@@ -1,213 +1,192 @@
-# Driving the `invalid` backlog to zero — state and next steps (2026-08-02, rev 2)
+# The `invalid` backlog is at zero — state and what comes next (rev 3, 2026-08-03)
 
-Handoff note, rewritten end-of-session. The goal is unchanged: eliminate **fundamentally incorrect**
-parses on the WRN-helicase first page (CNL-v3, 62 units), measured as the adjudication ledger's
-`invalid` rows, with `grammar-gap 0` **non-negotiable** and no loss of a pinned correct reading.
+The goal this note tracked: eliminate **fundamentally incorrect** parses on the WRN-helicase first
+page (CNL-v3, 62 units), measured as the adjudication ledger's `invalid` rows, with `grammar-gap 0`
+non-negotiable and no loss of a pinned correct reading.
+
+**That goal is met on this page.** The parser now produces no reading a human has judged
+inadmissible. This revision records the end state, the four defects that got us here, what is
+provably NOT worth retrying, and where the next work actually is — which is no longer this page.
 
 ## Where things stand
 
-Baseline `a369fcd`, snapshot `wordnet-umls-aligned-2026-08-02-stative-with`, tracked replay
+Baseline `3d2d052`, snapshot `wordnet-umls-aligned-2026-08-02-consolidated`, tracked replay
 `experiments/parsing/ranks/2026-07-29-demonstratives.json`.
 
 | | session start | now |
 |---|---|---|
+| `invalid` | 15 rows / 7 units | **0** |
+| unadjudicated | 0 | **0** |
 | grammar-gap | 0 | **0** |
 | expected-hits | 60/62 | **60/62** |
+| total-skeletons | 179 | **144** |
+| total-readings | 988 | 761 |
 | encoded | 12 | 14 |
-| total-readings | 988 | 793 |
-| total-skeletons | 179 | **147** |
-| `invalid` | 15 rows / 7 units | **3 rows / 2 units** |
-| unadjudicated | 0 | **0** |
+| patch layers on the snapshot | 3 | **0** |
 
-Four commits, each measured against the one before on the same base and the same drift-free replay:
+`scripts/eval-parse-rate.sh --baseline` exits 0. The replay keys cleanly against the reseeded
+lexicon (62 hits, 0 misses), so the recorded sense draw survived the reseed rather than degrading to
+cap-only.
 
-| commit | change | skeletons | `invalid` |
+The snapshot is a plain reseed of committed source. Reproduce with BOTH steps — the first makes a
+BASE snapshot and every measurement here is against an ALIGNED one:
+
+```
+scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-08-02-consolidated
+scripts/build-alignment-snapshot.sh --base <that> --out wordnet-umls-aligned-2026-08-02-consolidated
+```
+
+## The four defects, and what each cost
+
+Every one was a real bug found by reading the chart, not a threshold that got tightened.
+
+| commit | defect | `invalid` | skeletons |
 |---|---|---|---|
-| `80afab8` | adverbs BIND the clause feature (kernel) | 164 → 160 | 11 → 6 |
-| `6f2a0dd` | baseline adoption for the above | — | — |
-| `b90e78b` | VP-adjunct enumeration; the lost pin was an INVALID parse | 160 → 150 | 6 → 3 |
-| `a369fcd` | stative `with` participles; the MSI pin RESTORED | 150 → 147 | 3 → 3 |
+| `80afab8` | the forward adverb modifier laundered the clause feature | 11 → 6 | 164 → 160 |
+| `b90e78b` | VP-adjunct prepositions erased finiteness via `fin_any` | 6 → 3 | 160 → 150 |
+| `a369fcd` | governed preposition discarded — stative relational participle | 3 → 3 | 150 → 147 |
+| `dfec40a` | **WordNet frames 22 and 23 transposed** against `wninput.5` | 3 → 2 | 147 → 146 |
+| `c1adb65` | consolidation reseed — all three layers into source | 2 → 2 | 146 → 146 |
+| `3d2d052` | gloss-governed adjectives seeded a competing noun reading | **2 → 0** | 146 → 144 |
 
-## The 3 live `invalid` rows
+### The one that generalises: laundering
 
-Computed by intersecting `adjudications.tsv` against the produced skeleton set (147 pairs), not read
-off the file — most `invalid` rows in the file are now STALE (35 stale rows).
+Three of the six are the same shape. A rule typed `X → X` on a feature, fed a *subsumed* value,
+returns the *base* value — re-opening the hole the feature split was introduced to close.
+`pred ⊑ adj` makes SELECTION permissive by design (the copula, negation and every `-ly` adverb must
+accept a predicate nominal), so any rule that accepts `adj` and returns a FIXED `adj` launders. The
+cure is a BOUND feature variable shared by result and argument. `dcg::category` documents the
+mechanism and `the_forward_adverb_modifier_binds_the_clause_feature_it_consumes` pins it.
 
-| unit | rows | axis |
-|---|---|---|
-| We hypothesized that other DNA repair defects would give rise to synthetic-lethal relationships. | 1 | scope island |
-| These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency. | 2 | false identity |
+**One launderer is still open**, and it is the reason a cleanup in this session was reverted — see
+"`not_adj` still launders" below.
 
-**A probe already exists for the first.** `experiments/parsing/probes/frame22-oblique.esl` was written
-for exactly this row: WordNet frames 22 and 23 are SWAPPED in `convert.rs::classify` (22 is
-`Somebody ----s PP`, 23 is `Somebody's (body part) ----s`), so `give rise` gets no oblique-PP slot and
-its `to`-PP can only attach as an adjunct — which then escapes the `that`-clause onto the matrix
-subject. The layer simulates the corrected classification for one synset. **It has not been measured
-on any recent baseline.** That is the cheapest next thing in the backlog.
+### The one that was a plain reading error
 
-**The second is a regression to watch.** All five rows on the `classifications` unit went stale under
-the adverb binding (`80afab8`); two are LIVE again under this baseline. Which of the two later layers
-reintroduced them is **not measured** — check that before treating them as old news.
+`convert.rs::classify` mapped `1|2|3|22 => Intransitive` and `4|12|23|27 => PpOblique`, but
+`references/WordNet-3.0/doc/man/wninput.5` line 212 reads
 
-## What this baseline owes: a reseed
+```
+22  Somebody ----s PP
+23  Somebody's (body part) ----s
+```
 
-Both adopted layers are lexicon-level over `wordnet-umls-aligned-2026-08-01-prednom`, so the source
-and the snapshot disagree. Nothing is reproducible from a clean checkout until this lands.
+They were transposed, so frame 22's PP was dropped. `give rise` (synset 01752884) got no argument
+slot for its `to`-PP, the PP fell to adjunct position, and a free adjunct escaped a finite
+`that`-clause onto the matrix subject. **Two unit tests asserted the inverted mapping**, which is
+why it survived. Check the vendored spec, not the existing test.
 
-1. **VP-adjunct prepositions** — `ontologies/lexicon/closed-class.esl`: the 11 prepositions' `fin_any`
-   becomes the six concrete verbal `Fin` values (source: `probes/vpadj-enumerate-verbal.esl`).
-2. **Stative relational participles** — `crates/eigenius-wordnet/src/convert.rs`: a verb synset whose
-   frames NAME a governed preposition also emits `(S[adj]\NP)/cat_pp_arg(prep_X)` over a 2-place
-   axiom. `FrameKind::Essive` (`((S\NP)/cat_pp_arg(prep_as))/NP`) is already the correct template —
-   the machinery exists and simply is not applied to the frames that name a preposition. **Ship
-   frames 17/31 (`with`, 97 synsets) only** — see the scope limit below.
-3. **Drop the five redundant `_prednom` entries** from `closed-class.esl`
-   (`is/are/was/were_copula_prednom`, `not_adj_prednom`) — subsumption makes them duplicates.
+## Three times a "lost pin" was not a loss
 
-Reseed needs `--umls-all`. Re-measure all four numbers afterwards; the layer and the reseed are not
-guaranteed to agree (the 2026-07-25 determiner-holes cycle verified they did, and said so explicitly).
+This is the single most useful habit the page taught, and it is worth stating as a rule:
+**a dropped pin is a question, not a verdict.** Read the unit's readings before treating it as a
+regression.
 
-### Scope limit on (2), measured
+- The VP-adjunct enumeration was blocked for two cycles by a pin it "cost". The pinned reading was
+  standing on a **voice-feature violation** — `associated` seeds a 1-place `S[dcl,pss]\NP` and no
+  `is` entry selects a saturated `S[pss]\NP` (deliberately, so `*X is affected Y` stays out); the
+  `fin_any` VP-adjunct erased the feature, and the erased clause satisfied **all four** saturated
+  copula slots at once. Witnessed in `cell[1..9]`.
+- The frame 22/23 swap "cost" the `give rise` pin. That pin was the SAME adjunct analysis as the
+  unit's `invalid` row, differing only in where the adjunct landed. Deleting the adjunct killed
+  both — the unit went 2 skeletons to 1.
+- A `grammar-gap` is not automatically the loss of a correct parse either. The frame-19 case removed
+  a reading that was already nonsense (`data` = `datum` + the VERB `put/place`).
 
-The full rule over all five prepositions (15 `to` | 16 `from` | 17 `with` | 18 `of` | 19 `on`, 378
-synsets / 844 entries) **fails coverage**, `grammar-gap 1`. Bisected: frame 15 (`to`, 185 synsets) is
-entirely INERT; the breakage is in `from`/`of`/`on`, narrowed to frame 19, then to ONE synset
-(`set.v.01115006`, 2 entries). Its `set` entry EVICTS `cat_n(n05674584, mass)` from the `sets` leaf of
-«These data sets are project Achilles and project DRIVE.», which then has no parse.
+## Do not retry these — each is measured
 
-**But that unit's only reading is itself wrong**, so the coverage loss is a wrong reading vanishing
-from a unit that has no right one — see the copula section. It is held back because coverage is
-coverage, not because the rule is wrong.
+- **A kind-raise refusal gated on `is_adjective_refined`.** Too broad; it also removed "the group is
+  an INDETERMINATE line" and re-gapped its unit. `registry.rs` records this plus **five other
+  refuted mechanisms** for the same unit (open-vs-closed masking, cost penalty, cell-beam eviction,
+  widen/cap, classify budget). Read that comment before designing anything near the kind-raise.
+- **A governed-preposition prune without an adjectival-result requirement.** `X/cat_pp_arg(prep_R)`
+  for concrete `R` is a relational-WORD test, not an adjective test: it also matches relational
+  NOUNS whose nominal reading is correct. Witnessed by surface — `deficiency` (6 entries dropped),
+  `dependency` (8), `dependence` (8), `result` (6), `vulnerability` (5), `event` (5),
+  `co-occurrence` (4), `activity` (15). Result: **grammar-gap 0 → 9, expected-hits 60 → 49.**
+  Requiring `is_adjective_cat` on the RESULT is what makes it correct.
+- **Two sense-cap fixes** (cap-by-sense; exempting the closed class) — measured and rejected
+  2026-07-24. Read `seed.rs` ~204-229 first.
+- **`fin_verbal` as a VP-adjunct result feature** — the root gate admits only `fin`/`fin_any`, gap 2.
 
----
+## `not_adj` still launders — a correction to rev 2
 
-## The two structural findings that are now the main board
+Rev 2 listed "drop the five redundant `_prednom` entries" as owed. **That is wrong for one of
+them.** `not_adj` is `(S[adj]\NP)/(S[adj]\NP)` — an X→X rule — so under `pred ⊑ adj` it accepts a
+predicate nominal and hands back `adj`, which `is_adjective_cat` then admits for the attributive
+lift, reopening exactly the hole `lexicon:pred` closes. `scope_bearing_covers_the_modal_category_sniff`
+catches the deletion.
 
-### 1. The per-entry sense cap makes lexical additions zero-sum
+The four **copula** `_prednom` entries are genuine duplicates (they return `fin`, not their argument
+feature), but deleting them is behaviourally unmeasured and frees four cap slots on
+`is/are/was/were`, which the per-entry sense cap makes non-neutral in principle. All five were
+therefore left in place so the consolidation reseed stayed a pure port.
 
-`dcg::parse::seed` caps entries per lemma. The cap is keyed per **SENSE** but truncates per **ENTRY**,
-and one sense legitimately has several entries (different grammatical categories). This was
-characterised on 2026-07-24 with two fixes measured and rejected — and it hit us **three separate
-ways in one session**:
+Two follow-ups, both small:
+1. Make `not_adj` BIND its clause feature, the cure the adverbs got at `80afab8`. Then the fifth
+   entry becomes genuinely redundant.
+2. Measure the four copula deletions as a suppression layer (redefine with a non-matching
+   `lexicon:form`); fold into the next reseed if clean.
 
-- it hid **4 of the 6** enumerated VP-adjunct prepositions per surface (all six share one sense key),
-  so the adopted enumeration ships 66 entries of which ~22 are live and is closer to `require
-  fin|bse` than to a real enumeration. Witnessed by dumping `leaf[3..3]` at `SENSE_CAP` 2 vs 32;
-- it makes `Fix A (c)`'s positive-relational entry inert page-wide (recorded in `seed.rs`, emitted
-  4th, never seeds at base cap);
-- it **evicts a noun to gap a unit** — the frame-19 case above. Neither the added entry nor the
-  evicted one is in the ranker's kept list, so both are unranked and **emission order decides**.
+## What is left on this page
 
-The consequence to internalise: **the lexicon is at capacity for common surfaces, so any correct
-addition costs a deletion.** Every "add the missing entry" fix is gated on this.
+Not much, and none of it is the grammar producing wrong readings.
 
-Do not retry the two rejected fixes blind — read `seed.rs` lines ~204-229 first. Cap-by-sense was
-measured twice (encoded 10 → 0, then 11 → 4); exempting the closed class fails
-`sense_reranker_overrides_static_cap_order` because `in_lexicon.is_none()` means UNTAGGED, not
-closed-class.
+**2 pin misses of 62**, and they are NOT the same kind of thing:
 
-### 2. The copula supports predication but not identification or location
-
-Three gaps, each isolated with a minimal pair on the real page (append test sentences to a copy of
-the page so the document glossary still mints named individuals — see Instruments):
-
-| sentence | result |
+| unit | status |
 |---|---|
-| These data sets are **large**. | ✅ `gt(deg_large(the(C0150098)), std_large)` |
-| These data sets are **from WRN**. | ✗ gap — no copula + PP complement |
-| These data sets are **the data sets**. | ✗ gap — no equative with a referential complement |
-| **These** are large. | ✗ gap — no demonstrative pronoun |
-| These data sets are **WRN**. | ✅ parses (bare NP complement works) |
+| «Synthetic lethality is an interaction between two genetic events.» | correct reading is **producible**, absent on this sense draw (hit in draw 2, missed in 1 and 3) |
+| «Depletion of WRN induced double-stranded DNA breaks.» | correct reading is **not produced at all** — no skeleton carries the bare form |
 
-The first row is the control: the subject side is healthy and resolves to **C0150098** (`data set`).
-Everything that fails, fails on the predicate side.
+The second is a real absence: it differs from its pin by one token, `prep_of(G#0, §)` vs
+`prep_of(G#0, kind_of(§))` — WRN as the class *WRN protein, human* instead of the HGNC-symboled
+named individual *WRN gene*. Axis B (sense grounding), one of 5 units page-wide missing it. Do not
+re-pin either; that would bake in the wrong analysis.
 
-**This is why «These data sets are project Achilles and project DRIVE.» is corrupt.** It is an
-equative — identity between a definite kind and coordinated named individuals — and the construction
-does not exist, so the parser lands on the only analysis that composes: `data` = `datum`
-(n05816622) with the VERB `put/place` (v01494310). C0150098 IS built on span [1..2] and appears in
-**no reading**. The unit's pin is satisfied by that wrong reading because pins are skeletons and
-skeletons are sense-erased (`_provenance_note_2026-07-28-pins-are-sense-blind`).
+**84 `available` skeletons.** Read the verdict for what it is: "structurally available and not
+something the grammar should refuse — semantically false, or true but dispreferred." It explicitly
+includes false readings. These are ranking, not grammar.
 
-Chart evidence for where it dies:
-- `cell[4..5]` `project Achilles` → `cat_np(n00795720, sg)` ✅
-- `cell[4..8]` coordination completes only as a type-raised **subject** `S/(S\NP)` and as
-  `cat_group(n00795720, conn_and, pl)` — **no plain `cat_np`**
-- `cell[3..8]` `are project Achilles and project DRIVE` → one node, `cat_group(conn_and, pl)`.
-  **No VP at all**, so the subject GQ in `cell[0..2]` has nothing to apply to.
+**38 stale ledger rows.** Deleting them is a deliberate act; several carry the diagnosis of defect
+families still partly open, and 2 of the stale entries are PINS, not ledger rows.
 
-**core-en gives the categories for two of the three, and punts the semantics.**
-`v.xsl` `Copula` family: `<entry name="NP">` uses `$tv`, i.e. the copula with an NP complement is
-categorially just a transitive verb `(S[dcl]\NP)/NP` — the missing entry. `pp.xsl` `Prep-Loc` is
-`pos="Adj"` with a `Predicative` entry, so a locative/source preposition IS a predicative adjective
-and the existing adjectival copula consumes it — "X is from Y" needs no new copula entry at all.
-`np.xsl` `ProNP` is a plain NP, the shape a bare `these` wants.
+## Where the next work is
 
-But core-en's `NP` entry carries `be(Arg:X, Pred:Y)` over two entities, with an explicit source
-comment: `<!-- NB: This doesn't really capture the predicational nature of Y. -->`. It collapses
-predicational and identificational. Eigenius already goes further (predicate nominals get real
-membership `is_a` via `a_pred`), so adopting that semantics wholesale would be a regression.
+The `invalid` ledger was the ranking signal for this whole effort. **At zero it no longer
+constrains anything**, so continuing to optimise this page is measuring noise.
 
-**The open design question**, not yet decided: for «These data sets are project Achilles and project
-DRIVE.», the subject is ANAPHORIC — it refers to the referent introduced by «We analysed two
-independent cancer dependency data sets.», which parses OPEN
-(`ΠG#0:Prop. ΠG#1:ΣG#1:C0150098. … → G#0 → G#0`). The sentence's job is to RESOLVE that referent.
-Two shapes:
-
-- **assert an identity** — add `eq : Entity → Entity → Prop` plus a copula entry taking `cat_group`.
-  Needs group-denoting terms the semantics doesn't otherwise have. Note apposition — the one existing
-  construction expressing this relation, «the MMR genes MSH2, MSH6, PMS2 or MLH1» — **distributes**
-  the group over the containing predicate rather than forming a group term, so it is not a usable
-  template.
-- **treat it as resolution** — D64 referent holes already exist and are Π-abstracted, β-reduced on
-  resolution. This is the case that mechanism was built for. More invasive; check how resolution is
-  currently triggered before committing.
-
-Also worth measuring: whether the demonstrative-as-definite convention (`these` → `the(§)`, pinned
-across several units) is itself the obstacle, since it discards the anaphoric link at the lexicon
-before the grammar sees it.
-
----
-
-## Corrections to the record made this session
-
-Do not re-derive these; each cost a cycle.
-
-- **Adverbs are NOT emitted by the WordNet importer.** `Pos::Adv => {}` is deferred and the importer
-  emits no `(S[adj]\NP)/(S[adj]\NP)` anywhere. They are built in the KERNEL by
-  `dcg::category::adverb_modifier_cats` and seeded in `dcg::parse::seed`. The previous note and
-  `baseline.json` both said importer + reseed; it was two `cargo build`s.
-- **The `adjective-frames.tsv` row for `associated` is DEAD.** `governed_preposition` is reached only
-  from `push_adj`, over the words of ADJECTIVE synsets, and `associated` is not a WordNet adjective
-  lemma (`index.adj` 0, unlike `dependent`/`essential`/`concordant`, all 1). Verified: `associated`
-  carries no `cat_pp_arg` category at all at `SENSE_CAP=32`.
-- **"The 7×7 cross-product makes every feature pair expressible and still loses the pin" is not
-  supported.** Those runs were at `SENSE_CAP=2`, so ~2 of 49 entries per preposition were ever live.
-  The erasure conclusion happens to be right, but for the `pss`→`pass` reason below, not that one.
-- **The MSI pin was standing on a voice-feature violation.** `associated` seeds a 1-place
-  `S[dcl,pss]\NP` (past participle, ACTIVE/perfect); no `is` entry selects a SATURATED `S[pss]\NP` —
-  deliberately, so `*X is affected Y` stays out. The `fin_any` VP-adjunct erased the feature and the
-  erased clause satisfied **all four** saturated copula slots at once (adj/ger/pass/bse), witnessed
-  in `cell[1..9]`.
-- **A `grammar-gap` is not automatically the loss of a correct parse.** The frame-19 case removes a
-  reading that was already nonsense. Check what the unit's readings ARE before reading a coverage
-  metric as a regression.
+1. **A second page.** Highest value by a distance. One page is exhausted; the next defects live in
+   text this grammar has not seen. Everything below is better attacked with a second page's evidence
+   than with this one's.
+2. **The per-entry sense cap** — `dcg::parse::seed` caps per lemma, keyed per SENSE but truncating
+   per ENTRY. It bit **three ways in one session**: hid 4 of 6 enumerated prepositions per surface;
+   keeps `Fix A (c)` inert page-wide; and *evicted a noun to gap a unit*, where neither the added nor
+   the evicted entry was ranked so **emission order decided**. The consequence to internalise: the
+   lexicon is at capacity for common surfaces, so **any correct addition costs a deletion**. Every
+   "just add the missing entry" fix is gated on this.
+3. **The copula gap family** — no equative with a referential complement, no PP complement, no
+   demonstrative pronoun. Each isolated with a minimal pair; `core-en` supplies categories for two of
+   the three (`Copula/NP` = `$tv`; `Prep-Loc` is `pos="Adj"`, so "X is from Y" needs no new copula
+   entry) but concedes its semantics collapses predication and identification. This is why «These
+   data sets are project Achilles and project DRIVE.» has no correct reading available at all.
 
 ## Instruments
 
 | instrument | gives | caveat |
 |---|---|---|
-| `scripts/audit-skeletons.sh` | the validity ledger: correct / available / **invalid**; fail-closed | authoritative skeleton set; needs `EIGENIUS_DB_SNAPSHOT` + `EIGENIUS_SENSE_RANKS` matching the baseline |
-| `scripts/probe-mode-layer.sh --base … --layer …` | a patch-layer snapshot + full measure, NO reseed | lexical entries and axioms are patchable; TYPE declarations are not (ManifestDrift) |
-| `EIGENIUS_DUMP_READINGS=1` | raw term + gloss on the sweep WITH the document overlay | the only one like-for-like with the ledger; over-counted skeletons 166 vs 164 once — do not use for a census |
-| `EIGENIUS_DUMP_CELL=i..j` | packed cell: category + provenance + the Combine that built it | **works during the page sweep**, which is how the ranks-dependent leaf differences were found; samples 20 items per block |
-| `EIGENIUS_TRACE_SENTENCE` + `EIGENIUS_TRACE_SKELETONS=1` | fast single-sentence skeletons | **cap-only, no document overlay** — different reading set; leaves can be identical here and differ under the sweep |
-| `EIGENIUS_DUMP_SKELETONS=1` | `«unit» [N skeleton(s)]` + indented skeletons | the produced set, for intersecting against the ledger to find LIVE rows |
-| `cargo test -p eigenius-wordnet --test gen_stative_layer` | generates the stative layer from `data.verb` | uses the importer's own `past_participles`; `EIGENIUS_STATIVE_FRAMES=17,31` restricts the frame set |
+| `scripts/eval-parse-rate.sh <run.log> --baseline` | the gate; exit 0/2 | scores an existing run log, not a snapshot |
+| `scripts/measure-parse-rate.sh --snapshot … --replay …` | a full measurement | builds RELEASE; do not hand-roll `cargo test` |
+| `scripts/audit-skeletons.sh` | the validity ledger, fail-closed | needs `EIGENIUS_DB_SNAPSHOT` + `EIGENIUS_SENSE_RANKS` matching the baseline |
+| `scripts/probe-mode-layer.sh --base … --layer …` | patch-layer snapshot + measure, NO reseed | lexical entries and axioms are patchable; TYPE declarations are not (ManifestDrift) |
+| `EIGENIUS_DUMP_CELL=i..j` | packed cell: category + provenance + the Combine that built it | **works during the page sweep**; labels tokens, so grep `tok="…"` rather than guessing the index |
+| `EIGENIUS_DUMP_SKELETONS=1` | the produced set, for intersecting against the ledger | this is how you find LIVE rows; most `invalid` rows in the file are stale |
+| `EIGENIUS_GLOSS_READINGS=1` | verbalized English per skeleton | needs `-- --ignored`; the test is `#[ignore]`d |
+| `cargo run -p eigenius-wordnet --bin wordnet-import` | the importer's ESL, standalone | **diff this against a probe layer before spending a reseed** — it caught nothing this time, which is the point |
 
 **Testing a sentence that needs the document glossary:** copy the real page, append the test
 sentences, point `EIGENIUS_WRN_PAGE` at the copy. `EIGENIUS_TRACE_SENTENCE` cannot do this — named
-individuals like `ni_project_achilles` are minted from the document.
+individuals are minted from the document, and it is cap-only besides.
 
 **The recorded trap:** skeletons are sense-erased (`§`) and glosses are verbalized English, so
 grepping either for a predicate name matches nothing and reads as "0 occurrences" rather than as the
@@ -216,16 +195,17 @@ category error it is. This has produced several wrong analyses in this corpus.
 ## Standing constraints
 
 - `grammar-gap 0` is **non-negotiable**. A lost pin outranks any skeleton reduction — *unless the
-  pinned reading is shown invalid*, which is what unblocked the enumeration.
+  pinned reading is shown invalid*, which happened three times.
 - `--release` is load-bearing (debug overflows the stack in NbE readback → phantom GRAMMAR-GAP).
-  Use `scripts/measure-parse-rate.sh`; do not hand-roll `cargo test`.
 - `EIGENIUS_WRN_PAGE` / `EIGENIUS_SENSE_RANKS` / `EIGENIUS_DB_SNAPSHOT` must be ABSOLUTE paths.
 - Any reseed needs `--umls-all`. The default is a subset (3.29M resources vs 9.19M) and the mismatch
-  is SILENT — it once produced a fake catastrophic regression.
+  is SILENT — it once produced a fake catastrophic regression. It also needs the ALIGNMENT step
+  after it; `build-alignment-snapshot.sh`'s header records a run where skipping the regeneration
+  "loaded cleanly" and reported a v2 result under a v3 name.
+- Editing `ontologies/lexicon/closed-class.esl` changes the bootstrap hash — the harness fail-closes
+  on ManifestDrift rather than silently measuring the old lexicon, so such edits cannot be measured
+  before the reseed that bakes them in.
+- The reseed logs `building kernel docker image from HEAD (<rev>)` even on a dirty tree. The image
+  is built from the WORKING TREE (`context: .`, and `closed-class.esl` is `include_str!`-embedded),
+  so the content is right but the recorded provenance is misleading.
 - UMLS data is licensed; `/references` is gitignored and UMLS content is never committed.
-- `probe-mode-layer.sh` has **no guard** against a kernel-image / base-snapshot bootstrap mismatch. It
-  surfaces as `error: kernel exited before becoming healthy` with a hash dump. Cost a debugging cycle
-  on 2026-08-01.
-- 35 STALE ledger rows. Deleting them is a deliberate act — several carry the diagnosis of defect
-  families that are still partly open. 2 of the stale entries are PINS, not ledger rows, and
-  `expected-readings.tsv` forbids re-pinning either.
