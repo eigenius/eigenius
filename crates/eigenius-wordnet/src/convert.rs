@@ -144,6 +144,10 @@ pub struct Report {
     /// axiom) compete with the copula and re-encode `X is P` as `be(λx.P(x), X)`. Counts lemma skips,
     /// so one per (frame-kind × synset) occurrence of `be`.
     pub copula_skipped: usize,
+    /// Of `entries`, the STATIVE RELATIONAL PARTICIPLE entries ([`push_stative_relational`]): the
+    /// `(S[adj]\NP)/cat_pp_arg(prep)` reading of a past participle whose verb's WordNet frames NAME a
+    /// governed preposition (`associated WITH`, `linked WITH`).
+    pub stative_entries: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -648,6 +652,109 @@ fn is_essive_verb(lemma: &str) -> bool {
     ESSIVE_VERBS.contains(&l.as_str())
 }
 
+/// A WordNet sentence frame that NAMES a governed preposition → that preposition, for the STATIVE
+/// RELATIONAL PARTICIPLE rule ([`push_stative_relational`]).
+///
+/// The full domain `wninput(5WN)` records is
+///
+/// ```text
+/// 15 to | 16 from | 17 with | 18 of | 19 on | 31 with
+/// ```
+///
+/// (frame 14, "Somebody ----s somebody something", is the true double-object and names none). Only
+/// **17 and 31** are shipped. The other four are held back on a MEASUREMENT, not a guess: the full
+/// rule over all five prepositions (378 synsets / 844 entries) FAILS coverage, `grammar-gap 1`,
+/// bisected to frame 19 alone and then to ONE synset (`set.v.01115006`). Its `set` entry EVICTS
+/// `cat_n(n05674584, mass)` from the `sets` leaf of «These data sets are project Achilles and project
+/// DRIVE.», which then has no parse — because the per-entry sense cap (`dcg::parse::seed`) is keyed
+/// per SENSE but truncates per ENTRY, and with both entries unranked the emission order decides.
+/// Frame 15 (`to`, 185 synsets) is completely INERT. So the blocker is the sense cap, which is a
+/// separate structural finding; widen this set once it is fixed.
+fn stative_prep(frame: u8) -> Option<&'static str> {
+    match frame {
+        17 | 31 => Some("with"),
+        _ => None,
+    }
+}
+
+/// Verb synset → the **stative relational participle** entries, additively on top of the
+/// frame-derived verbal categories.
+///
+/// A verb whose frames name a governed preposition also lexicalises a participial RELATION —
+/// `associated with`, `linked with` — that is stative: a two-place fact holding between subject and
+/// relatum, with no agent who performed the act. It is categorially an ADJECTIVE taking a PP
+/// argument, which the existing copula already consumes:
+///
+/// ```text
+/// (S[dcl,adj]\NP)/cat_pp_arg(prep_X)   over a 2-place axiom   `wn:v{off}_rel`
+/// ```
+///
+/// so this needs no new copula entry and no ontology change. [`FrameKind::Essive`]
+/// (`((S\NP)/cat_pp_arg(prep_as))/NP`) is the same template; the machinery already existed and simply
+/// was not applied to the frames that name a preposition.
+///
+/// WHY IT IS NEEDED. [`classify`] collapses 14|15|16|17|18|19|31 into one preposition-less
+/// [`FrameKind::Ditransitive`] `((S\NP)/NP)/NP` and DISCARDS the preposition the frame names, so the
+/// relatum could only ever attach as a free ADJUNCT — `And(associated(x), prep_with(x, r))` rather
+/// than one saturated predication. The adjectival route cannot cover it either: [`governed_preposition`]
+/// is reached only from [`push_adj`], over the words of ADJECTIVE synsets, and `associated` is not a
+/// WordNet adjective lemma (`index.adj` 0, unlike `dependent`/`essential`/`concordant`, all 1), so the
+/// `associated<TAB>with` row in `adjective-frames.tsv` never fires.
+///
+/// The sem is the axiom ITSELF, unwrapped: `⟦(S[adj]\NP)/cat_pp_arg⟧ = Entity(relatum) →
+/// Entity(subject) → Prop`, so the category's own denotation order puts the COMPLEMENT first and the
+/// SUBJECT second — the house convention throughout (`is_passive` applies `TV(p, a)`, patient then
+/// agent). A flipping lambda would read backwards in every gloss.
+fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
+    // One preposition per synset, chosen by the LOWEST-NUMBERED naming frame so the result does not
+    // depend on frame order in `data.verb`.
+    let Some(prep) = syn
+        .frames
+        .iter()
+        .copied()
+        .filter(|&f| stative_prep(f).is_some())
+        .min()
+        .and_then(stative_prep)
+    else {
+        return;
+    };
+    let off = &syn.offset;
+    buf.push_str(&format!(
+        "axiom wn:v{off}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> Prop desc: \"{} (stative relational participle; governs `{prep}`)\"\n\n",
+        esc(&syn.gloss)
+    ));
+    rep.verb_axioms += 1;
+    let sem = format!("v{off}_rel");
+    let arrow = format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop");
+    let cat = format!(
+        "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)), lexicon:cat_pp_arg({}))",
+        prep_ctor(prep)
+    );
+    for (i, lemma) in syn.words.iter().enumerate() {
+        // The copula is grammar, not a content verb — same per-LEMMA skip as the verbal paradigm.
+        if is_copula_lemma(lemma) {
+            rep.copula_skipped += 1;
+            continue;
+        }
+        let sense = sense_key(syn, lemma);
+        for (k, pp) in head_pps(lemma).iter().enumerate() {
+            push_entry(
+                buf,
+                &format!("e_v{off}_rel_{i}_p{k}"),
+                pp,
+                &cat,
+                &sem,
+                &arrow,
+                &sense,
+                ranks,
+            );
+            rep.entries += 1;
+            rep.participle_entries += 1;
+            rep.stative_entries += 1;
+        }
+    }
+}
+
 fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) -> bool {
     let mut kinds: std::collections::BTreeSet<FrameKind> =
         syn.frames.iter().filter_map(|&f| classify(f)).collect();
@@ -666,6 +773,10 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
         rep.verbs_deferred += 1;
         return false;
     }
+    // Additive: the STATIVE RELATIONAL PARTICIPLE for a frame that names a governed preposition. Safe
+    // after the early return — every frame in `stative_prep`'s domain also classifies (all of
+    // 15|16|17|18|19|31 map to `Ditransitive`), so `kinds` is never empty when it fires.
+    push_stative_relational(buf, syn, rep, ranks);
     let off = &syn.offset;
     for kind in kinds {
         let tag = kind.tag();
@@ -1341,6 +1452,65 @@ mod tests {
 
     fn syn(line: &str) -> Synset {
         parse_data_line(line).unwrap()
+    }
+
+    #[test]
+    fn stative_relational_participle_binds_the_frame_named_preposition() {
+        // The real `associate` synset (00713167), frames 17 + 31 — both "… WITH something".
+        let s = syn(
+            "00713167 31 v 07 associate 0 tie_in 0 relate 0 link 0 colligate 2 link_up 0 connect 0 \
+             000 02 + 17 00 + 31 00 | make a logical or causal connection",
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_verb(&mut buf, &s, &mut rep, &SenseRanks::new());
+
+        // A 2-place axiom, distinct from the verbal `_d` ditransitive one.
+        assert!(
+            buf.contains(
+                "axiom wn:v00713167_rel : lexicon:Entity -> lexicon:Entity -> Prop desc: \"make a logical or causal connection (stative relational participle; governs `with`)\""
+            ),
+            "stative axiom missing:\n{buf}"
+        );
+        // The participle takes the PP as an ARGUMENT, and the preposition is the one the frame names —
+        // not the `prep_any` wildcard. This is what makes `with` a case-marker instead of an adjunct.
+        assert!(
+            buf.contains(
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_with)) );"
+            ),
+            "stative category missing or wrong preposition:\n{buf}"
+        );
+        // Emitted on the PAST PARTICIPLE surface only — `associated`, never `associate`/`associates`
+        // with this category (a stative relation has no finite active paradigm of its own).
+        assert!(buf.contains("lexicon:form     = \"associated\";"));
+        assert_eq!(rep.stative_entries, s.words.len(), "one per lemma: {buf}");
+        // ADDITIVE — the frame-derived ditransitive entries survive, so the ledger decides.
+        assert!(
+            buf.contains("wn:v00713167_d"),
+            "verbal entries dropped:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn stative_participle_is_restricted_to_the_shipped_with_frames() {
+        // Frames 15/16/18/19 name a preposition too, but are HELD BACK on a measurement (frame 19
+        // gaps a unit through the per-entry sense cap; frame 15 is inert). Pin the scope so widening
+        // it is a deliberate edit, not a drive-by.
+        assert_eq!(stative_prep(17), Some("with"));
+        assert_eq!(stative_prep(31), Some("with"));
+        for f in [14u8, 15, 16, 18, 19] {
+            assert_eq!(stative_prep(f), None, "frame {f} is not shipped");
+        }
+        // A synset carrying ONLY a held-back naming frame emits no stative entry at all.
+        let s = syn("01115006 41 v 01 set 0 000 01 + 19 00 | put into a certain place");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_verb(&mut buf, &s, &mut rep, &SenseRanks::new());
+        assert_eq!(rep.stative_entries, 0);
+        assert!(
+            !buf.contains("_rel"),
+            "held-back frame emitted a stative:\n{buf}"
+        );
     }
 
     #[test]
