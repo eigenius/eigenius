@@ -1,7 +1,7 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "80afab8",
+    "commit": "6f2a0dd (kernel) + experiments/parsing/probes/vpadj-enumerate-verbal.esl (lexicon layer)",
     "date": "2026-08-02",
     "profile": "release",
     "features": [
@@ -9,10 +9,10 @@
     ],
     "reranker": "AnthropicSenseRanker (live), recorded; this baseline is the drift-free REPLAY of draw 1 of 3",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-08-01-prednom",
+    "snapshot": "wordnet-umls-aligned-2026-08-02-vpadj-enum",
     "ranks": "experiments/parsing/ranks/2026-07-29-demonstratives.json",
     "replay": "62 hits, 0 key misses -- the SAME recording. The pred split changes categories, not the sense space, so no re-record was needed.",
-    "note": "Adverbs BIND the clause feature: the forward modifier is `(S[f]\\NP[n])/(S[f]\\NP[n])`, one polymorphic category replacing the two fixed ones (`adj` for the adjective modifier, `fin` for the forward VP modifier). The `adj` one LAUNDERED: once `pred <= adj` entered `feat_meets` (2b2b688) it took a predicate nominal by subsumption and returned a plain `adj`, which `is_adjective_cat` then admitted for the attributive lift (`mod_lifts`) -- reopening the hole `lexicon:pred` was introduced to close. A bound variable propagates through `unify_feat` instead, so the adverb hands back exactly the feature it consumed; the bound `f` also covers `fin`, so keeping a separate `fin`-fixed forward category would only duplicate every VP-adverb derivation. The BACKWARD VP modifier stays fixed at `fin` -- it never laundered (accepts `fin`, returns `fin`) and post-adjectival adverbs are not attested on this page. MEASURED against 164/953: grammar-gap 0 held, expected-hits 60/62 held (the SAME two documented misses), total-skeletons 164 -> 160, total-readings 953 -> 895, encoded 14 unchanged. Adjudicated: `invalid` 11 rows / 5 units -> 6 rows / 4 units, UNADJUDICATED 0. All FIVE rows on <<These classifications were highly concordant ...>> cleared and that unit fell 8 skeletons -> 3. CORRECTION TO THE PREVIOUS NOTE: it recorded this residual as an OPEN SET OF ADVERBS EMITTED BY THE WORDNET IMPORTER, needing an importer change and a reseed. That is wrong on both counts. The WordNet importer defers adverbs entirely (`Pos::Adv => {}`, crates/eigenius-wordnet/src/convert.rs) and emits no `(S[adj]\\NP)/(S[adj]\\NP)` anywhere; the categories are built in the KERNEL by `dcg::category::adverb_modifier_cats` and seeded productively for `-ly` forms and for the lexicalized list (`dcg::parse::seed`). The set is open -- productive `-ly` recognition is data-driven off the adjective base -- which is why enumeration could not close it, but the fix is kernel-side and needs NO reseed. Measured on the SAME snapshot wordnet-umls-aligned-2026-08-01-prednom as the previous baseline, so this is a clean A/B: the only variable is the category. ONE NEW SKELETON, adjudicated `available`: <<MSI is most commonly observed ...>> gains the PASSIVE reading of `is observed` with the agent abstracted (gloss: 'some Entity, it observe Microsatellite Instability and Microsatellite Instability in a cancer ...'), which the fixed `adj`/`fin` pair could not reach. It differs from that unit's PIN only in dropping the `gt(..., std)` degree of `most commonly` -- the transparent-adverb family the grammar supports deliberately. The widening is real and is the cost of binding: a variable admits every `Fin` value, not just the two that were enumerated. STILL OPEN: 6 `invalid` rows. Five sit on the VP-adjunct enumeration axis (<<We found that WRN was selectively essential in MSI models.>> x2, <<These libraries define genes that were essential for proliferation and survival.>> x2, <<We ascertained MSI status with sequencing.>> x1) and the enumeration was RE-MEASURED on this baseline: experiments/parsing/probes/vpadj-enumerate-verbal.esl gives grammar-gap 0, skeletons 164 -> 150, readings 953 -> 817, and still loses the pin on <<MSI is associated with notable responses to immune checkpoint blockade.>> -- the SAME pin, so the 1-pin cost did NOT change under the `pred` split and adoption stays blocked. The sixth is the scope island on <<We hypothesized that other DNA repair defects would give rise to synthetic-lethal relationships.>>. The five `_prednom` closed-class entries remain redundant under subsumption and should be dropped at the next reseed, which may move these numbers.",
+    "note": "VP-ADJUNCT PREPOSITIONS STOP ERASING THE CLAUSE FEATURE. The 11 VP-adjunct prepositions' `fin_any` is replaced by the six verbal `Fin` values, one concrete feature on BOTH sides per entry (experiments/parsing/probes/vpadj-enumerate-verbal.esl, 66 entries). MEASURED against 160/895 on the same base and the same drift-free replay: grammar-gap 0 held, total-skeletons 160 -> 150, total-readings 895 -> 807, encoded 14 unchanged. Adjudicated: `invalid` 6 live rows -> 3, UNADJUDICATED 0. THE LOST PIN WAS AN INVALID PARSE, which is why this is now adoptable after being blocked since 2026-08-01. <<MSI is associated with notable responses to immune checkpoint blockade.>> drops from expected-hits 60 -> 59, and the reading it loses was licensed by the `fin_any` ERASURE: `associated` seeds a 1-place `S[dcl,pss]\\NP` (past participle, ACTIVE/perfect); NO `is` entry selects a saturated `S[pss]\\NP` (is_copula `adj`, is_prog `ger`, is_passive_by `pass`, is_passive the UNSATURATED `(S[pss]\\NP)/NP`), deliberately, so `*X is affected Y` stays out. The `with`-adjunct applied to that `pss` clause returned `S[dcl,fin_any]\\NP` and the erased clause then satisfied ALL FOUR saturated copula slots at once (witnessed in cell[1..9]). A voice-feature violation, now removed. The unit is RE-PINNED to the saturated relational reading, a documented MISS -- see expected-readings.tsv for the full evidence and why re-pinning to a produced sibling would be wrong. CAVEAT, CAP-DEPENDENCE: at the shipped SENSE_CAP=2 only 2 of the 6 entries per preposition actually SEED (`fin`, `bse`) -- the cap is keyed per SENSE but truncates per ENTRY (dcg::parse::seed, characterised 2026-07-24) and all six share one sense key. So 66 entries ship and ~22 are live, and this result is closer to `require fin|bse` than to a true enumeration. Raising the cap or a different ranker draw changes which seed. Witnessed by dumping leaf[3..3] at SENSE_CAP 2 (2 entries) vs 32 (all 6). THE BINDER WAS MEASURED AS THE ALTERNATIVE and REJECTED on the ledger: experiments/parsing/probes/vpadj-bind-finiteness.esl (`cat_fin_forall`, ONE cap-immune entry per preposition, structurally the better shape) gives gap 0, skeletons 157, readings 844, the SAME pin loss -- but `invalid` 7 with 2 UNADJUDICATED, i.e. it ADDS a defect row where the enumeration halves the backlog. Numbers decided this against the structural preference. RESEED REQUIRED to bake in: the 11 prepositions live in ontologies/lexicon/closed-class.esl and this baseline is measured on a LAYER over wordnet-umls-aligned-2026-08-01-prednom, the same staging the determiner-holes cycle used (2026-07-25). Until the reseed, closed-class.esl and this snapshot disagree.",
     "attribution": "The page totals here are NOT a clean A/B against the previous baseline — snapshot AND recording both changed. Attribution was done CAP-ONLY (deterministic, no LLM, comparable across snapshots): the demonstrative drop alone is total-skeletons 467 -> 343 (-124, -26.6%) and total-readings 6680 -> 5395 (-19.2%), with grammar-gap 0 held, encoded 2 -> 3 and cap-only pin hits 53 -> 54. All 16 units whose skeleton sets changed contain a demonstrative: zero collateral on the other 46. The case-sensitive symbol fix was attributed separately under the PREVIOUS snapshot and recording: 225 -> 196 skeletons, 1069 -> 1041 readings, pins 62/62 held. The sense-ranker change is attributable by NEITHER instrument (cap-only never executes that code; the replay is what it invalidates) and its reach was measured as 36 of 62 rank-key misses."
   },
   "_provenance_note_2026-07-25-copula": "Re-baselined for TWO importer fixes made after ADJUDICATING the 16 structural readings of the page's worst unit (\"These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency\") instead of theorising about the sense cap. Those 16 decomposed as 4 families x 4 modifier-bracketings; 12 were plainly WRONG. (1) THE COPULA IS GRAMMAR (9f52ba1): WordNet gives `be` 8 verb synsets and 02604760 'have the quality of being' carries frame 6 -> FrameKind::LinkingAdj, emitting (S[dcl,fin]\\NP)/(S[dcl,adj]\\NP) over an OPAQUE 2-place axiom -- re-encoding 'X is P' as be(lambda x.P(x), X), destroying the copula's transparency (X is P **is** P(X)) and competing with the closed-class copula; a type-raising artifact (the SUBJECT applied as a 2-place function) rides on it. UMLS separately gave `were` a cat_n sense (the verb as a plural NOUN) via the `Be`=beryllium symbol homonym. Fixed by the mechanism already used for do/does/not/to/lead, prepositions/conjunctions and determiners: a per-LEMMA copula skip in the WordNet importer (synset siblings follow/live/equal keep their entries) + COPULA_SURFACES in the UMLS importer (`being` EXCLUDED -- a legitimate common noun). (2) Fix A (c) (6437edc): the POSITIVE relational predication for governed adjectives, `(S[adj]\\NP)/cat_pp_arg(prep)` with sem lambda r.lambda x. gt(deg_rel(r,x), std) -- previously only the COMPARATIVE consumed the relational cat_measure, so 'concordant WITH X' could not bind the relatum. MEASURED: deterministic cap-only A/B isolates the copula fix at total-skeletons 239 -> 196 (-18%) and readings 1741 -> 1560; the drift-free reranked REPLAY (record == replay exactly) gives total-skeletons 178 (the lowest recorded), readings 735, encoded 10, grammar-gap 0, expected-hits 23/23. The target unit fell 16 -> 4 skeletons and the 10/12/16-skeleton buckets emptied (only the 19-skeleton essive unit remains an outlier). skeletons_ceiling ratcheted 300 -> 250. Draw results/2026-07-24-2320-9f52ba1-first-page-cnl-v3-reranked (runtime 231s). RESIDUAL on that unit: 4 skeletons = family A (copula + `with`-ADJUNCT, which (c) should supersede but cannot here because two cat_pp_arg PPs cannot COORDINATE -- coordinate_prop needs a prop-ending category) x2 bracketings, plus family B (the adjective read as a NOMINAL kind, needing the documented adjective-competing-qualifier filter) x2. See history[0]. ",
@@ -32,29 +32,29 @@
     "open": 2,
     "encoded": 14,
     "total_readings_ceiling": 1900,
-    "total_readings": 895,
+    "total_readings": 807,
     "skeletons_ceiling": 400,
-    "skeletons": 160,
-    "expected_reading_hits": 60,
+    "skeletons": 150,
+    "expected_reading_hits": 59,
     "expected_reading_curated": 62,
     "skeleton_histogram": {
-      "_comment": "units bucketed by SKELETON count, from scripts/audit-skeletons.sh on wordnet-umls-aligned-2026-08-01-prednom at the adverb clause-feature binding (160 skeletons, 62 units). Take this census from the AUDIT, not from EIGENIUS_DUMP_READINGS: the reading dump gave 166 against the audit's 164 on the previous baseline, a 2-skeleton overcount, and the ledger is keyed on the audit's set. Skeleton count alone is still the WRONG target -- rank by STRUCTURAL ambiguity, and by the `invalid` ledger, not count.",
+      "_comment": "units bucketed by SKELETON count, from scripts/audit-skeletons.sh on wordnet-umls-aligned-2026-08-02-vpadj-enum (150 skeletons, 62 units). Take this census from the AUDIT, not from EIGENIUS_DUMP_READINGS (a 2-skeleton overcount was measured on an earlier baseline). Skeleton count alone is still the WRONG target -- rank by the `invalid` ledger, which is 3 live rows here.",
       "buckets": {
         "1": {
-          "units": 27,
-          "skeletons": 27
+          "units": 29,
+          "skeletons": 29
         },
         "2-3": {
-          "units": 22,
-          "skeletons": 47
+          "units": 21,
+          "skeletons": 43
         },
         "4-6": {
           "units": 9,
           "skeletons": 42
         },
         "7-10": {
-          "units": 2,
-          "skeletons": 18
+          "units": 1,
+          "skeletons": 10
         },
         "11-20": {
           "units": 2,
@@ -65,9 +65,9 @@
         "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 14,
         "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 12,
         "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 10,
-        "MSI is associated with notable responses to immune checkpoint blockade.": 8,
         "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.": 6,
-        "These findings show that WRN is a promising drug target for MSI cancers.": 6
+        "These findings show that WRN is a promising drug target for MSI cancers.": 6,
+        "Some cancers do not respond to immune checkpoint blockade.": 6
       }
     },
     "_expected_reading_note_2026_07_29": "hits 60 of 62 CURATED, and the 2-unit shortfall is EXPECTED and explained — see the header of expected-readings.tsv. Both are sense-selection misses with the STRUCTURE intact, not lost readings. «Synthetic lethality is an interaction between two genetic events.» is this lexicon's documented draw-variance unit (missed in draws 1 and 3, HIT in draw 2); its closest rival has the SAME `between` attachment and differs only in taking `two genetic events` as a quantified GQ instead of a bare kind. «Depletion of WRN induced double-stranded DNA breaks.» differs from its pin by ONE TOKEN — `prep_of(G#0, §)` against `prep_of(G#0, kind_of(§))` — i.e. WRN realising as the class `WRN protein, human` instead of the HGNC-symboled named individual `WRN gene`. That is Axis B, not grammar; and the gene reading is NOT AVAILABLE for this unit at all (no produced skeleton carries the bare form), which matches the page-wide finding of 5 units missing it. DO NOT repin either: repinning would bake the wrong analysis in. `expected_reading_curated` rises 61 -> 62 because the page is now fully pinned (65e62a6)."
