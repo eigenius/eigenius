@@ -1386,6 +1386,72 @@ fn verify_sense_lever_at_page_beam() {
     }
 }
 
+/// FALSE-IDENTITY probe (ledger: 14 `invalid` rows, the predicative kind-raise `ff1690f`). The bad
+/// readings assert `is_a(X, K)` where X cannot be K — e.g. «We ascertained MSI status with sequencing»
+/// yields `is_a(speaker, Σ…)` with the verb absorbed into the nominal and NO `ascertain` relation.
+///
+/// Three slash-mode assignments were measured against this family and ALL failed to touch it
+/// (`m_app` on verb+adj governed slashes cost 3 pins; `m_harm` and adj-only `m_app` were inert), so
+/// the reading is not built by composing a governed PP away. This prints each root reading's
+/// top-level COMBINATOR next to its sem, to name the rule that actually builds it.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_false_identity_provenance -- --ignored --nocapture
+#[test]
+#[ignore = "probe: which combinator builds the false-identity is_a; --ignored --nocapture"]
+fn probe_false_identity_provenance() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        // no copula, yet a predicative `is_a` reaches the root — the sharpest case
+        "We ascertained MSI status with sequencing.",
+        // gloss-governed adjective, PP stranded
+        "These classifications were highly concordant with PCR-based MSI phenotyping.",
+        // predicate nominal with a PP complement, `target` NOT in adjective-frames.tsv
+        "These findings show that WRN is a promising drug target for MSI cancers.",
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        eprintln!(
+            "\n=== {s:?} — {} closed, {} open ===",
+            closed.len(),
+            open.len()
+        );
+        use eigenius_kernel::dcg::category::pretty_cat_dbg;
+        let mut rows: Vec<(String, String)> = closed
+            .iter()
+            .map(|it| {
+                (
+                    // The ROOT CATEGORY matters as much as the combinator: a predicate-nominal
+                    // `is_a` needs a copula, and `is_finite_clause` admits a root only at
+                    // `fin`/`fin_any` — so a copula-less `is_a` root means some entry is handing
+                    // back a FINITE clause where an `adj`-featured one was expected.
+                    format!("{:?} :: {}", it.prov(), pretty_cat_dbg(it.cat())),
+                    pretty_term(it.sem()),
+                )
+            })
+            .collect();
+        rows.sort();
+        rows.dedup();
+        // Count how many roots assert a top-level identity, and by which combinator.
+        let mut by_prov: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+        for (prov, sem) in &rows {
+            let e = by_prov.entry(prov.clone()).or_default();
+            e.0 += 1;
+            if sem.contains("is_a(") {
+                e.1 += 1;
+            }
+        }
+        for (prov, (total, with_is_a)) in &by_prov {
+            eprintln!("  {prov:<28} readings {total:>4}   containing is_a {with_is_a:>4}");
+        }
+        for (prov, sem) in rows.iter().filter(|(_, s)| s.contains("is_a(")).take(3) {
+            eprintln!("    [{prov}] {}", &sem[..sem.len().min(200)]);
+        }
+    }
+}
+
 /// D63 compound-morphology §2a diagnostic: show *exactly* how `based on X` parses TODAY (before the
 /// Step 2b object+PP extension) — the adjective(`based`, data.adj) + `on`-adjunct reading, NOT the
 /// verb-argument `base(x, X)`. Dumps every distinct closed sem. Run with:

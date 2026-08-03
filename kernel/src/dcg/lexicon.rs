@@ -689,12 +689,15 @@ mod scope_bearing_tests {
             }
         }
 
-        // (2) NEGATION is declared, and is exactly what the sniff MISSES — both of its entries.
+        // (2) NEGATION is declared, and is exactly what the sniff MISSES — all of its entries.
+        // THREE since the `lexicon:pred` split: a predicate nominal is `S[dcl,pred]\NP`, not
+        // `S[dcl,adj]\NP`, so "is not a drug target" needs its own negation entry alongside the
+        // adjectival one. Every selector of a predicative complement is enumerated over {adj, pred}.
         let nots = lex.entries_for("not");
         assert_eq!(
             nots.len(),
-            2,
-            "expected the two `not` entries (verbal + adjectival)"
+            3,
+            "expected the three `not` entries (verbal + adjectival + predicate-nominal)"
         );
         for e in &nots {
             assert_eq!(

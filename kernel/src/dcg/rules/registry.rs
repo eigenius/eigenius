@@ -53,10 +53,8 @@ impl Grammar {
         let [c, _num] = is_ctor(ante.cat(), "cat_np")? else {
             return None;
         };
-        let body_args = is_ctor(body.cat(), "fwd").or_else(|| is_ctor(body.cat(), "bwd"))?;
-        let [s, _np] = body_args else {
-            return None;
-        };
+        let (_bm, s, _np) =
+            slash_parts(body.cat(), "fwd").or_else(|| slash_parts(body.cat(), "bwd"))?;
         if !matches!(is_ctor(s, "cat_s"),
             Some([mood, _]) if matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl"))
         {

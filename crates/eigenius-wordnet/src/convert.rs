@@ -144,6 +144,10 @@ pub struct Report {
     /// axiom) compete with the copula and re-encode `X is P` as `be(λx.P(x), X)`. Counts lemma skips,
     /// so one per (frame-kind × synset) occurrence of `be`.
     pub copula_skipped: usize,
+    /// Of `entries`, the STATIVE RELATIONAL PARTICIPLE entries ([`push_stative_relational`]): the
+    /// `(S[adj]\NP)/cat_pp_arg(prep)` reading of a past participle whose verb's WordNet frames NAME a
+    /// governed preposition (`associated WITH`, `linked WITH`).
+    pub stative_entries: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -229,35 +233,35 @@ impl FrameKind {
         let obj = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)");
         let s = format!("lexicon:cat_s(lexicon:dcl, lexicon:{fin})");
         match self {
-            FrameKind::Intransitive => format!("lexicon:bwd({s}, {subj})"),
-            FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), {obj})"),
+            FrameKind::Intransitive => format!("lexicon:bwd(lexicon:m_all, {s}, {subj})"),
+            FrameKind::Transitive => format!("lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), {obj})"),
             FrameKind::Ditransitive => {
-                format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
+                format!("lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), {obj}), {obj})")
             }
             // Essive `((S\NP)/cat_pp_arg(prep_as))/NP` — the object NP binds first (adjacent to the
             // verb), then the `as`-marked predicative complement `cat_pp_arg(prep_as)` (⟦·⟧ = Entity).
             // Same 3-place `Entity → Entity → Entity → Prop` axiom as the ditransitive; the distinct
             // `prep_as` marker forces the `as`, so a plain transitive verb still rejects a stray `as Y`.
             FrameKind::Essive => format!(
-                "lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_as)), {obj})"
+                "lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_as)), {obj})"
             ),
             // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
             // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
             // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. WordNet's
-            // PP frames (4, 23) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
+            // PP frames (4, 22) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
             // `prep_any` wildcard — it accepts any marker (C3-precision; the specific-prep gate applies to
             // gloss-governed ADJECTIVES, where WordNet's gloss does carry the governance).
             FrameKind::PpOblique => {
                 format!(
-                    "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
+                    "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
                 )
             }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
-            FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
+            FrameKind::Clausal => format!("lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_cp)"),
             // Linking (copular) verb: `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` — consumes a predicative-
             // adjective VP and yields a finite VP, like the copula `be`'s `adj` complement.
             FrameKind::LinkingAdj => format!(
-                "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
+                "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
             ),
         }
     }
@@ -272,14 +276,22 @@ impl FrameKind {
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
 /// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
-/// ----ing PP" 4, "----s PP" 23) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This replaces
-/// the former coarse handling (12/27 → transitive with the preposition dropped; 4/23 → intransitive with
-/// the PP dropped). **Object+PP** frames (13, 20, 21, 22) and other PP shapes stay coarse for now — a
-/// follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies it.
+/// ----ing PP" 4, "Somebody ----s PP" 22) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This
+/// replaces the former coarse handling (12/27 → transitive with the preposition dropped; 4/22 →
+/// intransitive with the PP dropped). **Object+PP** frames (13, 20, 21) and other PP shapes stay coarse
+/// for now — a follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies
+/// it.
+///
+/// Frames **22 and 23 were swapped** here until 2026-08-02. `doc/man/wninput.5` (vendored at
+/// `references/WordNet-3.0/doc/man/wninput.5`, line 212) reads `22  Somebody ----s PP` and
+/// `23  Somebody's (body part) ----s`, so 22 is the PP frame and 23 is an intransitive. The inversion
+/// dropped 22's PP — leaving `give rise` with no argument slot for its `to`-PP, so the PP fell to adjunct
+/// position and an adjunct escaped a finite `that`-clause onto the matrix subject — and handed 23 a
+/// spurious oblique slot.
 fn classify(frame: u8) -> Option<FrameKind> {
     match frame {
-        1 | 2 | 3 | 22 => Some(FrameKind::Intransitive),
-        4 | 12 | 23 | 27 => Some(FrameKind::PpOblique),
+        1 | 2 | 3 | 23 => Some(FrameKind::Intransitive),
+        4 | 12 | 22 | 27 => Some(FrameKind::PpOblique),
         8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
         6 | 7 => Some(FrameKind::LinkingAdj), // "----s Adjective" — copular/linking verb (D63 §8.5)
@@ -640,6 +652,109 @@ fn is_essive_verb(lemma: &str) -> bool {
     ESSIVE_VERBS.contains(&l.as_str())
 }
 
+/// A WordNet sentence frame that NAMES a governed preposition → that preposition, for the STATIVE
+/// RELATIONAL PARTICIPLE rule ([`push_stative_relational`]).
+///
+/// The full domain `wninput(5WN)` records is
+///
+/// ```text
+/// 15 to | 16 from | 17 with | 18 of | 19 on | 31 with
+/// ```
+///
+/// (frame 14, "Somebody ----s somebody something", is the true double-object and names none). Only
+/// **17 and 31** are shipped. The other four are held back on a MEASUREMENT, not a guess: the full
+/// rule over all five prepositions (378 synsets / 844 entries) FAILS coverage, `grammar-gap 1`,
+/// bisected to frame 19 alone and then to ONE synset (`set.v.01115006`). Its `set` entry EVICTS
+/// `cat_n(n05674584, mass)` from the `sets` leaf of «These data sets are project Achilles and project
+/// DRIVE.», which then has no parse — because the per-entry sense cap (`dcg::parse::seed`) is keyed
+/// per SENSE but truncates per ENTRY, and with both entries unranked the emission order decides.
+/// Frame 15 (`to`, 185 synsets) is completely INERT. So the blocker is the sense cap, which is a
+/// separate structural finding; widen this set once it is fixed.
+fn stative_prep(frame: u8) -> Option<&'static str> {
+    match frame {
+        17 | 31 => Some("with"),
+        _ => None,
+    }
+}
+
+/// Verb synset → the **stative relational participle** entries, additively on top of the
+/// frame-derived verbal categories.
+///
+/// A verb whose frames name a governed preposition also lexicalises a participial RELATION —
+/// `associated with`, `linked with` — that is stative: a two-place fact holding between subject and
+/// relatum, with no agent who performed the act. It is categorially an ADJECTIVE taking a PP
+/// argument, which the existing copula already consumes:
+///
+/// ```text
+/// (S[dcl,adj]\NP)/cat_pp_arg(prep_X)   over a 2-place axiom   `wn:v{off}_rel`
+/// ```
+///
+/// so this needs no new copula entry and no ontology change. [`FrameKind::Essive`]
+/// (`((S\NP)/cat_pp_arg(prep_as))/NP`) is the same template; the machinery already existed and simply
+/// was not applied to the frames that name a preposition.
+///
+/// WHY IT IS NEEDED. [`classify`] collapses 14|15|16|17|18|19|31 into one preposition-less
+/// [`FrameKind::Ditransitive`] `((S\NP)/NP)/NP` and DISCARDS the preposition the frame names, so the
+/// relatum could only ever attach as a free ADJUNCT — `And(associated(x), prep_with(x, r))` rather
+/// than one saturated predication. The adjectival route cannot cover it either: [`governed_preposition`]
+/// is reached only from [`push_adj`], over the words of ADJECTIVE synsets, and `associated` is not a
+/// WordNet adjective lemma (`index.adj` 0, unlike `dependent`/`essential`/`concordant`, all 1), so the
+/// `associated<TAB>with` row in `adjective-frames.tsv` never fires.
+///
+/// The sem is the axiom ITSELF, unwrapped: `⟦(S[adj]\NP)/cat_pp_arg⟧ = Entity(relatum) →
+/// Entity(subject) → Prop`, so the category's own denotation order puts the COMPLEMENT first and the
+/// SUBJECT second — the house convention throughout (`is_passive` applies `TV(p, a)`, patient then
+/// agent). A flipping lambda would read backwards in every gloss.
+fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
+    // One preposition per synset, chosen by the LOWEST-NUMBERED naming frame so the result does not
+    // depend on frame order in `data.verb`.
+    let Some(prep) = syn
+        .frames
+        .iter()
+        .copied()
+        .filter(|&f| stative_prep(f).is_some())
+        .min()
+        .and_then(stative_prep)
+    else {
+        return;
+    };
+    let off = &syn.offset;
+    buf.push_str(&format!(
+        "axiom wn:v{off}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> Prop desc: \"{} (stative relational participle; governs `{prep}`)\"\n\n",
+        esc(&syn.gloss)
+    ));
+    rep.verb_axioms += 1;
+    let sem = format!("v{off}_rel");
+    let arrow = format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop");
+    let cat = format!(
+        "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)), lexicon:cat_pp_arg({}))",
+        prep_ctor(prep)
+    );
+    for (i, lemma) in syn.words.iter().enumerate() {
+        // The copula is grammar, not a content verb — same per-LEMMA skip as the verbal paradigm.
+        if is_copula_lemma(lemma) {
+            rep.copula_skipped += 1;
+            continue;
+        }
+        let sense = sense_key(syn, lemma);
+        for (k, pp) in head_pps(lemma).iter().enumerate() {
+            push_entry(
+                buf,
+                &format!("e_v{off}_rel_{i}_p{k}"),
+                pp,
+                &cat,
+                &sem,
+                &arrow,
+                &sense,
+                ranks,
+            );
+            rep.entries += 1;
+            rep.participle_entries += 1;
+            rep.stative_entries += 1;
+        }
+    }
+}
+
 fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) -> bool {
     let mut kinds: std::collections::BTreeSet<FrameKind> =
         syn.frames.iter().filter_map(|&f| classify(f)).collect();
@@ -658,6 +773,10 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
         rep.verbs_deferred += 1;
         return false;
     }
+    // Additive: the STATIVE RELATIONAL PARTICIPLE for a frame that names a governed preposition. Safe
+    // after the early return — every frame in `stative_prep`'s domain also classifies (all of
+    // 15|16|17|18|19|31 map to `Ditransitive`), so `kinds` is never empty when it fires.
+    push_stative_relational(buf, syn, rep, ranks);
     let off = &syn.offset;
     for kind in kinds {
         let tag = kind.tag();
@@ -789,7 +908,7 @@ fn is_copula_lemma(lemma: &str) -> bool {
 }
 
 fn adj_cat() -> String {
-    format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
+    format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
 
 /// Curated adjective **subcategorization frames** (lemma → governed preposition) — the frame-acquisition
@@ -1029,7 +1148,10 @@ fn push_adj(
         &format!("( fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(lexicon:anaphor)) : {prop_arrow} )"),
     );
     let pos_cat = adj_cat();
-    let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
+    let cmp_cat = format!(
+        "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_than)",
+        adj_cat()
+    );
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
     for (i, lemma) in syn.words.iter().enumerate() {
         if restates_governed_frame(lemma) {
@@ -1074,7 +1196,7 @@ fn push_adj(
                 &format!("e_{loc}_{i}_r"),
                 lemma,
                 &format!(
-                    "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                    "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                     prep_ctor(&prep)
                 ),
                 &format!("deg_{loc}_rel"),
@@ -1094,7 +1216,7 @@ fn push_adj(
                 &format!("e_{loc}_{i}_rp"),
                 lemma,
                 &format!(
-                    "lexicon:fwd({}, lexicon:cat_pp_arg({}))",
+                    "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_arg({}))",
                     adj_cat(),
                     prep_ctor(&prep)
                 ),
@@ -1166,7 +1288,7 @@ fn push_adj(
                         &format!("e_{loc}_dr_{}_{j}", local(noun)),
                         nlemma,
                         &format!(
-                            "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                            "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                             prep_ctor(prep)
                         ),
                         &format!("deg_{loc}_rel"),
@@ -1333,10 +1455,69 @@ mod tests {
     }
 
     #[test]
+    fn stative_relational_participle_binds_the_frame_named_preposition() {
+        // The real `associate` synset (00713167), frames 17 + 31 — both "… WITH something".
+        let s = syn(
+            "00713167 31 v 07 associate 0 tie_in 0 relate 0 link 0 colligate 2 link_up 0 connect 0 \
+             000 02 + 17 00 + 31 00 | make a logical or causal connection",
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_verb(&mut buf, &s, &mut rep, &SenseRanks::new());
+
+        // A 2-place axiom, distinct from the verbal `_d` ditransitive one.
+        assert!(
+            buf.contains(
+                "axiom wn:v00713167_rel : lexicon:Entity -> lexicon:Entity -> Prop desc: \"make a logical or causal connection (stative relational participle; governs `with`)\""
+            ),
+            "stative axiom missing:\n{buf}"
+        );
+        // The participle takes the PP as an ARGUMENT, and the preposition is the one the frame names —
+        // not the `prep_any` wildcard. This is what makes `with` a case-marker instead of an adjunct.
+        assert!(
+            buf.contains(
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_with)) );"
+            ),
+            "stative category missing or wrong preposition:\n{buf}"
+        );
+        // Emitted on the PAST PARTICIPLE surface only — `associated`, never `associate`/`associates`
+        // with this category (a stative relation has no finite active paradigm of its own).
+        assert!(buf.contains("lexicon:form     = \"associated\";"));
+        assert_eq!(rep.stative_entries, s.words.len(), "one per lemma: {buf}");
+        // ADDITIVE — the frame-derived ditransitive entries survive, so the ledger decides.
+        assert!(
+            buf.contains("wn:v00713167_d"),
+            "verbal entries dropped:\n{buf}"
+        );
+    }
+
+    #[test]
+    fn stative_participle_is_restricted_to_the_shipped_with_frames() {
+        // Frames 15/16/18/19 name a preposition too, but are HELD BACK on a measurement (frame 19
+        // gaps a unit through the per-entry sense cap; frame 15 is inert). Pin the scope so widening
+        // it is a deliberate edit, not a drive-by.
+        assert_eq!(stative_prep(17), Some("with"));
+        assert_eq!(stative_prep(31), Some("with"));
+        for f in [14u8, 15, 16, 18, 19] {
+            assert_eq!(stative_prep(f), None, "frame {f} is not shipped");
+        }
+        // A synset carrying ONLY a held-back naming frame emits no stative entry at all.
+        let s = syn("01115006 41 v 01 set 0 000 01 + 19 00 | put into a certain place");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_verb(&mut buf, &s, &mut rep, &SenseRanks::new());
+        assert_eq!(rep.stative_entries, 0);
+        assert!(
+            !buf.contains("_rel"),
+            "held-back frame emitted a stative:\n{buf}"
+        );
+    }
+
+    #[test]
     fn frame_classification_covers_all_35() {
         // intransitive / transitive / ditransitive — the emittable kinds.
         assert_eq!(classify(2), Some(FrameKind::Intransitive));
-        assert_eq!(classify(22), Some(FrameKind::Intransitive)); // PP → coarse intrans
+        assert_eq!(classify(23), Some(FrameKind::Intransitive)); // "Somebody's (body part) ----s"
         assert_eq!(classify(8), Some(FrameKind::Transitive));
         assert_eq!(classify(13), Some(FrameKind::Transitive)); // "----s on something"
         assert_eq!(classify(14), Some(FrameKind::Ditransitive));
@@ -1345,7 +1526,7 @@ mod tests {
         assert_eq!(classify(12), Some(FrameKind::PpOblique)); // "----s to somebody"
         assert_eq!(classify(27), Some(FrameKind::PpOblique)); // "----s to somebody"
         assert_eq!(classify(4), Some(FrameKind::PpOblique)); //  "is ----ing PP"
-        assert_eq!(classify(23), Some(FrameKind::PpOblique)); // "----s PP"
+        assert_eq!(classify(22), Some(FrameKind::PpOblique)); // "Somebody ----s PP"
                                                               // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
         // frames 6/7 "----s Adjective" → linking (copular) verb (D63 §8.5).
@@ -1630,7 +1811,7 @@ mod tests {
         ));
         // Finite 3sg has a SINGULAR subject slot (6-agr); object slot stays num_any.
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         // base (num_any) + finite 3sg ("eats", sg) + finite plural ("eat", pl) forms.
@@ -1638,16 +1819,16 @@ mod tests {
         assert!(buf.contains("lexicon:form     = \"eats\";")); // fin 3sg
                                                                // bse keeps a num_any subject (the aux supplies agreement).
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // plural-finite has a PLURAL subject slot (6-agr).
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // Finite SIMPLE PAST — same surface as the participle but a finite (`fin`) clause head with a
         // `num_any` subject (past tense has no number agreement). The object slot stays num_any.
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert_eq!(rep.verb_axioms, 1);
         // Per lemma: base + finite 3sg + finite plural + gerund + past participle + finite simple
@@ -1691,7 +1872,7 @@ mod tests {
         // first (adjacent), then the `as`-marked predicative complement `cat_pp_arg(prep_as)`.
         assert!(buf.contains("lexicon:form     = \"identifies\";"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_as)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_as)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // Essive is ADDITIVE: the frame-8 transitive category is still emitted.
         assert!(buf.contains("axiom wn:v00618451_t :"));
@@ -1728,11 +1909,11 @@ mod tests {
         // gerund (regular -ing) + its `ger` category.
         assert!(buf.contains("lexicon:form     = \"eating\";"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // irregular past participle (eat → eaten) + its `pss` category, same axiom.
         assert!(buf.contains("lexicon:form     = \"eaten\";"));
-        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"));
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"));
         // participles point at the same predicate axiom as the finite form.
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         // the regular members inflect too: corrode → corroded, rust → rusting.
@@ -1786,7 +1967,7 @@ mod tests {
         assert!(buf.contains(
             "axiom wn:v00001234_d : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
         ));
-        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
+        assert!(buf.contains("lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
     }
 
     #[test]
@@ -1800,7 +1981,7 @@ mod tests {
         assert!(buf.contains("axiom wn:v00000003_c : Prop -> lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"shows\";")); // 3sg
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
     }
@@ -1849,7 +2030,7 @@ mod tests {
         // 3sg "remains" over an `adj` complement, singular subject.
         assert!(buf.contains("lexicon:form     = \"remains\";"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );"
         ));
         // The corpus form: past "remained" (fin, number-agnostic) also emitted.
         assert!(buf.contains("lexicon:form     = \"remained\";"));
@@ -1880,7 +2061,7 @@ mod tests {
         assert!(buf.contains("lexicon:sem      = wn:pos_sem_a00000001;"));
         assert!(buf.contains("lexicon:sem      = wn:cmp_sem_a00000001;"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
         ));
         // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading of `deg_X` — so the
         // closed-class `more`/`less` operators combine (periphrastic comparative at scale).
@@ -1989,7 +2170,7 @@ mod tests {
         );
         assert!(
             buf.contains(
-                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );"
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );"
             ),
             "relational cat_measure/cat_pp_arg(prep_on) reading — the gloss `dependent on` governs `on` \
              (C3-precision):\n{buf}"
@@ -2026,7 +2207,7 @@ mod tests {
         // The predicative category taking the governed PP as its argument.
         assert!(
             buf.contains(
-                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );"
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );"
             ),
             "positive relational cat `(S[adj]\\NP)/cat_pp_arg(prep_on)`:\n{buf}"
         );

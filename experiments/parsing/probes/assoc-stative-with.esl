@@ -1,0 +1,61 @@
+// ════════════════════════════════════════════════════════════════════
+// PATCH LAYER — ARM B: `associated with` as a STATIVE RELATIONAL predicate.
+//
+// TARGET ENCODING under test, for «MSI is associated with notable responses to immune checkpoint
+// blockade.»:
+//     §(kind_of(§), kind_of(ΣG#0:§. And(gt(§(G#0), §), prep_to(G#0, kind_of(§)))))
+// ONE two-place predication. No top-level `And`, no separate `prep_with` conjunct, no agent.
+//
+// WHY THE CURRENT LEXICON CANNOT PRODUCE IT. All eight readings of that unit carry
+// `prep_with(MSI, responses)` as a separate ADJUNCT conjunct, because nothing binds `with` as an
+// argument of `associated`:
+//   - the ADJECTIVAL route is dead. `governed_preposition` (convert.rs) is reached only from
+//     `push_adj`, over the words of ADJECTIVE synsets, and `associated` is not a WordNet adjective
+//     lemma (index.adj: 0 — unlike `dependent`/`essential`/`concordant`, all 1). So the row
+//     `associated<TAB>with` in `adjective-frames.tsv` NEVER FIRES. Measured: `associated`'s full
+//     entry inventory at SENSE_CAP=32 contains no `cat_pp_arg` category at all.
+//   - the VERBAL route is unmarked. `associate` sense 00713167 carries WordNet frames 17
+//     ("Somebody ----s somebody WITH something") and 31 ("Somebody ----s something WITH
+//     something"), but `classify` collapses 14|15|16|17|18|19|31 into one preposition-less
+//     `Ditransitive`, emitting `((S\NP)/NP)/NP` and discarding the preposition the frame names.
+//
+// WHAT THIS ARM ASSERTS. That the sentence's `associated` is STATIVE — a two-place relation
+// between MSI and the responses, holding as a fact, with no agent who performed an associating.
+// Contrast ARM A (assoc-frame17-with.esl), which routes through the verb's passive and therefore
+// existentially closes an agent: `∃a. associate(MSI, responses, a)`. Both are testable; this one is
+// the encoding argued for on saturation + no-unwitnessed-existential grounds.
+//
+// SHAPE. `(S[dcl,adj]\NP)/cat_pp_arg(prep_with)` — the same shape `push_adj` emits for a
+// gloss-governed relational adjective (Fix A (c)), so this is the entry the adjectival route WOULD
+// have produced had `associated` been a WordNet adjective lemma. The `with` is a case-marker, not a
+// predicate: it contributes no conjunct. The existing `is_copula` consumes the saturated
+// `S[dcl,adj]\NP` result, so NO new copula entry is needed.
+//
+// ADDITIVE, not a replacement: the existing `associated` entries stay, so their readings stay too
+// and the adjudication ledger decides. A REPLACEMENT would also need the suppression half (see
+// frame22-oblique.esl (1)).
+// ════════════════════════════════════════════════════════════════════
+namespace core      = "urn:eigenius:core";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace wn        = "urn:eigenius:wn";
+
+// The stative relation's denotation. Two-place and OPAQUE: `associated with` is an empirical
+// relation, not a decomposable one. `⟦cat_pp_arg⟧ = Entity`, so the arity matches the transitive.
+axiom wn:v00713167_rel : lexicon:Entity -> lexicon:Entity -> Prop desc: "stand in a logical or causal association with (stative; WordNet frames 17/31 govern `with`)"
+
+// The axiom IS the sem — no lambda wrapper, exactly as `FrameKind::Transitive` / `PpOblique` do.
+// `⟦(S[adj]\NP)/cat_pp_arg⟧ = ⟦cat_pp_arg⟧ -> ⟦S[adj]\NP⟧ = Entity(relatum) -> Entity(subject) ->
+// Prop`, so the category's own denotation order puts the COMPLEMENT first and the SUBJECT second —
+// the house convention throughout (`is_passive` applies `TV(p, a)`, patient then agent). Wrapping a
+// flipping lambda around it would read backwards in every gloss.
+resource wn:e_v00713167_rel_associated : lexicon:LexicalEntry {
+    core:description   = "stand in a logical or causal association with (stative relational; governs `with`).";
+    lexicon:form       = "associated";
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_with)) );
+    lexicon:sem        = wn:v00713167_rel;
+    lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense      = "wn:associate.v.00713167";
+    lexicon:grade      = epistemic:declared;
+    lexicon:in_lexicon = lexicon:wordnet;
+}

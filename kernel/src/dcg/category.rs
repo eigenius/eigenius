@@ -95,9 +95,18 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             )),
             Box::new(Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
         )),
-        ("fwd", [a, b]) | ("bwd", [a, b]) => Ok(Exp::Arrow(
+        // ⟦A/ₘB⟧ = ⟦A\ₘB⟧ = ⟦B⟧→⟦A⟧. The slash MODALITY `_m` is denotation-transparent: it
+        // restricts which combinatory rules may consume the slash, never what it denotes.
+        ("fwd", [_m, a, b]) | ("bwd", [_m, a, b]) => Ok(Exp::Arrow(
             Box::new(denote_cat(b)?),
             Box::new(denote_cat(a)?),
+        )),
+        // The multimodal migration's release-mode detector. `denote_cat` runs on every category,
+        // so a construction site still building a 2-argument slash is caught here and NAMED,
+        // rather than silently denoting as some other shape (D63 multimodal slashes).
+        ("fwd", [_, _]) | ("bwd", [_, _]) => Err(format!(
+            "`{name}` built with 2 arguments — expected 3 (mode, result, argument). A category \
+             construction site was not migrated to multimodal slashes."
         )),
         // ⟦cat_forall(λT:Set. R)⟧ = ΠT:Set. ⟦R⟧ — the dependent forward over a
         // common-noun type binds T (the noun's type) as a Π; ⟦R⟧ may mention it
@@ -169,6 +178,64 @@ pub fn is_ctor<'a>(cat: &'a Exp, name: &str) -> Option<&'a [Exp]> {
         Exp::InductiveCtor(_, n, args) if n.as_str() == name => Some(args),
         _ => None,
     }
+}
+
+/// The parts of a **slash** category — `A/ₘB` (`dir = "fwd"`) or `A\ₘB` (`dir = "bwd"`) — as
+/// `(mode, result, argument)`.
+///
+/// This is the ONLY sanctioned way to destructure a slash, and it exists because the multimodal
+/// migration is not compiler-checked: `Exp::InductiveCtor` carries its constructor name as a
+/// *string* and its arguments as a `Vec`, so a construction site left at the old 2-argument arity
+/// produces a term Rust type-checks happily. The scattered `is_ctor(c, "fwd")` + `len() == 2`
+/// idiom this replaces would have answered such a term with a silent "not a functor" — functor
+/// subsumption would simply stop firing, corrupting derivations rather than failing. Routing every
+/// destructuring through one accessor keeps that impossible.
+pub fn slash_parts<'a>(cat: &'a Exp, dir: &str) -> Option<(&'a Exp, &'a Exp, &'a Exp)> {
+    debug_assert!(
+        dir == "fwd" || dir == "bwd",
+        "slash_parts expects a slash constructor, got `{dir}`"
+    );
+    match is_ctor(cat, dir)? {
+        [m, a, b] => Some((m, a, b)),
+        // A stale 2-argument slash: report it, never treat it as a non-functor.
+        stale => {
+            debug_assert!(
+                false,
+                "`{dir}` built with arity {} — expected 3 (mode, result, argument). A category \
+                 construction site was not migrated to multimodal slashes.",
+                stale.len()
+            );
+            None
+        }
+    }
+}
+
+/// Whether `cat` is a slash in either direction, as `(dir, mode, result, argument)`.
+pub fn as_slash(cat: &Exp) -> Option<(&'static str, &Exp, &Exp, &Exp)> {
+    if let Some((m, a, b)) = slash_parts(cat, "fwd") {
+        return Some(("fwd", m, a, b));
+    }
+    slash_parts(cat, "bwd").map(|(m, a, b)| ("bwd", m, a, b))
+}
+
+/// `·` — all rules. The most permissive point of the mode lattice (its BOTTOM, as an inheritance
+/// hierarchy) and the migration default: it reproduces the pre-multimodal regime exactly, where
+/// every slash was composable.
+pub const MODE_ALL: &str = "m_all";
+/// `⋆` — application only. The lattice ROOT, and the least permissive slash: composition,
+/// type-raising and the crossed rules cannot consume it. core-en marks a phrasal verb's particle
+/// slash this way (`v.xsl`'s `tv.phrasal` is `iv /▷ np[acc] /★ prt`), which is what stops a
+/// governed complement from composing away from its head.
+pub const MODE_APP: &str = "m_app";
+
+/// A `lexicon:Mode` constructor value by name — see [`MODE_ALL`] / [`MODE_APP`].
+/// `None` if the `lexicon:Mode` inductive doesn't resolve in the layer chain.
+pub fn mode_value(layer: &Arc<Layer>, name: &str) -> Option<Exp> {
+    Some(Exp::InductiveCtor(
+        resolve_inductive(layer, "urn:eigenius:lexicon:Mode")?,
+        name.to_string(),
+        vec![],
+    ))
 }
 
 /// Categorial subsumption: may an `arg` category fill a `slot` category? Atoms
@@ -246,12 +313,18 @@ fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
     // VP fills an `S\NP_Gene` slot (`Gene ≤ Entity` ⇒ `Entity→Prop ≤ Gene→Prop`):
     // the argument check is run with operands SWAPPED. (Args are `[result, arg]` —
     // `⟦fwd(a,b)⟧ = ⟦b⟧ → ⟦a⟧`.) A functor only matches the same slash direction.
+    //
+    // The slash MODALITY is deliberately NOT unified here. A mode keys which combinatory RULES may
+    // consume a slash (Baldridge 2002 §5.2 — application is keyed to the root `⋆`, harmonic
+    // composition to `⋄`, and so on); it says nothing about whether one category may FILL another's
+    // argument slot. `A/⋆B` and `A/·B` both take a `B` and yield an `A`. Rule licensing is enforced
+    // where rules fire (`rules::combinators`), not here.
     for slash in ["fwd", "bwd"] {
-        if let (Some(s), Some(a)) = (is_ctor(slot, slash), is_ctor(arg, slash)) {
-            if s.len() == 2 && a.len() == 2 {
-                return unify_into(&s[0], &a[0], layer, subst)   // result: covariant
-                    && unify_into(&a[1], &s[1], layer, subst); // argument: contravariant
-            }
+        if let (Some((_sm, s_res, s_arg)), Some((_am, a_res, a_arg))) =
+            (slash_parts(slot, slash), slash_parts(arg, slash))
+        {
+            return unify_into(s_res, a_res, layer, subst)   // result: covariant
+                && unify_into(a_arg, s_arg, layer, subst); // argument: contravariant
         }
     }
     // Atoms of differing constructors / slashes of opposite direction never match.
@@ -355,17 +428,15 @@ const ENTITY_TOP_IRI: &str = "urn:eigenius:lexicon:Entity";
 /// any such slot and routes it to the unpacked CKY path; an index-independent grammar (every functor
 /// arg is a variable or `Entity`, as the WordNet/UMLS importer emits) is safe to pack.
 ///
-/// Only ARGUMENT positions count — the `B` in `fwd(A, B)` / `bwd(A, B)`, recursively (a nested
+/// Only ARGUMENT positions count — the `B` in `fwd(m, A, B)` / `bwd(m, A, B)`, recursively (a nested
 /// functor argument, e.g. a VP-adjunct's `S\NP`, has its own arg slots). A plain noun leaf
-/// `cat_n(Gene, sg)` is an *argument*, not a *slot*, so its concrete index does **not** flag.
+/// `cat_n(Gene, sg)` is an *argument*, not a *slot*, so its concrete index does **not** flag. The
+/// slash modality is not a category and never carries an index, so it is skipped.
 pub fn cat_has_selectional_slot(cat: &Exp) -> bool {
-    if let Exp::InductiveCtor(_, name, args) = cat {
-        if (name == "fwd" || name == "bwd") && args.len() == 2 {
-            // args[0] = result (covariant, may nest functors); args[1] = the argument slot.
-            return slot_is_concrete_nonentity(&args[1])
-                || cat_has_selectional_slot(&args[0])
-                || cat_has_selectional_slot(&args[1]);
-        }
+    if let Some((_dir, _mode, res, arg)) = as_slash(cat) {
+        return slot_is_concrete_nonentity(arg)
+            || cat_has_selectional_slot(res)
+            || cat_has_selectional_slot(arg);
     }
     false
 }
@@ -385,7 +456,34 @@ fn slot_is_concrete_nonentity(slot: &Exp) -> bool {
 /// underspecified top (`*_any`). `Any = ⊤`, unification = meet (`⊓`). Public so
 /// `apply` can check determiner/noun number agreement on `cat_forall`.
 pub fn feat_meets(a: &Exp, b: &Exp) -> bool {
-    a == b || is_any_feat(a) || is_any_feat(b)
+    a == b || is_any_feat(a) || is_any_feat(b) || pred_subsumes_adj(a, b)
+}
+
+/// `pred ⊑ adj` — the ONE non-flat pair in the feature lattice, and the reason it exists.
+///
+/// A PREDICATE NOMINAL is a predicative complement, so everything that selects one must accept it:
+/// the copula, negation, and — the open set — every WordNet adverb typed
+/// `(S[adj]\NP)/(S[adj]\NP)`. Enumerating that set is not possible from the closed-class file, and
+/// trying to (four `_prednom` copulas + `not_adj_prednom`) left `grammar-gap 1` on «These
+/// observations suggest that WRN dependency is not simply a result of MMR deficiency.», where
+/// `simply` is exactly such an adverb.
+///
+/// What `pred` must NOT do is license ATTRIBUTIVE use: English has no bare attributive predicate
+/// nominal (*"a drug-target cancer"). That is a separate test — [`is_adjective_cat`] matches the
+/// ctor name EXACTLY, so it keeps refusing `pred` no matter what the meet admits. Subsumption for
+/// selection, exact match for attribution; the two questions are asked in different places and this
+/// is the pair that makes them come apart.
+fn pred_subsumes_adj(a: &Exp, b: &Exp) -> bool {
+    fn name(e: &Exp) -> Option<&str> {
+        match e {
+            Exp::InductiveCtor(_, n, args) if args.is_empty() => Some(n.as_str()),
+            _ => None,
+        }
+    }
+    matches!(
+        (name(a), name(b)),
+        (Some("adj"), Some("pred")) | (Some("pred"), Some("adj"))
+    )
 }
 
 /// Feature **unification** (D63 §8.10) — the binding-aware generalization of
@@ -435,15 +533,25 @@ pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc
 /// adverb contributes nothing to the claim `Prop` (the science-transparent default; the
 /// measurement subset's obligation semantics is a later arm). Grounded in the WRN attachment
 /// positions:
-/// 1. **adjective modifier** `(S[adj]\NP)/(S[adj]\NP)` — "selectively essential", "highly concordant";
-/// 2. **VP modifier, forward** `(S\NP)/(S\NP)` — "commonly affects …";
-/// 3. **VP modifier, backward** `(S\NP)\(S\NP)` — "arrest selectively".
+/// 1. **pre-modifier, forward** `(S[f]\NP[n])/(S[f]\NP[n])` — "selectively essential", "highly
+///    concordant" (`f = adj`), "commonly affects …" (`f = fin`);
+/// 2. **VP modifier, backward** `(S[fin]\NP[n])\(S[fin]\NP[n])` — "arrest selectively".
 ///
-/// The VP modifier fixes the clause feature to `fin` (so it matches a *verbal* clause but not an
-/// `adj` clause — keeping it disjoint from the adjective modifier, no spurious duplicate parses) and
-/// keeps the subject **number** a free variable, so agreement flows through the modifier unchanged.
-/// The adjective modifier is fixed (`adj`, `num_any`), since predicative adjectives are uniform.
-/// `None` if the `lexicon:Cat`/`Mood`/`Fin`/`Num` inductives don't resolve.
+/// The forward modifier BINDS the clause feature, so it returns exactly the feature it consumed.
+/// It used to be two categories with the result feature FIXED — `adj` for the adjective modifier and
+/// `fin` for the forward VP modifier — and the `adj` one LAUNDERED: once `pred ⊑ adj` entered
+/// [`feat_meets`], it took a predicate nominal by subsumption and handed back a plain `adj`, which
+/// [`is_adjective_cat`] then accepted for the attributive lift. That is the same shape as `fin_any`
+/// laundering finiteness (`3ae672d`): a rule `X → X` over a feature it does not carry through.
+/// Binding is the fix, and it also collapses the two into one — a bound `f` covers `fin` as well, so
+/// keeping a separate `fin`-fixed forward category would only duplicate every VP-adverb derivation.
+///
+/// The BACKWARD modifier stays fixed at `fin`. It never laundered (it accepts `fin` and returns
+/// `fin`), and post-adjectival adverbs are not attested on the reference page, so binding it would
+/// widen coverage on no evidence.
+///
+/// The subject **number** is a free variable throughout, so agreement flows through the modifier
+/// unchanged. `None` if the `lexicon:Cat`/`Mood`/`Fin` inductives don't resolve.
 /// The **predicative adjective** category `S[adj]\NP` = `bwd(cat_s(dcl, adj), cat_np(Entity, num_any))`
 /// — fixed `adj` / `num_any`, since predicative adjectives are uniform. Shared by the adverb
 /// adjective-modifier cat ([`adverb_modifier_cats`]) and the D63 denominal `X-based` adjective
@@ -458,9 +566,12 @@ pub fn predicative_adjective_cat(layer: &Arc<Layer>) -> Option<Exp> {
     let adj = Exp::InductiveCtor(fin, "adj".to_string(), vec![]);
     let num_any = Exp::InductiveCtor(num, "num_any".to_string(), vec![]);
     let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
+    // `m_all`: the predicative-adjective category keeps the pre-multimodal permissive regime.
+    let m_all = mode_value(layer, MODE_ALL)?;
     Some(ctor(
         "bwd",
         vec![
+            m_all,
             ctor("cat_s", vec![dcl, adj]),
             ctor("cat_np", vec![entity, num_any]),
         ],
@@ -475,24 +586,32 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
 
-    // 1. Adjective modifier — over the uniform predicative-adjective cat `S[adj]\NP`.
-    let adjp = predicative_adjective_cat(layer)?;
-    let adj_mod = ctor("fwd", vec![adjp.clone(), adjp]);
+    // Adverb modifier categories stay `m_all` — an adverb is exactly the case that SHOULD compose
+    // freely (Baldridge's `skillfully` is `(s\◁np)/▷(s\◁np)`, both slashes permutative).
+    let m_all = mode_value(layer, MODE_ALL)?;
 
-    // 2/3. VP modifier — fixed `fin` clause (verbal, disjoint from `adj`), free subject number.
-    let fin_c = Exp::InductiveCtor(fin, "fin".to_string(), vec![]);
     let nvar = Exp::Var("__adv_num".to_string());
-    let vp = ctor(
-        "bwd",
-        vec![
-            ctor("cat_s", vec![dcl, fin_c]),
-            ctor("cat_np", vec![entity, nvar]),
-        ],
-    );
-    let vp_mod_fwd = ctor("fwd", vec![vp.clone(), vp.clone()]);
-    let vp_mod_bwd = ctor("bwd", vec![vp.clone(), vp]);
+    let clause = |feat: Exp| {
+        ctor(
+            "bwd",
+            vec![
+                m_all.clone(),
+                ctor("cat_s", vec![dcl.clone(), feat]),
+                ctor("cat_np", vec![entity.clone(), nvar.clone()]),
+            ],
+        )
+    };
 
-    Some(vec![adj_mod, vp_mod_fwd, vp_mod_bwd])
+    // 1. Forward pre-modifier — the clause feature is BOUND, so the adverb hands back whatever it
+    //    consumed (`adj`, `pred`, `fin`, …) instead of collapsing it to one value.
+    let bound = clause(Exp::Var("__adv_fin".to_string()));
+    let fwd_mod = ctor("fwd", vec![m_all.clone(), bound.clone(), bound]);
+
+    // 2. Backward VP modifier — verbal only; returns the `fin` it accepts, so nothing to bind.
+    let vp = clause(Exp::InductiveCtor(fin, "fin".to_string(), vec![]));
+    let vp_mod_bwd = ctor("bwd", vec![m_all, vp.clone(), vp]);
+
+    Some(vec![fwd_mod, vp_mod_bwd])
 }
 
 /// The transparent **sentence modifier** categories `S/S` and `S\S` (D62 Phase 3) — for
@@ -507,8 +626,13 @@ pub fn sentence_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let fin_any = Exp::InductiveCtor(fin, "fin_any".to_string(), vec![]);
     let s = Exp::InductiveCtor(cat.clone(), "cat_s".to_string(), vec![dcl, fin_any]);
-    let fwd = Exp::InductiveCtor(cat.clone(), "fwd".to_string(), vec![s.clone(), s.clone()]);
-    let bwd = Exp::InductiveCtor(cat, "bwd".to_string(), vec![s.clone(), s]);
+    let m_all = mode_value(layer, MODE_ALL)?;
+    let fwd = Exp::InductiveCtor(
+        cat.clone(),
+        "fwd".to_string(),
+        vec![m_all.clone(), s.clone(), s.clone()],
+    );
+    let bwd = Exp::InductiveCtor(cat, "bwd".to_string(), vec![m_all, s.clone(), s]);
     Some(vec![fwd, bwd])
 }
 
@@ -774,22 +898,52 @@ pub(super) fn base_class(t: &Exp) -> Exp {
 /// Whether `cat` is a sentence PRE-modifier `S/S` (`fwd(cat_s, cat_s)`) — the category a fronted
 /// transitional adverb / participial adjunct carries. Used by the fronted-modifier comma absorption.
 pub(super) fn is_sentence_premod(cat: &Exp) -> bool {
-    matches!(is_ctor(cat, "fwd"),
-        Some([a, b]) if is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
+    matches!(slash_parts(cat, "fwd"),
+        Some((_m, a, b)) if is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
 }
 
 /// Whether `cat` is a VP-adjunct preposition `((S\NP)\(S\NP))/NP` (`fwd(bwd(VP,VP), NP)`) — as
 /// opposed to the `cat_pp / NP` noun-modifier reading. Used by pied-piping (#2B) to pick the prep
 /// whose sem (`λx.λV.λs. And(V(s), prep(s,x))`) threads the fronted antecedent into the VP.
 pub(super) fn is_vp_adjunct_prep(cat: &Exp) -> bool {
-    matches!(is_ctor(cat, "fwd"),
-        Some([res, np]) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
+    matches!(slash_parts(cat, "fwd"),
+        Some((_m, res, np)) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
+}
+
+/// Whether `cat` **governs a named preposition** — `X/cat_pp_arg(prep_R)` for a CONCRETE `prep_R`.
+///
+/// This is the lexical signature of a gloss-governed relational word: `concordant WITH`, `dependent
+/// ON`, `essential FOR`, `associated WITH`. The importer writes the governance into the category —
+/// [`push_adj`](eigenius_wordnet)'s relational adjective and the stative relational participle both
+/// emit it — so the fact is readable here without consulting `adjective-frames.tsv`.
+///
+/// `prep_any` is EXCLUDED and that exclusion is the whole precision of this test. The wildcard is what
+/// `FrameKind::PpOblique` emits for WordNet's preposition-AGNOSTIC PP frames ("----s PP"), where no
+/// preposition is named and nothing is governed. Admitting it would match every oblique-PP verb in the
+/// lexicon instead of the handful of words whose frame names a specific marker.
+/// The RESULT must be a predicative ADJECTIVE (`S[adj]\NP`), which is what makes this an
+/// adjective-governance test rather than a relational-word test. Dropping that requirement was
+/// measured and REFUTED (2026-08-03): `X/cat_pp_arg(prep_R)` alone also matches relational NOUNS —
+/// `deficiency in`, `dependency on`, `dependence on`, `result of`, `vulnerability to`,
+/// `co-occurrence of` — whose nominal reading is the correct one, so pruning it took `grammar-gap`
+/// 0 -> 9 and expected-hits 60 -> 49 on the reference page.
+pub(super) fn governs_named_preposition(cat: &Exp) -> bool {
+    let Some((_m, res, arg)) = slash_parts(cat, "fwd") else {
+        return false;
+    };
+    if !is_adjective_cat(res) {
+        return false;
+    }
+    let Some([prep]) = is_ctor(arg, "cat_pp_arg") else {
+        return false;
+    };
+    matches!(prep, Exp::InductiveCtor(_, n, _) if n != "prep_any")
 }
 
 /// Whether a category is a **predicative adjective** `S[adj]\NP` — `bwd(cat_s(_, adj), _)`. Used to
 /// confirm a derived `-ly` adverb's base is a known adjective (D62 Phase 3).
 pub(super) fn is_adjective_cat(cat: &Exp) -> bool {
-    if let Some([s, _np]) = is_ctor(cat, "bwd") {
+    if let Some((_m, s, _np)) = slash_parts(cat, "bwd") {
         if let Some([_mood, fin]) = is_ctor(s, "cat_s") {
             return matches!(fin, Exp::InductiveCtor(_, n, _) if n == "adj");
         }
@@ -802,13 +956,13 @@ pub(super) fn is_adjective_cat(cat: &Exp) -> bool {
 /// their sem. Used by the denominal-suffix rule (D63 compound morphology §3b) to fetch each element's
 /// relation from its verb lemma.
 pub(super) fn is_binary_relation_cat(cat: &Exp) -> bool {
-    let Some([inner, obj]) = is_ctor(cat, "fwd") else {
+    let Some((_m, inner, obj)) = slash_parts(cat, "fwd") else {
         return false;
     };
     if is_ctor(obj, "cat_np").is_none() && is_ctor(obj, "cat_pp_arg").is_none() {
         return false;
     }
-    let Some([s, subj]) = is_ctor(inner, "bwd") else {
+    let Some((_im, s, subj)) = slash_parts(inner, "bwd") else {
         return false;
     };
     is_ctor(s, "cat_s").is_some() && is_ctor(subj, "cat_np").is_some()
@@ -838,6 +992,58 @@ mod tests {
     use super::*;
     use crate::nbe::term::Patt;
 
+    /// A GOVERNED preposition names a marker; `prep_any` names nothing.
+    ///
+    /// [`governs_named_preposition`] is the gate on the gloss-governed-relational nominal prune
+    /// (`dcg::parse::seed`), and its entire precision is that `prep_any` is refused. The wildcard is
+    /// what `FrameKind::PpOblique` emits for WordNet's preposition-AGNOSTIC PP frames, so admitting it
+    /// would prune the nominal reading of every oblique-PP verb surface in the lexicon rather than the
+    /// handful of relational words whose frame names a specific marker. Bootstrap-free: the categories
+    /// are built directly so this pins the predicate, not a snapshot.
+    #[test]
+    fn governed_preposition_test_refuses_the_prep_any_wildcard() {
+        fn ctor(name: &str, args: Vec<Exp>) -> Exp {
+            // A minimal `lexicon:Cat` inductive — the predicate only reads ctor names.
+            let decl = Arc::new(InductiveDecl {
+                iri: Iri::parse("urn:eigenius:lexicon:Cat").expect("iri"),
+                name: "Cat".into(),
+                params: vec![],
+                indices: vec![],
+                sort: Exp::Sort(0),
+                ctors: vec![],
+            });
+            Exp::InductiveCtor(decl, name.to_string(), args)
+        }
+        let vp = ctor(
+            "bwd",
+            vec![
+                ctor("m_all", vec![]),
+                ctor("cat_s", vec![ctor("dcl", vec![]), ctor("adj", vec![])]),
+                ctor(
+                    "cat_np",
+                    vec![ctor("Entity", vec![]), ctor("num_any", vec![])],
+                ),
+            ],
+        );
+        let with_prep = |p: &str| {
+            ctor(
+                "fwd",
+                vec![
+                    ctor("m_all", vec![]),
+                    vp.clone(),
+                    ctor("cat_pp_arg", vec![ctor(p, vec![])]),
+                ],
+            )
+        };
+        // `concordant with` / `essential for` — the frame NAMES the marker.
+        assert!(governs_named_preposition(&with_prep("prep_with")));
+        assert!(governs_named_preposition(&with_prep("prep_for")));
+        // `FrameKind::PpOblique` — the frame records no preposition, so nothing is governed.
+        assert!(!governs_named_preposition(&with_prep("prep_any")));
+        // A plain predicative adjective takes no PP argument at all.
+        assert!(!governs_named_preposition(&vp));
+    }
+
     /// Every `lexicon:Conn` constructor the coordination rules can CONSTRUCT must be DECLARED in the
     /// ontology.
     ///
@@ -866,9 +1072,83 @@ mod tests {
         }
     }
 
+    /// An adverb must hand back the clause feature it consumed.
+    ///
+    /// `pred ⊑ adj` ([`pred_subsumes_adj`]) makes SELECTION permissive by design — the copula,
+    /// negation and every adverb have to accept a predicate nominal. The cost is that any rule which
+    /// accepts `adj` and returns a FIXED `adj` launders `pred` into `adj`, and [`is_adjective_cat`]
+    /// then admits the laundered result for the attributive lift (`mod_lifts`), reopening exactly the
+    /// hole `lexicon:pred` was introduced to close. The forward adverb modifier was that rule.
+    ///
+    /// The cure is a BOUND feature variable shared by result and argument, so this pins the structure
+    /// rather than the measurement it produced (`invalid` 11 → 6, 2026-08-02).
+    #[test]
+    fn the_forward_adverb_modifier_binds_the_clause_feature_it_consumes() {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let cats = adverb_modifier_cats(ctx.head()).expect("adverb modifier cats resolve");
+
+        /// `bwd(m, cat_s(mood, FEAT), cat_np(…))` → `FEAT`.
+        fn clause_feat(c: &Exp) -> Option<&Exp> {
+            let (_m, s, _np) = slash_parts(c, "bwd")?;
+            match is_ctor(s, "cat_s")? {
+                [_mood, feat] => Some(feat),
+                _ => None,
+            }
+        }
+        fn feat_name(f: &Exp) -> Option<&str> {
+            match f {
+                Exp::InductiveCtor(_, n, args) if args.is_empty() => Some(n.as_str()),
+                _ => None,
+            }
+        }
+
+        let fwd = cats
+            .iter()
+            .find_map(|c| slash_parts(c, "fwd"))
+            .expect("a forward adverb modifier is seeded");
+        let (_m, res, arg) = fwd;
+        let rf = clause_feat(res).expect("the forward modifier's RESULT is a clause");
+        let af = clause_feat(arg).expect("the forward modifier's ARGUMENT is a clause");
+        assert!(
+            matches!(rf, Exp::Var(_)),
+            "the forward adverb's result clause feature must be a VARIABLE — a fixed value launders \
+             every feature that reaches it by subsumption; got {rf:?}"
+        );
+        assert_eq!(
+            rf, af,
+            "result and argument must share ONE variable, or `unify_feat` has nothing to propagate"
+        );
+
+        // No seeded adverb category may FIX `adj`: that is the laundering shape, and `pred` reaches
+        // any such slot through the meet.
+        for c in &cats {
+            let (_dir, _m, res, arg) = as_slash(c).expect("every adverb category is a slash");
+            for side in [res, arg] {
+                if let Some(f) = clause_feat(side).and_then(feat_name) {
+                    assert_ne!(
+                        f, "adj",
+                        "adverb category {c:?} fixes the clause feature to `adj`, which `pred` \
+                         subsumes into — it will launder a predicate nominal back into an \
+                         attributive-capable adjective"
+                    );
+                }
+            }
+        }
+    }
+
     // `denote_cat` matches on the constructor NAME + args (the decl Arc is erased),
     // so a directly-built `cat_group` ctor is faithful here.
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
+        // A slash carries a leading MODALITY (D63 multimodal slashes). Tests build the permissive
+        // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
+        // the call sites keep reading as `A/B` / `A\\B`.
+        let args = if name == "fwd" || name == "bwd" {
+            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            v.extend(args);
+            v
+        } else {
+            args
+        };
         Exp::InductiveCtor(list_decl(), name.into(), args)
     }
 

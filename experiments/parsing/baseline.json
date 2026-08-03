@@ -1,19 +1,20 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "7a34f71",
-    "date": "2026-07-30",
+    "commit": "c1adb65 + the working tree of THIS commit (kernel only; the snapshot is unchanged)",
+    "date": "2026-08-02",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "AnthropicSenseRanker (live), recorded; this baseline is the drift-free REPLAY of draw 1 of 3",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-07-30-framedup",
+    "snapshot": "wordnet-umls-aligned-2026-08-02-consolidated",
     "ranks": "experiments/parsing/ranks/2026-07-29-demonstratives.json",
-    "replay": "62 hits, 0 key misses — the SAME recording as the previous snapshot. Dropping the multiword lemma `dependent on` does NOT invalidate it: the rank key covers only OVER-CAP spans, and that span had exactly one sense, so it was never in a ranking request. Predicted otherwise and was wrong; the live re-record this reseed seemed to require was not needed.",
-    "note": "Reseeded for ONE importer change: the demonstratives joining the shared closed-class surface list (166b234), which drops 3 UMLS atoms across 2 concepts (C0039828/CHV `these` = the MeSH publication type *Theses*; C1080058 `this`/`This` = the insect genus *This <Coelopellini>*). Reseed reported 9,192,392 resources against the benchmarks note's 9,192,394 for the same full `--umls-all` import — a delta of exactly the 2 entries removed (3 atoms, but forms dedup case-insensitively so `this`/`This` collapse), which is also the evidence that the two snapshots are otherwise recipe-identical. Alignment layer rebuilt from the SAME committed `merges-lemma-keyed.json`: 40,027 entries redefined, and neither dropped concept is a merge target (C0039828 merges on `theses`/`thesis`, never `these`), so alignment and the drop are disjoint. Also in this baseline, both PARSER-side and needing no reseed: case-sensitive nomenclature-symbol matching (950f1e9) and the same filter applied to the sense ranker's candidate list (f832837). ALSO IN THIS SNAPSHOT (7a34f71): the WordNet importer drops a multiword adjective lemma that merely restates a governed-preposition frame — `X P` where `adjective-frames.tsv` says base `X` governs `P`. Exactly ONE lemma against WordNet 3.0, `dependent on` (2 entries: positive + cat_measure), hence the resource count 9,192,392 -> 9,192,390. Idioms are spared by construction (`all in`, `boxed in`, `agreed upon`, `contingent on`), pinned by `frame_duplicate_drop_spares_idioms`.",
-    "attribution": "The page totals here are NOT a clean A/B against the previous baseline — snapshot AND recording both changed. Attribution was done CAP-ONLY (deterministic, no LLM, comparable across snapshots): the demonstrative drop alone is total-skeletons 467 -> 343 (-124, -26.6%) and total-readings 6680 -> 5395 (-19.2%), with grammar-gap 0 held, encoded 2 -> 3 and cap-only pin hits 53 -> 54. All 16 units whose skeleton sets changed contain a demonstrative: zero collateral on the other 46. The case-sensitive symbol fix was attributed separately under the PREVIOUS snapshot and recording: 225 -> 196 skeletons, 1069 -> 1041 readings, pins 62/62 held. The sense-ranker change is attributable by NEITHER instrument (cap-only never executes that code; the replay is what it invalidates) and its reach was measured as 36 of 62 rank-key misses."
+    "replay": "62 hits, 0 key misses -- the SAME recording. The pred split changes categories, not the sense space, so no re-record was needed.",
+    "note": "INVALID 0. The gloss-governed-relational nominal prune (`dcg::parse::seed`) clears the page's last two `invalid` rows, both on «These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency.» -- `is_a(classification, Concordance)`, a false identity under EVERY sense assignment. THE RULE: a surface carrying a predicative-adjective entry that governs a NAMED preposition (`concordant WITH`, `dependent ON`, `essential FOR`, `associated WITH` -- `category::governs_named_preposition`) does not also seed a common-noun reading. The third sibling of the two surface-keyed cross-POS prunes already in `lookup_span`, and the same argument: the nominal is a LEXICON ARTIFACT, here the UMLS qualifier C4553529 whose term string happens to be an adjective. When it survives it feeds the predicative kind-raise, the copula predicates it, and the governed preposition's object -- which is the ADJECTIVE'S COMPLEMENT -- is stranded and reattaches as an adjunct on the subject. MEASURED, same snapshot and same drift-free replay: grammar-gap 0 held, expected-hits 60/62 held, encoded 14 unchanged, total-readings 785 -> 761, total-skeletons 146 -> 144, ledger 144 adjudicated (correct 60, available 84, INVALID 0), UNADJUDICATED 0. The two skeletons removed are exactly the two `invalid` rows; the 84 `available` are untouched. NO RESEED -- kernel-side, snapshot unchanged. WHY AT SEEDING AND NOT AT THE KIND-RAISE. The bad reading arrives at TWO sites -- the leaf raise (`is_a(x, C)`) and the raise of a COMPOSED `cat_n(Σx:C. prep_with(x, …))` (`is_a(x, Σ…)`) -- so removing the leaf entry removes the base both are built from. And `bare_nominal_shifts` takes a bare `Item` while `Grammar` deliberately carries NO lexicon, so 'this surface also has a governed entry' is not knowable there; `lookup_span` holds the surface and is where the sibling prunes already live. A refusal AT the kind-raise was already tried and refuted (registry.rs): gated on `is_adjective_refined` it was too broad, also removing 'the group is an INDETERMINATE line'. ONE REFUTATION MEASURED HERE, recorded so it is not retried. The first version tested only `X/cat_pp_arg(prep_R)` with a concrete `R`, WITHOUT requiring the result to be a predicative adjective. That is a relational-WORD test, not an adjective test, and it also matched relational NOUNS whose nominal reading is the correct one -- witnessed by surface: `deficiency` (6 entries dropped), `dependency` (8), `dependence` (8), `result` (6), `vulnerability` (5), `event` (5), `co-occurrence` (4), `activity` (15). Result: grammar-gap 0 -> 9 and expected-hits 60 -> 49. Adding the `is_adjective_cat` requirement on the RESULT reduced the firing set to adjectives and participles only (`immune`, `essential`, `identified`, `greater`, `dependent`, `specific`, `concordant`, `true`, `deficient`, `associated`) and is the version measured above.",
+    "reseed": "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-08-02-consolidated, then scripts/build-alignment-snapshot.sh --base <that> --out wordnet-umls-aligned-2026-08-02-consolidated. BOTH steps are required: the reseed produces a BASE snapshot and every measurement in this file is against an ALIGNED one.",
+    "attribution": "SUPERSEDED as a live attribution — retained as the record for the demonstrative/case-sensitivity cycle it describes. The CURRENT baseline needs no attribution argument: it is an exact reproduction of the layer stack it replaces, on every tracked number. The page totals here are NOT a clean A/B against the previous baseline — snapshot AND recording both changed. Attribution was done CAP-ONLY (deterministic, no LLM, comparable across snapshots): the demonstrative drop alone is total-skeletons 467 -> 343 (-124, -26.6%) and total-readings 6680 -> 5395 (-19.2%), with grammar-gap 0 held, encoded 2 -> 3 and cap-only pin hits 53 -> 54. All 16 units whose skeleton sets changed contain a demonstrative: zero collateral on the other 46. The case-sensitive symbol fix was attributed separately under the PREVIOUS snapshot and recording: 225 -> 196 skeletons, 1069 -> 1041 readings, pins 62/62 held. The sense-ranker change is attributable by NEITHER instrument (cap-only never executes that code; the replay is what it invalidates) and its reach was measured as 36 of 62 rank-key misses."
   },
   "_provenance_note_2026-07-25-copula": "Re-baselined for TWO importer fixes made after ADJUDICATING the 16 structural readings of the page's worst unit (\"These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency\") instead of theorising about the sense cap. Those 16 decomposed as 4 families x 4 modifier-bracketings; 12 were plainly WRONG. (1) THE COPULA IS GRAMMAR (9f52ba1): WordNet gives `be` 8 verb synsets and 02604760 'have the quality of being' carries frame 6 -> FrameKind::LinkingAdj, emitting (S[dcl,fin]\\NP)/(S[dcl,adj]\\NP) over an OPAQUE 2-place axiom -- re-encoding 'X is P' as be(lambda x.P(x), X), destroying the copula's transparency (X is P **is** P(X)) and competing with the closed-class copula; a type-raising artifact (the SUBJECT applied as a 2-place function) rides on it. UMLS separately gave `were` a cat_n sense (the verb as a plural NOUN) via the `Be`=beryllium symbol homonym. Fixed by the mechanism already used for do/does/not/to/lead, prepositions/conjunctions and determiners: a per-LEMMA copula skip in the WordNet importer (synset siblings follow/live/equal keep their entries) + COPULA_SURFACES in the UMLS importer (`being` EXCLUDED -- a legitimate common noun). (2) Fix A (c) (6437edc): the POSITIVE relational predication for governed adjectives, `(S[adj]\\NP)/cat_pp_arg(prep)` with sem lambda r.lambda x. gt(deg_rel(r,x), std) -- previously only the COMPARATIVE consumed the relational cat_measure, so 'concordant WITH X' could not bind the relatum. MEASURED: deterministic cap-only A/B isolates the copula fix at total-skeletons 239 -> 196 (-18%) and readings 1741 -> 1560; the drift-free reranked REPLAY (record == replay exactly) gives total-skeletons 178 (the lowest recorded), readings 735, encoded 10, grammar-gap 0, expected-hits 23/23. The target unit fell 16 -> 4 skeletons and the 10/12/16-skeleton buckets emptied (only the 19-skeleton essive unit remains an outlier). skeletons_ceiling ratcheted 300 -> 250. Draw results/2026-07-24-2320-9f52ba1-first-page-cnl-v3-reranked (runtime 231s). RESIDUAL on that unit: 4 skeletons = family A (copula + `with`-ADJUNCT, which (c) should supersede but cannot here because two cat_pp_arg PPs cannot COORDINATE -- coordinate_prop needs a prop-ending category) x2 bracketings, plus family B (the adjective read as a NOMINAL kind, needing the documented adjective-competing-qualifier filter) x2. See history[0]. ",
   "_provenance_note_2026-07-24-relcmp-c": "Re-baselined for Defect 2 (both levers) + the Defect-3 verbalizer. Snapshot wordnet-umls-aligned-2026-07-24-relcmp-c = relcmp-b re-reseeded (222b3ec) with (2a) the plural `some` determiner and DETERMINER_SURFACES withhold in the UMLS importer — so 'some MSI lines' is an existential GQ over the 'MSI line' compound, not a `compound_kind(…, C0205392 'Some (qualifier value)')` reification. TEST-side, no reseed: (2b) the abbreviation extraction now runs on the SOURCE page (the cleaned original, which parenthetically defines 'microsatellite instability (MSI)' / 'microsatellite stable (MSS)') via Schwartz-Hearst ∪ the live AnthropicAbbreviationProposer, so MSS carries a doc:mss binding to microsatellite-stable (C4321493) the reranker prefers over the C0024814 Marinesco-Sjogren acronym collision; and (3) the verbalizer renders the 3-arg referential `the(class,restrictor,x)` predication instead of bracketing it. The RECORD draw is results/2026-07-24-1513-222b3ec-dirty-first-page-cnl-v3-reranked (runtime 420s — with the extra abbreviation LLM call). The expected block is the DRIFT-FREE REPLAY of its ranks (deterministic, Schwartz-Hearst abbreviations, no LLM): total-readings 699 -> 678 (improved), total-skeletons 213 -> 215 (+2), grammar-gap 0, expected-hits 21/21, encoded 10 -> 9 (informational — the 'some' unit trades a wrong-encoded reification for the correct ambiguous existential). NOTE the RECORD read 747/220 vs the REPLAY 678/215: the AnthropicAbbreviationProposer's proposals are NOT recorded in ranks.json (only sense ranks are), so on replay the abbreviation source falls back to deterministic Schwartz-Hearst, which extracts the SAME parenthetical MSI/MSS and grounds MSS to microsatellite-stable (C4321493) identically — witnessed on the replay: C4321493 4x vs the residual C0024814 Marinesco-Sjogren 1x. So the LLM proposer is a superset used at RECORD time but the drift-free baseline is Schwartz-Hearst; the 2b fix (MSS grounding) reproduces on both. See history[0].",
@@ -28,33 +29,33 @@
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 48,
+    "ambiguous": 46,
     "open": 2,
-    "encoded": 12,
+    "encoded": 14,
     "total_readings_ceiling": 1900,
-    "total_readings": 988,
+    "total_readings": 761,
     "skeletons_ceiling": 400,
-    "skeletons": 179,
+    "skeletons": 144,
     "expected_reading_hits": 60,
     "expected_reading_curated": 62,
     "skeleton_histogram": {
-      "_comment": "units bucketed by their SKELETON count, from the same replay as `skeletons` above (179, 2026-07-30, `wordnet-umls-aligned-2026-07-30-framedup`). REGENERATED — the previous figures were stale at 237 skeletons (2026-07-27) and still listed the comparative unit at 48, which is now 4. The total is far less CONCENTRATED than it was: the largest unit no longer carries a fifth of the page, because the demonstrative drop (166b234), case-sensitive symbols (950f1e9) and the frame-duplicate drop (7a34f71) each removed whole families of readings from the tail. Read it before choosing a target — and note skeleton count alone is the WRONG criterion: rank by STRUCTURAL ambiguity, not by count.",
+      "_comment": "units bucketed by SKELETON count, from scripts/audit-skeletons.sh on wordnet-umls-aligned-2026-08-02-consolidated (144 skeletons, 62 units). The `invalid` ledger is now ZERO on this page, so skeleton count is no longer a proxy for anything outstanding -- the remaining 84 `available` are ranking, not grammar.",
       "buckets": {
         "1": {
-          "units": 25,
-          "skeletons": 25
+          "units": 31,
+          "skeletons": 31
         },
         "2-3": {
-          "units": 22,
-          "skeletons": 45
+          "units": 20,
+          "skeletons": 41
         },
         "4-6": {
           "units": 8,
-          "skeletons": 40
+          "skeletons": 38
         },
         "7-10": {
-          "units": 5,
-          "skeletons": 43
+          "units": 1,
+          "skeletons": 10
         },
         "11-20": {
           "units": 2,
@@ -65,11 +66,9 @@
         "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 14,
         "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 12,
         "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 10,
-        "Many cancers exhibit an impairment of a DNA repair pathway.": 9,
-        "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.": 8,
-        "These findings show that WRN is a promising drug target for MSI cancers.": 8,
-        "MSI is associated with notable responses to immune checkpoint blockade.": 8,
-        "We found that WRN was selectively essential in MSI models.": 6
+        "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.": 6,
+        "These findings show that WRN is a promising drug target for MSI cancers.": 6,
+        "Some cancers do not respond to immune checkpoint blockade.": 6
       }
     },
     "_expected_reading_note_2026_07_29": "hits 60 of 62 CURATED, and the 2-unit shortfall is EXPECTED and explained — see the header of expected-readings.tsv. Both are sense-selection misses with the STRUCTURE intact, not lost readings. «Synthetic lethality is an interaction between two genetic events.» is this lexicon's documented draw-variance unit (missed in draws 1 and 3, HIT in draw 2); its closest rival has the SAME `between` attachment and differs only in taking `two genetic events` as a quantified GQ instead of a bare kind. «Depletion of WRN induced double-stranded DNA breaks.» differs from its pin by ONE TOKEN — `prep_of(G#0, §)` against `prep_of(G#0, kind_of(§))` — i.e. WRN realising as the class `WRN protein, human` instead of the HGNC-symboled named individual `WRN gene`. That is Axis B, not grammar; and the gene reading is NOT AVAILABLE for this unit at all (no produced skeleton carries the bare form), which matches the page-wide finding of 5 units missing it. DO NOT repin either: repinning would bake the wrong analysis in. `expected_reading_curated` rises 61 -> 62 because the page is now fully pinned (65e62a6)."
@@ -100,6 +99,14 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-08-02",
+      "commit": "2b2b688",
+      "encoded": 14,
+      "skeletons": 164,
+      "readings": 953,
+      "note": "`lexicon:pred` split + `pred <= adj` subsumption. First change to cut skeletons at ZERO pin cost: 179 -> 164, gap 0, 60/62 held. Adjudicated `invalid` 15 -> 11 rows (7 -> 5 units), clearing both <<These findings show that WRN is a {synthetic-lethal vulnerability, promising drug target} for MSI cancers.>> units outright. Subsumption for SELECTION, exact ctor match for ATTRIBUTION -- `feat_meets` gains its only non-flat pair, `is_adjective_cat` keeps refusing `pred`. See provenance for the broken first attempt and the adverb-laundering residual."
+    },
     {
       "date": "2026-07-30",
       "commit": "7a34f71",

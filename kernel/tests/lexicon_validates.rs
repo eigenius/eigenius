@@ -1259,10 +1259,10 @@ namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:e_det_shape : lexicon:LexicalEntry {
     lexicon:form     = "every";
     lexicon:cat      = type_expr(
-        lexicon:fwd(
-            lexicon:fwd(
+        lexicon:fwd(lexicon:m_all, 
+            lexicon:fwd(lexicon:m_all, 
                 lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
-                lexicon:bwd(
+                lexicon:bwd(lexicon:m_all, 
                     lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
                     lexicon:cat_np(lexicon:Gene, lexicon:num_any)
                 )
@@ -1317,13 +1317,13 @@ fn determiner_unifies_type_var_and_substitutes_through_result() {
         "urn:eigenius:lexicon:cat",
     );
     let c_args = is_ctor(&concrete, "fwd").expect("determiner is a forward functor");
-    let concrete_result = c_args[0].clone(); // S/(S\NP_Gene)
-    let noun_cat = c_args[1].clone(); // N_Gene  (= cat_n(Gene, num_any))
+    let concrete_result = c_args[1].clone(); // S/(S\NP_Gene); [0] is the slash modality
+    let noun_cat = c_args[2].clone(); // N_Gene  (= cat_n(Gene, num_any))
 
     // The polymorphic category: `Gene` leaves → schematic `T`.
     let poly = polymorphize(&concrete, &gene, "T");
     let p_args = is_ctor(&poly, "fwd").expect("polymorphic determiner is a forward functor");
-    let poly_noun_slot = &p_args[1]; // N_T  (= cat_n(Var T, num_any))
+    let poly_noun_slot = &p_args[2]; // N_T  (= cat_n(Var T, num_any)); [0] is the slash modality
 
     // (1) Unification: the `N_T` slot binds `T := Gene` against the concrete noun.
     let subst = unify_cat(poly_noun_slot, &noun_cat, &layer).expect("N_T unifies with N_Gene");
@@ -1336,7 +1336,7 @@ fn determiner_unifies_type_var_and_substitutes_through_result() {
     // (2) Substituting that binding through the polymorphic result recovers the
     //     concrete result exactly.
     assert_eq!(
-        subst_cat(&p_args[0], &subst),
+        subst_cat(&p_args[1], &subst),
         concrete_result,
         "T := Gene must flow through the result category"
     );
@@ -1409,9 +1409,9 @@ resource lexicon:e_entity_noun : lexicon:LexicalEntry {
 resource lexicon:e_det_result : lexicon:LexicalEntry {
     lexicon:form     = "every gene";
     lexicon:cat      = type_expr(
-        lexicon:fwd(
+        lexicon:fwd(lexicon:m_all, 
             lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
-            lexicon:bwd(
+            lexicon:bwd(lexicon:m_all, 
                 lexicon:cat_s(lexicon:dcl, lexicon:fin),
                 lexicon:cat_np(lexicon:Gene, lexicon:sg)
             )
@@ -1576,10 +1576,10 @@ fn functor_subsumption_is_contravariant_in_the_argument() {
     let layer = det_poly_layer();
     // S\NP_Gene = the determiner-result's argument slot (from e_det_result).
     let det_result = poly_cat(&layer, "urn:eigenius:lexicon:e_det_result");
-    let vp_gene = is_ctor(&det_result, "fwd").expect("fwd")[1].clone(); // S\NP_Gene
+    let vp_gene = is_ctor(&det_result, "fwd").expect("fwd")[2].clone(); // S\NP_Gene (arg: [0]=mode)
                                                                         // S\NP_Entity = the general verb's VP (from e_affects).
     let affects = poly_cat(&layer, "urn:eigenius:lexicon:e_affects");
-    let vp_entity = is_ctor(&affects, "fwd").expect("fwd")[0].clone(); // S\NP_Entity
+    let vp_entity = is_ctor(&affects, "fwd").expect("fwd")[1].clone(); // S\NP_Entity (result: [0]=mode)
 
     // Contravariant: the more-general `S\NP_Entity` fills the `S\NP_Gene` slot…
     assert!(
@@ -1612,7 +1612,7 @@ fn every_gene_q_composes_via_apply_to_a_quantified_prop() {
     );
     let affects = poly_cat(&layer, "urn:eigenius:lexicon:e_affects");
     let vp = Item::new(
-        is_ctor(&affects, "fwd").expect("fwd")[0].clone(), // S\NP_Entity
+        is_ctor(&affects, "fwd").expect("fwd")[1].clone(), // S\NP_Entity (result: [0]=mode)
         q,                                                 // q : Entity → Prop
     );
 

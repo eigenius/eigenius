@@ -40,7 +40,7 @@ axiom wn:v01752884_p : lexicon:Entity -> lexicon:Entity -> Prop desc: "cause to 
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_0_b : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -51,7 +51,7 @@ resource wn:e_v01752884_i_0_b : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -62,7 +62,7 @@ resource wn:e_v01752884_i_0 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_0_fp : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -73,7 +73,7 @@ resource wn:e_v01752884_i_0_fp : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_0_g : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -84,7 +84,7 @@ resource wn:e_v01752884_i_0_g : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_0_p0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -95,7 +95,7 @@ resource wn:e_v01752884_i_0_p0 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_0_fpast0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -106,7 +106,7 @@ resource wn:e_v01752884_i_0_fpast0 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_1_b : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -117,7 +117,7 @@ resource wn:e_v01752884_i_1_b : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_1 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -128,7 +128,7 @@ resource wn:e_v01752884_i_1 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_1_fp : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -139,7 +139,7 @@ resource wn:e_v01752884_i_1_fp : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_1_g : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -150,7 +150,7 @@ resource wn:e_v01752884_i_1_g : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_1_p0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -161,7 +161,7 @@ resource wn:e_v01752884_i_1_p0 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_1_fpast0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -172,7 +172,7 @@ resource wn:e_v01752884_i_1_fpast0 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_2_b : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -183,7 +183,7 @@ resource wn:e_v01752884_i_2_b : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_2 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -194,7 +194,7 @@ resource wn:e_v01752884_i_2 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_2_fp : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -205,7 +205,7 @@ resource wn:e_v01752884_i_2_fp : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_2_g : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -216,7 +216,7 @@ resource wn:e_v01752884_i_2_g : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_2_p0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -227,7 +227,7 @@ resource wn:e_v01752884_i_2_p0 : lexicon:LexicalEntry {
 // (1) suppressed: frame 22 is not an intransitive frame.
 resource wn:e_v01752884_i_2_fpast0 : lexicon:LexicalEntry {
     lexicon:form       = "__frame22_suppressed__";
-    lexicon:cat        = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat        = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem        = wn:v01752884_i;
     lexicon:sem_type   = type_expr( lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -238,7 +238,7 @@ resource wn:e_v01752884_i_2_fpast0 : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_0_b_po : lexicon:LexicalEntry {
     lexicon:form       = "produce";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -249,7 +249,7 @@ resource wn:e_v01752884_i_0_b_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_0_po : lexicon:LexicalEntry {
     lexicon:form       = "produces";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -260,7 +260,7 @@ resource wn:e_v01752884_i_0_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_0_fp_po : lexicon:LexicalEntry {
     lexicon:form       = "produce";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -271,7 +271,7 @@ resource wn:e_v01752884_i_0_fp_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_0_g_po : lexicon:LexicalEntry {
     lexicon:form       = "producing";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -282,7 +282,7 @@ resource wn:e_v01752884_i_0_g_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_0_p0_po : lexicon:LexicalEntry {
     lexicon:form       = "produced";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -293,7 +293,7 @@ resource wn:e_v01752884_i_0_p0_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_0_fpast0_po : lexicon:LexicalEntry {
     lexicon:form       = "produced";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:produce.v.01752884";
@@ -304,7 +304,7 @@ resource wn:e_v01752884_i_0_fpast0_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_1_b_po : lexicon:LexicalEntry {
     lexicon:form       = "bring about";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -315,7 +315,7 @@ resource wn:e_v01752884_i_1_b_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_1_po : lexicon:LexicalEntry {
     lexicon:form       = "brings about";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -326,7 +326,7 @@ resource wn:e_v01752884_i_1_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_1_fp_po : lexicon:LexicalEntry {
     lexicon:form       = "bring about";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -337,7 +337,7 @@ resource wn:e_v01752884_i_1_fp_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_1_g_po : lexicon:LexicalEntry {
     lexicon:form       = "bringing about";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -348,7 +348,7 @@ resource wn:e_v01752884_i_1_g_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_1_p0_po : lexicon:LexicalEntry {
     lexicon:form       = "brought about";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -359,7 +359,7 @@ resource wn:e_v01752884_i_1_p0_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_1_fpast0_po : lexicon:LexicalEntry {
     lexicon:form       = "brought about";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bring_about.v.01752884";
@@ -370,7 +370,7 @@ resource wn:e_v01752884_i_1_fpast0_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_2_b_po : lexicon:LexicalEntry {
     lexicon:form       = "give rise";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -381,7 +381,7 @@ resource wn:e_v01752884_i_2_b_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_2_po : lexicon:LexicalEntry {
     lexicon:form       = "gives rise";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -392,7 +392,7 @@ resource wn:e_v01752884_i_2_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_2_fp_po : lexicon:LexicalEntry {
     lexicon:form       = "give rise";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -403,7 +403,7 @@ resource wn:e_v01752884_i_2_fp_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_2_g_po : lexicon:LexicalEntry {
     lexicon:form       = "giving rise";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -414,7 +414,7 @@ resource wn:e_v01752884_i_2_g_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_2_p0_po : lexicon:LexicalEntry {
     lexicon:form       = "given rise";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";
@@ -425,7 +425,7 @@ resource wn:e_v01752884_i_2_p0_po : lexicon:LexicalEntry {
 // (2) the oblique-PP entry the corrected classification emits.
 resource wn:e_v01752884_i_2_fpast0_po : lexicon:LexicalEntry {
     lexicon:form       = "given rise";
-    lexicon:cat        = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat        = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem        = wn:v01752884_p;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:give_rise.v.01752884";

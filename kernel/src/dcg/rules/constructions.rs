@@ -164,12 +164,8 @@ fn raise_kind_to_object_gq(np_cat: &Exp, np_sem: &Exp, gq_cat: &Exp) -> Option<(
         return None;
     };
     // The partner must be an object GQ: `(S\NP) \ ((S\NP)/NP)`.
-    let [res, inner] = is_ctor(gq_cat, "bwd")? else {
-        return None;
-    };
-    let [vp, obj] = is_ctor(inner, "fwd")? else {
-        return None;
-    };
+    let (res_mode, res, inner) = slash_parts(gq_cat, "bwd")?;
+    let (inner_mode, vp, obj) = slash_parts(inner, "fwd")?;
     let [_t_other, obj_num] = is_ctor(obj, "cat_np")? else {
         return None;
     };
@@ -181,8 +177,17 @@ fn raise_kind_to_object_gq(np_cat: &Exp, np_sem: &Exp, gq_cat: &Exp) -> Option<(
         "cat_np".into(),
         vec![t.clone(), obj_num.clone()],
     );
-    let new_inner = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![vp.clone(), new_obj]);
-    let cat = Exp::InductiveCtor(cat_decl.clone(), "bwd".into(), vec![res.clone(), new_inner]);
+    // Rebuilding the SAME category with a refined object: both slashes keep their own modality.
+    let new_inner = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "fwd".into(),
+        vec![inner_mode.clone(), vp.clone(), new_obj],
+    );
+    let cat = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![res_mode.clone(), res.clone(), new_inner],
+    );
     let tv_app = Exp::App(
         Box::new(Exp::App(
             Box::new(Exp::Var("TV".into())),
@@ -906,8 +911,8 @@ fn vocabulary(iri: &Iri) -> Option<&'static str> {
 /// `cat_np` (object / prep-object), not a `S\NP` VP, so the inner `bwd` probe fails. `None` otherwise.
 fn appositive_head_type(head_cat: &Exp) -> Option<&Exp> {
     // Determined subject GQ  S/(S\NP_C) = fwd(S, bwd(S, cat_np(C, _))): the ARGUMENT (arg 1) is the VP.
-    if let Some([_result, arg]) = is_ctor(head_cat, "fwd") {
-        if let Some([_s, np]) = is_ctor(arg, "bwd") {
+    if let Some((_m, _result, arg)) = slash_parts(head_cat, "fwd") {
+        if let Some((_am, _s, np)) = slash_parts(arg, "bwd") {
             if let Some([ty, _num]) = is_ctor(np, "cat_np") {
                 return Some(ty);
             }
@@ -1060,12 +1065,8 @@ pub fn reciprocate(
     }
     // `tv_cat` must be a transitive verb `(S\NP)/NP` = fwd(bwd(S, subj), obj); the
     // reciprocal sentence's category is that inner `S`.
-    let [vp, _obj] = is_ctor(tv_cat, "fwd")? else {
-        return None;
-    };
-    let [result, _subj] = is_ctor(vp, "bwd")? else {
-        return None;
-    };
+    let (_m, vp, _obj) = slash_parts(tv_cat, "fwd")?;
+    let (_vm, result, _subj) = slash_parts(vp, "bwd")?;
     let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
     let mut preds = Vec::new();
     for (i, subj) in members.iter().enumerate() {
@@ -1291,8 +1292,15 @@ pub fn type_raise(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)
             Exp::InductiveCtor(fin, "fin".into(), vec![]),
         ],
     );
-    let vp = Exp::InductiveCtor(cat_decl.clone(), "bwd".into(), vec![s.clone(), cat.clone()]);
-    let raised_cat = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![s, vp]);
+    // Type-raising `X ⇒T Y/i(Y\i X)` (Baldridge (196)) — the raised slashes take the permissive
+    // `m_all`, matching the pre-multimodal regime; `i` is a mode VARIABLE in the source rule.
+    let m_all = crate::dcg::category::mode_value(layer, crate::dcg::category::MODE_ALL)?;
+    let vp = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "bwd".into(),
+        vec![m_all.clone(), s.clone(), cat.clone()],
+    );
+    let raised_cat = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![m_all, s, vp]);
     let v = "__tr_v";
     let raised_sem = Exp::Lam(
         Patt::Var(v.into()),
@@ -1324,10 +1332,7 @@ pub fn relativize(noun_cat: &Exp, body_cat: &Exp, body_sem: &Exp) -> Option<(Exp
     };
     // The body is a clause missing one NP: `S/NP` (object relative) or `S\NP`
     // (subject relative), whose result `S` is a finite declarative clause.
-    let body_args = is_ctor(body_cat, "fwd").or_else(|| is_ctor(body_cat, "bwd"))?;
-    let [s, _np] = body_args else {
-        return None;
-    };
+    let (_bm, s, _np) = slash_parts(body_cat, "fwd").or_else(|| slash_parts(body_cat, "bwd"))?;
     if !is_decl_clause(s) {
         return None;
     }
@@ -1413,10 +1418,7 @@ pub fn relativize_appos(
     is_ctor(np_cat, "cat_np")?;
     // Body is a clause missing one NP (`S/NP` object-relative or `S\NP` subject-relative),
     // result a declarative clause — same shape the restrictive rule accepts.
-    let body_args = is_ctor(body_cat, "fwd").or_else(|| is_ctor(body_cat, "bwd"))?;
-    let [s, _np] = body_args else {
-        return None;
-    };
+    let (_bm, s, _np) = slash_parts(body_cat, "fwd").or_else(|| slash_parts(body_cat, "bwd"))?;
     if !is_decl_clause(s) {
         return None;
     }
@@ -1447,9 +1449,7 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     let Exp::InductiveCtor(cat_decl, _, _) = cat else {
         return None;
     };
-    let [s, _np] = is_ctor(cat, "bwd")? else {
-        return None;
-    };
+    let (_m, s, _np) = slash_parts(cat, "bwd")?;
     let [mood, fin] = is_ctor(s, "cat_s")? else {
         return None;
     };
@@ -1465,7 +1465,12 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     let dcl = Exp::InductiveCtor(mood_d, "dcl".into(), vec![]);
     let fin_any = Exp::InductiveCtor(fin_d, "fin_any".into(), vec![]);
     let s_full = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl, fin_any]);
-    let ss = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![s_full.clone(), s_full]);
+    let m_all_ss = crate::dcg::category::mode_value(layer, crate::dcg::category::MODE_ALL)?;
+    let ss = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "fwd".into(),
+        vec![m_all_ss, s_full.clone(), s_full],
+    );
     // The controlled-subject referent hole: the `lexicon:anaphor` placeholder (freshened by the
     // caller, exactly as a pronoun's sem is). `body(hole)` is the participial proposition.
     let anaphor = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:anaphor").ok()?);
@@ -1546,9 +1551,7 @@ pub fn reduced_relative(cat: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     let Exp::InductiveCtor(cat_decl, _, _) = cat else {
         return None;
     };
-    let [s, _np] = is_ctor(cat, "bwd")? else {
-        return None;
-    };
+    let (_m, s, _np) = slash_parts(cat, "bwd")?;
     let [mood, fin] = is_ctor(s, "cat_s")? else {
         return None;
     };
@@ -1576,9 +1579,7 @@ pub fn reduced_relative(cat: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
 /// `(S[adj]\NP) / cat_pp_than` (the measure/cardinality comparatives nest `cat_pp_than` under a `bwd`),
 /// it fires exactly where those entries did — a behaviour-preserving collapse, not a widening.
 pub fn elided_than(cat: &Exp, sem: &Exp, _layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
-    let [result, arg] = is_ctor(cat, "fwd")? else {
-        return None;
-    };
+    let (_m, result, arg) = slash_parts(cat, "fwd")?;
     let [] = is_ctor(arg, "cat_pp_than")? else {
         return None;
     };
@@ -1603,6 +1604,16 @@ mod tests {
     use crate::ontology::iri::Iri;
 
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
+        // A slash carries a leading MODALITY (D63 multimodal slashes). Tests build the permissive
+        // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
+        // the call sites keep reading as `A/B` / `A\\B`.
+        let args = if name == "fwd" || name == "bwd" {
+            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            v.extend(args);
+            v
+        } else {
+            args
+        };
         Exp::InductiveCtor(list_decl(), name.into(), args)
     }
     fn cls(iri: &str) -> Exp {

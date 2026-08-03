@@ -1,0 +1,79 @@
+// ════════════════════════════════════════════════════════════════════
+// SLASH-MODE PATCH LAYER — the COMPLEMENTIZER's clause slash becomes application-only (⋆).
+//
+// SHADOWING ONLY. `lexicon:that_comp` already exists in the base with this IRI; only the slash
+// MODALITY of its `lexicon:cat` differs. A mode is denotation-transparent (⟦fwd(m,A,B)⟧ = ⟦B⟧→⟦A⟧
+// for every `m`), so `sem`/`sem_type`/`sense`/`grade` are byte-identical to the base and the entry
+// denotes exactly what it denoted before. Nothing is added or removed.
+//
+// HYPOTHESIS. The ledger files «These findings show that WRN is a promising drug target for MSI
+// cancers.» under the predicative kind-raise's FALSE-IDENTITY family, but `probe_false_identity_
+// provenance` (d532cd3) shows its `is_a` is CORRECT — WRN genuinely is a drug target — and the real
+// defect is elsewhere in the same sem:
+//
+//   And(v00664788_c(is_a(C1337007, Σ…target…), the(C0037088)),
+//       prep_for(the(C0037088), …))
+//
+// `prep_for` sits at the TOP level taking an argument bound INSIDE the `that`-clause: a finite-clause
+// SCOPE-ISLAND violation, in 616 of 616 readings of that unit. The same defect is the standing
+// «We hypothesized that other DNA repair defects would give rise to synthetic-lethal relationships.»
+// row.
+//
+// For the PP to land outside, the clause must be built GAPPED — an `S/PP` still missing its PP —
+// and handed to `that` by COMPOSITION. Application-only forbids exactly that: `⋆` is the root of
+// Baldridge's hierarchy, so the application rules (192) still consume it, but the harmonic (194)
+// and crossed (200) composition rules cannot. `that` would then only ever apply to a COMPLETE
+// finite clause.
+//
+// The base entry's own comment already states this intent — "the complementizer needs a FULL finite
+// S on its right" — but `m_all` does not enforce it. This makes the stated intent categorial.
+//
+// ANCHOR. Baldridge (2002) gives the relativizer exactly this treatment in his mini-lexicon
+// (p. 102, (191f)): `that ⊢ (n\⋆n)/⋆(sᵢ/·np)` — ⋆ on BOTH its slashes — and groups it with
+// coordination as an "application-only construction". Eigenius implements coordination as a
+// reserved-word CKY rule rather than a lexical slash, so the complementizer is the one place that
+// treatment is expressible here.
+//
+// KILL CRITERION. `grammar-gap` must stay 0 and no pin may drop (expected-hits 60/62). Three prior
+// mode assignments on the GOVERNED-PP slash were measured and all failed — `m_app` on verb+adjective
+// cost 3 pins, `m_harm` and adjective-only `m_app` were bit-identical no-ops — so this is tested,
+// not assumed.
+//
+// ─────────────────────────────────────────────────────────────────────
+// RESULT 2026-08-01: INERT. Bit-identical to baseline on every tracked metric —
+// grammar-gap 0, encoded 12, expected-hits 60/62, total-readings 988, total-skeletons 179.
+//
+// The HYPOTHESIS ABOVE IS WRONG, and the sem that motivated it was misread. `v00664788_c` is the
+// CLAUSAL frame `(S\NP)/cat_cp`: it takes the CP first and the SUBJECT second, so the `the(C0037088)`
+// that `prep_for` takes is the MATRIX SUBJECT («These findings»), not a term bound inside the
+// `that`-clause. Nothing escapes the clause. `for MSI cancers` is attaching HIGH — to a clause that
+// has already completed — which is ordinary PP-attachment ambiguity, the same family the ledger
+// records for its 42 `available` rows ("the VP-adjunct preposition family carries `fin_any` on both
+// sides, so a PP unifies with the inner or the outer VP").
+//
+// So there is no composition out of the clause for `⋆` to forbid, which is exactly why marking the
+// complementizer changes nothing. The defect is a FEATURE problem on the VP-adjunct preposition
+// category, not a modality problem, and no slash mode can reach it.
+//
+// Kept as a recorded negative: the reasoning is sound, the anchor (Baldridge (191f)) is real, and
+// the measurement is what refutes it. Four mode assignments have now been tested against this
+// backlog and none has moved a single skeleton.
+//
+// Measure with:
+//   scripts/probe-mode-layer.sh --base <aligned-snapshot> \
+//       --layer experiments/parsing/probes/complementizer-app-only.esl
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace core      = "urn:eigenius:core";
+
+resource lexicon:that_comp : lexicon:LexicalEntry {
+    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    lexicon:form     = "that";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_app, lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "that";
+    lexicon:grade    = epistemic:declared;
+}

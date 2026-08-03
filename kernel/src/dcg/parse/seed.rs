@@ -29,7 +29,8 @@
 //! and the flat beamed chart both build their leaf cells from.
 
 use super::super::category::{
-    is_adjective_cat, is_binary_relation_cat, is_ctor, is_vp_adjunct_prep, kind_of,
+    governs_named_preposition, is_adjective_cat, is_binary_relation_cat, is_ctor,
+    is_vp_adjunct_prep, kind_of, slash_parts,
 };
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::lexicon::{FormEntries, LexEntry};
@@ -89,6 +90,39 @@ impl Parser {
             .entries_for(&s_lc)
             .iter()
             .any(|e| e.in_lexicon.is_none() && is_ctor(e.item.cat(), "cat_forall").is_some());
+        // Cross-POS NOMINAL prune for a GLOSS-GOVERNED RELATIONAL word (ALWAYS ON — a correctness fix).
+        // A surface that governs a named preposition (`concordant WITH`, `dependent ON`, `essential
+        // FOR`, `associated WITH` — [`governs_named_preposition`]) must not ALSO be read as a common
+        // noun. The third sibling of the two prunes above, and the same argument: the nominal reading is
+        // a LEXICON ARTIFACT, here a UMLS qualifier concept whose term string happens to be an adjective
+        // (`concordant` -> C4553529 "Concordance").
+        //
+        // What it costs when the artifact survives: the nominal feeds the predicative kind-raise
+        // (`bare_nominal_shifts`), the copula predicates it, and the result asserts membership between
+        // two things that cannot be identical under ANY sense assignment — `is_a(classification,
+        // Concordance)` on «These classifications were highly concordant with PCR-based MSI phenotyping
+        // and with predicted MMR deficiency.», the page's last two `invalid` rows. The governed
+        // preposition's object is the ADJECTIVE'S COMPLEMENT, so nominalising the adjective strands it
+        // and it reattaches as an adjunct on the subject.
+        //
+        // PRUNED AT SEEDING, not at the kind-raise. Two reasons, both structural. (1) The bad reading
+        // arrives at two different sites — the leaf raise (`is_a(x, C)`) and the raise of a COMPOSED
+        // `cat_n(Σx:C. prep_with(x, …))` (`is_a(x, Σ…)`) — and killing the leaf entry removes the base
+        // both are built from, where a guard at the raise would have to catch each site. (2)
+        // `bare_nominal_shifts` takes a bare `Item` and `Grammar` deliberately carries NO lexicon, so
+        // "this surface also has a governed-preposition entry" is not knowable there; `lookup_span`
+        // holds the surface and is where the sibling surface-keyed prunes already live.
+        //
+        // A REFUSAL AT THE KIND-RAISE WAS ALREADY TRIED AND REFUTED (see `kind_raised_nps`): gated on
+        // `is_adjective_refined`, it was too broad — it also removed the legitimate "the group is an
+        // INDETERMINATE line" and re-gapped its unit. That guard asked "is this nominal adjective-
+        // refined?", true of the good case too. The discriminating fact is that here the nominal's HEAD
+        // IS the adjective, and that adjective governs a preposition.
+        let surface_is_governed_relational = self
+            .lex
+            .entries_for(&s_lc)
+            .iter()
+            .any(|e| governs_named_preposition(e.item.cat()));
         // CASE-SENSITIVE ACRONYM MATCH ([`super::all_caps_symbol`]). The index is keyed on lowercased
         // forms, so an all-caps nomenclature SYMBOL is otherwise reachable from the lowercase common
         // noun it happens to spell. `CELL` — HGNC `NS` for the CELP pseudogene (C1413337) and OMIM
@@ -122,6 +156,13 @@ impl Parser {
             }
             if surface_is_determiner {
                 entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
+            }
+            if surface_is_governed_relational {
+                entries.retain(|e| {
+                    e.in_lexicon.is_none()
+                        || !(is_ctor(e.item.cat(), "cat_n").is_some()
+                            || is_ctor(e.item.cat(), "cat_np").is_some())
+                });
             }
             // **A `-s` surface cannot take a PLURAL subject** (verb-side number refinement). Morphology
             // reduces `affects` to `affect`, and the lemma's entry is the BASE form, whose finite
@@ -512,9 +553,7 @@ impl Parser {
         for p in 1..n {
             // The preposition governed by an adjective head immediately to the left.
             let governed_prep: Option<Exp> = chart[p - 1][p - 1].iter().find_map(|it| {
-                let [res, arg] = is_ctor(it.cat(), "fwd")? else {
-                    return None;
-                };
+                let (_m, res, arg) = slash_parts(it.cat(), "fwd")?;
                 let [prep] = is_ctor(arg, "cat_pp_arg")? else {
                     return None;
                 };
@@ -527,8 +566,8 @@ impl Parser {
             // Disambiguate only when this surface offers BOTH the matching argument marker and a
             // competing VP-adjunct reading — otherwise there is nothing spurious to drop.
             let has_matching_arg = chart[p][p].iter().any(|it| {
-                matches!(is_ctor(it.cat(), "fwd"),
-                    Some([a, _]) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
+                matches!(slash_parts(it.cat(), "fwd"),
+                    Some((_m, a, _)) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
             });
             let has_adjunct = chart[p][p].iter().any(|it| is_vp_adjunct_prep(it.cat()));
             if has_matching_arg && has_adjunct {
@@ -1030,7 +1069,7 @@ pub(super) fn sense_cap_key(
 /// `bwd(cat_s(_, bse), cat_np(_, num_any))` and never matches, which is what keeps the check off
 /// infinitives and participles.
 fn has_plural_finite_subject(cat: &Exp) -> bool {
-    if let Some([res, arg]) = is_ctor(cat, "bwd") {
+    if let Some((_m, res, arg)) = slash_parts(cat, "bwd") {
         let finite = matches!(is_ctor(res, "cat_s"),
             Some([_, Exp::InductiveCtor(_, f, _)]) if f == "fin");
         let plural_subj = matches!(is_ctor(arg, "cat_np"),

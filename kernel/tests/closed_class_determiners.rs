@@ -69,7 +69,7 @@ namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:remain_test : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
 resource lexicon:remained_e : lexicon:LexicalEntry {
     lexicon:form     = "remained";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:remain_test;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
     lexicon:sense    = "remain";
@@ -567,7 +567,7 @@ namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:base_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_base : lexicon:LexicalEntry {
     lexicon:form     = "base";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:base_rel;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:base.v.01";
@@ -576,7 +576,7 @@ resource lexicon:e_base : lexicon:LexicalEntry {
 axiom lexicon:resemble_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_resemble : lexicon:LexicalEntry {
     lexicon:form     = "resemble";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:resemble_rel;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:resemble.v.01";
@@ -585,7 +585,7 @@ resource lexicon:e_resemble : lexicon:LexicalEntry {
 axiom lexicon:like_adj : lexicon:Entity -> Prop
 resource lexicon:e_like : lexicon:LexicalEntry {
     lexicon:form     = "like";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:like_adj;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:like.a.01";
@@ -1007,7 +1007,7 @@ resource lexicon:prep_beside_sem : lexicon:SemTerm {
 resource lexicon:beside_prep : lexicon:LexicalEntry {
     core:description = "preposition 'beside' — TAGGED to lexicon:extra_lex and ranked, to probe the pied-piping rule.";
     lexicon:form        = "beside";
-    lexicon:cat         = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat         = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem         = lexicon:prep_beside_sem;
     lexicon:sem_type    = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense       = "beside";
@@ -2832,7 +2832,7 @@ class demo:Gyrase : lexicon:Entity {
 axiom demo:v_supercoil : lexicon:Entity -> lexicon:Entity -> Prop desc: "supercoils dna"
 resource demo:e_supercoil : lexicon:LexicalEntry {
     lexicon:form     = "supercoil";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = demo:v_supercoil;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:grade    = epistemic:declared;
@@ -3053,7 +3053,7 @@ namespace lexicon   = "urn:eigenius:lexicon";
 namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:e_contributes : lexicon:LexicalEntry {
     lexicon:form     = "contributes";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:contribute.v.01";
