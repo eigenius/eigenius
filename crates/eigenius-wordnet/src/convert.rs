@@ -244,7 +244,7 @@ impl FrameKind {
             // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
             // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
             // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. WordNet's
-            // PP frames (4, 23) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
+            // PP frames (4, 22) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
             // `prep_any` wildcard — it accepts any marker (C3-precision; the specific-prep gate applies to
             // gloss-governed ADJECTIVES, where WordNet's gloss does carry the governance).
             FrameKind::PpOblique => {
@@ -272,14 +272,22 @@ impl FrameKind {
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
 /// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
-/// ----ing PP" 4, "----s PP" 23) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This replaces
-/// the former coarse handling (12/27 → transitive with the preposition dropped; 4/23 → intransitive with
-/// the PP dropped). **Object+PP** frames (13, 20, 21, 22) and other PP shapes stay coarse for now — a
-/// follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies it.
+/// ----ing PP" 4, "Somebody ----s PP" 22) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This
+/// replaces the former coarse handling (12/27 → transitive with the preposition dropped; 4/22 →
+/// intransitive with the PP dropped). **Object+PP** frames (13, 20, 21) and other PP shapes stay coarse
+/// for now — a follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies
+/// it.
+///
+/// Frames **22 and 23 were swapped** here until 2026-08-02. `doc/man/wninput.5` (vendored at
+/// `references/WordNet-3.0/doc/man/wninput.5`, line 212) reads `22  Somebody ----s PP` and
+/// `23  Somebody's (body part) ----s`, so 22 is the PP frame and 23 is an intransitive. The inversion
+/// dropped 22's PP — leaving `give rise` with no argument slot for its `to`-PP, so the PP fell to adjunct
+/// position and an adjunct escaped a finite `that`-clause onto the matrix subject — and handed 23 a
+/// spurious oblique slot.
 fn classify(frame: u8) -> Option<FrameKind> {
     match frame {
-        1 | 2 | 3 | 22 => Some(FrameKind::Intransitive),
-        4 | 12 | 23 | 27 => Some(FrameKind::PpOblique),
+        1 | 2 | 3 | 23 => Some(FrameKind::Intransitive),
+        4 | 12 | 22 | 27 => Some(FrameKind::PpOblique),
         8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
         6 | 7 => Some(FrameKind::LinkingAdj), // "----s Adjective" — copular/linking verb (D63 §8.5)
@@ -1339,7 +1347,7 @@ mod tests {
     fn frame_classification_covers_all_35() {
         // intransitive / transitive / ditransitive — the emittable kinds.
         assert_eq!(classify(2), Some(FrameKind::Intransitive));
-        assert_eq!(classify(22), Some(FrameKind::Intransitive)); // PP → coarse intrans
+        assert_eq!(classify(23), Some(FrameKind::Intransitive)); // "Somebody's (body part) ----s"
         assert_eq!(classify(8), Some(FrameKind::Transitive));
         assert_eq!(classify(13), Some(FrameKind::Transitive)); // "----s on something"
         assert_eq!(classify(14), Some(FrameKind::Ditransitive));
@@ -1348,7 +1356,7 @@ mod tests {
         assert_eq!(classify(12), Some(FrameKind::PpOblique)); // "----s to somebody"
         assert_eq!(classify(27), Some(FrameKind::PpOblique)); // "----s to somebody"
         assert_eq!(classify(4), Some(FrameKind::PpOblique)); //  "is ----ing PP"
-        assert_eq!(classify(23), Some(FrameKind::PpOblique)); // "----s PP"
+        assert_eq!(classify(22), Some(FrameKind::PpOblique)); // "Somebody ----s PP"
                                                               // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
         // frames 6/7 "----s Adjective" → linking (copular) verb (D63 §8.5).
