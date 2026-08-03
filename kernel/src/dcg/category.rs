@@ -910,6 +910,36 @@ pub(super) fn is_vp_adjunct_prep(cat: &Exp) -> bool {
         Some((_m, res, np)) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
 }
 
+/// Whether `cat` **governs a named preposition** — `X/cat_pp_arg(prep_R)` for a CONCRETE `prep_R`.
+///
+/// This is the lexical signature of a gloss-governed relational word: `concordant WITH`, `dependent
+/// ON`, `essential FOR`, `associated WITH`. The importer writes the governance into the category —
+/// [`push_adj`](eigenius_wordnet)'s relational adjective and the stative relational participle both
+/// emit it — so the fact is readable here without consulting `adjective-frames.tsv`.
+///
+/// `prep_any` is EXCLUDED and that exclusion is the whole precision of this test. The wildcard is what
+/// `FrameKind::PpOblique` emits for WordNet's preposition-AGNOSTIC PP frames ("----s PP"), where no
+/// preposition is named and nothing is governed. Admitting it would match every oblique-PP verb in the
+/// lexicon instead of the handful of words whose frame names a specific marker.
+/// The RESULT must be a predicative ADJECTIVE (`S[adj]\NP`), which is what makes this an
+/// adjective-governance test rather than a relational-word test. Dropping that requirement was
+/// measured and REFUTED (2026-08-03): `X/cat_pp_arg(prep_R)` alone also matches relational NOUNS —
+/// `deficiency in`, `dependency on`, `dependence on`, `result of`, `vulnerability to`,
+/// `co-occurrence of` — whose nominal reading is the correct one, so pruning it took `grammar-gap`
+/// 0 -> 9 and expected-hits 60 -> 49 on the reference page.
+pub(super) fn governs_named_preposition(cat: &Exp) -> bool {
+    let Some((_m, res, arg)) = slash_parts(cat, "fwd") else {
+        return false;
+    };
+    if !is_adjective_cat(res) {
+        return false;
+    }
+    let Some([prep]) = is_ctor(arg, "cat_pp_arg") else {
+        return false;
+    };
+    matches!(prep, Exp::InductiveCtor(_, n, _) if n != "prep_any")
+}
+
 /// Whether a category is a **predicative adjective** `S[adj]\NP` — `bwd(cat_s(_, adj), _)`. Used to
 /// confirm a derived `-ly` adverb's base is a known adjective (D62 Phase 3).
 pub(super) fn is_adjective_cat(cat: &Exp) -> bool {
@@ -961,6 +991,58 @@ pub fn pretty_cat_dbg(c: &Exp) -> String {
 mod tests {
     use super::*;
     use crate::nbe::term::Patt;
+
+    /// A GOVERNED preposition names a marker; `prep_any` names nothing.
+    ///
+    /// [`governs_named_preposition`] is the gate on the gloss-governed-relational nominal prune
+    /// (`dcg::parse::seed`), and its entire precision is that `prep_any` is refused. The wildcard is
+    /// what `FrameKind::PpOblique` emits for WordNet's preposition-AGNOSTIC PP frames, so admitting it
+    /// would prune the nominal reading of every oblique-PP verb surface in the lexicon rather than the
+    /// handful of relational words whose frame names a specific marker. Bootstrap-free: the categories
+    /// are built directly so this pins the predicate, not a snapshot.
+    #[test]
+    fn governed_preposition_test_refuses_the_prep_any_wildcard() {
+        fn ctor(name: &str, args: Vec<Exp>) -> Exp {
+            // A minimal `lexicon:Cat` inductive — the predicate only reads ctor names.
+            let decl = Arc::new(InductiveDecl {
+                iri: Iri::parse("urn:eigenius:lexicon:Cat").expect("iri"),
+                name: "Cat".into(),
+                params: vec![],
+                indices: vec![],
+                sort: Exp::Sort(0),
+                ctors: vec![],
+            });
+            Exp::InductiveCtor(decl, name.to_string(), args)
+        }
+        let vp = ctor(
+            "bwd",
+            vec![
+                ctor("m_all", vec![]),
+                ctor("cat_s", vec![ctor("dcl", vec![]), ctor("adj", vec![])]),
+                ctor(
+                    "cat_np",
+                    vec![ctor("Entity", vec![]), ctor("num_any", vec![])],
+                ),
+            ],
+        );
+        let with_prep = |p: &str| {
+            ctor(
+                "fwd",
+                vec![
+                    ctor("m_all", vec![]),
+                    vp.clone(),
+                    ctor("cat_pp_arg", vec![ctor(p, vec![])]),
+                ],
+            )
+        };
+        // `concordant with` / `essential for` — the frame NAMES the marker.
+        assert!(governs_named_preposition(&with_prep("prep_with")));
+        assert!(governs_named_preposition(&with_prep("prep_for")));
+        // `FrameKind::PpOblique` — the frame records no preposition, so nothing is governed.
+        assert!(!governs_named_preposition(&with_prep("prep_any")));
+        // A plain predicative adjective takes no PP argument at all.
+        assert!(!governs_named_preposition(&vp));
+    }
 
     /// Every `lexicon:Conn` constructor the coordination rules can CONSTRUCT must be DECLARED in the
     /// ontology.
