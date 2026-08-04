@@ -1,0 +1,16 @@
+# What domain proposition each sentence is taken to warrant — the DECLARED half of the demo.
+#
+# The parser decides what a sentence MEANS (a Prop in WordNet/UMLS vocabulary). It cannot decide
+# that meaning warrants a domain claim in `onco:` vocabulary; that is a human judgement, and it is
+# recorded here with its author and its grounds. `prose-to-eigon --argument-out` turns each row into
+# a `reflection:DeclaredResource` whose canonical proposition is the ground implication
+# `<parsed Prop> -> <predicate>(<args>)`, plus the `reasoning:ReasoningSentence` that applies it.
+#
+# One row per claim. This does NOT generalise — the bridge is over a closed proposition, so a new
+# sentence needs a new row. That is the same bargain the WRN chain already makes for its
+# statistical->domain lifts (`wrn:bridge_msi_selective`).
+#
+# sentence <TAB> predicate <TAB> args <TAB> subject_iri <TAB> declared_by <TAB> rationale
+We found that WRN was selectively essential in MSI models.	urn:eigenius:benchmark:onco:SelectivelyEssential	WRN,MSI	urn:eigenius:pub:wrn:gene_WRN	chan-et-al-2019:results-p1	The authors report finding WRN essential specifically in MSI models. Taking their report as warrant for the domain claim is a Declared step: the parsed proposition is `found(..., speaker)` — an attitude report — and the bridge licenses passing from the report to the claim reported. The same proposition is independently warranted by the recomputed Wilcoxon in `wrn:concl_wrn_selective_recomputed` (37 vs 91 cell lines), so prose and data are two legs under one conclusion.
+MSI cancer models required the helicase activity of WRN.	urn:eigenius:benchmark:onco:RequiresActivity	WRN,helicase	urn:eigenius:pub:wrn:gene_WRN	chan-et-al-2019:results-p1	`required the helicase activity of WRN` predicated of MSI cancer models is the domain claim `RequiresActivity(WRN, helicase)`. Structure-function evidence: the helicase-dead mutant fails to rescue.
+MSI cancer models did not require the exonuclease activity of WRN.	urn:eigenius:benchmark:onco:DispensableActivity	WRN,exonuclease	urn:eigenius:pub:wrn:gene_WRN	chan-et-al-2019:results-p1	The NEGATED counterpart of the row above, and the demo's break point. `onco:DispensableActivity` is declared in `01-onco.esl` as the complement of `onco:RequiresActivity`, so the two rows are distinguished by exactly the word `not` — which is what makes deleting it a semantic edit the certificate can catch rather than a cosmetic one.

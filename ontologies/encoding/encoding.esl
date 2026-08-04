@@ -25,6 +25,13 @@ namespace lexicon     = "urn:eigenius:lexicon";
 namespace institution = "urn:eigenius:institution";
 namespace formats     = "urn:eigenius:core:formats";
 namespace enc         = "urn:eigenius:encoding";
+// Sub-namespaces. ESL has no nested-colon reference syntax, so `runtimes:external`
+// parses as a stray colon — each sub-namespace must be declared and used as its own prefix
+// (the convention `ontologies/reasoning/reasoning.esl` already follows).
+namespace runtimes    = "urn:eigenius:institution:runtimes";
+namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
+namespace enc_env     = "urn:eigenius:encoding:env";
+namespace enc_sig     = "urn:eigenius:encoding:signatures";
 
 // ════════════════════════════════════════════════════════════════════
 // S0 — DiscourseUnit: the parsing unit + provenance
@@ -290,8 +297,11 @@ resource enc:FormalizeDocument : institution:Institution {
     core:description = "The encoding-engine institution (D62): turns prose units into typed, witnessed EncodedClaims by orchestrating the DCG parser + LLM proposers behind the kernel felicity oracle. Generation institution (Derived); the separate faithfulness/verification half is D61 (deferred).";
     institution:institution_iri = enc:FormalizeDocument;
     institution:institution_name = "FormalizeDocument";
-    institution:runtime = institution:runtimes:external;
-    institution:requires_environment = enc:env:v1;   // STUB — define when the runtime env is built
+    institution:runtime = runtimes:external;
+    // `institution:requires_environment` is deliberately ABSENT (it is only `recommends`d). It
+    // previously pointed at a stub `enc_env:v1` that no resource defines, so the layer failed to
+    // load at all — a dangling reference is not a placeholder, it is an invalid layer. Add it back
+    // when the runtime environment actually exists.
 }
 
 resource enc:qc_formalize_unit : institution:QueryClass {
@@ -299,7 +309,7 @@ resource enc:qc_formalize_unit : institution:QueryClass {
     core:description = "OnDemand QueryClass: given a ScopedUnit, run the encoding pipeline (parse → resolve/disambiguate/recover/reformulate) and return an EncodedClaim. Dispatched explicitly via EigenQL FIBER … INTO (D2 §3.5); the result commits to the chain. Failures surface as LexicalGap / CutItem records, never a forced encoding.";
     institution:query_class = enc:ScopedUnit;
     institution:result_class = enc:EncodedClaim;
-    institution:dispatch_role = [institution:dispatch_roles:on_demand];
-    institution:query_handler = enc:signatures:formalize_unit;
+    institution:dispatch_role = [dispatch:on_demand];
+    institution:query_handler = enc_sig:formalize_unit;
     institution:institution_ref = enc:FormalizeDocument;
 }

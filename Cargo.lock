@@ -1057,6 +1057,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-encoding"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+ "eigenius-reasoning",
+ "eigenius-storage-rocksdb",
+ "eigenius-wordnet",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "eigenius-julia"
 version = "0.1.0"
 dependencies = [

@@ -196,6 +196,14 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             "Pair",
             vec![encode_type_json(a)?, encode_type_json(b)?],
         )),
+        // Σ-ELIMINATION. `Pair` (introduction) shipped with D48 but the projections did not, so the
+        // fragment covered only half of Σ and any term that *used* a pair was inexpressible. That
+        // is not an edge case for the D62 encoding pipeline: the DCG renders every definite
+        // description as `the(Σx:C. P(x)).1`, so before this arm existed NO parsed sentence
+        // containing a definite NP could be committed to a chain (found 2026-08-03 building
+        // `demo/prose-to-chain`, on «MSI cancer models required the helicase activity of WRN»).
+        Exp::Fst(p) => Ok(ctor("Fst", vec![encode_type_json(p)?])),
+        Exp::Snd(p) => Ok(ctor("Snd", vec![encode_type_json(p)?])),
         Exp::InductiveCtor(decl, ctor_name, args) => {
             // Encode `D.c(a1, ..., aN)` as
             //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
@@ -514,6 +522,14 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             let fst = decode_type_json(&args[0], ctx)?;
             let snd = decode_type_json(&args[1], ctx)?;
             Ok(Exp::Pair(Box::new(fst), Box::new(snd)))
+        }
+        "Fst" => {
+            expect_arg_count("Fst", 1, args)?;
+            Ok(Exp::Fst(Box::new(decode_type_json(&args[0], ctx)?)))
+        }
+        "Snd" => {
+            expect_arg_count("Snd", 1, args)?;
+            Ok(Exp::Snd(Box::new(decode_type_json(&args[0], ctx)?)))
         }
         "CtorApp" => {
             expect_arg_count("CtorApp", 2, args)?;
@@ -1267,6 +1283,26 @@ mod tests {
         let v = encode_type(&pair).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, pair);
+    }
+
+    /// The DCG's definite description: `(Σx:One. x).1` stands in for `the(Σx:C. P(x)).1`, whose
+    /// shape is what the D62 encoding pipeline has to commit. Before `Fst`/`Snd` were ctors of the
+    /// fragment this failed with `NotATypeLevelExp`, so every parsed sentence carrying a definite NP
+    /// was uncommittable.
+    #[test]
+    fn sigma_projections_round_trip_via_decode() {
+        let sig = Exp::Sig(
+            Patt::Var("x".to_string()),
+            Box::new(Exp::One),
+            Box::new(Exp::Var("x".to_string())),
+        );
+        for proj in [
+            Exp::Fst(Box::new(sig.clone())),
+            Exp::Snd(Box::new(sig.clone())),
+        ] {
+            let v = encode_type(&proj).unwrap();
+            assert_eq!(decode_type(&v, &empty_layer()).unwrap(), proj);
+        }
     }
 
     #[test]

@@ -141,6 +141,8 @@ impl DocumentIngestion for InProcessIngestion<'_> {
                     &ClaimSource {
                         stem: &stem,
                         warrant: Warrant::Declared,
+                        declared_by: "encoding-pipeline",
+                        timestamp: "2026-08-03T00:00:00Z",
                     },
                 ) {
                     Ok(claim) => {

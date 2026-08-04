@@ -1,0 +1,1 @@
+MSI cancer models required the helicase activity of WRN. MSI cancer models did not require the exonuclease activity of WRN.

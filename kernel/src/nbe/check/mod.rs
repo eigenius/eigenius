@@ -651,7 +651,16 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
                 params,
                 indices,
             },
-        ) => check_inductive_ctor_args(ctx, decl, ctor_name, args, expected_decl, params, indices),
+        ) => check_inductive_ctor_args(
+            ctx,
+            decl,
+            ctor_name,
+            args,
+            expected_decl,
+            params,
+            Some(indices),
+        )
+        .map(|_| ()),
 
         // Pattern-match elimination with motive inferred from the
         // expected type (Phase 11b step 12, D19 §10). The motive is
@@ -1078,12 +1087,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                     decl.params.len()
                 )));
             }
-            check_inductive_ctor_args(ctx, decl, ctor_name, args, decl, &[], &[])?;
-            Ok(Val::InductiveType {
-                decl: decl.clone(),
-                params: Vec::new(),
-                indices: Vec::new(),
-            })
+            // `None` = inference: no expected type, so the ctor's declared result under the bound
+            // arguments IS the answer — including its indices, which the previous
+            // `indices: Vec::new()` silently discarded. Lean's `infer_app` does exactly this
+            // (`inst(fun, ctx)`), which is why it needs no special case for indexed inductives.
+            check_inductive_ctor_args(ctx, decl, ctor_name, args, decl, &[], None)
         }
 
         // Recursor application — Phase 11b step 5.
@@ -2969,6 +2977,66 @@ mod tests {
                 assert_eq!(params.len(), 1, "expected 1 param");
                 assert_eq!(indices.len(), 1, "expected 1 index");
                 assert!(matches!(params[0], Val::One));
+                assert!(matches!(indices[0], Val::Unit));
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    /// A param-free indexed inductive — the shape `reasoning:JustifiedBy` has.
+    /// `Flag : One -> Type 0` with `mk : Π (u : One). Flag u`.
+    fn flag_decl() -> Arc<InductiveDecl> {
+        let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Flag").unwrap(),
+            name: "Flag".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Flag").unwrap(),
+            name: "Flag".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("u".to_string()),
+                    Box::new(Exp::One),
+                    Box::new(Exp::InductiveType(
+                        self_ref.clone(),
+                        vec![Exp::Var("u".to_string())],
+                    )),
+                ),
+            }],
+        })
+    }
+
+    /// **Regression.** Inferring an indexed inductive's constructor used to fail outright with
+    /// `index arity mismatch (actual has 1, expected has 0)`: the inference arm passed empty
+    /// expected indices, and would have answered `indices: []` even had it passed. The result
+    /// indices are determined by the ctor's declared result under the bound arguments — exactly
+    /// what Lean's `infer_app` computes via `inst(fun, ctx)`.
+    ///
+    /// This blocked every `reasoning:certificate` at commit (validation Rule 21 infers), including
+    /// the WRN case study's own recompute conclusions.
+    #[test]
+    fn infers_indexed_ctor_result_indices() {
+        let decl = flag_decl();
+        let exp = Exp::InductiveCtor(decl.clone(), "mk".to_string(), vec![Exp::Unit]);
+        let mut c = ctx();
+        let ty = check_infer(&mut c, &exp).expect("an indexed ctor must be inferable");
+        match ty {
+            Val::InductiveType {
+                decl: d,
+                params,
+                indices,
+            } => {
+                assert_eq!(d.name, "Flag");
+                assert!(params.is_empty());
+                assert_eq!(indices.len(), 1, "the index must be RECOVERED, not dropped");
                 assert!(matches!(indices[0], Val::Unit));
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),

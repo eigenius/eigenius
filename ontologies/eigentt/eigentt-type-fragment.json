@@ -228,6 +228,28 @@
             "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
           }
         ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Fst",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "pair",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Snd",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "pair",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
       }
     ]
   },

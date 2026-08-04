@@ -62,6 +62,13 @@ store as silent lexicon corruption.
 with *by content hash*, so an edited bootstrap makes the old store unresumable (`ManifestDrift`,
 fail-closed). Pre-production posture is drop-and-reseed.
 
+**Including comments.** `current_manifest()` hashes the raw source bytes —
+`Sha256::digest(spec.source.as_bytes())` (`kernel/src/bootstrap/mod.rs`) — not the compiled
+resources. So a typo fix or a clarifying comment in a bootstrapped `.esl`/`.json` invalidates every
+snapshot exactly as a semantic change would. Near-missed on 2026-08-03: a two-line comment
+correction to `ontologies/reasoning/reasoning.esl` would have cost the hour-long reseed that was
+running at the time. Documentation about a bootstrap ontology is cheaper to put in `docs/notes/`.
+
 ## 3. Measure, and evaluate
 
 ```bash
