@@ -100,6 +100,19 @@ if [[ $REPARSE == 1 ]]; then
     echo "NOTE: argument.json is deliberately NOT regenerated — it is the RECORDED argument."
 fi
 
+# The citations layer holds one ReasoningSentence per sentence. Loading it as ONE layer makes the
+# edited run fail atomically, which hides the interesting part: only the DERIVED claim should die.
+# Split it so each sentence's lift commits (or fails) on its own.
+SPLIT="$(mktemp -d)"; trap 'rm -rf "$SPLIT"' EXIT
+python3 - "$HERE/bridges.json" "$SPLIT" <<'PYEOF'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc = doc if isinstance(doc, list) else [doc]
+for r in doc:
+    n = "s1" if ":s1:" in r["@id"] else "s2"
+    json.dump([r], open(f"{sys.argv[2]}/bridge-{n}.json", "w"), indent=1)
+PYEOF
+
 hr "1. Vocabulary + the pinned literature rule"
 eig load "$REPO/ontologies/encoding/encoding.esl"
 eig load "$HERE/onco-typed.esl"
@@ -133,7 +146,8 @@ echo "   Note the arguments: UMLS concepts and WordNet synsets the graph already
 echo "   contained. Not strings about them — the classes themselves."
 echo "-- the vocabulary lift: shape rules, then one citation per sentence"
 eig load --branch formulas-intact "$HERE/rules.json"
-eig load --branch formulas-intact "$HERE/bridges.json"
+eig load --branch formulas-intact "$SPLIT/bridge-s1.json"
+eig load --branch formulas-intact "$SPLIT/bridge-s2.json"
 echo
 echo "-- THE INFERENCE: apply the pinned literature rule to the MEASUREMENT claim"
 echo "   rule (pinned, cited):  HasActivity(WRN, exonuclease) ⟹ RequiresActivity(WRN, helicase)"
@@ -161,19 +175,32 @@ echo
 echo "   the measurement's formula, before and after — the edit is VISIBLE in the term:"
 echo "   before:"; python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_1
 echo "   after :"; python3 "$HERE/narrate.py" "$HERE/claims-edited.json" claim_1
+
 echo
-echo "The same recorded lift, against the edited measurement…"
-if eig load --branch formulas-edited "$HERE/bridges.json"; then
-    echo "✗ UNEXPECTED: the lift should not survive an edited measurement." >&2
-    exit 1
+echo "-- sentence 2's own lift (the ASSERTED route) — untouched by the edit:"
+if eig load --branch formulas-edited "$SPLIT/bridge-s2.json"; then
+    echo "   ✓ still commits. The document still asserts RequiresActivity(WRN, helicase),"
+    echo "     and nothing about sentence 2 changed."
+else
+    echo "   ✗ UNEXPECTED: sentence 2's lift should be unaffected." >&2; exit 1
+fi
+
+echo
+echo "-- sentence 1's lift (the MEASUREMENT the derivation stands on):"
+if eig load --branch formulas-edited "$SPLIT/bridge-s1.json"; then
+    echo "   ✗ UNEXPECTED: the edited measurement should not lift." >&2; exit 1
 else
     echo
-    echo "✓ REJECTED — as intended."
+    echo "   ✓ REJECTED — and with it the derivation."
     echo
-    echo "  Sentence 1 now parses to a different proposition, so no IsDerivedAs witness matches"
-    echo "  the one its citation names. The lift fails, and with it everything downstream:"
-    echo "  the inferred RequiresActivity claim has no antecedent left to stand on."
+    echo "     Sentence 1 parses to a different proposition, so no IsDerivedAs witness"
+    echo "     matches the one its lift names. The inferred claim cited that lift as its"
+    echo "     antecedent, so it has nothing left to stand on."
     echo
-    echo "  Nothing compared the two texts. A measurement changed, and every conclusion that"
-    echo "  rested on it stopped committing."
+    echo "     The ASSERTED route survived; the DERIVED one did not. That asymmetry is"
+    echo "     the point — a conclusion the graph produced carries a live dependency on"
+    echo "     what it was produced from, and the document merely repeating it is not"
+    echo "     the same fact."
+    echo
+    echo "     Nothing compared the two texts."
 fi

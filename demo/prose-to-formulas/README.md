@@ -44,7 +44,22 @@ and the result is:
 > Once because sentence 2 asserts it — the document says so.
 > Once because it **follows** from sentence 1 plus a published rule.
 >
-> The second justification does not depend on the document stating the conclusion at all.
+> Two `ReasoningSentence`s carrying a byte-identical proposition, with entirely different
+> justification terms. (Nothing on chain records that they coincide — see *What is still thin*.)
+
+**The derived route is not the better-warranted one**, and it is worth being exact about that:
+
+| route | rests on |
+|---|---|
+| asserted (`s2:sentence`) | one Declared lift + sentence 2's parse |
+| derived (`inferred:sentence`) | one Declared lift + sentence 1's parse, **plus** a Declared literature rule |
+
+Both commit at grade `Declared`. The derived route carries strictly more assumptions — everything
+the assertion needs, over a *different* sentence, and a published rule on top. "Independent of the
+document stating the conclusion" is a claim about what it does not depend on, not about strength.
+
+What makes it the interesting one is that it **knows what it depends on**, which the next section
+makes visible.
 
 That is what "a sentence becomes justified" means here: not that it was written down, but that a
 chain of witnesses the kernel checks ends at its proposition.
@@ -53,9 +68,22 @@ Then the demo negates the measurement:
 
 > MSI cancer models ~~had~~ **did not have** the exonuclease activity of WRN.
 
-Sentence 1 parses to a different proposition, no `IsDerivedAs` witness matches the one its lift
-names, and the lift is rejected — taking the inference with it, since the conclusion has no
-antecedent left to stand on. Nothing compared the two texts.
+The two routes then come apart, in the same run:
+
+```text
+sentence 2's lift  (ASSERTED)     ✓ still commits — nothing about sentence 2 changed
+sentence 1's lift  (MEASUREMENT)  ✗ REJECTED — and with it the derivation
+```
+
+Sentence 1 parses to a different proposition, so no `IsDerivedAs` witness matches the one its lift
+names. The inferred claim cited that lift as its antecedent, so it has nothing left to stand on —
+while the document's own assertion of the same conclusion is untouched.
+
+That asymmetry is the point. A conclusion the graph produced carries a live dependency on what it
+was produced from; a document repeating it does not. Nothing compared the two texts.
+
+(The citations layer is deliberately split per sentence in `run.sh` — loaded as one layer the edited
+run fails atomically, which hides exactly this.)
 
 ## The three ways a claim gets justified here
 
