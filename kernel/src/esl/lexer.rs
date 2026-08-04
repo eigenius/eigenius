@@ -76,6 +76,8 @@ pub enum TokenKind {
     /// eigenius#72 — `forall (P : Prop) => body`. Alias for `pi` with
     /// proposition-authoring semantics; parses to the same AST.
     Forall,
+    /// `exists` — opens a Sigma (dependent pair) binder, the dual of `forall`.
+    Exists,
     /// eigenius#72 Layer 3 — `fun (i : T) => body` lambda in type
     /// position. Used as a motive for `match … returning <motive>`
     /// over indexed inductives. Compiles to `Exp::Lam`.
@@ -513,6 +515,7 @@ impl<'a> Lexer<'a> {
             "pi" => TokenKind::Pi,
             // eigenius#72 — proposition / indexed-type authoring.
             "forall" => TokenKind::Forall,
+            "exists" => TokenKind::Exists,
             "fun" => TokenKind::Fun,
             "axiom" => TokenKind::Axiom,
             "macro" => TokenKind::Macro,

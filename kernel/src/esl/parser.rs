@@ -966,6 +966,13 @@ impl<'a> Parser<'a> {
             return self.parse_pi_type();
         }
 
+        // `exists x : T, y : U . B` — the Sigma binder, dual of `forall`. Terminated by `.`
+        // rather than `=>` so it reads like the pair it builds; the DCG's own pretty-printer
+        // uses the same shape (`SG#0:C. body`).
+        if self.at(&TokenKind::Exists) {
+            return self.parse_sigma_type();
+        }
+
         // eigenius#72 Layer 3 — `fun (i_1 : T_1, …) => body` lambda in
         // type position. Used as a motive for `match … returning <motive>`
         // over indexed inductives. Parses through the same typed-param
@@ -1209,6 +1216,22 @@ impl<'a> Parser<'a> {
         Ok(TypeExpr::Pi {
             params,
             codomain: Box::new(codomain),
+            pos,
+        })
+    }
+
+    /// `exists x_1 : T_1, ..., x_N : T_N . B` — nested `TypeExpr::Sigma`.
+    ///
+    /// Mirrors [`Self::parse_pi_type`], with `.` closing the binder list instead of `=>`.
+    fn parse_sigma_type(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Exists)?;
+        let params = self.parse_typed_param_list()?;
+        self.expect(&TokenKind::Dot)?;
+        let body = self.parse_type_expr()?;
+        Ok(TypeExpr::Sigma {
+            params,
+            body: Box::new(body),
             pos,
         })
     }
