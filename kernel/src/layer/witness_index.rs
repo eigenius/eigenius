@@ -74,7 +74,7 @@ const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
 /// without changing this module's signature.
 pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
     let mut index: BTreeMap<WitnessKey, ()> = BTreeMap::new();
-    for (_iri, resource) in layer.iter_resources() {
+    for resource in witness_candidates(layer) {
         let is_a = resource.is_a();
         for cls in &is_a {
             let cls_str = cls.as_str();
@@ -130,6 +130,68 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
         }
     }
     index
+}
+
+/// The resources that could possibly carry a witness.
+///
+/// A witness comes only from a resource of one of five classes, so scanning EVERY resource in the
+/// layer is wasted work — and on a lexicon layer it is ruinous: `iter_resources` walks all
+/// `defined_iris` and pages each one in, which is ~8 s per WordNet/UMLS chunk and yields an empty
+/// map every time (a lexicon layer holds `LexicalEntry`s and classes, never a trace).
+///
+/// That cost lands entirely on the FAILURE path. A successful lookup finds its witness in the top
+/// layer and returns; a miss walks to the root and forces this build for every ancestor. Measured
+/// 2026-08-03 on `demo/prose-to-formulas`: the committing branch took 0.75 s and the rejecting one
+/// 127 s, for the same certificate shape. Every legitimate `Fails` on a chain with a real lexicon
+/// pays it.
+///
+/// So: ask the triple index for the few subjects whose `core:is_a` names a witness class, and page
+/// in only those.
+///
+/// **Only for STORED layers.** `autoonload_dispatch` runs before `persist`, so the layer being
+/// validated is not yet in the index — and same-layer witnesses are ordinary (a bridge and the
+/// sentence citing it commit together). Such a layer is in `storage.pending`, which is exactly the
+/// "stored vs in-flight" test `layer::index` already uses; for it, and for backend-less in-memory
+/// chains, fall back to the full scan.
+fn witness_candidates(layer: &Layer) -> Vec<std::sync::Arc<crate::ontology::resource::Resource>> {
+    let in_flight = layer
+        .storage()
+        .pending
+        .read()
+        .map(|p| p.contains_key(layer.id()))
+        .unwrap_or(true);
+    if in_flight || layer.storage().persistent_backend.is_none() {
+        return layer.iter_resources().map(|(_, r)| r).collect();
+    }
+    let Ok(is_a) = Iri::parse(wk::IS_A) else {
+        return layer.iter_resources().map(|(_, r)| r).collect();
+    };
+    let mut out = Vec::new();
+    for class in [
+        wk::DECLARATION_TRACE,
+        wk::OBSERVATION_TRACE,
+        wk::PROGRAM_TRACE,
+        wk::INSTITUTION_EMITTED_DERIVATION,
+        REASONING_SENTENCE,
+    ] {
+        let Ok(obj) = Iri::parse(class) else { continue };
+        for hit in layer
+            .storage()
+            .triple_index
+            .scan_predicate_object(&is_a, &obj)
+        {
+            let Ok((subject, defining)) = hit else {
+                continue;
+            };
+            if &defining != layer.id() {
+                continue;
+            }
+            if let Some(r) = layer.get_resource(&subject) {
+                out.push(r);
+            }
+        }
+    }
+    out
 }
 
 /// D54: read a `reasoning:ReasoningSentence`'s `proposition` and build a
