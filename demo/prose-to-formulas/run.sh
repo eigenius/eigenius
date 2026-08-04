@@ -120,12 +120,27 @@ cat "$HERE/paragraph.txt"
 echo
 echo "-- the parsed claims (one enc:EncodedClaim + ProgramTrace per sentence)"
 eig load --branch formulas-intact "$HERE/claims-intact.json"
+echo
+echo "   Each sentence is now a FORMULA over classes the chain already held:"
+echo
+echo "   «MSI cancer models had the exonuclease activity of WRN.»"
+python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_1
+echo
+echo "   «MSI cancer models required the helicase activity of WRN.»"
+python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_2
+echo
+echo "   Note the arguments: UMLS concepts and WordNet synsets the graph already"
+echo "   contained. Not strings about them — the classes themselves."
 echo "-- the vocabulary lift: shape rules, then one citation per sentence"
 eig load --branch formulas-intact "$HERE/rules.json"
 eig load --branch formulas-intact "$HERE/bridges.json"
 echo
 echo "-- THE INFERENCE: apply the pinned literature rule to the MEASUREMENT claim"
+echo "   rule (pinned, cited):  HasActivity(WRN, exonuclease) ⟹ RequiresActivity(WRN, helicase)"
 if eig load --branch formulas-intact "$HERE/inference.json"; then
+    echo
+    echo "   concluded proposition:"
+    python3 "$HERE/narrate.py" "$HERE/inference.json" sentence
     echo
     echo "✓ COMMITTED."
     echo "  RequiresActivity(WRN, helicase) is now justified TWICE on this branch:"
@@ -142,6 +157,10 @@ diff <(tr ' ' '\n' < "$HERE/paragraph.txt") \
      <(tr ' ' '\n' < "$HERE/paragraph-edited.txt") || true
 eig load --branch formulas-edited "$HERE/claims-edited.json"
 eig load --branch formulas-edited "$HERE/rules.json"
+echo
+echo "   the measurement's formula, before and after — the edit is VISIBLE in the term:"
+echo "   before:"; python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_1
+echo "   after :"; python3 "$HERE/narrate.py" "$HERE/claims-edited.json" claim_1
 echo
 echo "The same recorded lift, against the edited measurement…"
 if eig load --branch formulas-edited "$HERE/bridges.json"; then
