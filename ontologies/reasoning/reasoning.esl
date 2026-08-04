@@ -8,18 +8,27 @@
 //   values at `JustifiedBy.*` type-check sites via the per-Layer witness
 //   index (D49 §5, kernel/src/layer/witness_index.rs).
 //
-// - `JustificationTerm` (D39 §3) — six-constructor closed inductive:
-//   four categorical groundings (one per epistemic category) plus two
-//   composition operators (Artemov `App`/`Sum`). No further evolution
-//   without a versioned change to the ADT.
+// - `JustificationTerm` (D39 §3) — seven-constructor closed inductive:
+//   four categorical groundings (one per epistemic category), two
+//   composition operators (Artemov `App`/`Sum`), and universal
+//   specialization (`SpecStr`). No further evolution without a
+//   versioned change to the ADT.
 //
 // - `JustifiedBy : JustificationTerm -> Prop -> Type 0` (D39 §5) — the
 //   indexed inductive predicate whose inhabitants are the certificates
-//   `ReasoningSentence` carries. Seven constructors: four grounding
+//   `ReasoningSentence` carries. Nine constructors: four grounding
 //   constructors consume the matching `ChainWitness` witness; `app`
 //   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
 //   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
-//   a decomposable structure).
+//   a decomposable structure); `spec_str` and `spec_poly` eliminate a
+//   universal quantifier, over `core:string` and over any domain.
+//
+// **No implication introduction.** No rule PRODUCES `JustifiedBy(_, A -> B)`:
+// `app` yields `B`, `sum_*` yield `P`, `spec_*` yield `P(t)`. An implication
+// therefore enters only through a grounding — asserted as a resource, witnessed
+// by a trace. There is no deduction theorem, so a bridge between vocabularies
+// cannot be *derived*; it must be Declared. Quantifying it and eliminating with
+// `spec_poly` is what lets one bridge serve many claims.
 //
 // IRIs match the kernel's `well_known` constants
 // (`CHAIN_WITNESS_IS_*_AS`, etc.) — do not rename without updating
@@ -56,8 +65,10 @@ data witness:IsVerifiedAs : core:string -> Prop -> Prop {
 
 // ── JustificationTerm ────────────────────────────────────────────────
 //
-// The interlingua. Six ctors total: four categorical groundings + two
-// composition operators. Adding a constructor is a versioned change.
+// The interlingua. Seven ctors total: four categorical groundings, two
+// composition operators (App, Sum), and universal specialization (SpecStr —
+// shared by both `JustifiedBy.spec_str` and `JustifiedBy.spec_poly`).
+// Adding a constructor is a versioned change.
 
 data reasoning:JustificationTerm {
     DeclaredEvidence(core:string),
@@ -142,6 +153,31 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
                 t : core:string) =>
         reasoning:JustifiedBy(j, forall (x : core:string) => P(x)) ->
         reasoning:JustifiedBy(reasoning:SpecStr(j, t), P(t)),
+
+    // Universal specialization at ANY domain — the general form of `spec_str`.
+    //
+    // `spec_str` is monomorphic on `core:string`, which is enough for rules quantified over IRIs
+    // but not for rules quantified over the sorts the DCG parser actually produces. A parsed
+    // proposition's arguments are CLASSES (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`),
+    // so a rule shaped
+    //
+    //     forall (g : Set, a : Set) => <parse shape>(g, a) -> onco:RequiresActivity(g, a)
+    //
+    // commits fine — a Set-quantified implication is a `Prop` — but nothing could ELIMINATE the
+    // quantifier, so one bridge was needed per sentence rather than one per parse shape.
+    //
+    // The domain `T` and the instance `x : T` are bound on the PROOF side; the `JustificationTerm`
+    // still carries only a `core:string` tag, so the term algebra stays first-order and needs no
+    // new constructor — `SpecStr(j, tag)` serves, with the tag naming the instantiation for audit
+    // rather than carrying it.
+    spec_poly :
+        forall (T : Set,
+                P : T -> Prop,
+                j : reasoning:JustificationTerm,
+                x : T,
+                tag : core:string) =>
+        reasoning:JustifiedBy(j, forall (y : T) => P(y)) ->
+        reasoning:JustifiedBy(reasoning:SpecStr(j, tag), P(x)),
 }
 
 // ── ReasoningSentence (D39 §4.2) ─────────────────────────────────────

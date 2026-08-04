@@ -1,0 +1,33 @@
+// A rule PINNED FROM THE LITERATURE — not derived from this document.
+//
+// This is the piece that makes a sentence justifiable by INFERENCE rather than by having been
+// written. The document's activity sentence asserts its own content; the same content also FOLLOWS
+// from the measurement sentence plus this rule, and that second justification stands whether or not
+// the document says it.
+//
+// Note what makes it hand-authorable at all: the rule is in DOMAIN vocabulary, so its antecedent is
+// `HasActivity(WRN, exonuclease)` — plain class references. A rule whose antecedent had to be a
+// PARSE would be inexpressible in ESL, which has no syntax for the Σ-binders and projections a DCG
+// term contains. That is why the parse-shaped step is a generated bridge and this step is not.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace onco2      = "urn:eigenius:demo:onco-typed";
+namespace umlscui    = "urn:eigenius:umlscui";
+namespace wn         = "urn:eigenius:wn";
+
+resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
+    reflection:declared_by = "literature:illustrative-dependency-rule";
+    reflection:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
+
+    reflection:canonical_proposition = type_expr(
+        onco2:HasActivity(umlscui:C0388246, wn:n14606137)
+          -> onco2:RequiresActivity(umlscui:C0388246, umlscui:C0920283)
+    );
+}
+
+resource onco2:lit_rule_exo_implies_helicase_trace : reflection:DeclarationTrace {
+    reflection:resource    = onco2:lit_rule_exo_implies_helicase;
+    reflection:declared_by = "literature:illustrative-dependency-rule";
+    reflection:timestamp   = "2026-08-03T00:00:00Z";
+}

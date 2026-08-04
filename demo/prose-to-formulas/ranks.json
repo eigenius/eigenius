@@ -1,0 +1,314 @@
+[
+  {
+    "sentence": "MSI cancer models had the exonuclease activity of WRN.",
+    "context": "",
+    "words": [
+      {
+        "surface": "cancer",
+        "senses": [
+          "wn:Cancer.n.01977832",
+          "wn:Cancer.n.09752657",
+          "wn:cancer.n.14239918",
+          "wn:Cancer.n.08686658",
+          "wn:Cancer.n.09232687",
+          "umls:C0006826"
+        ],
+        "sems": [
+          "n01977832",
+          "n09752657",
+          "n14239918",
+          "n08686658",
+          "n09232687",
+          "n14239918"
+        ],
+        "order": [
+          2,
+          5
+        ]
+      },
+      {
+        "surface": "models",
+        "senses": [
+          "wn:model.a.02586446",
+          "wn:model.n.00898804",
+          "wn:model.n.03777283",
+          "wn:model.n.05845652",
+          "wn:model.n.05890249",
+          "wn:model.n.05925366",
+          "wn:model.n.05937112",
+          "wn:model.n.10291240",
+          "wn:model.n.10324560",
+          "wn:model.n.10324851",
+          "wn:model.v.01697027",
+          "wn:model.v.01697406",
+          "wn:model.v.01722980",
+          "wn:model.v.01743784",
+          "wn:model.v.02142626",
+          "wn:model.v.02142775"
+        ],
+        "sems": [
+          "λx. gt(deg_a02586446(x), std_a02586446)",
+          "n00898804",
+          "n03777283",
+          "n05845652",
+          "n05890249",
+          "n05925366",
+          "n05937112",
+          "n10291240",
+          "n10324560",
+          "n10324851",
+          "v01697027_t",
+          "v01697406_t",
+          "v01722980_t",
+          "v01743784_t",
+          "v02142626_i",
+          "v02142775_i"
+        ],
+        "order": [
+          4,
+          6
+        ]
+      },
+      {
+        "surface": "had",
+        "senses": [
+          "have",
+          "wn:have.v.00056930",
+          "wn:have.v.00065370",
+          "wn:have.v.00065639",
+          "wn:have.v.00120796",
+          "wn:have.v.00121046",
+          "wn:have.v.01156834",
+          "wn:have.v.01427127",
+          "wn:have.v.01733477",
+          "wn:have.v.02108026",
+          "wn:have.v.02203362",
+          "wn:have.v.02204692",
+          "wn:have.v.02205098",
+          "wn:have.v.02210119",
+          "wn:have.v.02236124",
+          "wn:have.v.02355596",
+          "wn:have.v.02378453",
+          "wn:have.v.02630189",
+          "wn:have.v.02740745",
+          "wn:have.n.10529231"
+        ],
+        "sems": [
+          "λP. P",
+          "v00056930_i",
+          "v00065370_t",
+          "v00065639_t",
+          "v00120796_t",
+          "v00121046_t",
+          "v01156834_t",
+          "v01427127_t",
+          "v01733477_t",
+          "v02108026_t",
+          "v02203362_t",
+          "v02204692_t",
+          "v02205098_t",
+          "v02210119_d",
+          "v02236124_d",
+          "v02355596_t",
+          "v02378453_t",
+          "v02630189_t",
+          "v02740745_t",
+          "n10529231"
+        ],
+        "order": [
+          10,
+          11,
+          17
+        ]
+      },
+      {
+        "surface": "exonuclease",
+        "senses": [
+          "wn:exonuclease.n.14606137",
+          "umls:C0015296"
+        ],
+        "sems": [
+          "n14606137",
+          "n14606137"
+        ],
+        "order": [
+          0,
+          1
+        ]
+      },
+      {
+        "surface": "activity",
+        "senses": [
+          "wn:activity.n.00407535",
+          "wn:activity.n.04635104",
+          "wn:activity.n.13440063",
+          "wn:activity.n.13518963",
+          "wn:activity.n.14006945",
+          "wn:activity.n.14531203"
+        ],
+        "sems": [
+          "n00407535",
+          "n04635104",
+          "n13440063",
+          "n13518963",
+          "n14006945",
+          "n14531203"
+        ],
+        "order": [
+          2,
+          5
+        ]
+      },
+      {
+        "surface": "WRN",
+        "senses": [
+          "umls:C0043119",
+          "umls:C0388246",
+          "umls:C1337007"
+        ],
+        "sems": [
+          "C0043119",
+          "C0388246",
+          "C1337007"
+        ],
+        "order": [
+          1,
+          2
+        ]
+      }
+    ]
+  },
+  {
+    "sentence": "MSI cancer models required the helicase activity of WRN.",
+    "context": "",
+    "words": [
+      {
+        "surface": "cancer",
+        "senses": [
+          "wn:Cancer.n.01977832",
+          "wn:Cancer.n.09752657",
+          "wn:cancer.n.14239918",
+          "wn:Cancer.n.08686658",
+          "wn:Cancer.n.09232687",
+          "umls:C0006826"
+        ],
+        "sems": [
+          "n01977832",
+          "n09752657",
+          "n14239918",
+          "n08686658",
+          "n09232687",
+          "n14239918"
+        ],
+        "order": [
+          2,
+          5
+        ]
+      },
+      {
+        "surface": "models",
+        "senses": [
+          "wn:model.a.02586446",
+          "wn:model.n.00898804",
+          "wn:model.n.03777283",
+          "wn:model.n.05845652",
+          "wn:model.n.05890249",
+          "wn:model.n.05925366",
+          "wn:model.n.05937112",
+          "wn:model.n.10291240",
+          "wn:model.n.10324560",
+          "wn:model.n.10324851",
+          "wn:model.v.01697027",
+          "wn:model.v.01697406",
+          "wn:model.v.01722980",
+          "wn:model.v.01743784",
+          "wn:model.v.02142626",
+          "wn:model.v.02142775"
+        ],
+        "sems": [
+          "λx. gt(deg_a02586446(x), std_a02586446)",
+          "n00898804",
+          "n03777283",
+          "n05845652",
+          "n05890249",
+          "n05925366",
+          "n05937112",
+          "n10291240",
+          "n10324560",
+          "n10324851",
+          "v01697027_t",
+          "v01697406_t",
+          "v01722980_t",
+          "v01743784_t",
+          "v02142626_i",
+          "v02142775_i"
+        ],
+        "order": [
+          4,
+          6
+        ]
+      },
+      {
+        "surface": "required",
+        "senses": [
+          "wn:require.v.00755745",
+          "wn:require.v.01188725",
+          "wn:require.v.02627934",
+          "wn:required.a.00848466",
+          "wn:required.a.01580775"
+        ],
+        "sems": [
+          "v00755745_d",
+          "v01188725_t",
+          "v02627934_t",
+          "λx. gt(deg_a00848466(x), std_a00848466)",
+          "λx. gt(deg_a01580775(x), std_a01580775)"
+        ],
+        "order": [
+          2,
+          1
+        ]
+      },
+      {
+        "surface": "activity",
+        "senses": [
+          "wn:activity.n.00407535",
+          "wn:activity.n.04635104",
+          "wn:activity.n.13440063",
+          "wn:activity.n.13518963",
+          "wn:activity.n.14006945",
+          "wn:activity.n.14531203"
+        ],
+        "sems": [
+          "n00407535",
+          "n04635104",
+          "n13440063",
+          "n13518963",
+          "n14006945",
+          "n14531203"
+        ],
+        "order": [
+          2,
+          5
+        ]
+      },
+      {
+        "surface": "WRN",
+        "senses": [
+          "umls:C0043119",
+          "umls:C0388246",
+          "umls:C1337007"
+        ],
+        "sems": [
+          "C0043119",
+          "C0388246",
+          "C1337007"
+        ],
+        "order": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+]

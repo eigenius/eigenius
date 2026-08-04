@@ -178,6 +178,23 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
     }
 }
 
+/// Deletes the working copy when the process ends. Held in a thread-local for the life of the run.
+///
+/// Without this each invocation leaks a full copy of the snapshot — ~1 GB — and on a tmpfs `/tmp`
+/// that is RAM. A morning of emitter runs filled a 16 GB tmpfs (2026-08-03).
+struct SnapshotWorkdir(PathBuf);
+
+impl Drop for SnapshotWorkdir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+thread_local! {
+    static SNAPSHOT_WORK: std::cell::RefCell<Option<SnapshotWorkdir>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// `cp -r --reflink=auto` the store into a scratch dir. Instant on a CoW filesystem.
 fn working_copy(src: &Path) -> Result<PathBuf, String> {
     let root = std::env::var("EIGENIUS_DB_WORKDIR")
@@ -199,9 +216,26 @@ fn working_copy(src: &Path) -> Result<PathBuf, String> {
             dst.display()
         ));
     }
+    // Reap copies left by a run that was KILLED — `Drop` does not run on SIGKILL. Only reap a
+    // directory whose owning process is gone.
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let Some(pid) = name
+                .to_str()
+                .and_then(|n| n.strip_prefix("eigenius-encoding-work-"))
+            else {
+                continue;
+            };
+            if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
     eprintln!(
-        "snapshot: working copy → {} (the source is left untouched)",
+        "snapshot: working copy → {} (the source is left untouched; removed on exit)",
         dst.display()
     );
+    SNAPSHOT_WORK.with(|slot| *slot.borrow_mut() = Some(SnapshotWorkdir(dst.clone())));
     Ok(dst)
 }

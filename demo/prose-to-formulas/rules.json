@@ -1,0 +1,576 @@
+[
+  {
+    "@id": "urn:eigenius:demo:formulas:rule_1",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:reflection:canonical_proposition": {
+      "args": [
+        "v0",
+        {
+          "args": [
+            1
+          ],
+          "ctor": "Sort"
+        },
+        {
+          "args": [
+            "v1",
+            {
+              "args": [
+                1
+              ],
+              "ctor": "Sort"
+            },
+            {
+              "args": [
+                "",
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            "urn:eigenius:wn:v02203362_t"
+                          ],
+                          "ctor": "ConstRef"
+                        },
+                        {
+                          "args": [
+                            {
+                              "args": [
+                                {
+                                  "args": [
+                                    "urn:eigenius:ontology:the"
+                                  ],
+                                  "ctor": "ConstRef"
+                                },
+                                {
+                                  "args": [
+                                    "G#0",
+                                    {
+                                      "args": [
+                                        "urn:eigenius:wn:n13440063"
+                                      ],
+                                      "ctor": "ConstRef"
+                                    },
+                                    {
+                                      "args": [
+                                        {
+                                          "args": [
+                                            {
+                                              "args": [
+                                                "urn:eigenius:logic:And"
+                                              ],
+                                              "ctor": "ConstRef"
+                                            },
+                                            {
+                                              "args": [
+                                                {
+                                                  "args": [
+                                                    {
+                                                      "args": [
+                                                        "urn:eigenius:ontology:compound_kind"
+                                                      ],
+                                                      "ctor": "ConstRef"
+                                                    },
+                                                    {
+                                                      "args": [
+                                                        "G#0"
+                                                      ],
+                                                      "ctor": "Var"
+                                                    }
+                                                  ],
+                                                  "ctor": "App"
+                                                },
+                                                {
+                                                  "args": [
+                                                    "v1"
+                                                  ],
+                                                  "ctor": "Var"
+                                                }
+                                              ],
+                                              "ctor": "App"
+                                            }
+                                          ],
+                                          "ctor": "App"
+                                        },
+                                        {
+                                          "args": [
+                                            {
+                                              "args": [
+                                                {
+                                                  "args": [
+                                                    "urn:eigenius:ontology:prep_of"
+                                                  ],
+                                                  "ctor": "ConstRef"
+                                                },
+                                                {
+                                                  "args": [
+                                                    "G#0"
+                                                  ],
+                                                  "ctor": "Var"
+                                                }
+                                              ],
+                                              "ctor": "App"
+                                            },
+                                            {
+                                              "args": [
+                                                {
+                                                  "args": [
+                                                    "urn:eigenius:ontology:kind_of"
+                                                  ],
+                                                  "ctor": "ConstRef"
+                                                },
+                                                {
+                                                  "args": [
+                                                    "v0"
+                                                  ],
+                                                  "ctor": "Var"
+                                                }
+                                              ],
+                                              "ctor": "App"
+                                            }
+                                          ],
+                                          "ctor": "App"
+                                        }
+                                      ],
+                                      "ctor": "App"
+                                    }
+                                  ],
+                                  "ctor": "Sig"
+                                }
+                              ],
+                              "ctor": "App"
+                            }
+                          ],
+                          "ctor": "Fst"
+                        }
+                      ],
+                      "ctor": "App"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            "urn:eigenius:ontology:kind_of"
+                          ],
+                          "ctor": "ConstRef"
+                        },
+                        {
+                          "args": [
+                            "G#0",
+                            {
+                              "args": [
+                                "urn:eigenius:wn:n05890249"
+                              ],
+                              "ctor": "ConstRef"
+                            },
+                            {
+                              "args": [
+                                {
+                                  "args": [
+                                    {
+                                      "args": [
+                                        "urn:eigenius:ontology:compound_kind"
+                                      ],
+                                      "ctor": "ConstRef"
+                                    },
+                                    {
+                                      "args": [
+                                        "G#0"
+                                      ],
+                                      "ctor": "Var"
+                                    }
+                                  ],
+                                  "ctor": "App"
+                                },
+                                {
+                                  "args": [
+                                    "G#1",
+                                    {
+                                      "args": [
+                                        "urn:eigenius:wn:n14239918"
+                                      ],
+                                      "ctor": "ConstRef"
+                                    },
+                                    {
+                                      "args": [
+                                        {
+                                          "args": [
+                                            {
+                                              "args": [
+                                                "urn:eigenius:ontology:compound_kind"
+                                              ],
+                                              "ctor": "ConstRef"
+                                            },
+                                            {
+                                              "args": [
+                                                "G#1"
+                                              ],
+                                              "ctor": "Var"
+                                            }
+                                          ],
+                                          "ctor": "App"
+                                        },
+                                        {
+                                          "args": [
+                                            "urn:eigenius:umlscui:C0920269"
+                                          ],
+                                          "ctor": "ConstRef"
+                                        }
+                                      ],
+                                      "ctor": "App"
+                                    }
+                                  ],
+                                  "ctor": "Sig"
+                                }
+                              ],
+                              "ctor": "App"
+                            }
+                          ],
+                          "ctor": "Sig"
+                        }
+                      ],
+                      "ctor": "App"
+                    }
+                  ],
+                  "ctor": "App"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            "urn:eigenius:demo:onco-typed:HasActivity"
+                          ],
+                          "ctor": "ConstRef"
+                        },
+                        {
+                          "args": [
+                            "v0"
+                          ],
+                          "ctor": "Var"
+                        }
+                      ],
+                      "ctor": "App"
+                    },
+                    {
+                      "args": [
+                        "v1"
+                      ],
+                      "ctor": "Var"
+                    }
+                  ],
+                  "ctor": "App"
+                }
+              ],
+              "ctor": "Pi"
+            }
+          ],
+          "ctor": "Pi"
+        }
+      ],
+      "ctor": "Pi"
+    },
+    "urn:eigenius:reflection:declared_by": "demo:shape-rules",
+    "urn:eigenius:reflection:rationale": "Any sentence of this parse shape warrants urn:eigenius:demo:onco-typed:HasActivity. Abstracted from «MSI cancer models had the exonuclease activity of WRN.»; the rule is quantified over the argument classes, so it serves every sentence of the shape rather than this one alone. The MEASUREMENT. Lifts the parsed sentence to HasActivity(WRN, exonuclease) — the antecedent the pinned literature rule speaks of."
+  },
+  {
+    "@id": "urn:eigenius:demo:formulas:rule_1-trace",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:reflection:DeclarationTrace"
+    ],
+    "urn:eigenius:reflection:declared_by": "demo:shape-rules",
+    "urn:eigenius:reflection:resource": "urn:eigenius:demo:formulas:rule_1",
+    "urn:eigenius:reflection:timestamp": "2026-08-03T00:00:00Z"
+  },
+  {
+    "@id": "urn:eigenius:demo:formulas:rule_2",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:reflection:canonical_proposition": {
+      "args": [
+        "v0",
+        {
+          "args": [
+            1
+          ],
+          "ctor": "Sort"
+        },
+        {
+          "args": [
+            "v1",
+            {
+              "args": [
+                1
+              ],
+              "ctor": "Sort"
+            },
+            {
+              "args": [
+                "",
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            "urn:eigenius:wn:v02627934_t"
+                          ],
+                          "ctor": "ConstRef"
+                        },
+                        {
+                          "args": [
+                            {
+                              "args": [
+                                {
+                                  "args": [
+                                    "urn:eigenius:ontology:the"
+                                  ],
+                                  "ctor": "ConstRef"
+                                },
+                                {
+                                  "args": [
+                                    "G#0",
+                                    {
+                                      "args": [
+                                        "urn:eigenius:wn:n13440063"
+                                      ],
+                                      "ctor": "ConstRef"
+                                    },
+                                    {
+                                      "args": [
+                                        {
+                                          "args": [
+                                            {
+                                              "args": [
+                                                "urn:eigenius:logic:And"
+                                              ],
+                                              "ctor": "ConstRef"
+                                            },
+                                            {
+                                              "args": [
+                                                {
+                                                  "args": [
+                                                    {
+                                                      "args": [
+                                                        "urn:eigenius:ontology:compound_kind"
+                                                      ],
+                                                      "ctor": "ConstRef"
+                                                    },
+                                                    {
+                                                      "args": [
+                                                        "G#0"
+                                                      ],
+                                                      "ctor": "Var"
+                                                    }
+                                                  ],
+                                                  "ctor": "App"
+                                                },
+                                                {
+                                                  "args": [
+                                                    "v1"
+                                                  ],
+                                                  "ctor": "Var"
+                                                }
+                                              ],
+                                              "ctor": "App"
+                                            }
+                                          ],
+                                          "ctor": "App"
+                                        },
+                                        {
+                                          "args": [
+                                            {
+                                              "args": [
+                                                {
+                                                  "args": [
+                                                    "urn:eigenius:ontology:prep_of"
+                                                  ],
+                                                  "ctor": "ConstRef"
+                                                },
+                                                {
+                                                  "args": [
+                                                    "G#0"
+                                                  ],
+                                                  "ctor": "Var"
+                                                }
+                                              ],
+                                              "ctor": "App"
+                                            },
+                                            {
+                                              "args": [
+                                                {
+                                                  "args": [
+                                                    "urn:eigenius:ontology:kind_of"
+                                                  ],
+                                                  "ctor": "ConstRef"
+                                                },
+                                                {
+                                                  "args": [
+                                                    "v0"
+                                                  ],
+                                                  "ctor": "Var"
+                                                }
+                                              ],
+                                              "ctor": "App"
+                                            }
+                                          ],
+                                          "ctor": "App"
+                                        }
+                                      ],
+                                      "ctor": "App"
+                                    }
+                                  ],
+                                  "ctor": "Sig"
+                                }
+                              ],
+                              "ctor": "App"
+                            }
+                          ],
+                          "ctor": "Fst"
+                        }
+                      ],
+                      "ctor": "App"
+                    },
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            "urn:eigenius:ontology:kind_of"
+                          ],
+                          "ctor": "ConstRef"
+                        },
+                        {
+                          "args": [
+                            "G#0",
+                            {
+                              "args": [
+                                "urn:eigenius:wn:n05890249"
+                              ],
+                              "ctor": "ConstRef"
+                            },
+                            {
+                              "args": [
+                                {
+                                  "args": [
+                                    {
+                                      "args": [
+                                        "urn:eigenius:ontology:compound_kind"
+                                      ],
+                                      "ctor": "ConstRef"
+                                    },
+                                    {
+                                      "args": [
+                                        "G#0"
+                                      ],
+                                      "ctor": "Var"
+                                    }
+                                  ],
+                                  "ctor": "App"
+                                },
+                                {
+                                  "args": [
+                                    "G#1",
+                                    {
+                                      "args": [
+                                        "urn:eigenius:wn:n14239918"
+                                      ],
+                                      "ctor": "ConstRef"
+                                    },
+                                    {
+                                      "args": [
+                                        {
+                                          "args": [
+                                            {
+                                              "args": [
+                                                "urn:eigenius:ontology:compound_kind"
+                                              ],
+                                              "ctor": "ConstRef"
+                                            },
+                                            {
+                                              "args": [
+                                                "G#1"
+                                              ],
+                                              "ctor": "Var"
+                                            }
+                                          ],
+                                          "ctor": "App"
+                                        },
+                                        {
+                                          "args": [
+                                            "urn:eigenius:umlscui:C0920269"
+                                          ],
+                                          "ctor": "ConstRef"
+                                        }
+                                      ],
+                                      "ctor": "App"
+                                    }
+                                  ],
+                                  "ctor": "Sig"
+                                }
+                              ],
+                              "ctor": "App"
+                            }
+                          ],
+                          "ctor": "Sig"
+                        }
+                      ],
+                      "ctor": "App"
+                    }
+                  ],
+                  "ctor": "App"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "args": [
+                            "urn:eigenius:demo:onco-typed:RequiresActivity"
+                          ],
+                          "ctor": "ConstRef"
+                        },
+                        {
+                          "args": [
+                            "v0"
+                          ],
+                          "ctor": "Var"
+                        }
+                      ],
+                      "ctor": "App"
+                    },
+                    {
+                      "args": [
+                        "v1"
+                      ],
+                      "ctor": "Var"
+                    }
+                  ],
+                  "ctor": "App"
+                }
+              ],
+              "ctor": "Pi"
+            }
+          ],
+          "ctor": "Pi"
+        }
+      ],
+      "ctor": "Pi"
+    },
+    "urn:eigenius:reflection:declared_by": "demo:shape-rules",
+    "urn:eigenius:reflection:rationale": "Any sentence of this parse shape warrants urn:eigenius:demo:onco-typed:RequiresActivity. Abstracted from «MSI cancer models required the helicase activity of WRN.»; the rule is quantified over the argument classes, so it serves every sentence of the shape rather than this one alone. The ACTIVITY sentence. The document asserts this; the very same proposition is ALSO concluded by applying the literature rule to the measurement above, so it ends up justified twice over — once because it was written, once because it follows."
+  },
+  {
+    "@id": "urn:eigenius:demo:formulas:rule_2-trace",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:reflection:DeclarationTrace"
+    ],
+    "urn:eigenius:reflection:declared_by": "demo:shape-rules",
+    "urn:eigenius:reflection:resource": "urn:eigenius:demo:formulas:rule_2",
+    "urn:eigenius:reflection:timestamp": "2026-08-03T00:00:00Z"
+  }
+]

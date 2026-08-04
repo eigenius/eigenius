@@ -1,0 +1,39 @@
+// Domain vocabulary over FORMULAS, not strings — demo 2's whole point.
+//
+// The WRN case study's `01-onco.esl` declares
+//
+//     data onco:RequiresActivity : core:string -> core:string -> Prop
+//
+// and its claims read `RequiresActivity("WRN", "helicase")`. But the parser does not produce
+// strings: it produces typed terms over real classes. The proposition for
+// «MSI cancer models required the helicase activity of WRN» contains
+//
+//     ConstRef(umlscui:C0388246)   the WRN gene concept
+//     ConstRef(umlscui:C0920283)   the helicase concept
+//
+// So a string-typed consequent forces the bridge to relate a FORMULA to two STRING LITERALS, and
+// nothing in the system relates the literal "helicase" to the class `umlscui:C0920283`. The kernel
+// cannot check that step — it is pure assertion, and it discards exactly the typed structure the
+// parser was built to produce.
+//
+// Typing the predicates at `Set` — the sort the parser's own arguments inhabit
+// (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`) — makes the bridge relate two formulas
+// that SHARE SUBTERMS. `eigenius-reasoning`'s `BridgedClaimGrader` additionally refuses any argument
+// class that does not occur in the parsed proposition, so a bridge can narrow what a sentence means
+// but cannot introduce a subject the sentence never mentioned.
+//
+// These live in their own namespace rather than re-typing `onco:`: the WRN chain's committed
+// conclusions use the string form, and migrating them is separate work.
+
+namespace core = "urn:eigenius:core";
+namespace onco2 = "urn:eigenius:demo:onco-typed";
+
+data onco2:RequiresActivity : Set -> Set -> Prop {
+}
+
+data onco2:DispensableActivity : Set -> Set -> Prop {
+}
+
+// The measured property the literature rule's antecedent speaks of.
+data onco2:HasActivity : Set -> Set -> Prop {
+}

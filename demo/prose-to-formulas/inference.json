@@ -1,0 +1,335 @@
+{
+  "@id": "urn:eigenius:demo:formulas:inferred:sentence",
+  "urn:eigenius:core:description": "CONCLUDED, not asserted: applying the pinned rule urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase to the claim established by sentence 1 yields the proposition sentence 2 also states. Edit sentence 1 and this stops committing, while the assertion in sentence 2 is untouched.",
+  "urn:eigenius:core:is_a": [
+    "urn:eigenius:reasoning:ReasoningSentence"
+  ],
+  "urn:eigenius:reasoning:certificate": {
+    "args": [
+      {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              "urn:eigenius:reasoning:JustifiedBy",
+                              "app"
+                            ],
+                            "ctor": "CtorApp"
+                          },
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      "urn:eigenius:demo:onco-typed:HasActivity"
+                                    ],
+                                    "ctor": "ConstRef"
+                                  },
+                                  {
+                                    "args": [
+                                      "urn:eigenius:umlscui:C0388246"
+                                    ],
+                                    "ctor": "ConstRef"
+                                  }
+                                ],
+                                "ctor": "App"
+                              },
+                              {
+                                "args": [
+                                  "urn:eigenius:wn:n14606137"
+                                ],
+                                "ctor": "ConstRef"
+                              }
+                            ],
+                            "ctor": "App"
+                          }
+                        ],
+                        "ctor": "App"
+                      },
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  "urn:eigenius:demo:onco-typed:RequiresActivity"
+                                ],
+                                "ctor": "ConstRef"
+                              },
+                              {
+                                "args": [
+                                  "urn:eigenius:umlscui:C0388246"
+                                ],
+                                "ctor": "ConstRef"
+                              }
+                            ],
+                            "ctor": "App"
+                          },
+                          {
+                            "args": [
+                              "urn:eigenius:umlscui:C0920283"
+                            ],
+                            "ctor": "ConstRef"
+                          }
+                        ],
+                        "ctor": "App"
+                      }
+                    ],
+                    "ctor": "App"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "urn:eigenius:reasoning:JustificationTerm",
+                          "DeclaredEvidence"
+                        ],
+                        "ctor": "CtorApp"
+                      },
+                      {
+                        "args": [
+                          "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+                        ],
+                        "ctor": "LitString"
+                      }
+                    ],
+                    "ctor": "App"
+                  }
+                ],
+                "ctor": "App"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      "urn:eigenius:reasoning:JustificationTerm",
+                      "VerifiedEvidence"
+                    ],
+                    "ctor": "CtorApp"
+                  },
+                  {
+                    "args": [
+                      "urn:eigenius:demo:formulas:s1:sentence"
+                    ],
+                    "ctor": "LitString"
+                  }
+                ],
+                "ctor": "App"
+              }
+            ],
+            "ctor": "App"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "urn:eigenius:reasoning:JustifiedBy",
+                          "declared"
+                        ],
+                        "ctor": "CtorApp"
+                      },
+                      {
+                        "args": [
+                          "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+                        ],
+                        "ctor": "LitString"
+                      }
+                    ],
+                    "ctor": "App"
+                  },
+                  {
+                    "args": [
+                      "",
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  "urn:eigenius:demo:onco-typed:HasActivity"
+                                ],
+                                "ctor": "ConstRef"
+                              },
+                              {
+                                "args": [
+                                  "urn:eigenius:umlscui:C0388246"
+                                ],
+                                "ctor": "ConstRef"
+                              }
+                            ],
+                            "ctor": "App"
+                          },
+                          {
+                            "args": [
+                              "urn:eigenius:wn:n14606137"
+                            ],
+                            "ctor": "ConstRef"
+                          }
+                        ],
+                        "ctor": "App"
+                      },
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  "urn:eigenius:demo:onco-typed:RequiresActivity"
+                                ],
+                                "ctor": "ConstRef"
+                              },
+                              {
+                                "args": [
+                                  "urn:eigenius:umlscui:C0388246"
+                                ],
+                                "ctor": "ConstRef"
+                              }
+                            ],
+                            "ctor": "App"
+                          },
+                          {
+                            "args": [
+                              "urn:eigenius:umlscui:C0920283"
+                            ],
+                            "ctor": "ConstRef"
+                          }
+                        ],
+                        "ctor": "App"
+                      }
+                    ],
+                    "ctor": "Pi"
+                  }
+                ],
+                "ctor": "App"
+              },
+              {
+                "args": [],
+                "ctor": "UnitVal"
+              }
+            ],
+            "ctor": "App"
+          }
+        ],
+        "ctor": "App"
+      },
+      {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      "urn:eigenius:reasoning:JustifiedBy",
+                      "verified"
+                    ],
+                    "ctor": "CtorApp"
+                  },
+                  {
+                    "args": [
+                      "urn:eigenius:demo:formulas:s1:sentence"
+                    ],
+                    "ctor": "LitString"
+                  }
+                ],
+                "ctor": "App"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "urn:eigenius:demo:onco-typed:HasActivity"
+                        ],
+                        "ctor": "ConstRef"
+                      },
+                      {
+                        "args": [
+                          "urn:eigenius:umlscui:C0388246"
+                        ],
+                        "ctor": "ConstRef"
+                      }
+                    ],
+                    "ctor": "App"
+                  },
+                  {
+                    "args": [
+                      "urn:eigenius:wn:n14606137"
+                    ],
+                    "ctor": "ConstRef"
+                  }
+                ],
+                "ctor": "App"
+              }
+            ],
+            "ctor": "App"
+          },
+          {
+            "args": [],
+            "ctor": "UnitVal"
+          }
+        ],
+        "ctor": "App"
+      }
+    ],
+    "ctor": "App"
+  },
+  "urn:eigenius:reasoning:justification": {
+    "args": [
+      {
+        "args": [
+          "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+        ],
+        "ctor": "DeclaredEvidence"
+      },
+      {
+        "args": [
+          "urn:eigenius:demo:formulas:s1:sentence"
+        ],
+        "ctor": "VerifiedEvidence"
+      }
+    ],
+    "ctor": "App"
+  },
+  "urn:eigenius:reasoning:proposition": {
+    "args": [
+      {
+        "args": [
+          {
+            "args": [
+              "urn:eigenius:demo:onco-typed:RequiresActivity"
+            ],
+            "ctor": "ConstRef"
+          },
+          {
+            "args": [
+              "urn:eigenius:umlscui:C0388246"
+            ],
+            "ctor": "ConstRef"
+          }
+        ],
+        "ctor": "App"
+      },
+      {
+        "args": [
+          "urn:eigenius:umlscui:C0920283"
+        ],
+        "ctor": "ConstRef"
+      }
+    ],
+    "ctor": "App"
+  }
+}

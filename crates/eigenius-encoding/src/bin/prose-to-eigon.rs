@@ -33,7 +33,9 @@ use std::process::ExitCode;
 
 use clap::Parser as ClapParser;
 use eigenius_encoding::claims::load_claims;
-use eigenius_encoding::emit::{emit_argument, emit_document, ParsedSentence};
+use eigenius_encoding::emit::{
+    emit_argument, emit_document, emit_inference, emit_shape_rules, ParsedSentence,
+};
 use eigenius_encoding::select::{load_pins, select_pinned};
 use eigenius_encoding::snapshot::{build_parser, open_head, ParserConfig};
 use eigenius_kernel::dcg::{segment_sentences, tokenize};
@@ -76,10 +78,27 @@ struct Args {
     /// nothing would ever fail to commit.
     #[arg(long, requires = "claims")]
     argument_out: Option<PathBuf>,
+    /// Where to write the SHAPE-RULE layer — one Declared rule per distinct (predicate, parse
+    /// shape), quantified over the argument classes. Use with `--citations-out`.
+    ///
+    /// A rule serves every sentence of its shape, so the rule count is the authoring cost:
+    /// `--argument-out` writes one ground bridge per sentence, this writes one rule per shape.
+    #[arg(long, requires = "claims")]
+    rules_out: Option<PathBuf>,
+    /// Where to write the per-sentence `ReasoningSentence`s that cite the shape rules.
+    #[arg(long, requires = "rules_out")]
+    citations_out: Option<PathBuf>,
     /// The `reflection:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
     /// byte-reproducible.
     #[arg(long, default_value = "2026-08-03T00:00:00Z")]
     timestamp: String,
+    /// Apply a rule already pinned on the chain: `<rule-iri>:<antecedent-ordinal>:<consequent-ordinal>`.
+    /// Writes the concluding `ReasoningSentence` to `--inference-out`.
+    #[arg(long, requires = "claims")]
+    inference: Option<String>,
+    /// Where to write the inference layer.
+    #[arg(long, requires = "inference")]
+    inference_out: Option<PathBuf>,
     /// WordNet dict for the Morphy lemmatizer.
     #[arg(long, default_value = "references/WordNet-3.0/dict")]
     dict: PathBuf,
@@ -190,6 +209,48 @@ fn run(args: &Args) -> Result<(), String> {
             parsed.len(),
             parsed.len()
         );
+    }
+    if let (Some(rules_out), Some(cites_out)) = (&args.rules_out, &args.citations_out) {
+        let path = args.claims.as_ref().expect("clap `requires` guarantees it");
+        let claims = load_claims(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let (rules, cites) = emit_shape_rules(&args.ns, &args.timestamp, &parsed, &claims)
+            .map_err(|e| e.to_string())?;
+        std::fs::write(rules_out, &rules)
+            .map_err(|e| format!("write {}: {e}", rules_out.display()))?;
+        std::fs::write(cites_out, &cites)
+            .map_err(|e| format!("write {}: {e}", cites_out.display()))?;
+        eprintln!(
+            "wrote {} and {} — COMMIT BOTH; they are the recorded argument",
+            rules_out.display(),
+            cites_out.display()
+        );
+    }
+    if let (Some(spec), Some(out)) = (&args.inference, &args.inference_out) {
+        let parts: Vec<&str> = spec.rsplitn(3, ':').collect();
+        let (conseq, ante, rule) = match parts.as_slice() {
+            [c, a, r] => (
+                c.parse::<usize>()
+                    .map_err(|e| format!("--inference consequent: {e}"))?,
+                a.parse::<usize>()
+                    .map_err(|e| format!("--inference antecedent: {e}"))?,
+                *r,
+            ),
+            _ => return Err("--inference must be <rule-iri>:<antecedent>:<consequent>".into()),
+        };
+        let path = args.claims.as_ref().expect("clap `requires`");
+        let claims = load_claims(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let json = emit_inference(
+            &args.ns,
+            &args.timestamp,
+            rule,
+            ante,
+            conseq,
+            &parsed,
+            &claims,
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::write(out, &json).map_err(|e| format!("write {}: {e}", out.display()))?;
+        eprintln!("wrote {} (the INFERRED claim)", out.display());
     }
     Ok(())
 }
