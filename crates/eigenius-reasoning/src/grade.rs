@@ -204,7 +204,11 @@ impl ClaimGrader for DeclaredClaimGrader {
         );
 
         // (2) The DeclarationTrace — emits IsDeclaredAs(declaring, P) into the chain witness index.
-        let trace_iri = iri(&format!("{}:assertion-trace", source.stem))?;
+        // `_trace`, not `-trace`: an IRI's local name becomes an ESL identifier when the
+        // resource is written as source, and a hyphen is not one. Minting an IRI here that
+        // `eigenius decompile` cannot express would put chain content beyond the reach of
+        // the source language.
+        let trace_iri = iri(&format!("{}:assertion_trace", source.stem))?;
         let mut trace = Resource::new(trace_iri);
         trace.set(
             iri(wk::IS_A)?,
@@ -381,7 +385,11 @@ impl ClaimGrader for BridgedClaimGrader<'_> {
             Value::String(self.rationale.to_string()),
         );
 
-        let trace_iri = iri(&format!("{}:bridge-trace", source.stem))?;
+        // `_trace`, not `-trace`: an IRI's local name becomes an ESL identifier when the
+        // resource is written as source, and a hyphen is not one. Minting an IRI here that
+        // `eigenius decompile` cannot express would put chain content beyond the reach of
+        // the source language.
+        let trace_iri = iri(&format!("{}:bridge_trace", source.stem))?;
         let mut trace = Resource::new(trace_iri);
         trace.set(
             iri(wk::IS_A)?,
@@ -772,7 +780,8 @@ pub fn shape_rule_resources(
     );
     r.set(iri(REFLECTION_RATIONALE)?, Value::String(rationale.into()));
 
-    let mut t = Resource::new(iri(&format!("{rule_iri}-trace"))?);
+    // `_trace`, not `-trace` — see the note in `justified_by_declared_certificate`.
+    let mut t = Resource::new(iri(&format!("{rule_iri}_trace"))?);
     t.set(
         iri(wk::IS_A)?,
         Value::Array(vec![Value::ResourceRef(iri(wk::DECLARATION_TRACE)?)]),

@@ -197,7 +197,7 @@ fn declared_claim_needs_its_declaration_trace() {
             r.id() != Some(&claim.sentence_iri)
                 && !r
                     .id()
-                    .is_some_and(|i| i.as_str().ends_with(":assertion-trace"))
+                    .is_some_and(|i| i.as_str().ends_with(":assertion_trace"))
         })
         .cloned()
         .collect();

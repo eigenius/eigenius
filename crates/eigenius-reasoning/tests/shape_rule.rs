@@ -381,7 +381,7 @@ fn a_pinned_literature_rule_justifies_a_sentence_by_inference() {
         iri("urn:eigenius:reflection:declared_by"),
         Value::String("demo:measurement".into()),
     );
-    let mut src_t = Resource::new(iri("urn:eigenius:demo:lit:meas_src-trace"));
+    let mut src_t = Resource::new(iri("urn:eigenius:demo:lit:meas_src_trace"));
     src_t.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::ResourceRef(iri(wk::DECLARATION_TRACE))]),
@@ -419,7 +419,7 @@ fn a_pinned_literature_rule_justifies_a_sentence_by_inference() {
         iri("urn:eigenius:reflection:rationale"),
         Value::String("Published: high concentration implies the helicase requirement.".into()),
     );
-    let mut rule_t = Resource::new(iri(&format!("{LIT_RULE}-trace")));
+    let mut rule_t = Resource::new(iri(&format!("{LIT_RULE}_trace")));
     rule_t.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::ResourceRef(iri(wk::DECLARATION_TRACE))]),
