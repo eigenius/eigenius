@@ -379,6 +379,7 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
 ///   `Arrow`) recurse into their children unchanged.
 fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) -> ast::TypeExpr {
     match typ {
+        ast::TypeExpr::Unit { .. } => typ.clone(),
         ast::TypeExpr::Ref { name, args, pos } => {
             if name.namespace.is_none() && args.is_empty() {
                 if let Some(bound) = env.get(&name.name) {
@@ -1049,6 +1050,12 @@ impl Compiler {
             return self.compile_type_expr(&expanded, scope);
         }
         match typ {
+            ast::TypeExpr::Unit { pos } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "the unit value `()` is a TERM, not a type — it is only meaningful inside \
+                 `type_expr(...)`"
+                    .to_string(),
+            )),
             ast::TypeExpr::Ref { name, args, .. } => {
                 let resolved = if name.namespace.is_none() {
                     let n = name.name.as_str();
@@ -1334,6 +1341,7 @@ impl Compiler {
             return self.lower_type_expr_to_exp(&expanded, scope);
         }
         match typ {
+            ast::TypeExpr::Unit { .. } => Ok(Exp::Unit),
             ast::TypeExpr::Sigma { params, body, .. } => {
                 // Nested `Exp::Sig`, rightmost binder innermost — the mirror of `Pi` below.
                 let mut working = scope.clone();
@@ -1637,6 +1645,7 @@ impl Compiler {
         };
 
         match typ {
+            ast::TypeExpr::Unit { .. } => Ok(serde_json::json!({"ctor": "UnitVal", "args": []})),
             ast::TypeExpr::Lambda { params, body, .. } => {
                 // Mirror the lowering's scope-threading so later params
                 // can mention earlier binders. Each dom is encoded
@@ -6139,12 +6148,12 @@ mod sigma_surface_tests {
         namespace p = "urn:eigenius:probe";
     "#;
 
-    /// `exists x : T. B` is the Sigma binder — the dual of `forall`, and the form every
+    /// `exists x : T => B` is the Sigma binder — the dual of `forall`, and the form every
     /// definite description the DCG produces needs (`the(Sig x : C. P(x)).1`).
     #[test]
     fn exists_lowers_to_sig() {
         let j = axiom_statement(&format!(
-            "{NS} axiom p:t : exists x : core:string. core:string"
+            "{NS} axiom p:t : exists x : core:string => core:string"
         ));
         assert_eq!(j["ctor"], "Sig", "got {j}");
         assert_eq!(j["args"][0], "x");
@@ -6154,7 +6163,7 @@ mod sigma_surface_tests {
     #[test]
     fn exists_binder_list_nests_like_forall() {
         let j = axiom_statement(&format!(
-            "{NS} axiom p:t : exists x : core:string, y : core:string. core:string"
+            "{NS} axiom p:t : exists x : core:string, y : core:string => core:string"
         ));
         assert_eq!(j["ctor"], "Sig");
         assert_eq!(j["args"][0], "x");
@@ -6168,7 +6177,7 @@ mod sigma_surface_tests {
     fn eigentt_fst_and_snd_lower_to_projection_nodes() {
         for (name, ctor) in [("fst", "Fst"), ("snd", "Snd")] {
             let j = axiom_statement(&format!(
-                "{NS} axiom p:t : eigentt:{name}(exists x : core:string. core:string)"
+                "{NS} axiom p:t : eigentt:{name}(exists x : core:string => core:string)"
             ));
             assert_eq!(j["ctor"], ctor, "{name} -> {j}");
             assert_eq!(j["args"][0]["ctor"], "Sig");

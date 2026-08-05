@@ -539,6 +539,14 @@ pub enum TypeExpr {
     /// The DCG parser produces these constantly — every definite description is
     /// `the(Sig x : C. P(x)).1` — so without this variant no parsed proposition could be
     /// written in ESL at all.
+    /// The unit VALUE `()` — `Exp::Unit`, the sole inhabitant of `One`.
+    ///
+    /// Hand-written certificate terms normally omit it (the kernel synthesises the slot in
+    /// e.g. `declared(bridge, P)`), so this exists mainly so a printer can emit back what the
+    /// kernel encoded and have it reparse — see `esl::print`.
+    Unit {
+        pos: Position,
+    },
     Sigma {
         params: Vec<TypedParam>,
         body: Box<TypeExpr>,
@@ -653,6 +661,7 @@ impl TypeExpr {
             | TypeExpr::BinderArrow { pos, .. }
             | TypeExpr::Pi { pos, .. }
             | TypeExpr::Sigma { pos, .. }
+            | TypeExpr::Unit { pos, .. }
             | TypeExpr::Sort { pos, .. }
             | TypeExpr::Lambda { pos, .. }
             | TypeExpr::Alias { pos, .. }

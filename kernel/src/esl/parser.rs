@@ -1125,6 +1125,12 @@ impl<'a> Parser<'a> {
         // a name (below) is constructor application, not grouping.
         if self.at(&TokenKind::LParen) {
             self.advance();
+            // `()` — the unit value. Checked before parsing an inner type so the empty
+            // parenthesis pair is not a parse error.
+            if self.at(&TokenKind::RParen) {
+                self.advance();
+                return Ok(TypeExpr::Unit { pos });
+            }
             let inner = self.parse_type_expr()?;
             // `(e : T)` — a type annotation (the bidirectional mode switch),
             // distinct from plain `(e)` grouping. Lets a checkable term (a `fun`
@@ -1227,7 +1233,11 @@ impl<'a> Parser<'a> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Exists)?;
         let params = self.parse_typed_param_list()?;
-        self.expect(&TokenKind::Dot)?;
+        // `=>`, exactly as `forall` — a second binder that terminated differently would be an
+        // inconsistency with no payoff, and it would burn `.`, the one token a postfix `.1`/`.2`
+        // projection form would need. (We chose `eigentt:fst(p)` over `p.1` precisely because
+        // ESL has no postfix form yet; leave the door open.)
+        self.expect(&TokenKind::FatArrow)?;
         let body = self.parse_type_expr()?;
         Ok(TypeExpr::Sigma {
             params,

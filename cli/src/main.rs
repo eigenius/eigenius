@@ -330,6 +330,21 @@ enum Commands {
         file: String,
     },
 
+    /// Decompile Eigon-JSON back to ESL source
+    Decompile {
+        /// Path to an Eigon-JSON (.json) file
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Re-compile the printed ESL and check it yields the same terms (alpha-equal)
+        #[arg(long)]
+        verify: bool,
+
+        /// Indent expression trees across lines instead of emitting each term on one line
+        #[arg(long)]
+        pretty: bool,
+    },
+
     /// Record a reasoning trace
     Reflect {
         /// Path to trace file (Eigon-JSON or ESL)
@@ -1232,6 +1247,11 @@ async fn main() {
             .await
         }
         Commands::Compile { file } => cmd_compile(&file, cli.json),
+        Commands::Decompile {
+            file,
+            verify,
+            pretty,
+        } => cmd_decompile(&file, verify, pretty),
         Commands::Lexicon { command } => match command {
             LexiconCommands::Gate { files } => cmd_lexicon_gate(&files, cli.json),
             LexiconCommands::Parse {
@@ -1609,12 +1629,20 @@ fn cmd_compile(file: &str, json_output: bool) {
         std::process::exit(1);
     });
 
-    let resources = eigenius_kernel::esl::compile(&source).unwrap_or_else(|errors| {
-        for e in &errors {
-            eprintln!("{file}: {e}");
-        }
+    // Against a bootstrapped layer, not bare: constructor short names resolve through the chain's
+    // ctor table (`collect_ctors_from_layer`), so a file citing `reasoning:JustifiedBy`'s ctors
+    // compiles here rather than only inside a running server. Seeding only ADDS resolvable names.
+    let ctx = bootstrap::bootstrap().unwrap_or_else(|e| {
+        eprintln!("Bootstrap failed: {e}");
         std::process::exit(1);
     });
+    let resources = eigenius_kernel::esl::compile_against_layer(&source, ctx.head())
+        .unwrap_or_else(|errors| {
+            for e in &errors {
+                eprintln!("{file}: {e}");
+            }
+            std::process::exit(1);
+        });
 
     // Output as Eigon-JSON array
     let json_values: Vec<serde_json::Value> = resources
@@ -1628,6 +1656,106 @@ fn cmd_compile(file: &str, json_output: bool) {
     } else {
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     }
+}
+
+/// Print an Eigon-JSON document back as ESL source — the inverse of [`cmd_compile`].
+///
+/// `--verify` closes the loop: re-compile the printed source and check every D47 term is
+/// alpha-equal to the one in the input, under the same normalisation the witness index uses. A
+/// mismatch exits non-zero rather than emitting source that would commit a different object.
+fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
+    let text = std::fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("Failed to read file: {e}");
+        std::process::exit(1);
+    });
+    let doc: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
+        eprintln!("{file}: not valid JSON: {e}");
+        std::process::exit(1);
+    });
+    let layout = if pretty {
+        eigenius_kernel::esl::print::Layout::Pretty
+    } else {
+        eigenius_kernel::esl::print::Layout::Flat
+    };
+    let source =
+        eigenius_kernel::esl::print::print_document_with(&doc, layout).unwrap_or_else(|e| {
+            eprintln!("{file}: cannot decompile: {e}");
+            std::process::exit(1);
+        });
+
+    if verify {
+        // Against a bootstrapped layer: constructor short names resolve through the chain's ctor
+        // table, which is where `reasoning:JustifiedBy`'s constructors live.
+        let ctx = bootstrap::bootstrap().unwrap_or_else(|e| {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        });
+        let resources = eigenius_kernel::esl::compile_against_layer(&source, ctx.head())
+            .unwrap_or_else(|errors| {
+                eprintln!("{file}: decompiled source does not compile:");
+                for e in &errors {
+                    eprintln!("  {e}");
+                }
+                std::process::exit(1);
+            });
+        let back = serde_json::Value::Array(
+            resources
+                .iter()
+                .map(eigon_json::serialize_resource)
+                .collect(),
+        );
+        let mismatches = compare_terms(&doc, &back);
+        if !mismatches.is_empty() {
+            eprintln!(
+                "{file}: {} term(s) changed under round trip:",
+                mismatches.len()
+            );
+            for m in &mismatches {
+                eprintln!("  {m}");
+            }
+            std::process::exit(1);
+        }
+        eprintln!("verified: every term is alpha-equal after recompiling");
+    }
+
+    println!("{source}");
+}
+
+/// Compare the D47 terms of two documents by `@id` + property, alpha-canonically.
+fn compare_terms(a: &serde_json::Value, b: &serde_json::Value) -> Vec<String> {
+    use eigenius_kernel::witness::alpha_canonicalize_proposition_json;
+    fn terms(v: &serde_json::Value) -> std::collections::BTreeMap<String, serde_json::Value> {
+        let mut out = std::collections::BTreeMap::new();
+        let rs = match v {
+            serde_json::Value::Array(a) => a.clone(),
+            other => vec![other.clone()],
+        };
+        for r in rs {
+            let Some(o) = r.as_object() else { continue };
+            let id = o.get("@id").and_then(|x| x.as_str()).unwrap_or("<anon>");
+            for (k, val) in o {
+                if val.get("ctor").is_some() {
+                    out.insert(format!("{id} :: {k}"), val.clone());
+                }
+            }
+        }
+        out
+    }
+    let (ta, tb) = (terms(a), terms(b));
+    let mut bad = Vec::new();
+    for (k, va) in &ta {
+        match tb.get(k) {
+            None => bad.push(format!("{k}: absent after round trip")),
+            Some(vb) => {
+                if alpha_canonicalize_proposition_json(va)
+                    != alpha_canonicalize_proposition_json(vb)
+                {
+                    bad.push(format!("{k}: not alpha-equal"));
+                }
+            }
+        }
+    }
+    bad
 }
 
 /// Run the D62 felicity gate (`eigenius_kernel::dcg::gate_entry`) over every
