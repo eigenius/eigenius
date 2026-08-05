@@ -88,30 +88,53 @@ if [[ $REPARSE == 1 ]]; then
     # Each variant replays its OWN recording: the reranker's key includes the sentence and its
     # candidate senses, so the edited paragraph is a different question and a shared ranks file
     # would MISS on it and silently fall back to cap-only.
-    "$REPO/target/release/prose-to-eigon" --snapshot "$SNAPSHOT" \
+    # `prose-to-esl`, not `prose-to-eigon`: same pipeline, ESL instead of Eigon-JSON. The chain
+    # artifacts are committed in the language they were authored in, so a reviewer reads the
+    # generated formulas rather than a D47 encoding of them.
+    "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
         --source "$HERE/paragraph.txt"        --pins "$HERE/pins.tsv" \
         --ranks  "$HERE/ranks.json"           --ns   "urn:eigenius:demo:formulas" \
-        --out    "$HERE/claims-intact.json"   --claims "$HERE/claims.tsv" \
-        --rules-out "$HERE/rules.json"        --citations-out "$HERE/argument.json"
-    "$REPO/target/release/prose-to-eigon" --snapshot "$SNAPSHOT" \
+        --out    "$HERE/claims-intact.esl"    --claims "$HERE/claims.tsv" \
+        --rules-out "$HERE/rules.esl"         --citations-out "$HERE/bridges.esl"
+    "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
         --source "$HERE/paragraph-edited.txt" --pins "$HERE/pins.tsv" \
         --ranks  "$HERE/ranks-edited.json"    --ns   "urn:eigenius:demo:formulas" \
-        --out    "$HERE/claims-edited.json"
-    echo "NOTE: argument.json is deliberately NOT regenerated — it is the RECORDED argument."
+        --out    "$HERE/claims-edited.esl"
+    echo "NOTE: inference.esl is NOT regenerated — it is the RECORDED derivation."
 fi
 
 # The citations layer holds one ReasoningSentence per sentence. Loading it as ONE layer makes the
 # edited run fail atomically, which hides the interesting part: only the DERIVED claim should die.
 # Split it so each sentence's lift commits (or fails) on its own.
 SPLIT="$(mktemp -d)"; trap 'rm -rf "$SPLIT"' EXIT
-python3 - "$HERE/bridges.json" "$SPLIT" <<'PYEOF'
-import json, sys
-doc = json.load(open(sys.argv[1]))
-doc = doc if isinstance(doc, list) else [doc]
-for r in doc:
-    n = "s1" if ":s1:" in r["@id"] else "s2"
-    json.dump([r], open(f"{sys.argv[2]}/bridge-{n}.json", "w"), indent=1)
+# Each part keeps the whole `namespace` preamble — aliases are per-file, and a resource block
+# carries no declarations of its own.
+python3 - "$HERE/bridges.esl" "$SPLIT" <<'PYEOF'
+import re, sys
+
+text = open(sys.argv[1]).read()
+head, _, rest = text.partition("\nresource ")
+for block in ("resource " + rest).split("\nresource "):
+    if not block.startswith("resource "):
+        block = "resource " + block
+    # Name the part after the resource's own namespace alias (`s1`, `s2`) — the emitter derives
+    # those from the per-sentence IRI, so the parts stay in step with the sentences.
+    m = re.match(r"resource\s+(\w+):", block)
+    if not m:
+        sys.exit(f"cannot name a bridge part from: {block.splitlines()[0]!r}")
+    open(f"{sys.argv[2]}/bridge-{m.group(1)}.esl", "w").write(head + "\n" + block)
 PYEOF
+
+# `narrate.py` renders a D47 term with concept names substituted, so it needs the ENCODING, not the
+# source. Compile each file once into the scratch dir — the ESL is the committed artifact, the JSON
+# is derived on demand, and there is only ever one copy of the content.
+narrate() {
+    local esl="$1" suffix="$2"
+    local json="$SPLIT/$(basename "${esl%.esl}").json"
+    # The bare binary, not `eig`: `compile` is local-only and refuses when `--endpoint` is set.
+    [[ -f "$json" ]] || "$REPO/target/debug/eigenius" compile "$esl" > "$json"
+    python3 "$HERE/narrate.py" "$json" "$suffix"
+}
 
 hr "1. Vocabulary + the pinned literature rule"
 eig load "$REPO/ontologies/encoding/encoding.esl"
@@ -132,29 +155,29 @@ hr "2. INTACT — the document as written"
 cat "$HERE/paragraph.txt"
 echo
 echo "-- the parsed claims (one enc:EncodedClaim + ProgramTrace per sentence)"
-eig load --branch formulas-intact "$HERE/claims-intact.json"
+eig load --branch formulas-intact "$HERE/claims-intact.esl"
 echo
 echo "   Each sentence is now a FORMULA over classes the chain already held:"
 echo
 echo "   «MSI cancer models had the exonuclease activity of WRN.»"
-python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_1
+narrate "$HERE/claims-intact.esl" claim_1
 echo
 echo "   «MSI cancer models required the helicase activity of WRN.»"
-python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_2
+narrate "$HERE/claims-intact.esl" claim_2
 echo
 echo "   Note the arguments: UMLS concepts and WordNet synsets the graph already"
 echo "   contained. Not strings about them — the classes themselves."
 echo "-- the vocabulary lift: shape rules, then one citation per sentence"
-eig load --branch formulas-intact "$HERE/rules.json"
-eig load --branch formulas-intact "$SPLIT/bridge-s1.json"
-eig load --branch formulas-intact "$SPLIT/bridge-s2.json"
+eig load --branch formulas-intact "$HERE/rules.esl"
+eig load --branch formulas-intact "$SPLIT/bridge-s1.esl"
+eig load --branch formulas-intact "$SPLIT/bridge-s2.esl"
 echo
 echo "-- THE INFERENCE: apply the pinned literature rule to the MEASUREMENT claim"
 echo "   rule (pinned, cited):  HasActivity(WRN, exonuclease) ⟹ RequiresActivity(WRN, helicase)"
-if eig load --branch formulas-intact "$HERE/inference.json"; then
+if eig load --branch formulas-intact "$HERE/inference.esl"; then
     echo
     echo "   concluded proposition:"
-    python3 "$HERE/narrate.py" "$HERE/inference.json" sentence
+    narrate "$HERE/inference.esl" sentence
     echo
     echo "✓ COMMITTED."
     echo "  RequiresActivity(WRN, helicase) is now justified TWICE on this branch:"
@@ -169,16 +192,16 @@ fi
 hr "3. EDITED — the measurement is negated"
 diff <(tr ' ' '\n' < "$HERE/paragraph.txt") \
      <(tr ' ' '\n' < "$HERE/paragraph-edited.txt") || true
-eig load --branch formulas-edited "$HERE/claims-edited.json"
-eig load --branch formulas-edited "$HERE/rules.json"
+eig load --branch formulas-edited "$HERE/claims-edited.esl"
+eig load --branch formulas-edited "$HERE/rules.esl"
 echo
 echo "   the measurement's formula, before and after — the edit is VISIBLE in the term:"
-echo "   before:"; python3 "$HERE/narrate.py" "$HERE/claims-intact.json" claim_1
-echo "   after :"; python3 "$HERE/narrate.py" "$HERE/claims-edited.json" claim_1
+echo "   before:"; narrate "$HERE/claims-intact.esl" claim_1
+echo "   after :"; narrate "$HERE/claims-edited.esl" claim_1
 
 echo
 echo "-- sentence 2's own lift (the ASSERTED route) — untouched by the edit:"
-if eig load --branch formulas-edited "$SPLIT/bridge-s2.json"; then
+if eig load --branch formulas-edited "$SPLIT/bridge-s2.esl"; then
     echo "   ✓ still commits. The document still asserts RequiresActivity(WRN, helicase),"
     echo "     and nothing about sentence 2 changed."
 else
@@ -187,7 +210,7 @@ fi
 
 echo
 echo "-- sentence 1's lift (the MEASUREMENT the derivation stands on):"
-if eig load --branch formulas-edited "$SPLIT/bridge-s1.json"; then
+if eig load --branch formulas-edited "$SPLIT/bridge-s1.esl"; then
     echo "   ✗ UNEXPECTED: the edited measurement should not lift." >&2; exit 1
 else
     echo

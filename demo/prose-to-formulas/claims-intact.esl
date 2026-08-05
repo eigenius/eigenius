@@ -1,0 +1,110 @@
+// Decompiled from Eigon-JSON by `eigenius decompile`.
+
+namespace core = "urn:eigenius:core";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace encoding = "urn:eigenius:encoding";
+namespace formulas = "urn:eigenius:demo:formulas";
+namespace logic = "urn:eigenius:logic";
+namespace ontology = "urn:eigenius:ontology";
+namespace reflection = "urn:eigenius:reflection";
+namespace umlscui = "urn:eigenius:umlscui";
+namespace wn = "urn:eigenius:wn";
+
+resource formulas:unit_1 : encoding:DiscourseUnit {
+    encoding:prose = "MSI cancer models had the exonuclease activity of WRN.";
+    encoding:section = "/home/hm/src/eigenius/eigenius/demo/prose-to-formulas/paragraph.txt (sha256 2109446562cdeb31f816b1d45fadfa38d682e5b5243fbe43704f624f9ca6d28d)";
+    encoding:span_end = 54;
+    encoding:span_start = 0;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource formulas:scoped_1 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:demo:formulas:unit_1";
+}
+
+resource formulas:claim_1 : encoding:EncodedClaim {
+    core:description = "«MSI cancer models had the exonuclease activity of WRN.» — the reading pinned as correct: §(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))";
+    encoding:from_unit = "urn:eigenius:demo:formulas:scoped_1";
+    reflection:canonical_proposition = type_expr(
+        wn:v02203362_t(
+            eigentt:fst(ontology:the(
+                            (exists x0 : wn:n13440063 =>
+                                logic:And(
+                                    ontology:compound_kind(x0, wn:n14606137),
+                                    ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246))
+                                ))
+                        )),
+            ontology:kind_of(
+                (exists x0 : wn:n05890249 =>
+                    ontology:compound_kind(
+                        x0,
+                        (exists x1 : wn:n14239918 =>
+                            ontology:compound_kind(x1, umlscui:C0920269))
+                    ))
+            )
+        )
+    );
+}
+
+resource formulas:trace_1 : reflection:ProgramTrace {
+    reflection:resource = "urn:eigenius:demo:formulas:claim_1";
+    reflection:source = "eigenius-encoding prose-to-eigon: DCG parse (D63) of /home/hm/src/eigenius/eigenius/demo/prose-to-formulas/paragraph.txt chars 0..54 (source sha256 2109446562cdeb31f816b1d45fadfa38d682e5b5243fbe43704f624f9ca6d28d)";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+
+resource formulas:decision_1 : encoding:DecisionPoint {
+    encoding:candidate_count = 1;
+    encoding:decision_unit = "urn:eigenius:demo:formulas:scoped_1";
+    encoding:selected_claim = "urn:eigenius:demo:formulas:claim_1";
+    reflection:rationale = "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose sense-erased skeleton equals the human-verified pin. Structural disambiguation (D62 S4) is open work — this is declared selection, and it fails closed if the pin matches zero or several readings. Pin note: the MEASUREMENT sentence; same shape as the activity sentence";
+}
+
+resource formulas:unit_2 : encoding:DiscourseUnit {
+    encoding:prose = "MSI cancer models required the helicase activity of WRN.";
+    encoding:section = "/home/hm/src/eigenius/eigenius/demo/prose-to-formulas/paragraph.txt (sha256 2109446562cdeb31f816b1d45fadfa38d682e5b5243fbe43704f624f9ca6d28d)";
+    encoding:span_end = 111;
+    encoding:span_start = 55;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource formulas:scoped_2 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:demo:formulas:unit_2";
+}
+
+resource formulas:claim_2 : encoding:EncodedClaim {
+    core:description = "«MSI cancer models required the helicase activity of WRN.» — the reading pinned as correct: §(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))";
+    encoding:from_unit = "urn:eigenius:demo:formulas:scoped_2";
+    reflection:canonical_proposition = type_expr(
+        wn:v02627934_t(
+            eigentt:fst(ontology:the(
+                            (exists x0 : wn:n13440063 =>
+                                logic:And(
+                                    ontology:compound_kind(x0, umlscui:C0920283),
+                                    ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246))
+                                ))
+                        )),
+            ontology:kind_of(
+                (exists x0 : wn:n05890249 =>
+                    ontology:compound_kind(
+                        x0,
+                        (exists x1 : wn:n14239918 =>
+                            ontology:compound_kind(x1, umlscui:C0920269))
+                    ))
+            )
+        )
+    );
+}
+
+resource formulas:trace_2 : reflection:ProgramTrace {
+    reflection:resource = "urn:eigenius:demo:formulas:claim_2";
+    reflection:source = "eigenius-encoding prose-to-eigon: DCG parse (D63) of /home/hm/src/eigenius/eigenius/demo/prose-to-formulas/paragraph.txt chars 55..111 (source sha256 2109446562cdeb31f816b1d45fadfa38d682e5b5243fbe43704f624f9ca6d28d)";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+
+resource formulas:decision_2 : encoding:DecisionPoint {
+    encoding:candidate_count = 1;
+    encoding:decision_unit = "urn:eigenius:demo:formulas:scoped_2";
+    encoding:selected_claim = "urn:eigenius:demo:formulas:claim_2";
+    reflection:rationale = "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose sense-erased skeleton equals the human-verified pin. Structural disambiguation (D62 S4) is open work — this is declared selection, and it fails closed if the pin matches zero or several readings. Pin note: verified 2026-08-03 by structural inspection against snapshot wordnet-umls-aligned-2026-08-03-sigmaproj: subject = the unique activity that is helicase-KIND and of-WRN (compound + PP); object = nested compound MSI-(cancer-model). DIFFERS from the full-scope pin in expected-readings.tsv line 87, which lacked the helicase compound entirely -- this reading is the more complete one.";
+}
+

@@ -211,11 +211,27 @@ change does not fail at all.
 | `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) |
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
 | `literature-rules.esl` | — | the pinned `A → B`, cited, in domain vocabulary |
-| `claims-intact.json` | `prose-to-eigon` | units + encoded claims + ProgramTraces + decision points |
-| `claims-edited.json` | `prose-to-eigon` | the same, from the edited prose |
-| `rules.json` | `--rules-out`, **once** | shape rules — one per distinct (predicate, parse shape) |
-| `bridges.json` | `--citations-out`, **once** | one `ReasoningSentence` per sentence, citing a shape rule |
-| `inference.json` | `--inference-out`, **once** | the CONCLUDED claim — the literature rule applied to the measurement |
+| `claims-intact.esl` | `prose-to-esl` | units + encoded claims + ProgramTraces + decision points |
+| `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
+| `rules.esl` | `--rules-out`, **once** | shape rules — one per distinct (predicate, parse shape) |
+| `bridges.esl` | `--citations-out`, **once** | one `ReasoningSentence` per sentence, citing a shape rule |
+| `inference.esl` | `--inference-out`, **once** | the CONCLUDED claim — the literature rule applied to the measurement |
+
+The generated chain artifacts are **ESL, not Eigon-JSON**. `prose-to-esl` runs the same pipeline as
+`prose-to-eigon` and prints the record as source, so what is committed is the formula a reviewer
+reads rather than a D47 encoding of it:
+
+```
+resource formulas:claim_1 : encoding:EncodedClaim {
+    reflection:canonical_proposition = type_expr(wn:v02203362_t(eigentt:fst(ontology:the(
+        (exists x0 : wn:n13440063 => logic:And(ontology:compound_kind(x0, wn:n14606137),
+        ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246)))))), …));
+}
+```
+
+`eigenius decompile <file>.json` prints any Eigon-JSON document this way; `--verify` recompiles it
+and checks every term is alpha-equal under the normalisation the witness index hashes.
+`kernel/tests/esl_round_trip.rs` runs that check over this directory on every build.
 
 `run.sh --reparse` re-derives the two claims layers from the snapshot instead of using the committed
 fixtures.
@@ -226,7 +242,7 @@ separate work.
 
 ## Why the argument layer is generated once and committed
 
-`argument.json` is the **recorded argument**: what someone concluded, at a point in time, from the
+`bridges.esl` is the **recorded argument**: what someone concluded, at a point in time, from the
 prose as it then read. The claims layers are a function of the prose. Regenerating the argument on
 every run would re-derive it around any edit, and nothing would ever fail to commit — which is the
 one thing the demo exists to show.

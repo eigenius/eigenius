@@ -1,0 +1,38 @@
+// Decompiled from Eigon-JSON by `eigenius decompile`.
+
+namespace core = "urn:eigenius:core";
+namespace inferred = "urn:eigenius:demo:formulas:inferred";
+namespace onco_typed = "urn:eigenius:demo:onco-typed";
+namespace reasoning = "urn:eigenius:reasoning";
+namespace umlscui = "urn:eigenius:umlscui";
+namespace wn = "urn:eigenius:wn";
+
+resource inferred:sentence : reasoning:ReasoningSentence {
+    core:description = "CONCLUDED, not asserted: applying the pinned rule urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase to the claim established by sentence 1 yields the proposition sentence 2 also states. Edit sentence 1 and this stops committing, while the assertion in sentence 2 is untouched.";
+    reasoning:certificate = type_expr(
+        reasoning:app(
+            onco_typed:HasActivity(umlscui:C0388246, wn:n14606137),
+            onco_typed:RequiresActivity(umlscui:C0388246, umlscui:C0920283),
+            reasoning:DeclaredEvidence(
+                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+            ),
+            reasoning:VerifiedEvidence("urn:eigenius:demo:formulas:s1:sentence"),
+            reasoning:declared(
+                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
+                onco_typed:HasActivity(umlscui:C0388246, wn:n14606137)
+                -> onco_typed:RequiresActivity(umlscui:C0388246, umlscui:C0920283),
+                ()
+            ),
+            reasoning:verified(
+                "urn:eigenius:demo:formulas:s1:sentence",
+                onco_typed:HasActivity(umlscui:C0388246, wn:n14606137),
+                ()
+            )
+        )
+    );
+    reasoning:justification = reasoning:App(reasoning:DeclaredEvidence("urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"), reasoning:VerifiedEvidence("urn:eigenius:demo:formulas:s1:sentence"));
+    reasoning:proposition = type_expr(
+        onco_typed:RequiresActivity(umlscui:C0388246, umlscui:C0920283)
+    );
+}
+

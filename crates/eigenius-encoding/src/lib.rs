@@ -33,6 +33,7 @@
 
 pub mod claims;
 pub mod emit;
+pub mod pipeline;
 pub mod select;
 pub mod snapshot;
 

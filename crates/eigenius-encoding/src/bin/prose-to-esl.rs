@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `prose-to-eigon` — parse prose over a lexicon snapshot and write the D62 encoding record as
-//! Eigon-JSON, ready for `eigenius load`.
+//! `prose-to-esl` — parse prose over a lexicon snapshot and write the D62 encoding record as
+//! ESL source — the same record, in the language it was authored in.
 //!
 //! The pipeline lives in [`eigenius_encoding::pipeline`]; this binary only fixes the output
 //! format. See that module for the flags and the fail-closed contract.
@@ -24,10 +24,10 @@ use clap::Parser as ClapParser;
 use eigenius_encoding::pipeline::{run, Args, OutputFormat};
 
 fn main() -> ExitCode {
-    match run(&Args::parse(), OutputFormat::Json) {
+    match run(&Args::parse(), OutputFormat::Esl) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("\nprose-to-eigon: {e}");
+            eprintln!("\nprose-to-esl: {e}");
             ExitCode::FAILURE
         }
     }
