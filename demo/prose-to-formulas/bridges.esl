@@ -310,3 +310,4 @@ resource s2:sentence : reasoning:ReasoningSentence {
     );
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 }
+
