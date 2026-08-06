@@ -108,4 +108,3 @@ resource formulas:decision_2 : encoding:DecisionPoint {
     encoding:selected_claim = "urn:eigenius:demo:formulas:claim_2";
     reflection:rationale = "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose sense-erased skeleton equals the human-verified pin. Structural disambiguation (D62 S4) is open work — this is declared selection, and it fails closed if the pin matches zero or several readings. Pin note: verified 2026-08-03 by structural inspection against snapshot wordnet-umls-aligned-2026-08-03-sigmaproj: subject = the unique activity that is helicase-KIND and of-WRN (compound + PP); object = nested compound MSI-(cancer-model). DIFFERS from the full-scope pin in expected-readings.tsv line 87, which lacked the helicase compound entirely -- this reading is the more complete one.";
 }
-

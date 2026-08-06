@@ -74,4 +74,3 @@ resource formulas:rule_2_trace : reflection:DeclarationTrace {
     reflection:resource = "urn:eigenius:demo:formulas:rule_2";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
-

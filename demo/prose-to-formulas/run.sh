@@ -53,6 +53,21 @@ cd "$REPO"
 cargo build -q -p eigenius-cli
 eig() { "$REPO/target/debug/eigenius" --endpoint "$ENDPOINT" "$@"; }
 
+# `eig load` that names its artifact first. The narration below refers to layers by ROLE ("the
+# shape rules", "sentence 1's lift"); printing the path ties each role to a file a reviewer can
+# open. The split bridge parts are shown against their source: only `bridges.esl` is committed,
+# the per-sentence parts are cut from it into a scratch dir below.
+eig_load() {
+    local branch=()
+    if [[ "$1" == "--branch" ]]; then branch=(--branch "$2"); shift 2; fi
+    local shown="${1#"$REPO"/}"
+    if [[ "$1" == "$SPLIT"/* ]]; then
+        shown="demo/prose-to-formulas/bridges.esl → $(basename "$1")"
+    fi
+    printf '\033[2m   loading %s\033[0m\n' "$shown"
+    eig load "${branch[@]}" "$1"
+}
+
 hr() { printf '\n\033[1m%s\033[0m\n' "── $* ─────────────────────────────────────────"; }
 
 hr "0. Kernel on the LEXICON snapshot"
@@ -137,11 +152,11 @@ narrate() {
 }
 
 hr "1. Vocabulary + the pinned literature rule"
-eig load "$REPO/ontologies/encoding/encoding.esl"
-eig load "$HERE/onco-typed.esl"
+eig_load "$REPO/ontologies/encoding/encoding.esl"
+eig_load "$HERE/onco-typed.esl"
 # A rule from the literature — NOT from this document. Hand-authorable because it is in domain
 # vocabulary; a rule whose antecedent had to be a PARSE would be inexpressible in ESL.
-eig load "$HERE/literature-rules.esl"
+eig_load "$HERE/literature-rules.esl"
 BASE="$(eig branch show main --json | grep -o '"head_layer": *"[^"]*"' | cut -d'"' -f4)"
 [[ -n "$BASE" ]] || { echo "ERROR: could not read main's head layer" >&2; exit 1; }
 echo "base head: $BASE"
@@ -155,7 +170,7 @@ hr "2. INTACT — the document as written"
 cat "$HERE/paragraph.txt"
 echo
 echo "-- the parsed claims (one enc:EncodedClaim + ProgramTrace per sentence)"
-eig load --branch formulas-intact "$HERE/claims-intact.esl"
+eig_load --branch formulas-intact "$HERE/claims-intact.esl"
 echo
 echo "   Each sentence is now a FORMULA over classes the chain already held:"
 echo
@@ -168,13 +183,13 @@ echo
 echo "   Note the arguments: UMLS concepts and WordNet synsets the graph already"
 echo "   contained. Not strings about them — the classes themselves."
 echo "-- the vocabulary lift: shape rules, then one citation per sentence"
-eig load --branch formulas-intact "$HERE/rules.esl"
-eig load --branch formulas-intact "$SPLIT/bridge-s1.esl"
-eig load --branch formulas-intact "$SPLIT/bridge-s2.esl"
+eig_load --branch formulas-intact "$HERE/rules.esl"
+eig_load --branch formulas-intact "$SPLIT/bridge-s1.esl"
+eig_load --branch formulas-intact "$SPLIT/bridge-s2.esl"
 echo
 echo "-- THE INFERENCE: apply the pinned literature rule to the MEASUREMENT claim"
 echo "   rule (pinned, cited):  HasActivity(WRN, exonuclease) ⟹ RequiresActivity(WRN, helicase)"
-if eig load --branch formulas-intact "$HERE/inference.esl"; then
+if eig_load --branch formulas-intact "$HERE/inference.esl"; then
     echo
     echo "   concluded proposition:"
     narrate "$HERE/inference.esl" sentence
@@ -192,8 +207,8 @@ fi
 hr "3. EDITED — the measurement is negated"
 diff <(tr ' ' '\n' < "$HERE/paragraph.txt") \
      <(tr ' ' '\n' < "$HERE/paragraph-edited.txt") || true
-eig load --branch formulas-edited "$HERE/claims-edited.esl"
-eig load --branch formulas-edited "$HERE/rules.esl"
+eig_load --branch formulas-edited "$HERE/claims-edited.esl"
+eig_load --branch formulas-edited "$HERE/rules.esl"
 echo
 echo "   the measurement's formula, before and after — the edit is VISIBLE in the term:"
 echo "   before:"; narrate "$HERE/claims-intact.esl" claim_1
@@ -201,7 +216,7 @@ echo "   after :"; narrate "$HERE/claims-edited.esl" claim_1
 
 echo
 echo "-- sentence 2's own lift (the ASSERTED route) — untouched by the edit:"
-if eig load --branch formulas-edited "$SPLIT/bridge-s2.esl"; then
+if eig_load --branch formulas-edited "$SPLIT/bridge-s2.esl"; then
     echo "   ✓ still commits. The document still asserts RequiresActivity(WRN, helicase),"
     echo "     and nothing about sentence 2 changed."
 else
@@ -210,15 +225,36 @@ fi
 
 echo
 echo "-- sentence 1's lift (the MEASUREMENT the derivation stands on):"
-if eig load --branch formulas-edited "$SPLIT/bridge-s1.esl"; then
+if eig_load --branch formulas-edited "$SPLIT/bridge-s1.esl"; then
     echo "   ✗ UNEXPECTED: the edited measurement should not lift." >&2; exit 1
 else
     echo
-    echo "   ✓ REJECTED — and with it the derivation."
+    echo "   ✓ REJECTED."
     echo
     echo "     Sentence 1 parses to a different proposition, so no IsDerivedAs witness"
-    echo "     matches the one its lift names. The inferred claim cited that lift as its"
-    echo "     antecedent, so it has nothing left to stand on."
+    echo "     matches the one its lift names — bridges.esl asks for claim_1 carrying the"
+    echo "     INTACT term, and claims-edited.esl committed that term with a trailing"
+    echo "     '→ False'. The witness key hashes the proposition, so one line of formula"
+    echo "     is enough to miss."
+fi
+
+# The derivation itself, attempted on the edited branch. Step 2 committed it; here its antecedent
+# never came into existence, so the same file is refused. Loading it is what makes the dependency
+# VISIBLE rather than asserted in narration — without this the demo only shows the lift failing and
+# leaves the audience to take the consequence on trust.
+echo
+echo "-- and THE INFERENCE that stood on that lift — the same file step 2 committed:"
+if eig_load --branch formulas-edited "$HERE/inference.esl"; then
+    echo "   ✗ UNEXPECTED: the inference must not commit without sentence 1's lift." >&2; exit 1
+else
+    echo
+    echo "   ✓ REJECTED — the derivation is gone with the measurement it stood on."
+    echo
+    echo "     inference.esl cites 'urn:eigenius:demo:formulas:s1:sentence' as the warrant"
+    echo "     for its antecedent. That lift was just refused, so on this branch the IRI"
+    echo "     names nothing and the IsVerifiedAs witness the certificate needs cannot be"
+    echo "     synthesised. (The kernel reports the gate verdict, not the missing witness;"
+    echo "     the ValidateJustification diagnostic is not surfaced through Load today.)"
     echo
     echo "     The ASSERTED route survived; the DERIVED one did not. That asymmetry is"
     echo "     the point — a conclusion the graph produced carries a live dependency on"

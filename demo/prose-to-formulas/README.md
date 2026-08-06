@@ -7,6 +7,11 @@ until the kernel refuses it.
 ./demo/prose-to-formulas/run.sh
 ```
 
+To run including parsing:
+```bash
+EIGENIUS_DB_SNAPSHOT="$PWD/../db-snapshot/wordnet-umls-aligned-2026-08-03-specpoly" ./demo/prose-to-formulas/run.sh --reparse
+```
+
 **Prerequisite: a lexicon snapshot.** The encoded claims' propositions are built from lexicon axioms
 (`wn:v02627934_t` is the verb sense of *require*), so the chain they commit to must be the one that
 *defines* those axioms — a bare core+domain chain fails at the D47 decode with `ConstRef references

@@ -1,14 +1,30 @@
-// A rule PINNED FROM THE LITERATURE — not derived from this document.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// literature-rules.esl — a rule PINNED FROM THE LITERATURE, not derived from this document.
+//
+// In English:
+//
+//   If a model has WRN's exonuclease activity, then it requires WRN's helicase activity.
+//
+//   HasActivity(WRN, exonuclease)  →  RequiresActivity(WRN, helicase)
 //
 // This is the piece that makes a sentence justifiable by INFERENCE rather than by having been
 // written. The document's activity sentence asserts its own content; the same content also FOLLOWS
 // from the measurement sentence plus this rule, and that second justification stands whether or not
-// the document says it.
+// the document says it. `inference.esl` is the step that performs the application.
 //
-// Note what makes it hand-authorable at all: the rule is in DOMAIN vocabulary, so its antecedent is
-// `HasActivity(WRN, exonuclease)` — plain class references. A rule whose antecedent had to be a
-// PARSE would be inexpressible in ESL, which has no syntax for the Σ-binders and projections a DCG
-// term contains. That is why the parse-shaped step is a generated bridge and this step is not.
+// ILLUSTRATIVE, NOT A FINDING. This implication is invented for the demo — it is not a result of
+// Chan et al. The demo is about how a sentence becomes justified, not about WRN biology. The
+// `rationale` field below says so on the chain, where a reader of the graph will see it.
+//
+// Why this rule is hand-authorable at all, when the per-sentence lifts in `bridges.esl` are
+// machine-generated: this rule is stated in DOMAIN vocabulary, so its antecedent is
+// `HasActivity(WRN, exonuclease)` — plain class references anyone can type. A rule whose antecedent
+// had to be a PARSE would be inexpressible in ESL, which has no syntax for the Σ-binders and
+// projections a DCG term contains. That is the dividing line between what is authored here and
+// what is generated: parse-shaped steps are generated bridges, domain-shaped steps are not.
+//
+// Loaded onto `main` before the two demo branches are cut, so both branches share it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 
 namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
@@ -16,16 +32,60 @@ namespace onco2      = "urn:eigenius:demo:onco-typed";
 namespace umlscui    = "urn:eigenius:umlscui";
 namespace wn         = "urn:eigenius:wn";
 
+// The classes the rule quantifies over, drawn from two different lexicons the graph already held:
+//
+//   umlscui:C0388246   WRN           (a UMLS concept)
+//   wn:n14606137       exonuclease   (a WordNet synset)
+//   umlscui:C0920283   helicase      (a UMLS concept)
+
+// ── The rule ──────────────────────────────────────────────────────────────────────────────────
+//
+// `reflection:DeclaredResource` is the epistemic class for something a human asserts as an axiom,
+// definition, or design decision — as opposed to something observed, derived, or machine-verified.
+// The class requires `declared_by` and recommends `rationale` and `timestamp`. Nothing about a
+// Declared resource claims it is true; it claims someone stood behind it, and says who.
 resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
+    // WHO stands behind the rule. A citation slot: in a real chain this would identify the paper.
     reflection:declared_by = "literature:illustrative-dependency-rule";
+
+    // WHY, recorded on chain rather than in a comment a reader of the graph would never see.
     reflection:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
 
+    // WHAT the rule says, as a machine-checkable proposition rather than prose. This is the field
+    // that turns a citation into something the kernel can apply.
+    //
+    // `canonical_proposition` is optional in general — when absent, a resource's witness defaults
+    // to the bare term `Asserts(iri)`, which records THAT something was declared without exposing
+    // its content. Spelling out the implication here is what makes the rule usable as the `A -> B`
+    // premise of an `app` step.
+    //
+    // It must match, byte for byte after D47 encoding, the implication written out in
+    // `inference.esl`'s `reasoning:declared(...)` sub-proof — the witness key hashes the
+    // proposition, so a rule that says something even slightly different is a different rule.
     reflection:canonical_proposition = type_expr(
         onco2:HasActivity(umlscui:C0388246, wn:n14606137)
           -> onco2:RequiresActivity(umlscui:C0388246, umlscui:C0920283)
     );
 }
 
+// ── The trace ─────────────────────────────────────────────────────────────────────────────────
+//
+// Why a SECOND resource, when the rule above already says who declared it and why:
+//
+// The kernel's witness index is built by walking TRACE-class resources, not the resources they
+// point at. A `DeclarationTrace` is what emits `IsDeclaredAs(target_iri, P)` — the trace supplies
+// the target via `reflection:resource`, and P is read off that target's `canonical_proposition`.
+// The rule resource on its own mints nothing.
+//
+// That witness is exactly what `inference.esl` consumes. Its certificate contains
+// `reasoning:declared("…:lit_rule_exo_implies_helicase", A -> B, ())`, and the `()` is a slot the
+// kernel fills by looking up `(Declared, this IRI, hash of A -> B)` in the index. `IsDeclaredAs`
+// has zero constructors, so no author can supply an inhabitant — the lookup IS the type-check.
+// Delete this trace and the intact branch's inference stops committing.
+//
+// The trace repeats `declared_by` rather than inheriting it: the class requires `resource`,
+// `declared_by`, and `timestamp`. The timestamp is fixed rather than generated so the demo's
+// artifacts are byte-reproducible across runs.
 resource onco2:lit_rule_exo_implies_helicase_trace : reflection:DeclarationTrace {
     reflection:resource    = onco2:lit_rule_exo_implies_helicase;
     reflection:declared_by = "literature:illustrative-dependency-rule";
