@@ -24,7 +24,7 @@ The platform distinguishes four kinds of knowledge, each with stronger guarantee
 When a result matters — a clinical trial conclusion, a materials-property prediction, a regulatory submission — you can tell what has been verified end-to-end versus what's plausible-sounding text without grounding.
 
 Theoretical foundation: dependent type theory + Grothendieck institutions, integrating different formal logics and scientific disciplines under one typed substrate. [Eigenius: A Typed Knowledge-Graph
-DBMS Wwith Epistemic Stratification
+DBMS with Epistemic Stratification
 and Institution-Mediated Reasoning](https://arxiv.org/abs/2608.04457) sketches the academic framing.
 
 > This is still a very early stage of this project. Anticipate
