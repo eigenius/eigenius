@@ -1,0 +1,38 @@
+// Decompiled from Eigon-JSON by `eigenius decompile`.
+
+namespace eigentt = "urn:eigenius:eigentt";
+namespace formulas = "urn:eigenius:demo:formulas";
+namespace lexicon = "urn:eigenius:lexicon";
+namespace logic = "urn:eigenius:logic";
+namespace onco_typed = "urn:eigenius:demo:onco-typed";
+namespace ontology = "urn:eigenius:ontology";
+namespace reflection = "urn:eigenius:reflection";
+namespace wn = "urn:eigenius:wn";
+
+resource formulas:rule_general : reflection:DeclaredResource {
+    reflection:canonical_proposition = type_expr(
+        forall (v0 : Set) =>
+            forall (v1 : Set) =>
+                forall (v2 : lexicon:Entity) =>
+                    wn:v02203362_t(
+                        eigentt:fst(ontology:the(
+                                        (exists x0 : wn:n13440063 =>
+                                            logic:And(
+                                                ontology:compound_kind(x0, v1),
+                                                ontology:prep_of(x0, ontology:kind_of(v0))
+                                            ))
+                                    )),
+                        v2
+                    )
+                    -> onco_typed:HasActivity(v0, v1)
+    );
+    reflection:declared_by = "demo:hand-authored-eigon-json";
+    reflection:rationale = "Hand-authored directly in Eigon-JSON. Abstracts the SUBJECT as well as the gene and activity, so it covers any context — not only MSI cancer models. Not expressible in ESL: the antecedent is a DCG term with Sigma-binders and a .1 projection.";
+}
+
+resource formulas:rule_general_trace : reflection:DeclarationTrace {
+    reflection:declared_by = "demo:hand-authored-eigon-json";
+    reflection:resource = "urn:eigenius:demo:formulas:rule_general";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+

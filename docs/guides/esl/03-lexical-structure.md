@@ -16,19 +16,28 @@ Block comments do not nest.
 
 ## 3.2. Keywords
 
-Keywords are case-sensitive lowercase, except for `Construct` which is title-case (it occupies an expression position alongside identifiers and is capitalised to match the convention for type-construction operations).
+Keywords are case-sensitive lowercase, except for `Construct` (it occupies an expression position alongside identifiers and is capitalised to match the convention for type-construction operations) and the sort names `Prop`, `Set`, `Type`.
 
 **Top-level (declaration) keywords** mark the start of a top-level form:
 
 ```
-namespace  class  property  resource  program  data  codata
+namespace  class  property  resource  program  data  codata  axiom  macro
+merge_comorphism  text_index  vector_index
 ```
 
 **Expression keywords** appear inside `program` bodies:
 
 ```
-let  case  match  returning  Construct  map  reduce  corecord
+let  case  match  returning  Construct  map  reduce  corecord  lambda
 ```
+
+**Type and binder keywords** appear in type positions — `axiom` statements, `data` constructor types, and [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) blocks:
+
+```
+pi  forall  exists  fun  alias  in  Prop  Set  Type
+```
+
+`forall` is an alias for `pi` with proposition-authoring semantics — same AST. `exists` opens the Σ (dependent-pair) binder, its dual ([§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions)).
 
 **Boolean literals** lex as `BoolLit` tokens:
 
@@ -101,7 +110,7 @@ The lexer is intentionally minimal:
 For readers coming from the [EigenQL guide](../eigenql/03-lexical-structure.md), the differences are:
 
 - ESL has **no `?` variable prefix** — variables and property names look identical to identifiers (parser disambiguates by position).
-- ESL keywords are **lowercase** (except `Construct`); EigenQL keywords are **uppercase** (`MATCH`, `WHERE`, etc.).
+- ESL keywords are **lowercase** (except `Construct` and the sort names `Prop` / `Set` / `Type`); EigenQL keywords are **uppercase** (`MATCH`, `WHERE`, etc.).
 - ESL has **two lambda forms** (`\` and `λ`); EigenQL has no anonymous functions.
 - ESL has the **`<` token** for size bounds; EigenQL uses `<` only as a comparison operator.
 - ESL has an explicit **`Construct` keyword**; EigenQL relies on `RETURN [Class] { ... }` for typed result construction.

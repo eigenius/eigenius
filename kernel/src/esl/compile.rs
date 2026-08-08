@@ -379,6 +379,7 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
 ///   `Arrow`) recurse into their children unchanged.
 fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) -> ast::TypeExpr {
     match typ {
+        ast::TypeExpr::Unit { .. } => typ.clone(),
         ast::TypeExpr::Ref { name, args, pos } => {
             if name.namespace.is_none() && args.is_empty() {
                 if let Some(bound) = env.get(&name.name) {
@@ -443,6 +444,26 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
             ast::TypeExpr::Pi {
                 params: new_params,
                 codomain: Box::new(expand_aliases(codomain, &inner)),
+                pos: pos.clone(),
+            }
+        }
+        ast::TypeExpr::Sigma { params, body, pos } => {
+            let mut inner = env.clone();
+            let new_params: Vec<_> = params
+                .iter()
+                .map(|p| {
+                    let new_typ = expand_aliases(&p.typ, &inner);
+                    inner.remove(&p.name);
+                    ast::TypedParam {
+                        name: p.name.clone(),
+                        typ: new_typ,
+                        pos: p.pos.clone(),
+                    }
+                })
+                .collect();
+            ast::TypeExpr::Sigma {
+                params: new_params,
+                body: Box::new(expand_aliases(body, &inner)),
                 pos: pos.clone(),
             }
         }
@@ -1029,6 +1050,12 @@ impl Compiler {
             return self.compile_type_expr(&expanded, scope);
         }
         match typ {
+            ast::TypeExpr::Unit { pos } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "the unit value `()` is a TERM, not a type — it is only meaningful inside \
+                 `type_expr(...)`"
+                    .to_string(),
+            )),
             ast::TypeExpr::Ref { name, args, .. } => {
                 let resolved = if name.namespace.is_none() {
                     let n = name.name.as_str();
@@ -1139,6 +1166,12 @@ impl Compiler {
             // produces an embedded `InductiveArgType`). The kind
             // slot accepts both string and embedded forms — the
             // decoder dispatches on the value's shape.
+            ast::TypeExpr::Sigma { pos, .. } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "`exists` (Sigma) is only available inside `type_expr(...)`, which lowers to the \
+                 D47 ctor encoding; the resource-shaped type language has no binder for it"
+                    .to_string(),
+            )),
             ast::TypeExpr::Pi {
                 params, codomain, ..
             } => {
@@ -1308,11 +1341,50 @@ impl Compiler {
             return self.lower_type_expr_to_exp(&expanded, scope);
         }
         match typ {
+            ast::TypeExpr::Unit { .. } => Ok(Exp::Unit),
+            ast::TypeExpr::Sigma { params, body, .. } => {
+                // Nested `Exp::Sig`, rightmost binder innermost — the mirror of `Pi` below.
+                let mut working = scope.clone();
+                let mut doms = Vec::with_capacity(params.len());
+                for p in params {
+                    doms.push((
+                        p.name.clone(),
+                        self.lower_type_expr_to_exp(&p.typ, &working)?,
+                    ));
+                    working.insert(p.name.as_str());
+                }
+                let mut acc = self.lower_type_expr_to_exp(body, &working)?;
+                for (name, dom) in doms.into_iter().rev() {
+                    acc = Exp::Sig(
+                        crate::nbe::term::Patt::Var(name),
+                        Box::new(dom),
+                        Box::new(acc),
+                    );
+                }
+                Ok(acc)
+            }
             ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(match kind {
                 ast::SortKind::Prop => 0,
                 ast::SortKind::Set => 1,
                 ast::SortKind::Type(n) => n + 1,
             })),
+            // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_json`. Both paths
+            // are live: `axiom X : T` lowers through here, `type_expr(...)` in a resource
+            // property through the JSON encoder.
+            ast::TypeExpr::Ref { name, args, .. }
+                if args.len() == 1
+                    && matches!(
+                        self.resolve(name).as_deref(),
+                        Ok("urn:eigenius:eigentt:fst") | Ok("urn:eigenius:eigentt:snd")
+                    ) =>
+            {
+                let inner = self.lower_type_expr_to_exp(&args[0], scope)?;
+                Ok(if self.resolve(name)?.ends_with(":fst") {
+                    Exp::Fst(Box::new(inner))
+                } else {
+                    Exp::Snd(Box::new(inner))
+                })
+            }
             ast::TypeExpr::Ref { name, args, .. } => {
                 let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
                 if is_bound {
@@ -1573,6 +1645,7 @@ impl Compiler {
         };
 
         match typ {
+            ast::TypeExpr::Unit { .. } => Ok(serde_json::json!({"ctor": "UnitVal", "args": []})),
             ast::TypeExpr::Lambda { params, body, .. } => {
                 // Mirror the lowering's scope-threading so later params
                 // can mention earlier binders. Each dom is encoded
@@ -1596,6 +1669,28 @@ impl Compiler {
                         "ctor": "Lam",
                         "args": [name, dom, acc],
                     });
+                }
+                Ok(acc)
+            }
+            ast::TypeExpr::Sigma { params, body, .. } => {
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut binder_doms: Vec<(String, serde_json::Value)> =
+                    Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    binder_doms.push((
+                        p.name.clone(),
+                        self.encode_type_expr_to_json(&p.typ, &local)?,
+                    ));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut acc = self.encode_type_expr_to_json(body, &inner_scope)?;
+                for (name, dom) in binder_doms.into_iter().rev() {
+                    acc = json!({ "ctor": "Sig", "args": [name, dom, acc] });
                 }
                 Ok(acc)
             }
@@ -1669,6 +1764,27 @@ impl Compiler {
                     "ctor": "Pi",
                     "args": [name.clone(), dom_json, body_json],
                 }))
+            }
+            // Sigma ELIMINATION. `eigentt:fst(p)` / `eigentt:snd(p)` are surface spellings of
+            // the `Fst`/`Snd` term nodes, not axioms — an axiom would be opaque and never
+            // reduce, so `fst(pair)` would not compute. Written as pseudo-application because
+            // `TypeExpr` has no postfix form at all; a `.1` / `.fst` postfix could be added
+            // later and would desugar to these same nodes, leaving encoded terms identical.
+            ast::TypeExpr::Ref { name, args, .. }
+                if args.len() == 1
+                    && matches!(
+                        self.resolve(name).as_deref(),
+                        Ok("urn:eigenius:eigentt:fst") | Ok("urn:eigenius:eigentt:snd")
+                    ) =>
+            {
+                let resolved = self.resolve(name)?;
+                let ctor = if resolved.ends_with(":fst") {
+                    "Fst"
+                } else {
+                    "Snd"
+                };
+                let inner = self.encode_type_expr_to_json(&args[0], scope)?;
+                Ok(json!({ "ctor": ctor, "args": [inner] }))
             }
             ast::TypeExpr::Ref { name, args, .. } => {
                 // Mirror `lower_type_expr_to_exp`'s Ref resolution: bound
@@ -6004,5 +6120,75 @@ mod tests {
                 .any(|e| format!("{e:?}").contains("expects 2 argument")),
             "diagnostic should name the expected vs actual arity: got {err:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod sigma_surface_tests {
+    use crate::esl;
+
+    fn axiom_statement(src: &str) -> serde_json::Value {
+        let rs = esl::compile(src).expect("compiles");
+        let a = rs
+            .iter()
+            .find(|r| r.id().is_some_and(|i| i.as_str().ends_with(":t")))
+            .expect("axiom resource");
+        match a
+            .get(&crate::ontology::iri::Iri::parse("urn:eigenius:eigentt:axiom_statement").unwrap())
+            .expect("axiom_statement")
+        {
+            crate::ontology::resource::Value::Json(j) => j.clone(),
+            other => panic!("expected Json, got {other:?}"),
+        }
+    }
+
+    const NS: &str = r#"
+        namespace core = "urn:eigenius:core";
+        namespace eigentt = "urn:eigenius:eigentt";
+        namespace p = "urn:eigenius:probe";
+    "#;
+
+    /// `exists x : T => B` is the Sigma binder — the dual of `forall`, and the form every
+    /// definite description the DCG produces needs (`the(Sig x : C. P(x)).1`).
+    #[test]
+    fn exists_lowers_to_sig() {
+        let j = axiom_statement(&format!(
+            "{NS} axiom p:t : exists x : core:string => core:string"
+        ));
+        assert_eq!(j["ctor"], "Sig", "got {j}");
+        assert_eq!(j["args"][0], "x");
+    }
+
+    /// Binders nest rightmost-innermost, exactly as `forall` does.
+    #[test]
+    fn exists_binder_list_nests_like_forall() {
+        let j = axiom_statement(&format!(
+            "{NS} axiom p:t : exists x : core:string, y : core:string => core:string"
+        ));
+        assert_eq!(j["ctor"], "Sig");
+        assert_eq!(j["args"][0], "x");
+        assert_eq!(j["args"][2]["ctor"], "Sig");
+        assert_eq!(j["args"][2]["args"][0], "y");
+    }
+
+    /// `eigentt:fst` / `eigentt:snd` are surface spellings of the projection NODES, not
+    /// axioms — an axiom would be opaque and never reduce, so `fst(pair)` would not compute.
+    #[test]
+    fn eigentt_fst_and_snd_lower_to_projection_nodes() {
+        for (name, ctor) in [("fst", "Fst"), ("snd", "Snd")] {
+            let j = axiom_statement(&format!(
+                "{NS} axiom p:t : eigentt:{name}(exists x : core:string => core:string)"
+            ));
+            assert_eq!(j["ctor"], ctor, "{name} -> {j}");
+            assert_eq!(j["args"][0]["ctor"], "Sig");
+        }
+    }
+
+    /// A one-argument call to anything else stays an ordinary application — the
+    /// interception must not swallow user functions.
+    #[test]
+    fn only_the_eigentt_projections_are_intercepted() {
+        let j = axiom_statement(&format!("{NS} axiom p:t : core:Asserts(core:string)"));
+        assert_eq!(j["ctor"], "App", "got {j}");
     }
 }

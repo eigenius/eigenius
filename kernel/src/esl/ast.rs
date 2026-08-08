@@ -529,6 +529,29 @@ pub enum TypeExpr {
         body: Box<TypeExpr>,
         pos: Position,
     },
+    /// Dependent PAIR binder: `exists x_1 : T_1, ..., x_N : T_N . B`.
+    ///
+    /// Compiles to N nested `Exp::Sig`, exactly as `Pi`/`forall` compiles to nested
+    /// `Exp::Pi`. Named `exists` by analogy with `forall` (which is itself an alias for
+    /// `pi`) — a Sigma in Prop position IS the existential, and the first projection
+    /// `eigentt:fst` is what recovers the witness.
+    ///
+    /// The DCG parser produces these constantly — every definite description is
+    /// `the(Sig x : C. P(x)).1` — so without this variant no parsed proposition could be
+    /// written in ESL at all.
+    /// The unit VALUE `()` — `Exp::Unit`, the sole inhabitant of `One`.
+    ///
+    /// Hand-written certificate terms normally omit it (the kernel synthesises the slot in
+    /// e.g. `declared(bridge, P)`), so this exists mainly so a printer can emit back what the
+    /// kernel encoded and have it reparse — see `esl::print`.
+    Unit {
+        pos: Position,
+    },
+    Sigma {
+        params: Vec<TypedParam>,
+        body: Box<TypeExpr>,
+        pos: Position,
+    },
     /// D37 §3.5 — value-typed Pi binder:
     /// `pi x_1 : T_1, ..., x_N : T_N => U`. Compiles to N nested
     /// single-parameter `Exp::Pi` nodes; the rightmost `U` is the
@@ -637,6 +660,8 @@ impl TypeExpr {
             | TypeExpr::Arrow { pos, .. }
             | TypeExpr::BinderArrow { pos, .. }
             | TypeExpr::Pi { pos, .. }
+            | TypeExpr::Sigma { pos, .. }
+            | TypeExpr::Unit { pos, .. }
             | TypeExpr::Sort { pos, .. }
             | TypeExpr::Lambda { pos, .. }
             | TypeExpr::Alias { pos, .. }

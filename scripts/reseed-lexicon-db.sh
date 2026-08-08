@@ -65,11 +65,29 @@ DICT="references/WordNet-3.0/dict"
 UMLS_ALL=0
 BUILD_IMAGE=1
 SNAPSHOT_DIR=""
+# Bytes of ESL per concept chunk = bytes per LAYER COMMIT. Empty ⇒ leave the importer's own default
+# (100 MiB, sized against the kernel's 128 MiB gRPC Load limit).
+#
+# **Do not reach for this to control memory.** It was added on 2026-08-03 on the theory that peak RSS
+# was a per-commit transient, so smaller chunks would cap it. Measured (WordNet chain only, 1 s
+# sampling, 15 s idle after every commit — `docs/notes/2026-08-03-reseed-memory-profile.md`):
+#
+#   chunk 001 (100 MiB) → 6.7 GB ; idle 15 s → NO release
+#   chunk 002 (101 MiB) → 15.4 GB ; idle 15 s → NO release
+#   all loads finished, container idle 1 min later → still 15.39 GB
+#
+# Memory is RETAINED per layer, not transient, so total resident tracks total data loaded rather than
+# chunk size. Worse, chunk 002 cost more than 001 on both axes (+8.7 GB vs +6.7 GB; 111 s vs 55 s)
+# for the same bytes, so there is a chain-DEPTH term too — and smaller chunks mean MORE layers. This
+# knob most likely makes the problem worse. It stays only because chunk size is a legitimate thing to
+# vary when the gRPC limit or a partial-load retry demands it.
+SPLIT_BYTES="${SPLIT_BYTES:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umls-all)     UMLS_ALL=1; shift ;;
     --no-build)     BUILD_IMAGE=0; shift ;;
     --snapshot-dir) SNAPSHOT_DIR="$2"; shift 2 ;;
+    --split-bytes)  SPLIT_BYTES="$2"; shift 2 ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -155,8 +173,11 @@ UMLS_DROP_ARGS=()
 # concept-reading of a compound; coverage-safe. Opt-out with DROP_CHV_REDUNDANT=0.
 UMLS_CHV_ARGS=()
 [[ "${DROP_CHV_REDUNDANT:-1}" == "1" ]] && UMLS_CHV_ARGS+=(--drop-chv-redundant)
+UMLS_SPLIT_ARGS=()
+[[ -n "$SPLIT_BYTES" ]] && UMLS_SPLIT_ARGS=(--split-bytes "$SPLIT_BYTES")
 "$ROOT/target/release/umls-import" --meta-dir "$UMLS_META" --version "$UMLS_RELEASE" \
-  --out-dir umls-chain "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}" "${UMLS_DROP_ARGS[@]}" "${UMLS_CHV_ARGS[@]}"
+  --out-dir umls-chain "${UMLS_SPLIT_ARGS[@]}" \
+  "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}" "${UMLS_DROP_ARGS[@]}" "${UMLS_CHV_ARGS[@]}"
 
 # Guard: the base layer must declare EVERY semantic type the concept chunks reference, else the
 # kernel rejects the chunks (UnresolvedClassReference, fail-closed). This catches the dangling-STY

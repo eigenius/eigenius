@@ -1,0 +1,25 @@
+# Pinned readings for the demo paragraph — copied VERBATIM from
+# experiments/parsing/expected-readings.tsv (file lines 137, 87, 88).
+# sentence <TAB> sense-erased skeleton of the human-verified reading <TAB> verification note
+We found that WRN was selectively essential in MSI models.	§(And(gt(§(§), §), prep_in(§, kind_of(ΣG#0:§. compound_kind(G#0, §)))), speaker)	verified 2026-07-29 (audit): `in MSI models` modifies WRN's essentiality — And(essential(WRN), prep_in(WRN, MSI-model)) — WRN the GENE. Siblings attach the PP to the matrix subject `we`, or read a spurious `Washington state` / `named WA` for WRN.
+MSI cancer models required the helicase activity of WRN.	§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))	verified 2026-07-22 (gloss)
+MSI cancer models did not require the exonuclease activity of WRN.	§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False	verified 2026-07-22 (gloss)
+#
+# The EDITED third sentence. Its skeleton is IDENTICAL to the helicase sentence's:
+# same bracketing, and senses are erased. That is the point — deleting the negation
+# is invisible to every structural check, and shows up only in the proposition.
+#
+# ── Re-pinned for THIS snapshot (default UMLS scope + alignment) ──────────────
+# The pins above were verified against the full --umls-all aligned snapshot. On a
+# narrower sense inventory the parser reaches DIFFERENT (and here, better) readings.
+# `select_pinned` fails closed on a mismatch, which is how this was caught rather
+# than silently encoded.
+MSI cancer models required the helicase activity of WRN.	§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))	verified 2026-08-03 by structural inspection against snapshot wordnet-umls-aligned-2026-08-03-sigmaproj: subject = the unique activity that is helicase-KIND and of-WRN (compound + PP); object = nested compound MSI-(cancer-model). DIFFERS from the full-scope pin in expected-readings.tsv line 87, which lacked the helicase compound entirely -- this reading is the more complete one.
+MSI cancer models did not require the exonuclease activity of WRN.	§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False	verified 2026-08-03 by structural inspection: IDENTICAL to the helicase sentence's reading except for the trailing `→ False`. The negation is the ONLY structural difference, which is what makes deleting it a semantic edit no syntactic check can see.
+MSI cancer models required the exonuclease activity of WRN.	§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))	the EDITED sentence. Its skeleton equals the helicase sentence's exactly (senses are erased), so structure cannot distinguish them — only the proposition can.
+#
+# The measurement sentence. 20 readings survive (the adjective + definite NP is more
+# ambiguous than the compound pattern); this is the one where the subject is the nested
+# compound MSI-(cancer-model) and the object is the-high-concentration-of-thymidine.
+MSI cancer models had the exonuclease activity of WRN.	§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))	the MEASUREMENT sentence; same shape as the activity sentence
+MSI cancer models did not have the exonuclease activity of WRN.	§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False	the EDITED measurement

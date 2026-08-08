@@ -128,6 +128,8 @@ fn declared_grader_produces_a_commit_passing_claim() {
             &ClaimSource {
                 stem: "urn:eigenius:doc:demo:s0",
                 warrant: Warrant::Declared,
+                declared_by: "encoding-pipeline",
+                timestamp: "2026-08-03T00:00:00Z",
             },
         )
         .expect("grade builds the cluster");
@@ -175,6 +177,8 @@ fn declared_claim_needs_its_declaration_trace() {
             &ClaimSource {
                 stem: "urn:eigenius:doc:demo:s0",
                 warrant: Warrant::Declared,
+                declared_by: "encoding-pipeline",
+                timestamp: "2026-08-03T00:00:00Z",
             },
         )
         .expect("grade builds the cluster");
@@ -193,7 +197,7 @@ fn declared_claim_needs_its_declaration_trace() {
             r.id() != Some(&claim.sentence_iri)
                 && !r
                     .id()
-                    .is_some_and(|i| i.as_str().ends_with(":assertion-trace"))
+                    .is_some_and(|i| i.as_str().ends_with(":assertion_trace"))
         })
         .cloned()
         .collect();

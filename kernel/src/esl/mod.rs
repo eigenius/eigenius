@@ -25,6 +25,7 @@ pub mod compile;
 pub mod error;
 pub mod lexer;
 pub mod parser;
+pub mod print;
 
 use crate::ontology::resource::Resource;
 

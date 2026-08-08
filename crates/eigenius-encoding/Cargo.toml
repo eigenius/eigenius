@@ -1,0 +1,23 @@
+[package]
+name = "eigenius-encoding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+eigenius-wordnet = { path = "../eigenius-wordnet" }
+eigenius-reasoning = { path = "../eigenius-reasoning" }
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+
+[features]
+# The contextual sense reranker. RECORD needs it; REPLAY does not (a recorded
+# `ranks.json` replays with no LLM at all), which is what the demo ships with.
+use-llm = ["eigenius-kernel/use-llm"]
+
+[[bin]]
+name = "prose-to-eigon"
+path = "src/bin/prose-to-eigon.rs"

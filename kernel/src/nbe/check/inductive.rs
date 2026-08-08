@@ -361,6 +361,22 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
     (args, current)
 }
 
+/// Type-check a constructor application's arguments and **return the type it constructs** — the
+/// ctor's declared result evaluated under the bound arguments.
+///
+/// `expected_indices` is `None` in *inference* mode (no expected type to check against) and
+/// `Some(idx)` in *checking* mode. This mirrors Lean: `nanoda_lib`'s `infer_app` walks the head's
+/// Pi telescope instantiating each argument and returns `inst(fun, ctx)`, with no expected type and
+/// no index unification — a constructor there is an ordinary `Const`, so its result type, indices
+/// included, simply falls out of substitution. Eigenius keeps constructors as a compound
+/// `Exp::InductiveCtor` node, so the equivalent instantiation is `actual_result` below.
+///
+/// Before this returned a type, the `Exp::InductiveCtor` inference arm passed empty expected
+/// indices and answered `indices: []`, which made **every indexed inductive's constructor
+/// un-inferable** (`index arity mismatch (actual has N, expected has 0)`) and would have answered
+/// with the wrong type had it passed. That is not a corner case: `reasoning:JustifiedBy` is
+/// indexed, so no `reasoning:certificate` could pass validation Rule 21 at commit — including the
+/// WRN case study's own `chain/04-phase1-recompute-conclusions.esl` (found 2026-08-03).
 pub(super) fn check_inductive_ctor_args(
     ctx: &mut CheckCtx,
     decl: &Arc<InductiveDecl>,
@@ -368,8 +384,8 @@ pub(super) fn check_inductive_ctor_args(
     args: &[Exp],
     expected_decl: &Arc<InductiveDecl>,
     params: &[Val],
-    expected_indices: &[Val],
-) -> Result<(), CheckError> {
+    expected_indices: Option<&[Val]>,
+) -> Result<Val, CheckError> {
     if decl.name != expected_decl.name {
         return Err(CheckError::TypeMismatch(format!(
             "InductiveCtor: constructor of `{}` does not match expected inductive `{}`",
@@ -498,7 +514,33 @@ pub(super) fn check_inductive_ctor_args(
     // Without this check a buggy constructor declaration of the form
     // `foo : Π p:P. OtherInductive` or `foo : ... → SizedNat (↑ i)`
     // used at `SizedNat i` would pass silently.
+    // The constructed type: the ctor's declared result under the bound arguments. This is the
+    // answer in inference mode, and the left-hand side of the comparison in checking mode.
     let actual_result = ctx.eval(current, &arg_env)?;
+    let Some(expected_indices) = expected_indices else {
+        // INFERENCE — nothing to compare against, so neither the result-type subtype check nor the
+        // index unification below applies (Lean does neither when inferring). Answer with the type
+        // the constructor actually builds, indices and all.
+        //
+        // Tie the knot first. A ctor's declared result type refers to its own inductive through a
+        // SELF-REFERENCE placeholder — the same IRI and name, but built with `ctors: []` (see e.g.
+        // `simple_vec_decl` in the check tests). Handing that back verbatim yields a type whose
+        // constructor list is empty, and a later `match` on the value then fails with
+        // "match arm references unknown constructor". Substitute the full declaration, keeping the
+        // indices that were just recovered.
+        return Ok(match actual_result {
+            Val::InductiveType {
+                decl: found,
+                params,
+                indices,
+            } if found.name == decl.name => Val::InductiveType {
+                decl: decl.clone(),
+                params,
+                indices,
+            },
+            other => other,
+        });
+    };
     let expected_result = Val::InductiveType {
         decl: expected_decl.clone(),
         params: params.to_vec(),
@@ -562,7 +604,7 @@ pub(super) fn check_inductive_ctor_args(
         }
     }
 
-    Ok(())
+    Ok(actual_result)
 }
 
 /// Type-check an `Exp::InductiveRec` application and return its result

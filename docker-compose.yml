@@ -34,6 +34,17 @@ services:
     environment:
       - EIGENIUS_ORCHESTRATOR_ENDPOINT=http://orchestrator:8080
       - RUST_LOG=${RUST_LOG:-info}
+      # Cap glibc's per-thread malloc arenas. The kernel runs on the system allocator (jemalloc is
+      # opt-in, `--features jemalloc-prof`), and glibc gives a tokio/tonic server up to 8×ncores
+      # arenas that grow independently and never hand pages back — so a bulk load's allocation churn
+      # (JSON decode + Rule 21 type-check on millions of `lexicon:cat` values) inflates RSS far past
+      # what is live. MEASURED on the WordNet chain, identical load, allocator the only variable
+      # (docs/notes/2026-08-03-reseed-memory-profile.md):
+      #     default arenas   peak 15.66 GB
+      #     ARENA_MAX=2      peak  9.41 GB     ← 40% less, and it is the difference between a
+      #                                          lexicon reseed fitting a 32 GB host and not
+      # Not mystery tuning: delete this and the reseed goes back to running at the edge of RAM.
+      - MALLOC_ARENA_MAX=${MALLOC_ARENA_MAX:-2}
     command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db"]
     volumes:
       - eigenius_db:/var/lib/eigenius/db

@@ -71,7 +71,22 @@ TypeExpr     ::= QualifiedName                                           (* "Nat
               |  QualifiedName '(' TypeExpr (',' TypeExpr)* ')'          (* "Stream(A, j)" *)
               |  TypeExpr '->' TypeExpr                                  (* "A -> B" *)
               |  '{' BoundedBinder '}' '->' TypeExpr                     (* "{j < i} -> body" *)
+              |  ('pi' | 'forall') TypedParams '=>' TypeExpr             (* Π — "forall (x : T) => B" *)
+              |  'exists' TypedParams '=>' TypeExpr                      (* Σ — "exists (x : T) => B" *)
+              |  'fun' TypedParams '=>' TypeExpr                         (* λ in type position — match motive *)
+              |  'Prop' | 'Set' | 'Type' Integer                         (* sorts, D46 §2 *)
+              |  '(' ')'                                                 (* unit VALUE, Exp::Unit *)
+              |  '(' TypeExpr ':' TypeExpr ')'                           (* annotation — mode switch *)
+              |  'alias' AliasBinding (',' AliasBinding)* 'in' TypeExpr  (* compile-time substitution *)
+              |  StringLit                                               (* "urn:…" — Exp::LitString *)
+
+TypedParams  ::= TypedParam (',' TypedParam)*
+              |  '(' TypedParam (',' TypedParam)* ')'   (* outer parens optional *)
+TypedParam   ::= Identifier ':' TypeExpr
+AliasBinding ::= Identifier '=' TypeExpr                (* later bindings see earlier ones *)
 ```
+
+`pi` / `forall` / `exists` / `fun` and the sort and unit forms are accepted wherever `parse_type_expr` runs — `axiom` statements, `data` constructor types, and [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) blocks. `exists` and `()` reach the kernel only through the `type_expr` lowering path; the resource-shaped type language ([§6](06-resources-types-and-the-layer.md)) has no encoding for either and the compiler rejects them there. `eigentt:fst(p)` / `eigentt:snd(p)` parse as ordinary applications and are intercepted at lowering into `Exp::Fst` / `Exp::Snd`.
 
 ### 11.1.4. Program and expressions
 
@@ -112,7 +127,11 @@ QualifiedName::= Identifier ':' Identifier
 
 ### Declaration keywords
 
-`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`
+`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`, `axiom`, `macro`, `merge_comorphism` (+ `for`), `text_index`, `vector_index`
+
+### Type and binder keywords
+
+`pi`, `forall`, `exists`, `fun`, `alias` (+ `in`), `Prop`, `Set`, `Type`
 
 ### Class/property body keywords
 
@@ -120,7 +139,7 @@ QualifiedName::= Identifier ':' Identifier
 
 ### Expression keywords
 
-`let`, `case`, `match`, `returning`, `Construct`, `map`, `reduce`, `corecord`
+`let`, `case`, `match`, `returning`, `Construct`, `map`, `reduce`, `corecord`, `lambda`
 
 ### Literal keywords
 
@@ -132,6 +151,7 @@ QualifiedName::= Identifier ':' Identifier
 |---|---|
 | `=` | Assignment in `let`, namespace, fields |
 | `->` | Function-type arrow |
+| `=>` | Closes a binder list (`pi` / `forall` / `exists` / `fun`) |
 | `\` | Lambda (ASCII) |
 | `λ` | Lambda (Unicode) |
 | `.` | Property projection |
