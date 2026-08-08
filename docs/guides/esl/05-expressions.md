@@ -362,14 +362,42 @@ The same `parse_type_expr` grammar that powers `axiom` ([§4.4a](04-declarations
 | Form | Lowers to |
 |---|---|
 | `forall (x : T, y : U) => body` | `Exp::Pi(x, T, Exp::Pi(y, U, body))` |
+| `exists (x : T, y : U) => body` | `Exp::Sig(x, T, Exp::Sig(y, U, body))` |
 | `A -> B` | Non-dependent `Exp::Pi(_, A, B)` |
 | `Prop` / `Set` / `Type N` | `Exp::Sort(...)` |
 | `Id(A, x, y)` | `Exp::EigonClass(core:Id)` applied to args (D46 §7) |
 | `ex:Pred(arg1, arg2, ...)` | `Exp::App(Exp::ConstRef(IRI), arg1, arg2, ...)` |
 | `ex:zero` (nullary ctor) | `Exp::ConstRef(IRI)` |
+| `eigentt:fst(p)` / `eigentt:snd(p)` | `Exp::Fst(p)` / `Exp::Snd(p)` |
+| `()` | `Exp::Unit` |
 | `"literal-iri"` | `Exp::LitString("literal-iri")` |
 
 The `LitString` form is what lets you embed concrete subject IRIs — `screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")` — directly in a proposition without authoring a separate `core:axiom_statement` resource per compound. The kernel treats the literal as an opaque `string` value; downstream institutions consume it by string-equality matching.
+
+### Σ-binders and their projections
+
+`exists` is the dependent-pair binder, the dual of `forall`: N binders lower to N nested `Exp::Sig`, rightmost innermost, exactly as `forall` lowers to nested `Exp::Pi`. The binder list takes the same optionally-parenthesised form (`exists x : T => B` and `exists (x : T, y : U) => B` both parse), and `=>` closes it — not `.`, which stays free for a future postfix projection form.
+
+A Σ in `Prop` position *is* the existential, and `eigentt:fst` recovers the witness:
+
+```esl
+axiom demo:t : eigentt:fst(exists x : core:string => core:string);
+```
+
+`eigentt:fst(p)` / `eigentt:snd(p)` are written as one-argument applications because `TypeExpr` has no postfix form. They are **not axioms**: the compiler intercepts those two IRIs and emits `Exp::Fst` / `Exp::Snd` term nodes, so `fst(pair)` reduces — an axiom would be opaque and never compute. A one-argument call to anything else stays an ordinary `App`. On the wire they are the `Fst` / `Snd` ctors of [`eigentt:TypeExpr`](../../../ontologies/eigentt/eigentt-type-fragment.json), added alongside the `Pair` ctor D48 shipped.
+
+`()` is the unit *value* (`Exp::Unit`), the sole inhabitant of `One`. Hand-written certificates normally omit it — the kernel synthesises the witness slot in e.g. `declared(bridge, P)` — so it exists mainly so that [`eigenius decompile`](../platform/04-cli-reference.md#decompile-file---verify---pretty) can print back what the kernel encoded and have it reparse.
+
+`exists` and `()` are meaningful only where `type_expr(...)` lowering applies (including `axiom` and `data` ctor types, which take the same path). In the resource-shaped type language the compiler rejects both:
+
+```
+`exists` (Sigma) is only available inside `type_expr(...)`, which lowers to the
+D47 ctor encoding; the resource-shaped type language has no binder for it
+
+the unit value `()` is a TERM, not a type — it is only meaningful inside `type_expr(...)`
+```
+
+What forces the pair: the DCG parser renders every definite description as `the(Σx : C. P(x)).1`, so a proposition parsed from prose is unwritable in ESL — and, before `Fst`/`Snd` were fragment ctors, uncommittable at all — without the binder and its projections.
 
 ### Why this surface vs. the JSON form
 

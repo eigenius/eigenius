@@ -339,11 +339,17 @@ impl Printer<'_> {
                 Ok(format!("{alias}:{name}"))
             }
 
+            // `Type n` is the ONLY undelimited multi-token form the printer emits, so it is the
+            // only one whose atomicity is a claim rather than a syntactic fact. It holds because
+            // ESL has no juxtaposition: application is `f(a, b)`, so nothing can bind between
+            // `Type` and its level. `sorts_round_trip_in_every_position` in
+            // kernel/tests/esl_round_trip.rs pins that — the parser wants `Type 1`, and an earlier
+            // `Type(1)` here printed source that would not reparse at all.
             "Sort" => match args.first().and_then(Value::as_u64) {
                 Some(0) => Ok("Prop".into()),
                 Some(1) => Ok("Set".into()),
-                // `Type(n)` is `Sort(n + 1)` — kernel/src/esl/compile.rs, SortKind::Type.
-                Some(n) => Ok(format!("Type({})", n - 1)),
+                // `Type n` is `Sort(n + 1)` — kernel/src/esl/compile.rs, SortKind::Type.
+                Some(n) => Ok(format!("Type {}", n - 1)),
                 None => Err(self.err("`Sort` needs a level", path)),
             },
 

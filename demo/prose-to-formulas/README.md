@@ -110,9 +110,11 @@ fail-closed cases.
 ### Why the literature rule can be hand-authored when a bridge cannot
 
 Its antecedent is `HasActivity(WRN, exonuclease)` — plain class references. A rule whose antecedent
-had to be a *parse* would be inexpressible: the ESL surface has no syntax for the Σ-binders and
-projections a DCG term contains. That is exactly why the parse-shaped step is a **generated** shape
-rule and the domain-vocabulary step is not.
+had to be a *parse* would be impractical to hand-author: the Σ-binders and projections a DCG term
+contains do have an ESL surface (`exists`, `eigentt:fst` — `claims-intact.esl` in this directory is
+nothing but), but the term for one sentence runs to hundreds of characters of nested applications
+that no one writes by hand correctly. That is exactly why the parse-shaped step is a **generated**
+shape rule and the domain-vocabulary step is not.
 
 ## Where the rejection actually comes from
 

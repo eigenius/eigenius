@@ -40,7 +40,22 @@ Compile an ESL file to Eigon-JSON, write to stdout.
 eigenius compile demo/document.esl > demo/document.json
 ```
 
-Pure surface-language transformation — no validation, no layer load.
+Surface-language transformation — no validation, and nothing is committed. It does bootstrap a layer first, so that constructor short names resolve through the chain's ctor table (`collect_ctors_from_layer`): a file citing `reasoning:JustifiedBy`'s constructors compiles here rather than only inside a running server. Seeding the bootstrap layer only *adds* resolvable names, so it cannot make a previously-compiling file fail.
+
+<a id="decompile-file---verify---pretty"></a>
+### `decompile <FILE> [--verify] [--pretty]`
+
+Print an Eigon-JSON document back as ESL source — the inverse of `compile`. Every D47 term value (`reasoning:proposition`, `reasoning:certificate`, `eigentt:axiom_statement`, `reflection:canonical_proposition`, …) is rendered in the [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) sublanguage.
+
+```bash
+eigenius decompile chain/sentence.json
+eigenius decompile chain/sentence.json --verify --pretty
+```
+
+- `--verify` re-compiles the printed source and checks that every term is alpha-equal to the one in the input, under the same canonicalisation the witness index uses. A mismatch prints the offending `@id :: property` pairs and exits non-zero, rather than emitting source that would commit a different object. Like `compile`, verification runs against a bootstrapped layer so ctor short names resolve.
+- `--pretty` indents expression trees across lines; the default emits each term on one line. Layout is the only difference — the terms are identical either way.
+
+This is what keeps chain content inside the reach of the source language: a resource the kernel or an institution *generated* can be read back as ESL, and machine-minted IRIs must therefore have local names that are legal ESL identifiers (`…:assertion_trace`, not `…:assertion-trace`). A ctor with no ESL surface is refused rather than printed approximately.
 
 ### `inspect <IRI> [--at-layer <LAYER_ID>] [--branch <NAME>]`
 

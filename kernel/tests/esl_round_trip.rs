@@ -248,6 +248,68 @@ fn pretty_layout_changes_only_whitespace() {
     eprintln!("{checked} terms print identically flat and pretty ({broke_a_line} broke a line)");
 }
 
+/// `Type n` is the only undelimited multi-token form the printer emits, so it is the only one a
+/// surrounding construct could split. Every position that could do so is checked here, at levels
+/// on both sides of the `Prop` / `Set` / `Type n` spelling boundary.
+///
+/// **Regression.** The printer emitted `Type(1)`, which the parser rejects outright (`expected
+/// non-negative integer level after `Type`, found LParen`) — so no term carrying a universe above
+/// `Set` could be decompiled into source that reparses. `Prop` (`Sort 0`) and `Set` (`Sort 1`) are
+/// spelled as single tokens and were unaffected, which is exactly why a corpus that only uses
+/// those two did not catch it.
+#[test]
+fn sorts_round_trip_in_every_position() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let mut checked = 0usize;
+
+    // 0 → `Prop`, 1 → `Set`, 2 and up → `Type n`. Both spellings, so the test would still hold if
+    // the boundary moved.
+    for level in [0u64, 1, 2, 7] {
+        let s = serde_json::json!({"ctor": "Sort", "args": [level]});
+        let cases = [
+            ("bare", s.clone()),
+            (
+                "arrow domain",
+                serde_json::json!({"ctor": "Pi", "args": ["", s.clone(), s.clone()]}),
+            ),
+            (
+                "App argument",
+                serde_json::json!({"ctor": "App", "args": [
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]},
+                    s.clone(),
+                ]}),
+            ),
+            (
+                "binder domain",
+                serde_json::json!({"ctor": "Sig", "args": [
+                    "x", s.clone(), {"ctor": "Var", "args": ["x"]},
+                ]}),
+            ),
+            (
+                "under a projection",
+                serde_json::json!({"ctor": "Fst", "args": [
+                    {"ctor": "Sig", "args": ["x", s.clone(), {"ctor": "Var", "args": ["x"]}]},
+                ]}),
+            ),
+        ];
+        for (position, term) in cases {
+            let label = format!("Sort {level} in {position}");
+            let mut ns = Namespaces::new();
+            let printed = print_type_expr(&term, &mut ns).expect("prints");
+            let back = wrap_and_compile(&printed, &ns, layer)
+                .unwrap_or_else(|e| panic!("{label}: printed `{printed}` does not compile: {e}"));
+            assert_eq!(
+                alpha_canonicalize_proposition_json(&term),
+                alpha_canonicalize_proposition_json(&back),
+                "{label}: printed `{printed}`, which compiles to a different term"
+            );
+            checked += 1;
+        }
+    }
+    eprintln!("{checked} sort placements round-trip");
+}
+
 /// Compile an already-printed type-expression body in a resource-property slot.
 fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value, String> {
     // The preamble comes from the same `Namespaces` the body was printed with — the printer

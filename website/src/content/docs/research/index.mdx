@@ -20,10 +20,12 @@ coming from each tradition.
 <div class="paper-grid">
 
 <PaperCard
-  venue="CS"
-  title="A Compiler for AI Thought: Typed Knowledge Graphs as the Substrate for Auditable Scientific Reasoning"
-  href="/research/papers/cacm-typed-reasoning/"
-  comingSoon
+  venue="arXiv"
+  title="Eigenius: A Typed Knowledge-Graph DBMS with Epistemic Stratification and Institution-Mediated Reasoning"
+  abstract="A typed knowledge-graph DBMS that makes provenance a structural invariant rather than something reconstructed across subsystems: epistemic status is a commit-time check, institutions are strongly typed integration boundaries, and cross-system translations materialize into the graph as first-class resources. Recomputing a published Nature study end to end, all 52 derived conclusions hold from pinned data — surfacing four machine-checked discrepancies in the original."
+  href="/research/papers/typed-knowledge-graph-dbms/"
+  downloadHref="https://arxiv.org/pdf/2608.04457"
+  status="Preprint · cs.DB"
 />
 
 <PaperCard
@@ -35,19 +37,35 @@ coming from each tradition.
 
 </div>
 
-> **Both papers are in active preparation.** Abstracts, manuscripts,
-> and submission details will be posted here as soon as they land at
-> their target venues. In the interim, the [worked
+> **The systems paper is on arXiv** as of 5 August 2026
+> ([2608.04457](https://arxiv.org/abs/2608.04457)). The Science paper
+> is still in active preparation; its abstract and manuscript will be
+> posted here when it lands. In the interim, the [worked
 > examples](/examples/) and the [concepts](/concepts/) cover the same
 > material in narrative form.
 
 ## How to cite
 
-A formal citation entry will appear here once the papers land at
-their target venues. In the interim, please cite the GitHub
-repository with the commit hash you reference; the platform's
-content-addressed identifiers make a precise citation
-straightforward:
+For the architecture, the type discipline, or the recomputation
+result, cite the preprint:
+
+```bibtex
+@misc{will2026eigenius,
+  author        = {Will, Hans-Martin and Brown, Jr., Allen L. and Fuchs, Matthew},
+  title         = {Eigenius: A Typed Knowledge-Graph {DBMS} with Epistemic
+                   Stratification and Institution-Mediated Reasoning},
+  year          = {2026},
+  eprint        = {2608.04457},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB},
+  doi           = {10.48550/arXiv.2608.04457},
+  url           = {https://arxiv.org/abs/2608.04457},
+}
+```
+
+For a specific result you have re-run, cite the repository with the
+commit hash — or, better, the content-addressed chain state, which
+pins the exact inputs rather than a repository snapshot:
 
 ```bibtex
 @misc{eigenius2026,
@@ -61,8 +79,9 @@ straightforward:
 
 ## Reading order, by background
 
-While the papers are in preparation, the material is best
-approached through this site and the repository. By tradition:
+The [preprint](https://arxiv.org/abs/2608.04457) is the single
+document that covers the architecture end to end; this site and the
+repository go deeper on any one piece of it. By tradition:
 
 **From type theory** (Coq, Lean, Agda, dependent types):
 start with the [Concepts overview](/concepts/) for the
