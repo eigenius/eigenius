@@ -338,24 +338,21 @@ the client at that subprocess. See
 [platform guide §7.7](docs/guides/platform/07-orchestrator.md#77-the-mcp-server)
 for the full client wiring.
 
-### The `eigenius` skill (Claude Code only)
+### The agent guide
 
-The repo ships an agent skill at
-[`.claude/skills/eigenius.md`](.claude/skills/eigenius.md) — a project-scoped
-file Claude Code loads automatically when you launch it from the repo root.
-The skill teaches Claude the platform's mental model, the three surface
-languages, the MCP tool selection table, minimal Eigon-JSON / ESL / EigenQL
-shapes, common workflows, and the pitfalls that trip agents up (mandatory
-`is_a`, synthesized IRI row keys in query results, persistent-backend
-requirements, D41 multi-layer outcomes, …).
+[`docs/method/eigenius.md`](docs/method/eigenius.md) teaches a coding agent the
+platform's mental model, the three surface languages, the MCP tool selection
+table, minimal Eigon-JSON / ESL / EigenQL shapes, common workflows, and the
+pitfalls that trip agents up (mandatory `is_a`, synthesized IRI row keys in
+query results, persistent-backend requirements, D41 multi-layer outcomes, …).
 
-After `claude mcp add` and a fresh Claude Code session, ask the agent
-something like *"check the eigenius health"* or *"list the classes loaded in
-eigenius"* — the skill auto-triggers on platform keywords and the agent
-picks the right tool. Or invoke explicitly via `/eigenius`.
+It is a reference document, not an auto-loaded agent skill — point the agent at
+the file, or paste the relevant section. Two companions sit beside it:
+[`reasoning.md`](docs/method/reasoning.md) (capturing reasoning as a typed chain)
+and [`grounding.md`](docs/method/grounding.md) (retrieval and citation anchors).
 
-To use the skill across all your projects, copy it to
-`~/.claude/skills/eigenius.md`.
+After `claude mcp add`, ask the agent something like *"check the eigenius
+health"* or *"list the classes loaded in eigenius"*.
 
 ### Smoke-test with the MCP Inspector
 
