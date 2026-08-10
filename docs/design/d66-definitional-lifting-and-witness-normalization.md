@@ -141,7 +141,7 @@ thing to bridge to.
 
 Declared once — correctly, it *is* a literature claim — and now honestly general rather than a claim
 about WRN in no particular context. Application to «MSI cancer models» is `spec_poly` at `m`, which is
-the mechanism `demo/prose-to-formulas/bridges.esl:44` already uses.
+the mechanism `demo/prose-to-formulas/inference.esl` uses to eliminate the quantifier.
 
 ### 2.3 What this does to the accounting
 
@@ -649,7 +649,7 @@ cannot be deferred.)*
 | Emit side does not | `kernel/src/layer/witness_index.rs:206,223,249` |
 | α-canonicalization is a targeted patch | `kernel/src/witness/mod.rs:130-136,181` |
 | Index errors discarded | `kernel/src/layer/mod.rs:1165,1176` |
-| `spec_poly` already applied at `Set` | `demo/prose-to-formulas/bridges.esl:44,74,194` |
+| `spec_poly` applied at `Set` | `demo/prose-to-formulas/inference.esl` (slice 3; previously the generated `bridges.esl`) |
 | Decode preserves author binder names | `kernel/src/program/eigentt_type_mirror.rs:431-439` (`Pi`), `:443-451` (`Sig`) |
 | `Lam` is `(name, dom, body)`; dom validated then dropped | `kernel/src/program/eigentt_type_mirror.rs:453-465` |
 | Decode's `"App"` arm is already head-aware and folds args | `kernel/src/program/eigentt_type_mirror.rs:474-482` |
@@ -663,7 +663,7 @@ cannot be deferred.)*
 
 ## 9. Unresolved observation
 
-`spec_poly` binds `T : Set` and is applied at `T := Set` (`demo/prose-to-formulas/bridges.esl:44`).
+`spec_poly` binds `T : Set` and is applied at `T := Set` (`demo/prose-to-formulas/inference.esl`).
 The kernel has
 `Sort(n) : Sort(n+1)` (`kernel/src/nbe/check/mod.rs:616,1136`) and cumulativity `Sort(m) <: Sort(n)`
 iff `m ≤ n` (`kernel/src/nbe/check/conv.rs:292`), which does not obviously admit `Set : Set`. The demo

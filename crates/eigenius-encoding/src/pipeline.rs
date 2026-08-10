@@ -35,7 +35,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::claims::load_claims;
-use crate::emit::{emit_argument, emit_document, emit_inference, emit_shape_rules, ParsedSentence};
+use crate::emit::{emit_argument, emit_document, emit_inference, ParsedSentence};
 use crate::select::{load_pins, select_pinned};
 use crate::snapshot::{build_parser, open_head, ParserConfig};
 use clap::Parser as ClapParser;
@@ -87,16 +87,6 @@ pub struct Args {
     /// nothing would ever fail to commit.
     #[arg(long, requires = "claims")]
     argument_out: Option<PathBuf>,
-    /// Where to write the SHAPE-RULE layer — one Declared rule per distinct (predicate, parse
-    /// shape), quantified over the argument classes. Use with `--citations-out`.
-    ///
-    /// A rule serves every sentence of its shape, so the rule count is the authoring cost:
-    /// `--argument-out` writes one ground bridge per sentence, this writes one rule per shape.
-    #[arg(long, requires = "claims")]
-    rules_out: Option<PathBuf>,
-    /// Where to write the per-sentence `ReasoningSentence`s that cite the shape rules.
-    #[arg(long, requires = "rules_out")]
-    citations_out: Option<PathBuf>,
     /// The `reflection:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
     /// byte-reproducible.
     #[arg(long, default_value = "2026-08-03T00:00:00Z")]
@@ -228,19 +218,6 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             argument_out.display(),
             parsed.len(),
             parsed.len()
-        );
-    }
-    if let (Some(rules_out), Some(cites_out)) = (&args.rules_out, &args.citations_out) {
-        let path = args.claims.as_ref().expect("clap `requires` guarantees it");
-        let claims = load_claims(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        let (rules, cites) = emit_shape_rules(&args.ns, &args.timestamp, &parsed, &claims)
-            .map_err(|e| e.to_string())?;
-        write_doc(rules_out, &rules, format)?;
-        write_doc(cites_out, &cites, format)?;
-        eprintln!(
-            "wrote {} and {} — COMMIT BOTH; they are the recorded argument",
-            rules_out.display(),
-            cites_out.display()
         );
     }
     if let (Some(spec), Some(out)) = (&args.inference, &args.inference_out) {

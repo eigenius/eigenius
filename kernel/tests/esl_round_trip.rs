@@ -39,9 +39,12 @@ use serde_json::Value;
 const CORPUS: &[&str] = &[
     "../demo/prose-to-formulas/claims-intact.esl",
     "../demo/prose-to-formulas/claims-edited.esl",
-    "../demo/prose-to-formulas/rules.esl",
-    "../demo/prose-to-formulas/bridges.esl",
     "../demo/prose-to-formulas/inference.esl",
+    // D66 replaced the generated shape rules and per-sentence bridges with transparent
+    // definitions, so `rules.esl` and `bridges.esl` no longer exist. The definitions and the
+    // quantified literature rule take their place in this corpus.
+    "../demo/prose-to-formulas/onco-typed.esl",
+    "../demo/prose-to-formulas/literature-rules.esl",
     "../demo/prose-to-formulas/rule-general.esl",
 ];
 

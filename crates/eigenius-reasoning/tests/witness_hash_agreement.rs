@@ -109,7 +109,7 @@ fn app2(f: Exp, a: Exp, b: Exp) -> Exp {
     Exp::App(Box::new(Exp::App(Box::new(f), Box::new(a))), Box::new(b))
 }
 
-/// The real shape, mirroring `demo/prose-to-formulas/rules.esl`:
+/// The real shape the DCG parser produces (what the demo's generated shape rules used to abstract):
 ///
 /// ```text
 /// prep_of( fst(the(Σx0 : activity. And(compound_kind(x0, exonuclease),
@@ -855,4 +855,145 @@ fn definition_body_cannot_escape_checking_by_riding_on_another_class() {
          Rule 21 exemption becomes an escape hatch; got {:?}",
         errs.iter().map(|e| format!("{:?}", e.rule)).collect::<Vec<_>>()
     );
+}
+
+// ── D66 slice 3 crux: does a definition unfold to EXACTLY the committed parse? ─────────────────
+
+/// The lexicon vocabulary `demo/prose-to-formulas` parses into. Stand-ins carrying the real IRIs —
+/// decode only needs each to resolve to something of the right class, which keeps this test free of
+/// the WordNet/UMLS snapshot. Both sides of every comparison below reference the same IRIs and go
+/// through the same decode, so the equality result is unaffected by the substitution.
+const LEXICON_STANDINS: &str = r#"
+    namespace lexicon = "urn:eigenius:lexicon";
+    namespace wn      = "urn:eigenius:wn";
+    namespace umlscui = "urn:eigenius:umlscui";
+    class wn:n13440063 { }
+    class wn:n14606137 { }
+    class wn:n05890249 { }
+    class wn:n14239918 { }
+    class umlscui:C0388246 { }
+    class umlscui:C0920269 { }
+    class umlscui:C0920283 { }
+    axiom wn:v02203362_t : lexicon:Entity -> lexicon:Entity -> Prop
+    axiom wn:v02627934_t : lexicon:Entity -> lexicon:Entity -> Prop
+"#;
+
+/// The MSI-cancer-model term, shared by both sentences. Not a class — a nested compound kind.
+const MSI: &str = r#"(exists x0 : wn:n05890249 =>
+                        ontology:compound_kind(
+                            x0,
+                            (exists x1 : wn:n14239918 =>
+                                ontology:compound_kind(x1, umlscui:C0920269))))"#;
+
+/// `demo/prose-to-formulas/claims-intact.esl` commits each sentence's parse. D66 replaces the
+/// generated shape rules with definitions, so a use of `HasActivity` / `RequiresActivity` must
+/// decode to **exactly** the parse — not equivalently: the witness key hashes the term, so any
+/// difference and `inference.esl` finds no witness.
+///
+/// Checked against the committed artifact for both sentences, offline, before anything downstream
+/// depends on it.
+fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name: &str) {
+    // (a) The parse, as `claims-*.esl` stores it.
+    let parse_src = format!(
+        r#"{LEXICON_STANDINS}
+        namespace ontology = "urn:eigenius:ontology";
+        namespace logic    = "urn:eigenius:logic";
+        namespace eigentt  = "urn:eigenius:eigentt";
+        namespace reflection = "urn:eigenius:reflection";
+        namespace p = "urn:eigenius:demo:parse";
+        resource p:claim : reflection:DeclaredResource {{
+            reflection:declared_by = "test";
+            reflection:canonical_proposition = type_expr(
+                {verb_axiom}(
+                    eigentt:fst(ontology:the(
+                        (exists x0 : wn:n13440063 =>
+                            logic:And(
+                                ontology:compound_kind(x0, {activity}),
+                                ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246))
+                            )))),
+                    ontology:kind_of({MSI})
+                )
+            );
+        }}"#
+    );
+
+    // (b) The definition, and a call at the same three positions.
+    let def_src = format!(
+        r#"{LEXICON_STANDINS}
+        namespace ontology = "urn:eigenius:ontology";
+        namespace logic    = "urn:eigenius:logic";
+        namespace eigentt  = "urn:eigenius:eigentt";
+        namespace reflection = "urn:eigenius:reflection";
+        namespace onco = "urn:eigenius:demo:onco";
+        namespace d = "urn:eigenius:demo:def";
+
+        def onco:{def_name}(m : Set, g : Set, a : Set) : Prop =
+            {verb_axiom}(
+                eigentt:fst(ontology:the(
+                    (exists x0 : wn:n13440063 =>
+                        logic:And(
+                            ontology:compound_kind(x0, a),
+                            ontology:prep_of(x0, ontology:kind_of(g))
+                        )))),
+                ontology:kind_of(m));
+
+        resource d:claim : reflection:DeclaredResource {{
+            reflection:declared_by = "test";
+            reflection:canonical_proposition = type_expr(
+                onco:{def_name}({MSI}, umlscui:C0388246, {activity})
+            );
+        }}"#
+    );
+
+    let base = chain_with_parse_vocabulary();
+    let build = |src: &str| {
+        let mut b = LayerBuilder::new("case", Some(Arc::clone(&base)));
+        let rs = esl::compile(src).unwrap_or_else(|e| panic!("compiles: {e:?}"));
+        for r in rs.clone() {
+            b.add_resource(r).unwrap();
+        }
+        (Arc::new(b.build(LayerStorage::in_memory())), rs)
+    };
+    let (parse_layer, parse_rs) = build(&parse_src);
+    let (def_layer, def_rs) = build(&def_src);
+
+    let prop_of = |rs: &[Resource], id: &str| {
+        rs.iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some(id))
+            .and_then(|r| r.get(&iri(wk::CANONICAL_PROPOSITION)).cloned())
+            .expect("claim carries a proposition")
+    };
+    let parse_stored = prop_of(&parse_rs, "urn:eigenius:demo:parse:claim");
+    let call_stored = prop_of(&def_rs, "urn:eigenius:demo:def:claim");
+    assert_ne!(
+        parse_stored, call_stored,
+        "{def_name}: the STORED forms must differ — folded call vs spelled-out parse"
+    );
+
+    let parse_decoded = decode_type(&parse_stored, &parse_layer).expect("parse decodes");
+    let call_decoded = decode_type(&call_stored, &def_layer).expect("call decodes");
+    assert_eq!(
+        call_decoded, parse_decoded,
+        "{def_name} must unfold to EXACTLY the committed parse"
+    );
+    assert_eq!(
+        hash_proposition_exp(&call_decoded).unwrap(),
+        hash_proposition_exp(&parse_decoded).unwrap(),
+        "{def_name}: and therefore hash identically — this is what makes the lift free"
+    );
+}
+
+/// Sentence 1 — «MSI cancer models had the exonuclease activity of WRN» (`claim_1`).
+#[test]
+fn has_activity_unfolds_to_exactly_the_committed_parse() {
+    definition_matches_committed_parse("wn:v02203362_t", "wn:n14606137", "HasActivity");
+}
+
+/// Sentence 2 — «MSI cancer models required the helicase activity of WRN» (`claim_2`).
+///
+/// `inference.esl` concludes this proposition and `claim_2` asserts it independently; the demo's
+/// "justified twice" turns on them being the same term.
+#[test]
+fn requires_activity_unfolds_to_exactly_the_committed_parse() {
+    definition_matches_committed_parse("wn:v02627934_t", "umlscui:C0920283", "RequiresActivity");
 }

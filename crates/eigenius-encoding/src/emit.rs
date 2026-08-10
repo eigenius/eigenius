@@ -37,10 +37,7 @@ use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
-use eigenius_reasoning::grade::{
-    build_shape_rule, shape_rule_resources, BridgedClaimGrader, ChainRuleApplication,
-    ShapeRuleCitation,
-};
+use eigenius_reasoning::grade::{BridgedClaimGrader, ChainRuleApplication};
 use eigenius_reasoning::{ClaimGrader, ClaimSource, Warrant};
 
 use crate::claims::ClaimSpec;
@@ -315,122 +312,6 @@ fn res(id: &str, classes: &[&str]) -> Resource {
         Value::Array(classes.iter().map(|c| Value::ResourceRef(iri(c))).collect()),
     );
     r
-}
-
-/// Emit the argument as **shape rules + citations**: one Declared rule per distinct
-/// (predicate, parse-shape), cited by every sentence that matches it.
-///
-/// Returns `(rules_layer, citations_layer)`. Sentences are grouped by the *abstracted* proposition —
-/// two sentences share a rule exactly when abstracting their argument classes yields the same term —
-/// so amortisation is automatic and visible in the rule count.
-///
-/// Both layers are the **recorded argument** and are generated once and committed; only the claims
-/// layer is a function of the current prose.
-pub fn emit_shape_rules(
-    ns: &str,
-    timestamp: &str,
-    sentences: &[ParsedSentence<'_>],
-    claims: &BTreeMap<String, ClaimSpec>,
-) -> Result<(String, String), ArgumentError> {
-    let mut rules: Vec<Resource> = Vec::new();
-    let mut cites: Vec<Resource> = Vec::new();
-    // (predicate, abstracted-proposition) → (rule IRI, binders)
-    let mut seen: BTreeMap<(String, String), (String, Vec<String>)> = BTreeMap::new();
-
-    for s in sentences {
-        let spec = claims
-            .get(&s.text)
-            .ok_or_else(|| ArgumentError::NoClaim(s.text.clone()))?;
-        let rule = build_shape_rule(s.item.sem(), &spec.predicate, &spec.args).map_err(|e| {
-            ArgumentError::Grade {
-                ordinal: s.ordinal,
-                detail: e.to_string(),
-            }
-        })?;
-        let key = (
-            spec.predicate.clone(),
-            match &rule.proposition {
-                Value::Json(j) => j.to_string(),
-                other => format!("{other:?}"),
-            },
-        );
-        let (rule_iri, binders) = match seen.get(&key) {
-            Some(hit) => hit.clone(),
-            None => {
-                let iri_s = format!("{ns}:rule_{}", seen.len() + 1);
-                rules.extend(
-                    shape_rule_resources(
-                        &iri_s,
-                        &rule,
-                        &spec.declared_by,
-                        &format!(
-                            "Any sentence of this parse shape warrants {}. Abstracted from «{}»; \
-                             the rule is quantified over the argument classes, so it serves every \
-                             sentence of the shape rather than this one alone. {}",
-                            spec.predicate, s.text, spec.rationale
-                        ),
-                        timestamp,
-                    )
-                    .map_err(|e| ArgumentError::Grade {
-                        ordinal: s.ordinal,
-                        detail: e.to_string(),
-                    })?,
-                );
-                let v = (iri_s, rule.binders.clone());
-                seen.insert(key, v.clone());
-                v
-            }
-        };
-
-        let claim_iri = format!("{ns}:claim_{}", s.ordinal);
-        let graded = ShapeRuleCitation {
-            rule_iri: &rule_iri,
-            claim_iri: &claim_iri,
-            binders: &binders,
-            classes: &spec.args,
-            predicate: &spec.predicate,
-        }
-        .grade(
-            s.item.sem(),
-            &ClaimSource {
-                stem: &format!("{ns}:s{}", s.ordinal),
-                warrant: Warrant::Declared,
-                declared_by: &spec.declared_by,
-                timestamp,
-            },
-        )
-        .map_err(|e| ArgumentError::Grade {
-            ordinal: s.ordinal,
-            detail: e.to_string(),
-        })?;
-        for mut r in graded.resources {
-            if r.id() == Some(&graded.sentence_iri) {
-                r.set(
-                    iri("urn:eigenius:reasoning:subject_iri"),
-                    Value::String(spec.subject_iri.clone()),
-                );
-                r.set(
-                    iri(&format!("{CORE}:description")),
-                    Value::String(format!(
-                        "«{}» warrants {}({}) — by citing shape rule {rule_iri}.",
-                        s.text,
-                        spec.predicate,
-                        spec.args.join(", ")
-                    )),
-                );
-            }
-            cites.push(r);
-        }
-    }
-    eprintln!(
-        "shape rules: {} rule(s) for {} sentence(s)",
-        seen.len(),
-        sentences.len()
-    );
-    Ok((
-        serde_json::to_string_pretty(&serialize_document(&rules)).expect("serialize"),
-        serde_json::to_string_pretty(&serialize_document(&cites)).expect("serialize"),
-    ))
 }
 
 /// Emit the **inference**: apply a rule already pinned on the chain to the domain claim some earlier

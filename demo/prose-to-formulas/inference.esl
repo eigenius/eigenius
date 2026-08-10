@@ -4,13 +4,13 @@
 //
 // In English:
 //
-//   Sentence 1 of the paragraph established, by parsing and lifting, that MSI cancer models had
-//   WRN's exonuclease activity                     HasActivity(WRN, exonuclease)
-//   A rule pinned from the literature says that     HasActivity(WRN, exonuclease)
-//   anything with WRN's exonuclease activity          → RequiresActivity(WRN, helicase)
+//   Sentence 1 of the paragraph established, by parsing, that MSI cancer models had WRN's
+//   exonuclease activity                            HasActivity(MSI, WRN, exonuclease)
+//   A rule pinned from the literature says that      ∀m. HasActivity(m, WRN, exonuclease)
+//   any model with WRN's exonuclease activity              → RequiresActivity(m, WRN, helicase)
 //   requires its helicase activity
-//   ──────────────────────────────────────────────────────────────────────────────────
-//   therefore                                      RequiresActivity(WRN, helicase)
+//   ──────────────────────────────────────────────────────────────────────────────────────────
+//   therefore                                       RequiresActivity(MSI, WRN, helicase)
 //
 // The conclusion is the SAME proposition sentence 2 of the paragraph asserts on its own. So on the
 // intact branch that proposition ends up justified twice — once because the document states it,
@@ -18,43 +18,55 @@
 // are independent of each other. Deleting the negation from sentence 1 kills the second and leaves
 // the first standing. That asymmetry is what the demo shows.
 //
-// GENERATED ONCE, THEN COMMITTED. `run.sh --reparse` deliberately does not regenerate this file:
-// it is the RECORDED derivation, and re-deriving it on every run would let the argument silently
-// reshape itself around any edit, so nothing would ever fail to commit. The comments below are
-// hand-written and meant to survive — do not overwrite this file with `eigenius decompile` output.
-// (The body was originally decompiled from Eigon-JSON by `eigenius decompile`.)
+// ── WHAT CHANGED WITH D66 ─────────────────────────────────────────────────────────────────────
+//
+// This used to cite `s1:sentence` — a per-sentence "lift" from `bridges.esl` that carried the
+// parsed proposition into domain vocabulary by applying a generated shape rule. Those lifts and
+// the rules they cited are gone. `onco-typed.esl` now DEFINES `HasActivity` and `RequiresActivity`
+// as transparent definitions over the parser's own lexicon, so `HasActivity(m, g, a)` and the
+// parsed sentence are the same term. Nothing has to bridge between them, so nothing does.
+//
+// The antecedent below is therefore warranted by the PARSER's own witness — `claim_1`, committed
+// under a `ProgramTrace` by `prose-to-esl` — cited directly. No intermediate step, and nothing
+// Declared between the sentence and its use. The only Declared resource this inference rests on is
+// the literature rule itself, which is an assertion and is graded as one.
+//
+// The model is also no longer hidden. The rule quantifies over it and this step SPECIALIZES that
+// quantifier, at the term the sentences are actually about — «MSI cancer models». What used to be
+// a silent generalization is now an explicit `spec_poly`.
+//
+// GENERATED ONCE, THEN COMMITTED — no longer true, and better: this file is now hand-authored, as
+// it always should have been. `run.sh --reparse` does not touch it. It is the RECORDED derivation;
+// re-deriving it on every run would let the argument silently reshape itself around any edit, so
+// nothing would ever fail to commit.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-namespace core = "urn:eigenius:core";
-namespace inferred = "urn:eigenius:demo:formulas:inferred";
-namespace onco_typed = "urn:eigenius:demo:onco-typed";
-namespace reasoning = "urn:eigenius:reasoning";
-namespace umlscui = "urn:eigenius:umlscui";
-namespace wn = "urn:eigenius:wn";
+namespace core        = "urn:eigenius:core";
+namespace inferred    = "urn:eigenius:demo:formulas:inferred";
+namespace onco_typed  = "urn:eigenius:demo:onco-typed";
+namespace ontology    = "urn:eigenius:ontology";
+namespace reasoning   = "urn:eigenius:reasoning";
+namespace umlscui     = "urn:eigenius:umlscui";
+namespace wn          = "urn:eigenius:wn";
 
-// The three classes every proposition below is built from. The graph already held all three, and
-// they come from two different lexicons occupying the same argument slots:
+// The vocabulary every proposition below is built from — all of it already on the chain, from two
+// different lexicons occupying the same argument slots:
 //
-//   umlscui:C0388246   WRN           (a UMLS concept)
-//   wn:n14606137       exonuclease   (a WordNet synset)
-//   umlscui:C0920283   helicase      (a UMLS concept)
+//   umlscui:C0388246   WRN            (a UMLS concept)
+//   wn:n14606137       exonuclease    (a WordNet synset)
+//   umlscui:C0920283   helicase       (a UMLS concept)
+//   umlscui:C0920269   MSI            (a UMLS concept)
+//   wn:n05890249       model          (a WordNet synset)
+//   wn:n14239918       cancer         (a WordNet synset)
 //
-// `HasActivity` and `RequiresActivity` take these CLASSES, not strings naming them. With
-// string-typed predicates the consequent would read `RequiresActivity("WRN", "helicase")` while
-// the antecedent contained the class `umlscui:C0920283`, and nothing in the system relates the two
-// — the step would be unverifiable by construction.
+// The MODEL is not a single class. «MSI cancer models» parses to a nested compound kind — models
+// whose kind is (cancers whose kind is MSI) — and that whole term is what the sentences are about.
+// Writing it out is the honest thing: the claim really is about that kind, not about a name.
 
 resource inferred:sentence : reasoning:ReasoningSentence {
-    core:description = "CONCLUDED, not asserted: applying the pinned rule urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase to the claim established by sentence 1 yields the proposition sentence 2 also states. Edit sentence 1 and this stops committing, while the assertion in sentence 2 is untouched.";
+    core:description = "«MSI cancer models required the helicase activity of WRN» — CONCLUDED by applying the pinned literature rule to sentence 1's parsed measurement. The document asserts this too; this justification does not depend on it doing so.";
 
-    // A `ReasoningSentence` is a chain-resident reasoning step, and the class requires all three of
-    // the fields below. The ValidateJustification gate (an AutoOnLoad quality check, D39 §4.3)
-    // type-checks them against each other at commit: `certificate : JustifiedBy(justification,
-    // proposition)`. A Fails verdict rejects the sentence — which is how the edited branch dies.
-    //
-    //   reasoning:proposition    WHAT is claimed
-    //   reasoning:justification  the SHAPE of the warrant, as a term
-    //   reasoning:certificate    the kernel-checkable PROOF that this warrant warrants this claim
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // ── The certificate ───────────────────────────────────────────────────────────────────────
     //
@@ -66,62 +78,76 @@ resource inferred:sentence : reasoning:ReasoningSentence {
     //         JustifiedBy(j2, A) ->             // j2 warrants its antecedent
     //         JustifiedBy(App(j1, j2), B)       // ... so App(j1, j2) warrants the consequent
     //
-    // Its six arguments below are, in order: A, B, j1, j2, and the two sub-proofs.
+    // `alias` names the model term once instead of four times. It is compile-time substitution —
+    // the stored proposition is identical to writing the term out at each site.
     reasoning:certificate = type_expr(
+        alias msi = (exists x0 : wn:n05890249 =>
+                        ontology:compound_kind(
+                            x0,
+                            (exists x1 : wn:n14239918 =>
+                                ontology:compound_kind(x1, umlscui:C0920269)))) in
         reasoning:app(
-            // A — the antecedent. Sentence 1's domain claim: MSI cancer models had WRN's
-            // exonuclease activity. Byte-identical to the `proposition` that sentence 1's own
-            // lift (`bridges.esl` → `bridge-s1.esl`) committed, or the witness below misses.
-            onco_typed:HasActivity(umlscui:C0388246, wn:n14606137),
+            // A — the antecedent. Sentence 1's proposition. `HasActivity` is a DEFINITION, so this
+            // unfolds to exactly the term `claim_1` carries; the witness below matches by
+            // conversion, not by assertion.
+            onco_typed:HasActivity(msi, umlscui:C0388246, wn:n14606137),
 
             // B — the consequent, and the claim this whole sentence concludes.
-            onco_typed:RequiresActivity(umlscui:C0388246, umlscui:C0920283),
+            onco_typed:RequiresActivity(msi, umlscui:C0388246, umlscui:C0920283),
 
-            // j1 — the warrant for the implication: the literature rule, cited by IRI. `Declared`
-            // because a published rule is asserted on an authority, not derived from this chain.
-            // It is hand-authored in `literature-rules.esl`, which is only possible because it is
-            // stated in DOMAIN vocabulary; a rule whose antecedent had to be a PARSE would be
-            // inexpressible in ESL, which has no syntax for a DCG term's Σ-binders and projections.
-            reasoning:DeclaredEvidence(
-                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+            // j1 — the warrant for the implication: the literature rule SPECIALIZED to this model.
+            // `SpecStr` records that a universal was instantiated; the tag names the instantiation
+            // for audit rather than carrying the term.
+            reasoning:SpecStr(
+                reasoning:DeclaredEvidence(
+                    "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+                ),
+                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
             ),
 
-            // j2 — the warrant for the antecedent: sentence 1's committed lift, cited by IRI. A
-            // committed `ReasoningSentence` mints `IsVerifiedAs` on its own IRI (D54), so this is
-            // the lemma-citation path — refer to an earlier established step by name.
-            reasoning:VerifiedEvidence("urn:eigenius:demo:formulas:s1:sentence"),
+            // j2 — the warrant for the antecedent: the PARSER's own witness, cited directly.
+            // `claim_1` was committed under a `ProgramTrace`, which mints `IsDerivedAs`.
+            reasoning:DerivedEvidence("urn:eigenius:demo:formulas:claim_1"),
 
-            // Sub-proof 1 : JustifiedBy(DeclaredEvidence(rule), A -> B).
-            // The proposition spelled out here must match the rule resource's
-            // `reflection:canonical_proposition` exactly.
+            // Sub-proof 1 : JustifiedBy(SpecStr(...), A -> B).
             //
-            // On the trailing `()`: that slot's type is the chain witness `IsDeclaredAs(iri, P)`,
-            // and the `()` is a placeholder the kernel IGNORES BY DESIGN. The `IsDeclaredAs` /
-            // `IsObservedAs` / `IsDerivedAs` / `IsVerifiedAs` predicates have zero constructors, so
-            // no author can build an inhabitant. At this slot the kernel instead SYNTHESISES one
-            // from the layer's witness index, keyed by (category, IRI, SHA-256 of the D47-encoded
-            // proposition); a miss is a type error, not a warning. Author-side forgery is
-            // impossible — the chain either already admits the fact or the certificate does not
-            // type-check.
-            reasoning:declared(
-                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
-                onco_typed:HasActivity(umlscui:C0388246, wn:n14606137)
-                -> onco_typed:RequiresActivity(umlscui:C0388246, umlscui:C0920283),
-                ()
+            // The rule is `∀m. …`, so it cannot be applied to a particular model until the
+            // quantifier is eliminated. `spec_poly` does that at any domain — here `Set`, since a
+            // model is a kind. Its arguments are: the domain T, the motive P, the justification
+            // term being specialized, the instance x, the audit tag, and the proof of the
+            // universal. The `declared(…)` proof's proposition must match the rule resource's
+            // `canonical_proposition` exactly — the witness key hashes it.
+            reasoning:spec_poly(
+                Set,
+                (fun (m : Set) =>
+                    onco_typed:HasActivity(m, umlscui:C0388246, wn:n14606137)
+                      -> onco_typed:RequiresActivity(m, umlscui:C0388246, umlscui:C0920283)),
+                reasoning:DeclaredEvidence(
+                    "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+                ),
+                msi,
+                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model",
+                reasoning:declared(
+                    "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
+                    forall (m : Set) =>
+                        onco_typed:HasActivity(m, umlscui:C0388246, wn:n14606137)
+                          -> onco_typed:RequiresActivity(m, umlscui:C0388246, umlscui:C0920283),
+                    ()
+                )
             ),
 
-            // Sub-proof 2 : JustifiedBy(VerifiedEvidence(s1:sentence), A). THE LIVE DEPENDENCY.
+            // Sub-proof 2 : JustifiedBy(DerivedEvidence(claim_1), A). THE LIVE DEPENDENCY.
             //
-            // Because the witness key hashes the PROPOSITION and not just the IRI, this citation is
-            // bound to the exact claim sentence 1 was recorded as establishing — citing the name
-            // alone is not enough. Sentence 1 with its negation deleted parses to a different
-            // proposition, so on the edited branch its lift is itself rejected and
-            // `s1:sentence` never exists: this inference has nothing left to apply the rule to.
-            // Meanwhile sentence 2's own lift is untouched and still commits. Nothing compared the
-            // two texts; the dependency did the work.
-            reasoning:verified(
-                "urn:eigenius:demo:formulas:s1:sentence",
-                onco_typed:HasActivity(umlscui:C0388246, wn:n14606137),
+            // The witness key hashes the PROPOSITION, not just the IRI, so this citation is bound
+            // to the exact term sentence 1 parsed to. With the negation deleted, sentence 1 parses
+            // to `⟨that term⟩ → False` — a different proposition, a different key, no witness. This
+            // inference then has nothing to apply the rule to and the whole layer is refused.
+            //
+            // Sentence 2's own claim is untouched and still commits, so the document still says
+            // the conclusion. Nothing compared the two texts; the dependency did the work.
+            reasoning:derived(
+                "urn:eigenius:demo:formulas:claim_1",
+                onco_typed:HasActivity(msi, umlscui:C0388246, wn:n14606137),
                 ()
             )
         )
@@ -130,11 +156,26 @@ resource inferred:sentence : reasoning:ReasoningSentence {
     // The justification TERM — the same shape as the certificate's `App(j1, j2)`, recorded on its
     // own so the warrant is readable (and indexable) without re-checking the proof. The gate
     // requires the certificate to be a proof about exactly this term.
-    reasoning:justification = reasoning:App(reasoning:DeclaredEvidence("urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"), reasoning:VerifiedEvidence("urn:eigenius:demo:formulas:s1:sentence"));
+    reasoning:justification = reasoning:App(
+        reasoning:SpecStr(
+            reasoning:DeclaredEvidence(
+                "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
+            ),
+            "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
+        ),
+        reasoning:DerivedEvidence("urn:eigenius:demo:formulas:claim_1")
+    );
 
     // The proposition concluded: B from the `app` above. Sentence 2 of the paragraph asserts this
     // very same proposition directly — that is the point of the demo, not a redundancy.
     reasoning:proposition = type_expr(
-        onco_typed:RequiresActivity(umlscui:C0388246, umlscui:C0920283)
+        onco_typed:RequiresActivity(
+            (exists x0 : wn:n05890249 =>
+                ontology:compound_kind(
+                    x0,
+                    (exists x1 : wn:n14239918 =>
+                        ontology:compound_kind(x1, umlscui:C0920269)))),
+            umlscui:C0388246,
+            umlscui:C0920283)
     );
 }

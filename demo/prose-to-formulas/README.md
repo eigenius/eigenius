@@ -87,18 +87,24 @@ while the document's own assertion of the same conclusion is untouched.
 That asymmetry is the point. A conclusion the graph produced carries a live dependency on what it
 was produced from; a document repeating it does not. Nothing compared the two texts.
 
-(The citations layer is deliberately split per sentence in `run.sh` — loaded as one layer the edited
-run fails atomically, which hides exactly this.)
+(There is no citations layer any more — see *The two ways a claim gets justified here*. The edited
+run's rejection lands on `inference.esl` itself.)
 
-## The three ways a claim gets justified here
+## The two ways a claim gets justified here
 
 | | what warrants it | grade | authoring cost |
 |---|---|---|---|
-| **shape rule** | a Declared rule quantified over the parse's argument classes, instantiated per sentence with `spec_poly` | Declared | one rule per parse SHAPE |
-| **pinned literature rule** | a published `A → B` on the chain, applied to a claim an earlier sentence established | Declared | one rule, reused |
+| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `spec_poly` and applied to a claim a sentence established | Declared | one rule, reused |
 | **prose modus ponens** | `A` and `A → B` **both parsed from sentences** — the grammar renders `if` as native implication | **Derived** | none |
 
-The third is the strongest: nothing is Declared, because the implication *is* a sentence. The
+There used to be a third — a **shape rule**, one Declared rule per parse shape, bridging a parsed
+sentence to domain vocabulary. It is gone (D66). `onco-typed.esl` now *defines* the domain
+predicates over the parser's own lexicon, so `HasActivity(m, g, a)` and the parsed sentence are the
+same term and the lift is definitional equality. The kernel computes it; nothing declares it. On the
+62 sentences of `experiments/parsing/expected-readings.tsv` that mechanism needed at least 61
+Declared bridges — one per sentence, near enough — and each was an unchecked leap.
+
+The second is the strongest: nothing is Declared, because the implication *is* a sentence. The
 grammar's `if` entry is `λs₂. λs₁. (s₂ → s₁)`, and its design note says encoding it opaquely "would
 forfeit modus ponens in the checker". `"S₁ if S₂"` parses to a genuine top-level implication whose
 antecedent is verbatim the premise sentence's own parse — verified against the real snapshot.
@@ -107,14 +113,18 @@ All three are exercised by [`shape_rule.rs`](../../crates/eigenius-reasoning/tes
 including `one_rule_serves_two_different_sentences` (one rule, two sentences, both `Holds`) and two
 fail-closed cases.
 
-### Why the literature rule can be hand-authored when a bridge cannot
+### Why the literature rule is still hand-authored, and nothing else is
 
-Its antecedent is `HasActivity(WRN, exonuclease)` — plain class references. A rule whose antecedent
-had to be a *parse* would be impractical to hand-author: the Σ-binders and projections a DCG term
-contains do have an ESL surface (`exists`, `eigentt:fst` — `claims-intact.esl` in this directory is
-nothing but), but the term for one sentence runs to hundreds of characters of nested applications
-that no one writes by hand correctly. That is exactly why the parse-shaped step is a **generated**
-shape rule and the domain-vocabulary step is not.
+Its antecedent reads `HasActivity(m, WRN, exonuclease)` — a call anyone can type. That call *is* the
+parse: `HasActivity` is a definition whose body is the DCG term, so the readable surface and the
+formula are one thing rather than two connected by an assertion.
+
+The term itself runs to hundreds of characters of nested applications that no one writes by hand
+correctly — which is why nobody writes it. What is authored is the abbreviation and the claim that
+uses it. (An earlier version of this file said such a term would be "impractical to hand-author" and
+concluded the parse-shaped step therefore had to be *generated*. The premise was right and the
+conclusion was wrong: the answer to an unwritable term is to name it, not to generate an assertion
+about it.)
 
 ## Where the rejection actually comes from
 
@@ -213,16 +223,13 @@ change does not fail at all.
 |---|---|---|
 | `paragraph.txt` | — | the two sentences, verbatim from CNL-v3 |
 | `paragraph-edited.txt` | — | the same, minus one negation |
-| `onco-typed.esl` | — | domain predicates at `Set -> Set -> Prop` |
-| `claims.tsv` | — | which domain proposition each sentence warrants, with **class IRI** arguments |
+| `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon — `Set -> Set -> Set -> Prop`, model explicit |
 | `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) |
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
-| `literature-rules.esl` | — | the pinned `A → B`, cited, in domain vocabulary |
+| `literature-rules.esl` | — | the pinned `∀m. A → B`, cited — the ONLY DeclarationTrace on the branch |
 | `claims-intact.esl` | `prose-to-esl` | units + encoded claims + ProgramTraces + decision points |
 | `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
-| `rules.esl` | `--rules-out`, **once** | shape rules — one per distinct (predicate, parse shape) |
-| `bridges.esl` | `--citations-out`, **once** | one `ReasoningSentence` per sentence, citing a shape rule |
-| `inference.esl` | `--inference-out`, **once** | the CONCLUDED claim — the literature rule applied to the measurement |
+| `inference.esl` | hand-authored | the CONCLUDED claim — the literature rule specialized at the model and applied to sentence 1's own parse |
 
 The generated chain artifacts are **ESL, not Eigon-JSON**. `prose-to-esl` runs the same pipeline as
 `prose-to-eigon` and prints the record as source, so what is committed is the formula a reviewer
@@ -247,12 +254,12 @@ The domain namespace is `urn:eigenius:demo:onco-typed` rather than the WRN case 
 whose predicates are string-typed and whose committed conclusions depend on that; migrating them is
 separate work.
 
-## Why the argument layer is generated once and committed
+## Why the argument is committed, not regenerated
 
-`bridges.esl` is the **recorded argument**: what someone concluded, at a point in time, from the
-prose as it then read. The claims layers are a function of the prose. Regenerating the argument on
-every run would re-derive it around any edit, and nothing would ever fail to commit — which is the
-one thing the demo exists to show.
+`inference.esl` is the **recorded argument**: what someone concluded, at a point in time, from the
+prose as it then read. The claims layers are a function of the prose. Re-deriving the argument on
+every run would reshape it around any edit, and nothing would ever fail to commit — which is the one
+thing the demo exists to show. `--reparse` regenerates only the claims.
 
 The two halves run on two branches off one base, rather than as two loads onto one chain, because a
 redefinition does not retract the earlier layer's witness: `IsDerivedAs claim_2 P_original` would
@@ -309,12 +316,17 @@ be asserted; it cannot be proved.
 
 ## On amortisation, honestly
 
-`--rules-out` prints the ratio it achieved. This paragraph's two sentences use two different
-predicates, so it reports **2 rules for 2 sentences** — no saving visible here. The saving is real
-but needs repetition to show: `one_rule_serves_two_different_sentences` demonstrates one rule
-covering two sentences, and the mechanism groups automatically by `(predicate, abstracted
-proposition)`. A page with recurring constructions would show it; a two-sentence paragraph with two
-constructions cannot, and inventing prose to make the number look better would be dishonest.
+This used to report **2 rules for 2 sentences** and explain that the saving needed repetition to
+show. That was measured properly afterwards, and the mechanism did not amortise at all: 62 sentences
+of the WRN paper produce **61 distinct parse shapes**
+(`python3 experiments/parsing/skeleton-abstraction.py`). The skeletons are sense-erased, so 61 is
+what a *perfect* lexical abstraction would reach — no lexicon resource could have improved it,
+because the variation is structural.
+
+The conclusion was that the count was the wrong thing to minimise. What matters is how many
+**unchecked assertions** a chain rests on, and definitions take that to one: the literature rule,
+which genuinely is an assertion and is graded as one. See
+`docs/notes/2026-08-09-shape-rule-amortisation.md` and D66.
 
 ## Appendix: the quantified form
 
@@ -352,5 +364,5 @@ Two further gaps, for completeness:
   findings"* resolves to a definite description over a *findings* kind rather than to the propositions
   it denotes. The paper's own conclusion sentence needs exactly that.
 - **The inference structure.** *"These findings show that X"* yields a proposition; nothing extracts
-  the justification term from the connective. Here the argument's shape is Declared in `claims.tsv`
-  and only the propositions come from the prose.
+  the justification term from the connective. Here the argument's shape is hand-authored in
+  `inference.esl` and only the propositions come from the prose.

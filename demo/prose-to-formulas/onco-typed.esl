@@ -1,75 +1,86 @@
-// Domain vocabulary over FORMULAS, not strings — demo 2's whole point.
+// Domain vocabulary as TRANSPARENT DEFINITIONS over the parser's own lexicon (D66).
 //
-// The WRN case study's `01-onco.esl` declares
+// ── WHAT CHANGED, AND WHY IT MATTERS ──────────────────────────────────────────────────────────
 //
-//     data onco:RequiresActivity : core:string -> core:string -> Prop
+// These were opaque axioms:
 //
-// and its claims read `RequiresActivity("WRN", "helicase")`. But the parser does not produce
-// strings: it produces typed terms over real classes. The proposition for
-// «MSI cancer models required the helicase activity of WRN» contains
+//     data onco2:HasActivity : Set -> Set -> Prop { }
 //
-//     ConstRef(umlscui:C0388246)   the WRN gene concept
-//     ConstRef(umlscui:C0920283)   the helicase concept
+// A zero-constructor inductive is opaque by construction — nothing in the system relates it to
+// anything. So the only way to connect a parsed sentence to it was to ASSERT the connection: one
+// `reflection:DeclaredResource` per parse shape, saying "a sentence of this shape warrants this
+// predicate", on somebody's authority. Measured over the 62 sentences of the WRN paper in
+// `experiments/parsing/expected-readings.tsv`, that is at least 61 such assertions — one per
+// sentence, near enough — and the count is not the problem. Each one is an unchecked leap the
+// kernel accepts because a `declared_by` field says who stood behind it.
 //
-// So a string-typed consequent forces the bridge to relate a FORMULA to two STRING LITERALS, and
-// nothing in the system relates the literal "helicase" to the class `umlscui:C0920283`. The kernel
-// cannot check that step — it is pure assertion, and it discards exactly the typed structure the
-// parser was built to produce.
+// Declared as DEFINITIONS, the connection is not asserted at all. `HasActivity(m, g, a)` unfolds
+// to the parse, so the lift is definitional equality: the kernel computes it, nothing declares it.
+// The bridges are gone, and so is `rules.esl`.
 //
-// Typing the predicates at `Set` — the sort the parser's own arguments inhabit
-// (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`) — makes the bridge relate two formulas
-// that SHARE SUBTERMS. `eigenius-reasoning`'s `BridgedClaimGrader` additionally refuses any argument
-// class that does not occur in the parsed proposition, so a bridge can narrow what a sentence means
-// but cannot introduce a subject the sentence never mentioned.
+// ── THE HIDDEN QUANTIFIER, NOW EXPLICIT ───────────────────────────────────────────────────────
 //
-// These live in their own namespace rather than re-typing `onco:`: the WRN chain's committed
-// conclusions use the string form, and migrating them is separate work.
+// The old predicates were BINARY: `HasActivity(WRN, exonuclease)`. The sentence they lifted is
+// «MSI cancer models had the exonuclease activity of WRN» — it says something about MSI cancer
+// models. Dropping that argument turned a claim about one experimental context into a claim about
+// WRN simpliciter, and the generalisation was invisible: it lived in the predicate's ARITY, never
+// stated, never justified.
+//
+// So `m` is a parameter now. It is not a class IRI — the parse says «MSI cancer models», a nested
+// compound kind, and the call site carries that term. That is what the sentence actually asserts.
+//
+// ── WHY THE BODIES DIFFER BY ONE TOKEN ────────────────────────────────────────────────────────
+//
+// `HasActivity` and `RequiresActivity` have identical bodies apart from the verb synset —
+// `v02203362_t` (have) versus `v02627934_t` (require). That is not redundancy to factor out: they
+// are different verbs, so they are different propositions, and a rule relating them is a claim
+// about the world (see `literature-rules.esl`) rather than a definitional identity.
+//
+// ── WHERE THESE NAMES COME FROM (unchanged debt) ──────────────────────────────────────────────
+//
+// The predicate NAMES are still invented — carried over from the WRN reproduction experiment
+// (`experiments/publications/wrn-helicase/chain/01-onco.esl`, 2026-06-18), when the chain had no
+// grounded vocabulary to draw on. `HasActivity` in particular duplicates RO:0002215 `capable of`.
+//
+// Grounding them is capped by what the parser can see: a definition may only be written over
+// vocabulary the lexicon contains, and this lexicon is WordNet + UMLS. Reaching GO:0004527
+// («exonuclease activity») or RO:0002215 is a LEXICON change, not a change here. Recorded rather
+// than fixed — D66 D6.
+//
+// `DispensableActivity` was declared here and used by nothing. Removed. (The similarly-named
+// predicate in `demo/prose-to-chain` is a different IRI, in `urn:eigenius:benchmark:onco`, and is
+// unaffected.)
 
-// ── WHERE THESE PREDICATE NAMES COME FROM ─────────────────────────────────────────────────────
-//
-// All three are declared here, in a demo namespace, and are drawn from no published ontology.
-// That is a carry-over. `RequiresActivity` and `DispensableActivity` were invented for the WRN
-// reproduction experiment (experiments/publications/wrn-helicase/chain/01-onco.esl, 2026-06-18),
-// when the chain had no grounded vocabulary to draw on. This file re-typed them at `Set` for
-// demo 2 and did not revisit where the NAMES come from: the migration grounded the ARGUMENTS
-// (`"WRN"` → `umlscui:C0388246`) and left the PREDICATES where they were.
-//
-// ESL has no slot for this on a `data` declaration — the body accepts constructors only — so
-// unlike `literature-rules.esl`, whose rationale is committed and visible to a reader of the
-// GRAPH, what follows lives only in this source file. Closing that is a language change, not
-// something to work around with an ad-hoc annotation resource here.
-//
-// The ARGUMENTS carry the same debt with a structural excuse. `exonuclease` is `wn:n14606137`, a
-// WordNet synset — a general-English dictionary sense — where GO:0004527 "exonuclease activity"
-// is the canonical term; `helicase` is `umlscui:C0920283` where GO:0004386 exists. But a bridge
-// may only name classes the PARSE produced (`BridgedClaimGrader` refuses any other), and the
-// parser's lexicon is WordNet + UMLS. So the vocabulary a lift can reach is capped by the
-// vocabulary the parser can see: grounding in GO is a LEXICON change, not a bridge change. That
-// cap is the price of the guarantee that a lift cannot introduce a subject the sentence never
-// mentioned.
+namespace logic    = "urn:eigenius:logic";
+namespace eigentt  = "urn:eigenius:eigentt";
+namespace ontology = "urn:eigenius:ontology";
+namespace wn       = "urn:eigenius:wn";
+namespace onco2    = "urn:eigenius:demo:onco-typed";
 
-namespace core = "urn:eigenius:core";
-namespace onco2 = "urn:eigenius:demo:onco-typed";
-
-// INVENTED, and legitimately so. "This model requires this gene's activity for viability" is a
-// research-level dependency claim. RO has no relation for it; the nearest, RO:0002502 `depends
-// on`, is generic. Declaring new vocabulary is what a chain is for — the debt is only that
-// nothing here said it was new.
-data onco2:RequiresActivity : Set -> Set -> Prop {
-}
-
-// INVENTED (the complement of RequiresActivity), and UNUSED by this demo — only
-// demo/prose-to-chain references it. Carried over with the other two.
-data onco2:DispensableActivity : Set -> Set -> Prop {
-}
-
-// The measured property the literature rule's antecedent speaks of.
+// «⟨m⟩ had the ⟨a⟩ activity of ⟨g⟩» — the parse of sentence 1, abstracted over its three content
+// positions. Unfolds to exactly the term `claim_1` carries; verified by
+// `the_definition_unfolds_to_exactly_the_committed_parse` in eigenius-reasoning's tests.
 //
-// DUPLICATES A STANDARD RELATION, and should cite it once a relation ontology is on the chain.
-// RO:0002215 `capable of` is "a relation between a material entity (such as a cell) and a
-// process, in which the material entity has the ability to carry out the process" — which is what
-// this predicate means, and it is the relation GO itself uses to link gene products to molecular
-// functions. Unlike the two above, this one was introduced fresh for demo 2 (it appears nowhere
-// in the WRN experiment), so it duplicated an existing term rather than inheriting the habit.
-data onco2:HasActivity : Set -> Set -> Prop {
-}
+// Reading the body outward: the subject is THE unique thing that is an `a`-kind and is `of` the
+// kind `g` (`the(…)` picks it, `eigentt:fst` projects the witness out of the Σ); the object is the
+// kind `m`. `wn:n13440063` is the synset the activity noun sits in.
+def onco2:HasActivity(m : Set, g : Set, a : Set) : Prop =
+    wn:v02203362_t(
+        eigentt:fst(ontology:the(
+            (exists x0 : wn:n13440063 =>
+                logic:And(
+                    ontology:compound_kind(x0, a),
+                    ontology:prep_of(x0, ontology:kind_of(g))
+                )))),
+        ontology:kind_of(m));
+
+// «⟨m⟩ required the ⟨a⟩ activity of ⟨g⟩» — sentence 2. Identical to the above but for the verb.
+def onco2:RequiresActivity(m : Set, g : Set, a : Set) : Prop =
+    wn:v02627934_t(
+        eigentt:fst(ontology:the(
+            (exists x0 : wn:n13440063 =>
+                logic:And(
+                    ontology:compound_kind(x0, a),
+                    ontology:prep_of(x0, ontology:kind_of(g))
+                )))),
+        ontology:kind_of(m));
