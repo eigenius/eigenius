@@ -269,3 +269,179 @@ fn the_two_paths_are_actually_different() {
          agreement tests above are trivially true and prove nothing"
     );
 }
+
+// ── D66 slice 2: a transparent definition unfolds at decode ────────────────────────────────────
+
+use eigenius_kernel::ontology::resource::Resource;
+use eigenius_kernel::ontology::well_known as wk;
+
+/// Build a `eigentt:Definition` resource: `def F (g : Set) (a : Set) : Prop = prep_of(kind_of(g), kind_of(a))`.
+///
+/// The body is stored as a lambda chain, already normal (D9). `opaque` makes it rigid instead.
+fn definition_resource(def_iri: &str, opaque: bool) -> Resource {
+    let body = Exp::Lam(
+        Patt::Var("g".into()),
+        Box::new(Exp::Lam(
+            Patt::Var("a".into()),
+            Box::new(app2(
+                ax("urn:eigenius:ontology:prep_of"),
+                Exp::App(
+                    Box::new(ax("urn:eigenius:ontology:kind_of")),
+                    Box::new(Exp::Var("g".into())),
+                ),
+                Exp::App(
+                    Box::new(ax("urn:eigenius:ontology:kind_of")),
+                    Box::new(Exp::Var("a".into())),
+                ),
+            )),
+        )),
+    );
+    // `Exp::Lam` carries no domain, so the encoder needs the annotations supplied separately.
+    let encoded_body = eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
+        &[
+            (Patt::Var("g".into()), Exp::Sort(1)),
+            (Patt::Var("a".into()), Exp::Sort(1)),
+        ],
+        match &body {
+            Exp::Lam(_, inner) => match inner.as_ref() {
+                Exp::Lam(_, b) => b,
+                other => other,
+            },
+            other => other,
+        },
+    )
+    .expect("lambda chain encodes");
+
+    let mut r = Resource::new(iri(def_iri));
+    r.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::ResourceRef(iri(
+            "urn:eigenius:eigentt:Definition",
+        ))]),
+    );
+    r.set(
+        iri("urn:eigenius:eigentt:definition_type"),
+        encode_type(&Exp::Pi(
+            Patt::Unit,
+            Box::new(Exp::Sort(1)),
+            Box::new(Exp::Pi(
+                Patt::Unit,
+                Box::new(Exp::Sort(1)),
+                Box::new(Exp::Sort(0)),
+            )),
+        ))
+        .unwrap(),
+    );
+    r.set(iri("urn:eigenius:eigentt:definition_body"), encoded_body);
+    if opaque {
+        r.set(
+            iri("urn:eigenius:eigentt:definition_opaque"),
+            Value::Boolean(true),
+        );
+    }
+    r
+}
+
+fn chain_with_definition(def_iri: &str, opaque: bool) -> Arc<Layer> {
+    let base = chain_with_parse_vocabulary();
+    let mut b = LayerBuilder::new("definitions", Some(base));
+    b.add_resource(definition_resource(def_iri, opaque))
+        .unwrap();
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+const DEF: &str = "urn:eigenius:demo:def:HasActivity";
+
+/// The load-bearing slice-2 test: a use of a transparent definition decodes to its unfolded body,
+/// with the arguments substituted and **no beta-redex** left behind.
+#[test]
+fn a_transparent_definition_unfolds_at_decode() {
+    let layer = chain_with_definition(DEF, false);
+
+    // `F(WRN, exonuclease)` as it would be stored: an App spine over the definition's IRI.
+    let use_site = app2(
+        Exp::EigonAxiom(iri(DEF)), // encodes as ConstRef; decode discriminates by class
+        cls("urn:eigenius:demo:cls:WRN"),
+        cls("urn:eigenius:demo:cls:exonuclease"),
+    );
+    let stored = encode_type(&use_site).unwrap();
+    let decoded = decode_type(&stored, &layer).expect("the use decodes");
+
+    // What the body means once instantiated.
+    let expected = app2(
+        ax("urn:eigenius:ontology:prep_of"),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:WRN")),
+        ),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:exonuclease")),
+        ),
+    );
+    assert_eq!(decoded, expected, "the definition must unfold to its body");
+
+    // The point of peel-and-substitute: no redex is ever formed.
+    fn has_redex(e: &Exp) -> bool {
+        match e {
+            Exp::App(f, a) => matches!(f.as_ref(), Exp::Lam(..)) || has_redex(f) || has_redex(a),
+            Exp::Fst(x) | Exp::Snd(x) => has_redex(x),
+            Exp::Sig(_, d, b) | Exp::Pi(_, d, b) => has_redex(d) || has_redex(b),
+            Exp::Lam(_, b) => has_redex(b),
+            _ => false,
+        }
+    }
+    assert!(
+        !has_redex(&decoded),
+        "peel-and-substitute must not leave a beta-redex: {decoded:?}"
+    );
+}
+
+/// An opaque definition does NOT unfold — it stays rigid, like an axiom (#95 / D9 carve-out).
+#[test]
+fn an_opaque_definition_stays_folded() {
+    let layer = chain_with_definition(DEF, true);
+    let use_site = app2(
+        Exp::EigonAxiom(iri(DEF)),
+        cls("urn:eigenius:demo:cls:WRN"),
+        cls("urn:eigenius:demo:cls:exonuclease"),
+    );
+    let stored = encode_type(&use_site).unwrap();
+    let decoded = decode_type(&stored, &layer).expect("the use decodes");
+    assert_eq!(
+        decoded, use_site,
+        "an opaque definition must decode to itself, unfolded by nothing"
+    );
+}
+
+/// Folded and unfolded forms hash **identically** — the property the whole design turns on. An
+/// author writes the definition; the checker sees the parse; the witness key must not care.
+#[test]
+fn folded_and_unfolded_uses_hash_the_same() {
+    let layer = chain_with_definition(DEF, false);
+    let folded = encode_type(&app2(
+        Exp::EigonAxiom(iri(DEF)),
+        cls("urn:eigenius:demo:cls:WRN"),
+        cls("urn:eigenius:demo:cls:exonuclease"),
+    ))
+    .unwrap();
+    let unfolded = encode_type(&app2(
+        ax("urn:eigenius:ontology:prep_of"),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:WRN")),
+        ),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:exonuclease")),
+        ),
+    ))
+    .unwrap();
+
+    assert_ne!(folded, unfolded, "the stored forms differ, as they must");
+    assert_eq!(
+        emit_side_hash(&layer, &folded),
+        emit_side_hash(&layer, &unfolded),
+        "a definition's identity is the normal form of its RHS (D9), so the two must agree"
+    );
+}

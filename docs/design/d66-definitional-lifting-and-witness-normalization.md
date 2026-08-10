@@ -506,8 +506,27 @@ the `Let` token — `Let` stays reserved for the scoped type-position let (§1.2
 3. **Decode: peel and substitute** (§2.4) — one more arm on the head-aware `"App"` handling, alongside
    the `InductiveType` folding already there. `eval` is untouched and stays layer-free; `axiom` stays
    rigid.
-4. **Opacity modes** (#95) — a branch condition at the head. **Not deferrable**: once unfolding is a
-   decode-time question about a specific definition, the mode must exist for decode to answer it.
+4. **Opacity modes** (#95) — a branch condition at the head. `eigentt:definition_opaque`; absent means
+   transparent. An opaque definition decodes to `EigonAxiom` — rigid, never unfolded — and its
+   identity is the folded name rather than the normal form of its body (the D9 carve-out).
+
+   **Correction (2026-08-09).** An earlier draft called this "not deferrable: once unfolding is a
+   decode-time question about a specific definition, the mode must exist for decode to answer it."
+   That is circular — the mode is needed only if opaque definitions exist; were every definition
+   transparent, decode would unfold unconditionally and need no flag. Opacity **is** deferrable, and
+   is carried here for #95 rather than required by this slice.
+
+   **What distinguishes an opaque definition from an axiom, and what does not.** Today: nothing.
+   Both decode to a rigid `EigonAxiom`, both carry a type and a name, and the opaque definition's
+   body is inert. The distinction only becomes real with **step 1a's commit-time check**: an axiom is
+   *asserted* — nothing inhabits it and the kernel takes it on trust — whereas an opaque definition
+   has a body that was **type-checked against `definition_type` and then sealed**. That is Coq's
+   `Qed`: downstream depends on the name, not on which inhabitant, but the inhabitant was verified.
+   In a system built on epistemic grading that is not a small difference — unchecked assertion versus
+   checked construction — but it is entirely carried by the check. **Until 1a lands, an opaque
+   definition is an axiom with a decorative body**, and a body the kernel ignores is exactly the
+   "documentation claiming more than the code does" pattern the claims audit names. Do not expose
+   `opaque` in the ESL `def` surface before then.
 
 *Gate:* a `def` whose body is a parse-shaped `Prop` compiles and commits; `HasActivity(m, g, a)` converts
 with the parse; **the decoded term contains no `App(Lam, _)`**; a partial application decodes to a

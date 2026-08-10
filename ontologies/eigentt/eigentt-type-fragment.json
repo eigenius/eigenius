@@ -278,5 +278,39 @@
     "urn:eigenius:core:description": "Free-form note: why this axiom is being admitted, what trust assumption it encodes, what metatheory justifies it. For auditability — axioms are chain-traceable.",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:Definition",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Definition",
+    "urn:eigenius:core:description": "A named, chain-resident TRANSPARENT definition (D66). Unlike an `eigentt:Axiom`, whose IRI evaluates to a rigid neutral and never unfolds, a Definition names a body that decode substitutes at the use site. `definition_body` holds the body as a lambda chain `Lam(x1, T1, Lam(x2, T2, … B))`; arity and parameter types are read off `definition_type`, so nothing is stored twice. The body is stored ALREADY NORMALIZED — a definition's identity for equality and hashing is the normal form of its right-hand side (D66 D9), which is what lets a use decode to a normal term without evaluating. Recursive bodies are rejected at commit: decode would not terminate.",
+    "urn:eigenius:core:requires": ["urn:eigenius:eigentt:definition_type", "urn:eigenius:eigentt:definition_body"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:definition_opaque", "urn:eigenius:core:description"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:definition_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "definition_type",
+    "urn:eigenius:core:description": "The declared type of the definition, e.g. `Set -> Set -> Set -> Prop`. Arity and parameter types are read from here rather than duplicated, so a stored arity can never contradict the type. D47-encoded (eigentt:TypeExpr).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:definition_body",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "definition_body",
+    "urn:eigenius:core:description": "The right-hand side as a lambda chain, stored in NORMAL FORM (D66 D9). Decode peels one leading `Lam` per supplied argument and substitutes, never forming a beta-redex, so a use decodes straight to a normal term. D47-encoded (eigentt:TypeExpr).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:definition_opaque",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "definition_opaque",
+    "urn:eigenius:core:description": "When true, decode does NOT unfold this definition: the IRI stays a rigid constant, like an axiom, and the definition's identity is the folded name rather than the normal form of its body (the D66 D9 carve-out). This is the strict-vs-unrestricted decode mode of issue #95. Absent means transparent.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
   }
 ]

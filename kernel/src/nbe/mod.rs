@@ -28,6 +28,7 @@ pub mod readback;
 pub mod recursor;
 pub mod sized;
 pub mod sized_rigid;
+pub mod subst;
 pub mod term;
 pub mod unify;
 pub mod val;
