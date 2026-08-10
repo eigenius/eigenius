@@ -74,6 +74,9 @@ pub enum Declaration {
     /// `axiom_statement` is the type expression encoded via the D47
     /// codec. Optional `note: "..."` populates `core:axiom_justification`.
     Axiom(AxiomDecl),
+    /// `def ex:F(p : T, ...) : R = <type-expr>` — a transparent definition (D66). Lowers to an
+    /// `eigentt:Definition` carrying `definition_type` and a lambda-chain `definition_body`.
+    Def(DefDecl),
     /// D52 §12 — file-level `macro` declaration. Defines a smart
     /// constructor `macro ns:Name(p1 : T1, ...) : RetT => body`
     /// where `body` is a `Value` expression that can reference the
@@ -143,6 +146,30 @@ pub struct AxiomDecl {
     pub statement: TypeExpr,
     pub description: Option<String>,
     pub justification: Option<String>,
+    pub pos: Position,
+}
+
+/// `def ex:F(m : Set, g : Set) : Prop = <body>` — a chain-resident TRANSPARENT definition (D66).
+///
+/// Distinct from [`AxiomDecl`] in exactly the way that matters: an axiom's IRI evaluates to a rigid
+/// neutral and never unfolds, whereas a definition's body is substituted by decode at every use, so
+/// `F(a, b)` and the body-with-arguments are the same term and hash identically.
+///
+/// The parameters give both halves: the declared type is `Pi(m : Set). Pi(g : Set). Prop`, and the
+/// body is the lambda chain `Lam(m, Lam(g, ...))`. Nothing is stored twice — arity and parameter
+/// types are read back off the type.
+#[derive(Debug)]
+pub struct DefDecl {
+    pub name: QualifiedName,
+    /// `(m : Set, g : Set)`. Reuses [`TypedParam`] — the production `forall` already uses — so a
+    /// parameter's type can be any type expression (`P : T -> Prop`), not just a class or a sort
+    /// as [`DataParam`] allows.
+    pub params: Vec<TypedParam>,
+    /// The result type, after the `:`.
+    pub result: TypeExpr,
+    /// The right-hand side, after the `=`.
+    pub body: TypeExpr,
+    pub description: Option<String>,
     pub pos: Position,
 }
 

@@ -783,6 +783,7 @@ impl Compiler {
                 "vector_index lowering not yet implemented (D43 M2)".to_string(),
             )),
             ast::Declaration::Axiom(ax) => self.compile_axiom(ax),
+            ast::Declaration::Def(d) => self.compile_def(d),
         }
     }
 
@@ -1306,6 +1307,74 @@ impl Compiler {
             r.set(
                 iri("urn:eigenius:eigentt:axiom_justification"),
                 Value::String(j.clone()),
+            );
+        }
+        stamp_declared(&mut r);
+        Ok(vec![r])
+    }
+
+    /// Lower `def ex:F(m : Set, g : Set) : Prop = <body>` to an `eigentt:Definition` (D66).
+    ///
+    /// The parameters give both stored halves:
+    /// - `definition_type` = `Pi (m : Set). Pi (g : Set). Prop`
+    /// - `definition_body` = the lambda chain `Lam(m, Lam(g, <body>))`
+    ///
+    /// Arity and parameter types live only in the type, so a stored arity can never contradict it.
+    ///
+    /// **The body is stored as written, not normalized here.** D9 requires what is *stored* to be
+    /// the normal form of the right-hand side. This compiler satisfies that by not producing a
+    /// non-normal body, and Rule 24 refuses any that slips through. Normalizing here would mean
+    /// evaluating an open term and reading it back, which renames every binder — and a compiler
+    /// silently rewriting an author's body is worse than telling them it contains a redex.
+    fn compile_def(&self, decl: &ast::DefDecl) -> Result<Vec<Resource>, EslError> {
+        let mut scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut binders: Vec<(crate::nbe::term::Patt, Exp)> = Vec::new();
+        for p in &decl.params {
+            let dom = self.lower_type_expr_to_exp(&p.typ, &scope)?;
+            binders.push((crate::nbe::term::Patt::Var(p.name.clone()), dom));
+            scope.insert(p.name.as_str());
+        }
+        let result_exp = self.lower_type_expr_to_exp(&decl.result, &scope)?;
+        let body_exp = self.lower_type_expr_to_exp(&decl.body, &scope)?;
+
+        // The declared type: one `Pi` per parameter, ending in the result type.
+        let mut type_exp = result_exp;
+        for (patt, dom) in binders.iter().rev() {
+            type_exp = Exp::Pi(patt.clone(), Box::new(dom.clone()), Box::new(type_exp));
+        }
+
+        let encoded_type =
+            crate::program::eigentt_type_mirror::encode_type(&type_exp).map_err(|e| {
+                EslError::compiler(
+                    Some(decl.pos.clone()),
+                    format!("definition type encoding failed: {e}"),
+                )
+            })?;
+        // `Exp::Lam` carries no domain slot, so the encoder takes the annotations separately.
+        let encoded_body = crate::program::eigentt_type_mirror::encode_lam_chain(
+            &binders, &body_exp,
+        )
+        .map_err(|e| {
+            EslError::compiler(
+                Some(decl.pos.clone()),
+                format!("definition body encoding failed: {e}"),
+            )
+        })?;
+
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:eigentt:Definition".to_string(),
+            )]),
+        );
+        r.set(iri("urn:eigenius:eigentt:definition_type"), encoded_type);
+        r.set(iri("urn:eigenius:eigentt:definition_body"), encoded_body);
+        if let Some(d) = &decl.description {
+            r.set(
+                iri("urn:eigenius:core:description"),
+                Value::String(d.clone()),
             );
         }
         stamp_declared(&mut r);

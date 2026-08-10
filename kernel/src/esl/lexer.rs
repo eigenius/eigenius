@@ -86,6 +86,10 @@ pub enum TokenKind {
     /// Commits a `core:Axiom` chain resource with the type expression
     /// encoded via the D47 codec.
     Axiom,
+    /// `def name(p : T, ...) : R = <type-expr>` — a chain-resident TRANSPARENT definition (D66).
+    /// Commits an `eigentt:Definition` whose body decode substitutes at each use, unlike
+    /// [`TokenKind::Axiom`], whose IRI stays rigid and never unfolds.
+    Def,
     /// D52 §12 — `macro ns:Name(p1 : T1, ...) : RetT => body`
     /// top-level smart-constructor declaration. Compile-time AST
     /// substitution only; not a runtime function. Distinct from
@@ -518,6 +522,7 @@ impl<'a> Lexer<'a> {
             "exists" => TokenKind::Exists,
             "fun" => TokenKind::Fun,
             "axiom" => TokenKind::Axiom,
+            "def" => TokenKind::Def,
             "macro" => TokenKind::Macro,
             "Prop" => TokenKind::Prop,
             "Set" => TokenKind::SetKw,

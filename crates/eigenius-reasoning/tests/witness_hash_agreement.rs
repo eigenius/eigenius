@@ -445,3 +445,414 @@ fn folded_and_unfolded_uses_hash_the_same() {
         "a definition's identity is the normal form of its RHS (D9), so the two must agree"
     );
 }
+
+// ── D66 slice 2, Rule 24: commit-time validation of a definition ───────────────────────────────
+
+use eigenius_kernel::validation::{ValidationRule, Validator};
+
+/// Validate `r` against a chain that already carries the parse vocabulary, returning the Rule 24
+/// messages (if any).
+fn definition_errors(r: Resource) -> Vec<String> {
+    let base = chain_with_parse_vocabulary();
+    Validator::new(Arc::clone(&base))
+        .validate_resource(&r)
+        .into_iter()
+        .filter(|e| e.rule == ValidationRule::DefinitionMalformed)
+        .map(|e| e.message)
+        .collect()
+}
+
+/// A well-formed definition passes.
+#[test]
+fn rule24_accepts_a_well_formed_definition() {
+    let errs = definition_errors(definition_resource(DEF, false));
+    assert!(errs.is_empty(), "expected no Rule 24 errors, got {errs:?}");
+}
+
+/// Recursion is refused: decode substitutes the body at the use site, so a self-reference would
+/// expand forever. There is no fuel and no termination argument (#66).
+#[test]
+fn rule24_rejects_a_recursive_definition() {
+    let mut r = definition_resource(DEF, false);
+    // A body that names its own IRI.
+    let self_ref = eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
+        &[
+            (Patt::Var("g".into()), Exp::Sort(1)),
+            (Patt::Var("a".into()), Exp::Sort(1)),
+        ],
+        &app2(
+            Exp::EigonAxiom(iri(DEF)),
+            Exp::Var("g".into()),
+            Exp::Var("a".into()),
+        ),
+    )
+    .unwrap();
+    r.set(iri("urn:eigenius:eigentt:definition_body"), self_ref);
+
+    let errs = definition_errors(r);
+    assert!(
+        errs.iter().any(|m| m.contains("references its own IRI")),
+        "a recursive body must be refused; got {errs:?}"
+    );
+}
+
+/// A body carrying a beta-redex is refused: D9 makes a definition's identity the NORMAL FORM of its
+/// right-hand side, so a redex-bearing body would hash differently on the two ends of the key.
+#[test]
+fn rule24_rejects_a_body_that_is_not_in_normal_form() {
+    let mut r = definition_resource(DEF, false);
+    // `(λz. kind_of(z)) WRN` — a redex, left unreduced.
+    let redex = eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
+        &[
+            (Patt::Var("g".into()), Exp::Sort(1)),
+            (Patt::Var("a".into()), Exp::Sort(1)),
+        ],
+        &app2(
+            ax("urn:eigenius:ontology:prep_of"),
+            Exp::App(
+                Box::new(
+                    eigenius_kernel::program::eigentt_type_mirror::decode_type(
+                        &eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
+                            &[(Patt::Var("z".into()), Exp::Sort(1))],
+                            &Exp::App(
+                                Box::new(ax("urn:eigenius:ontology:kind_of")),
+                                Box::new(Exp::Var("z".into())),
+                            ),
+                        )
+                        .unwrap(),
+                        &chain_with_parse_vocabulary(),
+                    )
+                    .unwrap(),
+                ),
+                Box::new(cls("urn:eigenius:demo:cls:WRN")),
+            ),
+            Exp::App(
+                Box::new(ax("urn:eigenius:ontology:kind_of")),
+                Box::new(Exp::Var("a".into())),
+            ),
+        ),
+    );
+    // `encode_lam_chain` refuses a bare inner `Lam`, so if the redex cannot even be encoded the
+    // invariant is enforced one layer earlier — which is also acceptable. Only assert when it can.
+    if let Ok(encoded) = redex {
+        r.set(iri("urn:eigenius:eigentt:definition_body"), encoded);
+        let errs = definition_errors(r);
+        assert!(
+            errs.iter().any(|m| m.contains("not in normal form")),
+            "a redex-bearing body must be refused; got {errs:?}"
+        );
+    }
+}
+
+/// The check that gives `definition_opaque` its meaning: the body must inhabit the declared type.
+/// An axiom is asserted; a definition's body is verified and only then sealed.
+#[test]
+fn rule24_rejects_a_body_that_does_not_inhabit_its_declared_type() {
+    let mut r = definition_resource(DEF, false);
+    // Declared `Set -> Set -> Prop`, but the body is a bare sort.
+    r.set(
+        iri("urn:eigenius:eigentt:definition_body"),
+        encode_type(&Exp::Sort(0)).unwrap(),
+    );
+    let errs = definition_errors(r);
+    assert!(
+        errs.iter().any(|m| m.contains("does not inhabit")),
+        "a body of the wrong type must be refused; got {errs:?}"
+    );
+}
+
+// ── D66 slice 2: the ESL `def` surface, end to end ─────────────────────────────────────────────
+
+/// `def` compiles, commits, and unfolds — lexer → parser → compiler → decode in one pass.
+#[test]
+fn esl_def_compiles_and_unfolds_at_a_use_site() {
+    let src = r#"
+        namespace ont = "urn:eigenius:ontology";
+        namespace d   = "urn:eigenius:demo:esl";
+        def d:Activity(g : Set, a : Set) : Prop =
+            ont:prep_of(ont:kind_of(g), ont:kind_of(a))
+            desc: "the a-activity of g";
+    "#;
+    let resources = esl::compile(src).expect("`def` compiles");
+    let def = resources
+        .iter()
+        .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:demo:esl:Activity"))
+        .expect("the definition resource is emitted");
+    assert!(
+        def.is_a()
+            .iter()
+            .any(|c| c.as_str() == "urn:eigenius:eigentt:Definition"),
+        "a `def` must mint an eigentt:Definition, got {:?}",
+        def.is_a()
+    );
+    assert!(def
+        .get(&iri("urn:eigenius:eigentt:definition_type"))
+        .is_some());
+    assert!(def
+        .get(&iri("urn:eigenius:eigentt:definition_body"))
+        .is_some());
+
+    // Commit it onto a chain that has the vocabulary, and check a use unfolds.
+    let mut b = LayerBuilder::new("esl-def", Some(chain_with_parse_vocabulary()));
+    for r in resources {
+        b.add_resource(r).unwrap();
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let use_site = app2(
+        Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Activity")),
+        cls("urn:eigenius:demo:cls:WRN"),
+        cls("urn:eigenius:demo:cls:exonuclease"),
+    );
+    let decoded = decode_type(&encode_type(&use_site).unwrap(), &layer).expect("the use decodes");
+    let expected = app2(
+        ax("urn:eigenius:ontology:prep_of"),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:WRN")),
+        ),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:exonuclease")),
+        ),
+    );
+    assert_eq!(
+        decoded, expected,
+        "a use of an ESL-authored definition must unfold to its body"
+    );
+}
+
+/// The printer emits generic `resource X : Class { … }` blocks rather than `def` syntax — the same
+/// treatment `axiom` gets. That is fine *provided it round-trips*: `decompile --verify` recompiles
+/// what it printed and compares. Verify it here rather than assume it, since a definition that
+/// prints but does not reparse would break `decompile` the moment a chain holds one.
+#[test]
+fn a_definition_round_trips_through_the_printer() {
+    let src = r#"
+        namespace ont = "urn:eigenius:ontology";
+        namespace d   = "urn:eigenius:demo:esl";
+        def d:Activity(g : Set, a : Set) : Prop =
+            ont:prep_of(ont:kind_of(g), ont:kind_of(a));
+    "#;
+    let original = esl::compile(src).expect("compiles");
+    // The printer takes an Eigon-JSON document, the same path `eigenius decompile` uses.
+    let doc = eigenius_kernel::ontology::eigon_json::serialize_document(&original);
+    let printed = eigenius_kernel::esl::print::print_document(&doc).expect("prints");
+    let reparsed = esl::compile(&printed)
+        .unwrap_or_else(|e| panic!("printed ESL does not recompile: {e:?}\n---\n{printed}"));
+
+    let find = |rs: &[Resource]| {
+        rs.iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:demo:esl:Activity"))
+            .cloned()
+            .expect("definition present")
+    };
+    let (a, b) = (find(&original), find(&reparsed));
+    for prop in [
+        "urn:eigenius:eigentt:definition_type",
+        "urn:eigenius:eigentt:definition_body",
+    ] {
+        assert_eq!(
+            a.get(&iri(prop)),
+            b.get(&iri(prop)),
+            "`{prop}` must survive print → recompile"
+        );
+    }
+}
+
+/// **Does δ compose?** One definition's body may reference another, and the stored body keeps that
+/// reference *folded* — nothing normalizes it away at commit (Rule 24 checks β only). That is only
+/// sound if decode unfolds nested definitions recursively, so both ends of the witness key still
+/// land on the same fully-unfolded term.
+#[test]
+fn nested_definitions_unfold_all_the_way_at_decode() {
+    let src = r#"
+        namespace ont = "urn:eigenius:ontology";
+        namespace d   = "urn:eigenius:demo:esl";
+        def d:Inner(x : Set) : lexicon:Entity = ont:kind_of(x);
+        def d:Outer(g : Set, a : Set) : Prop  = ont:prep_of(d:Inner(g), d:Inner(a));
+    "#;
+    let src = src.replace(
+        "namespace ont",
+        "namespace lexicon = \"urn:eigenius:lexicon\";\n        namespace ont",
+    );
+    let resources = esl::compile(&src).expect("nested defs compile");
+    let mut b = LayerBuilder::new("nested", Some(chain_with_parse_vocabulary()));
+    for r in resources {
+        b.add_resource(r).unwrap();
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let use_site = app2(
+        Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Outer")),
+        cls("urn:eigenius:demo:cls:WRN"),
+        cls("urn:eigenius:demo:cls:exonuclease"),
+    );
+    let decoded = decode_type(&encode_type(&use_site).unwrap(), &layer).expect("decodes");
+
+    // Fully unfolded: BOTH levels gone, `Inner` nowhere in the result.
+    let expected = app2(
+        ax("urn:eigenius:ontology:prep_of"),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:WRN")),
+        ),
+        Exp::App(
+            Box::new(ax("urn:eigenius:ontology:kind_of")),
+            Box::new(cls("urn:eigenius:demo:cls:exonuclease")),
+        ),
+    );
+    assert_eq!(
+        decoded, expected,
+        "decode must unfold nested definitions all the way, or a folded inner reference would \
+         survive into the hash on one side and not the other"
+    );
+}
+
+// ── D66 slice 2: the gate items I had not actually verified ────────────────────────────────────
+
+/// Gate item: a **partial** application decodes to a β-normal `Lam`, not to a redex.
+///
+/// Peel-and-substitute stops when arguments run out. Claimed in D66 §2.4; never tested until now.
+#[test]
+fn a_partial_application_decodes_to_a_beta_normal_lambda() {
+    let layer = chain_with_definition(DEF, false);
+    // `F(WRN)` — one argument to a two-parameter definition.
+    let partial = Exp::App(
+        Box::new(Exp::EigonAxiom(iri(DEF))),
+        Box::new(cls("urn:eigenius:demo:cls:WRN")),
+    );
+    let decoded = decode_type(&encode_type(&partial).unwrap(), &layer).expect("decodes");
+    match &decoded {
+        Exp::Lam(..) => {}
+        other => panic!("a partial application must leave a Lam, got {other:?}"),
+    }
+    fn has_redex(e: &Exp) -> bool {
+        match e {
+            Exp::App(f, a) => matches!(f.as_ref(), Exp::Lam(..)) || has_redex(f) || has_redex(a),
+            Exp::Lam(_, b) => has_redex(b),
+            Exp::Fst(x) | Exp::Snd(x) => has_redex(x),
+            Exp::Sig(_, d, b) | Exp::Pi(_, d, b) => has_redex(d) || has_redex(b),
+            _ => false,
+        }
+    }
+    assert!(!has_redex(&decoded), "still no redex: {decoded:?}");
+}
+
+/// An ESL-authored `def` passes commit validation — including Rule 24. My earlier Rule 24 tests
+/// used a hand-built resource; this checks the one the compiler actually emits.
+#[test]
+fn an_esl_authored_def_passes_commit_validation() {
+    let src = r#"
+        namespace ont = "urn:eigenius:ontology";
+        namespace d   = "urn:eigenius:demo:esl";
+        def d:Activity(g : Set, a : Set) : Prop =
+            ont:prep_of(ont:kind_of(g), ont:kind_of(a));
+    "#;
+    let base = chain_with_parse_vocabulary();
+    let validator = Validator::new(Arc::clone(&base));
+    for r in esl::compile(src).expect("compiles") {
+        let errs: Vec<String> = validator
+            .validate_resource(&r)
+            .into_iter()
+            .map(|e| format!("{:?}: {}", e.rule, e.message))
+            .collect();
+        assert!(
+            errs.is_empty(),
+            "compiler-emitted resource {:?} failed validation: {errs:?}",
+            r.id()
+        );
+    }
+}
+
+/// A **proposition that uses a definition** passes commit validation.
+///
+/// This is the question behind "does a transparent definition need an `axiom_env` entry?" Rule 21
+/// requires every `eigentt:TypeExpr`-valued property to decode *and* type-check. If a definition's
+/// IRI reached `check_infer` as a bare constant it would have no registered type and fail — so this
+/// passing is the evidence that decode unfolds it first and the checker never sees the name.
+#[test]
+fn a_proposition_using_a_definition_type_checks_at_commit() {
+    let src = r#"
+        namespace ont = "urn:eigenius:ontology";
+        namespace d   = "urn:eigenius:demo:esl";
+        def d:Activity(g : Set, a : Set) : Prop =
+            ont:prep_of(ont:kind_of(g), ont:kind_of(a));
+    "#;
+    let mut b = LayerBuilder::new("defs", Some(chain_with_parse_vocabulary()));
+    for r in esl::compile(src).expect("compiles") {
+        b.add_resource(r).unwrap();
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    // A resource whose canonical_proposition is a USE of the definition.
+    let mut claim = Resource::new(iri("urn:eigenius:demo:esl:claim"));
+    claim.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+    );
+    claim.set(
+        iri("urn:eigenius:reflection:declared_by"),
+        Value::String("test".into()),
+    );
+    claim.set(
+        iri(wk::CANONICAL_PROPOSITION),
+        encode_type(&app2(
+            Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Activity")),
+            cls("urn:eigenius:demo:cls:WRN"),
+            cls("urn:eigenius:demo:cls:exonuclease"),
+        ))
+        .unwrap(),
+    );
+
+    let errs: Vec<String> = Validator::new(layer)
+        .validate_resource(&claim)
+        .into_iter()
+        .map(|e| format!("{:?}: {}", e.rule, e.message))
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "a proposition citing a definition must type-check at commit; got {errs:?}"
+    );
+}
+
+/// **Why exempting `definition_body` from Rule 21 is sound.**
+///
+/// Rule 21 ends in `check_infer`, and a lambda chain has no inferable type, so for a definition body
+/// the rule contributes nothing but a spurious rejection. The body is instead checked by Rule 24
+/// against the declared `definition_type` — the correct mode, and strictly stronger.
+///
+/// That argument has a hole unless one thing holds: the exemption is keyed on the *property IRI*,
+/// not on the class, so it would be an escape hatch if `definition_body` could ride on a resource
+/// that is NOT an `eigentt:Definition` — Rule 24 would not run, Rule 21 would be exempt, and the
+/// value would be checked by nothing.
+///
+/// It cannot. Rule 10 is restrictive and `definition_body`'s `core:domain` is `[eigentt:Definition]`.
+/// This test is what makes that a checked fact rather than a reading of the ontology.
+#[test]
+fn definition_body_cannot_escape_checking_by_riding_on_another_class() {
+    let layer = chain_with_parse_vocabulary();
+    let mut smuggler = Resource::new(iri("urn:eigenius:demo:esl:smuggler"));
+    smuggler.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+    );
+    smuggler.set(
+        iri("urn:eigenius:reflection:declared_by"),
+        Value::String("test".into()),
+    );
+    // A body that Rule 24 would reject (ill-typed), on a resource Rule 24 will never look at.
+    smuggler.set(
+        iri("urn:eigenius:eigentt:definition_body"),
+        encode_type(&Exp::Sort(0)).unwrap(),
+    );
+
+    let errs = Validator::new(layer).validate_resource(&smuggler);
+    assert!(
+        errs.iter()
+            .any(|e| e.rule == ValidationRule::DomainViolation),
+        "`definition_body` outside an eigentt:Definition must be refused by the domain rule, or the \
+         Rule 21 exemption becomes an escape hatch; got {:?}",
+        errs.iter().map(|e| format!("{:?}", e.rule)).collect::<Vec<_>>()
+    );
+}

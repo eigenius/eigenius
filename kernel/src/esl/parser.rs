@@ -104,6 +104,7 @@ impl<'a> Parser<'a> {
             TokenKind::SetKw => "Set".to_string(),
             TokenKind::TypeKw => "Type".to_string(),
             TokenKind::Axiom => "axiom".to_string(),
+            TokenKind::Def => "def".to_string(),
             TokenKind::Forall => "forall".to_string(),
             _ => {
                 return Err(EslError::parser(
@@ -213,6 +214,7 @@ impl<'a> Parser<'a> {
                 TokenKind::Axiom => {
                     declarations.push(Declaration::Axiom(self.parse_axiom()?))
                 }
+                TokenKind::Def => declarations.push(Declaration::Def(self.parse_def()?)),
                 TokenKind::Macro => {
                     declarations.push(Declaration::Macro(self.parse_macro()?))
                 }
@@ -1525,6 +1527,50 @@ impl<'a> Parser<'a> {
             statement,
             description,
             justification,
+            pos,
+        })
+    }
+
+    /// `def ex:F(m : Set, g : Set) : Prop = <type-expr>` (D66).
+    ///
+    /// Parameters reuse `parse_typed_param_list` — the production `forall` already uses — so a
+    /// parameter's type may be any type expression, not just a class or sort as `data` allows.
+    ///
+    /// `opaque` is deliberately NOT accepted here. The property exists on the resource for #95, but
+    /// an opaque definition is indistinguishable from an axiom until its body is type-checked at
+    /// commit — until then it would be a body the kernel ignores, which is exactly the
+    /// documentation-claiming-more-than-the-code pattern. Authors get `axiom` for that today.
+    fn parse_def(&mut self) -> Result<DefDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Def)?;
+        let name = self.parse_qualified_name()?;
+        let params = if self.at(&TokenKind::LParen) {
+            self.parse_typed_param_list()?
+        } else {
+            Vec::new()
+        };
+        self.expect(&TokenKind::Colon)?;
+        let result = self.parse_type_expr()?;
+        self.expect(&TokenKind::Eq)?;
+        let body = self.parse_type_expr()?;
+        let mut description = None;
+        while let TokenKind::Ident(ident) = self.peek().clone() {
+            if ident.as_str() != "desc" {
+                break;
+            }
+            self.advance();
+            self.expect(&TokenKind::Colon)?;
+            description = Some(self.expect_string()?);
+        }
+        if self.at(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(DefDecl {
+            name,
+            params,
+            result,
+            body,
+            description,
             pos,
         })
     }

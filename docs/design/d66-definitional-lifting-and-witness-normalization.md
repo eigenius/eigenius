@@ -1,6 +1,6 @@
 # D66 — Definitional lifting: transparent definitions, explicit context, and symmetric witness normalization
 
-*Status: design — **decision-complete** (§6 D1–D9 all ✅); ready to implement (§5 slices). No code yet. Motivated by the shape-rule
+*Status: design — **decision-complete** (§6 D1–D10 all ✅); ready to implement (§5 slices). No code yet. Motivated by the shape-rule
 amortisation investigation ([`docs/notes/2026-08-09-shape-rule-amortisation.md`](../notes/2026-08-09-shape-rule-amortisation.md),
 issues #111/#112): every lift from a parsed sentence to domain vocabulary is currently a **Declared**
 bridge, one per parse shape — measured at ≥61 bridges for 62 sentences. The cause is not the bridge
@@ -298,13 +298,13 @@ hashing raw stored JSON and decodes first, exactly as the check side already doe
 | emit side, today | hashes the folded JSON | — |
 | emit side, fixed | keeps the folded JSON | decodes, then hashes the unfolded form |
 
-Because a definition's body is stored normalized (D9) and peel-and-substitute forms no redex, the
-decoded term *is* the normal form — so "decode, then hash" and "hash the normal form" are the same
-operation, and the two sides agree by construction rather than by coincidence.
+Decode is what makes the decoded term the normal form: it performs δ (recursively, D9) and
+peel-and-substitute forms no redex, while Rule 24 has already refused any body carrying one. So
+"decode, then hash" and "hash the normal form" are the same operation, and the two sides agree by
+construction rather than by coincidence.
 
 `prop_hash` stays a hash of a *term*, and there is one normalization path instead of two kept in step
-by hand. **The stored form stays folded**, so `eigenius decompile` still prints `HasActivity(m, g, a)`
-and the readability the definition buys is not lost at the printer.
+by hand. **The stored form stays folded** — see D10 for why, and for what that does and does not buy.
 
 This is a smaller change than "evaluate in the layer": the emit side must decode anyway to obtain an
 `Exp`, and decode is where the layer already is.
@@ -533,6 +533,55 @@ with the parse; **the decoded term contains no `App(Lam, _)`**; a partial applic
 β-normal `Lam`; an `opaque` def does **not** unfold; a recursive body is rejected at commit;
 `eigenius decompile` still prints the folded form.
 
+**Status (2026-08-10): implemented.**
+
+| piece | where |
+|---|---|
+| capture-avoiding substitution | `kernel/src/nbe/subst.rs` (new) — exhaustive over the definition-body fragment, **refuses** anything outside it rather than passing it through unsubstituted |
+| `Definition` class + `definition_type` / `definition_body` / `definition_opaque` | `ontologies/eigentt/eigentt-type-fragment.json` |
+| decode: unfold transparent, peel-and-substitute; opaque stays rigid | `kernel/src/program/eigentt_type_mirror.rs` |
+| Rule 24 — non-recursive, decodes, β-normal, inhabits its type | `kernel/src/validation/mod.rs` |
+| `def` surface | `kernel/src/esl/{lexer,ast,parser,compile}.rs` |
+
+Three things the implementation settled that the design had left loose:
+
+- **Parameters use `TypedParam`, not `DataParam`.** `data`'s parameter kind is an `IndexKind` — a
+  class or a sort only — so it cannot express `(P : T -> Prop)`. The `forall` production can.
+- **No printer change was needed.** The printer emits generic `resource X : Class { … }` blocks, the
+  same treatment `axiom` gets, and that round-trips. Verified rather than assumed
+  (`a_definition_round_trips_through_the_printer`), because a definition that printed but did not
+  reparse would break `eigenius decompile --verify` on the first chain holding one.
+- **`opaque` is not accepted by the parser.** The property exists for #95, but until the body is
+  type-checked at commit an opaque definition is an axiom with a decorative body. Rule 24 now does
+  that check, so exposing it is a small follow-up rather than a design question.
+
+**Rule 24's check order is load-bearing.** Recursion is checked **first, on the encoded form**, before
+any decode. Decode unfolds a definition by substituting its body at the use site, so a body naming its
+own IRI recurses *inside decode* — a guard placed after decoding never runs. A test caught this.
+
+**`eigentt:definition_body` is exempt from Rule 21, and this is the argument.** Without the exemption
+**no `def` can commit at all**: Rule 21 ends in `check_infer`, and a definition body is a lambda chain,
+which has no inferable type — a lambda is *checked against* an expected type, never inferred from
+itself. Every well-formed definition was rejected with `cannot infer type of: Lam(…)`. The exemption is
+sound on three legs:
+
+1. **Rule 21 contributed nothing here.** For a lambda it produced only a spurious rejection, so
+   exempting loses no coverage.
+2. **Rule 24 checks the body in the correct mode** — against the declared `definition_type`, strictly
+   stronger than inference. And `definition_type` is **not** exempt: it still passes through Rule 21,
+   so the type the body is checked against is itself validated.
+3. **The exemption is keyed on the property IRI, not the class**, which would be an escape hatch if
+   `definition_body` could ride on a non-`Definition` resource — Rule 24 would not run and Rule 21
+   would be exempt. It cannot: **Rule 10 (domain) is restrictive** and `definition_body`'s
+   `core:domain` is `[eigentt:Definition]`. Pinned by
+   `definition_body_cannot_escape_checking_by_riding_on_another_class`, which smuggles an ill-typed
+   body onto a `DeclaredResource` and asserts the refusal. If that domain is ever relaxed, or Rule 10
+   made advisory, the test fails and names the reason.
+
+This was found only because a test exercised the **commit gate** rather than the mechanism. Every
+earlier slice-2 test built layers directly and passed; the feature would have failed on first real
+use. Worth carrying into slice 3, where the demo rewrite goes through the real load path.
+
 **Slice 3 — the capstone: rewrite the demo.** Not a cleanup pass — this is the acceptance test for the
 whole design, and it is where **D6** is answered (arity and names, chosen with the `def` form in hand
 rather than guessed against one that does not exist yet).
@@ -562,7 +611,8 @@ cannot be deferred.)*
 | **D5** | A definition is a **separate declaration form** (`def`), not `Decl::Def` on the `Let` token; unfolding happens **at decode**, not at eval | ✅ settled — §1.2a. A chain-resident definition is a *third binder*: `Let` is local and `Rho`-resolved and cannot mint an IRI; `EigonAxiom` mints an IRI but evaluates to a rigid neutral (`kernel/src/nbe/eval/mod.rs:509`), correctly so for `kind_of`/`the`. `eval` has no layer (`:155`), so δ belongs in decode, which already resolves `ConstRef` against the layer — and #95 independently frames δ-control as decode modes. `Let` stays reserved for the scoped type-position let |
 | **D6** | Arity and naming of the domain predicates once the context is explicit | ✅ settled **as sequencing** — the question is deliberately *not* answered here. `demo/prose-to-formulas` is rewritten as the **capstone** (slice 3) once slices 0–2 are implemented, and the arity and names are chosen there with the mechanism in hand. Answering it now would fix a vocabulary against a `def` form that does not yet exist. Note `demo/prose-to-formulas/onco-typed.esl` already records that `HasActivity` duplicates **RO:0002215 `capable of`**, which is *binary*, gene-to-process, and carries the same context-free assumption — so the honest ternary form will not map onto it cleanly, and the capstone settles **arity and naming, not grounding** (§7) |
 | **D7** | Cost of decoding on the commit path | ✅ settled — **absorb it**. Every `canonical_proposition` gains a D47 decode at layer build. Correctness comes first; the alternative is two normalization paths kept in step by hand, which is the defect being fixed. Efficiency is follow-up work, taken only if measurement warrants it — see below |
-| **D9** | What is a definition's **identity** for equality and hashing? | ✅ settled — **the normalized form of its right-hand side**, normalized **once at `def` commit** and stored that way. Anything computing a `prop_hash` therefore hashes the normal form, and the two ends of the witness key agree *by construction* rather than by an argument that decode-only happens to coincide with decode-plus-eval. Normalizing at commit rather than per use matters because slice 0 moved emission to **per lookup**: normalizing at each use would put a full NbE evaluation on every witness probe on every layer of a chain walk, far beyond the "a D47 decode at layer build" D7 accepted. With the RHS already normal, D8's peel-and-substitute drops closed arguments into a normal body without forming a redex, so a use decodes straight to a normal term and neither side evaluates. **Carve-out:** this defines identity for *transparent* definitions; an opaque one does not unfold, so its identity stays the folded name (#95). **Condition to pin, not assume:** substituting normal closed arguments into a normal body yields a normal term |
+| **D10** | Is a definition's body stored δ-**folded** or δ-**expanded**? | ✅ settled — **folded**. Both satisfy D9: a use decodes to the fully unfolded term before anything hashes it, so identity is the normal form either way. Only storage differs. Measured on two nested definitions in the demo's own shape (`ActivityOf` referenced once by `HasActivity`): folded **17 nodes / 554 bytes**, expanded **32 nodes / 1104 bytes** — roughly double at one level, and a body referencing another twice inlines it twice. Expanded storage also has a sharper edge: `encode_type` refuses a bare `Exp::Lam` (`LamWithoutAnnotation`), because decode discards a `Lam`'s domain, so anything reading a stored body and writing it back must carry the parameter types separately. **Corrected 2026-08-10:** an earlier draft justified folded storage by `eigenius decompile` printing the folded call. That readability requirement was never set and is not a basis for this decision; it is at most an observation about the printer |
+| **D9** | What is a definition's **identity** for equality and hashing? | ✅ settled — **the normal form of its right-hand side**. *(Refined 2026-08-10 against the implementation: the earlier wording said "normalized once at commit and stored that way", which is not what the kernel does and not what it should do. **Nothing normalizes.** β-normality is enforced at commit by **rejection** — Rule 24 refuses a redex-bearing body rather than rewriting it, because a compiler silently rewriting an author's body is worse than telling them it has a redex. **δ is performed at decode**, recursively, so a body may reference another definition and keep it FOLDED in storage. The storage half of that split is D10. Both ends of the witness key still agree, because both go through the same decode — pinned by `nested_definitions_unfold_all_the_way_at_decode`.)* Anything computing a `prop_hash` therefore hashes the normal form, and the two ends of the witness key agree *by construction* rather than by an argument that decode-only happens to coincide with decode-plus-eval. Normalizing at commit rather than per use matters because slice 0 moved emission to **per lookup**: normalizing at each use would put a full NbE evaluation on every witness probe on every layer of a chain walk, far beyond the "a D47 decode at layer build" D7 accepted. With the RHS already normal, D8's peel-and-substitute drops closed arguments into a normal body without forming a redex, so a use decodes straight to a normal term and neither side evaluates. **Carve-out:** this defines identity for *transparent* definitions; an opaque one does not unfold, so its identity stays the folded name (#95). **Condition to pin, not assume:** substituting normal closed arguments into a normal body yields a normal term |
 | **D8** | Does decode form a redex or substitute through — and what is stored? | ✅ settled — **store the λ-body; decode peels and substitutes; definitions are non-recursive.** §2.4. The real axis is decode behaviour, not storage: forming `App(Lam…, x)` would force the emit side to replicate the evaluator, which is §4's defect relocated from α to β. Peel-and-substitute is bounded and structural, so D5 and D4 both hold. Storage is the λ-body — arity and parameter types come from the declared type, so nothing is duplicated and no new consistency rule is needed; and it avoids a second binding convention in `TypeExpr` that `alpha_canonicalize_proposition_json` would mis-handle, since that function deliberately preserves free `Var`s. Decode distinguishes a definition by the resolved resource's class, as `resolve_const_ref` already does for axiom / class / individual; **no new `Exp` variant** — after substitution the definition leaves no trace. Opacity (#95) hangs off the same resource and is a branch condition at the head. Requires a total capture-avoiding substitution on `Exp`, which does not yet exist (§2.4) |
 
 ## 7. Out of scope
