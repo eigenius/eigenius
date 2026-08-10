@@ -98,7 +98,6 @@ fn build_universal_rule_chain() -> ExecutionContext {
         fixture_builder.add_resource(r).unwrap();
     }
     let fixture_layer = Arc::new(fixture_builder.build(LayerStorage::in_memory()));
-    let _ = fixture_layer.chain_witness_index();
 
     ExecutionContext::new(
         fixture_layer,

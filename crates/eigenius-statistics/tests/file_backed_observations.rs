@@ -178,7 +178,6 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
         b.add_resource(file).unwrap();
         Arc::new(b.build(LayerStorage::in_memory()))
     };
-    let _ = fixture.chain_witness_index();
 
     ExecutionContext::new(
         fixture,

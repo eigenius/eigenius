@@ -70,6 +70,20 @@ impl Validator {
             return vec![];
         }
 
+        // `eigentt:definition_body` is exempt, and deliberately so (D66 slice 2).
+        //
+        // This rule ends in `check_infer` — INFERENCE. A definition's body is a lambda chain, and a
+        // bare `Exp::Lam` has no inferable type: a lambda is *checked against* an expected type, not
+        // inferred from itself. Applying inference here rejects every well-formed definition with
+        // "cannot infer type of: Lam(...)".
+        //
+        // The body is not going unchecked — Rule 24 checks it in the correct mode, against the
+        // declared `definition_type`, which is strictly stronger than anything inference could
+        // establish. `definition_type` itself is NOT exempt and still comes through here.
+        if prop_iri.as_str() == "urn:eigenius:eigentt:definition_body" {
+            return vec![];
+        }
+
         // (1) Decode the D47-encoded tree. Malformed trees, unresolved
         // ConstRefs, and unknown CtorApps surface here.
         let exp = match decode_type(value, &self.layer) {

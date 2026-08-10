@@ -3,9 +3,9 @@
 //
 // In English:
 //
-//   If a model has WRN's exonuclease activity, then it requires WRN's helicase activity.
+//   For any model m: if m has WRN's exonuclease activity, then m requires WRN's helicase activity.
 //
-//   HasActivity(WRN, exonuclease)  →  RequiresActivity(WRN, helicase)
+//   ∀ m. HasActivity(m, WRN, exonuclease)  →  RequiresActivity(m, WRN, helicase)
 //
 // This is the piece that makes a sentence justifiable by INFERENCE rather than by having been
 // written. The document's activity sentence asserts its own content; the same content also FOLLOWS
@@ -16,12 +16,28 @@
 // Chan et al. The demo is about how a sentence becomes justified, not about WRN biology. The
 // `rationale` field below says so on the chain, where a reader of the graph will see it.
 //
-// Why this rule is hand-authorable at all, when the per-sentence lifts in `bridges.esl` are
-// machine-generated: this rule is stated in DOMAIN vocabulary, so its antecedent is
-// `HasActivity(WRN, exonuclease)` — plain class references anyone can type. A rule whose antecedent
-// had to be a PARSE would be inexpressible in ESL, which has no syntax for the Σ-binders and
-// projections a DCG term contains. That is the dividing line between what is authored here and
-// what is generated: parse-shaped steps are generated bridges, domain-shaped steps are not.
+// ── WHY IT QUANTIFIES OVER THE MODEL ──────────────────────────────────────────────────────────
+//
+// The sentences it relates are about MSI cancer models. A rule that dropped the model from its
+// arity would hide a universal quantification there: a claim about one experimental context would
+// silently become a claim about WRN as such, never stated and never justified.
+//
+// With the model an explicit parameter, the quantifier is where it belongs — in the rule, visible,
+// and it is what the rule actually says. `inference.esl` eliminates it with
+// `JustifiedBy.spec_poly` at the model the sentences are about, which is the ordinary way to use a
+// general claim on a particular case.
+//
+// ── AND WHY IT IS THE ONLY DECLARED THING HERE ────────────────────────────────────────────────
+//
+// This rule is Declared because it IS an assertion: somebody read a paper and asserts the
+// dependency. That is the honest grade for it.
+//
+// The LIFT from prose to domain vocabulary Declares nothing: `onco-typed.esl` defines
+// `HasActivity` and `RequiresActivity` as transparent definitions over the parser's own lexicon,
+// so `HasActivity(m, g, a)` and the parsed sentence are the same term — the kernel computes that,
+// nothing asserts it. One `DeclarationTrace` sits on this branch, below, and it is the only claim
+// anyone is standing behind. (Its antecedent IS a parse — `exists` and `eigentt:fst` are ESL
+// surface — reached through a definition rather than spelled out.)
 //
 // Loaded onto `main` before the two demo branches are cut, so both branches share it.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -32,11 +48,13 @@ namespace onco2      = "urn:eigenius:demo:onco-typed";
 namespace umlscui    = "urn:eigenius:umlscui";
 namespace wn         = "urn:eigenius:wn";
 
-// The classes the rule quantifies over, drawn from two different lexicons the graph already held:
+// The classes the rule mentions, drawn from two different lexicons the graph already held:
 //
 //   umlscui:C0388246   WRN           (a UMLS concept)
 //   wn:n14606137       exonuclease   (a WordNet synset)
 //   umlscui:C0920283   helicase      (a UMLS concept)
+//
+// The model is not fixed here — that is the point of the quantifier.
 
 // ── The rule ──────────────────────────────────────────────────────────────────────────────────
 //
@@ -49,7 +67,7 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
     reflection:declared_by = "literature:illustrative-dependency-rule";
 
     // WHY, recorded on chain rather than in a comment a reader of the graph would never see.
-    reflection:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
+    reflection:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Quantified over the model, so applying it to a particular one is an explicit specialization rather than a silent generalization. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
 
     // WHAT the rule says, as a machine-checkable proposition rather than prose. This is the field
     // that turns a citation into something the kernel can apply.
@@ -59,12 +77,15 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
     // its content. Spelling out the implication here is what makes the rule usable as the `A -> B`
     // premise of an `app` step.
     //
-    // It must match, byte for byte after D47 encoding, the implication written out in
-    // `inference.esl`'s `reasoning:declared(...)` sub-proof — the witness key hashes the
-    // proposition, so a rule that says something even slightly different is a different rule.
+    // It must match, byte for byte after D47 encoding, the implication `inference.esl`'s
+    // `reasoning:declared(...)` sub-proof writes out — the witness key hashes the proposition, so a
+    // rule that says something even slightly different is a different rule. Note that the two
+    // `onco2:` calls below are DEFINITIONS: decode unfolds them to the parsed sentences on both
+    // sides, so the match is on the unfolded terms and holds by construction.
     reflection:canonical_proposition = type_expr(
-        onco2:HasActivity(umlscui:C0388246, wn:n14606137)
-          -> onco2:RequiresActivity(umlscui:C0388246, umlscui:C0920283)
+        forall (m : Set) =>
+            onco2:HasActivity(m, umlscui:C0388246, wn:n14606137)
+              -> onco2:RequiresActivity(m, umlscui:C0388246, umlscui:C0920283)
     );
 }
 
@@ -78,14 +99,14 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
 // The rule resource on its own mints nothing.
 //
 // That witness is exactly what `inference.esl` consumes. Its certificate contains
-// `reasoning:declared("…:lit_rule_exo_implies_helicase", A -> B, ())`, and the `()` is a slot the
-// kernel fills by looking up `(Declared, this IRI, hash of A -> B)` in the index. `IsDeclaredAs`
-// has zero constructors, so no author can supply an inhabitant — the lookup IS the type-check.
-// Delete this trace and the intact branch's inference stops committing.
+// `reasoning:declared("…:lit_rule_exo_implies_helicase", ∀m. A -> B, ())`, and the `()` is a slot
+// the kernel fills by looking up `(Declared, this IRI, hash of the proposition)` in the index.
+// `IsDeclaredAs` has zero constructors, so no author can supply an inhabitant — the lookup IS the
+// type-check. Delete this trace and the intact branch's inference stops committing.
 //
-// The trace repeats `declared_by` rather than inheriting it: the class requires `resource`,
-// `declared_by`, and `timestamp`. The timestamp is fixed rather than generated so the demo's
-// artifacts are byte-reproducible across runs.
+// This is the ONLY DeclarationTrace on the branch. Counting these is how to count what the chain
+// takes on authority: `reflection:DeclaredResource` is a provenance label the ESL compiler stamps
+// on every declaration it emits, definitions included, and mints no witness.
 resource onco2:lit_rule_exo_implies_helicase_trace : reflection:DeclarationTrace {
     reflection:resource    = onco2:lit_rule_exo_implies_helicase;
     reflection:declared_by = "literature:illustrative-dependency-rule";

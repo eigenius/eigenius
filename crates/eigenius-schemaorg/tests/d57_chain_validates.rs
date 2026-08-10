@@ -55,7 +55,6 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
 
-    let _ = layer.chain_witness_index();
     let ctx = ExecutionContext::new(
         layer.clone(),
         name,
@@ -240,7 +239,6 @@ fn d57_objective_chain_validates() {
         "d57-05-synthesis",
     );
 
-    let _ = l05.chain_witness_index();
     let ctx = ExecutionContext::new(
         l05,
         "d57-05-synthesis",

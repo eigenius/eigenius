@@ -9,21 +9,25 @@ until the kernel refuses it.
 
 To run including parsing:
 ```bash
-EIGENIUS_DB_SNAPSHOT="$PWD/../db-snapshot/wordnet-umls-aligned-2026-08-03-specpoly" ./demo/prose-to-formulas/run.sh --reparse
+./demo/prose-to-formulas/run.sh --reparse
 ```
 
-**Prerequisite: a lexicon snapshot.** The encoded claims' propositions are built from lexicon axioms
-(`wn:v02627934_t` is the verb sense of *require*), so the chain they commit to must be the one that
-*defines* those axioms — a bare core+domain chain fails at the D47 decode with `ConstRef references
-unresolved IRI`. `run.sh` stages it into the kernel's docker volume and treats the snapshot itself as
-read-only.
+**Prerequisite: an ALIGNED lexicon snapshot.** The encoded claims' propositions are built from
+lexicon axioms (`wn:v02627934_t` is the verb sense of *require*), so the chain they commit to must
+be the one that *defines* those axioms — a bare core+domain chain fails at the D47 decode with
+`ConstRef references unresolved IRI`. And it must be the aligned chain: on a raw (unaligned) reseed,
+WordNet and UMLS carry duplicate senses of the same words, the recorded ranks replay (keyed on each
+word's candidate senses) misses and falls back to cap-only, and `--reparse` fails closed with two
+readings sharing the pinned skeleton. `run.sh` stages the snapshot into the kernel's docker volume
+and treats the snapshot itself as read-only.
 
 ```
-<repo-parent>/db-snapshot/wordnet-umls-aligned-2026-08-03-specpoly   (1006 MB)
+<repo-parent>/db-snapshot/wordnet-umls-aligned-d66   (993 MB)
 ```
 
-Override with `EIGENIUS_DB_SNAPSHOT`. To build one: `scripts/reseed-lexicon-db.sh`, then
-`scripts/build-alignment-snapshot.sh`.
+Override with `EIGENIUS_DB_SNAPSHOT`. To build one:
+`scripts/reseed-lexicon-db.sh --snapshot-dir wordnet-umls-d66`, then
+`scripts/build-alignment-snapshot.sh --base <that> --out …/wordnet-umls-aligned-d66`.
 
 ## What it shows
 
@@ -37,31 +41,33 @@ MSI cancer models required the helicase activity of WRN.      ← an activity cl
 and one rule **pinned from the literature**, not from this document:
 
 ```text
-HasActivity(WRN, exonuclease) → RequiresActivity(WRN, helicase)
+∀m. HasActivity(m, WRN, exonuclease) → RequiresActivity(m, WRN, helicase)
 ```
 
 The parser turns each sentence into a closed, felicity-gated `Prop`, committed as an
-`enc:EncodedClaim` under a `reflection:ProgramTrace` that mints `IsDerivedAs claim_i P_i`. A shape
-rule lifts each into domain vocabulary. Then the pinned rule is applied to the measurement's claim,
-and the result is:
+`enc:EncodedClaim` under a `reflection:ProgramTrace` that mints `IsDerivedAs claim_i P_i`. There is
+no lift step: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon, so
+each parsed proposition already **is** a domain formula. Then the pinned rule is specialized at the
+model and applied to the measurement's claim, and the result is:
 
-> **`RequiresActivity(WRN, helicase)` is justified twice.**
+> **`RequiresActivity(MSI, WRN, helicase)` is justified twice.**
 > Once because sentence 2 asserts it — the document says so.
 > Once because it **follows** from sentence 1 plus a published rule.
 >
-> Two `ReasoningSentence`s carrying a byte-identical proposition, with entirely different
-> justification terms. (Nothing on chain records that they coincide — see *What is still thin*.)
+> One proposition, two entirely different warrants: sentence 2's own parse witness, and a
+> `ReasoningSentence` whose certificate applies the rule. (Nothing on chain records that they
+> coincide.)
 
 **The derived route is not the better-warranted one**, and it is worth being exact about that:
 
 | route | rests on |
 |---|---|
-| asserted (`s2:sentence`) | one Declared lift + sentence 2's parse |
-| derived (`inferred:sentence`) | one Declared lift + sentence 1's parse, **plus** a Declared literature rule |
+| asserted (`claim_2`) | sentence 2's parse — a `Derived` witness, nothing Declared |
+| derived (`inferred:sentence`) | sentence 1's parse, **plus** a Declared literature rule |
 
-Both commit at grade `Declared`. The derived route carries strictly more assumptions — everything
-the assertion needs, over a *different* sentence, and a published rule on top. "Independent of the
-document stating the conclusion" is a claim about what it does not depend on, not about strength.
+The derived route carries strictly more assumptions — a parse of a *different* sentence, and a
+published rule on top, so it commits at `Declared`, its weakest link. "Independent of the document
+stating the conclusion" is a claim about what it does not depend on, not about strength.
 
 What makes it the interesting one is that it **knows what it depends on**, which the next section
 makes visible.
@@ -76,45 +82,51 @@ Then the demo negates the measurement:
 The two routes then come apart, in the same run:
 
 ```text
-sentence 2's lift  (ASSERTED)     ✓ still commits — nothing about sentence 2 changed
-sentence 1's lift  (MEASUREMENT)  ✗ REJECTED — and with it the derivation
+sentence 2's claim  (ASSERTED)       ✓ still commits — nothing about sentence 2 changed
+the derivation on sentence 1         ✗ REJECTED — inference.esl refused at commit
 ```
 
-Sentence 1 parses to a different proposition, so no `IsDerivedAs` witness matches the one its lift
-names. The inferred claim cited that lift as its antecedent, so it has nothing left to stand on —
+Sentence 1 parses to a different proposition, so no `IsDerivedAs` witness matches the one the
+recorded certificate cites for its antecedent. The inferred claim has nothing left to stand on —
 while the document's own assertion of the same conclusion is untouched.
 
 That asymmetry is the point. A conclusion the graph produced carries a live dependency on what it
 was produced from; a document repeating it does not. Nothing compared the two texts.
 
-(The citations layer is deliberately split per sentence in `run.sh` — loaded as one layer the edited
-run fails atomically, which hides exactly this.)
+(The edited run's rejection lands on `inference.esl` itself — the recorded argument is the only
+resource that cites the measurement.)
 
-## The three ways a claim gets justified here
+## The two ways a claim gets justified here
 
 | | what warrants it | grade | authoring cost |
 |---|---|---|---|
-| **shape rule** | a Declared rule quantified over the parse's argument classes, instantiated per sentence with `spec_poly` | Declared | one rule per parse SHAPE |
-| **pinned literature rule** | a published `A → B` on the chain, applied to a claim an earlier sentence established | Declared | one rule, reused |
+| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `spec_poly` and applied to a claim a sentence established | Declared | one rule, reused |
 | **prose modus ponens** | `A` and `A → B` **both parsed from sentences** — the grammar renders `if` as native implication | **Derived** | none |
 
-The third is the strongest: nothing is Declared, because the implication *is* a sentence. The
+The lift from prose to domain vocabulary is not a third way: `onco-typed.esl` *defines* the domain
+predicates over the parser's own lexicon, so `HasActivity(m, g, a)` and the parsed sentence are the
+same term and the lift is definitional equality (D66). The kernel computes it; nothing declares it.
+What matters is how many **unchecked assertions** a chain rests on, and definitions take that to
+one: the literature rule, which genuinely is an assertion and is graded as one.
+
+The second is the strongest: nothing is Declared, because the implication *is* a sentence. The
 grammar's `if` entry is `λs₂. λs₁. (s₂ → s₁)`, and its design note says encoding it opaquely "would
 forfeit modus ponens in the checker". `"S₁ if S₂"` parses to a genuine top-level implication whose
 antecedent is verbatim the premise sentence's own parse — verified against the real snapshot.
 
-All three are exercised by [`shape_rule.rs`](../../crates/eigenius-reasoning/tests/shape_rule.rs),
-including `one_rule_serves_two_different_sentences` (one rule, two sentences, both `Holds`) and two
-fail-closed cases.
+Both are exercised by
+[`justification_routes.rs`](../../crates/eigenius-reasoning/tests/justification_routes.rs), each
+with a `Holds` case and a fail-closed case.
 
-### Why the literature rule can be hand-authored when a bridge cannot
+### Why the literature rule is hand-authored, and nothing else is
 
-Its antecedent is `HasActivity(WRN, exonuclease)` — plain class references. A rule whose antecedent
-had to be a *parse* would be impractical to hand-author: the Σ-binders and projections a DCG term
-contains do have an ESL surface (`exists`, `eigentt:fst` — `claims-intact.esl` in this directory is
-nothing but), but the term for one sentence runs to hundreds of characters of nested applications
-that no one writes by hand correctly. That is exactly why the parse-shaped step is a **generated**
-shape rule and the domain-vocabulary step is not.
+Its antecedent reads `HasActivity(m, WRN, exonuclease)` — a call anyone can type. That call *is* the
+parse: `HasActivity` is a definition whose body is the DCG term, so the readable surface and the
+formula are one thing rather than two connected by an assertion.
+
+The term itself runs to hundreds of characters of nested applications that no one writes by hand
+correctly — which is why nobody writes it. What is authored is the abbreviation and the claim that
+uses it: the answer to an unwritable term is to name it, not to generate an assertion about it.
 
 ## Where the rejection actually comes from
 
@@ -127,7 +139,7 @@ standalone claim against anything. What rejects is the **certificate**.
 | property | what it holds | encoding |
 |---|---|---|
 | `reasoning:proposition` | the domain claim `C` | D47 `eigentt:TypeExpr` |
-| `reasoning:justification` | the *reason shape*: `App(DeclaredEvidence(bridge), DerivedEvidence(claim))` | D32 §3.7 tagged dict — a `JustificationTerm` **value** |
+| `reasoning:justification` | the *reason shape*: `App(SpecStr(DeclaredEvidence(rule), tag), DerivedEvidence(claim))` | D32 §3.7 tagged dict — a `JustificationTerm` **value** |
 | `reasoning:certificate` | the proof that the reason warrants the claim | D47 `eigentt:TypeExpr` |
 
 The justification says *which evidence*; the certificate says *why that evidence suffices*. A
@@ -158,20 +170,25 @@ type-check.
 
 ### Where the prose enters
 
-The certificate is one application of the Artemov rule:
+The certificate is one application of the Artemov rule, over an implication obtained by
+specializing the ∀-quantified literature rule at the model:
 
 ```text
-app( P, C,
-     DeclaredEvidence(bridge),  DerivedEvidence(claim),
-     declared(bridge, P → C, _),        ← the human's lift, Declared
-     derived (claim,  P,     _) )       ← the parser's output, Derived
+app( A, B,
+     SpecStr(DeclaredEvidence(rule), tag),  DerivedEvidence(claim_1),
+     spec_poly( Set, (fun m => A(m) → B(m)), DeclaredEvidence(rule),
+                «MSI cancer models», tag,
+                declared(rule, ∀m. A(m) → B(m), _) ),   ← the pinned rule, Declared, specialized
+     derived (claim_1, A, _) )                          ← the parser's output, Derived
 ```
 
-`app` is a constructor of `JustifiedBy`: from `j1 : JustifiedBy(_, A → B)` and
+`spec_poly` eliminates the quantifier: from `JustifiedBy(j, ∀y:T. P(y))` it yields
+`JustifiedBy(SpecStr(j, tag), P(x))`. `app` then composes: from `j1 : JustifiedBy(_, A → B)` and
 `j2 : JustifiedBy(_, A)` it yields `JustifiedBy(App(j1,j2), B)`. **`A` must be the same term on both
-sides** — the bridge's antecedent and the claim's proposition must be *identical*, not merely
-compatible. (That invariant has its own test:
-`bridge_antecedent_and_derived_grounding_embed_the_same_subtree`.)
+sides** — the specialized rule's antecedent and the claim's proposition must be *identical*, not
+merely compatible. Both reach it through the `HasActivity` definition, which unfolds to exactly the
+committed parse (`has_activity_unfolds_to_exactly_the_committed_parse`), so the match holds by
+construction rather than by an assertion kept in step by hand.
 
 The trailing `_` on `declared` and `derived` is a `UnitVal`. The kernel **discards it and synthesises
 the real witness itself**, from the chain witness index:
@@ -190,16 +207,16 @@ emits `IsDerivedAs claim_iri P`, where `P` is the claim's own `canonical_proposi
 ### Why the edit fails
 
 ```text
-intact   claim_2.canonical_proposition = P    →  index key (Derived, claim_2, sha256(P))
-edited   claim_2.canonical_proposition = P′   →  index key (Derived, claim_2, sha256(P′))
+intact   claim_1.canonical_proposition = P            →  index key (Derived, claim_1, sha256(P))
+edited   claim_1.canonical_proposition = P → False    →  index key (Derived, claim_1, sha256(P → False))
 
-recorded certificate still contains        derived(claim_2, P, _)
-kernel therefore looks up                  (Derived, claim_2, sha256(P))
+recorded certificate still contains        derived(claim_1, P, _)
+kernel therefore looks up                  (Derived, claim_1, sha256(P))
 ```
 
 The proposition is **hashed into the key**, so this is exact structural identity — no similarity
-metric, no threshold. `sha256(P) ≠ sha256(P′)`, the lookup misses, no inhabitant exists for
-`JustifiedBy(DerivedEvidence(claim_2), P)`, `app` cannot be applied, and the certificate fails against
+metric, no threshold. `sha256(P) ≠ sha256(P → False)`, the lookup misses, no inhabitant exists for
+`JustifiedBy(DerivedEvidence(claim_1), P)`, `app` cannot be applied, and the certificate fails against
 `JustifiedBy(justification, C)`.
 
 Two things follow. The paragraph has to be an **argument**, not a list of facts — the edit only bites
@@ -212,17 +229,14 @@ change does not fail at all.
 | file | generated? | what it is |
 |---|---|---|
 | `paragraph.txt` | — | the two sentences, verbatim from CNL-v3 |
-| `paragraph-edited.txt` | — | the same, minus one negation |
-| `onco-typed.esl` | — | domain predicates at `Set -> Set -> Prop` |
-| `claims.tsv` | — | which domain proposition each sentence warrants, with **class IRI** arguments |
+| `paragraph-edited.txt` | — | the same, with the measurement negated («had» → «did not have») |
+| `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon — `Set -> Set -> Set -> Prop`, model explicit |
 | `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) |
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
-| `literature-rules.esl` | — | the pinned `A → B`, cited, in domain vocabulary |
+| `literature-rules.esl` | — | the pinned `∀m. A → B`, cited — the ONLY DeclarationTrace on the branch |
 | `claims-intact.esl` | `prose-to-esl` | units + encoded claims + ProgramTraces + decision points |
 | `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
-| `rules.esl` | `--rules-out`, **once** | shape rules — one per distinct (predicate, parse shape) |
-| `bridges.esl` | `--citations-out`, **once** | one `ReasoningSentence` per sentence, citing a shape rule |
-| `inference.esl` | `--inference-out`, **once** | the CONCLUDED claim — the literature rule applied to the measurement |
+| `inference.esl` | hand-authored | the CONCLUDED claim — the literature rule specialized at the model and applied to sentence 1's own parse |
 
 The generated chain artifacts are **ESL, not Eigon-JSON**. `prose-to-esl` runs the same pipeline as
 `prose-to-eigon` and prints the record as source, so what is committed is the formula a reviewer
@@ -247,15 +261,15 @@ The domain namespace is `urn:eigenius:demo:onco-typed` rather than the WRN case 
 whose predicates are string-typed and whose committed conclusions depend on that; migrating them is
 separate work.
 
-## Why the argument layer is generated once and committed
+## Why the argument is committed, not regenerated
 
-`bridges.esl` is the **recorded argument**: what someone concluded, at a point in time, from the
-prose as it then read. The claims layers are a function of the prose. Regenerating the argument on
-every run would re-derive it around any edit, and nothing would ever fail to commit — which is the
-one thing the demo exists to show.
+`inference.esl` is the **recorded argument**: what someone concluded, at a point in time, from the
+prose as it then read. The claims layers are a function of the prose. Re-deriving the argument on
+every run would reshape it around any edit, and nothing would ever fail to commit — which is the one
+thing the demo exists to show. `--reparse` regenerates only the claims.
 
 The two halves run on two branches off one base, rather than as two loads onto one chain, because a
-redefinition does not retract the earlier layer's witness: `IsDerivedAs claim_2 P_original` would
+redefinition does not retract the earlier layer's witness: `IsDerivedAs claim_1 P_original` would
 still be reachable and the certificate would still resolve.
 
 ## What a `Holds` does NOT mean
@@ -265,12 +279,13 @@ Two witnesses stand behind the intact commit, and neither is about biology.
 | witness | grade | what it actually attests |
 |---|---|---|
 | `IsDerivedAs(claim_i, P)` | **Derived** | the DCG parser, run over bytes with a recorded sha256 at a recorded span, produced proposition `P` — a fact about **the text** |
-| `IsDeclaredAs(bridge_i, P → C)` | **Declared** | a human asserts that a sentence meaning `P` warrants the domain claim `C`, with author and rationale |
+| `IsDeclaredAs(lit_rule, ∀m. A(m) → B(m))` | **Declared** | a human asserts the published dependency between the two activities, with author and rationale |
 
-`app` composes them and the result commits at **Declared** — a conclusion is no better than its
-weakest link, and the lift is the weak one.
+`spec_poly` and `app` compose them and the result commits at **Declared** — a conclusion is no
+better than its weakest link, and the rule is the weak one.
 
-So the chain says *"the paper says it, and we declare that its saying so warrants the claim."*
+So the chain says *"the paper says the measurement, and we declare a rule under which it entails
+the conclusion."*
 **Nothing here witnesses that WRN's exonuclease activity is in fact dispensable.** A `Holds` proves
 the certificate type-checks against admitted witnesses — D61's oracle #1, structural validity. It is
 not oracle #2 (faithfulness), and it is certainly not truth.
@@ -298,38 +313,18 @@ A third sentence — *"We found that WRN was selectively essential in MSI models
 exactly this reason: on this snapshot it yields two readings sharing the pinned skeleton, and
 `select_pinned` refused to choose. That refusal is the design working.
 
-**Bridges are Declared and do not amortise.** Typing the arguments makes the lift checkable in one
-respect — the classes must be present — but it does not make it *derivable*. The bridge is still a
-ground implication, one per claim, graded Declared.
+**The literature rule is Declared, and has to be.** Definitions make the parse and the domain
+formula one term, so the lift Declares nothing — but a rule relating two propositions is a claim
+about the world, graded Declared.
 
 That is a property of the logic, not an authoring shortcut: **there is no implication introduction.**
-No rule produces `JustifiedBy(_, A → B)` — `app` yields `B`, `sum_l`/`sum_r` yield `P`, `spec_str`
-yields `P(t)`. An implication enters only through a grounding, so a bridge between vocabularies must
-be asserted; it cannot be proved.
+No rule produces `JustifiedBy(_, A → B)` — `app` yields `B`, `sum_l`/`sum_r` yield `P`,
+`spec_str`/`spec_poly` yield `P(t)`. An implication enters only through a grounding, so a rule
+connecting propositions must be asserted; it cannot be proved.
 
-## On amortisation, honestly
+## Appendix: `spec_poly`
 
-`--rules-out` prints the ratio it achieved. This paragraph's two sentences use two different
-predicates, so it reports **2 rules for 2 sentences** — no saving visible here. The saving is real
-but needs repetition to show: `one_rule_serves_two_different_sentences` demonstrates one rule
-covering two sentences, and the mechanism groups automatically by `(predicate, abstracted
-proposition)`. A page with recurring constructions would show it; a two-sentence paragraph with two
-constructions cannot, and inventing prose to make the number look better would be dishonest.
-
-## Appendix: the quantified form
-
-Shape rules are quantified over the classes rather than naming them:
-
-```esl
-reflection:canonical_proposition = type_expr(
-    forall (g : Set, a : Set) => onco2:ParsedShape(g, a) -> onco2:RequiresActivity(g, a)
-);
-```
-
-**This already commits** — a `Set`-quantified implication is a `Prop` and mints its `IsDeclaredAs`
-witness like any other declaration (verified 2026-08-03). What is missing is the *elimination*:
-`spec_str` is monomorphic on `core:string`, so it cannot instantiate a `Set`-quantified rule. A
-polymorphic form is expressible —
+The elimination this demo's certificate uses:
 
 ```esl
 spec_poly :
@@ -337,13 +332,14 @@ spec_poly :
     JustifiedBy(j, forall (y : T) => P(y)) -> JustifiedBy(SpecStr(j, tag), P(x)),
 ```
 
-— and loads as a well-formed constructor (also verified). It binds the domain type and the instance
-on the *proof* side while the justification term carries only a string tag, so `JustificationTerm`
-needs no change; only `JustifiedBy` gains a constructor.
-
-That is a `reasoning.esl` edit, which is bootstrapped, so it costs a lexicon reseed — worth batching
-with any other ontology change. With it, one rule per parse *shape* replaces one bridge per sentence,
-and the shape inventory is small: 46 distinct `cat` shapes across 242,938 lexical entries.
+A `JustifiedBy` constructor in [`reasoning.esl`](../../ontologies/reasoning/reasoning.esl) (landed
+2026-08-03; `reasoning.esl` is bootstrapped, so adding it cost a lexicon reseed). `spec_str` is
+monomorphic on `core:string`; `spec_poly` eliminates a universal at any domain. It binds the domain
+type and the instance on the *proof* side while the justification term carries only a string tag,
+so `JustificationTerm` needed no change; only `JustifiedBy` gained a constructor.
+`inference.esl` applies it at `T := Set` to specialize the literature rule at «MSI cancer models» —
+a nested compound-kind term, not a class IRI. (D66 §9 records an undiagnosed universe question
+about that instantiation; it type-checks today.)
 
 Two further gaps, for completeness:
 
@@ -352,5 +348,5 @@ Two further gaps, for completeness:
   findings"* resolves to a definite description over a *findings* kind rather than to the propositions
   it denotes. The paper's own conclusion sentence needs exactly that.
 - **The inference structure.** *"These findings show that X"* yields a proposition; nothing extracts
-  the justification term from the connective. Here the argument's shape is Declared in `claims.tsv`
-  and only the propositions come from the prose.
+  the justification term from the connective. Here the argument's shape is hand-authored in
+  `inference.esl` and only the propositions come from the prose.

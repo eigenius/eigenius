@@ -462,9 +462,6 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     builder.add_resource(trace).unwrap();
     let user_layer = Arc::new(builder.build(LayerStorage::in_memory()));
 
-    // Force the user layer's witness index to populate from the trace.
-    let _ = user_layer.chain_witness_index();
-
     ExecutionContext::new(
         user_layer,
         "phase10-test",
@@ -568,7 +565,6 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
     builder.add_resource(target).unwrap();
     builder.add_resource(trace).unwrap();
     let user_layer = Arc::new(builder.build(LayerStorage::in_memory()));
-    let _ = user_layer.chain_witness_index();
 
     ExecutionContext::new(
         user_layer,

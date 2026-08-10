@@ -84,7 +84,7 @@ The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/
 Four task-first guides plus a consolidated bibliography, all grounded in the implementation:
 
 - **[Platform user guide](docs/guides/platform/README.md)** — chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, the runtime substrate (Julia v1) with per-institution slow-walks, deployment, troubleshooting, **the notebook UX**, **tags / branches / history**, **merge resolution**, **the TypeScript SDK**.
-- **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
+- **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `axiom`, `def`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
 - **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch (with `INTO`-pinned chain reinsertion), stratification, and the result-document format.
 - **[Formula language](docs/guides/formula/README.md)** — eight chapters on the chain-mirrored EigenTT fragment (`urn:eigenius:formulas:FormulaTerm`) shared by every numerical institution: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS. Covers the six-constructor inductive, Eigon-JSON encoding, operator catalog, the ESL `formula(...)` Pratt-parsed sublanguage, and identity-comorphism collapse across institutions.
 - **[References](docs/guides/references/README.md)** — consolidated bibliography for the platform: works actually cited in design docs / papers / guides, foundational works the system relies on, philosophical and methodological precursors, and contemporary related work. Generated from the BibTeX files in [`docs/references/`](docs/references/) by `scripts/bib-to-md.py`; verified against Crossref / arXiv / live URLs by `scripts/verify-citations.py`.
@@ -338,24 +338,21 @@ the client at that subprocess. See
 [platform guide §7.7](docs/guides/platform/07-orchestrator.md#77-the-mcp-server)
 for the full client wiring.
 
-### The `eigenius` skill (Claude Code only)
+### The agent guide
 
-The repo ships an agent skill at
-[`.claude/skills/eigenius.md`](.claude/skills/eigenius.md) — a project-scoped
-file Claude Code loads automatically when you launch it from the repo root.
-The skill teaches Claude the platform's mental model, the three surface
-languages, the MCP tool selection table, minimal Eigon-JSON / ESL / EigenQL
-shapes, common workflows, and the pitfalls that trip agents up (mandatory
-`is_a`, synthesized IRI row keys in query results, persistent-backend
-requirements, D41 multi-layer outcomes, …).
+[`docs/method/eigenius.md`](docs/method/eigenius.md) teaches a coding agent the
+platform's mental model, the three surface languages, the MCP tool selection
+table, minimal Eigon-JSON / ESL / EigenQL shapes, common workflows, and the
+pitfalls that trip agents up (mandatory `is_a`, synthesized IRI row keys in
+query results, persistent-backend requirements, D41 multi-layer outcomes, …).
 
-After `claude mcp add` and a fresh Claude Code session, ask the agent
-something like *"check the eigenius health"* or *"list the classes loaded in
-eigenius"* — the skill auto-triggers on platform keywords and the agent
-picks the right tool. Or invoke explicitly via `/eigenius`.
+It is a reference document, not an auto-loaded agent skill — point the agent at
+the file, or paste the relevant section. Two companions sit beside it:
+[`reasoning.md`](docs/method/reasoning.md) (capturing reasoning as a typed chain)
+and [`grounding.md`](docs/method/grounding.md) (retrieval and citation anchors).
 
-To use the skill across all your projects, copy it to
-`~/.claude/skills/eigenius.md`.
+After `claude mcp add`, ask the agent something like *"check the eigenius
+health"* or *"list the classes loaded in eigenius"*.
 
 ### Smoke-test with the MCP Inspector
 

@@ -99,7 +99,6 @@ fn sab16_compound_filter_validates_to_holds() {
 
     // Force the witness index (admits IsDeclaredAs on the acceptance rule
     // + the five methodological conformances).
-    let _ = chain.chain_witness_index();
 
     let ctx = ExecutionContext::new(
         chain,

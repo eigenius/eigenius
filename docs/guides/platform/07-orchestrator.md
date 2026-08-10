@@ -215,13 +215,11 @@ Then configure your client to launch the MCP stdio entry point on demand. Claude
 
 `deno task mcp` is defined in [`orchestration/deno.json`](../../../orchestration/deno.json) and runs [`src/mcp_main.ts`](../../../orchestration/src/mcp_main.ts). The orchestrator container does **not** need to be running for this path.
 
-### 7.7.4. The `eigenius` skill (Claude Code)
+### 7.7.4. The agent guide
 
-The repo ships an agent skill at [`.claude/skills/eigenius.md`](../../../.claude/skills/eigenius.md) that teaches Claude Code how to use the platform correctly: the mental model, the three surface languages, the MCP tool selection table, minimal Eigon-JSON / ESL / EigenQL shapes, common workflows, and the pitfalls that trip agents up (mandatory `is_a`, synthesized IRI row keys in query results, persistent-backend requirements, D41 multi-layer outcomes, …).
+[`docs/method/eigenius.md`](../../method/eigenius.md) teaches a coding agent how to use the platform correctly: the mental model, the three surface languages, the MCP tool selection table, minimal Eigon-JSON / ESL / EigenQL shapes, common workflows, and the pitfalls that trip agents up (mandatory `is_a`, synthesized IRI row keys in query results, persistent-backend requirements, D41 multi-layer outcomes, …).
 
-The skill is **project-scoped** — every developer who clones the repo and runs Claude Code from the project root picks it up automatically. To use it across projects, copy to `~/.claude/skills/eigenius.md`.
-
-Skills are discovered at session startup. After cloning the repo, start a fresh Claude Code session — the skill auto-triggers whenever the user mentions *Eigenius*, *kernel*, *ESL*, *EigenQL*, *Eigon-JSON*, *layer*, *branch*, *institution*, *Verdict*, or asks to load / query / inspect / run something. Explicit invocation also works via `/eigenius`.
+It is a **reference document, not an auto-loaded agent skill** — point the agent at the path, or paste the section you need. Two companions sit beside it: [`reasoning.md`](../../method/reasoning.md), the method for capturing reasoning as a typed chain of graded, witnessed propositions, and [`grounding.md`](../../method/grounding.md), the retrieval-and-citation method its anchoring step uses.
 
 ### 7.7.5. Smoke-test with the MCP Inspector
 

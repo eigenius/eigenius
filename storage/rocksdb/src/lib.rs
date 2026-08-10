@@ -568,9 +568,16 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             // `byte_size` (sum of encoded resource bytes — drives GC's
             // reclaim estimate) and write the values into the batch
             // without re-encoding.
+            // One walk, three stamps: the encoded bytes, `byte_size`, and the D66
+            // witness-scan skip hint.
+            let mut has_witness_candidates = false;
             let encoded: Vec<(Iri, Vec<u8>)> = layer
                 .iter_resources()
-                .map(|(iri, resource)| (iri, eigon_cbor::serialize_resource(&resource)))
+                .map(|(iri, resource)| {
+                    has_witness_candidates |=
+                        eigenius_kernel::layer::is_witness_candidate(&resource);
+                    (iri, eigon_cbor::serialize_resource(&resource))
+                })
                 .collect();
             let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
 
@@ -581,6 +588,7 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
                 parents: all_parents,
                 name: layer.name().to_string(),
                 resource_count: layer.defined_iris().len() as u64,
+                has_witness_candidates,
                 // Copy the build-time stamp set by `LayerBuilder::build`
                 // rather than taking `now_millis()` here; keeps the
                 // in-memory Layer and persisted handle consistent on

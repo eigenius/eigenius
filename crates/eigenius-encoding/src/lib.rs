@@ -31,13 +31,11 @@
 //! `experiments/parsing/expected-readings.tsv`. Zero or several matches is an error with a
 //! diagnostic, never a silent pick.
 
-pub mod claims;
 pub mod emit;
 pub mod pipeline;
 pub mod select;
 pub mod snapshot;
 
-pub use claims::{load_claims, ClaimSpec};
-pub use emit::{emit_argument, emit_document, ArgumentError, EmitError, ParsedSentence};
+pub use emit::{emit_document, EmitError, ParsedSentence};
 pub use select::{select_pinned, Pin, SelectError};
 pub use snapshot::{build_parser, open_head, ParserConfig};

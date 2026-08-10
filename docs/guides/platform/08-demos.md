@@ -1,8 +1,8 @@
 # 8. Worked demos
 
-Four end-to-end demos. Three live in [`demo/`](../../../demo/), each driven by a shell script; the fourth (the multi-institution Julia stack) lives under [`notebooks/examples/`](../../../notebooks/examples/). They're the fastest way to see the platform working as a whole — and the most reliable smoke test that an install is correct.
+Five end-to-end demos. Three live in [`demo/`](../../../demo/), each driven by a shell script; the multi-institution Julia stack and the Lean verification audit chain live under [`notebooks/examples/`](../../../notebooks/examples/). They're the fastest way to see the platform working as a whole — and the most reliable smoke test that an install is correct.
 
-All four assume the kernel and orchestrator are running. The easiest path: `EIGENIUS_MOCK_LLM=true docker compose up --build -d` (no API key needed) followed by the demo command.
+The first four assume the kernel and orchestrator are running — the easiest path: `EIGENIUS_MOCK_LLM=true docker compose up --build -d` (no API key needed) followed by the demo command. `prose-to-formulas` (§8.5) manages its own kernel container.
 
 ## 8.1. `demo/run.sh` — the basic document demo
 
@@ -78,16 +78,7 @@ This demo demonstrates the central ergonomic claim of the platform: domain-model
 
 The expected output shape — a `PatentBrief` resource with a structured `analysis` field and a free-text `summary` field — is in [`demo/patent/example-output.json`](../../../demo/patent/example-output.json).
 
-## 8.3. WASM extensibility — REMOVED (2026-07-08)
-
-The WASM extensibility demo (`demo/wasm/run.sh`), the `examples/wasm-*`
-components, and in-kernel/orchestrator WASM hosting were removed. Chapters
-[9](09-wasm-components.md) and [10](10-wasm-institutions.md) are retained
-only as historical record. For live extension, use in-process Rust
-institutions or external institutions via the runtime substrate
-([chapter 11](11-runtime-substrate.md)).
-
-## 8.4. `kinase-institutions` — multi-institution Julia stack
+## 8.3. `kinase-institutions` — multi-institution Julia stack
 
 Source: [`notebooks/examples/kinase-institutions-setup.sh`](../../../notebooks/examples/kinase-institutions-setup.sh) and [`notebooks/examples/kinase-institutions.json`](../../../notebooks/examples/kinase-institutions.json).
 
@@ -121,7 +112,7 @@ Both paths use the same `commit_with_validation` machinery — comorphism-transl
 
 The per-institution slow-walks under [`platform/julia-institutions/`](julia-institutions/) cover each piece in isolation; the kinase notebook is the one place the whole stack runs together against a single chain.
 
-## 8.5. `lean-verification` — Lean 4 verification audit chain
+## 8.4. `lean-verification` — Lean 4 verification audit chain
 
 Source: [`notebooks/examples/lean-verification-setup.sh`](../../../notebooks/examples/lean-verification-setup.sh) and [`notebooks/examples/lean-verification.json`](../../../notebooks/examples/lean-verification.json).
 
@@ -153,47 +144,31 @@ Verification is **in-process** ([`crates/eigenius-lean/`](../../../crates/eigeni
 
 Regeneration: when the Lean toolchain or the capstone proof changes, regenerate the fixture with `cargo run -p eigenius-lean --example gen_verification_demo`. Toolchain bumps follow the checklist at [`docs/notes/lean-toolchain-upgrade.md`](../../notes/lean-toolchain-upgrade.md).
 
-## 8.6. `prose-to-chain` — prose parsed into a chain, then edited until the kernel refuses it
-
-Source: [`demo/prose-to-chain/run.sh`](../../../demo/prose-to-chain/run.sh) and [`demo/prose-to-chain/README.md`](../../../demo/prose-to-chain/README.md).
-
-Two sentences of controlled prose from the WRN paper — *"MSI cancer models required the helicase activity of WRN"* and its exonuclease negation — go through the DCG parser (D63), which turns each into a closed, felicity-gated `Prop`. Each lands on the chain as an `enc:EncodedClaim` under a `reflection:ProgramTrace`, minting the witness `IsDerivedAs claim_i P_i`. A recorded argument then lifts each parsed proposition into domain vocabulary through a **Declared bridge** — a `reflection:DeclaredResource` whose canonical proposition is the ground implication `P → C` — and commits the result as a `reasoning:ReasoningSentence` whose certificate the kernel type-checks at commit.
-
-```bash
-./demo/prose-to-chain/run.sh              # stages the lexicon snapshot, brings the kernel up, runs both halves
-./demo/prose-to-chain/run.sh --reparse    # re-derive the claims layers from the paragraph text
-```
-
-The second half edits the prose. The parser produces a different `P`, so the `IsDerivedAs` witness the bridge's certificate names no longer matches, the certificate fails to type-check, and the commit is rejected. **Nothing compares the two texts** — the rejection comes entirely from the witness the certificate cites.
-
-**Prerequisite: a lexicon snapshot** (~993 MB). The propositions are built from lexicon axioms (`wn:v02627934_t` is the verb sense of *require*), so the chain must be the one that *defines* those axioms; a bare core+domain chain fails at the D47 decode with `ConstRef references unresolved IRI`. `run.sh` stages it into the kernel's docker volume read-only. Override the location with `EIGENIUS_DB_SNAPSHOT`; build one with [`scripts/reseed-lexicon-db.sh`](../../../scripts/reseed-lexicon-db.sh) then `scripts/build-alignment-snapshot.sh`.
-
-## 8.7. `prose-to-formulas` — the same conclusion justified two ways
+## 8.5. `prose-to-formulas` — the same conclusion justified two ways
 
 Source: [`demo/prose-to-formulas/run.sh`](../../../demo/prose-to-formulas/run.sh) and [`demo/prose-to-formulas/README.md`](../../../demo/prose-to-formulas/README.md).
 
-The successor to §8.6, with every layer authored in ESL rather than hand-written Eigon-JSON. Two sentences — a measurement (*"MSI cancer models had the exonuclease activity of WRN"*) and an activity claim (*"…required the helicase activity of WRN"*) — plus one rule **pinned from the literature**, not from the document: `HasActivity(WRN, exonuclease) → RequiresActivity(WRN, helicase)`.
+Two sentences of controlled prose from the WRN paper — a measurement (*"MSI cancer models had the exonuclease activity of WRN"*) and an activity claim (*"…required the helicase activity of WRN"*) — go through the DCG parser (D63), which turns each into a closed, felicity-gated `Prop`, committed as an `enc:EncodedClaim` under a `reflection:ProgramTrace` that mints the witness `IsDerivedAs claim_i P_i`. Plus one rule **pinned from the literature**, not from the document: `∀m. HasActivity(m, WRN, exonuclease) → RequiresActivity(m, WRN, helicase)`.
 
 ```bash
 ./demo/prose-to-formulas/run.sh
 ./demo/prose-to-formulas/run.sh --reparse
 ```
 
-The result is `RequiresActivity(WRN, helicase)` justified twice — once because sentence 2 asserts it, once because it *follows* from sentence 1 plus the published rule. Two `ReasoningSentence`s carrying a byte-identical proposition with entirely different justification terms. Both commit at grade `Declared`; the derived route carries strictly more assumptions, and the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's lift still commits, sentence 1's lift is rejected, and the derivation that cited it has nothing left to stand on.
+Under D66 there is **no lift step**: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon (`def`), so a parsed sentence and its domain formula are the same term by definitional equality. The result is `RequiresActivity(MSI, WRN, helicase)` justified twice — once because sentence 2 asserts it (its own parse witness, nothing Declared), once because it *follows* from sentence 1 plus the published rule specialized at the model with [`spec_poly`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate). The derived route carries strictly more assumptions and commits at `Declared`; the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's claim still commits, the derivation that cited sentence 1's parse has nothing left to stand on and is rejected.
 
-Three ways a claim gets justified here, all three exercised by [`crates/eigenius-reasoning/tests/shape_rule.rs`](../../../crates/eigenius-reasoning/tests/shape_rule.rs):
+Two ways a claim gets justified here, both exercised by [`crates/eigenius-reasoning/tests/justification_routes.rs`](../../../crates/eigenius-reasoning/tests/justification_routes.rs):
 
 | | What warrants it | Grade | Authoring cost |
 |---|---|---|---|
-| **shape rule** | a Declared rule quantified over the parse's argument classes, instantiated per sentence with [`spec_poly`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate) | Declared | one rule per parse *shape* |
-| **pinned literature rule** | a published `A → B` on the chain, applied to a claim an earlier sentence established | Declared | one rule, reused |
+| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `spec_poly` and applied to a claim an earlier sentence established | Declared | one rule, reused |
 | **prose modus ponens** | `A` and `A → B` both parsed from sentences — the grammar renders `if` as native implication | **Derived** | none |
 
-The third is the only one that Declares nothing: `"S₁ if S₂"` parses to a genuine top-level implication whose antecedent is verbatim the premise sentence's own parse, so `app` composes them with no human assertion in between.
+The second is the only one that Declares nothing: `"S₁ if S₂"` parses to a genuine top-level implication whose antecedent is verbatim the premise sentence's own parse, so `app` composes them with no human assertion in between. (A third way — generated **shape rules**, one Declared rule per parse shape — was retired by D66's definitional lift.)
 
-Same snapshot prerequisite as §8.6 (`…-specpoly`, ~1006 MB).
+**Prerequisite: an aligned lexicon snapshot** (`…/db-snapshot/wordnet-umls-aligned-d66`, ~993 MB). The propositions are built from lexicon axioms (`wn:v02627934_t` is the verb sense of *require*), so the chain must be the one that *defines* those axioms; a bare core+domain chain fails at the D47 decode with `ConstRef references unresolved IRI`. And it must be the **aligned** chain — on a raw reseed, duplicate WordNet/UMLS senses make `--reparse` fail closed. `run.sh` stages the snapshot into the kernel's docker volume read-only. Override the location with `EIGENIUS_DB_SNAPSHOT`; build one with [`scripts/reseed-lexicon-db.sh`](../../../scripts/reseed-lexicon-db.sh) then `scripts/build-alignment-snapshot.sh`.
 
-## 8.8. Running the demos as smoke tests
+## 8.6. Running the demos as smoke tests
 
 Each demo exits 0 on success and non-zero on any step failure. They're suitable as part of CI or pre-deployment verification:
 
@@ -211,12 +186,11 @@ The demos exercise overlapping but distinct subsystems:
 |---|---|
 | `demo/run.sh` | Bootstrap, JSON+ESL load, query, program run with `CompleteText` |
 | `demo/patent/run.sh` | `CompleteJson` structured extraction, two-step LLM pipeline, `Construct` |
-| `demo/prose-to-chain/run.sh` | DCG parse → `EncodedClaim`, Declared bridges, certificate rejection on edited prose |
-| `demo/prose-to-formulas/run.sh` | The above in ESL, plus shape rules (`spec_poly`), a pinned literature rule, and prose modus ponens |
+| `demo/prose-to-formulas/run.sh` | DCG parse → `EncodedClaim`, the definitional lift (`def`, D66), a `spec_poly`-specialized literature rule, prose modus ponens, certificate rejection on edited prose |
 
-For coverage, run both LLM demos. For speed, `demo/run.sh` alone covers the most common failure modes. The two prose demos need the lexicon snapshot staged first (§8.6), so they don't belong in a cold CI job.
+For coverage, run both LLM demos. For speed, `demo/run.sh` alone covers the most common failure modes. The prose-to-formulas demo needs the lexicon snapshot staged first (§8.5), so it doesn't belong in a cold CI job.
 
-## 8.9. Customising the demos
+## 8.7. Customising the demos
 
 Each demo script accepts the kernel endpoint as the first positional argument, so you can point them at a kernel running anywhere:
 

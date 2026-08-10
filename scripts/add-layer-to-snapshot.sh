@@ -67,6 +67,17 @@ CLI="$ROOT/target/release/eigenius"
 say "building the release CLI"
 cargo build --release -p eigenius-cli
 
+# The KERNEL image too — not just the CLI.
+#
+# `docker-compose.yml` pins `image: eigenius-kernel:local` beside its `build:` stanza, so
+# `docker compose up` reuses whatever was last built and never rebuilds. That silently undermines
+# this script's whole premise: the layer below is loaded THROUGH THE KERNEL precisely so it passes
+# the current validator, and a stale image validates it against old rules. The result is a
+# persistent snapshot containing something today's kernel would reject — discovered later, far from
+# here. Building is cheap next to a snapshot copy; not building is a correctness hole.
+say "building the kernel image (compose pins a tag, so `up` alone would reuse a stale one)"
+docker compose build kernel
+
 say "staging the base snapshot into a clean volume ($VOLUME)"
 # The base is copied IN; it is never opened in place. RocksDB takes a store read-write on open and
 # rewrites CURRENT/MANIFEST/WAL — a run against the base directly would mutate it (the bug fixed in

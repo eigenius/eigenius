@@ -116,6 +116,14 @@ pub enum ValidationRule {
     /// applied to the wrong argument type, an application of a non-function).
     /// Caught by `check_infer` (Rule 21).
     TypeExprIllTyped,
+    /// An `eigentt:Definition` is not well-formed (D66 slice 2). One of: its body does not decode;
+    /// it is **recursive**, which would make decode's peel-and-substitute non-terminating; its body
+    /// is **not in normal form**, breaking D9's rule that a definition's identity is the normal form
+    /// of its right-hand side; or its body does not inhabit the declared `definition_type`.
+    ///
+    /// The last is what separates an opaque definition from an axiom: an axiom is asserted and the
+    /// kernel takes it on trust, whereas a definition's body is checked here and only then sealed.
+    DefinitionMalformed,
 }
 
 impl fmt::Display for ValidationError {
@@ -286,6 +294,10 @@ impl Validator {
         // type, operator arity mismatch) surface as the
         // `nbe::check` diagnostic.
         errors.extend(self.check_standalone_lambda_well_typedness(resource, &res_id));
+
+        // Rule 24: `eigentt:Definition` well-formedness (D66 slice 2) — decodes, is
+        // non-recursive, is stored in normal form, and inhabits its declared type.
+        errors.extend(self.check_definition_well_formedness(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*
@@ -783,6 +795,140 @@ impl Validator {
         errors
     }
 
+    /// Rule 24: `eigentt:Definition` well-formedness (D66 slice 2).
+    ///
+    /// A definition is unfolded by decode at every use, so a malformed one is not a local problem:
+    /// it changes what every citing proposition means, or fails to terminate. Four checks, in the
+    /// order that gives the most useful diagnostic:
+    ///
+    /// 1. **Not recursive.** Checked FIRST, on the encoded form. Decode substitutes the body at the
+    ///    use site, so a body naming its own IRI recurses *inside decode* — a guard placed after
+    ///    decoding would never run. `Decl::Drec` exists in the kernel but decode has no fuel and no
+    ///    termination argument (issue #66), so recursion is refused rather than bounded.
+    /// 2. **Decodes.** Otherwise nothing below is meaningful.
+    /// 3. **Stored in normal form.** D9 makes a definition's identity the normal form of its RHS,
+    ///    and the whole reason to normalize at commit is that uses can then skip evaluation. A
+    ///    non-normal body would silently break that: the emit side would hash the redex-bearing
+    ///    form while the check side hashes what it evaluates to. Validation *enforces* the
+    ///    invariant; producing the normal form is the compile path's job, since a validator checks
+    ///    and does not rewrite.
+    /// 4. **Inhabits its declared type.** This is the check that gives `definition_opaque` its
+    ///    meaning — see [`ValidationRule::DefinitionMalformed`].
+    fn check_definition_well_formedness(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let definition_class = iri("urn:eigenius:eigentt:Definition");
+        if !resource.is_instance_of(&definition_class) {
+            return errors;
+        }
+        let body_prop = iri("urn:eigenius:eigentt:definition_body");
+        let type_prop = iri("urn:eigenius:eigentt:definition_type");
+        let fail = |errors: &mut Vec<ValidationError>, property, message: String| {
+            errors.push(ValidationError {
+                resource_id: res_id.clone(),
+                property,
+                rule: ValidationRule::DefinitionMalformed,
+                message,
+            });
+        };
+
+        let (Some(body_value), Some(type_value)) =
+            (resource.get(&body_prop), resource.get(&type_prop))
+        else {
+            // `core:requires` (Rule 3) already reports the absence; nothing to add.
+            return errors;
+        };
+
+        // 1. Not recursive — and this MUST run BEFORE decoding, not after.
+        //
+        //    Decode unfolds a transparent definition by substituting its body at the use site, so a
+        //    body naming its own IRI recurses *inside decode*. A guard placed after decoding would
+        //    never run: the thing it guards against happens first. Checking the ENCODED form needs
+        //    no decode, and is also where a self-reference is visible as itself rather than as
+        //    whatever decode turned it into. There is no fuel and no termination argument for
+        //    recursion here — see #66.
+        if let (Some(id), crate::ontology::resource::Value::Json(json)) = (res_id, body_value) {
+            if json_mentions_const_ref(json, id.as_str()) {
+                fail(
+                    &mut errors,
+                    Some(body_prop.clone()),
+                    format!(
+                        "`definition_body` references its own IRI `{id}` — a recursive definition \
+                         cannot be unfolded at decode (no fuel, no termination argument; see #66)"
+                    ),
+                );
+                return errors;
+            }
+        }
+
+        // 2. Decodes.
+        let body_exp =
+            match crate::program::eigentt_type_mirror::decode_type(body_value, &self.layer) {
+                Ok(e) => e,
+                Err(e) => {
+                    fail(
+                        &mut errors,
+                        Some(body_prop.clone()),
+                        format!("`definition_body` does not decode: {e:?}"),
+                    );
+                    return errors;
+                }
+            };
+
+        // 3. Stored in normal form.
+        if let Some(redex) = first_beta_redex(&body_exp) {
+            fail(
+                &mut errors,
+                Some(body_prop.clone()),
+                format!(
+                    "`definition_body` is not in normal form — it contains a beta-redex at `{redex}`.                      A definition's identity is the NORMAL FORM of its right-hand side (D66 D9), so                      a redex-bearing body would hash differently on the two ends of the witness key"
+                ),
+            );
+            return errors;
+        }
+
+        // 4. Inhabits its declared type.
+        let type_exp =
+            match crate::program::eigentt_type_mirror::decode_type(type_value, &self.layer) {
+                Ok(e) => e,
+                Err(e) => {
+                    fail(
+                        &mut errors,
+                        Some(type_prop.clone()),
+                        format!("`definition_type` does not decode: {e:?}"),
+                    );
+                    return errors;
+                }
+            };
+        let type_val = match crate::nbe::eval::eval(&type_exp, &crate::nbe::env::Rho::Nil) {
+            Ok(v) => v,
+            Err(e) => {
+                fail(
+                    &mut errors,
+                    Some(type_prop.clone()),
+                    format!("`definition_type` failed to evaluate: {e}"),
+                );
+                return errors;
+            }
+        };
+        let mut ctx = crate::nbe::check::CheckCtx::with_layer(
+            crate::nbe::env::Rho::Nil,
+            Vec::new(),
+            std::sync::Arc::clone(&self.layer),
+        );
+        if let Err(e) = crate::nbe::check::check(&mut ctx, &body_exp, &type_val) {
+            fail(
+                &mut errors,
+                Some(body_prop),
+                format!("`definition_body` does not inhabit `definition_type`: {e}"),
+            );
+        }
+        errors
+    }
+
     /// Rule 13: Universe stratification (D6b §7).
     ///
     /// A resource at universe level N may only reference resources at
@@ -942,6 +1088,50 @@ struct ComorphismFormatRef<'a> {
     expected_class_iri: &'a str,
     /// Human label for the expected class.
     expected_label: &'a str,
+}
+
+/// Does this encoded `eigentt:TypeExpr` tree contain a `ConstRef` to `target`? Used by Rule 24's
+/// recursion check, on the encoded form because that is where a self-reference is visible as itself
+/// rather than as whatever decode turned it into.
+fn json_mentions_const_ref(v: &serde_json::Value, target: &str) -> bool {
+    match v {
+        serde_json::Value::Object(o) => {
+            if o.get("ctor").and_then(|c| c.as_str()) == Some("ConstRef") {
+                if let Some(args) = o.get("args").and_then(|a| a.as_array()) {
+                    if args.first().and_then(|x| x.as_str()) == Some(target) {
+                        return true;
+                    }
+                }
+            }
+            o.values().any(|x| json_mentions_const_ref(x, target))
+        }
+        serde_json::Value::Array(a) => a.iter().any(|x| json_mentions_const_ref(x, target)),
+        _ => false,
+    }
+}
+
+/// The first beta-redex in `e` — an `App` whose head is a `Lam` — rendered for the diagnostic, or
+/// `None` if the term is beta-normal. Rule 24 uses this to enforce D9's stored-normal-form invariant.
+fn first_beta_redex(e: &crate::nbe::term::Exp) -> Option<String> {
+    use crate::nbe::term::Exp;
+    match e {
+        Exp::App(f, a) => {
+            if matches!(f.as_ref(), Exp::Lam(..)) {
+                return Some(crate::dcg::pretty_term(e));
+            }
+            first_beta_redex(f).or_else(|| first_beta_redex(a))
+        }
+        Exp::Lam(_, b) => first_beta_redex(b),
+        Exp::Pi(_, d, b) | Exp::Sig(_, d, b) => first_beta_redex(d).or_else(|| first_beta_redex(b)),
+        Exp::Fst(x) | Exp::Snd(x) => first_beta_redex(x),
+        Exp::Ann(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
+            first_beta_redex(a).or_else(|| first_beta_redex(b))
+        }
+        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+            args.iter().find_map(first_beta_redex)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

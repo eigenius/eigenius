@@ -1,6 +1,6 @@
 # 4. Declarations
 
-ESL has seven top-level declaration forms: `namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`. Each compiles to one or more Eigon-JSON resources; the section for each form below shows the syntax, the emitted resource shape, and the kernel mapping.
+ESL's top-level declaration forms are `namespace`, `class`, `property`, `resource`, `axiom`, `def`, `text_index`, `vector_index`, `data`, `codata`, `program`, and `macro`. Each compiles to one or more Eigon-JSON resources (except `macro`, which is compile-time only); the section for each form below shows the syntax, the emitted resource shape, and the kernel mapping.
 
 The AST type for the file root is [`ast::File`](../../../kernel/src/esl/ast.rs):
 
@@ -142,7 +142,7 @@ axiom ex:propext :
 
 The `axiom` keyword takes a name, a colon, and a type expression. The statement is **postulated** — the kernel admits an inhabitant of the type without requiring a proof term, treating the axiom's name as an opaque constant equal only to itself by symbol identity. Conversion never `delta`-reduces it. The chain validator type-checks the *statement* against the universe ladder at commit and rejects malformed propositions; the inhabitant is granted by fiat.
 
-Axioms are the chain-author surface for the kernel's "admit without proof" mechanism. Anything that lives here becomes a citable chain artifact downstream reasoning can name via `DeclaredEvidence`; anything that doesn't can't enter the trust base silently.
+Axioms are the chain-author surface for the kernel's "admit without proof" mechanism. Anything that lives here becomes a citable chain artifact downstream reasoning can name via `DeclaredEvidence`; anything that doesn't can't enter the trust base silently. (For a named term the kernel *unfolds* instead of postulating — definitional equality rather than fiat — see `def`, [§4.4c](#44c-def--transparent-definitions-d66).)
 
 ### Type-expression sub-grammar
 
@@ -275,6 +275,50 @@ Recommended:
 **v1 multiplicity.** At most one TextIndex and at most one VectorIndex per target Property per head — both can coexist on the same Property (the hybrid retrieval case). The constraint is verified by [`verify_text_index_multiplicity`](../../../kernel/src/layer/index_discovery.rs) and `verify_vector_index_multiplicity`.
 
 Parser: [`parse_text_index`](../../../kernel/src/esl/parser.rs) / [`parse_vector_index`](../../../kernel/src/esl/parser.rs). AST: [`TextIndexDecl`](../../../kernel/src/esl/ast.rs) / [`VectorIndexDecl`](../../../kernel/src/esl/ast.rs).
+
+## 4.4c. `def` — transparent definitions (D66)
+
+```esl
+def onco2:HasActivity(m : Set, g : Set, a : Set) : Prop =
+    wn:v02203362_t(
+        eigentt:fst(ontology:the(
+            (exists x0 : wn:n13440063 =>
+                logic:And(
+                    ontology:compound_kind(x0, a),
+                    ontology:prep_of(x0, ontology:kind_of(g))
+                )))),
+        ontology:kind_of(m));
+```
+
+The `def` keyword takes a name, an optional parenthesised parameter list, a result type, and — after `=` — a body. Both the result type and the body are type expressions (the same sub-grammar `axiom` uses); the parameters use the `forall` production's `TypedParam`, so higher-order parameters like `(P : T -> Prop)` are accepted. An optional `desc : "…"` clause before the terminating `;` records a `core:description`.
+
+Where an `axiom` is **postulated** — an opaque constant conversion never unfolds — a `def` is **transparent**: the D47 decoder unfolds a reference to it by substituting the body at the use site (peel-and-substitute, [`eigentt_type_mirror.rs`](../../../kernel/src/program/eigentt_type_mirror.rs)), so `HasActivity(m, g, a)` and its unfolded body are the *same term* up to definitional equality. Nothing has to assert the connection between an abbreviation and what it abbreviates; the kernel computes it (D66 §2). This is how `demo/prose-to-formulas` lifts parsed sentences into domain vocabulary without a single Declared bridge.
+
+### Wire shape
+
+The declaration commits a Resource of class `eigentt:Definition` with two D47-encoded halves ([`compile_def`](../../../kernel/src/esl/compile.rs)):
+
+- `eigentt:definition_type` — one `Pi` per parameter ending in the result type: `Pi (m : Set). Pi (g : Set). Pi (a : Set). Prop`;
+- `eigentt:definition_body` — the corresponding lambda chain `Lam(m, Lam(g, Lam(a, ⟨body⟩)))`.
+
+Arity and parameter types live only in the type, so a stored arity can never contradict it. The body is stored **as written**, not normalized by the compiler — D9 requires the stored body to be its own normal form, and Rule 24 refuses one that is not, rather than silently rewriting the author's term.
+
+### Rule 24 — what commit checks
+
+Validation ([`validation/mod.rs`](../../../kernel/src/validation/mod.rs)) rejects a definition whose:
+
+1. body references its own IRI (recursion — checked first, **on the encoded form**, because decode would unfold the cycle);
+2. body fails to decode against the chain;
+3. body is not β-normal;
+4. body does not inhabit `definition_type` (checked *against* the declared type — a lambda chain has no inferable type, which is why `eigentt:definition_body` is exempt from Rule 21's `check_infer`; the type itself is not exempt, and Rule 10's restrictive domain keeps a `definition_body` from riding on any class but `eigentt:Definition`).
+
+### Opacity
+
+`eigentt:definition_opaque` exists in the ontology (issue #95): an opaque definition decodes to a rigid `EigonAxiom` — never unfolded, its identity the folded name — but with a body that was type-checked and then sealed (Coq's `Qed`), unlike an axiom's pure assertion. The ESL surface does **not** accept an `opaque` modifier yet; `axiom` remains the authoring surface for opaque statements.
+
+`eigenius decompile` prints a definition as a generic `resource … : eigentt:Definition { … }` block, which reparses; round-trip is pinned by `a_definition_round_trips_through_the_printer`.
+
+Parser: [`parse_def`](../../../kernel/src/esl/parser.rs). AST: [`DefDecl`](../../../kernel/src/esl/ast.rs). Substitution: [`nbe/subst.rs`](../../../kernel/src/nbe/subst.rs).
 
 ## 4.5. `data` — inductive types
 

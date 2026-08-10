@@ -12,6 +12,7 @@ NamespaceDecl::= 'namespace' Identifier '=' StringLit ';'
 
 Declaration  ::= ClassDecl | PropertyDecl | ResourceDecl
               |  DataDecl  | CodataDecl   | ProgramDecl
+              |  DefDecl                                   (* D66 — §11.1.3 *)
 ```
 
 ### 11.1.2. Class, property, resource
@@ -44,7 +45,7 @@ Value         ::= StringLit | Integer | Float | Boolean
               |  '{' ResourceField* '}'                     (* embedded resource *)
 ```
 
-### 11.1.3. Data and codata
+### 11.1.3. Data, codata, and definitions
 
 ```ebnf
 DataDecl     ::= 'data' QualifiedName ParamList? '{' Ctor (',' Ctor)* ','? '}'
@@ -84,9 +85,14 @@ TypedParams  ::= TypedParam (',' TypedParam)*
               |  '(' TypedParam (',' TypedParam)* ')'   (* outer parens optional *)
 TypedParam   ::= Identifier ':' TypeExpr
 AliasBinding ::= Identifier '=' TypeExpr                (* later bindings see earlier ones *)
+
+DefDecl      ::= 'def' QualifiedName
+                 ('(' TypedParam (',' TypedParam)* ')')?
+                 ':' TypeExpr '=' TypeExpr
+                 ('desc' ':' StringLit)? ';'?           (* D66 transparent definition, §4.4c *)
 ```
 
-`pi` / `forall` / `exists` / `fun` and the sort and unit forms are accepted wherever `parse_type_expr` runs — `axiom` statements, `data` constructor types, and [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) blocks. `exists` and `()` reach the kernel only through the `type_expr` lowering path; the resource-shaped type language ([§6](06-resources-types-and-the-layer.md)) has no encoding for either and the compiler rejects them there. `eigentt:fst(p)` / `eigentt:snd(p)` parse as ordinary applications and are intercepted at lowering into `Exp::Fst` / `Exp::Snd`.
+`pi` / `forall` / `exists` / `fun` and the sort and unit forms are accepted wherever `parse_type_expr` runs — `axiom` statements, `def` result types and bodies, `data` constructor types, and [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) blocks. `exists` and `()` reach the kernel only through the `type_expr` lowering path; the resource-shaped type language ([§6](06-resources-types-and-the-layer.md)) has no encoding for either and the compiler rejects them there. `eigentt:fst(p)` / `eigentt:snd(p)` parse as ordinary applications and are intercepted at lowering into `Exp::Fst` / `Exp::Snd`.
 
 ### 11.1.4. Program and expressions
 
@@ -127,7 +133,7 @@ QualifiedName::= Identifier ':' Identifier
 
 ### Declaration keywords
 
-`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`, `axiom`, `macro`, `merge_comorphism` (+ `for`), `text_index`, `vector_index`
+`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`, `axiom`, `def` (+ `desc`), `macro`, `merge_comorphism` (+ `for`), `text_index`, `vector_index`
 
 ### Type and binder keywords
 

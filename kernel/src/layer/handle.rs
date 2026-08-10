@@ -51,6 +51,13 @@ use std::collections::{BTreeMap, BTreeSet};
 /// position-addressed `id` and the content-only `content_hash`. Content
 /// hash duplicates across positions are expected (anchored-commit cache,
 /// content-hash dedup); position hashes are globally unique.
+/// Serde default for [`LayerHandle::has_witness_candidates`] — see that field. Conservative:
+/// a handle written before the field existed carries no information, so assume the layer may hold
+/// witnesses and probe it.
+fn witness_candidates_unknown() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayerHandle {
     /// Position-addressed identifier for this layer. Folds content
@@ -88,6 +95,23 @@ pub struct LayerHandle {
     /// Milliseconds since Unix epoch — when the layer was committed. Matches
     /// the convention used by D21's `TaskRecord`.
     pub created_at: i64,
+
+    /// **Witness-scan skip hint (D66 slice 0).** `false` iff this layer defines *no* resource that
+    /// could ever admit a `ChainWitness` — no Trace, no `InstitutionEmittedDerivation`, no
+    /// `ReasoningSentence`. A `lookup_chain_witness` walk skips such a layer outright instead of
+    /// probing it.
+    ///
+    /// Stamped by `store_layer` at write time from the layer's own immutable resources, exactly like
+    /// `resource_count` and `encoded_bytes`. Layers are immutable, so it can never go stale, and it
+    /// rides the handle's own write rather than a separate index batch (unlike the derived indexes —
+    /// claims-audit A1).
+    ///
+    /// **Defaults to `true`, and must.** Handles persisted before this field existed decode without
+    /// it; `true` means "no information, go and look", which costs the optimisation and nothing else.
+    /// `false` would mark every pre-existing layer witness-free and silently break every citation
+    /// into history — a performance hint turned into a correctness bug.
+    #[serde(default = "witness_candidates_unknown")]
+    pub has_witness_candidates: bool,
 
     /// Encoded resource bytes for this layer — the sum of
     /// `eigon_cbor::serialize_resource(...).len()` over every resource
@@ -233,11 +257,68 @@ mod tests {
             parents,
             name: format!("layer-{byte}"),
             resource_count: 0,
+            has_witness_candidates: false,
             created_at: 0,
             byte_size: 0,
             is_redirect_source: false,
             tombstoned_iris: BTreeSet::new(),
         }
+    }
+
+    /// A handle persisted before `has_witness_candidates` existed must decode as `true`.
+    ///
+    /// `false` would mark every pre-existing layer witness-free and silently break every citation
+    /// into history. This is the test that keeps the serde default honest.
+    #[test]
+    fn handle_without_witness_flag_decodes_as_unknown() {
+        let mut without = std::collections::BTreeMap::new();
+        without.insert("id", ciborium::Value::Bytes(vec![7u8; 32]));
+        without.insert("content_hash", ciborium::Value::Bytes(vec![7u8; 32]));
+        without.insert("supporting_layer", ciborium::Value::Null);
+        without.insert("parents", ciborium::Value::Array(vec![]));
+        without.insert("name", ciborium::Value::Text("legacy".into()));
+        without.insert("resource_count", ciborium::Value::Integer(0.into()));
+        without.insert("created_at", ciborium::Value::Integer(0.into()));
+        without.insert("byte_size", ciborium::Value::Integer(0.into()));
+        without.insert("is_redirect_source", ciborium::Value::Bool(false));
+        without.insert("tombstoned_iris", ciborium::Value::Array(vec![]));
+        let map = ciborium::Value::Map(
+            without
+                .into_iter()
+                .map(|(k, v)| (ciborium::Value::Text(k.into()), v))
+                .collect(),
+        );
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&map, &mut bytes).unwrap();
+        let decoded: LayerHandle =
+            ciborium::from_reader(bytes.as_slice()).expect("a pre-D66 handle must still decode");
+        assert!(
+            decoded.has_witness_candidates,
+            "absent flag must mean UNKNOWN (probe the layer), never `false`"
+        );
+    }
+
+    /// A kernel built before this field must still read a DB written after it — the D24 criterion
+    /// for whether `SCHEMA_VERSION` needs a bump. ciborium writes structs as named maps and serde
+    /// ignores unknown keys, so the extra field is skipped rather than fatal. No bump required.
+    #[test]
+    fn handle_with_unknown_field_still_decodes() {
+        let h = handle(3, vec![]);
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&h, &mut bytes).unwrap();
+        let value: ciborium::Value = ciborium::from_reader(bytes.as_slice()).unwrap();
+        let ciborium::Value::Map(mut entries) = value else {
+            panic!("LayerHandle must serialise as a CBOR map with named keys");
+        };
+        entries.push((
+            ciborium::Value::Text("a_field_from_the_future".into()),
+            ciborium::Value::Bool(true),
+        ));
+        let mut extended = Vec::new();
+        ciborium::into_writer(&ciborium::Value::Map(entries), &mut extended).unwrap();
+        let decoded: LayerHandle =
+            ciborium::from_reader(extended.as_slice()).expect("unknown fields must be ignored");
+        assert_eq!(decoded.id, h.id);
     }
 
     #[test]

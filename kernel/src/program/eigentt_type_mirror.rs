@@ -475,6 +475,12 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             expect_arg_count("App", 2, args)?;
             let head = decode_type_json(&args[0], ctx)?;
             let arg = decode_type_json(&args[1], ctx)?;
+            // D66: the head resolved from a transparent `eigentt:Definition`, so it is that
+            // definition's lambda chain. Peel and substitute instead of building an `App` — the
+            // redex is never formed, so the result is normal (§2.4).
+            if is_definition_head(&args[0], ctx) {
+                return peel_and_substitute(head, arg);
+            }
             // Spine folding: if head is an InductiveType / CodataType /
             // InductiveCtor, append arg to its args list. Otherwise
             // produce a plain App.
@@ -650,6 +656,90 @@ fn resolve_inductive_decl_for_ctor(
     Ok(decl)
 }
 
+/// `urn:eigenius:eigentt:Definition` — the class decode unfolds (D66).
+fn definition_class_iri() -> Iri {
+    Iri::parse("urn:eigenius:eigentt:Definition").expect("valid IRI")
+}
+fn definition_body_iri() -> Iri {
+    Iri::parse("urn:eigenius:eigentt:definition_body").expect("valid IRI")
+}
+fn definition_opaque_iri() -> Iri {
+    Iri::parse("urn:eigenius:eigentt:definition_opaque").expect("valid IRI")
+}
+
+/// Absent means transparent — the common case, so it is the default.
+fn definition_is_opaque(resource: &crate::ontology::resource::Resource) -> bool {
+    matches!(
+        resource.get(&definition_opaque_iri()),
+        Some(crate::ontology::resource::Value::Boolean(true))
+    )
+}
+
+/// Is this decoded head a transparent definition's body — i.e. a lambda chain the App spine should
+/// peel rather than apply?
+///
+/// Peeling is gated on the head having come from a `Definition`, not on it merely *being* a `Lam`.
+/// Reducing any `App(Lam, _)` at decode would change the hash of every stored proposition that
+/// happens to contain a redex, which is a separate decision from this feature (D66 §2.4 specifies
+/// the narrower rule).
+fn is_definition_head(head_json: &serde_json::Value, ctx: &DecodeCtx<'_>) -> bool {
+    let mut cursor = head_json;
+    // Walk down the App spine to its innermost head.
+    loop {
+        let Some(obj) = cursor.as_object() else {
+            return false;
+        };
+        match obj.get("ctor").and_then(|c| c.as_str()) {
+            Some("App") => {
+                let Some(args) = obj.get("args").and_then(|a| a.as_array()) else {
+                    return false;
+                };
+                let Some(next) = args.first() else {
+                    return false;
+                };
+                cursor = next;
+            }
+            Some("ConstRef") => {
+                let Some(iri_str) = obj
+                    .get("args")
+                    .and_then(|a| a.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|v| v.as_str())
+                else {
+                    return false;
+                };
+                let Ok(iri) = Iri::parse(iri_str) else {
+                    return false;
+                };
+                return ctx
+                    .layer
+                    .resolve(&iri)
+                    .filter(|r| r.is_a().contains(&definition_class_iri()))
+                    .is_some_and(|r| !definition_is_opaque(&r));
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Peel one leading `Lam` off `head` and substitute `arg` into its body (D66 §2.4 / D8).
+///
+/// No redex is formed, so the result stays normal — which is what lets both ends of the witness key
+/// hash the same term without evaluating (D9). Under-application simply stops early: three binders
+/// applied to one argument leaves a two-binder `Lam`, still normal.
+fn peel_and_substitute(head: Exp, arg: Exp) -> Result<Exp, DecodeError> {
+    match head {
+        Exp::Lam(crate::nbe::term::Patt::Var(name), body) => {
+            crate::nbe::subst::subst(&body, name.as_str(), &arg).map_err(|e| {
+                DecodeError::AppOnNonParametric(format!("definition instantiation: {e}"))
+            })
+        }
+        // A wildcard binder discards its argument.
+        Exp::Lam(_, body) => Ok(*body),
+        other => Ok(Exp::App(Box::new(other), Box::new(arg))),
+    }
+}
+
 fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
     // Self-reference short-circuit: when the ConstRef points to the
     // inductive currently being assembled, emit
@@ -705,6 +795,22 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
         .expect("urn:eigenius:eigentt:Axiom is a valid IRI");
     if class_iris.contains(&axiom_iri) {
         return Ok(Exp::EigonAxiom(iri));
+    }
+    // D66 — a chain-resident `eigentt:Definition`. A TRANSPARENT one decodes to its stored body
+    // (a lambda chain); the enclosing App spine then peels and substitutes, so a use lands on a
+    // normal term without forming a redex. An OPAQUE one behaves exactly like an axiom: rigid,
+    // never unfolded, identity is the folded name (#95 / D66 D9 carve-out).
+    if class_iris.contains(&definition_class_iri()) {
+        if definition_is_opaque(&resource) {
+            return Ok(Exp::EigonAxiom(iri));
+        }
+        let body = resource.get(&definition_body_iri()).ok_or_else(|| {
+            DecodeError::ConstRefWrongClass {
+                iri: iri.clone(),
+                found_classes: class_iris.clone(),
+            }
+        })?;
+        return decode_type(body, ctx.layer);
     }
     if class_iris.contains(&class_iri) {
         Ok(Exp::EigonClass(iri))

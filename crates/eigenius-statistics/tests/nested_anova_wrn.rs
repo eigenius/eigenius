@@ -84,7 +84,6 @@ fn build_chain() -> ExecutionContext {
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
-    let _ = fixture_layer.chain_witness_index();
     ExecutionContext::new(
         fixture_layer,
         "nested-anova-fixture",
