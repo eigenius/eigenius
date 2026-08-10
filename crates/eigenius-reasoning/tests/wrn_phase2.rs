@@ -100,7 +100,6 @@ fn esl_against_pending(
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
 
-    let _ = layer.chain_witness_index();
     let ctx = ExecutionContext::new(
         layer.clone(),
         name,
@@ -257,7 +256,6 @@ fn wrn_phase2_validation_chain_validates() {
         "wrn-phase2",
     );
 
-    let _ = phase2.chain_witness_index();
     let ctx = ExecutionContext::new(
         phase2,
         "wrn-phase2",

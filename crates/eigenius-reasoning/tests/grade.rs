@@ -94,7 +94,6 @@ fn commit_over(base: &Arc<Layer>, resources: Vec<Resource>) -> ExecutionContext 
         builder.add_resource(r).unwrap();
     }
     let layer = Arc::new(builder.build(LayerStorage::in_memory()));
-    let _ = layer.chain_witness_index();
     ExecutionContext::new(
         layer,
         "grade-test",

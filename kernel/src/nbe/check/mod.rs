@@ -3455,7 +3455,6 @@ mod tests {
         let layer = Arc::new(builder.build(LayerStorage::in_memory()));
 
         // Force index population so the hook finds the witness.
-        let _ = layer.chain_witness_index();
 
         let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
 
@@ -3484,7 +3483,6 @@ mod tests {
         use crate::layer::{LayerBuilder, LayerStorage};
         let layer =
             Arc::new(LayerBuilder::new("phase9-empty", None).build(LayerStorage::in_memory()));
-        let _ = layer.chain_witness_index(); // populate (empty)
         let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
         let expected = chain_witness_typed_at(
             "IsDeclaredAs",

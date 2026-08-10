@@ -160,7 +160,6 @@ fn commit_and_validate(
         builder.add_resource(r).unwrap();
     }
     let layer = Arc::new(builder.build(LayerStorage::in_memory()));
-    let _ = layer.chain_witness_index();
     let ctx = ExecutionContext::new(
         layer,
         "bridged-grade-test",

@@ -155,7 +155,6 @@ fn verdict(base: &Arc<Layer>, rs: Vec<Resource>, sentence_iri: &Iri) -> (String,
         b.add_resource(r).unwrap();
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let _ = layer.chain_witness_index();
     let ctx = ExecutionContext::new(
         layer,
         "shape-test",

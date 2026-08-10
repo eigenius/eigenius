@@ -43,8 +43,8 @@ mod vector_index;
 mod witness_index;
 
 pub use witness_index::{
-    build_witness_index, default_asserts_proposition, default_asserts_proposition_hash,
-    lookup_chain_witness, synthesize_chain_witness,
+    default_asserts_proposition, default_asserts_proposition_hash, is_witness_candidate,
+    layer_admits_witness, lookup_chain_witness, synthesize_chain_witness,
 };
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
@@ -323,21 +323,18 @@ pub struct Layer {
     /// persist timestamps consistent. Matches D21's `TaskRecord`
     /// convention (i64 millis).
     created_at: i64,
-    /// D49 §3 per-`Layer` witness index — a deterministic projection of
-    /// the Layer's Trace resources into the set of admitted
-    /// `ChainWitness.IsXxAs` keys. Materialised lazily on first lookup
-    /// (most Layers carry no Trace resources; building the index for
-    /// them costs nothing until something actually asks). Recomputable
-    /// from `iter_resources()` at any time, so does not need to be
-    /// persisted — the Layer's content hash transitively covers it via
-    /// the Trace resources themselves.
-    witness_index: std::sync::OnceLock<std::collections::BTreeMap<crate::witness::WitnessKey, ()>>,
+
+    /// D66 witness-scan skip hint, copied from [`LayerHandle::has_witness_candidates`].
+    /// `false` iff this layer defines no resource that could admit a `ChainWitness`, letting
+    /// `lookup_chain_witness` skip it without probing. Freshly-built (not yet persisted) layers
+    /// carry `true`: the flag is stamped by `store_layer`, so before that there is no information
+    /// and the conservative answer is to look.
+    has_witness_candidates: bool,
     /// D46 §10 axiom environment — the materialised projection of this
     /// Layer's `eigentt:Axiom` chain resources into typed bindings.
     /// Lazily built on first call to `axiom_env()`. Pure deterministic
     /// function of the layer's resources, so the env is recomputable and
-    /// not persisted separately. Parallels `witness_index` in shape and
-    /// rationale.
+    /// not persisted separately.
     axiom_env: std::sync::OnceLock<std::sync::Arc<crate::program::axiom_env::AxiomEnv>>,
 }
 
@@ -428,7 +425,7 @@ impl Layer {
             storage,
             redirect_target: None,
             created_at: handle.created_at,
-            witness_index: std::sync::OnceLock::new(),
+            has_witness_candidates: handle.has_witness_candidates,
             axiom_env: std::sync::OnceLock::new(),
         }
     }
@@ -455,7 +452,7 @@ impl Layer {
             storage,
             redirect_target: None,
             created_at: handle.created_at,
-            witness_index: std::sync::OnceLock::new(),
+            has_witness_candidates: handle.has_witness_candidates,
             axiom_env: std::sync::OnceLock::new(),
         }
     }
@@ -530,27 +527,12 @@ impl Layer {
         self.parents.first()
     }
 
-    /// D49 §3 per-Layer witness index — the materialised projection of
-    /// this Layer's Trace resources into admitted `ChainWitness` keys.
-    /// Lazily built on first call (most Layers carry no Trace resources;
-    /// don't pay the cost until something asks); cached for subsequent
-    /// calls. The contents are a pure deterministic function of the
-    /// Layer's resources, so the index is recomputable and need not be
-    /// persisted separately — content-addressing covers it transitively
-    /// through the Trace resources.
-    pub fn chain_witness_index(
-        &self,
-    ) -> &std::collections::BTreeMap<crate::witness::WitnessKey, ()> {
-        self.witness_index
-            .get_or_init(|| witness_index::build_witness_index(self))
-    }
-
     /// D46 §10 — axiom environment for this layer chain. Walks the
     /// chain, collects every `eigentt:Axiom` resource, decodes its
     /// `axiom_statement` to an `Exp`, type-checks the statement to
     /// recover a `Val`, and returns the `IRI → AxiomEntry` mapping.
     /// Lazily built on first call; subsequent calls hand back the same
-    /// `Arc`. Same lifecycle as `chain_witness_index` — pure function
+    /// `Arc`. Pure function
     /// of chain contents, not persisted, recomputable.
     ///
     /// `build_axiom_env` needs `&Arc<Layer>` (it calls `decode_type` /
@@ -577,18 +559,10 @@ impl Layer {
         std::sync::Arc::clone(env)
     }
 
-    /// Test-only helper that sets the witness index directly instead of
-    /// going through `build_witness_index`. Used by tests that need to
-    /// exercise lookup paths against witness shapes the build path
-    /// doesn't yet support (e.g., D49 §4's `IsVerifiedAs → IsDerivedAs`
-    /// coercion, where `IsVerifiedAs` emission depends on the
-    /// Phase-7 / D49 §7 Lean comorphism that isn't wired yet).
-    #[cfg(test)]
-    pub fn chain_witness_index_for_test_set(
-        &self,
-        index: std::collections::BTreeMap<crate::witness::WitnessKey, ()>,
-    ) -> Result<(), std::collections::BTreeMap<crate::witness::WitnessKey, ()>> {
-        self.witness_index.set(index)
+    /// D66 witness-scan skip hint — see the field. `false` means this layer cannot admit any
+    /// `ChainWitness`, so a chain walk may skip it without probing.
+    pub fn has_witness_candidates(&self) -> bool {
+        self.has_witness_candidates
     }
 
     /// Returns all topological parents. Empty for the root layer; one
@@ -1129,7 +1103,9 @@ impl LayerBuilder {
             // handle can copy it (instead of each backend calling
             // `now_millis()` themselves and drifting from this value).
             created_at: now_millis(),
-            witness_index: std::sync::OnceLock::new(),
+            // Not yet stamped — `store_layer` computes it. Until then, assume it may hold
+            // witnesses; an in-flight layer is probed anyway.
+            has_witness_candidates: true,
             axiom_env: std::sync::OnceLock::new(),
         };
         // Index lifecycle (D65): derived indexes are materialised at the

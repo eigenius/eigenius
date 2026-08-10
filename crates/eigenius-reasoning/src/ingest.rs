@@ -164,13 +164,13 @@ impl DocumentIngestion for InProcessIngestion<'_> {
             });
         }
 
-        // Commit every cluster onto the doc chain and build the witness index the certificates need.
+        // Commit every cluster onto the doc chain. Witness admission is answered by direct
+        // lookup against the layer (D66 slice 0), so there is nothing to pre-build here.
         let mut builder = LayerBuilder::new("doc-claims", Some(Arc::clone(&doc_layer)));
         for r in cluster_resources {
             let _ = builder.add_resource(r);
         }
         let claims_layer = Arc::new(builder.build(LayerStorage::in_memory()));
-        let _ = claims_layer.chain_witness_index();
 
         // Validate each claim through the D39 gate against the committed chain; record the verdict.
         let ctx = ExecutionContext::new(

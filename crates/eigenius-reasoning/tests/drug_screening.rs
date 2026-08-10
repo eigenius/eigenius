@@ -164,7 +164,6 @@ fn build_drug_screening_chain() -> ExecutionContext {
     // the StatisticalAnalysisPlan's ProgramTrace admits
     // `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` — the witness
     // the certificate's `derived(...)` constructor consumes.
-    let _ = fixture_layer.chain_witness_index();
 
     ExecutionContext::new(
         fixture_layer,

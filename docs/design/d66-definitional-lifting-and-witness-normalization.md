@@ -248,7 +248,14 @@ agree on `prop_hash` do not compute it the same way:
 | side | path | normalizes? |
 |---|---|---|
 | **lookup** (type-check) | `kernel/src/program/check_hooks.rs:76` — `readback_val(level, &indices[1])`, then `WitnessKey::from_exp` | **yes** — the proposition arrives as a `Val`, already evaluated by NbE, so δ has happened |
-| **emit** (layer build) | `kernel/src/layer/witness_index.rs:206,223,249` — `hash_proposition_value(encoded_prop)` on the stored `Value::Json` | **no** — hashes what the author typed |
+| **emit** (witness-index build) | `kernel/src/layer/witness_index.rs:206,223,249` — `hash_proposition_value(encoded_prop)` on the stored `Value::Json` | **no** — hashes what the author typed |
+
+**Where the emit side actually runs.** Not at layer build or persist. `build_witness_index` is called
+lazily from `Layer::chain_witness_index` through a `OnceLock` (`kernel/src/layer/mod.rs:541-546`), and
+the trigger is `check_layer_with_coercion` during **type-checking**, when a certificate needs a witness
+(`kernel/src/layer/witness_index.rs:356`). The index is a pure function of the layer's resources and is
+**not persisted** — content-addressing covers it transitively through the Trace resources. So it is
+built at most once per layer per process, and only for layers something asks about.
 
 `alpha_canonicalize_proposition_json` (`kernel/src/witness/mod.rs:181`) is not a general normalization policy. It
 is a targeted patch for the one symptom of this asymmetry that already bit — NbE readback freshens
@@ -297,24 +304,108 @@ This is a smaller change than "evaluate in the layer": the emit side must decode
 
 ### 4.2 This makes a latent fail-open live
 
-`hash_proposition_value` is infallible today, so witness indexing cannot fail. Decoding can. And index
-population errors are **discarded** — `let _ = …` at `kernel/src/layer/mod.rs:1165` and
-`kernel/src/layer/mod.rs:1176` (item A2 of
-[`docs/notes/2026-08-08-claims-audit-followups.md`](../notes/2026-08-08-claims-audit-followups.md)).
-A proposition that fails to decode would
-silently not be indexed, its witness would silently not resolve, and the citing sentence would fail with
-no signal naming the cause.
+`hash_proposition_value` is infallible today, so witness-index construction cannot fail. Decoding can —
+and there is nowhere for the failure to go:
 
-**A2 is a prerequisite of this work, not adjacent hygiene.**
+- `build_witness_index(layer) -> BTreeMap<WitnessKey, ()>` (`kernel/src/layer/witness_index.rs:75`) has
+  **no error channel**.
+- Its per-resource emitters return `Option<WitnessKey>` and `None` is dropped without a trace
+  (`emit_from_reasoning_sentence`, `emit_from_institution_derivation`, `emit_from_trace`).
+- `Layer::chain_witness_index` builds it inside `OnceLock::get_or_init`
+  (`kernel/src/layer/mod.rs:541-546`), which cannot return a `Result`.
+
+So a proposition that failed to decode would produce no key, the lookup would miss, and the citing
+sentence would fail as *"no witness"* rather than *"this witness exists but its proposition did not
+decode"* — the two are indistinguishable to the author.
+
+**Correction (2026-08-09).** An earlier draft attributed this to claims-audit **A2**, the discarded
+`Result`s at `kernel/src/layer/mod.rs:1165,1176`. That is wrong: those govern the **triple / text /
+value** indexes, which are persisted and populated at `populate_layer_indexes`. The witness index is a
+different mechanism — lazy, in-memory, never persisted (§4). **A2 is a real defect but not a
+prerequisite of this work**, and slice 0 targets `build_witness_index`, not `populate_layer_indexes`.
 
 ## 5. Implementation plan (slices)
 
 Ordering is forced: 0 before 1 before 2, or the first committed definition produces witnesses that do
 not resolve.
 
-**Slice 0 — fail closed on index population.** Replace the discarded `Result`s at `kernel/src/layer/mod.rs:1165,1176`
-with a commit-failing (or at minimum logged, via the `kernel.commit.*` operation table) error path.
-Claims-audit A2. *Gate:* an induced index-population failure fails the commit with a diagnostic.
+**Slice 0 — replace the witness index with direct lookup (constant footprint).**
+
+Today `build_witness_index` materialises **every** witness key in a layer into a
+`BTreeMap<WitnessKey, ()>` cached in a `OnceLock`, then answers a lookup by membership test. Two
+consequences: memory is O(trace resources) per layer, held for the layer's lifetime; and a miss is a
+bare `false` that cannot say why.
+
+Neither is necessary, because **the key already contains the IRI** — `WitnessKey { category, iri,
+prop_hash }`. Given a key, go straight to the resource that would produce it:
+
+| the key's origin | how to reach it directly |
+|---|---|
+| self-attesting (`ReasoningSentence` → Verified, `InstitutionEmittedDerivation` → Derived) | the key's IRI **is** the resource: `layer.resolve(iri)` |
+| trace-attested (`DeclarationTrace` / `ObservationTrace` / `ProgramTrace`) | `scan_predicate_object(reflection:resource, key.iri)` — `reflection:resource` is `core:resource`-typed, so it is in the triple index |
+
+Then read that one resource's proposition (or the `Asserts(iri)` default), hash, compare. **No index is
+built and nothing is retained** — constant footprint, and the persistence question disappears with it:
+there is no derived structure to keep in step, so it can neither go stale nor be half-written.
+
+This **subsumes the diagnostic goal**. The miss now happens while holding the specific resource, so it
+distinguishes *no trace at all* / *trace exists, wrong category* / *category matches, proposition hashes
+differently* / (after slice 1) *proposition failed to decode*. Surfacing the third case is given as the
+reason `prop_hash` is in the key at all (`kernel/src/witness/mod.rs:86-89`), and it is invisible today
+because the answer is one membership bit.
+
+Scope: `check_layer_with_coercion` (`kernel/src/layer/witness_index.rs:356`) is the only consumer of the
+whole map — it calls `contains_key`. Every other call site is `let _ = layer.chain_witness_index();`,
+force-population that becomes a no-op and is deleted. `Layer::chain_witness_index`, its `OnceLock`
+field, `build_witness_index`, and `chain_witness_index_for_test_set` all go.
+
+Preserve exactly: the Derived→Verified coercion, the `Asserts(iri)` default, and the parent-chain walk.
+In-flight and no-backend layers have no populated triple index — `witness_candidates` already
+special-cases them with `iter_resources()`; the direct version keeps that fallback but **short-circuits
+on first hit** instead of collecting, so it stays constant memory and linear time, on those layers only.
+
+**Keep the layer skip — it was the index's real job.** The index did not answer the match; it *avoided*
+layers that could never answer it. Five `scan_predicate_object(is_a, …)` probes returned nothing on a
+lexicon layer, and the empty `BTreeMap` was then cached in the `OnceLock`, so every later lookup on that
+layer was one membership test on an empty map — free. The measured 127 s was the *first* visit to each
+ancestor; the cache is what stopped it recurring. Direct lookup alone is cheaper on first visit (one
+targeted probe instead of five) and unboundedly worse after, because a certificate makes many lookups
+and each walks the chain: past roughly *k > 5* lookups the cached design wins.
+
+So the skip is preserved as **one stamped bit on `LayerHandle`**, not as a cache:
+
+```rust
+/// false iff this layer defines no resource that could ever admit a ChainWitness.
+#[serde(default = "witness_candidates_unknown")]   // absent ⇒ true
+pub has_witness_candidates: bool,
+```
+
+- **Constant footprint** — one bool per layer, in metadata already held in memory ("bounded by the
+  number of layers, not by graph size") and already carrying derived hints stamped at write time
+  (`resource_count`, `byte_size`).
+- **Cheaper than caching** — computed once *ever*, at commit, folded into the resource walk
+  `store_layer` already performs for `byte_size`. A `OnceLock<bool>` would recompute per process.
+- **Cannot go stale** — layers are immutable, and it rides the handle's own write rather than a
+  separate index batch, so claims-audit **A1** does not apply. This is why the earlier
+  "don't persist derived witness data" argument does not extend to it: that argument was about an
+  O(traces) structure in its own unsynced batch, and this is neither.
+- **Defaults to `true`, and must.** Handles written before the field decode without it; `true` means
+  "no information, go and look". `false` would mark every pre-existing layer witness-free and silently
+  break every citation into history — a performance hint turned into a correctness bug.
+
+**No `SCHEMA_VERSION` bump.** D24's criterion is whether a kernel built before the change fails to read
+a DB written after it. `LayerHandle` is CBOR via ciborium, which writes structs as named maps, and serde
+ignores unknown keys. Both directions are pinned by tests rather than assumed:
+`handle_without_witness_flag_decodes_as_unknown` (old DB → new kernel yields `true`) and
+`handle_with_unknown_field_still_decodes` (new DB → old kernel skips the field).
+
+*Gate:* every existing witness test passes unchanged; no per-layer allocation proportional to trace
+count; a layer stamped witness-free is skipped without probing; a miss caused by a proposition mismatch
+names the resource and the mismatch.
+
+*If repeated lookups on layers that **do** hold traces later prove too slow*, the next step is a
+fixed-size bloom over witnessed target IRIs on the same handle — skipping per-IRI rather than per-layer,
+still constant footprint, and reusing the per-layer bloom pattern that already exists.
 
 **Slice 1 — symmetric witness normalization.** Emit side decodes `canonical_proposition` → `Exp`,
 encodes, hashes — instead of hashing the stored JSON. *Gate:* a proposition stored in one form and cited

@@ -234,9 +234,14 @@ impl PersistentBackend for MemoryPersistentBackend {
         // Match the persistent backend's `byte_size` accounting so
         // GC estimate tests against this fixture produce the same
         // numbers a real backend would.
+        // One walk, two stamps: `byte_size` and the D66 witness-scan skip hint.
+        let mut has_witness_candidates = false;
         let byte_size: u64 = layer
             .iter_resources()
-            .map(|(_, r)| crate::ontology::eigon_cbor::serialize_resource(&r).len() as u64)
+            .map(|(_, r)| {
+                has_witness_candidates |= crate::layer::is_witness_candidate(&r);
+                crate::ontology::eigon_cbor::serialize_resource(&r).len() as u64
+            })
             .sum();
         let handle = LayerHandle {
             id: id.clone(),
@@ -245,6 +250,7 @@ impl PersistentBackend for MemoryPersistentBackend {
             parents: all_parents,
             name: layer.name().to_string(),
             resource_count: layer.defined_iris().len() as u64,
+            has_witness_candidates,
             // Copy the build-time stamp instead of taking `now_millis()`
             // here — keeps the in-memory Layer and persisted handle
             // consistent on `created_at` (single source of truth in

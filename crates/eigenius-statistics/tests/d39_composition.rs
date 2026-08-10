@@ -134,7 +134,6 @@ fn build_composition_chain() -> ExecutionContext {
         composition_builder.add_resource(r).unwrap();
     }
     let composition_layer = Arc::new(composition_builder.build(LayerStorage::in_memory()));
-    let _ = composition_layer.chain_witness_index();
 
     ExecutionContext::new(
         composition_layer,

@@ -12,27 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D49 §6 per-`Layer` witness index.
+//! D49 §6 chain-witness admission.
 //!
-//! Each `Layer` carries a materialised `BTreeMap<WitnessKey, ()>` projecting
-//! its Trace-class resources into admitted `ChainWitness` keys. The index is
-//! a pure deterministic function of the Layer's resources — recomputable on
-//! load, content-addressed transitively via the Layer's own content hash.
+//! Whether a `Layer` admits a `ChainWitness` key is a pure deterministic function of that Layer's
+//! Trace-class resources — content-addressed transitively via the Layer's own content hash, so
+//! nothing here is persisted.
 //!
-//! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)`
-//! tries each Layer top-down, returning true on first hit. First-hit-wins
-//! is sound because Layer immutability means a once-admitted witness stays
-//! admitted in all descendants.
+//! **Answered by direct lookup, not by a materialised index.** A [`WitnessKey`] carries the IRI of
+//! the resource it grounds, so [`layer_admits_witness`] goes to that one resource. An earlier
+//! implementation built a `BTreeMap<WitnessKey, ()>` of every witness in the layer, cached it in a
+//! `OnceLock` on `Layer`, and answered by membership test; that cost memory proportional to the
+//! layer's trace count for the lifetime of the layer, and reduced every miss to a bare `false`
+//! carrying no reason. Direct lookup is O(1) in memory and holds the specific resource at the point
+//! of the decision (D66 slice 0).
 //!
-//! This module hosts the index-build function. The `OnceLock` field on
-//! `Layer` and the lookup walker live in `kernel/src/layer/mod.rs`.
+//! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)` tries each Layer top-down,
+//! returning true on first hit. First-hit-wins is sound because Layer immutability means a
+//! once-admitted witness stays admitted in all descendants.
 
 use crate::layer::Layer;
 use crate::ontology::resource::Resource;
 use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
 use crate::witness::{hash_proposition_value, WitnessCategory, WitnessKey};
-use std::collections::BTreeMap;
 
 /// D54: the `reasoning:ReasoningSentence` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
@@ -41,157 +43,147 @@ use std::collections::BTreeMap;
 const REASONING_SENTENCE: &str = "urn:eigenius:reasoning:ReasoningSentence";
 const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
 
-/// Build the per-`Layer` witness index by walking the Layer's local
-/// resources and dispatching each Trace-class resource to the
-/// corresponding witness emission.
+/// Does `layer` itself admit `key`?
 ///
-/// **Per D49 §6**: three of the four Trace classes are static reads of a
-/// resource's `canonical_proposition`. The fourth (`VerificationTrace`)
-/// is admitted via a comorphism-reified `VerifiedPropositionView`
-/// (D49 §7) and is handled the same way once that view exists. The
-/// implementation here covers all four uniformly: the witness emitter
-/// reads `canonical_proposition` from the trace's target resource (or,
-/// for `VerificationTrace`, from the `VerifiedPropositionView` resource
-/// keyed by `source_verified_resource`).
+/// **Direct lookup — nothing is built and nothing is retained.** A [`WitnessKey`] carries the IRI of
+/// the grounded resource, so "does this layer admit this key" is answerable by going to the one
+/// resource that could produce it. The predecessor materialised *every* witness in the layer into a
+/// cached `BTreeMap` and answered by membership test, which cost memory proportional to the layer's
+/// trace count and could not say why a miss missed.
 ///
-/// **What this Phase-4 implementation handles**:
-/// - `DeclarationTrace` → `IsDeclaredAs target_iri P`
-/// - `ObservationTrace` → `IsObservedAs target_iri P`
-/// - `ProgramTrace` → `IsDerivedAs output_iri P`
+/// Two routes, mirroring the two ways a witness arises (D49 §6):
 ///
-/// `VerificationTrace` dispatch is deferred to the Phase-7 / D49 §7
-/// integration, which depends on the `reasoning:VerifiedPropositionView`
-/// class (produced by the Lean → Reasoning comorphism). When that lands,
-/// the dispatch becomes a fourth match arm here.
+/// - **self-attesting** — the key's IRI *is* the resource. A committed `reasoning:ReasoningSentence`
+///   is `Verified` on its own IRI (D54 lemma citation); a `reflection:InstitutionEmittedDerivation`
+///   is `Derived` on its own IRI (D52). Reached by [`Layer::get_resource`], which is layer-local.
+/// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
+///   `reflection:resource`. Reached through the triple index, since that property is
+///   `core:resource`-typed and therefore indexed.
 ///
-/// **Default proposition**: per D49 §6 / D39 §4.1, an absent
-/// `reflection:canonical_proposition` on the target resource defaults to
-/// the EigenTT term `Asserts(iri)`. Authoring the `Asserts` inductive +
-/// the witness-emission default is Phase 5; the Phase-4 implementation
-/// emits a witness only when `canonical_proposition` is present on the
-/// target. This is sufficient to exercise the witness machinery against
-/// hand-built test fixtures; the `Asserts(iri)` default lands in Phase 5
-/// without changing this module's signature.
-pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
-    let mut index: BTreeMap<WitnessKey, ()> = BTreeMap::new();
-    for resource in witness_candidates(layer) {
+/// The target itself is resolved with [`Layer::resolve`] (a chain walk), because a trace committed
+/// here may attest a resource that lives in an ancestor — the same behaviour the index had.
+pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
+    // 0. Skip outright if the layer holds nothing that could ever admit a witness. This is the job
+    //    the materialised index used to do by caching an empty map — now a stamped bit on the
+    //    handle, so it costs no probe and survives process restarts. A lexicon layer answers here.
+    if !layer.has_witness_candidates() {
+        return false;
+    }
+    // 1. Self-attesting. `get_resource` is layer-local (it gates on `defined_iris`), which is the
+    //    "defined in THIS layer" condition the candidate scan used to enforce explicitly.
+    if let Some(resource) = layer.get_resource(&key.iri) {
         let is_a = resource.is_a();
-        for cls in &is_a {
-            let cls_str = cls.as_str();
-            let category = if cls_str == wk::DECLARATION_TRACE {
-                WitnessCategory::Declared
-            } else if cls_str == wk::OBSERVATION_TRACE {
-                WitnessCategory::Observed
-            } else if cls_str == wk::PROGRAM_TRACE {
-                WitnessCategory::Derived
-            } else {
-                continue;
-            };
-            // The trace's target IRI is in `reflection:resource` for
-            // Declaration / Observation traces, and (per D49 §6) for
-            // ProgramTrace's output we'd traditionally read the
-            // `output` property — but since both surface here as the
-            // same reflection:resource carrier, treat them uniformly.
-            if let Some(key) = emit_from_trace(layer, &resource, category) {
-                index.insert(key, ());
+        let emitted = match key.category {
+            WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) => {
+                emit_from_reasoning_sentence(&resource)
             }
-        }
-        // D52 institution-emitted-derivation shape: AutoOnLoad-emitted
-        // derivations (`reflection:InstitutionEmittedDerivation`) are
-        // self-attesting — the kernel produced them deterministically
-        // from a decidable institution running against the gated
-        // subject, no separate ProgramTrace is needed to certify their
-        // existence. Walk these directly and admit
-        // `IsDerivedAs(derivation_iri, P)` against the derivation's
-        // own IRI. The verdict resource itself doesn't carry a
-        // canonical_proposition under the new shape — only derivations
-        // do (D52 verdict-vs-derivation split).
-        if is_a
-            .iter()
-            .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION)
-        {
-            if let Some(key) = emit_from_institution_derivation(&resource) {
-                index.insert(key, ());
+            WitnessCategory::Derived
+                if is_a
+                    .iter()
+                    .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION) =>
+            {
+                emit_from_institution_derivation(&resource)
             }
-        }
-        // D54 reasoning-sentence lemma citation: a committed
-        // `reasoning:ReasoningSentence` is a kernel-checked proof of its
-        // `proposition` — the `ValidateJustification` gate Held, and the
-        // commit pipeline rejects `Fails` sentences, so any *committed*
-        // sentence Held (the same trust-committed model that lets us admit
-        // institution derivations without re-running them). Admit it as a
-        // `Verified` witness keyed on its own IRI, so a later sentence can
-        // cite it as a lemma via `JustifiedBy.verified` (or `.derived`, via
-        // the `IsVerifiedAs → IsDerivedAs` coercion in `lookup_chain_witness`).
-        if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) {
-            if let Some(key) = emit_from_reasoning_sentence(&resource) {
-                index.insert(key, ());
-            }
+            _ => None,
+        };
+        if emitted.as_ref() == Some(key) {
+            return true;
         }
     }
-    index
+    // 2. Trace-attested.
+    any_trace_targeting(layer, &key.iri, |trace| {
+        trace.is_a().iter().any(|cls| {
+            trace_category(cls.as_str()).is_some_and(|category| {
+                category == key.category
+                    && emit_from_trace(layer, trace, category).as_ref() == Some(key)
+            })
+        })
+    })
 }
 
-/// The resources that could possibly carry a witness.
+/// Could `resource` ever admit a `ChainWitness`?
 ///
-/// A witness comes only from a resource of one of five classes, so scanning EVERY resource in the
-/// layer is wasted work — and on a lexicon layer it is ruinous: `iter_resources` walks all
-/// `defined_iris` and pages each one in, which is ~8 s per WordNet/UMLS chunk and yields an empty
-/// map every time (a lexicon layer holds `LexicalEntry`s and classes, never a trace).
+/// True for the five classes [`layer_admits_witness`] can emit from: the three Trace classes, a
+/// `reflection:InstitutionEmittedDerivation`, and a `reasoning:ReasoningSentence`. Stamped over a
+/// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
+/// skip a layer that holds none without probing it — the job the materialised index used to do by
+/// caching an empty map.
+pub fn is_witness_candidate(resource: &Resource) -> bool {
+    resource.is_a().iter().any(|c| {
+        let c = c.as_str();
+        trace_category(c).is_some()
+            || c == wk::INSTITUTION_EMITTED_DERIVATION
+            || c == REASONING_SENTENCE
+    })
+}
+
+/// The witness category a Trace class attests, or `None` if the class is not a Trace.
 ///
-/// That cost lands entirely on the FAILURE path. A successful lookup finds its witness in the top
-/// layer and returns; a miss walks to the root and forces this build for every ancestor. Measured
-/// 2026-08-03 on `demo/prose-to-formulas`: the committing branch took 0.75 s and the rejecting one
-/// 127 s, for the same certificate shape. Every legitimate `Fails` on a chain with a real lexicon
-/// pays it.
+/// `VerificationTrace` is absent deliberately: it is admitted via a comorphism-reified
+/// `VerifiedPropositionView` (D49 §7) and becomes a fourth arm when that view exists.
+fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
+    match class_iri {
+        wk::DECLARATION_TRACE => Some(WitnessCategory::Declared),
+        wk::OBSERVATION_TRACE => Some(WitnessCategory::Observed),
+        wk::PROGRAM_TRACE => Some(WitnessCategory::Derived),
+        _ => None,
+    }
+}
+
+/// Visit each Trace resource **defined in this layer** whose `reflection:resource` is `target`,
+/// returning `true` at the first one `f` accepts. Short-circuits; holds one resource at a time.
 ///
-/// So: ask the triple index for the few subjects whose `core:is_a` names a witness class, and page
-/// in only those.
-///
-/// **Only for STORED layers.** `autoonload_dispatch` runs before `persist`, so the layer being
-/// validated is not yet in the index — and same-layer witnesses are ordinary (a bridge and the
-/// sentence citing it commit together). Such a layer is in `storage.pending`, which is exactly the
+/// **Only STORED layers can use the index.** `autoonload_dispatch` runs before `persist`, so the
+/// layer being validated is not yet indexed — and same-layer witnesses are ordinary (a bridge and
+/// the sentence citing it commit together). Such a layer is in `storage.pending`, which is the
 /// "stored vs in-flight" test `layer::index` already uses; for it, and for backend-less in-memory
-/// chains, fall back to the full scan.
-fn witness_candidates(layer: &Layer) -> Vec<std::sync::Arc<crate::ontology::resource::Resource>> {
+/// chains, fall back to iterating the layer.
+///
+/// The fallback is the expensive path, and the reason the predecessor's doc warned about it:
+/// `iter_resources` pages in every `defined_iri`, ~8 s per WordNet/UMLS chunk. It landed entirely
+/// on the FAILURE path — a hit finds its witness in the top layer and returns, a miss walks to the
+/// root. Measured 2026-08-03 on `demo/prose-to-formulas`: 0.75 s committing, **127 s** rejecting,
+/// same certificate shape. Two things keep that fixed here: stored layers take the indexed path,
+/// and this scan stops at the first accepted trace instead of building keys for all of them.
+fn any_trace_targeting<F>(layer: &Layer, target: &Iri, mut f: F) -> bool
+where
+    F: FnMut(&Resource) -> bool,
+{
     let in_flight = layer
         .storage()
         .pending
         .read()
         .map(|p| p.contains_key(layer.id()))
         .unwrap_or(true);
-    if in_flight || layer.storage().persistent_backend.is_none() {
-        return layer.iter_resources().map(|(_, r)| r).collect();
+    let indexed = !in_flight && layer.storage().persistent_backend.is_some();
+
+    if !indexed {
+        return layer
+            .iter_resources()
+            .any(|(_, r)| resolve_target_iri(&r).as_ref() == Some(target) && f(&r));
     }
-    let Ok(is_a) = Iri::parse(wk::IS_A) else {
-        return layer.iter_resources().map(|(_, r)| r).collect();
+
+    let Ok(resource_prop) = Iri::parse(wk::REFLECTION_RESOURCE) else {
+        return false;
     };
-    let mut out = Vec::new();
-    for class in [
-        wk::DECLARATION_TRACE,
-        wk::OBSERVATION_TRACE,
-        wk::PROGRAM_TRACE,
-        wk::INSTITUTION_EMITTED_DERIVATION,
-        REASONING_SENTENCE,
-    ] {
-        let Ok(obj) = Iri::parse(class) else { continue };
-        for hit in layer
-            .storage()
-            .triple_index
-            .scan_predicate_object(&is_a, &obj)
-        {
-            let Ok((subject, defining)) = hit else {
-                continue;
-            };
-            if &defining != layer.id() {
-                continue;
-            }
-            if let Some(r) = layer.get_resource(&subject) {
-                out.push(r);
+    for hit in layer
+        .storage()
+        .triple_index
+        .scan_predicate_object(&resource_prop, target)
+    {
+        let Ok((subject, defining)) = hit else {
+            continue;
+        };
+        if &defining != layer.id() {
+            continue;
+        }
+        if let Some(trace) = layer.get_resource(&subject) {
+            if f(&trace) {
+                return true;
             }
         }
     }
-    out
+    false
 }
 
 /// D54: read a `reasoning:ReasoningSentence`'s `proposition` and build a
@@ -353,8 +345,7 @@ pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
 }
 
 fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
-    let index = layer.chain_witness_index();
-    if index.contains_key(key) {
+    if layer_admits_witness(layer, key) {
         return true;
     }
     if key.category == WitnessCategory::Derived {
@@ -363,7 +354,7 @@ fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
             iri: key.iri.clone(),
             prop_hash: key.prop_hash,
         };
-        if index.contains_key(&verified_key) {
+        if layer_admits_witness(layer, &verified_key) {
             return true;
         }
     }
@@ -454,6 +445,18 @@ mod tests {
         r
     }
 
+    /// A committed `reasoning:ReasoningSentence` — admitted as a `Verified` witness on its own
+    /// IRI (D54). The commit pipeline rejects `Fails` sentences, so any committed one Held.
+    fn reasoning_sentence(sentence_iri: &str, prop: &Exp) -> Resource {
+        let mut r = Resource::new(iri(sentence_iri));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
+        );
+        r.set(iri(REASONING_PROPOSITION), encode_type(prop).unwrap());
+        r
+    }
+
     fn declaration_trace(target_iri: &str, trace_iri: &str) -> Resource {
         let mut r = Resource::new(iri(trace_iri));
         r.set(
@@ -480,12 +483,10 @@ mod tests {
         ))
         .unwrap();
         let layer = b.build(LayerStorage::in_memory());
-        let index = layer.chain_witness_index();
         let expected = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
         assert!(
-            index.contains_key(&expected),
-            "expected IsDeclaredAs witness for target; got keys {:?}",
-            index.keys().collect::<Vec<_>>()
+            layer_admits_witness(&layer, &expected),
+            "expected IsDeclaredAs witness for target"
         );
     }
 
@@ -508,11 +509,14 @@ mod tests {
         ))
         .unwrap();
         let layer = b.build(LayerStorage::in_memory());
-        let index = layer.chain_witness_index();
+        // No `core:Asserts` in this chain, so the default proposition cannot be built and no
+        // witness is admitted at any proposition. Probe the two hashes a caller could plausibly
+        // present: the sort the target would carry, and `Asserts`'s own absence.
+        let probe =
+            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &Exp::Sort(0)).unwrap();
         assert!(
-            index.is_empty(),
-            "Phase 4 emits nothing when canonical_proposition is absent (got {:?})",
-            index.keys().collect::<Vec<_>>()
+            !layer_admits_witness(&layer, &probe),
+            "nothing is admitted when canonical_proposition is absent and Asserts is unavailable"
         );
     }
 
@@ -605,7 +609,6 @@ mod tests {
         .unwrap();
         let user_layer = user.build(LayerStorage::in_memory());
 
-        let index = user_layer.chain_witness_index();
         // Witness should now exist with the Asserts(target) default proposition.
         let expected_hash = default_asserts_proposition_hash(&core_layer, &iri(target))
             .expect("Asserts default must resolve");
@@ -615,10 +618,8 @@ mod tests {
             prop_hash: expected_hash,
         };
         assert!(
-            index.contains_key(&expected),
-            "default Asserts witness must be emitted when canonical_proposition is absent; \
-             got keys {:?}",
-            index.keys().collect::<Vec<_>>()
+            layer_admits_witness(&user_layer, &expected),
+            "default Asserts witness must be admitted when canonical_proposition is absent"
         );
     }
 
@@ -641,12 +642,11 @@ mod tests {
         .unwrap();
         let user_layer = user.build(LayerStorage::in_memory());
 
-        let index = user_layer.chain_witness_index();
         let explicit_key =
             WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &explicit_prop).unwrap();
         assert!(
-            index.contains_key(&explicit_key),
-            "explicit canonical_proposition witness must be in index"
+            layer_admits_witness(&user_layer, &explicit_key),
+            "explicit canonical_proposition witness must be admitted"
         );
         // The Asserts default key must NOT be in the index — the
         // emitter picked the explicit proposition.
@@ -661,9 +661,61 @@ mod tests {
             "explicit Prop must hash differently from default Asserts(iri)"
         );
         assert!(
-            !index.contains_key(&default_key),
-            "default Asserts witness must NOT appear when explicit canonical_proposition is set"
+            !layer_admits_witness(&user_layer, &default_key),
+            "default Asserts witness must NOT be admitted when explicit canonical_proposition is set"
         );
+    }
+
+    /// The skip must be a pure optimisation: a layer stamped `has_witness_candidates = false`
+    /// answers `false` without probing, and a layer that really holds a witness must never be
+    /// stamped that way. `is_witness_candidate` is what `store_layer` folds over the layer's
+    /// resources, so pin it against every class the emitters can fire on.
+    #[test]
+    fn witness_candidate_predicate_covers_every_emitting_class() {
+        let prop = Exp::Sort(0);
+        assert!(
+            is_witness_candidate(&declaration_trace(
+                "urn:eigenius:example:t",
+                "urn:eigenius:example:tr"
+            )),
+            "DeclarationTrace must be a candidate"
+        );
+        assert!(
+            is_witness_candidate(&reasoning_sentence("urn:eigenius:example:s", &prop)),
+            "ReasoningSentence must be a candidate (D54)"
+        );
+        // A target resource carrying a canonical_proposition is NOT itself a candidate — the
+        // trace pointing at it is. Getting this backwards would stamp claim-only layers as
+        // witness-bearing and cost the skip, not correctness.
+        assert!(
+            !is_witness_candidate(&target_resource_with_canonical_prop(
+                "urn:eigenius:example:tgt",
+                &prop
+            )),
+            "a bare DeclaredResource is not a witness candidate"
+        );
+    }
+
+    /// A layer stamped witness-free is skipped even when it does define a matching trace. This is
+    /// the failure mode of the hint being wrong, pinned so the stamping side stays honest.
+    #[test]
+    fn skip_hint_short_circuits_the_lookup() {
+        let target = "urn:eigenius:example:thing";
+        let prop = Exp::Sort(0);
+        let mut b = LayerBuilder::new("test", None);
+        b.add_resource(target_resource_with_canonical_prop(target, &prop))
+            .unwrap();
+        b.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:thing-decl-trace",
+        ))
+        .unwrap();
+        let layer = b.build(LayerStorage::in_memory());
+        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+
+        // Freshly built layers are conservatively `true`, so the witness is found.
+        assert!(layer.has_witness_candidates());
+        assert!(layer_admits_witness(&layer, &key));
     }
 
     // --- Phase 6 foundation — synthesize_chain_witness ---
@@ -750,23 +802,18 @@ mod tests {
         // coercion, even though the index doesn't carry the Derived key
         // directly.
         //
-        // Setup: we *manually* construct a Layer whose witness index
-        // contains a Verified key (since Phase 4's build_witness_index
-        // doesn't emit VerificationTrace witnesses yet — that's Phase 7).
+        // A committed `reasoning:ReasoningSentence` is admitted as a `Verified` witness on its
+        // own IRI (D54 lemma citation), so the coercion can be exercised against the real
+        // emission path — the predecessor injected a key through a test-only `OnceLock` setter
+        // because it predated D54 emission.
         let target = "urn:eigenius:example:proof";
         let prop = Exp::Sort(0);
         let verified_key =
             WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
 
-        // Build a Layer normally (no traces). Then inject a witness via
-        // the OnceLock's set() interface — this is test-only access; the
-        // production path uses build_witness_index.
-        let layer = LayerBuilder::new("test", None).build(LayerStorage::in_memory());
-        let mut idx = std::collections::BTreeMap::new();
-        idx.insert(verified_key.clone(), ());
-        layer
-            .chain_witness_index_for_test_set(idx)
-            .expect("OnceLock not yet initialised in fresh layer");
+        let mut b = LayerBuilder::new("test", None);
+        b.add_resource(reasoning_sentence(target, &prop)).unwrap();
+        let layer = b.build(LayerStorage::in_memory());
 
         // Direct Verified lookup hits.
         assert!(lookup_chain_witness(&layer, &verified_key));

@@ -303,7 +303,6 @@ fn wrn_warrants_kernel_recomputed() {
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
-    let _ = with_results.chain_witness_index();
     let ctx = ExecutionContext::new(
         with_results,
         "wrn-stat-results",

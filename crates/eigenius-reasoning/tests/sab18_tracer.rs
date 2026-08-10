@@ -90,8 +90,6 @@ fn sab18_dili_rf_validates_to_holds_and_covers() {
         "sab18-chain",
     );
 
-    let _ = chain.chain_witness_index();
-
     let ctx = ExecutionContext::new(
         chain,
         "sab18-chain",
