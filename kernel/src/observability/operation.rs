@@ -63,6 +63,9 @@ pub const RPC_RUN_GC: &str = "kernel.rpc.run_gc";
 // --- Layer ---
 
 pub const LAYER_COMMIT: &str = "kernel.layer.commit";
+/// D66 slice 1 — a stored `canonical_proposition` could not be decoded, so no `ChainWitness` can
+/// be admitted for it. Emitted at the lookup site, which holds the specific resource.
+pub const WITNESS_DECODE: &str = "kernel.layer.witness_decode";
 pub const LAYER_TOPOLOGY: &str = "kernel.layer.topology";
 
 // --- Commit pipeline (D41 §12) ---

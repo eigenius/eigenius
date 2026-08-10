@@ -1,6 +1,6 @@
 # D66 — Definitional lifting: transparent definitions, explicit context, and symmetric witness normalization
 
-*Status: design — **decision-complete** (§6 D1–D8 all ✅); ready to implement (§5 slices). No code yet. Motivated by the shape-rule
+*Status: design — **decision-complete** (§6 D1–D9 all ✅); ready to implement (§5 slices). No code yet. Motivated by the shape-rule
 amortisation investigation ([`docs/notes/2026-08-09-shape-rule-amortisation.md`](../notes/2026-08-09-shape-rule-amortisation.md),
 issues #111/#112): every lift from a parsed sentence to domain vocabulary is currently a **Declared**
 bridge, one per parse shape — measured at ≥61 bridges for 62 sentences. The cause is not the bridge
@@ -163,6 +163,9 @@ The definition is stored as a λ-body — `Lam(m, Set, Lam(g, Set, Lam(a, Set, B
 existing `Lam` (3 args: name, dom, body; `kernel/src/program/eigentt_type_mirror.rs:453-465`). Arity and
 parameter types come from the declared type, so nothing is stored twice.
 
+**`B` is stored already normalized** (D9): `def` commit normalizes the right-hand side, so a use decodes
+straight to a normal term and nothing downstream has to evaluate.
+
 `HasActivity(MSI, WRN, exo)` encodes as the spine `App(App(App(ConstRef(HasActivity), MSI), WRN), exo)`.
 Naïve δ would resolve the head to the λ-body and leave three β-redexes, which is why the emit side would
 then need an evaluator (§4). **Decode never constructs them.** Its `"App"` arm is already head-aware — it
@@ -294,6 +297,10 @@ hashing raw stored JSON and decodes first, exactly as the check side already doe
 | check side | — | already unfolded (decode → eval → `Val`) |
 | emit side, today | hashes the folded JSON | — |
 | emit side, fixed | keeps the folded JSON | decodes, then hashes the unfolded form |
+
+Because a definition's body is stored normalized (D9) and peel-and-substitute forms no redex, the
+decoded term *is* the normal form — so "decode, then hash" and "hash the normal form" are the same
+operation, and the two sides agree by construction rather than by coincidence.
 
 `prop_hash` stays a hash of a *term*, and there is one normalization path instead of two kept in step
 by hand. **The stored form stays folded**, so `eigenius decompile` still prints `HasActivity(m, g, a)`
@@ -437,17 +444,63 @@ still constant footprint, and reusing the per-layer bloom pattern that already e
 
 **Slice 1 — symmetric witness normalization.** Emit side decodes `canonical_proposition` → `Exp`,
 encodes, hashes — instead of hashing the stored JSON. *Gate:* a proposition stored in one form and cited
-in a definitionally-equal other form resolves. *Also:* recompute the index over an existing snapshot and
-diff keys against the current scheme — expected to be a no-op, since no chain today has definitions and
-binder-name differences are already α-canonicalized. **Verify, do not assume.** *And:* record a
-lexicon-reseed timing before and after as a baseline — per D7 this does **not** gate the slice; it
-exists so a later optimisation has a number.
+in a definitionally-equal other form resolves.
+
+**Correction (2026-08-09).** An earlier draft gated this on "recompute the index over an existing
+snapshot and diff keys" — i.e. on `encode(decode(stored)) == stored`. That is the wrong property:
+neither necessary nor sufficient. What matters is only that **the two ends land on the same hash**, and
+under D9 they do by construction. Reproducing the stored bytes is irrelevant, and in one case
+impossible — see the `Lam` boundary below.
+
+*Known boundary:* `Exp::Lam` carries no type slot, so decode discards a `Lam`'s domain
+(`kernel/src/program/eigentt_type_mirror.rs:456`) and re-encoding a bare `Lam` is a hard error
+(`EncodeError::LamWithoutAnnotation`, `:129`). A stored proposition containing one can never round-trip
+— but `WitnessKey::from_exp` already routes through `encode_type`, so the **check** side cannot key such
+a proposition today either. Slice 1 turns an asymmetric failure (emit succeeds, check fails) into a
+symmetric one; nothing that resolves today stops resolving. Pinned by
+`lam_bearing_propositions_cannot_round_trip_on_either_side`.
+
+*Also:* record a lexicon-reseed timing before and after as a baseline — per D7 this does **not** gate
+the slice; it exists so a later optimisation has a number.
+
+**Status (2026-08-09): implemented and verified.**
+
+The three emit sites (`emit_from_trace`, `emit_from_reasoning_sentence`,
+`emit_from_institution_derivation`) now route through one helper that decodes against the layer and
+hashes the resulting `Exp`. Two needed the layer threaded in. No evaluation on this side — per D9 the
+decoded term is already the normal form. A decode failure logs through the operation table under
+`kernel.layer.witness_decode`, naming the resource, so a miss caused by an undecodable proposition is
+no longer indistinguishable from an absent witness (§4.2).
+
+Verified:
+- `cargo test --workspace` — 170 suites, **2747 passed, 0 failed**; clippy clean under `-D warnings`.
+  Slice 1 is a no-op on everything currently on chain, which is the point.
+- `crates/eigenius-reasoning/tests/witness_hash_agreement.rs` — the emit and check sides agree on the
+  **definite description** `Fst(the(Σx. …))` that every parsed sentence contains, on its negated form
+  `⟨parse⟩ → False`, and across binder renaming. The negated and un-negated forms hash **differently**,
+  which is what makes the demo's one-word edit detectable. A fourth test asserts the comparison is not
+  vacuous — `eval` + `readback` genuinely rewrites the term, so the agreement is doing work rather than
+  comparing a term with itself.
+- `demo/prose-to-formulas/run.sh --reparse` against `wordnet-umls-aligned-2026-08-03-specpoly` — both
+  branches behave exactly as before: intact commits through the inference, edited refuses `bridge-s1`
+  and `inference.esl` while `bridge-s2` still commits. Regeneration is byte-identical to the committed
+  artifacts.
+
+**Timing is still not the measurement D7 wants.** That run took 56.9 s wall for the *whole script* —
+volume staging, kernel boot, two reparses, all loads — which is not comparable to the 0.75 s / 127 s
+figures, since those measured a branch's loads alone. It rules the 127 s pathology out, and nothing
+more: there is no timing from the pre-slice-0 run, and the skip is still inactive on that snapshot
+(every lexicon layer decodes to "unknown"). The comparison remains deferred to the next reseed, per
+slice 0's Status.
 
 **Slice 2 — the `def` declaration and δ-at-decode.** A new declaration form (D5), *not* `Decl::Def` on
 the `Let` token — `Let` stays reserved for the scoped type-position let (§1.2a). Three parts:
 
 1. **Resource shape** (D8) — IRI, declared type, λ-body, opacity flag. Arity and parameter types are
    read off the type; a commit check rejects a recursive body.
+1a. **Normalize the RHS at commit** (D9) — store the normal form, and reject a body that will not
+   normalize. This is what lets every later use skip evaluation. Pin the condition it rests on:
+   substituting normal closed arguments into a normal body yields a normal term.
 2. **Capture-avoiding substitution on `Exp`** — new, and the one genuinely novel piece (§2.4). Total, no
    fail-soft. Property-test it against `eval`+`readback` on closed terms.
 3. **Decode: peel and substitute** (§2.4) — one more arm on the head-aware `"App"` handling, alongside
@@ -490,6 +543,7 @@ cannot be deferred.)*
 | **D5** | A definition is a **separate declaration form** (`def`), not `Decl::Def` on the `Let` token; unfolding happens **at decode**, not at eval | ✅ settled — §1.2a. A chain-resident definition is a *third binder*: `Let` is local and `Rho`-resolved and cannot mint an IRI; `EigonAxiom` mints an IRI but evaluates to a rigid neutral (`kernel/src/nbe/eval/mod.rs:509`), correctly so for `kind_of`/`the`. `eval` has no layer (`:155`), so δ belongs in decode, which already resolves `ConstRef` against the layer — and #95 independently frames δ-control as decode modes. `Let` stays reserved for the scoped type-position let |
 | **D6** | Arity and naming of the domain predicates once the context is explicit | ✅ settled **as sequencing** — the question is deliberately *not* answered here. `demo/prose-to-formulas` is rewritten as the **capstone** (slice 3) once slices 0–2 are implemented, and the arity and names are chosen there with the mechanism in hand. Answering it now would fix a vocabulary against a `def` form that does not yet exist. Note `demo/prose-to-formulas/onco-typed.esl` already records that `HasActivity` duplicates **RO:0002215 `capable of`**, which is *binary*, gene-to-process, and carries the same context-free assumption — so the honest ternary form will not map onto it cleanly, and the capstone settles **arity and naming, not grounding** (§7) |
 | **D7** | Cost of decoding on the commit path | ✅ settled — **absorb it**. Every `canonical_proposition` gains a D47 decode at layer build. Correctness comes first; the alternative is two normalization paths kept in step by hand, which is the defect being fixed. Efficiency is follow-up work, taken only if measurement warrants it — see below |
+| **D9** | What is a definition's **identity** for equality and hashing? | ✅ settled — **the normalized form of its right-hand side**, normalized **once at `def` commit** and stored that way. Anything computing a `prop_hash` therefore hashes the normal form, and the two ends of the witness key agree *by construction* rather than by an argument that decode-only happens to coincide with decode-plus-eval. Normalizing at commit rather than per use matters because slice 0 moved emission to **per lookup**: normalizing at each use would put a full NbE evaluation on every witness probe on every layer of a chain walk, far beyond the "a D47 decode at layer build" D7 accepted. With the RHS already normal, D8's peel-and-substitute drops closed arguments into a normal body without forming a redex, so a use decodes straight to a normal term and neither side evaluates. **Carve-out:** this defines identity for *transparent* definitions; an opaque one does not unfold, so its identity stays the folded name (#95). **Condition to pin, not assume:** substituting normal closed arguments into a normal body yields a normal term |
 | **D8** | Does decode form a redex or substitute through — and what is stored? | ✅ settled — **store the λ-body; decode peels and substitutes; definitions are non-recursive.** §2.4. The real axis is decode behaviour, not storage: forming `App(Lam…, x)` would force the emit side to replicate the evaluator, which is §4's defect relocated from α to β. Peel-and-substitute is bounded and structural, so D5 and D4 both hold. Storage is the λ-body — arity and parameter types come from the declared type, so nothing is duplicated and no new consistency rule is needed; and it avoids a second binding convention in `TypeExpr` that `alpha_canonicalize_proposition_json` would mis-handle, since that function deliberately preserves free `Var`s. Decode distinguishes a definition by the resolved resource's class, as `resolve_const_ref` already does for axiom / class / individual; **no new `Exp` variant** — after substitution the definition leaves no trace. Opacity (#95) hangs off the same resource and is a branch condition at the head. Requires a total capture-avoiding substitution on `Exp`, which does not yet exist (§2.4) |
 
 ## 7. Out of scope

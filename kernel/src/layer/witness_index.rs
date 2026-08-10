@@ -31,10 +31,11 @@
 //! once-admitted witness stays admitted in all descendants.
 
 use crate::layer::Layer;
+use crate::observability::{field, operation};
 use crate::ontology::resource::Resource;
 use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
-use crate::witness::{hash_proposition_value, WitnessCategory, WitnessKey};
+use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 
 /// D54: the `reasoning:ReasoningSentence` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
@@ -75,14 +76,14 @@ pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
         let is_a = resource.is_a();
         let emitted = match key.category {
             WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) => {
-                emit_from_reasoning_sentence(&resource)
+                emit_from_reasoning_sentence(layer, &resource)
             }
             WitnessCategory::Derived
                 if is_a
                     .iter()
                     .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION) =>
             {
-                emit_from_institution_derivation(&resource)
+                emit_from_institution_derivation(layer, &resource)
             }
             _ => None,
         };
@@ -99,6 +100,50 @@ pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
             })
         })
     })
+}
+
+/// Hash a stored proposition **the way the check side does**: decode it against the layer, then hash
+/// the resulting `Exp`.
+///
+/// The check side receives an already-decoded, already-evaluated `Val` and hashes its readback
+/// (`kernel/src/program/check_hooks.rs:76`). Hashing the *stored* JSON instead — what this replaces —
+/// agreed with that only as long as nothing could make the written form differ from the interpreted
+/// one. Definitions are exactly that (D66 §4): the author writes the folded name, the checker sees the
+/// unfolded body. Decoding here is what keeps the two ends on the same term.
+///
+/// No evaluation: a definition's body is stored already normalized (D9) and peel-and-substitute forms
+/// no redex (D8), so the decoded term *is* the normal form.
+///
+/// `None` on a decode failure — the same "no witness" outcome as before, but no longer silent: it logs
+/// through the operation table naming the resource, so a lookup miss caused by an undecodable
+/// proposition is distinguishable from an absent one (D66 §4.2).
+fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Option<[u8; 32]> {
+    let decoded = match crate::program::eigentt_type_mirror::decode_type(encoded, layer) {
+        Ok(exp) => exp,
+        Err(e) => {
+            tracing::warn!(
+                { field::OPERATION } = operation::WITNESS_DECODE,
+                { field::ERROR_KIND } = "proposition_decode_failed",
+                { field::ERROR_MESSAGE } = %format!("{e:?}"),
+                resource_iri = %owner,
+                "stored proposition did not decode; no witness can be admitted for it"
+            );
+            return None;
+        }
+    };
+    match hash_proposition_exp(&decoded) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            tracing::warn!(
+                { field::OPERATION } = operation::WITNESS_DECODE,
+                { field::ERROR_KIND } = "proposition_encode_failed",
+                { field::ERROR_MESSAGE } = %format!("{e:?}"),
+                resource_iri = %owner,
+                "decoded proposition did not re-encode; no witness can be admitted for it"
+            );
+            None
+        }
+    }
 }
 
 /// Could `resource` ever admit a `ChainWitness`?
@@ -191,11 +236,11 @@ where
 /// is the D47-encoded `Value::Json` the consumer's `JustifiedBy.verified(iri, P)`
 /// term hashes to identically (same encoding path), so the key matches.
 /// Returns `None` when the sentence has no `@id` or no `proposition`.
-fn emit_from_reasoning_sentence(sentence: &Resource) -> Option<WitnessKey> {
+fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
     let sentence_iri = sentence.id().cloned()?;
     let prop_iri = Iri::parse(REASONING_PROPOSITION).ok()?;
     let encoded_prop = sentence.get(&prop_iri)?;
-    let prop_hash = hash_proposition_value(encoded_prop);
+    let prop_hash = hash_stored_proposition(layer, &sentence_iri, encoded_prop)?;
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
@@ -208,11 +253,11 @@ fn emit_from_reasoning_sentence(sentence: &Resource) -> Option<WitnessKey> {
 /// `WitnessKey` keyed against the derivation's own IRI. Returns `None`
 /// when the derivation has no `canonical_proposition` set (kernel
 /// merge dropped it, or the institution didn't supply one).
-fn emit_from_institution_derivation(derivation: &Resource) -> Option<WitnessKey> {
+fn emit_from_institution_derivation(layer: &Layer, derivation: &Resource) -> Option<WitnessKey> {
     let derivation_iri = derivation.id().cloned()?;
     let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
     let encoded_prop = derivation.get(&prop_iri)?;
-    let prop_hash = hash_proposition_value(encoded_prop);
+    let prop_hash = hash_stored_proposition(layer, &derivation_iri, encoded_prop)?;
     Some(WitnessKey {
         category: WitnessCategory::Derived,
         iri: derivation_iri,
@@ -238,7 +283,7 @@ fn emit_from_trace(
     let target_resource = layer.resolve(&target_iri)?;
     let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
     let prop_hash = match target_resource.get(&prop_iri) {
-        Some(encoded_prop) => hash_proposition_value(encoded_prop),
+        Some(encoded_prop) => hash_stored_proposition(layer, &target_iri, encoded_prop)?,
         None => default_asserts_proposition_hash(layer, &target_iri)?,
     };
     Some(WitnessKey {
@@ -558,6 +603,8 @@ mod tests {
 
     // --- D39 Phase 2 — Asserts(iri) default when canonical_proposition is absent ---
 
+    use crate::nbe::term::Patt;
+
     fn layer_with_core_ontology() -> Arc<crate::layer::Layer> {
         // Load the real core ontology so `core:Asserts` resolves.
         use crate::ontology::eigon_json;
@@ -716,6 +763,131 @@ mod tests {
         // Freshly built layers are conservatively `true`, so the witness is found.
         assert!(layer.has_witness_candidates());
         assert!(layer_admits_witness(&layer, &key));
+    }
+
+    // --- D66 slice 1 prerequisite: do the emit and check sides land on the same hash? ---
+
+    /// Slice 1 moves the emit side from hashing the *stored* JSON to decoding it first. The
+    /// property that has to hold is **not** "decode then encode reproduces the stored bytes" — that
+    /// is neither necessary nor sufficient. What matters is that the two ends of the witness key
+    /// compute the same hash:
+    ///
+    /// - **check side** — `decode → eval → readback → encode → hash` (`check_hooks.rs:76` receives
+    ///   an already-evaluated `Val` and reads it back).
+    /// - **emit side, after slice 1** — `decode → encode → hash`.
+    ///
+    /// They differ by `eval` + `readback`. Readback freshens binder names, which α-canonicalisation
+    /// absorbs (D4). `eval` performs β/δ/ι — and on stored propositions there is nothing for it to
+    /// do: parses are β-normal (measured: 0 `Lam`, 0 `App(Lam, _)` across the demo's 76 nodes) and
+    /// no chain carries definitions until slice 2, after which decode unfolds them anyway.
+    ///
+    /// That reasoning is exactly what D66 says to verify rather than assume, so this asserts the
+    /// agreement directly instead of arguing for it.
+    #[test]
+    fn emit_and_check_sides_agree_on_the_hash() {
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::eval;
+        use crate::nbe::readback::readback_val;
+        use crate::program::eigentt_type_mirror::decode_type;
+
+        let layer = layer_with_core_ontology();
+        let s = || Exp::Sort(0);
+        let cls = |i: &str| Exp::EigonClass(iri(i));
+
+        let cases: Vec<(&str, Exp)> = vec![
+            ("bare sort", s()),
+            ("Set", Exp::Sort(1)),
+            (
+                "arrow — the negation shape",
+                Exp::Arrow(Box::new(s()), Box::new(s())),
+            ),
+            (
+                "pi with a named binder",
+                Exp::Pi(Patt::Var("x".into()), Box::new(Exp::Sort(1)), Box::new(s())),
+            ),
+            (
+                "sigma — the `exists` binder",
+                Exp::Sig(
+                    Patt::Var("x0".into()),
+                    Box::new(Exp::Sort(1)),
+                    Box::new(s()),
+                ),
+            ),
+            // NB the definite description `Fst(the(Σx. …))` is deliberately absent: `the` is an
+            // `ontology:` axiom, so the shape is not constructible against a core-only layer, and
+            // `Fst` of a bare `Sig` is ill-typed (a projection of a *type*, not of a pair). That
+            // shape is covered where parse-shaped propositions already exist —
+            // `crates/eigenius-reasoning/tests/shape_rule.rs`.
+            ("class reference", cls(crate::ontology::well_known::CLASS)),
+        ];
+
+        let mut broken = Vec::new();
+        for (label, exp) in &cases {
+            let Ok(stored) = encode_type(exp) else {
+                broken.push(format!("{label}: does not encode"));
+                continue;
+            };
+            let decoded = match decode_type(&stored, &layer) {
+                Ok(d) => d,
+                Err(e) => {
+                    broken.push(format!("{label}: does not decode: {e:?}"));
+                    continue;
+                }
+            };
+            // Emit side, after slice 1.
+            let emit = crate::witness::hash_proposition_exp(&decoded);
+            // Check side, as it already behaves.
+            let check = eval(&decoded, &Rho::Nil)
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|v| {
+                    crate::witness::hash_proposition_exp(&readback_val(0, &v))
+                        .map_err(|e| format!("{e:?}"))
+                });
+            match (emit, check) {
+                (Ok(a), Ok(b)) if a == b => {}
+                (Ok(a), Ok(b)) => broken.push(format!(
+                    "{label}: emit {} != check {}",
+                    hex::encode(&a[..8]),
+                    hex::encode(&b[..8])
+                )),
+                (Err(e), _) => broken.push(format!("{label}: emit side failed: {e:?}")),
+                (_, Err(e)) => broken.push(format!("{label}: check side failed: {e}")),
+            }
+        }
+        assert!(
+            broken.is_empty(),
+            "the two ends of the witness key disagree:\n  {}",
+            broken.join("\n  ")
+        );
+    }
+
+    /// The known exception, pinned so it is a documented boundary rather than a latent surprise.
+    ///
+    /// `Exp::Lam` carries no type slot, so decode **discards** a `Lam`'s domain annotation
+    /// (`eigentt_type_mirror.rs:456`) and re-encoding a bare `Lam` is a hard error
+    /// (`EncodeError::LamWithoutAnnotation`, `:129`). A stored proposition containing a `Lam` can
+    /// therefore never round-trip.
+    ///
+    /// This does **not** regress under slice 1: `WitnessKey::from_exp` already routes through
+    /// `encode_type`, so the *check* side already cannot form a key for such a proposition. Making
+    /// the emit side decode too changes an asymmetric failure (emit succeeds, check fails) into a
+    /// symmetric one (neither admits). Nothing that resolves today stops resolving.
+    #[test]
+    fn lam_bearing_propositions_cannot_round_trip_on_either_side() {
+        let lam = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::Sort(0)));
+        assert!(
+            encode_type(&lam).is_err(),
+            "a bare Lam must not encode — decode cannot recover its domain"
+        );
+        assert!(
+            WitnessKey::from_exp(
+                WitnessCategory::Declared,
+                iri("urn:eigenius:example:l"),
+                &lam
+            )
+            .is_err(),
+            "so the CHECK side already cannot key a Lam-bearing proposition today"
+        );
     }
 
     // --- Phase 6 foundation — synthesize_chain_witness ---
