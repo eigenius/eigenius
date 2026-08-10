@@ -403,6 +403,34 @@ ignores unknown keys. Both directions are pinned by tests rather than assumed:
 count; a layer stamped witness-free is skipped without probing; a miss caused by a proposition mismatch
 names the resource and the mismatch.
 
+**Status (2026-08-09): implemented; correctness verified, cost not yet measured.**
+
+Verified — `cargo test --workspace` 2745 passed / 0 failed, clippy clean under `-D warnings`; and
+`demo/prose-to-formulas/run.sh --reparse` end to end against
+`wordnet-umls-aligned-2026-08-03-specpoly`: the intact branch commits all four layers and the
+inference, the edited branch refuses `bridge-s1` and `inference.esl` with `qc_validate_justification`
+→ `Fails` while `bridge-s2` still commits. Regenerating the claims/rules/bridges artifacts reproduced
+the committed files exactly (modulo one trailing newline).
+
+**Not yet measured, and the demo run could not measure it.** That snapshot predates the handle field,
+so every lexicon layer decodes via the serde default to `true` and is *probed, not skipped* — the run
+exercised direct lookup with the skip inactive on the whole deep part of the chain. It therefore
+establishes correctness under the pessimistic condition and says nothing about the skip's value.
+
+**Deferred to the next reseed** (a reseed is what stamps the lexicon layers). Two timed runs of the
+demo settle it, against the figures the predecessor recorded — 0.75 s committing, **127 s** rejecting:
+
+1. **legacy handles, skip inactive** — the upper bound; every ancestor probed on every lookup.
+2. **after reseed, skip active** — expected fastest of the three designs, since it costs neither the
+   five `is_a` probes per layer nor a per-process rebuild.
+
+If (1) is already at or below the old figures the skip is belt-and-braces; if (1) regresses and (2)
+recovers, the stamped bit is load-bearing and should be treated as such.
+
+Note the demo does **not** stress the conservative serde default: a `false` default would have passed
+it too, because the legacy lexicon layers genuinely hold no witnesses and every trace-bearing layer in
+that run was freshly stamped. `handle_without_witness_flag_decodes_as_unknown` is what covers it.
+
 *If repeated lookups on layers that **do** hold traces later prove too slow*, the next step is a
 fixed-size bloom over witnessed target IRIs on the same handle — skipping per-IRI rather than per-layer,
 still constant footprint, and reusing the per-layer bloom pattern that already exists.
