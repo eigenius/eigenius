@@ -29,18 +29,13 @@
 //! a hashed input span. A certificate that cites `derived(claim_iri, P)` therefore breaks the moment
 //! the prose changes and the parser derives a different `P` — which is the whole point.
 
-use std::collections::BTreeMap;
-
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
 use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
-use eigenius_reasoning::grade::{BridgedClaimGrader, ChainRuleApplication};
-use eigenius_reasoning::{ClaimGrader, ClaimSource, Warrant};
 
-use crate::claims::ClaimSpec;
 use crate::select::Pin;
 
 const CORE: &str = "urn:eigenius:core";
@@ -211,96 +206,6 @@ pub fn reading_skeleton(item: &Item) -> String {
     skeleton_of(item.sem())
 }
 
-/// Emit the **argument** over the encoded claims: one Declared bridge + one `ReasoningSentence` per
-/// sentence, as Eigon-JSON.
-///
-/// The construction is [`BridgedClaimGrader`] — it lives in the reasoning institution because that
-/// is whose artifacts these are, and because its in-process tests
-/// (`crates/eigenius-reasoning/tests/bridged_grade.rs`) are what witness that the certificates
-/// actually gate: Holds over the parser's `IsDerivedAs` witness, `Fails` once the claim is
-/// re-derived from edited prose.
-///
-/// **Generate this ONCE and commit the result.** It is the recorded argument, not a function of the
-/// current prose. Regenerate it alongside the claims and it re-derives itself around any edit —
-/// nothing would ever fail to commit, which is the one thing the whole exercise is for.
-pub fn emit_argument(
-    ns: &str,
-    timestamp: &str,
-    sentences: &[ParsedSentence<'_>],
-    claims: &BTreeMap<String, ClaimSpec>,
-) -> Result<String, ArgumentError> {
-    let mut out: Vec<Resource> = Vec::new();
-    for s in sentences {
-        let spec = claims
-            .get(&s.text)
-            .ok_or_else(|| ArgumentError::NoClaim(s.text.clone()))?;
-        let claim_iri = format!("{ns}:claim_{}", s.ordinal);
-        let grader = BridgedClaimGrader {
-            claim_iri: &claim_iri,
-            predicate: &spec.predicate,
-            args: &spec.args,
-            declared_by: &spec.declared_by,
-            rationale: &spec.rationale,
-            timestamp,
-        };
-        let graded = grader
-            .grade(
-                s.item.sem(),
-                &ClaimSource {
-                    stem: &format!("{ns}:s{}", s.ordinal),
-                    warrant: Warrant::Declared,
-                    declared_by: &spec.declared_by,
-                    timestamp,
-                },
-            )
-            .map_err(|e| ArgumentError::Grade {
-                ordinal: s.ordinal,
-                detail: e.to_string(),
-            })?;
-        for mut r in graded.resources {
-            // The grader is domain-agnostic; the demo's own provenance goes on here.
-            if r.id() == Some(&graded.sentence_iri) {
-                r.set(
-                    iri("urn:eigenius:reasoning:subject_iri"),
-                    Value::String(spec.subject_iri.clone()),
-                );
-                r.set(
-                    iri(&format!("{CORE}:description")),
-                    Value::String(format!(
-                        "«{}» warrants {}({}).",
-                        s.text,
-                        spec.predicate,
-                        spec.args.join(", ")
-                    )),
-                );
-            }
-            out.push(r);
-        }
-    }
-    Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize Eigon-JSON"))
-}
-
-#[derive(Debug)]
-pub enum ArgumentError {
-    NoClaim(String),
-    Grade { ordinal: usize, detail: String },
-}
-
-impl std::fmt::Display for ArgumentError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoClaim(s) => write!(
-                f,
-                "no declared claim for «{s}» — the claims file must say what domain proposition \
-                 this sentence is taken to warrant, and on whose authority"
-            ),
-            Self::Grade { ordinal, detail } => {
-                write!(f, "sentence {ordinal}: {detail}")
-            }
-        }
-    }
-}
-
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("well-formed IRI")
 }
@@ -312,77 +217,4 @@ fn res(id: &str, classes: &[&str]) -> Resource {
         Value::Array(classes.iter().map(|c| Value::ResourceRef(iri(c))).collect()),
     );
     r
-}
-
-/// Emit the **inference**: apply a rule already pinned on the chain to the domain claim some earlier
-/// sentence established, concluding that rule's consequent.
-///
-/// `antecedent`/`consequent` are sentence ordinals; their domain propositions come from the claim
-/// map, so the emitter never invents either side. The conclusion this produces is the SAME
-/// proposition the consequent sentence asserts on its own — which is the point: on the intact chain
-/// that claim ends up justified twice, once because the document says it and once because it follows
-/// from a measurement plus a published rule.
-pub fn emit_inference(
-    ns: &str,
-    timestamp: &str,
-    rule_iri: &str,
-    antecedent: usize,
-    consequent: usize,
-    sentences: &[ParsedSentence<'_>],
-    claims: &BTreeMap<String, ClaimSpec>,
-) -> Result<String, ArgumentError> {
-    let spec_of = |ord: usize| -> Result<&ClaimSpec, ArgumentError> {
-        let s = sentences
-            .iter()
-            .find(|s| s.ordinal == ord)
-            .ok_or_else(|| ArgumentError::NoClaim(format!("sentence {ord}")))?;
-        claims
-            .get(&s.text)
-            .ok_or_else(|| ArgumentError::NoClaim(s.text.clone()))
-    };
-    let prop = |spec: &ClaimSpec| -> serde_json::Value {
-        let mut v = serde_json::json!({ "ctor": "ConstRef", "args": [spec.predicate] });
-        for a in &spec.args {
-            let arg = if a.starts_with("urn:") {
-                serde_json::json!({ "ctor": "ConstRef", "args": [a] })
-            } else {
-                serde_json::json!({ "ctor": "LitString", "args": [a] })
-            };
-            v = serde_json::json!({ "ctor": "App", "args": [v, arg] });
-        }
-        v
-    };
-    let a = prop(spec_of(antecedent)?);
-    let c = prop(spec_of(consequent)?);
-    let ante_sentence = format!("{ns}:s{antecedent}:sentence");
-    let graded = ChainRuleApplication {
-        rule_iri,
-        antecedent_sentence_iri: &ante_sentence,
-        antecedent: &a,
-        consequent: &c,
-    }
-    .conclude(&ClaimSource {
-        stem: &format!("{ns}:inferred"),
-        warrant: Warrant::Declared,
-        declared_by: "demo:inference",
-        timestamp,
-    })
-    .map_err(|e| ArgumentError::Grade {
-        ordinal: consequent,
-        detail: e.to_string(),
-    })?;
-    let mut out = Vec::new();
-    for mut r in graded.resources {
-        r.set(
-            iri(&format!("{CORE}:description")),
-            Value::String(format!(
-                "CONCLUDED, not asserted: applying the pinned rule {rule_iri} to the claim \
-                 established by sentence {antecedent} yields the proposition sentence {consequent} \
-                 also states. Edit sentence {antecedent} and this stops committing, while the \
-                 assertion in sentence {consequent} is untouched."
-            )),
-        );
-        out.push(r);
-    }
-    Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize"))
 }

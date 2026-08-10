@@ -27,10 +27,9 @@
 #   formulas-intact   paragraph.txt          → argument commits, ValidateJustification Holds
 #   formulas-edited   paragraph-edited.txt   → argument REJECTED
 #
-# The edit deletes one negation ("did not require" → "required") from the second
-# sentence. It still parses, and to exactly the same STRUCTURE — the skeleton is
-# the helicase sentence's — so nothing syntactic notices. What changes is the
-# proposition, and the recorded argument's certificate cites the old one.
+# The edit inserts one negation ("had" → "did not have") into the first sentence —
+# the measurement. It still parses; the proposition gains a trailing '→ False', so
+# it is a different term, and the recorded argument's certificate cites the old one.
 #
 # Prerequisites:
 #   docker compose build kernel                      ← REBUILD AFTER ANY KERNEL CHANGE.
@@ -77,7 +76,7 @@ hr "0. Kernel on the LEXICON snapshot"
 # of `require`, and so on), so the chain the claims commit to must be the one that DEFINES those
 # axioms. Committing a parsed proposition onto a bare core+domain chain fails at the D47 decode with
 # `ConstRef references unresolved IRI` — the parser and the chain have to share a lexicon.
-SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-03-specpoly}"
+SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-d66}"
 [[ -f "$SNAPSHOT/CURRENT" ]] || {
     echo "ERROR: no lexicon snapshot at $SNAPSHOT" >&2
     echo "  build one: scripts/reseed-lexicon-db.sh && scripts/build-alignment-snapshot.sh …" >&2
@@ -100,7 +99,6 @@ echo "kernel healthy at $ENDPOINT, serving the lexicon chain"
 
 if [[ $REPARSE == 1 ]]; then
     hr "0b. Re-deriving the claims layers from the lexicon snapshot"
-    SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:?set EIGENIUS_DB_SNAPSHOT to an aligned WordNet+UMLS snapshot}"
     cargo build -q --release -p eigenius-encoding
     # Each variant replays its OWN recording: the reranker's key includes the sentence and its
     # candidate senses, so the edited paragraph is a different question and a shared ranks file
@@ -108,9 +106,9 @@ if [[ $REPARSE == 1 ]]; then
     # `prose-to-esl`, not `prose-to-eigon`: same pipeline, ESL instead of Eigon-JSON. The chain
     # artifacts are committed in the language they were authored in, so a reviewer reads the
     # generated formulas rather than a D47 encoding of them.
-    # Only the CLAIMS layer is derived from the prose. Under D66 there is nothing else to
-    # generate: the lift from a parsed sentence to domain vocabulary is definitional equality
-    # (`onco-typed.esl`), so there are no shape rules and no per-sentence bridges to emit.
+    # Only the CLAIMS layer is derived from the prose. The lift from a parsed sentence to domain
+    # vocabulary is definitional equality (`onco-typed.esl`), so the claims are the only
+    # generated artifact.
     "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
         --source "$HERE/paragraph.txt"        --pins "$HERE/pins.tsv" \
         --ranks  "$HERE/ranks.json"           --ns   "urn:eigenius:demo:formulas" \
@@ -126,9 +124,10 @@ fi
 # `narrate.py` renders a D47 term with concept names substituted, so it needs the ENCODING, not the
 # source. Compile each file once into the scratch dir — the ESL is the committed artifact, the JSON
 # is derived on demand, and there is only ever one copy of the content.
+SCRATCH="$(mktemp -d)"; trap 'rm -rf "$SCRATCH"' EXIT
 narrate() {
     local esl="$1" suffix="$2"
-    local json="$SPLIT/$(basename "${esl%.esl}").json"
+    local json="$SCRATCH/$(basename "${esl%.esl}").json"
     # The bare binary, not `eig`: `compile` is local-only and refuses when `--endpoint` is set.
     [[ -f "$json" ]] || "$REPO/target/debug/eigenius" compile "$esl" > "$json"
     python3 "$HERE/narrate.py" "$json" "$suffix"

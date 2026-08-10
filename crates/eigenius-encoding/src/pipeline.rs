@@ -34,8 +34,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::claims::load_claims;
-use crate::emit::{emit_argument, emit_document, emit_inference, ParsedSentence};
+use crate::emit::{emit_document, ParsedSentence};
 use crate::select::{load_pins, select_pinned};
 use crate::snapshot::{build_parser, open_head, ParserConfig};
 use clap::Parser as ClapParser;
@@ -76,28 +75,10 @@ pub struct Args {
     /// Regenerated on every run — this is the layer the prose determines.
     #[arg(long)]
     out: PathBuf,
-    /// Declared claim map: `sentence <TAB> predicate <TAB> args <TAB> subject_iri <TAB> declared_by
-    /// <TAB> rationale`. Required with `--argument-out`.
-    #[arg(long)]
-    claims: Option<PathBuf>,
-    /// Where to write the argument layer (bridges + reasoning sentences).
-    ///
-    /// **Generate this ONCE and commit it.** It is the recorded argument, not a function of the
-    /// current prose; regenerating it on every run would re-derive the argument around any edit and
-    /// nothing would ever fail to commit.
-    #[arg(long, requires = "claims")]
-    argument_out: Option<PathBuf>,
     /// The `reflection:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
     /// byte-reproducible.
     #[arg(long, default_value = "2026-08-03T00:00:00Z")]
     timestamp: String,
-    /// Apply a rule already pinned on the chain: `<rule-iri>:<antecedent-ordinal>:<consequent-ordinal>`.
-    /// Writes the concluding `ReasoningSentence` to `--inference-out`.
-    #[arg(long, requires = "claims")]
-    inference: Option<String>,
-    /// Where to write the inference layer.
-    #[arg(long, requires = "inference")]
-    inference_out: Option<PathBuf>,
     /// WordNet dict for the Morphy lemmatizer.
     #[arg(long, default_value = "references/WordNet-3.0/dict")]
     dict: PathBuf,
@@ -206,47 +187,6 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         parsed.len()
     );
 
-    if let Some(argument_out) = &args.argument_out {
-        let path = args.claims.as_ref().expect("clap `requires` guarantees it");
-        let claims = load_claims(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        let json = emit_argument(&args.ns, &args.timestamp, &parsed, &claims)
-            .map_err(|e| e.to_string())?;
-        write_doc(argument_out, &json, format)?;
-        eprintln!(
-            "wrote {} ({} bridges + {} reasoning sentences) — COMMIT THIS; do not regenerate it \
-             per run",
-            argument_out.display(),
-            parsed.len(),
-            parsed.len()
-        );
-    }
-    if let (Some(spec), Some(out)) = (&args.inference, &args.inference_out) {
-        let parts: Vec<&str> = spec.rsplitn(3, ':').collect();
-        let (conseq, ante, rule) = match parts.as_slice() {
-            [c, a, r] => (
-                c.parse::<usize>()
-                    .map_err(|e| format!("--inference consequent: {e}"))?,
-                a.parse::<usize>()
-                    .map_err(|e| format!("--inference antecedent: {e}"))?,
-                *r,
-            ),
-            _ => return Err("--inference must be <rule-iri>:<antecedent>:<consequent>".into()),
-        };
-        let path = args.claims.as_ref().expect("clap `requires`");
-        let claims = load_claims(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        let json = emit_inference(
-            &args.ns,
-            &args.timestamp,
-            rule,
-            ante,
-            conseq,
-            &parsed,
-            &claims,
-        )
-        .map_err(|e| e.to_string())?;
-        write_doc(out, &json, format)?;
-        eprintln!("wrote {} (the INFERRED claim)", out.display());
-    }
     Ok(())
 }
 

@@ -16,34 +16,28 @@
 // Chan et al. The demo is about how a sentence becomes justified, not about WRN biology. The
 // `rationale` field below says so on the chain, where a reader of the graph will see it.
 //
-// ── WHY IT QUANTIFIES OVER THE MODEL (D66) ────────────────────────────────────────────────────
+// ── WHY IT QUANTIFIES OVER THE MODEL ──────────────────────────────────────────────────────────
 //
-// It used to read `HasActivity(WRN, exonuclease) → RequiresActivity(WRN, helicase)` — no model
-// anywhere. But the sentences it relates are about MSI cancer models, and the predicates were
-// binary, so the model was simply dropped. That was a universal quantification hiding in an arity:
-// a claim about one experimental context silently became a claim about WRN as such, never stated
-// and never justified.
+// The sentences it relates are about MSI cancer models. A rule that dropped the model from its
+// arity would hide a universal quantification there: a claim about one experimental context would
+// silently become a claim about WRN as such, never stated and never justified.
 //
 // With the model an explicit parameter, the quantifier is where it belongs — in the rule, visible,
-// and this is now what the rule actually says. `inference.esl` eliminates it with
+// and it is what the rule actually says. `inference.esl` eliminates it with
 // `JustifiedBy.spec_poly` at the model the sentences are about, which is the ordinary way to use a
 // general claim on a particular case.
 //
-// ── AND WHY IT IS STILL THE ONLY DECLARED THING HERE ──────────────────────────────────────────
+// ── AND WHY IT IS THE ONLY DECLARED THING HERE ────────────────────────────────────────────────
 //
 // This rule is Declared because it IS an assertion: somebody read a paper and asserts the
 // dependency. That is the honest grade for it.
 //
-// What is no longer Declared is the LIFT from prose to domain vocabulary. `onco-typed.esl` now
-// defines `HasActivity` and `RequiresActivity` as transparent definitions over the parser's own
-// lexicon, so `HasActivity(m, g, a)` and the parsed sentence are the same term — the kernel
-// computes that, nothing asserts it. The generated `rules.esl` and its two DeclarationTraces are
-// gone. One `DeclarationTrace` remains on this branch, below, and it is the only claim anyone is
-// standing behind.
-//
-// (An earlier version of this file said a rule whose antecedent had to be a PARSE would be
-// "inexpressible in ESL". Not so — `exists` and `eigentt:fst` are ESL surface, and this rule's
-// antecedent IS a parse now, reached through a definition rather than spelled out.)
+// The LIFT from prose to domain vocabulary Declares nothing: `onco-typed.esl` defines
+// `HasActivity` and `RequiresActivity` as transparent definitions over the parser's own lexicon,
+// so `HasActivity(m, g, a)` and the parsed sentence are the same term — the kernel computes that,
+// nothing asserts it. One `DeclarationTrace` sits on this branch, below, and it is the only claim
+// anyone is standing behind. (Its antecedent IS a parse — `exists` and `eigentt:fst` are ESL
+// surface — reached through a definition rather than spelled out.)
 //
 // Loaded onto `main` before the two demo branches are cut, so both branches share it.
 // ══════════════════════════════════════════════════════════════════════════════════════════════

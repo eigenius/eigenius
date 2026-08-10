@@ -39,7 +39,7 @@ The most-used reference chapters are:
 
 7. **[The orchestrator](07-orchestrator.md)** — what it does (IO component dispatch + LLM adapter + MCP server + substrate addon), real vs. mock LLM mode, the built-in `CompleteText` and `CompleteJson` components, when you don't need it.
 
-8. **[Worked demos](08-demos.md)** — step-throughs of `demo/run.sh`, `demo/patent/run.sh`, the multi-institution kinase-institutions notebook, the Lean verification audit chain, and the two prose-to-chain demos (parsed sentences committed as certificates, then edited until the kernel refuses them).
+8. **[Worked demos](08-demos.md)** — step-throughs of `demo/run.sh`, `demo/patent/run.sh`, the multi-institution kinase-institutions notebook, the Lean verification audit chain, and the prose-to-formulas demo (parsed sentences committed as certificates, then edited until the kernel refuses them).
 
 9. **[Building WASM components](09-wasm-components.md)** — **REMOVED (2026-07-08).** Retained as historical record; WASM component hosting and `eigenius capability install` no longer exist.
 

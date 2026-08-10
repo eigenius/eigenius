@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! **One rule, many sentences.** A `BridgedClaimGrader` bridge serves exactly one sentence, because
-//! its implication is ground. A [`ShapeRule`] is quantified over the classes the parse supplies, so
-//! ONE declared resource + trace covers every sentence of the same shape — the rule is instantiated
-//! per sentence with `JustifiedBy.spec_poly` and then applied to that sentence's own
-//! `IsDerivedAs` witness.
+//! The two ways a claim gets justified in `demo/prose-to-formulas`, exercised against the gate:
 //!
-//! The load-bearing test is [`one_rule_serves_two_different_sentences`]: two sentences with
-//! different subjects, one shared rule, both `Holds`.
+//! - **Prose modus ponens** — `A` and `A → B` both parsed from sentences, nothing Declared;
+//! - **a pinned literature rule** — a Declared `A → B` applied to a claim a sentence established.
+//!
+//! Each has a `Holds` case and a fail-closed case. (A third mechanism — generated shape rules,
+//! one Declared rule per parse shape — lived here until D66 replaced it with transparent
+//! definitions; `spec_poly` elimination is now exercised end-to-end by the demo's
+//! `inference.esl`.)
 
 use std::sync::Arc;
 
@@ -32,13 +33,11 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
-use eigenius_reasoning::grade::{build_shape_rule, shape_rule_resources, ShapeRuleCitation};
 use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::{ClaimGrader, ClaimSource, ReasoningInstitution, Warrant};
+use eigenius_reasoning::{ClaimSource, ReasoningInstitution, Warrant};
 use serde_json::json;
 
 const PRED: &str = "urn:eigenius:demo:onco-typed:RequiresActivity";
-const RULE: &str = "urn:eigenius:demo:shape:rule_requires";
 const GENE_A: &str = "urn:eigenius:demo:cls:WRN";
 const ACT_A: &str = "urn:eigenius:demo:cls:helicase";
 const GENE_B: &str = "urn:eigenius:demo:cls:BLM";
@@ -175,68 +174,6 @@ fn verdict(base: &Arc<Layer>, rs: Vec<Resource>, sentence_iri: &Iri) -> (String,
     )
 }
 
-/// **The point of shape rules.** Two sentences about different genes and different activities, ONE
-/// declared rule, both admitted. Under ground bridges this needs two declared resources and two
-/// traces; here the rule cluster is committed once.
-#[test]
-fn one_rule_serves_two_different_sentences() {
-    let base = build_chain();
-    let p_a = parsed(GENE_A, ACT_A);
-    let classes_a = vec![GENE_A.to_string(), ACT_A.to_string()];
-    let rule = build_shape_rule(&p_a, PRED, &classes_a).expect("rule builds");
-    assert_eq!(rule.binders.len(), 2);
-
-    let rule_cluster = shape_rule_resources(
-        RULE,
-        &rule,
-        "demo:shape-rules",
-        "Any sentence of this shape warrants RequiresActivity at the same classes.",
-        "2026-08-03T00:00:00Z",
-    )
-    .unwrap();
-
-    for (n, (gene, act)) in [(GENE_A, ACT_A), (GENE_B, ACT_B)].iter().enumerate() {
-        let prop = parsed(gene, act);
-        let classes = vec![gene.to_string(), act.to_string()];
-        let claim_iri = format!("urn:eigenius:demo:shape:claim_{n}");
-        let cited = ShapeRuleCitation {
-            rule_iri: RULE,
-            claim_iri: &claim_iri,
-            binders: &rule.binders,
-            classes: &classes,
-            predicate: PRED,
-        }
-        .grade(
-            &prop,
-            &ClaimSource {
-                stem: &format!("urn:eigenius:demo:shape:s{n}"),
-                warrant: Warrant::Declared,
-                declared_by: "demo:shape-rules",
-                timestamp: "2026-08-03T00:00:00Z",
-            },
-        )
-        .expect("citation builds");
-
-        let mut rs = rule_cluster.clone();
-        rs.extend(claim_resources(&claim_iri, &prop, n));
-        rs.extend(cited.resources.clone());
-        let (ctor, diag) = verdict(&base, rs, &cited.sentence_iri);
-        assert_eq!(
-            ctor, "Holds",
-            "sentence {n} ({gene}, {act}); diagnostic: {diag:?}"
-        );
-    }
-}
-
-/// Fail closed: the rule may only be cited for classes the sentence actually mentions.
-#[test]
-fn shape_rule_refuses_a_class_the_sentence_does_not_mention() {
-    let p = parsed(GENE_A, ACT_A);
-    let err = build_shape_rule(&p, PRED, &[GENE_A.to_string(), GENE_B.to_string()])
-        .expect_err("BLM does not occur in this sentence");
-    assert!(err.to_string().contains("does not occur"), "{err}");
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // Prose modus ponens — both premises Derived, nothing Declared
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -325,7 +262,7 @@ fn a_pinned_literature_rule_justifies_a_sentence_by_inference() {
     let base = build_chain();
 
     // (1) The measurement claim, established by an ordinary parsed sentence. Stand-in for the
-    //     bridged conclusion of "MSI cancer models had the high concentration of thymidine."
+    //     domain reading of "MSI cancer models had the high concentration of thymidine."
     let a = json!({ "ctor": "App", "args": [
         { "ctor": "ConstRef", "args": [CONC] },
         { "ctor": "ConstRef", "args": [ACT_B] }

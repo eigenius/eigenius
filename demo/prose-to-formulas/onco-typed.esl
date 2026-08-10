@@ -1,33 +1,25 @@
 // Domain vocabulary as TRANSPARENT DEFINITIONS over the parser's own lexicon (D66).
 //
-// ── WHAT CHANGED, AND WHY IT MATTERS ──────────────────────────────────────────────────────────
+// ── WHY DEFINITIONS ───────────────────────────────────────────────────────────────────────────
 //
-// These were opaque axioms:
+// An opaque predicate — `data onco2:HasActivity : Set -> Set -> Set -> Prop { }`, a
+// zero-constructor inductive — is related to nothing, so the only way to connect a parsed
+// sentence to it is to ASSERT the connection: a `reflection:DeclaredResource` saying "a sentence
+// of this shape warrants this predicate", on somebody's authority — an unchecked leap the kernel
+// accepts because a `declared_by` field says who stood behind it.
 //
-//     data onco2:HasActivity : Set -> Set -> Prop { }
+// As DEFINITIONS, the connection is not asserted at all. `HasActivity(m, g, a)` unfolds to the
+// parse, so the lift is definitional equality: the kernel computes it, nothing declares it.
 //
-// A zero-constructor inductive is opaque by construction — nothing in the system relates it to
-// anything. So the only way to connect a parsed sentence to it was to ASSERT the connection: one
-// `reflection:DeclaredResource` per parse shape, saying "a sentence of this shape warrants this
-// predicate", on somebody's authority. Measured over the 62 sentences of the WRN paper in
-// `experiments/parsing/expected-readings.tsv`, that is at least 61 such assertions — one per
-// sentence, near enough — and the count is not the problem. Each one is an unchecked leap the
-// kernel accepts because a `declared_by` field says who stood behind it.
+// ── THE QUANTIFIER IS EXPLICIT ────────────────────────────────────────────────────────────────
 //
-// Declared as DEFINITIONS, the connection is not asserted at all. `HasActivity(m, g, a)` unfolds
-// to the parse, so the lift is definitional equality: the kernel computes it, nothing declares it.
-// The bridges are gone, and so is `rules.esl`.
+// The sentence is «MSI cancer models had the exonuclease activity of WRN» — it says something
+// about MSI cancer models, so the model is a parameter. Dropping it would turn a claim about one
+// experimental context into a claim about WRN simpliciter, with the generalisation hidden in the
+// predicate's ARITY, never stated, never justified.
 //
-// ── THE HIDDEN QUANTIFIER, NOW EXPLICIT ───────────────────────────────────────────────────────
-//
-// The old predicates were BINARY: `HasActivity(WRN, exonuclease)`. The sentence they lifted is
-// «MSI cancer models had the exonuclease activity of WRN» — it says something about MSI cancer
-// models. Dropping that argument turned a claim about one experimental context into a claim about
-// WRN simpliciter, and the generalisation was invisible: it lived in the predicate's ARITY, never
-// stated, never justified.
-//
-// So `m` is a parameter now. It is not a class IRI — the parse says «MSI cancer models», a nested
-// compound kind, and the call site carries that term. That is what the sentence actually asserts.
+// `m` is not a class IRI — the parse says «MSI cancer models», a nested compound kind, and the
+// call site carries that term. That is what the sentence actually asserts.
 //
 // ── WHY THE BODIES DIFFER BY ONE TOKEN ────────────────────────────────────────────────────────
 //
@@ -36,20 +28,20 @@
 // are different verbs, so they are different propositions, and a rule relating them is a claim
 // about the world (see `literature-rules.esl`) rather than a definitional identity.
 //
-// ── WHERE THESE NAMES COME FROM (unchanged debt) ──────────────────────────────────────────────
+// ── WHERE THESE NAMES COME FROM (D6, settled 2026-08-10) ──────────────────────────────────────
 //
-// The predicate NAMES are still invented — carried over from the WRN reproduction experiment
+// The predicate NAMES are invented — carried over from the WRN reproduction experiment
 // (`experiments/publications/wrn-helicase/chain/01-onco.esl`, 2026-06-18), when the chain had no
 // grounded vocabulary to draw on. `HasActivity` in particular duplicates RO:0002215 `capable of`.
 //
-// Grounding them is capped by what the parser can see: a definition may only be written over
-// vocabulary the lexicon contains, and this lexicon is WordNet + UMLS. Reaching GO:0004527
-// («exonuclease activity») or RO:0002215 is a LEXICON change, not a change here. Recorded rather
-// than fixed — D66 D6.
+// D6 settles that they STAY. Under `def` a name is a transparent abbreviation — the body is the
+// meaning and the kernel computes it, so the name asserts nothing. And RO:0002215 is BINARY,
+// gene-to-process, context-free: the explicit-model ternary form contradicts the identity its
+// name would claim, so borrowing it would assert an alignment that does not hold.
 //
-// `DispensableActivity` was declared here and used by nothing. Removed. (The similarly-named
-// predicate in `demo/prose-to-chain` is a different IRI, in `urn:eigenius:benchmark:onco`, and is
-// unaffected.)
+// Grounding is capped by what the parser can see: a definition may only be written over
+// vocabulary the lexicon contains, and this lexicon is WordNet + UMLS. When RO/GO enter the
+// lexicon, the move is to define RO-named predicates over those entries — not to rename these.
 
 namespace logic    = "urn:eigenius:logic";
 namespace eigentt  = "urn:eigenius:eigentt";

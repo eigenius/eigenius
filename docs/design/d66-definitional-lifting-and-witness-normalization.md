@@ -596,6 +596,60 @@ and the inference dying with it — with **one** Declared resource on the branch
 negation-visibility property (`→ False` distinguishing the edited sentence) must survive unchanged; it
 is the demo's whole point and the definitions must preserve it.
 
+**Status (2026-08-10): implemented, run, and verified — first contact with the real lexicon.**
+
+The slice was code-complete on 2026-08-09 but unrunnable until a reseed: slice 2 grew a **bootstrap**
+ontology (`eigentt-type-fragment.json` gained `Definition` + its three properties), and the seed
+manifest is content-verified, so every pre-D66 snapshot fails the drift check. An attempt to add the
+four resources as an additive layer (`definition-layer.esl` + a patched snapshot) could not work —
+the drift check fires on the seed manifest before any layer loads — and those artifacts are deleted.
+
+Environment: `reseed-lexicon-db.sh --snapshot-dir wordnet-umls-d66` — **11 m 41 s** wall on a cold
+machine (includes a from-scratch kernel-image build; this is the D7 baseline number). WordNet 4
+layers / ~648 k resources + UMLS 11 layers / ~2.65 M resources, all clean.
+`build-alignment-snapshot.sh` over it: 38 389 merges, **3 m 07 s** → `wordnet-umls-aligned-d66`.
+
+Verified, committed fixtures (gate items):
+
+- Intact branch commits every layer and the inference; the conclusion is justified twice. Edited
+  branch: claims commit, `inference.esl` refused with `qc_validate_justification` → `Fails` — the
+  negation-visibility property survived the move to definitions.
+- **One** DeclarationTrace on the branch (the literature rule), down from ≥62 Declared.
+- **Rule 24 against the real WordNet/UMLS resources** (`wn:v02203362_t`, `wn:n13440063`, …, not the
+  stand-ins): `onco-typed.esl`'s two definitions commit, 673 ms.
+- **`spec_poly` at the Σ-term** for «MSI cancer models» type-checks on the real chain (§9's
+  universe oddity remains undiagnosed but does not bite here either).
+
+Verified, `--reparse` against the **aligned** snapshot: both variants parse each sentence to exactly
+1 closed reading, and the regenerated `claims-intact.esl` / `claims-edited.esl` are **byte-identical**
+to the committed fixtures. Against the **raw** (unaligned) snapshot `--reparse` fails closed:
+sentence 1 yields 2 readings sharing the pinned skeleton — WordNet/UMLS duplicate senses are
+unmerged, so the recorded ranks replay (keyed on candidate senses) misses and falls back to
+cap-only, and `select_pinned` refuses. The demo's prerequisite is the aligned chain, as before D66;
+the fixture path is indifferent (no parsing).
+
+**The slice-0 deferred measurement**, from the kernel's own `commit.pipeline_run` `duration_ms`
+against the freshly stamped snapshot: intact `inference.esl` commit **343 ms** (pre-slice-0:
+0.75 s); edited `inference.esl` refusal **366 ms** (pre-slice-0: **127 s**). Rejection now costs
+the same as commit — the 127 s materialised-index pathology is gone. Run (1) of the protocol
+(current code, legacy unstamped handles) is no longer obtainable: pre-D66 snapshots fail the drift
+check and any current reseed stamps the bit; the nearest legacy datapoint stays slice 1's 56.9 s
+whole-script run. Whether the stamped skip specifically, as opposed to direct lookup alone, is
+load-bearing was therefore not isolated.
+
+Found by the run (slice 2's mechanism-vs-gate lesson, again):
+
+- `narrate()` still referenced `$SPLIT` — the bridge-splitting scratch dir whose definition was
+  deleted with the bridges — so under `set -u` the first narration killed the script. A pipe on the
+  invoking side masked the non-zero exit. Restored as `SCRATCH`, now only narrate's compile cache.
+- `run.sh`'s default snapshot pointed at the dead pre-D66 `…-2026-08-03-specpoly`; now
+  `…-aligned-d66`.
+- The edit-direction narration in `run.sh` and `inference.esl` said a negation was *deleted from
+  sentence 2*; the fixtures *insert* one into sentence 1 («had» → «did not have»). Corrected.
+
+D6 is recorded in §6 and `onco-typed.esl`. The ESL guides gained `def` (03 keyword table,
+04 §4.4c with Rule 24 and the opacity boundary, 11 EBNF + keyword reference).
+
 *(Opacity control, #95, was a fourth slice in an earlier draft. It is folded into slice 2: once δ is a
 decode-time question about a specific definition, decode cannot answer it without the mode, so it
 cannot be deferred.)*
@@ -609,7 +663,7 @@ cannot be deferred.)*
 | **D3** | Normalization is fixed at the **emit side of the witness index**, not inside `hash_proposition_value` | ✅ settled — §4.1; keeps `prop_hash` layer-independent |
 | **D4** | Does α-canonicalization survive as mechanism, or degrade to a leveller? | ✅ settled — **it stays load-bearing; keep it.** Under D5 only one side reads back: the check side's `readback_val` freshens binder names to `G#n`, while decode carries the author's name straight through as `Patt::Var(name)` (`kernel/src/program/eigentt_type_mirror.rs:431-439` for `Pi`, `:443-451` for `Sig`). The names therefore always differ and α-canonicalization is what makes the two hashes meet. This holds under either D8 branch — option (b) leaves the emit side with no readback at all, option (a) adds one at a level that need not match `ctx.rho.len()`. An earlier draft had the emit side *evaluating*, which is where the "both sides read back, so maybe it is redundant" doubt came from; §4.1 no longer says that |
 | **D5** | A definition is a **separate declaration form** (`def`), not `Decl::Def` on the `Let` token; unfolding happens **at decode**, not at eval | ✅ settled — §1.2a. A chain-resident definition is a *third binder*: `Let` is local and `Rho`-resolved and cannot mint an IRI; `EigonAxiom` mints an IRI but evaluates to a rigid neutral (`kernel/src/nbe/eval/mod.rs:509`), correctly so for `kind_of`/`the`. `eval` has no layer (`:155`), so δ belongs in decode, which already resolves `ConstRef` against the layer — and #95 independently frames δ-control as decode modes. `Let` stays reserved for the scoped type-position let |
-| **D6** | Arity and naming of the domain predicates once the context is explicit | ✅ settled **as sequencing** — the question is deliberately *not* answered here. `demo/prose-to-formulas` is rewritten as the **capstone** (slice 3) once slices 0–2 are implemented, and the arity and names are chosen there with the mechanism in hand. Answering it now would fix a vocabulary against a `def` form that does not yet exist. Note `demo/prose-to-formulas/onco-typed.esl` already records that `HasActivity` duplicates **RO:0002215 `capable of`**, which is *binary*, gene-to-process, and carries the same context-free assumption — so the honest ternary form will not map onto it cleanly, and the capstone settles **arity and naming, not grounding** (§7) |
+| **D6** | Arity and naming of the domain predicates once the context is explicit | ✅ settled — **slice 3 (2026-08-10): ternary with the model explicit, and the invented names stay.** Arity: `HasActivity(m, g, a) : Set -> Set -> Set -> Prop`, the model a `Set` parameter carrying the nested compound-kind term the sentences are about (§2.2). Naming: `HasActivity` / `RequiresActivity` remain in `urn:eigenius:demo:onco-typed`. Under `def` a name is a transparent abbreviation — the body is the meaning and the kernel computes it — so the name asserts nothing and an invented one is no longer an unchecked leap. Borrowing **RO:0002215 `capable of`**'s name was rejected: that relation is *binary*, gene-to-process, and context-free, so the explicit-model ternary form contradicts the identity the name would claim. Grounding stays a lexicon change (§7): when RO/GO enter the parser's lexicon, the move is to `def` RO-named predicates over those entries, not to rename these. Recorded in `onco-typed.esl` |
 | **D7** | Cost of decoding on the commit path | ✅ settled — **absorb it**. Every `canonical_proposition` gains a D47 decode at layer build. Correctness comes first; the alternative is two normalization paths kept in step by hand, which is the defect being fixed. Efficiency is follow-up work, taken only if measurement warrants it — see below |
 | **D10** | Is a definition's body stored δ-**folded** or δ-**expanded**? | ✅ settled — **folded**. Both satisfy D9: a use decodes to the fully unfolded term before anything hashes it, so identity is the normal form either way. Only storage differs. Measured on two nested definitions in the demo's own shape (`ActivityOf` referenced once by `HasActivity`): folded **17 nodes / 554 bytes**, expanded **32 nodes / 1104 bytes** — roughly double at one level, and a body referencing another twice inlines it twice. Expanded storage also has a sharper edge: `encode_type` refuses a bare `Exp::Lam` (`LamWithoutAnnotation`), because decode discards a `Lam`'s domain, so anything reading a stored body and writing it back must carry the parameter types separately. **Corrected 2026-08-10:** an earlier draft justified folded storage by `eigenius decompile` printing the folded call. That readability requirement was never set and is not a basis for this decision; it is at most an observation about the printer |
 | **D9** | What is a definition's **identity** for equality and hashing? | ✅ settled — **the normal form of its right-hand side**. *(Refined 2026-08-10 against the implementation: the earlier wording said "normalized once at commit and stored that way", which is not what the kernel does and not what it should do. **Nothing normalizes.** β-normality is enforced at commit by **rejection** — Rule 24 refuses a redex-bearing body rather than rewriting it, because a compiler silently rewriting an author's body is worse than telling them it has a redex. **δ is performed at decode**, recursively, so a body may reference another definition and keep it FOLDED in storage. The storage half of that split is D10. Both ends of the witness key still agree, because both go through the same decode — pinned by `nested_definitions_unfold_all_the_way_at_decode`.)* Anything computing a `prop_hash` therefore hashes the normal form, and the two ends of the witness key agree *by construction* rather than by an argument that decode-only happens to coincide with decode-plus-eval. Normalizing at commit rather than per use matters because slice 0 moved emission to **per lookup**: normalizing at each use would put a full NbE evaluation on every witness probe on every layer of a chain walk, far beyond the "a D47 decode at layer build" D7 accepted. With the RHS already normal, D8's peel-and-substitute drops closed arguments into a normal body without forming a redex, so a use decodes straight to a normal term and neither side evaluates. **Carve-out:** this defines identity for *transparent* definitions; an opaque one does not unfold, so its identity stays the folded name (#95). **Condition to pin, not assume:** substituting normal closed arguments into a normal body yields a normal term |

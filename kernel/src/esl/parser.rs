@@ -222,7 +222,7 @@ impl<'a> Parser<'a> {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom, macro), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom, def, macro), found {:?}",
                             self.peek()
                         ),
                     ))

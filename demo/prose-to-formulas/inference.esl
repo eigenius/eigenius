@@ -15,30 +15,25 @@
 // The conclusion is the SAME proposition sentence 2 of the paragraph asserts on its own. So on the
 // intact branch that proposition ends up justified twice — once because the document states it,
 // once because it follows from a measurement plus a published rule — and the two justifications
-// are independent of each other. Deleting the negation from sentence 1 kills the second and leaves
-// the first standing. That asymmetry is what the demo shows.
+// are independent of each other. Negating sentence 1 kills the second and leaves the first
+// standing. That asymmetry is what the demo shows.
 //
-// ── WHAT CHANGED WITH D66 ─────────────────────────────────────────────────────────────────────
+// ── HOW THE ANTECEDENT IS WARRANTED ───────────────────────────────────────────────────────────
 //
-// This used to cite `s1:sentence` — a per-sentence "lift" from `bridges.esl` that carried the
-// parsed proposition into domain vocabulary by applying a generated shape rule. Those lifts and
-// the rules they cited are gone. `onco-typed.esl` now DEFINES `HasActivity` and `RequiresActivity`
-// as transparent definitions over the parser's own lexicon, so `HasActivity(m, g, a)` and the
-// parsed sentence are the same term. Nothing has to bridge between them, so nothing does.
+// `onco-typed.esl` DEFINES `HasActivity` and `RequiresActivity` as transparent definitions over
+// the parser's own lexicon, so `HasActivity(m, g, a)` and the parsed sentence are the same term
+// (D66). Nothing has to bridge between them, so nothing does: the antecedent below is warranted
+// by the PARSER's own witness — `claim_1`, committed under a `ProgramTrace` by `prose-to-esl` —
+// cited directly. Nothing Declared stands between the sentence and its use. The only Declared
+// resource this inference rests on is the literature rule itself, which is an assertion and is
+// graded as one.
 //
-// The antecedent below is therefore warranted by the PARSER's own witness — `claim_1`, committed
-// under a `ProgramTrace` by `prose-to-esl` — cited directly. No intermediate step, and nothing
-// Declared between the sentence and its use. The only Declared resource this inference rests on is
-// the literature rule itself, which is an assertion and is graded as one.
+// The model is explicit. The rule quantifies over it, and this step SPECIALIZES that quantifier
+// with `spec_poly` at the term the sentences are actually about — «MSI cancer models».
 //
-// The model is also no longer hidden. The rule quantifies over it and this step SPECIALIZES that
-// quantifier, at the term the sentences are actually about — «MSI cancer models». What used to be
-// a silent generalization is now an explicit `spec_poly`.
-//
-// GENERATED ONCE, THEN COMMITTED — no longer true, and better: this file is now hand-authored, as
-// it always should have been. `run.sh --reparse` does not touch it. It is the RECORDED derivation;
-// re-deriving it on every run would let the argument silently reshape itself around any edit, so
-// nothing would ever fail to commit.
+// HAND-AUTHORED, THEN COMMITTED. `run.sh --reparse` does not touch this file. It is the RECORDED
+// derivation; re-deriving it on every run would let the argument silently reshape itself around
+// any edit, so nothing would ever fail to commit.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
 namespace core        = "urn:eigenius:core";
@@ -139,7 +134,7 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             // Sub-proof 2 : JustifiedBy(DerivedEvidence(claim_1), A). THE LIVE DEPENDENCY.
             //
             // The witness key hashes the PROPOSITION, not just the IRI, so this citation is bound
-            // to the exact term sentence 1 parsed to. With the negation deleted, sentence 1 parses
+            // to the exact term sentence 1 parsed to. With the negation inserted, sentence 1 parses
             // to `⟨that term⟩ → False` — a different proposition, a different key, no witness. This
             // inference then has nothing to apply the rule to and the whole layer is refused.
             //

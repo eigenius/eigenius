@@ -21,7 +21,7 @@ Keywords are case-sensitive lowercase, except for `Construct` (it occupies an ex
 **Top-level (declaration) keywords** mark the start of a top-level form:
 
 ```
-namespace  class  property  resource  program  data  codata  axiom  macro
+namespace  class  property  resource  program  data  codata  axiom  def  macro
 merge_comorphism  text_index  vector_index
 ```
 
@@ -31,7 +31,7 @@ merge_comorphism  text_index  vector_index
 let  case  match  returning  Construct  map  reduce  corecord  lambda
 ```
 
-**Type and binder keywords** appear in type positions — `axiom` statements, `data` constructor types, and [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) blocks:
+**Type and binder keywords** appear in type positions — `axiom` statements, `def` result types and bodies, `data` constructor types, and [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) blocks:
 
 ```
 pi  forall  exists  fun  alias  in  Prop  Set  Type

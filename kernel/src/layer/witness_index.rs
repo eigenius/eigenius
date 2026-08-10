@@ -817,7 +817,7 @@ mod tests {
             // `ontology:` axiom, so the shape is not constructible against a core-only layer, and
             // `Fst` of a bare `Sig` is ill-typed (a projection of a *type*, not of a pair). That
             // shape is covered where parse-shaped propositions already exist —
-            // `crates/eigenius-reasoning/tests/shape_rule.rs`.
+            // `crates/eigenius-reasoning/tests/justification_routes.rs`.
             ("class reference", cls(crate::ontology::well_known::CLASS)),
         ];
 

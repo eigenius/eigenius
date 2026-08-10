@@ -311,9 +311,9 @@ The four grounding constructors each consume a [`ChainWitness.Is*As`](06-resourc
 
 The five composition constructors (`app`, `sum_l`, `sum_r`, `spec_str`, `spec_poly`) are pure type-theoretic combinators — no witness lookup, just standard inductive-family pattern matching.
 
-**`spec_poly` vs. `spec_str`.** `spec_str` is monomorphic on `core:string`, which covers rules quantified over IRIs but not over the sorts a parsed proposition carries: the DCG's arguments are classes, so a rule shaped `forall (g : Set, a : Set) => <parse shape>(g, a) -> onco:RequiresActivity(g, a)` commits (a `Set`-quantified implication is a `Prop`) but nothing could eliminate the quantifier. Without `spec_poly` that costs one Declared bridge per *sentence*; with it, one per *parse shape*.
+**`spec_poly` vs. `spec_str`.** `spec_str` is monomorphic on `core:string`, which covers rules quantified over IRIs but not over the sorts a parsed proposition carries: the DCG's arguments are classes, so a `Set`-quantified rule (a `Prop`, commits like any other declaration) needs its universal eliminated at a `Set`. `spec_poly` does that at any domain — `demo/prose-to-formulas/inference.esl` uses it to specialize the literature rule's `∀ (m : Set)` at the nested compound-kind term for «MSI cancer models».
 
-**No implication introduction.** No constructor produces `JustifiedBy(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `spec_str` / `spec_poly` yield `P` at an instance. An implication therefore enters the system only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a bridge between vocabularies cannot be *derived*; it must be Declared, and quantifying it is what lets one bridge serve many claims.
+**No implication introduction.** No constructor produces `JustifiedBy(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `spec_str` / `spec_poly` yield `P` at an instance. An implication therefore enters the system only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a rule relating propositions cannot be *derived*; it must be Declared, and quantifying it and eliminating with `spec_str` / `spec_poly` is what lets one rule serve many instances.
 
 ### 9.10.3. The `ReasoningSentence` resource
 
