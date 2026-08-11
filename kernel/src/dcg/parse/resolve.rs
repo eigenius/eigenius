@@ -278,8 +278,14 @@ impl Parser {
 
     /// The chosen reading's gloss for the ranker's prior-selection context (a uniquely-encoded or
     /// anaphora-resolved sentence doesn't go through [`Self::select_reading`], so its gloss is
-    /// computed here).
-    fn reading_gloss(&self, sentence: &str, lemmatizer: &dyn Lemmatizer, item: &Item) -> String {
+    /// computed here). Public for drivers that thread the discourse themselves (the encoding
+    /// pipeline's ranked arm) — the SAME gloss function keeps their replay keys compatible.
+    pub fn reading_gloss(
+        &self,
+        sentence: &str,
+        lemmatizer: &dyn Lemmatizer,
+        item: &Item,
+    ) -> String {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
         verbalize(
             item.sem(),

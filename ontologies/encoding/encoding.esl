@@ -179,7 +179,7 @@ resource enc:gap_unresolvable : enc:GapDisposition {
 class enc:DecisionPoint {
     description = "Records a structural-disambiguation choice (S4): which reading was selected among multiple felicitous parses of one unit, and why. All candidates already type-check, so this is auditable selection, not generation. (Typed-content warrant deferred to D61.)";
     requires enc:decision_unit, enc:selected_claim;
-    recommends enc:candidate_count, reflection:rationale;
+    recommends enc:candidate_count, reflection:rationale, enc:selected_by, enc:runner_up_skeletons;
 }
 
 property enc:decision_unit : core:resource {
@@ -196,6 +196,39 @@ property enc:selected_claim : core:resource {
 
 property enc:candidate_count : core:integer {
     description = "How many felicitous readings the forest offered before selection (>1 by construction).";
+    domain enc:DecisionPoint;
+}
+
+// Selection-authority enumeration (individuals, like DiscourseUnitKind) — WHO made the choice.
+// Every candidate reading type-checks, so there is no kernel veto on selection; the recorded
+// authority + rationale + runners-up are the audit trail (d63-reading-selection.md).
+class enc:SelectionAuthority {
+    description = "On whose authority a DecisionPoint's reading was selected: a human skeleton pin, the (untrusted, recorded) reading ranker, or no choice at all because a sole reading survived.";
+}
+
+resource enc:authority_pin : enc:SelectionAuthority {
+    core:short_name = "pin";
+    core:description = "A human-verified skeleton pin (expected-readings format) — declared selection; fails closed on zero or several matches.";
+}
+resource enc:authority_ranker : enc:SelectionAuthority {
+    core:short_name = "ranker";
+    core:description = "The reading ranker (D63 reading-selection) — an untrusted LLM choice in document context, live or replayed from a recording; audited via rationale, runners-up, and the reading-adjudication ledger.";
+}
+resource enc:authority_sole : enc:SelectionAuthority {
+    core:short_name = "sole";
+    core:description = "The forest's sole surviving reading — no selection existed to make.";
+}
+
+property enc:selected_by : core:resource {
+    description = "The SelectionAuthority that chose the reading — a closed enumeration (allows_only, the epistemic_status pattern): adding an authority is a deliberate vocabulary edit, never a silent mint. Absent on records emitted before the reading ranker existed (those state the pin authority in their rationale text).";
+    class_types enc:SelectionAuthority;
+    allows_only enc:authority_pin, enc:authority_ranker, enc:authority_sole;
+    domain enc:DecisionPoint;
+}
+
+property enc:runner_up_skeletons : core:value_array {
+    description = "The non-chosen candidates' sense-erased skeletons in the ranker's stated preference order — what the choice was made against. Emitted by the ranker authority only.";
+    element_type = core:string;
     domain enc:DecisionPoint;
 }
 

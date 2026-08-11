@@ -31,9 +31,14 @@ corrected same day to READING-level** (pins = grammar instrument, not selection 
 28/44 (64%), invalid-selected 0** in `selection-baseline.json` — its OWN file, separate from the
 parse baseline: parse gates the grammar/forest, selection gates the ranker/choice (structure
 diagnostic 32/44; the 4-unit gap = sense errors inside the verified structure, invisible to
-skeleton metrics). Gate verified holding. Exit-gate
-criteria met. **Active step: slice 5 — emission: the `enc:DecisionPoint` computed-choice arm +
-the ranked path in `select.rs` beside `select_pinned`.**
+skeleton metrics). Gate verified holding. Slice 5 DONE `2026-08-11`: `enc:SelectionAuthority`
+enumeration (closed via `allows_only`) + `enc:runner_up_skeletons` in encoding.esl (new
+`encoding_validates.rs` kernel test — first validation coverage for that file);
+`SentenceSelection::{Pinned,Ranked,Sole}` emission arms (pin arm byte-stable — demo
+`claims-intact.esl` regenerates identically); CLI `--pins` XOR `--selections` (replay-only
+computed arm). **STAGE 1 COMPLETE.** **Active step: Stage 2 (anaphora, D64 completion) — first
+deliverable is the demonstratives-as-holes design note (plan §2.1); Stage 3's grader track (3.3
+`DerivedClaimGrader`) can run in parallel.**
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

@@ -34,11 +34,13 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::emit::{emit_document, ParsedSentence};
-use crate::select::{load_pins, select_pinned};
+use crate::emit::{emit_document, ParsedSentence, SentenceSelection};
+use crate::select::{load_pins, select_pinned, select_ranked};
 use crate::snapshot::{build_parser, open_head, ParserConfig};
 use clap::Parser as ClapParser;
-use eigenius_kernel::dcg::{segment_sentences, tokenize};
+use eigenius_kernel::dcg::{
+    segment_sentences, tokenize, PriorSelection, ReplayReadingRanker, SelectionOutcome,
+};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 use sha2::{Digest, Sha256};
 
@@ -61,9 +63,16 @@ pub struct Args {
     /// The prose to encode.
     #[arg(long)]
     source: PathBuf,
-    /// Pinned readings: `sentence <TAB> skeleton <TAB> note`.
+    /// Pinned readings: `sentence <TAB> skeleton <TAB> note` — the DECLARED selection arm.
+    /// Exactly one of `--pins` / `--selections` is required.
     #[arg(long)]
-    pins: PathBuf,
+    pins: Option<PathBuf>,
+    /// A recorded reading-selection draw (`selections.json`) to REPLAY — the COMPUTED selection
+    /// arm (d63-reading-selection.md). Replay-only here, deliberately: artifact generation stays
+    /// deterministic; record a draw with `scripts/measure-parse-rate.sh --selections <new-file>`.
+    /// Exactly one of `--pins` / `--selections` is required.
+    #[arg(long)]
+    selections: Option<PathBuf>,
     /// A recorded `ranks.json` to replay — deterministic, no LLM. Omit for cap-only (a DIFFERENT
     /// experiment: sense elimination is off, so the pins may not match).
     #[arg(long)]
@@ -113,8 +122,30 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     let sha = hex(&Sha256::digest(doc.as_bytes()));
     eprintln!("source: {} (sha256 {sha})", args.source.display());
 
-    let pins = load_pins(&args.pins).map_err(|e| format!("read {}: {e}", args.pins.display()))?;
-    eprintln!("pins:   {} entries", pins.len());
+    // Exactly one selection authority per run — an emission with a mixed or defaulted authority
+    // would be unauditable.
+    enum Authority {
+        Pins(std::collections::BTreeMap<String, crate::select::Pin>),
+        Replay(ReplayReadingRanker),
+    }
+    let authority =
+        match (&args.pins, &args.selections) {
+            (Some(p), None) => {
+                let pins = load_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+                eprintln!("pins:   {} entries", pins.len());
+                Authority::Pins(pins)
+            }
+            (None, Some(s)) => {
+                let ranker = ReplayReadingRanker::load(s)
+                    .map_err(|e| format!("read {}: {e}", s.display()))?;
+                eprintln!("selections: REPLAY {} (deterministic, no LLM)", s.display());
+                Authority::Replay(ranker)
+            }
+            _ => return Err(
+                "exactly one of --pins (declared arm) / --selections (computed arm) is required"
+                    .to_string(),
+            ),
+        };
 
     let head = open_head(&args.snapshot)?;
     let (parser, recording) = build_parser(
@@ -158,18 +189,71 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // because the recording is exactly what a re-run needs to diagnose the mismatch deterministically.
     recording.flush()?;
 
+    // Selection. The ranked arm's per-sentence records are hoisted so `ParsedSentence` can
+    // borrow them past the match; the pin arm borrows the pins out of `authority` directly.
+    let mut ranked: Vec<(usize, Option<SelectionOutcome>)> = Vec::new();
     let mut parsed = Vec::new();
-    for (n, text, closed) in &forests {
-        let (item, pin) = select_pinned(text, closed, &pins).map_err(|e| e.to_string())?;
-        let start = doc.find(text.as_str()).unwrap_or(0);
-        parsed.push(ParsedSentence {
-            ordinal: *n,
-            text: text.clone(),
-            span: (start, start + text.len()),
-            item,
-            candidates: closed.len(),
-            pin,
-        });
+    match &authority {
+        Authority::Pins(pins) => {
+            for (n, text, closed) in &forests {
+                let (item, pin) = select_pinned(text, closed, pins).map_err(|e| e.to_string())?;
+                let start = doc.find(text.as_str()).unwrap_or(0);
+                parsed.push(ParsedSentence {
+                    ordinal: *n,
+                    text: text.clone(),
+                    span: (start, start + text.len()),
+                    item,
+                    candidates: closed.len(),
+                    selection: SentenceSelection::Pinned(pin),
+                });
+            }
+        }
+        Authority::Replay(ranker) => {
+            // Thread the discourse exactly as the recording harness did: prior selections
+            // accumulate in SEGMENT order with 0-based ordinals — they are part of the replay
+            // KEY, so a divergent gloss or ordinal is a counted miss (→ Abstained, fail-closed),
+            // never a silently different question.
+            let mut prior: Vec<PriorSelection> = Vec::new();
+            for (n, text, closed) in &forests {
+                let ordinal = *n - 1;
+                if closed.len() == 1 {
+                    prior.push(PriorSelection {
+                        ordinal,
+                        gloss: parser.reading_gloss(text, &lem, &closed[0]),
+                    });
+                    eprintln!("  [{n}] sole reading — no selection to make");
+                    ranked.push((0, None));
+                } else {
+                    let (idx, sel) =
+                        select_ranked(&parser, ranker, &doc, text, &lem, &prior, closed)
+                            .map_err(|e| e.to_string())?;
+                    eprintln!(
+                        "  [{n}] ranker selected 1 of {}: {}",
+                        closed.len(),
+                        sel.chosen_skeleton
+                    );
+                    prior.push(PriorSelection {
+                        ordinal,
+                        gloss: sel.chosen_gloss.clone(),
+                    });
+                    ranked.push((idx, Some(sel)));
+                }
+            }
+            for ((n, text, closed), (idx, outcome)) in forests.iter().zip(&ranked) {
+                let start = doc.find(text.as_str()).unwrap_or(0);
+                parsed.push(ParsedSentence {
+                    ordinal: *n,
+                    text: text.clone(),
+                    span: (start, start + text.len()),
+                    item: &closed[*idx],
+                    candidates: closed.len(),
+                    selection: match outcome {
+                        Some(sel) => SentenceSelection::Ranked(sel),
+                        None => SentenceSelection::Sole,
+                    },
+                });
+            }
+        }
     }
 
     let json = emit_document(

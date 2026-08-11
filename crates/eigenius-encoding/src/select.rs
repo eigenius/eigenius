@@ -12,23 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! **Reading selection — declared, not solved.**
+//! **Reading selection — two arms, both fail-closed.**
 //!
-//! Structural disambiguation (D62 S4) is open work: the reference page runs 60 of 62 units
-//! ambiguous. So this crate does not *decide* which reading is right. It reads the human-verified
-//! skeleton out of a pin file (the format of `experiments/parsing/expected-readings.tsv`) and keeps
-//! the readings whose sense-erased skeleton equals it.
+//! - [`select_pinned`] — the DECLARED arm: reads the human-verified skeleton out of a pin file
+//!   (the `experiments/parsing/expected-readings.tsv` format) and keeps the one reading whose
+//!   sense-erased skeleton equals it. No match is an error (the pin is stale or the grammar
+//!   moved); *several* matches is also an error (they differ only in sense — a skeleton pin
+//!   cannot adjudicate that).
+//! - [`select_ranked`] — the COMPUTED arm (`d63-reading-selection.md`): the kernel's
+//!   `Parser::select_reading` presents the readings to a [`ReadingRanker`] (in this pipeline, a
+//!   replayed recording — artifact generation stays deterministic) in document context. An
+//!   abstention — including a replay miss — is an error: nothing is emitted for an unchosen
+//!   sentence.
 //!
-//! **Fail closed, both ways.** No match is an error — the pin is stale or the grammar moved, and
-//! either way the demo must not encode a reading nobody verified. *Several* matches is also an
-//! error: readings sharing a skeleton differ only in sense, and picking one arbitrarily would be
-//! exactly the silent, unwitnessed choice this crate exists to avoid.
+//! Neither arm has a kernel veto (every candidate reading type-checks); the pin arm's authority
+//! is the human, the ranked arm's controls are the recorded decision (emitted as the
+//! `enc:DecisionPoint`) and the reading-adjudication ledger.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
+use eigenius_kernel::dcg::{Lemmatizer, Parser, PriorSelection, ReadingRanker, SelectionOutcome};
 
 /// One pinned sentence: its surface text and the sense-erased skeleton of the verified reading.
 #[derive(Clone, Debug)]
@@ -57,6 +63,12 @@ pub enum SelectError {
         pin: String,
         n: usize,
     },
+    /// The ranked arm's ranker abstained (for a replayed recording: a key MISS — the document,
+    /// forest, glosses, or an upstream selection changed under it).
+    Abstained {
+        sentence: String,
+        candidates: usize,
+    },
 }
 
 impl std::fmt::Display for SelectError {
@@ -83,6 +95,17 @@ impl std::fmt::Display for SelectError {
                 f,
                 "«{sentence}»: {n} readings share the pinned skeleton — they differ only in sense, \
                  and choosing between them is not this crate's call.\n  pin: {pin}"
+            ),
+            Self::Abstained {
+                sentence,
+                candidates,
+            } => write!(
+                f,
+                "«{sentence}»: the reading ranker ABSTAINED ({candidates} candidates) — nothing is \
+                 emitted for an unchosen sentence. For a replayed recording this is a key MISS: \
+                 the document, forest, glosses, or an upstream selection changed under it; \
+                 re-record the draw (scripts/measure-parse-rate.sh --selections <new-file>) and \
+                 adjudicate it, or pin the sentence."
             ),
         }
     }
@@ -145,6 +168,29 @@ pub fn select_pinned<'a, 'p>(
             sentence: sentence.to_string(),
             pin: pin.skeleton.clone(),
             n,
+        }),
+    }
+}
+
+/// The COMPUTED arm: put the readings to the `ranker` through the kernel's ONE presentation
+/// function (`Parser::select_reading` — the same candidates, grouping, and context the
+/// measurement harness and the discourse loop run). Returns the chosen index into `readings`
+/// plus the audit record. An abstention fails closed — see [`SelectError::Abstained`].
+#[allow(clippy::too_many_arguments)]
+pub fn select_ranked(
+    parser: &Parser,
+    ranker: &dyn ReadingRanker,
+    document: &str,
+    sentence: &str,
+    lemmatizer: &dyn Lemmatizer,
+    prior: &[PriorSelection],
+    readings: &[Item],
+) -> Result<(usize, SelectionOutcome), SelectError> {
+    match parser.select_reading(ranker, document, sentence, lemmatizer, prior, readings) {
+        Some((idx, sel)) => Ok((idx, sel)),
+        None => Err(SelectError::Abstained {
+            sentence: sentence.to_string(),
+            candidates: readings.len(),
         }),
     }
 }

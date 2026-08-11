@@ -189,8 +189,27 @@ contradicts the verified structure is a wrong reading, no sense judgment needed;
    `reading-unadjudicated == 0`, and `invalid-selected == 0` (verified engaging:
    `selection 28/44 → 28/44 (holds)`). Parse metrics byte-identical throughout. Stage-1 exit-gate
    criteria are met; slice 5 (emission) completes the stage.
-5. **Emission** — `DecisionPoint` computed-choice arm; ranked path in `select.rs` beside
-   `select_pinned`.
+5. **Emission** — DONE (2026-08-11). Vocabulary (`ontologies/encoding/encoding.esl`, chain-loaded,
+   not bootstrapped — no reseed): `enc:SelectionAuthority` + individuals `authority_pin` /
+   `authority_ranker` / `authority_sole`; `enc:selected_by` (`class_types` + **`allows_only`**
+   closing the enumeration — the `reflection:epistemic_status` pattern, so a new authority is a
+   deliberate vocabulary edit); `enc:runner_up_skeletons` (`core:value_array`,
+   `element_type core:string`). New kernel test `encoding_validates.rs` compiles+validates the
+   ontology over its documented chain and pins the closed enumeration (it immediately caught a
+   missing `element_type` — the file previously had NO validation coverage outside the demo).
+   Emission (`crates/eigenius-encoding`): `ParsedSentence.selection: SentenceSelection` —
+   `Pinned` (BYTE-STABLE: no `selected_by`, historical rationale text; regenerating the demo's
+   `claims-intact.esl` diffs empty against the committed artifact) / `Ranked` (authority
+   individual + ranker rationale verbatim + runner-up skeletons) / `Sole` (authority_sole).
+   CLI: `--pins` XOR `--selections` (the computed arm is REPLAY-only here — artifact generation
+   stays deterministic; record draws via `measure-parse-rate.sh`); the ranked arm threads prior
+   selections in segment order with the recording's 0-based ordinals (part of the replay key), a
+   miss ⇒ `SelectError::Abstained`, fail-closed. `select_ranked` wraps the kernel's ONE
+   presentation function; `Parser::reading_gloss` made pub for the sole-reading prior gloss.
+   Tests: 3 emit-arm unit tests + the ontology test. E2E of the ranked arm over a real store
+   lands with Stage 3 (the CLI lacks the harness's Stage-A augmentation, so harness recordings
+   don't replay against the un-augmented CLI parser — the known pipeline split, resolved by
+   unification).
 
 ## 7. Deferred
 

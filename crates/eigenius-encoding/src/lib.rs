@@ -36,6 +36,6 @@ pub mod pipeline;
 pub mod select;
 pub mod snapshot;
 
-pub use emit::{emit_document, EmitError, ParsedSentence};
-pub use select::{select_pinned, Pin, SelectError};
+pub use emit::{emit_document, EmitError, ParsedSentence, SentenceSelection};
+pub use select::{select_pinned, select_ranked, Pin, SelectError};
 pub use snapshot::{build_parser, open_head, ParserConfig};
