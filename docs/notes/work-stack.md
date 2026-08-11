@@ -16,10 +16,12 @@ spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s p
 *selection* stage (LLM `ReadingRanker` in document context, recorded + gated against the 62-pin
 gold set) rather than further multiplicity reduction; Stages 3–4 subsume (3)'s Phase-1-harness and
 Phase-2 items. Settled: Derived landing shape; selection inside the discourse loop; document
-context for both LLM stages. **Active step: the `d63-reading-selection.md` design note + slice 1.1
-(promote the verbaliser to `kernel/src/dcg/verbalize.rs`).** Exit gate (Stage 1):
-`selection_accuracy` measured and gated on the pins, `invalid_selected == 0`, parse metrics
-unchanged under replay.
+context for both LLM stages. Design note `d63-reading-selection.md` written; slices 1–2 DONE `2026-08-11` (verbaliser promoted
+to the kernel with a generic `resource_label`; `ReadingRanker` seam + record/replay + the
+`resolve_document` integration, all tests green). **Active step: slice 3 — the harness + gates
+(`selections.json` in `measure-parse-rate.sh`, `selection_accuracy` in
+`eval-parse-rate.sh`/`baseline.json`).** Exit gate (Stage 1): `selection_accuracy` measured and
+gated on the pins, `invalid_selected == 0`, parse metrics unchanged under replay.
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

@@ -2615,16 +2615,16 @@ fn resolve_document_threads_discourse_across_sentences() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"));
+    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), None);
     assert_eq!(resolved.len(), 2);
     assert!(
         matches!(
-            resolved[0],
+            resolved[0].outcome,
             SentenceOutcome::Encoded(_) | SentenceOutcome::Ambiguous(_)
         ),
         "sentence 1 parses closed"
     );
-    let SentenceOutcome::Encoded(s2) = &resolved[1] else {
+    let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
         panic!("sentence 2's pronoun should resolve to a single closed prop");
     };
     assert!(
@@ -2634,10 +2634,100 @@ fn resolve_document_threads_discourse_across_sentences() {
     );
 
     // Fail-closed: a proposer that finds no antecedent ⇒ the sentence stays Open, not a wrong closed parse.
-    let none = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"));
+    let none = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"), None);
     assert!(
-        matches!(none[1], SentenceOutcome::Open(_)),
+        matches!(none[1].outcome, SentenceOutcome::Open(_)),
         "an unresolvable pronoun stays Open (fail-closed)"
+    );
+}
+
+#[test]
+fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
+    // The reading-selection stage (d63-reading-selection.md §4) inside the discourse loop. A ranker
+    // that always abstains must leave every outcome EXACTLY as the no-ranker run classifies it
+    // (fail-open); a ranker that always chooses must leave no Ambiguous sentence, and every
+    // selection must carry the audit record (skeleton, gloss, rationale, candidate count).
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+
+    struct Abstain;
+    impl ReadingRanker for Abstain {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            _c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            None
+        }
+    }
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            // The document context must carry the whole input, the target sentence, and any
+            // prior selections — assert the plumbing, not just the choice.
+            assert!(ctx.document.contains(ctx.sentence), "sentence ⊆ document");
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first candidate (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    let (_layer, index) = index_over_bootstrap();
+    let doc = ["HeLa affects BRCA1", "it affects HeLa"];
+
+    let plain = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), None);
+    let abstained =
+        index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), Some(&Abstain));
+    for (p, a) in plain.iter().zip(&abstained) {
+        assert_eq!(
+            std::mem::discriminant(&p.outcome),
+            std::mem::discriminant(&a.outcome),
+            "an abstaining ranker changes nothing"
+        );
+        assert!(a.selection.is_none(), "an abstention records no selection");
+    }
+
+    let ranked = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), Some(&First));
+    for (r, p) in ranked.iter().zip(&plain) {
+        match (&p.outcome, &r.outcome) {
+            // A sentence the no-ranker run left ambiguous is now Encoded, with the audit record.
+            (SentenceOutcome::Ambiguous(items), SentenceOutcome::Encoded(_)) => {
+                let sel = r
+                    .selection
+                    .as_ref()
+                    .expect("a selection carries its record");
+                assert_eq!(sel.candidates, items.len(), "all readings competed");
+                assert!(!sel.chosen_skeleton.is_empty());
+                assert_eq!(sel.rationale, "first candidate (test)");
+                assert_eq!(
+                    sel.runner_up_skeletons.len(),
+                    items.len() - 1,
+                    "every non-chosen reading appears as a runner-up"
+                );
+            }
+            // A uniquely-encoded / resolved / open sentence is untouched and carries no record.
+            _ => {
+                assert_eq!(
+                    std::mem::discriminant(&p.outcome),
+                    std::mem::discriminant(&r.outcome),
+                    "the ranker only acts on Ambiguous sentences"
+                );
+                assert!(r.selection.is_none());
+            }
+        }
+    }
+    assert!(
+        !ranked
+            .iter()
+            .any(|r| matches!(r.outcome, SentenceOutcome::Ambiguous(_))),
+        "an always-choosing ranker leaves no Ambiguous sentence"
     );
 }
 

@@ -116,12 +116,19 @@ pool to resolved-open readings; this stage selects among closed readings only.
 
 ## 6. Slices
 
-1. **Promote the verbaliser** — move `Vb`, `verbalize`, `unit_sense_names`, `umls_name`,
-   `name_atom`, `axiom_local`, `is_false`, `app_spine` from
-   `crates/eigenius-wordnet/tests/db_backed_encoding.rs` to `kernel/src/dcg/verbalize.rs`; the
-   harness imports the kernel version. (Gate renderer == selector renderer: one function.)
-2. **The seam** — `reading_ranker.rs`: types, trait, mock, recording/replay. Unit tests over the
-   in-memory demo layer.
+1. **Promote the verbaliser** — DONE (2026-08-11). `kernel/src/dcg/verbalize.rs`; the harness
+   imports the kernel version. Public API: `Vb`, `verbalize`, `unit_sense_names`, and the generic
+   `resource_label(iri, layer)` (nothing vocabulary-named is public; see §7 preferred-label).
+2. **The seam + loop integration** — DONE (2026-08-11). `kernel/src/dcg/reading_ranker.rs`:
+   `ReadingRanker`/`ReadingCandidate`/`DocumentContext`/`ReadingSelection`, `PinReadingRanker`,
+   `RecordingReadingRanker`/`ReplayReadingRanker` (`selections.json`; the key covers the document
+   sha, prior selections, and the full candidate presentation; a replay miss ABSTAINS and is
+   counted). `resolve_document` takes `Option<&dyn ReadingRanker>` and returns
+   `Vec<SentenceResolution>` (outcome + `SelectionOutcome` audit record: chosen skeleton + gloss,
+   rationale, runner-up skeletons, candidate count); candidates are presented grouped by skeleton;
+   an out-of-range reply abstains. `InProcessPipeline::with_reading_ranker`;
+   `SentenceEncoding.selection`. Tests: seam unit tests + the loop test
+   (`a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it`).
 3. **Harness + gates** — selection pass in `db_backed_encoding.rs` over the corpus page;
    `selections.json`; `measure-parse-rate.sh`/`eval-parse-rate.sh`/`baseline.json` wiring.
 4. **Live ranker** — `AnthropicReadingRanker`; record a reference draw; measure

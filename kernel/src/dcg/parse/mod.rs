@@ -49,7 +49,9 @@ mod seed;
 // Re-exported so `dcg::parse::X` keeps resolving exactly as before the split (`dcg/mod.rs` and
 // `pipeline.rs` import these paths).
 pub use felicity::{HoleInfo, HoleKind, OpenParse};
-pub use resolve::{Candidate, ProposeCtx, Proposer, SentenceOutcome};
+pub use resolve::{
+    Candidate, ProposeCtx, Proposer, SelectionOutcome, SentenceOutcome, SentenceResolution,
+};
 
 use super::category::{is_adjective_cat, is_vp_adjunct_prep};
 use super::holes::{freshen_anaphor, hole_base};

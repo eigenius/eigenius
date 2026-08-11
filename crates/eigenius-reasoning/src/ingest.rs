@@ -133,7 +133,9 @@ impl DocumentIngestion for InProcessIngestion<'_> {
         // Grade each closed sentence into its claim cluster; collect the cluster resources to commit.
         let mut sentences: Vec<IngestedSentence> = Vec::with_capacity(encoding.sentences.len());
         let mut cluster_resources: Vec<Resource> = Vec::new();
-        for (i, SentenceEncoding { text, outcome }) in encoding.sentences.into_iter().enumerate() {
+        for (i, SentenceEncoding { text, outcome, .. }) in
+            encoding.sentences.into_iter().enumerate()
+        {
             let claim = if let SentenceOutcome::Encoded(item) = &outcome {
                 let stem = format!("urn:eigenius:doc:{doc_id}:s{i}");
                 match self.grader.grade(

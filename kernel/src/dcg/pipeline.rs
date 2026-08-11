@@ -37,7 +37,8 @@ use super::augment::{
     LexiconAugmentation, NominalCategoryProposer,
 };
 use super::lemmatizer::Lemmatizer;
-use super::parse::{Parser, Proposer, SentenceOutcome};
+use super::parse::{Parser, Proposer, SelectionOutcome, SentenceOutcome};
+use super::reading_ranker::ReadingRanker;
 use super::segment::segment_sentences;
 
 /// The document→encoding pipeline: raw document text → typed propositions, one [`SentenceOutcome`] per
@@ -57,11 +58,14 @@ pub struct DocumentEncoding {
     pub sentences: Vec<SentenceEncoding>,
 }
 
-/// One body sentence's encoding: its surface text and the classified [`SentenceOutcome`].
+/// One body sentence's encoding: its surface text, the classified [`SentenceOutcome`], and — when
+/// a reading ranker collapsed an ambiguous forest — the selection audit record (emitted downstream
+/// as the claim's `enc:DecisionPoint`).
 #[derive(Clone)]
 pub struct SentenceEncoding {
     pub text: String,
     pub outcome: SentenceOutcome,
+    pub selection: Option<SelectionOutcome>,
 }
 
 /// The Phase-1 **in-process** pipeline: every stage runs in Rust, with the LLM steps behind the proposer
@@ -75,6 +79,9 @@ pub struct InProcessPipeline<'a> {
     anaphora_proposer: &'a dyn Proposer,
     category_proposer: &'a dyn CategoryProposer,
     augment_options: AugmentOptions,
+    /// The reading-selection stage (`docs/notes/d63-reading-selection.md`). `None` (the default)
+    /// keeps ambiguous sentences `Ambiguous` — the deterministic no-regression arm.
+    reading_ranker: Option<&'a dyn ReadingRanker>,
 }
 
 /// The default (deterministic) POS proposer — a `'static` ZST so [`InProcessPipeline::new`] can hand out
@@ -100,7 +107,15 @@ impl<'a> InProcessPipeline<'a> {
             // Default: `DocumentOnly` (no retrieval) — deterministic, no `base`-index dependency. Opt into
             // `LexiconBacked` (form-`TextIndex` OOV grounding) via [`Self::with_augment_options`].
             augment_options: AugmentOptions::DocumentOnly,
+            reading_ranker: None,
         }
+    }
+
+    /// Install the (untrusted) [`ReadingRanker`] that collapses an ambiguous sentence to one
+    /// reading, in document context. Without one, ambiguous sentences stay `Ambiguous`.
+    pub fn with_reading_ranker(mut self, ranker: &'a dyn ReadingRanker) -> Self {
+        self.reading_ranker = Some(ranker);
+        self
     }
 
     /// Set the Stage-A augmentation source (`DocumentOnly` default vs `LexiconBacked` form-index grounding,
@@ -162,12 +177,21 @@ impl<'a> InProcessPipeline<'a> {
             .filter(|s| !s.trim().is_empty())
             .collect();
         let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
-        let outcomes = index.resolve_document(&refs, self.lemmatizer, self.anaphora_proposer);
+        let resolutions = index.resolve_document(
+            &refs,
+            self.lemmatizer,
+            self.anaphora_proposer,
+            self.reading_ranker,
+        );
 
         let sentences = bodies
             .into_iter()
-            .zip(outcomes)
-            .map(|(text, outcome)| SentenceEncoding { text, outcome })
+            .zip(resolutions)
+            .map(|(text, r)| SentenceEncoding {
+                text,
+                outcome: r.outcome,
+                selection: r.selection,
+            })
             .collect();
         (
             DocumentEncoding {

@@ -21,6 +21,13 @@
 
 use super::*;
 
+use crate::dcg::pretty::pretty_term;
+use crate::dcg::reading_ranker::{
+    DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
+};
+use crate::dcg::skeleton::skeleton_of;
+use crate::dcg::verbalize::{unit_sense_names, verbalize, Vb};
+
 impl Parser {
     /// Resolve an [`OpenParse`] by substituting each hole with a proposed antecedent and
     /// **re-gating** through the kernel (D64 §4 — the trusted half of anaphora resolution; the
@@ -140,20 +147,40 @@ impl Parser {
     /// (Phase 2). Recency is the only salience signal we model; the proposer does the ranking (§4). First
     /// cut: candidate surfaces are the entity IRI local names (a readable label is a later refinement),
     /// and only PRIOR-discourse entities are candidates (intra-sentential binding is a refinement).
+    ///
+    /// **Reading selection** (D63 `docs/notes/d63-reading-selection.md`): when a sentence has SEVERAL
+    /// closed readings and a `ranker` is installed, the ranker chooses one — in document context (the
+    /// surrounding text + the glosses of prior selections) — and the sentence becomes `Encoded` with a
+    /// [`SelectionOutcome`] audit record. No ranker, or a ranker abstention, keeps the fail-open
+    /// `Ambiguous` outcome. There is no kernel veto on this choice (every candidate type-checks); the
+    /// audit record + the offline faithfulness gate are the controls.
     pub fn resolve_document(
         &self,
         sentences: &[&str],
         lemmatizer: &dyn Lemmatizer,
         proposer: &dyn Proposer,
-    ) -> Vec<SentenceOutcome> {
+        ranker: Option<&dyn ReadingRanker>,
+    ) -> Vec<SentenceResolution> {
+        let document = sentences.join(" ");
         let mut candidates: Vec<Candidate> = Vec::new();
+        let mut prior: Vec<PriorSelection> = Vec::new();
         let mut out = Vec::with_capacity(sentences.len());
-        for s in sentences {
+        for (ordinal, s) in sentences.iter().enumerate() {
             let (mut closed, open) = self.parse_open(s, lemmatizer);
+            let mut selection = None;
             let outcome = if closed.len() == 1 {
                 SentenceOutcome::Encoded(closed.pop().expect("len==1"))
             } else if closed.len() > 1 {
-                SentenceOutcome::Ambiguous(closed)
+                match ranker
+                    .and_then(|r| self.select_reading(r, &document, s, lemmatizer, &prior, &closed))
+                {
+                    Some((idx, sel)) => {
+                        let item = closed.remove(idx);
+                        selection = Some(sel);
+                        SentenceOutcome::Encoded(item)
+                    }
+                    None => SentenceOutcome::Ambiguous(closed),
+                }
             } else if let Some(o) = open.first() {
                 // OPEN: try to resolve its referent holes against the discourse; unresolvable ⇒ stays open.
                 match self.resolve_with(o, s, &candidates, proposer) {
@@ -163,8 +190,19 @@ impl Parser {
             } else {
                 SentenceOutcome::Gap
             };
-            // Thread the discourse: harvest the chosen reading's named entities (most-recent-first) into
-            // the candidate set for the following sentences' anaphora.
+            // Thread the discourse: the chosen reading's gloss joins the ranker's context for the later
+            // sentences (sequential consistency), and its named entities join the anaphora candidate
+            // set (most-recent-first). Gloss threading only runs with a ranker installed — without one
+            // nothing consumes it.
+            if ranker.is_some() {
+                if let SentenceOutcome::Encoded(item) = &outcome {
+                    let gloss = match &selection {
+                        Some(sel) => sel.chosen_gloss.clone(),
+                        None => self.reading_gloss(s, lemmatizer, item),
+                    };
+                    prior.push(PriorSelection { ordinal, gloss });
+                }
+            }
             let harvest = match &outcome {
                 SentenceOutcome::Encoded(item) => Some(item.sem()),
                 SentenceOutcome::Ambiguous(items) => items.first().map(Item::sem),
@@ -175,9 +213,76 @@ impl Parser {
                 fresh.append(&mut candidates);
                 candidates = fresh;
             }
-            out.push(outcome);
+            out.push(SentenceResolution { outcome, selection });
         }
         out
+    }
+
+    /// Present a sentence's surviving readings to the (untrusted) `ranker` — grouped by skeleton,
+    /// glossed by the shared verbaliser ([`crate::dcg::verbalize`]) — and map its choice back to an
+    /// index into `closed`. `None` = abstain (no selection, or a malformed reply — an out-of-range
+    /// index abstains rather than panicking; the ranker is untrusted input).
+    fn select_reading(
+        &self,
+        ranker: &dyn ReadingRanker,
+        document: &str,
+        sentence: &str,
+        lemmatizer: &dyn Lemmatizer,
+        prior: &[PriorSelection],
+        closed: &[Item],
+    ) -> Option<(usize, SelectionOutcome)> {
+        let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
+        let vb = Vb {
+            names: &names,
+            layer: &self.grammar.layer,
+        };
+        let skels: Vec<String> = closed.iter().map(|it| skeleton_of(it.sem())).collect();
+        // Present GROUPED BY SKELETON (the stable sort keeps the forest's cost order within a
+        // group), so structural alternatives sit side by side for the ranker.
+        let mut order: Vec<usize> = (0..closed.len()).collect();
+        order.sort_by(|&a, &b| skels[a].cmp(&skels[b]));
+        let cands: Vec<ReadingCandidate> = order
+            .iter()
+            .map(|&i| ReadingCandidate {
+                skeleton: skels[i].clone(),
+                gloss: verbalize(closed[i].sem(), &vb),
+                sem: pretty_term(closed[i].sem()),
+            })
+            .collect();
+        let ctx = DocumentContext {
+            document,
+            sentence,
+            prior_selections: prior,
+        };
+        let sel = ranker.select(&ctx, &cands)?;
+        let chosen = *order.get(sel.chosen)?;
+        let outcome = SelectionOutcome {
+            chosen_skeleton: cands[sel.chosen].skeleton.clone(),
+            chosen_gloss: cands[sel.chosen].gloss.clone(),
+            rationale: sel.rationale,
+            runner_up_skeletons: sel
+                .runners_up
+                .iter()
+                .filter_map(|&i| cands.get(i))
+                .map(|c| c.skeleton.clone())
+                .collect(),
+            candidates: cands.len(),
+        };
+        Some((chosen, outcome))
+    }
+
+    /// The chosen reading's gloss for the ranker's prior-selection context (a uniquely-encoded or
+    /// anaphora-resolved sentence doesn't go through [`Self::select_reading`], so its gloss is
+    /// computed here).
+    fn reading_gloss(&self, sentence: &str, lemmatizer: &dyn Lemmatizer, item: &Item) -> String {
+        let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
+        verbalize(
+            item.sem(),
+            &Vb {
+                names: &names,
+                layer: &self.grammar.layer,
+            },
+        )
     }
 }
 
@@ -194,6 +299,35 @@ pub enum SentenceOutcome {
     Open(OpenParse),
     /// No parse — an OOV token, or an all-known-tokens grammar gap.
     Gap,
+}
+
+/// One sentence's result from the discourse loop: the classified outcome plus, when a reading
+/// ranker chose among several surviving readings, the selection audit record.
+#[derive(Clone)]
+pub struct SentenceResolution {
+    pub outcome: SentenceOutcome,
+    /// `Some` iff a [`ReadingRanker`] selection collapsed an ambiguous forest to the `Encoded`
+    /// reading. Uniquely-encoded, resolved-open, and abstained sentences carry `None`.
+    pub selection: Option<SelectionOutcome>,
+}
+
+/// The audit record of an automated reading selection (`docs/notes/d63-reading-selection.md` §3):
+/// what was chosen, why, and what it beat. Downstream emission records it as the claim's
+/// `enc:DecisionPoint`. There is no kernel veto on the choice — this record and the offline
+/// faithfulness gate are the controls.
+#[derive(Clone, Debug)]
+pub struct SelectionOutcome {
+    /// The chosen reading's sense-erased skeleton — the key the pins and the adjudication ledger
+    /// are written in.
+    pub chosen_skeleton: String,
+    /// The chosen reading's verbalised gloss.
+    pub chosen_gloss: String,
+    /// The ranker's stated reason, verbatim.
+    pub rationale: String,
+    /// The remaining candidates' skeletons in the ranker's preference order.
+    pub runner_up_skeletons: Vec<String>,
+    /// How many readings competed.
+    pub candidates: usize,
 }
 
 /// The named-entity antecedent candidates a resolved sem references — every `EigonResource` IRI (a

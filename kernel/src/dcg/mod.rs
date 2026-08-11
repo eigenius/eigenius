@@ -48,6 +48,7 @@ pub mod named_entity;
 pub mod parse;
 pub mod pipeline;
 pub mod pretty;
+pub mod reading_ranker;
 mod reserved;
 mod rules;
 pub mod segment;
@@ -100,10 +101,14 @@ pub use lexicon::{
 pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
     Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, ProposeCtx, Proposer,
-    SentenceOutcome, DEFAULT_FOREST_CAP,
+    SelectionOutcome, SentenceOutcome, SentenceResolution, DEFAULT_FOREST_CAP,
 };
 pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
 pub use pretty::pretty_term;
+pub use reading_ranker::{
+    DocumentContext, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
+    ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+};
 pub use rules::combinators::apply;
 pub use rules::constructions::{
     appose_group, cats_coordinate, complete_coord, coordinate_np, coordinate_prop, distribute,
