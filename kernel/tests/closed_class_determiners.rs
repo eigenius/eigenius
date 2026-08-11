@@ -2542,6 +2542,166 @@ fn resolve_open_substitutes_an_antecedent_and_re_gates() {
     );
 }
 
+// ── Demonstratives as RESTRICTOR-TYPED holes (D64, d64-demonstratives-as-holes.md, slice 2) ──
+//
+// The kernel mechanism only — no lexicon change: a test overlay declares the polymorphic
+// placeholder `lexicon:anaphor_of : ∀(A:Set) → A` and demonstrative-style determiner entries on
+// the NOVEL surface "yonder" (so the bootstrapped ι demonstratives don't interfere). The felicity
+// gate freshens `anaphor_of(A)` applications in the normal form — where β-reduction has made the
+// restrictor concrete — into holes typed AT the restrictor, giving the resolution re-gate a veto
+// the Entity-typed pronoun holes cannot express.
+const DEMONSTRATIVE_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace core      = "urn:eigenius:core";
+
+axiom lexicon:anaphor_of : forall (A : Set) => A
+
+// A SUBCLASS level under CellLine, for the re-gate subsumption probe: does the veto accept an
+// antecedent typed by a subclass of the hole's restrictor?
+class lexicon:HeLaSubline : lexicon:CellLine {
+    description = "test subclass of CellLine (re-gate subsumption probe).";
+}
+resource lexicon:hela_s3 : lexicon:HeLaSubline {
+    core:description = "a HeLa subline (test individual of the subclass).";
+}
+
+// The design note's dem sems (§2), on singular cats copied from the bootstrapped demonstratives.
+resource lexicon:dem_subj_sem_t : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) => V(lexicon:anaphor_of(A))
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+resource lexicon:dem_obj_sem_t : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            TV(lexicon:anaphor_of(T), subj)
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:yonder_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: test demonstrative determiner (subject, sg).";
+    lexicon:form     = "yonder";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:dem_subj_sem_t;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "yonder";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:yonder_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: test demonstrative determiner (object, sg).";
+    lexicon:form     = "yonder";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:dem_obj_sem_t;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "yonder";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
+    let (base, _) = index_over_bootstrap();
+    let resources = esl::compile_against_layer(DEMONSTRATIVE_FIXTURE, &base)
+        .expect("demonstrative fixture compiles");
+    let mut b = LayerBuilder::new("dem-fixture", Some(base));
+    for r in resources {
+        b.add_resource(r).expect("add fixture resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let index = Parser::build(Arc::clone(&layer));
+    (layer, index)
+}
+
+fn entity_ante(layer: &Arc<Layer>, local: &str) -> Exp {
+    let r = layer
+        .resolve(&Iri::parse(&format!("urn:eigenius:lexicon:{local}")).unwrap())
+        .unwrap_or_else(|| panic!("{local} resolves"));
+    Exp::EigonResource(Box::new((*r).clone()))
+}
+
+#[test]
+fn yonder_demonstrative_yields_a_restrictor_typed_open_parse() {
+    let (_layer, index) = index_with_demonstratives();
+    let (closed, open) = index.parse_open("yonder cell line affects HeLa", &Identity);
+    assert!(
+        closed.is_empty(),
+        "no ι entry for the test surface ⇒ no closed reading"
+    );
+    assert!(!open.is_empty(), "the demonstrative yields an OPEN parse");
+    let holes = &open[0].holes;
+    assert_eq!(holes.len(), 1, "one referent hole");
+    // The hole is typed at the RESTRICTOR — the noun's class — not at Entity.
+    assert!(
+        format!("{:?}", holes[0].ty).contains("CellLine"),
+        "hole typed by the restrictor (CellLine), got {:?}",
+        holes[0].ty
+    );
+}
+
+#[test]
+fn demonstrative_hole_vetoes_a_type_wrong_antecedent() {
+    let (layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects BRCA1", &Identity);
+    assert!(!open.is_empty());
+    let hole = open[0].holes[0].var.clone();
+
+    // Type-correct: hela : CellLine — the re-gate closes the parse.
+    let ok = index.resolve_open(&open[0], &[(hole.clone(), entity_ante(&layer, "hela"))]);
+    assert!(ok.is_some(), "a CellLine antecedent resolves");
+
+    // Type-wrong: brca1 : Gene — THE VETO the Entity-typed pronoun holes cannot express.
+    let veto = index.resolve_open(&open[0], &[(hole, entity_ante(&layer, "brca1"))]);
+    assert!(
+        veto.is_none(),
+        "a Gene antecedent for a CellLine-typed hole is REJECTED by the kernel re-gate"
+    );
+}
+
+/// The re-gate SUBSUMPTION probe (review question, d64-demonstratives-as-holes.md §2a): an
+/// antecedent typed by a SUBCLASS of the hole's restrictor. The demo lexicon already depends on
+/// class-parent subsumption (Gene-typed resources in Entity-typed verb positions), so the same
+/// mechanism should accept `hela_s3 : HeLaSubline <: CellLine` in a CellLine-typed hole — this
+/// test RECORDS the answer either way.
+#[test]
+fn demonstrative_hole_accepts_a_subclass_antecedent() {
+    let (layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects BRCA1", &Identity);
+    assert!(!open.is_empty());
+    let hole = open[0].holes[0].var.clone();
+    let resolved = index.resolve_open(&open[0], &[(hole, entity_ante(&layer, "hela_s3"))]);
+    assert!(
+        resolved.is_some(),
+        "an antecedent typed by a SUBCLASS of the restrictor is accepted (ontology-as-types \
+         subsumption at the re-gate) — if this fails, the veto is over-strict and the proposer \
+         must bridge subclass gaps (see the design note §2a)"
+    );
+}
+
+#[test]
+fn two_demonstrative_occurrences_are_two_independent_holes() {
+    let (layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects yonder cell line", &Identity);
+    assert!(!open.is_empty(), "both demonstratives yield an open parse");
+    let two: Vec<_> = open.iter().filter(|o| o.holes.len() == 2).collect();
+    assert!(
+        !two.is_empty(),
+        "a reading carries TWO distinct holes (one per occurrence)"
+    );
+    let o = two[0];
+    assert_ne!(o.holes[0].var, o.holes[1].var, "distinct referents");
+    // Both resolve independently — here to the same entity, which is a legal coreference.
+    let bindings: Vec<(String, Exp)> = o
+        .holes
+        .iter()
+        .map(|h| (h.var.clone(), entity_ante(&layer, "hela")))
+        .collect();
+    assert!(
+        index.resolve_open(o, &bindings).is_some(),
+        "both holes resolve through the re-gate"
+    );
+}
+
 /// A deterministic mock [`Proposer`]: picks the in-scope candidate whose surface form equals the
 /// target (a ranked single-element list), else proposes nothing (unresolvable). Stands in for the
 /// LLM proposer to exercise the resolve loop without an LLM.

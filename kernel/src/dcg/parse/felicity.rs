@@ -104,8 +104,16 @@ impl Parser {
             eprintln!("    [felicity] readback start");
         }
         let nf = felicity_readback(&evaled)?;
-        // The holes carried by this parse — each a typed parameter (readback-named `{base}0`).
-        let infos: Vec<HoleInfo> = present
+        // Demonstrative holes (D64, `d64-demonstratives-as-holes.md` §2): freshen every
+        // `lexicon:anaphor_of(A)` application in the NORMAL FORM — β-reduction has made the
+        // restrictor `A` concrete here, which is why these holes cannot be seeded like the
+        // Entity-typed pronoun holes (the determiner hasn't met its noun at seed time). Each
+        // occurrence becomes a fresh variable carried at the RESTRICTOR type, so the resolution
+        // re-gate vetoes a type-wrong antecedent.
+        let (nf, dem_holes) = super::super::holes::freshen_anaphor_of(&nf);
+        // The holes carried by this parse — each a typed parameter (seed holes readback-named
+        // `{base}0`; demonstrative holes named by the gate's traversal).
+        let mut infos: Vec<HoleInfo> = present
             .iter()
             .map(|(base, ty_exp, kind)| HoleInfo {
                 var: format!("{base}0"),
@@ -113,6 +121,11 @@ impl Parser {
                 kind: (*kind).clone(),
             })
             .collect();
+        infos.extend(dem_holes.into_iter().map(|(var, ty)| HoleInfo {
+            var,
+            ty,
+            kind: HoleKind::EntityRef,
+        }));
         if dbg {
             eprintln!("    [felicity] check start");
         }
@@ -166,8 +179,10 @@ impl Parser {
 /// for factive presuppositions is a planned future arm.) The carrier types each hole per its kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoleKind {
-    /// An unresolved entity referent (a pronoun / possessor), resolved by APPLYING a chain antecedent
-    /// to its parameter and re-gating. First-order, `Entity`-typed, in argument position.
+    /// An unresolved entity referent, resolved by APPLYING a chain antecedent to its parameter
+    /// and re-gating. First-order, in argument position. Typed by its SOURCE: `Entity` for a
+    /// pronoun / possessor (seed-time freshening), the RESTRICTOR class for a demonstrative
+    /// (`anaphor_of(A)`, felicity-time freshening — "these findings" resolves only to findings).
     EntityRef,
 }
 

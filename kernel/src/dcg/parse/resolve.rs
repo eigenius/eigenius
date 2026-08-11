@@ -50,6 +50,19 @@ impl Parser {
                 .iter()
                 .find(|(v, _)| *v == hole.var)
                 .map(|(_, a)| a)?;
+            // **The hole-type veto, enforced HERE.** β-reduction ERASES the Π-binder's type
+            // annotation, and after substitution the antecedent only meets the body's own
+            // argument types (typically the wide `Entity` of a verb slot) — so the whole-term
+            // check below cannot see a restrictor. Checking `antecedent : Tᵢ` before applying is
+            // what makes a demonstrative's restrictor typing real ("these findings" resolves
+            // only to findings). Subsumption comes with it: the checker's intensional
+            // resource-inhabits-class rule walks `Layer::is_subclass_of`, so a SUBCLASS-typed
+            // antecedent is accepted. (Found by the slice-2 veto test: without this check, the
+            // Gene-for-CellLine antecedent resolved — the veto did not exist.)
+            let ty_val = eval(&hole.ty, &Rho::Nil).ok()?;
+            let mut ty_ctx =
+                CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+            check(&mut ty_ctx, ante, &ty_val).ok()?;
             term = Exp::App(Box::new(term), Box::new(ante.clone()));
         }
         let nf = readback_val(0, &eval(&term, &Rho::Nil).ok()?);

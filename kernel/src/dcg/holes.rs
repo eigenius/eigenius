@@ -65,3 +65,63 @@ pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
         other => other.clone(),
     }
 }
+
+/// The POLYMORPHIC placeholder a demonstrative determiner's `sem` applies to its restrictor
+/// (`lexicon:anaphor_of : ∀(A:Set) → A`, `d64-demonstratives-as-holes.md` §2). Unlike the bare
+/// pronoun placeholder it cannot be freshened at seed time — the determiner has not met its noun,
+/// so the hole's TYPE is unknown; the applied form rides the derivation as a closed constant and
+/// is freshened by the felicity gate, where β-reduction has made the restrictor concrete.
+const ANAPHOR_OF_IRI: &str = "urn:eigenius:lexicon:anaphor_of";
+
+/// Freshen every `lexicon:anaphor_of(A)` application in a NORMAL FORM into a typed referent hole:
+/// each occurrence is replaced by a fresh variable (`$demref$<k>_0`, traversal order — the
+/// skeleton normalizer α-normalizes the `$name$digits_digits` shape, so the naming is
+/// drift-free), and `(var, A)` is returned so the gate can carry the hole at the RESTRICTOR type
+/// — the kernel re-gate then vetoes a type-wrong antecedent ("these findings" resolves only to
+/// findings). Two occurrences in one reading are two distinct subterm sites → two distinct holes
+/// (independent referents, resolved independently). Runs post-readback, so a partially-applied
+/// `anaphor_of` head cannot occur in a well-typed nf; a bare un-applied constant is left alone
+/// (nothing to type the hole with) and the gate's closed `check` rejects the candidate.
+pub(super) fn freshen_anaphor_of(exp: &Exp) -> (Exp, Vec<(String, Exp)>) {
+    fn walk(e: &Exp, holes: &mut Vec<(String, Exp)>) -> Exp {
+        if let Exp::App(f, a) = e {
+            if matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == ANAPHOR_OF_IRI) {
+                let var = format!("$demref${}_0", holes.len());
+                holes.push((var.clone(), a.as_ref().clone()));
+                return Exp::Var(var);
+            }
+        }
+        match e {
+            Exp::App(f, x) => Exp::App(Box::new(walk(f, holes)), Box::new(walk(x, holes))),
+            Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(walk(b, holes))),
+            Exp::Pi(p, a, b) => Exp::Pi(
+                p.clone(),
+                Box::new(walk(a, holes)),
+                Box::new(walk(b, holes)),
+            ),
+            Exp::Sig(p, a, b) => Exp::Sig(
+                p.clone(),
+                Box::new(walk(a, holes)),
+                Box::new(walk(b, holes)),
+            ),
+            Exp::Arrow(a, b) => Exp::Arrow(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
+            Exp::Times(a, b) => Exp::Times(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
+            Exp::Fst(x) => Exp::Fst(Box::new(walk(x, holes))),
+            Exp::Snd(x) => Exp::Snd(Box::new(walk(x, holes))),
+            Exp::Pair(a, b) => Exp::Pair(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
+            Exp::Ann(x, t) => Exp::Ann(Box::new(walk(x, holes)), Box::new(walk(t, holes))),
+            Exp::InductiveType(d, args) => {
+                Exp::InductiveType(d.clone(), args.iter().map(|x| walk(x, holes)).collect())
+            }
+            Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+                d.clone(),
+                n.clone(),
+                args.iter().map(|x| walk(x, holes)).collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+    let mut holes = Vec::new();
+    let out = walk(exp, &mut holes);
+    (out, holes)
+}
