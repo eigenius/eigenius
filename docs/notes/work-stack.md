@@ -9,7 +9,19 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
+### 1. ▲ ACTIVE — [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stage 1 of 4: reading selection**
+The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
+→ unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
+spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
+*selection* stage (LLM `ReadingRanker` in document context, recorded + gated against the 62-pin
+gold set) rather than further multiplicity reduction; Stages 3–4 subsume (3)'s Phase-1-harness and
+Phase-2 items. Settled: Derived landing shape; selection inside the discourse loop; document
+context for both LLM stages. **Active step: the `d63-reading-selection.md` design note + slice 1.1
+(promote the verbaliser to `kernel/src/dcg/verbalize.rs`).** Exit gate (Stage 1):
+`selection_accuracy` measured and gated on the pins, `invalid_selected == 0`, parse metrics
+unchanged under replay.
+
+### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
 
@@ -93,8 +105,9 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
-The overall sequence that (1) is a detour from. Remaining once (1) pops, in order:
+### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+The overall sequence that (2) is a detour from — now largely folded into (1)'s Stages 3–4.
+Remaining once (2) pops, in order:
 **address ambiguity** (0 encoded → clean single parses) + long-sentence perf → **grading-phase gaps**
 (Citation grade-climb; graded-props run over the full lexicon, persistent doc layer) → **Phase 2**
 (orchestrator / served path). The Phase-1 machinery (reshape, pipeline, grader, ingestion, D47 codec) is

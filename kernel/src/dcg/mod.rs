@@ -53,6 +53,7 @@ mod rules;
 pub mod segment;
 pub mod sense_ranker;
 pub mod skeleton;
+pub mod verbalize;
 
 /// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
 /// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
@@ -116,3 +117,4 @@ pub use sense_ranker::{
     IdentityRanker, RankRecord, RankedWord, RecordingSenseRanker, ReplaySenseRanker,
     SenseCandidate, SenseRanker, WordSenses,
 };
+pub use verbalize::{resource_label, unit_sense_names, verbalize, Vb};
