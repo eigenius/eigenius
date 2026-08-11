@@ -132,6 +132,25 @@ if grep -qE '^  histogram:' "$LOG"; then
   echo
 fi
 
+# ── Reading selection (d63-reading-selection.md §5) — from the `=== SELECTION` line only ─────
+# eligible = units with ≥2 closed readings; chose/abstained = the ranker's decisions; curated =
+# chosen units that have a pin; correct = chosen skeleton == pin; invalid-selected = chosen
+# skeleton is `invalid`-adjudicated (must be 0 — gated below). Absent on logs predating slice 3.
+SELSUM="$(grep -m1 -E '^=== SELECTION' "$LOG" || true)"
+SEL_RANKER=""; SEL_ELIG=""; SEL_CHOSE=""; SEL_ABST=""; SEL_CUR=""; SEL_COR=""; SEL_INV=""
+if [[ -n "$SELSUM" ]]; then
+  SEL_RANKER="$(sed -E 's/^=== SELECTION \(([^)]*)\).*/\1/' <<<"$SELSUM")"
+  SEL_ELIG=$(field 'eligible'  "$SELSUM"); [[ "$SEL_ELIG" =~ ^[0-9]+$ ]] || SEL_ELIG=""
+  SEL_CHOSE=$(field 'chose'    "$SELSUM"); [[ "$SEL_CHOSE" =~ ^[0-9]+$ ]] || SEL_CHOSE=""
+  SEL_ABST=$(field 'abstained' "$SELSUM"); [[ "$SEL_ABST" =~ ^[0-9]+$ ]] || SEL_ABST=""
+  SEL_CUR=$(field 'curated'    "$SELSUM"); [[ "$SEL_CUR" =~ ^[0-9]+$ ]] || SEL_CUR=""
+  SEL_COR=$(field 'correct'    "$SELSUM"); [[ "$SEL_COR" =~ ^[0-9]+$ ]] || SEL_COR=""
+  SEL_INV=$(field 'invalid-selected' "$SELSUM"); [[ "$SEL_INV" =~ ^[0-9]+$ ]] || SEL_INV=""
+  echo "  SELECTION ($SEL_RANKER): chose $SEL_CHOSE of $SEL_ELIG eligible (abstained $SEL_ABST);" \
+       "accuracy $SEL_COR/$SEL_CUR curated; invalid-selected $SEL_INV"
+  echo
+fi
+
 RC=0
 if [[ "$PROFILE" == "debug" ]]; then
   echo "  UNTRUSTWORTHY: DEBUG build. Debug stack frames overflow in NbE readback, killing parses"
@@ -149,6 +168,19 @@ fi
 
 # ── Faithfulness: the open goal — how many resolve to ONE reading ────────────
 echo "  RESOLUTION: $ENC/$U encoded (single reading); $AMB ambiguous, $OPN open."
+
+# ── Selection gate: an invalid-adjudicated skeleton must never be SELECTED ───
+# The reading ranker has no kernel veto (every candidate type-checks), so this is one of its two
+# controls (the other is selection accuracy vs the pins, gated against the baseline below once a
+# live-ranker baseline is set — slice 4).
+if [[ -n "$SEL_INV" ]]; then
+  if [[ "$SEL_INV" -eq 0 ]]; then
+    echo "  SELECTION-VALIDITY: PASS — no invalid-adjudicated skeleton was selected."
+  else
+    echo "  SELECTION-VALIDITY: FAIL — $SEL_INV selection(s) chose an invalid-adjudicated skeleton."
+    RC=2
+  fi
+fi
 
 # ── Baseline comparison against the COMMITTED reference ──────────────────────
 if [[ "$USE_JSON" == "1" ]]; then
@@ -217,6 +249,25 @@ if [[ "$USE_JSON" == "1" ]]; then
     fi
   elif [[ -z "$TS" ]]; then
     echo "    total-skeletons  (not in this log — harness predates the metric; re-measure to gate it)"
+  fi
+
+  # ── Selection-accuracy gate: correct picks on curated units must not drop ──────────────────────
+  # Gated only once baseline.json carries expected.selection_correct/selection_curated (set
+  # deliberately from the live ranker's drift-free replay — slice 4). Until then: report-only.
+  if [[ -n "$SEL_COR" ]]; then
+    BSELC=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('selection_correct',''))")
+    BSELN=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('selection_curated',''))")
+    if [[ "$BSELC" =~ ^[0-9]+$ ]]; then
+      if [[ "$SEL_COR" -lt "$BSELC" ]]; then
+        printf '    %-16s %s/%s → %s/%s   REGRESSION (correct selections dropped)\n' \
+          "selection" "$BSELC" "$BSELN" "$SEL_COR" "$SEL_CUR"; RC=2
+      else
+        printf '    %-16s %s/%s → %s/%s%s\n' "selection" "$BSELC" "$BSELN" "$SEL_COR" "$SEL_CUR" \
+          "$([[ "$SEL_COR" -gt "$BSELC" ]] && echo '   more correct' || echo '   (holds)')"
+      fi
+    else
+      echo "    selection        $SEL_COR/$SEL_CUR correct (no baseline set yet — gated from slice 4's live-ranker replay)"
+    fi
   fi
 fi
 

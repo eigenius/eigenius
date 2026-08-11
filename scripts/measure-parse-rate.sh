@@ -107,12 +107,12 @@ done
 #
 # `EIGENIUS_POS_PRUNE` is read with `.is_ok()`: ANY value, including the empty string, enables it.
 # Setting it to "0" would turn it ON. It must be UNSET to be off — hence `env -u`, not `VAR=0`.
-for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES; do
+for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS_OUT; do
   if [[ -n "${!v:-}" ]]; then
     echo "note: ignoring ambient $v=${!v} — the run declares its own config (use the flags)" >&2
   fi
 done
-ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES)
+ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS_OUT)
 [[ "$POS_PRUNE" == "1" ]] && ENV_STRIP+=(EIGENIUS_POS_PRUNE=1)
 [[ "$COMB_CORE" == "1" ]] && ENV_STRIP+=(EIGENIUS_COMBINATORY_CORE=1)
 # Read-only instrument: it observes the forest and does NOT change the parse (the four metrics are
@@ -205,6 +205,12 @@ else
 fi
 [[ -n "$RANKS" ]] && ENV_STRIP+=(EIGENIUS_SENSE_RANKS="$RANKS")
 
+# ── Reading-selection decisions: always RECORDED (d63-reading-selection.md §5) ──
+# The selection pass runs the deterministic pin-backed arm inside the harness; recording its
+# decisions per run costs nothing and gives slice 4's live ranker the drift-free replay artifact.
+SELECTIONS="$RUN_DIR/selections.json"
+ENV_STRIP+=(EIGENIUS_SELECTIONS_OUT="$SELECTIONS")
+
 # ── Provenance header — a log without it cannot be reproduced or trusted ─────
 KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   "$ROOT/crates/eigenius-wordnet/tests/db_backed_encoding.rs" \
@@ -220,6 +226,7 @@ KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW $KNOBS"
   echo "# rust_min_stack: ${RUST_MIN_STACK:-default}"
   echo "# ranks:     $RANKS_MODE"
+  echo "# selections: RECORD → $SELECTIONS (pin-backed arm)"
   echo "# started:   $(date -Iseconds)"
   echo "# command:   EIGENIUS_SENSE_RANKS=$RANKS EIGENIUS_DB_SNAPSHOT=$SNAP EIGENIUS_WRN_PAGE=$PAGE cargo test --release -p eigenius-wordnet ${FEATURES[*]} --test db_backed_encoding wrn_first_page_over_full_lexicon -- --ignored --nocapture"
   echo

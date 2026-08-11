@@ -129,8 +129,20 @@ pool to resolved-open readings; this stage selects among closed readings only.
    an out-of-range reply abstains. `InProcessPipeline::with_reading_ranker`;
    `SentenceEncoding.selection`. Tests: seam unit tests + the loop test
    (`a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it`).
-3. **Harness + gates** — selection pass in `db_backed_encoding.rs` over the corpus page;
-   `selections.json`; `measure-parse-rate.sh`/`eval-parse-rate.sh`/`baseline.json` wiring.
+3. **Harness + gates** — DONE (2026-08-11). The sweep's `Outcome` retains its `Item`s; the
+   selection pass runs in document order inside the unit loop via the SAME `Parser::select_reading`
+   (now `pub`) the pipeline runs, with the pin-backed arm recording to `selections.json`
+   (`EIGENIUS_SELECTIONS_OUT`, set by `measure-parse-rate.sh`; artifacts flush BEFORE
+   `assert_replay_faithful`). New summary line `=== SELECTION (…): eligible, chose, abstained,
+   curated, correct, invalid-selected ===`; `eval-parse-rate.sh` parses it, gates
+   `invalid-selected == 0` (SELECTION-VALIDITY), and gates accuracy once `baseline.json` carries
+   `selection_correct`/`selection_curated` (slice 4). VERIFIED on a fresh
+   `--umls-all`+alignment reseed (`wordnet-umls-aligned-2026-08-11-consolidated`): the committed
+   2026-07-29 ranks replay 62/0, every baseline metric reproduces EXACTLY (gap 0, missing 0,
+   encoded 14, readings 761, skeletons 144, hits 60/62) — selection perturbs nothing — and the pin
+   arm reads: eligible 46, chose 10, abstained 36 (skeleton ties / unpinned), correct 10/10,
+   invalid-selected 0. Also witnessed: on the WRONG snapshot (aligned-d66, 60/60 rank misses) the
+   pin arm abstains 51/53 — fail-closed on a divergent forest.
 4. **Live ranker** — `AnthropicReadingRanker`; record a reference draw; measure
    `selection_accuracy`; set the gated baseline from its replay.
 5. **Emission** — `DecisionPoint` computed-choice arm; ranked path in `select.rs` beside

@@ -399,7 +399,6 @@ fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
 
 /// The four-way outcome taxonomy the pipeline routes on (D62 §4). Mirrors `encoding_prototype.rs`
 /// (duplicated — these are prototype drivers, not library code).
-#[derive(Debug)]
 enum Outcome {
     Encoded {
         is_prop: bool,
@@ -407,6 +406,9 @@ enum Outcome {
         /// an encoded unit by construction. Held as the SET (not a count) so the faithfulness gate can
         /// ask "does this unit still CONTAIN its expected reading" (see `expected-readings.jsonl`).
         skeletons: Vec<String>,
+        /// The single closed reading — retained so the selection pass can gloss it into the reading
+        /// ranker's prior-selection context without re-parsing the unit.
+        reading: Item,
     },
     Ambiguous {
         count: usize,
@@ -414,6 +416,9 @@ enum Outcome {
         /// The distinct STRUCTURAL skeletons among the `count` closed readings — the sense-independent
         /// (drift-free) bracketing set. `count / skeletons.len()` is the sense× multiplicity.
         skeletons: Vec<String>,
+        /// The surviving closed readings — retained so the selection pass (d63-reading-selection.md
+        /// §5) can present them to the reading ranker without re-parsing the unit.
+        readings: Vec<Item>,
     },
     MissingLexeme {
         unknown: Vec<String>,
@@ -646,6 +651,29 @@ fn load_expected_readings() -> Vec<Expected> {
     out
 }
 
+/// The adjudication ledger — same directory as the pins. The selection pass reads only its
+/// `invalid` rows: a skeleton the grammar should not produce, which a reading ranker must
+/// therefore never SELECT. `invalid-selected` is gated to 0 by eval-parse-rate.sh.
+const ADJUDICATIONS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../experiments/parsing/adjudications.tsv"
+);
+
+/// The `(sentence, skeleton)` pairs adjudicated `invalid`. Missing file ⇒ empty (check inactive).
+fn load_invalid_adjudications() -> BTreeSet<(String, String)> {
+    let Ok(text) = std::fs::read_to_string(ADJUDICATIONS) else {
+        return BTreeSet::new();
+    };
+    text.lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (s, sk, v) = (f.next()?, f.next()?, f.next()?);
+            (v.trim() == "invalid").then(|| (s.trim().to_string(), sk.trim().to_string()))
+        })
+        .collect()
+}
+
 /// The distinct-skeleton COUNT of a classified unit — Encoded/Ambiguous (closed) and Open (parametric)
 /// carry structural skeletons; GrammarGap/MissingLexeme/ScaleBound produce none (0).
 fn unit_skeletons(o: &Outcome) -> usize {
@@ -712,11 +740,13 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
         1 => Outcome::Encoded {
             is_prop: gates_to_prop(layer, closed[0].sem()),
             skeletons: skeleton_set(&closed),
+            reading: closed.into_iter().next().expect("len==1"),
         },
         n => Outcome::Ambiguous {
             count: n,
             is_prop: gates_to_prop(layer, closed[0].sem()),
             skeletons: skeleton_set(&closed),
+            readings: closed,
         },
     }
 }
@@ -2960,6 +2990,24 @@ fn wrn_first_page_over_full_lexicon() {
         eigenius_kernel::dcg::attribution::begin();
     }
 
+    // ── Reading selection (d63-reading-selection.md §5–6, slice 3): the deterministic pin-backed
+    // arm. Selection runs AFTER classification and changes NO parse metric — the summary line is
+    // identical with and without it. The pin ranker abstains on any unpinned sentence, a pin
+    // matching no reading, or a skeleton tie, so `correct == curated` holds by construction on
+    // this arm; slice 4 swaps in the live ranker and the same counters measure IT. Decisions are
+    // recorded (`EIGENIUS_SELECTIONS_OUT`) so a live draw can later be replayed drift-free.
+    let pins: std::collections::BTreeMap<String, String> = load_expected_readings()
+        .into_iter()
+        .map(|e| (e.sentence, e.skeleton))
+        .collect();
+    let invalid_adjudicated = load_invalid_adjudications();
+    let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(
+        eigenius_kernel::dcg::PinReadingRanker::new(pins.clone()),
+    );
+    let mut prior: Vec<eigenius_kernel::dcg::PriorSelection> = Vec::new();
+    let (mut sel_eligible, mut sel_chose, mut sel_abstained) = (0usize, 0usize, 0usize);
+    let (mut sel_curated, mut sel_correct, mut sel_invalid) = (0usize, 0usize, 0usize);
+
     let mut report: Vec<UnitReport> = Vec::new();
     for (i, text) in segment_sentences(&page).into_iter().enumerate() {
         let ntok = tokenize(&text).len();
@@ -2970,6 +3018,58 @@ fn wrn_first_page_over_full_lexicon() {
             t.elapsed().as_secs_f64(),
             tag(&outcome)
         );
+        // Reading selection, in document order (prior selections accumulate into the ranker's
+        // context). An Encoded unit contributes its single reading's gloss; an Ambiguous unit is
+        // put to the ranker via the SAME `select_reading` the pipeline's discourse loop runs.
+        match &outcome {
+            Outcome::Encoded { reading, .. } => {
+                let vnames = unit_sense_names(&text, &index, &lem, &head);
+                let vb = Vb {
+                    names: &vnames,
+                    layer: &head,
+                };
+                prior.push(eigenius_kernel::dcg::PriorSelection {
+                    ordinal: i,
+                    gloss: verbalize(reading.sem(), &vb),
+                });
+            }
+            Outcome::Ambiguous { readings, .. } => {
+                sel_eligible += 1;
+                match index.select_reading(&selection_ranker, &page, &text, &lem, &prior, readings)
+                {
+                    Some((_idx, sel)) => {
+                        sel_chose += 1;
+                        let pinned = pins.get(text.trim());
+                        if pinned.is_some() {
+                            sel_curated += 1;
+                        }
+                        if pinned == Some(&sel.chosen_skeleton) {
+                            sel_correct += 1;
+                        }
+                        if invalid_adjudicated
+                            .contains(&(text.trim().to_string(), sel.chosen_skeleton.clone()))
+                        {
+                            sel_invalid += 1;
+                            eprintln!(
+                                "  INVALID-SELECTED: «{}» chose an invalid-adjudicated skeleton: {}",
+                                text.trim(),
+                                sel.chosen_skeleton
+                            );
+                        }
+                        eprintln!(
+                            "  selected 1 of {}: {}",
+                            sel.candidates, sel.chosen_skeleton
+                        );
+                        prior.push(eigenius_kernel::dcg::PriorSelection {
+                            ordinal: i,
+                            gloss: sel.chosen_gloss.clone(),
+                        });
+                    }
+                    None => sel_abstained += 1,
+                }
+            }
+            _ => {}
+        }
         // Page-wide English gloss (`EIGENIUS_GLOSS_READINGS=1`) — verbalize each reading for authoring
         // / verifying the expected-reading corpus without reading raw λ-terms.
         //
@@ -3082,6 +3182,24 @@ fn wrn_first_page_over_full_lexicon() {
     }
 
     summarize(&report);
+
+    // Persist the selection decisions and print the SELECTION summary line BEFORE the replay
+    // assert (same discipline as `flush_sense_ranks`: a run that produced a number always leaves
+    // its artifacts, even when the assert then fails the run). `eval-parse-rate.sh` reads these
+    // metrics from THIS line only (trap 4 applies to selection too) and gates
+    // `invalid-selected == 0`.
+    if let Ok(p) = std::env::var("EIGENIUS_SELECTIONS_OUT") {
+        match selection_ranker.write(std::path::Path::new(&p)) {
+            Ok(n) => eprintln!("selections: RECORDED {n} decision(s) → {p}"),
+            Err(e) => eprintln!("selections: FAILED to write {p}: {e}"),
+        }
+    }
+    eprintln!(
+        "=== SELECTION (pin-backed): eligible {sel_eligible}, chose {sel_chose}, \
+         abstained {sel_abstained}, curated {sel_curated}, correct {sel_correct}, \
+         invalid-selected {sel_invalid} ==="
+    );
+
     assert_replay_faithful();
 
     if rollup {

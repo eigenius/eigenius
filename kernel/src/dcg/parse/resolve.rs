@@ -222,7 +222,11 @@ impl Parser {
     /// glossed by the shared verbaliser ([`crate::dcg::verbalize`]) — and map its choice back to an
     /// index into `closed`. `None` = abstain (no selection, or a malformed reply — an out-of-range
     /// index abstains rather than panicking; the ranker is untrusted input).
-    fn select_reading(
+    ///
+    /// Public because the measurement harness drives it directly (per-unit, with its own parse
+    /// config and document order) while [`Self::resolve_document`] drives it in the pipeline —
+    /// ONE presentation function for both, so the gate measures exactly what the pipeline runs.
+    pub fn select_reading(
         &self,
         ranker: &dyn ReadingRanker,
         document: &str,
