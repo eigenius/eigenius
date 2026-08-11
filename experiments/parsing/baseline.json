@@ -16,6 +16,7 @@
     "reseed": "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-08-02-consolidated, then scripts/build-alignment-snapshot.sh --base <that> --out wordnet-umls-aligned-2026-08-02-consolidated. BOTH steps are required: the reseed produces a BASE snapshot and every measurement in this file is against an ALIGNED one.",
     "attribution": "SUPERSEDED as a live attribution — retained as the record for the demonstrative/case-sensitivity cycle it describes. The CURRENT baseline needs no attribution argument: it is an exact reproduction of the layer stack it replaces, on every tracked number. The page totals here are NOT a clean A/B against the previous baseline — snapshot AND recording both changed. Attribution was done CAP-ONLY (deterministic, no LLM, comparable across snapshots): the demonstrative drop alone is total-skeletons 467 -> 343 (-124, -26.6%) and total-readings 6680 -> 5395 (-19.2%), with grammar-gap 0 held, encoded 2 -> 3 and cap-only pin hits 53 -> 54. All 16 units whose skeleton sets changed contain a demonstrative: zero collateral on the other 46. The case-sensitive symbol fix was attributed separately under the PREVIOUS snapshot and recording: 225 -> 196 skeletons, 1069 -> 1041 readings, pins 62/62 held. The sense-ranker change is attributable by NEITHER instrument (cap-only never executes that code; the replay is what it invalidates) and its reach was measured as 36 of 62 rank-key misses."
   },
+  "_provenance_note_2026-08-11-dem-migration": "D64 DEMONSTRATIVES-AS-HOLES migration (docs/notes/d64-demonstratives-as-holes.md, slice 3). The four demonstrative surfaces' i sems became restrictor-typed referent holes (lexicon:anaphor_of; bootstrap edit -> reseed, snapshot wordnet-umls-aligned-2026-08-11-dem). The committed ranks (2026-07-29-demonstratives) REPLAY 62/0 against the new seed -- closed-class surfaces are not sense-ranked, verified not assumed. THE FLIP, planned in the note's par.5 and re-ratcheted here to the honest numbers: open 2 -> 20 (18 demonstrative units now honestly await discourse resolution; the single-sentence sweep correctly reports them Open), ambiguous 46 -> 31, encoded 14 -> 11, total-readings 761 -> 226 (the retired i readings carried most of the page's sense multiplicity), skeletons 144 -> 139; ceilings 1900 -> 500 / 400 -> 250. PINS: 19 units re-pinned by the mechanical i->hole transform of their previously verified skeletons (checked against the new forest); the 2 documented misses (draw-variance 'Synthetic lethality...', Axis-B 'Depletion of WRN...') keep their old pins -- expected-hits 60/62 HOLDS. MIGRATION FINDING: a demonstrative NP's internal restrictor structure now lives in the hole's TYPE, which skeletons do not print -- pins on such units discriminate less (note par.5a); the skeleton ledger consequently has 74 new-unadjudicated rows pending a wave (45 kept, 20 migrated mechanically, 55 stale dropped). Selection re-drawn over the new forest: see selection-baseline.json.",
   "_provenance_note_2026-08-11-selection": "READING SELECTION is a SEPARATE baseline: experiments/parsing/selection-baseline.json (d63-reading-selection.md slice 4). This file gates the GRAMMAR + lexicon (what forest is produced); that one gates the RANKER (which reading gets chosen), scored reading-level against reading-adjudications.tsv. They re-baseline on different triggers -- grammar work here, draw/prompt/ledger changes there. The selection machinery's arms: measure-parse-rate.sh --selections <file> exists=REPLAY / missing=LIVE-RECORD (composes with --replay: a reference draw is live selection over the deterministic replayed forest); without the flag a live run draws live, a deterministic run uses the pin-backed arm. Selection runs post-classification, so every number in THIS file is byte-identical with and without it (verified on the 2026-08-11 reseed).",
   "_provenance_note_2026-07-25-copula": "Re-baselined for TWO importer fixes made after ADJUDICATING the 16 structural readings of the page's worst unit (\"These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency\") instead of theorising about the sense cap. Those 16 decomposed as 4 families x 4 modifier-bracketings; 12 were plainly WRONG. (1) THE COPULA IS GRAMMAR (9f52ba1): WordNet gives `be` 8 verb synsets and 02604760 'have the quality of being' carries frame 6 -> FrameKind::LinkingAdj, emitting (S[dcl,fin]\\NP)/(S[dcl,adj]\\NP) over an OPAQUE 2-place axiom -- re-encoding 'X is P' as be(lambda x.P(x), X), destroying the copula's transparency (X is P **is** P(X)) and competing with the closed-class copula; a type-raising artifact (the SUBJECT applied as a 2-place function) rides on it. UMLS separately gave `were` a cat_n sense (the verb as a plural NOUN) via the `Be`=beryllium symbol homonym. Fixed by the mechanism already used for do/does/not/to/lead, prepositions/conjunctions and determiners: a per-LEMMA copula skip in the WordNet importer (synset siblings follow/live/equal keep their entries) + COPULA_SURFACES in the UMLS importer (`being` EXCLUDED -- a legitimate common noun). (2) Fix A (c) (6437edc): the POSITIVE relational predication for governed adjectives, `(S[adj]\\NP)/cat_pp_arg(prep)` with sem lambda r.lambda x. gt(deg_rel(r,x), std) -- previously only the COMPARATIVE consumed the relational cat_measure, so 'concordant WITH X' could not bind the relatum. MEASURED: deterministic cap-only A/B isolates the copula fix at total-skeletons 239 -> 196 (-18%) and readings 1741 -> 1560; the drift-free reranked REPLAY (record == replay exactly) gives total-skeletons 178 (the lowest recorded), readings 735, encoded 10, grammar-gap 0, expected-hits 23/23. The target unit fell 16 -> 4 skeletons and the 10/12/16-skeleton buckets emptied (only the 19-skeleton essive unit remains an outlier). skeletons_ceiling ratcheted 300 -> 250. Draw results/2026-07-24-2320-9f52ba1-first-page-cnl-v3-reranked (runtime 231s). RESIDUAL on that unit: 4 skeletons = family A (copula + `with`-ADJUNCT, which (c) should supersede but cannot here because two cat_pp_arg PPs cannot COORDINATE -- coordinate_prop needs a prop-ending category) x2 bracketings, plus family B (the adjective read as a NOMINAL kind, needing the documented adjective-competing-qualifier filter) x2. See history[0]. ",
   "_provenance_note_2026-07-24-relcmp-c": "Re-baselined for Defect 2 (both levers) + the Defect-3 verbalizer. Snapshot wordnet-umls-aligned-2026-07-24-relcmp-c = relcmp-b re-reseeded (222b3ec) with (2a) the plural `some` determiner and DETERMINER_SURFACES withhold in the UMLS importer — so 'some MSI lines' is an existential GQ over the 'MSI line' compound, not a `compound_kind(…, C0205392 'Some (qualifier value)')` reification. TEST-side, no reseed: (2b) the abbreviation extraction now runs on the SOURCE page (the cleaned original, which parenthetically defines 'microsatellite instability (MSI)' / 'microsatellite stable (MSS)') via Schwartz-Hearst ∪ the live AnthropicAbbreviationProposer, so MSS carries a doc:mss binding to microsatellite-stable (C4321493) the reranker prefers over the C0024814 Marinesco-Sjogren acronym collision; and (3) the verbalizer renders the 3-arg referential `the(class,restrictor,x)` predication instead of bracketing it. The RECORD draw is results/2026-07-24-1513-222b3ec-dirty-first-page-cnl-v3-reranked (runtime 420s — with the extra abbreviation LLM call). The expected block is the DRIFT-FREE REPLAY of its ranks (deterministic, Schwartz-Hearst abbreviations, no LLM): total-readings 699 -> 678 (improved), total-skeletons 213 -> 215 (+2), grammar-gap 0, expected-hits 21/21, encoded 10 -> 9 (informational — the 'some' unit trades a wrong-encoded reification for the correct ambiguous existential). NOTE the RECORD read 747/220 vs the REPLAY 678/215: the AnthropicAbbreviationProposer's proposals are NOT recorded in ranks.json (only sense ranks are), so on replay the abbreviation source falls back to deterministic Schwartz-Hearst, which extracts the SAME parenthetical MSI/MSS and grounds MSS to microsatellite-stable (C4321493) identically — witnessed on the replay: C4321493 4x vs the residual C0024814 Marinesco-Sjogren 1x. So the LLM proposer is a superset used at RECORD time but the drift-free baseline is Schwartz-Hearst; the 2b fix (MSS grounding) reproduces on both. See history[0].",
@@ -30,43 +31,43 @@
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 46,
-    "open": 2,
-    "encoded": 14,
-    "total_readings_ceiling": 1900,
-    "total_readings": 761,
-    "skeletons_ceiling": 400,
-    "skeletons": 144,
+    "ambiguous": 31,
+    "open": 20,
+    "encoded": 11,
+    "total_readings_ceiling": 500,
+    "total_readings": 226,
+    "skeletons_ceiling": 250,
+    "skeletons": 139,
     "expected_reading_hits": 60,
     "expected_reading_curated": 62,
     "skeleton_histogram": {
-      "_comment": "units bucketed by SKELETON count, from scripts/audit-skeletons.sh on wordnet-umls-aligned-2026-08-02-consolidated (144 skeletons, 62 units). The `invalid` ledger is now ZERO on this page, so skeleton count is no longer a proxy for anything outstanding -- the remaining 84 `available` are ranking, not grammar.",
+      "_comment": "units bucketed by SKELETON count over the D64 demonstrative-hole forest (139 skeletons, 62 units; open units' parametric skeletons included). The adjudication ledger has 74 new-unadjudicated rows pending a wave (D64 migration collapsed demonstrative restrictors into hole TYPES, which skeletons do not print, so most old rows could not be carried mechanically).",
       "buckets": {
         "1": {
-          "units": 31,
-          "skeletons": 31
+          "units": 32,
+          "skeletons": 32
         },
         "2-3": {
-          "units": 20,
-          "skeletons": 41
+          "units": 19,
+          "skeletons": 38
         },
         "4-6": {
           "units": 8,
           "skeletons": 38
         },
         "7-10": {
-          "units": 1,
-          "skeletons": 10
+          "units": 2,
+          "skeletons": 19
         },
         "11-20": {
-          "units": 2,
-          "skeletons": 26
+          "units": 1,
+          "skeletons": 12
         }
       },
       "top_units": {
-        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 14,
         "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 12,
         "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 10,
+        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 9,
         "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.": 6,
         "These findings show that WRN is a promising drug target for MSI cancers.": 6,
         "Some cancers do not respond to immune checkpoint blockade.": 6

@@ -678,15 +678,21 @@ fn denominal_like_routes_to_the_verb_relation_and_does_not_drop_x() {
 fn connectives_batch_parses() {
     let (_layer, index) = index_over_bootstrap();
 
-    // Plural demonstratives `these`/`those` (plural noun via PluralS; mirror `all`).
-    assert!(
-        !index.parse("these genes affect HeLa", &PluralS).is_empty(),
-        "`these` + plural noun + plural verb parses"
-    );
-    assert!(
-        !index.parse("those genes affect HeLa", &PluralS).is_empty(),
-        "`those` + plural noun + plural verb parses"
-    );
+    // Plural demonstratives `these`/`those` (plural noun via PluralS; mirror `all`). Since D64
+    // slice 3 they are ANAPHORIC — the parse is OPEN, carrying a restrictor-typed referent hole
+    // (`d64-demonstratives-as-holes.md`), not a closed ι reading.
+    for d in ["these", "those"] {
+        let (closed, open) = index.parse_open(&format!("{d} genes affect HeLa"), &PluralS);
+        assert!(
+            closed.is_empty(),
+            "`{d}` no longer yields a closed ι reading (the pre-D64 misparse)"
+        );
+        assert!(
+            open.iter()
+                .any(|o| o.holes.len() == 1 && format!("{:?}", o.holes[0].ty).contains("Gene")),
+            "`{d}` + plural noun parses OPEN with a Gene-typed referent hole"
+        );
+    }
 
     // Prepositions `between`/`within` (VP-adjunct, mirror `in`).
     assert!(
@@ -2555,8 +2561,6 @@ namespace lexicon   = "urn:eigenius:lexicon";
 namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace core      = "urn:eigenius:core";
 
-axiom lexicon:anaphor_of : forall (A : Set) => A
-
 // A SUBCLASS level under CellLine, for the re-gate subsumption probe: does the veto accept an
 // antecedent typed by a subclass of the hole's restrictor?
 class lexicon:HeLaSubline : lexicon:CellLine {
@@ -2566,25 +2570,14 @@ resource lexicon:hela_s3 : lexicon:HeLaSubline {
     core:description = "a HeLa subline (test individual of the subclass).";
 }
 
-// The design note's dem sems (§2), on singular cats copied from the bootstrapped demonstratives.
-resource lexicon:dem_subj_sem_t : lexicon:SemTerm {
-    lexicon:term = type_expr(
-        ( fun (A : Set) => fun (V : A -> Prop) => V(lexicon:anaphor_of(A))
-          : forall (A : Set) => (A -> Prop) -> Prop )
-    );
-}
-resource lexicon:dem_obj_sem_t : lexicon:SemTerm {
-    lexicon:term = type_expr(
-        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
-            TV(lexicon:anaphor_of(T), subj)
-          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
-    );
-}
+// Test demonstrative entries on the NOVEL surface "yonder" — the bootstrapped `dem_ref_*_sem`
+// (slice 3 moved the real demonstratives to them) on singular cats, isolated from the real
+// this/that/these/those so the tests pin the MECHANISM, not the migrated lexicon.
 resource lexicon:yonder_subj : lexicon:LexicalEntry {
     core:description = "grammatical: test demonstrative determiner (subject, sg).";
     lexicon:form     = "yonder";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:dem_subj_sem_t;
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "yonder";
     lexicon:grade    = epistemic:declared;
@@ -2593,7 +2586,7 @@ resource lexicon:yonder_obj : lexicon:LexicalEntry {
     core:description = "grammatical: test demonstrative determiner (object, sg).";
     lexicon:form     = "yonder";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:dem_obj_sem_t;
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "yonder";
     lexicon:grade    = epistemic:declared;

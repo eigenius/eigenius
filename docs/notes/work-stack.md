@@ -46,10 +46,14 @@ restrictor-typed holes, and the **hole-type veto in `resolve_open`** — the sli
 that β-reduction erases the Π-binder annotation, so the restrictor veto had to be enforced
 per-antecedent before application (note §2a; subclass antecedents accepted via
 `Layer::is_subclass_of`; two occurrences = two independent holes). Four `yonder`-fixture tests
-green; no lexicon change yet. **Active step: slice 3 — the lexicon swap (four demonstrative
-surfaces → dem sems + `anaphor_of` axiom in closed-class.esl, batched bootstrap edit) + the §5
-migration (reseed, re-pin, ledger, fresh selection draw, both baselines).** Stage 3's grader
-track (3.3 `DerivedClaimGrader`) can run in parallel.
+green. Slice 3 (lexicon swap + reseed + migration) DONE `2026-08-11`: 8 entries swapped, reseed →
+`wordnet-umls-aligned-2026-08-11-dem`; ranks replayed 62/0; open 2→20, readings 761→226; 19 pins
+re-migrated (hits 60/62 HOLDS); selection re-drawn (21/31 reading-correct, invalid 0); both
+baselines re-derived. Ledger: 74 new-unadjudicated rows pending a wave (hole types invisible to
+skeletons — note §5a, incl. the future instrument fix). **Active step: slice 4 — discourse
+close-out: DB-backed `resolve_document` over the page with the flipped-Open demonstrative units
+resolving; needs plan §2.2 (pooled closed∪resolved-open competition) + §2.3 (kind/claim
+candidates).** Stage 3's grader track (3.3 `DerivedClaimGrader`) can run in parallel.
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

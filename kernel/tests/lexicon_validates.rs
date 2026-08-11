@@ -2108,15 +2108,29 @@ fn buildout_some_and_no_determiners_parse_to_prop() {
 fn buildout_definite_and_demonstrative_determiners_parse_to_prop() {
     let layer = det_poly_layer();
     let index = Parser::build(layer.clone());
-    // the (subject + object)
+    // the (subject + object) — plain definite, referential ι, CLOSED.
     assert_parses_to_prop(&layer, &index, "the gene affects HeLa");
     assert_parses_to_prop(&layer, &index, "every gene affects the cell line");
-    // this (subject + object)
-    assert_parses_to_prop(&layer, &index, "this gene affects HeLa");
-    assert_parses_to_prop(&layer, &index, "every gene affects this cell line");
-    // that (demonstrative — distinct from the relativizer `that`; subject + object)
-    assert_parses_to_prop(&layer, &index, "that gene affects HeLa");
-    assert_parses_to_prop(&layer, &index, "every gene affects that cell line");
+    // Demonstratives are ANAPHORIC since D64 slice 3 (`d64-demonstratives-as-holes.md`): the
+    // parse is OPEN, carrying a referent hole typed at the noun's class — not a closed ι Prop.
+    let assert_open_with_hole = |sentence: &str, class_substr: &str| {
+        let (closed, open) = index.parse_open(sentence, &Identity);
+        assert!(
+            closed.is_empty(),
+            "'{sentence}': no closed ι reading (the pre-D64 misparse)"
+        );
+        assert!(
+            open.iter().any(|o| o
+                .holes
+                .iter()
+                .any(|h| format!("{:?}", h.ty).contains(class_substr))),
+            "'{sentence}' parses OPEN with a {class_substr}-typed referent hole"
+        );
+    };
+    assert_open_with_hole("this gene affects HeLa", "Gene");
+    assert_open_with_hole("every gene affects this cell line", "CellLine");
+    assert_open_with_hole("that gene affects HeLa", "Gene");
+    assert_open_with_hole("every gene affects that cell line", "CellLine");
     // an (pre-vocalic spelling of the indefinite article `a`; subject + object —
     // a/an phonology is orthographic, so the parser treats `an` exactly as `a`)
     assert_parses_to_prop(&layer, &index, "an gene affects HeLa");

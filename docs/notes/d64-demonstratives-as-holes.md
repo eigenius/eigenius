@@ -174,9 +174,26 @@ discovered:
    `resolve_open`** (the β-erasure finding, §2a). Four tests over the `yonder` fixture: typed
    open parse, type-wrong veto, subclass acceptance, two independent holes. No lexicon change —
    the bootstrapped ι demonstratives are untouched; full suite green.
-3. **Lexicon swap + reseed** — the four surfaces' sems in `closed-class.esl` (batched with any
-   other pending bootstrap edits), the §5 migration (re-pin, re-adjudicate, ranks replay
-   verified, fresh selection draw + ledger + both baselines), gates green end to end.
+3. **Lexicon swap + reseed** — DONE (2026-08-11). `anaphor_of` axiom + `dem_ref_*_sem` in
+   `closed-class.esl`; all 8 demonstrative entries swapped (`the` untouched; the `that`
+   complementizer untouched); reseed → `wordnet-umls-aligned-2026-08-11-dem`. The §5 migration,
+   measured: ranks replay **62/0 held**; open 2→20, ambiguous 46→31, encoded 14→11,
+   total-readings **761→226** (the retired ι readings carried most of the page's sense
+   multiplicity), skeletons 144→139; **19 units re-pinned** by the mechanical ι→hole transform of
+   their verified skeletons, the 2 documented misses kept — **expected-hits 60/62 holds**;
+   ceilings re-ratcheted 1900→500 / 400→250. Selection re-drawn (eligible 46→31 — flipped-Open
+   units left the pool): chose 31/31, reading-correct 21/31, invalid 0; 3 novel decisions
+   adjudicated (one CORRECTED a prior wrong pick). Skeleton ledger: 45 kept + 20 migrated + 55
+   stale dropped + **74 new-unadjudicated pending a wave** (see §5a).
+
+   **§5a — migration finding: hole types are invisible to skeletons.** A demonstrative NP's
+   internal restrictor structure ("data sets **for genes that…**") now lives in the hole's TYPE
+   (`HoleInfo.ty`); the carrier's `Exp::Lam` binders are untyped, so `pretty_term`/skeletons
+   cannot print it. Consequences: (a) pins on such units discriminate attachment *inside* the
+   demonstrative NP less than before (recorded in the affected pins' notes); (b) most old ledger
+   rows for these units could not be carried mechanically — hence the 74-row wave. Instrument
+   fix, future: print each hole's type alongside the skeleton (the `OpenParse.holes` carry it) in
+   the dump/ledger keys.
 4. **Discourse close-out** — with §2.2/§2.3 in place: the corpus page through DB-backed
    `resolve_document`, demonstrative units resolving to entity/kind antecedents; claim-referent
    units documented as pending §2.3's claim candidates.
