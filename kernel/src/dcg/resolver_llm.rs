@@ -24,8 +24,6 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::ontology::Iri;
-
 use super::{ProposeCtx, Proposer};
 
 /// The model's structured reply: candidate indices, most-likely antecedent first.
@@ -87,7 +85,7 @@ impl AnthropicProposer {
 }
 
 impl Proposer for AnthropicProposer {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<Iri> {
+    fn propose(&self, ctx: &ProposeCtx) -> Vec<usize> {
         if ctx.candidates.is_empty() {
             return Vec::new();
         }
@@ -95,23 +93,25 @@ impl Proposer for AnthropicProposer {
             .candidates
             .iter()
             .enumerate()
-            .map(|(i, c)| format!("[{i}] {}", c.surface))
+            .map(|(i, c)| format!("[{i}] {}", c.surface()))
             .collect::<Vec<_>>()
             .join("\n");
         let instructions = format!(
-            "In the sentence:\n  \"{}\"\nan anaphor (pronoun or possessor) refers to an earlier \
-             entity. Choose its most likely antecedent from these candidates:\n{}\n\nReturn \
-             `ranked_candidate_indices`: the candidate indices, most-likely antecedent first \
-             (empty if none is plausible).",
+            "In the sentence:\n  \"{}\"\nan anaphor (pronoun, possessor, or demonstrative) refers \
+             to an earlier referent. Choose its most likely antecedent from these candidates:\n{}\
+             \n\nReturn `ranked_candidate_indices`: the candidate indices, most-likely antecedent \
+             first (empty if none is plausible).",
             ctx.sentence, candidate_list,
         );
         let Some(ranking) = self.ask(&instructions) else {
             return Vec::new();
         };
+        // Out-of-range indices are dropped here for a cleaner record; `resolve_with` would
+        // ignore them anyway (the proposer is untrusted input).
         ranking
             .ranked_candidate_indices
             .into_iter()
-            .filter_map(|i| ctx.candidates.get(i).map(|c| c.iri.clone()))
+            .filter(|&i| i < ctx.candidates.len())
             .collect()
     }
 }

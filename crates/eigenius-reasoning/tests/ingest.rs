@@ -26,7 +26,6 @@ use eigenius_kernel::dcg::{
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-use eigenius_kernel::ontology::Iri;
 use eigenius_reasoning::{
     ClaimVerdict, DeclaredClaimGrader, DocumentIngestion, Grade, InProcessIngestion,
     IngestedSentence,
@@ -35,7 +34,7 @@ use eigenius_reasoning::{
 /// A no-op anaphora proposer — the demo document has no pronouns, so the resolver never consults it.
 struct NoProposer;
 impl Proposer for NoProposer {
-    fn propose(&self, _ctx: &ProposeCtx) -> Vec<Iri> {
+    fn propose(&self, _ctx: &ProposeCtx) -> Vec<usize> {
         Vec::new()
     }
 }

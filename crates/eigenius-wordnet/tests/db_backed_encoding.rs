@@ -46,7 +46,7 @@ use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
     is_nonprose, pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize,
     AbbreviationBinding, Identity, Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation,
-    Parser, Pos, Vb,
+    Parser, Pos, ProposeCtx, Proposer, SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -389,6 +389,87 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
 
 fn morphy() -> MorphyLemmatizer {
     MorphyLemmatizer::load(std::path::Path::new(DICT)).expect("load Morphy from dict")
+}
+
+/// Stage A — the page's document augmentation, ONE assembly shared by the isolated-sentence sweep
+/// and the discourse close-out (the two must parse over the SAME overlay or their forests are not
+/// comparable): OOV groundings against the form/description text indexes (D63
+/// lexicon-augmentation §6a), the named-entity appositions ("Project Achilles"/"project DRIVE",
+/// `d63-named-entity-glossary-source.md`), and the abbreviation glossary extracted from the SOURCE
+/// document (Defect 2b — definitions live in the original page even when a CNL rewrite is what is
+/// parsed; `EIGENIUS_WRN_SOURCE` overrides). Deterministic proposers by default; the live LLM
+/// abbreviation proposer is drop-in under `--features use-llm`.
+fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> LexiconAugmentation {
+    let mut aug = {
+        use eigenius_kernel::dcg::{
+            augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
+        };
+        augment_lexicon_backed(
+            head,
+            page,
+            &NoAbbreviationProposer,
+            &NominalCategoryProposer,
+            lem,
+        )
+    };
+    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, page);
+    let n_names = ne_aug.added.len();
+    eprintln!(
+        "named entities: {:?}",
+        ne_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(ne_aug.added);
+    aug.supporting.extend(ne_aug.supporting);
+    let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
+    let abbr_aug = {
+        #[cfg(feature = "use-llm")]
+        {
+            match eigenius_kernel::dcg::AnthropicAbbreviationProposer::from_env() {
+                Some(p) => {
+                    eprintln!(
+                        "abbreviation proposer: AnthropicAbbreviationProposer (live) on source"
+                    );
+                    eigenius_kernel::dcg::augment_document_only(head, &source_text, &p, lem)
+                }
+                None => eigenius_kernel::dcg::augment_document_only(
+                    head,
+                    &source_text,
+                    &eigenius_kernel::dcg::NoAbbreviationProposer,
+                    lem,
+                ),
+            }
+        }
+        #[cfg(not(feature = "use-llm"))]
+        {
+            eigenius_kernel::dcg::augment_document_only(
+                head,
+                &source_text,
+                &eigenius_kernel::dcg::NoAbbreviationProposer,
+                lem,
+            )
+        }
+    };
+    eprintln!(
+        "abbreviations: {:?}",
+        abbr_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(abbr_aug.added);
+    aug.supporting.extend(abbr_aug.supporting);
+    eprintln!(
+        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
+        aug.added.len() - n_names,
+        aug.missing_oov.len()
+    );
+    aug
 }
 
 /// Does this sem kernel-gate to a `Prop`? (the felicity confirmation)
@@ -2900,91 +2981,7 @@ fn wrn_first_page_over_full_lexicon() {
 
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
-    // Stage A — the document augmentation (D63 lexicon-augmentation §6a, this session): ground OOV atoms
-    // against the form/description text indexes and OVERLAY the groundings onto the index, so the parser
-    // SEES them (uncommitted, doc-scoped — the §7-2 in-memory-overlay path) instead of gapping on them.
-    // Deterministic proposers here (reproducible A/B); the live LLM abbreviation/POS proposers are
-    // drop-in behind the traits (exercised by the `--features use-llm` smoke tests).
-    let mut aug = {
-        use eigenius_kernel::dcg::{
-            augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
-        };
-        augment_lexicon_backed(
-            &head,
-            &page,
-            &NoAbbreviationProposer,
-            &NominalCategoryProposer,
-            &lem,
-        )
-    };
-    // Named-entity source (D63 `d63-named-entity-glossary-source.md`): recognize `<common-noun-head>
-    // <Name>` appositions ("Project Achilles", "project DRIVE") and OVERLAY them as doc-local named
-    // individuals (`cat_np`) via the SAME in-memory augmentation — closes the "project"(N/V)-crowding
-    // grammar gap without a persistent doc layer.
-    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &page);
-    let n_names = ne_aug.added.len();
-    eprintln!(
-        "named entities: {:?}",
-        ne_aug
-            .added
-            .iter()
-            .map(|b| b.provenance.surface.clone())
-            .collect::<Vec<_>>()
-    );
-    aug.added.extend(ne_aug.added);
-    aug.supporting.extend(ne_aug.supporting);
-    // Abbreviation glossary (D63 Defect 2b): the CNL uses acronyms (MSI/MSS) whose DEFINITIONS live in
-    // the ORIGINAL page ("microsatellite instability (MSI)", "microsatellite stable (MSS)") — not the
-    // parsed CNL. Run the abbreviation extraction on the SOURCE document (Schwartz-Hearst, plus the live
-    // LLM proposer under `use-llm` for non-parenthetical introductions) so `MSS` grounds to
-    // microsatellite-stable rather than the `C0024814` Marinesco-Sjogren acronym collision. Merged into
-    // the same doc-scoped overlay; source = WRN_PAGE (the cleaned original) by default, `page` is the
-    // parsed CNL, so the definitions come from the source and bind the CNL's acronym surfaces.
-    let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
-    let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.clone());
-    let abbr_aug = {
-        #[cfg(feature = "use-llm")]
-        {
-            match eigenius_kernel::dcg::AnthropicAbbreviationProposer::from_env() {
-                Some(p) => {
-                    eprintln!(
-                        "abbreviation proposer: AnthropicAbbreviationProposer (live) on source"
-                    );
-                    eigenius_kernel::dcg::augment_document_only(&head, &source_text, &p, &lem)
-                }
-                None => eigenius_kernel::dcg::augment_document_only(
-                    &head,
-                    &source_text,
-                    &eigenius_kernel::dcg::NoAbbreviationProposer,
-                    &lem,
-                ),
-            }
-        }
-        #[cfg(not(feature = "use-llm"))]
-        {
-            eigenius_kernel::dcg::augment_document_only(
-                &head,
-                &source_text,
-                &eigenius_kernel::dcg::NoAbbreviationProposer,
-                &lem,
-            )
-        }
-    };
-    eprintln!(
-        "abbreviations: {:?}",
-        abbr_aug
-            .added
-            .iter()
-            .map(|b| b.provenance.surface.clone())
-            .collect::<Vec<_>>()
-    );
-    aug.added.extend(abbr_aug.added);
-    aug.supporting.extend(abbr_aug.supporting);
-    eprintln!(
-        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
-        aug.added.len() - n_names,
-        aug.missing_oov.len()
-    );
+    let aug = page_augmentation(&head, &page, &lem);
     // Reranker CONTEXT WINDOW — OFF by default, opt-in via `EIGENIUS_CONTEXT_SENTENCES` (the
     // `--context-window` arm). When on, the ranker sees `window` sentences on each side, so a sense
     // plausible in isolation but wrong in context (UMLS "Geographic Locations" for "regions" in a
@@ -3354,6 +3351,116 @@ fn wrn_first_page_over_full_lexicon() {
             eprint!("{s}");
         }
     }
+}
+
+/// D64 slice 4 — the DISCOURSE CLOSE-OUT (plan §2.2/§2.3): the corpus page through DB-backed
+/// `resolve_document`, with the pooled closed∪resolved-open competition and entity/kind
+/// antecedent candidates. Deterministic: the RECENCY proposer proposes every in-scope candidate
+/// in most-recent-first order and the kernel re-gate does ALL the filtering (the per-hole
+/// restrictor veto, then the closed re-gate); no reading ranker, so multi-reading pools stay
+/// `Ambiguous` (fail-open). The measured signal is the OUTCOME TRANSITION of the
+/// isolated-sentence `Open` units (20 on the dem baseline): a demonstrative unit whose referent
+/// is representable — a named individual or a kind, into a PLAIN-CLASS-typed hole — leaves
+/// `Open`; claim-referent units (pending §2.3 claim candidates) and Σ-restrictored holes
+/// (pending the restrictor-accommodation decision) stay honestly `Open`. Parses over the SAME
+/// overlay + rank replay as the sweep, so the forests are comparable.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/path/ranks.json \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     resolve_document_discourse_close_out -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed discourse close-out; needs snapshot + ranks replay; --ignored --nocapture"]
+fn resolve_document_discourse_close_out() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = match std::fs::read_to_string(&page_path) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("SKIP: {page_path} not found");
+            return;
+        }
+    };
+    eprintln!("discourse close-out over: {page_path}");
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let aug = page_augmentation(&head, &page, &lem);
+    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+
+    // The recency proposer: every in-scope candidate, most-recent-first (the order
+    // `resolve_document` assembles). The kernel's restrictor veto is the whole filter — this is
+    // the deterministic floor; the LLM proposer (§2.4) replaces the ORDER, not the veto.
+    struct Recency;
+    impl Proposer for Recency {
+        fn propose(&self, ctx: &ProposeCtx) -> Vec<usize> {
+            (0..ctx.candidates.len()).collect()
+        }
+    }
+
+    let sentences: Vec<String> = segment_sentences(&page)
+        .into_iter()
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
+    let t = std::time::Instant::now();
+    let resolutions = index.resolve_document(&refs, &lem, &Recency, None);
+    assert_eq!(resolutions.len(), sentences.len());
+
+    let is_dem = |t: &str| {
+        let lt = format!(" {}", t.to_lowercase());
+        [" this ", " that ", " these ", " those "]
+            .iter()
+            .any(|d| lt.contains(d))
+    };
+    let (mut enc, mut amb, mut open_n, mut gap) = (0usize, 0usize, 0usize, 0usize);
+    for (i, (s, r)) in sentences.iter().zip(&resolutions).enumerate() {
+        let mark = if is_dem(s) { " [dem]" } else { "" };
+        match &r.outcome {
+            SentenceOutcome::Encoded(item) => {
+                enc += 1;
+                eprintln!("[unit {i:>2}] ENCODED{mark} «{}»", s.trim());
+                if is_dem(s) {
+                    eprintln!("           sk={}", erase_senses(&pretty_term(item.sem())));
+                }
+            }
+            SentenceOutcome::Ambiguous(pool) => {
+                amb += 1;
+                eprintln!("[unit {i:>2}] AMBIG({}){mark} «{}»", pool.len(), s.trim());
+            }
+            SentenceOutcome::Open(o) => {
+                open_n += 1;
+                eprintln!(
+                    "[unit {i:>2}] OPEN({} hole(s)){mark} «{}»",
+                    o.holes.len(),
+                    s.trim()
+                );
+            }
+            SentenceOutcome::Gap => {
+                gap += 1;
+                eprintln!("[unit {i:>2}] GAP{mark} «{}»", s.trim());
+            }
+        }
+    }
+    eprintln!(
+        "=== DISCOURSE (recency proposer, no ranker, {:.0}s): encoded {enc}, ambiguous {amb}, \
+         open {open_n}, gap {gap} over {} units ===",
+        t.elapsed().as_secs_f64(),
+        sentences.len()
+    );
+    eprintln!("    (isolated-sentence dem baseline: encoded 11, ambiguous 31, open 20, gap 0)");
+
+    // Fail-closed invariants — run-independent. Pooling only ADDS resolved readings to a
+    // sentence's pool: coverage cannot regress (no new Gap), and no isolated-closed unit can
+    // flip to Open.
+    assert_eq!(gap, 0, "pooling must not create grammar gaps");
+    assert!(
+        open_n <= 20,
+        "pooling can only close Open units, never create them (isolated baseline: 20)"
+    );
+    assert_replay_faithful();
 }
 
 fn tag(o: &Outcome) -> &'static str {

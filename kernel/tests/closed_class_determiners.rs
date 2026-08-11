@@ -2593,6 +2593,39 @@ resource lexicon:yonder_obj : lexicon:LexicalEntry {
 }
 "#;
 
+/// A NAMED-ENTITY reading of the SAME surface span "yonder cell line" (a multi-token proper
+/// name, like the UMLS multi-token concepts), so the span carries BOTH a closed reading and the
+/// demonstrative open reading — the §2.2 pooled-competition probe. Chained on TOP of
+/// [`DEMONSTRATIVE_FIXTURE`] only where the competition is under test (the base fixture's tests
+/// assert `closed.is_empty()`).
+const POOLED_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace core      = "urn:eigenius:core";
+resource lexicon:yonder_ne : lexicon:LexicalEntry {
+    core:description = "test: named-entity reading of the demonstrative span (pooled-competition probe).";
+    lexicon:form     = "yonder cell line";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:HeLaSubline, lexicon:sg) );
+    lexicon:sem      = lexicon:hela_s3;
+    lexicon:sem_type = type_expr( lexicon:HeLaSubline );
+    lexicon:sense    = "urn:eigenius:lexicon:hela_s3";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn index_with_pooled_fixture() -> (Arc<Layer>, Parser) {
+    let (base, _) = index_with_demonstratives();
+    let resources =
+        esl::compile_against_layer(POOLED_FIXTURE, &base).expect("pooled fixture compiles");
+    let mut b = LayerBuilder::new("pooled-fixture", Some(base));
+    for r in resources {
+        b.add_resource(r).expect("add pooled resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let index = Parser::build(Arc::clone(&layer));
+    (layer, index)
+}
+
 fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
     let (base, _) = index_over_bootstrap();
     let resources = esl::compile_against_layer(DEMONSTRATIVE_FIXTURE, &base)
@@ -2725,11 +2758,12 @@ fn two_demonstrative_occurrences_are_two_independent_holes() {
 /// LLM proposer to exercise the resolve loop without an LLM.
 struct PickBySurface(&'static str);
 impl Proposer for PickBySurface {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<eigenius_kernel::ontology::Iri> {
+    fn propose(&self, ctx: &ProposeCtx) -> Vec<usize> {
         ctx.candidates
             .iter()
-            .filter(|c| c.surface == self.0)
-            .map(|c| c.iri.clone())
+            .enumerate()
+            .filter(|(_, c)| c.surface() == self.0)
+            .map(|(i, _)| i)
             .collect()
     }
 }
@@ -2742,11 +2776,11 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
     let (_c, open) = index.parse_open("it affects HeLa", &Identity);
     assert_eq!(open.len(), 1, "one open parse");
     let candidates = vec![
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:brca1").unwrap(),
             surface: "BRCA1".into(),
         },
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:hela").unwrap(),
             surface: "HeLa".into(),
         },
@@ -2793,7 +2827,7 @@ fn resolve_document_threads_discourse_across_sentences() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), None);
+    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("The BRCA1 gene"), None);
     assert_eq!(resolved.len(), 2);
     assert!(
         matches!(
@@ -2860,9 +2894,13 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let plain = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), None);
-    let abstained =
-        index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), Some(&Abstain));
+    let plain = index.resolve_document(&doc, &Identity, &PickBySurface("The BRCA1 gene"), None);
+    let abstained = index.resolve_document(
+        &doc,
+        &Identity,
+        &PickBySurface("The BRCA1 gene"),
+        Some(&Abstain),
+    );
     for (p, a) in plain.iter().zip(&abstained) {
         assert_eq!(
             std::mem::discriminant(&p.outcome),
@@ -2872,7 +2910,12 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
         assert!(a.selection.is_none(), "an abstention records no selection");
     }
 
-    let ranked = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"), Some(&First));
+    let ranked = index.resolve_document(
+        &doc,
+        &Identity,
+        &PickBySurface("The BRCA1 gene"),
+        Some(&First),
+    );
     for (r, p) in ranked.iter().zip(&plain) {
         match (&p.outcome, &r.outcome) {
             // A sentence the no-ranker run left ambiguous is now Encoded, with the audit record.
@@ -2907,6 +2950,119 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
             .any(|r| matches!(r.outcome, SentenceOutcome::Ambiguous(_))),
         "an always-choosing ranker leaves no Ambiguous sentence"
     );
+}
+
+#[test]
+fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
+    // Plan §2.3 kind candidates, end to end through the discourse loop: sentence 1 makes the
+    // KIND ⟦genes⟧ discourse-referent (a bare plural — `kind_of(Gene)`); sentence 2's
+    // demonstrative ("yonder gene", hole typed at the restrictor Gene) resolves to it via the
+    // kernel's derived-kind-predication coercion (base(K) ⊑ restrictor). Candidates carry
+    // READABLE surfaces: the kind verbalizes to "Gene", the individual to its layer label.
+    let (_layer, index) = index_with_demonstratives();
+    let doc = ["HeLa affects genes", "yonder gene affects HeLa"];
+
+    // The proposer picks the kind by its verbalized surface → the re-gate closes the parse
+    // with the kind as the referent.
+    let resolved = index.resolve_document(&doc, &PluralS, &PickBySurface("Gene"), None);
+    let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
+        panic!("the demonstrative resolves to the discourse kind ⟦genes⟧");
+    };
+    assert!(
+        pretty_term(s2.sem()).contains("kind_of(Gene)"),
+        "the referent is the KIND, not an invented individual: {}",
+        pretty_term(s2.sem())
+    );
+
+    // A type-wrong candidate — the CellLine individual for the Gene-typed hole — is VETOED by
+    // the re-gate, and the sentence stays honestly Open (fail-closed).
+    let vetoed = index.resolve_document(&doc, &PluralS, &PickBySurface("The HeLa cell line"), None);
+    assert!(
+        matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
+        "a kind-typed hole rejects a class-incompatible individual antecedent"
+    );
+}
+
+#[test]
+fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
+    // Plan §2.2: the reading pool is closed ∪ resolved-open. The span "yonder cell line" carries
+    // BOTH a closed named-entity reading (`hela_s3`, the POOLED_FIXTURE entry) and the
+    // demonstrative open reading; before §2.2 the closed reading silently killed the anaphoric
+    // one (`resolve_with` only ran when closed was empty).
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+
+    let (_layer, index) = index_with_pooled_fixture();
+    let doc = ["HeLa affects BRCA1", "yonder cell line affects BRCA1"];
+
+    // No ranker: BOTH readings survive as Ambiguous — the anaphoric reading (resolved to the
+    // discourse HeLa) sits in the pool beside the named-entity reading.
+    let plain = index.resolve_document(&doc, &Identity, &PickBySurface("The HeLa cell line"), None);
+    let SentenceOutcome::Ambiguous(pool) = &plain[1].outcome else {
+        panic!(
+            "closed + resolved-open must POOL to Ambiguous, got {}",
+            match &plain[1].outcome {
+                SentenceOutcome::Encoded(it) => format!("Encoded({})", pretty_term(it.sem())),
+                SentenceOutcome::Open(_) => "Open".to_string(),
+                SentenceOutcome::Gap => "Gap".to_string(),
+                SentenceOutcome::Ambiguous(_) => unreachable!(),
+            }
+        );
+    };
+    assert_eq!(pool.len(), 2, "exactly the two competing readings");
+    let sems: Vec<String> = pool.iter().map(|it| pretty_term(it.sem())).collect();
+    assert!(
+        sems.iter().any(|s| s.contains("hela_s3")),
+        "the closed named-entity reading is in the pool: {sems:?}"
+    );
+    assert!(
+        sems.iter()
+            .any(|s| s.contains("hela") && !s.contains("hela_s3")),
+        "the resolved anaphoric reading (discourse HeLa) is in the pool: {sems:?}"
+    );
+
+    // An unresolvable discourse (no antecedent proposed) leaves the closed reading alone — a
+    // pool of one, Encoded, never a false Open.
+    let alone = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"), None);
+    let SentenceOutcome::Encoded(only) = &alone[1].outcome else {
+        panic!("with the anaphoric reading unresolvable, the closed reading encodes alone");
+    };
+    assert!(pretty_term(only.sem()).contains("hela_s3"));
+    assert!(
+        alone[1].selection.is_none(),
+        "a pool of one records no selection"
+    );
+
+    // A ranker collapses the pooled competition and the audit record counts BOTH readings.
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first candidate (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+    let ranked = index.resolve_document(
+        &doc,
+        &Identity,
+        &PickBySurface("The HeLa cell line"),
+        Some(&First),
+    );
+    let SentenceOutcome::Encoded(_) = &ranked[1].outcome else {
+        panic!("a choosing ranker collapses the pooled competition");
+    };
+    let sel = ranked[1]
+        .selection
+        .as_ref()
+        .expect("the pooled selection carries its audit record");
+    assert_eq!(sel.candidates, 2, "both pooled readings competed");
 }
 
 #[test]
@@ -3256,7 +3412,7 @@ fn in_process_pipeline_encodes_a_document_end_to_end() {
         Arc::clone(&base),
         &Identity,
         &NoAbbreviationProposer,
-        &PickBySurface("hela"),
+        &PickBySurface("The HeLa cell line"),
     );
     let enc = pipeline.encode(doc);
 
@@ -3414,11 +3570,11 @@ fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
     let (_closed, open) = index.parse_open("it affects HeLa", &Identity);
     assert_eq!(open.len(), 1, "one open parse with one referent hole");
     let candidates = vec![
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:brca1").unwrap(),
             surface: "BRCA1".into(),
         },
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:hela").unwrap(),
             surface: "HeLa".into(),
         },

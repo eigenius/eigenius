@@ -753,28 +753,73 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             }
         }
 
-        // Fallthrough: infer type and compare under subtyping
-        // (`inferred <: expected`). For everything except sized
-        // inductive parameters, `subtype_of` reduces to `eq_nf`.
-        // The current TSO is passed through so bounded size binders
-        // in scope can witness subtyping between neutral sizes.
-        (e, t) => {
-            let t1 = check_infer(ctx, e)?;
-            // CN-as-types subsumption (Luo 2012; D62 §8.6): a value of a subclass
-            // type checks against its superclass type — the inclusion-coercion
-            // fragment of coercive subtyping, honoring the ontology's declared
-            // `core:subclass_of` lattice as the `EigonClass` subtype rule. This
-            // relaxation lives ONLY at the directional check boundary; definitional
-            // equality (`eq_nf`) stays exact.
-            if let (Val::EigonClass(sub), Val::EigonClass(sup)) = (&t1, t) {
-                if let Some(layer) = &ctx.layer {
-                    if layer.is_subclass_of(sub, sup) {
-                        return Ok(());
-                    }
-                }
+        // Kind term against a class type — the **derived-kind-predication coercion**
+        // (Chierchia's ∩, D64 §2.3 kind antecedents): `ontology:kind_of(K) : Entity`
+        // by its axiom type, but in CHECK mode it also coerces into a class position
+        // `C` when `K`'s base class is a (reflexive-transitive) subclass of `C` —
+        // "these lines" may resolve to the kind ⟦MSI cell lines⟧ exactly because that
+        // kind's base class is `CellLine`. This mirrors the categorial side, which
+        // already indexes a bare-kind NP by `base(K)` so it sits in the subsumption
+        // lattice (`LexicalIndex::kind_raised_nps`); without this arm the sem-level
+        // check disagreed with the grammar's own indexing. Like the CN-as-types arm
+        // in [`check_by_inference`], the relaxation is check-mode-only coercive
+        // subtyping — inference still gives `Entity`, and definitional equality stays
+        // exact. The coercion only ADDS acceptances: on a miss (base not a subclass,
+        // or not peelable to a class) the term falls back to plain inference, so
+        // `kind_of(K) : Entity` keeps typing through the axiom's codomain as before.
+        (Exp::App(f, k), Val::EigonClass(sup)) if is_kind_of_axiom(f) => match kind_base_class(k) {
+            Some(base)
+                if base == sup
+                    || ctx
+                        .layer
+                        .as_ref()
+                        .is_some_and(|l| l.is_subclass_of(base, sup)) =>
+            {
+                Ok(())
             }
-            subtype_of_with_hyps(ctx.rho.len(), &t1, t, &ctx.size_tso)
+            _ => check_by_inference(ctx, exp, typ),
+        },
+
+        // Fallthrough: infer type and compare under subtyping.
+        (e, t) => check_by_inference(ctx, e, t),
+    }
+}
+
+/// Infer type and compare under subtyping (`inferred <: expected`). For everything except sized
+/// inductive parameters, `subtype_of` reduces to `eq_nf`. The current TSO is passed through so
+/// bounded size binders in scope can witness subtyping between neutral sizes.
+fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckError> {
+    let t1 = check_infer(ctx, e)?;
+    // CN-as-types subsumption (Luo 2012; D62 §8.6): a value of a subclass
+    // type checks against its superclass type — the inclusion-coercion
+    // fragment of coercive subtyping, honoring the ontology's declared
+    // `core:subclass_of` lattice as the `EigonClass` subtype rule. This
+    // relaxation lives ONLY at the directional check boundary; definitional
+    // equality (`eq_nf`) stays exact.
+    if let (Val::EigonClass(sub), Val::EigonClass(sup)) = (&t1, t) {
+        if let Some(layer) = &ctx.layer {
+            if layer.is_subclass_of(sub, sup) {
+                return Ok(());
+            }
         }
+    }
+    subtype_of_with_hyps(ctx.rho.len(), &t1, t, &ctx.size_tso)
+}
+
+/// Is `e` the `ontology:kind_of` nominalization axiom (Chierchia's ∩, `Set -> Entity`)?
+/// Foundational-vocabulary reference, same convention as `core:is_a` in `eval`.
+fn is_kind_of_axiom(e: &Exp) -> bool {
+    matches!(e, Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of")
+}
+
+/// The base class of a kind's underlying type: peel `Σx:C. R` (recursively, for stacked
+/// refinements) down to an `EigonClass`. `None` when the base is not a class (a neutral
+/// or bound-variable base — the coercion arm then falls through to plain inference).
+fn kind_base_class(k: &Exp) -> Option<&Iri> {
+    match k {
+        Exp::EigonClass(i) => Some(i),
+        Exp::Sig(_, base, _) => kind_base_class(base),
+        _ => None,
     }
 }
 
@@ -1760,6 +1805,85 @@ mod tests {
         assert!(
             check(&mut ctx(), &bare, &class("urn:eigenius:example:Gene")).is_err(),
             "empty is_a inhabits no specific class (fail-closed)"
+        );
+    }
+
+    #[test]
+    fn check_kind_coerces_into_its_base_class() {
+        // The derived-kind-predication coercion (D64 §2.3): `kind_of(K)` check-mode-coerces
+        // into class `C` iff `base(K) ⊑ C`. Check mode ONLY — inference still gives the
+        // axiom's codomain (`Entity`), so this is the same inclusion-coercion shape as the
+        // CN-as-types arm.
+        let kind_of = |k: Exp| {
+            Exp::App(
+                Box::new(Exp::EigonAxiom(
+                    Iri::parse("urn:eigenius:ontology:kind_of").unwrap(),
+                )),
+                Box::new(k),
+            )
+        };
+        let cls = |s: &str| Exp::EigonClass(Iri::parse(s).unwrap());
+        let class = |s: &str| Val::EigonClass(Iri::parse(s).unwrap());
+
+        // Reflexive (layer-free): the kind of Gene coerces into Gene…
+        let gene = "urn:eigenius:example:Gene";
+        assert!(check(&mut ctx(), &kind_of(cls(gene)), &class(gene)).is_ok());
+        // …and a REFINED kind peels its Σ spine to the same base ("MSI cell lines" is
+        // still a cell-line kind).
+        let refined = Exp::Sig(
+            Patt::Var("x".to_string()),
+            Box::new(cls(gene)),
+            Box::new(Exp::One),
+        );
+        assert!(check(&mut ctx(), &kind_of(refined), &class(gene)).is_ok());
+        // An unrelated class is vetoed — the restrictor typing stays real.
+        assert!(check(
+            &mut ctx(),
+            &kind_of(cls(gene)),
+            &class("urn:eigenius:example:Other")
+        )
+        .is_err());
+        // A base that is not a class (bound variable) falls through — no silent acceptance.
+        assert!(check(
+            &mut ctx(),
+            &kind_of(Exp::Var("A".to_string())),
+            &class(gene)
+        )
+        .is_err());
+
+        // Subclass acceptance via the layer lattice: kind_of(Dog) coerces into Animal.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut builder = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            builder.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut domain = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            domain.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(domain.build(crate::layer::LayerStorage::in_memory()));
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        assert!(
+            check(
+                &mut c,
+                &kind_of(cls("urn:eigenius:example:Dog")),
+                &class("urn:eigenius:example:Animal")
+            )
+            .is_ok(),
+            "a subclass kind coerces into the superclass position"
+        );
+        assert!(
+            check(
+                &mut c,
+                &kind_of(cls("urn:eigenius:example:Animal")),
+                &class("urn:eigenius:example:Dog")
+            )
+            .is_err(),
+            "the coercion is directional — a superclass kind does not narrow"
         );
     }
 

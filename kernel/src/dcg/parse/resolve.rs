@@ -26,7 +26,7 @@ use crate::dcg::reading_ranker::{
     DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
 };
 use crate::dcg::skeleton::skeleton_of;
-use crate::dcg::verbalize::{unit_sense_names, verbalize, Vb};
+use crate::dcg::verbalize::{resource_label, unit_sense_names, verbalize, Vb};
 
 impl Parser {
     /// Resolve an [`OpenParse`] by substituting each hole with a proposed antecedent and
@@ -82,7 +82,7 @@ impl Parser {
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
     /// and re-gating through the kernel (D64 §4, the resolve loop). For each hole the proposer
     /// is asked, given the sentence and the in-scope `candidates`, for a **ranked** list of
-    /// antecedent IRIs; the loop searches those assignments (depth-first, bounded by the
+    /// candidate indices; the loop searches those assignments (depth-first, bounded by the
     /// proposer's list lengths) and returns the first whole-parse assignment the kernel re-gates
     /// to a closed `Prop`. **Fail-closed**: a hole the proposer leaves empty, or whose every
     /// candidate the kernel vetoes (type mismatch), yields `None` — no committed parse. The
@@ -103,7 +103,8 @@ impl Parser {
             });
             let antes: Vec<Exp> = picks
                 .iter()
-                .filter_map(|iri| self.antecedent_exp(iri))
+                .filter_map(|&i| candidates.get(i)) // out-of-range ⇒ ignored (untrusted input)
+                .filter_map(|c| self.antecedent_exp(c))
                 .collect();
             if antes.is_empty() {
                 return None; // unresolvable / unknown antecedent ⇒ fail closed
@@ -137,36 +138,46 @@ impl Parser {
         None
     }
 
-    /// The antecedent term for a chain-entity IRI: an `EigonResource` (named entity), `EigonClass`
-    /// (a class), or `EigonAxiom`, per the entity's kind. `None` if the IRI does not resolve in
-    /// the chain (so a hallucinated antecedent fails closed before re-gating).
-    fn antecedent_exp(&self, iri: &Iri) -> Option<Exp> {
-        self.grammar.layer.resolve(iri)?;
-        Some(super::super::lexicon::resolve_sem(&self.grammar.layer, iri))
+    /// The antecedent term for a proposed [`Candidate`]: an individual resolves through the
+    /// chain to its sem (`EigonResource`/`EigonClass`/`EigonAxiom`, per the entity's kind —
+    /// `None` if the IRI does not resolve, so a stale candidate fails closed before re-gating);
+    /// a kind IS its harvested `kind_of(…)` term.
+    fn antecedent_exp(&self, cand: &Candidate) -> Option<Exp> {
+        match cand {
+            Candidate::Individual { iri, .. } => {
+                self.grammar.layer.resolve(iri)?;
+                Some(super::super::lexicon::resolve_sem(&self.grammar.layer, iri))
+            }
+            Candidate::Kind { term, .. } => Some(term.clone()),
+        }
     }
 
     /// **Stage C — the discourse resolve loop** (D64 §4, `docs/design/d64-llm-anaphora-resolution.md`).
-    /// Parse the document's `sentences` IN ORDER, threading a growing candidate set of antecedents. For
-    /// each sentence: parse; if the best full parse is already CLOSED keep it; if it is OPEN (carries
-    /// `EntityRef` referent holes — a pronoun / "these X"), resolve every hole against the in-scope
-    /// `candidates` via [`Self::resolve_with`] (the untrusted `proposer` suggests, the kernel re-gates);
-    /// a gap or unresolvable hole yields `None` (**fail-closed**). Then harvest the resolved sentence's
-    /// referenced named entities into the candidate set — **most-recent-first** — for later sentences.
-    /// Returns one resolved (closed) [`Item`] per input sentence.
+    /// Parse the document's `sentences` IN ORDER, threading a growing candidate set of antecedents.
+    ///
+    /// **Pooled competition** (plan §2.2): each sentence's reading pool is its CLOSED readings ∪
+    /// the open readings whose holes RESOLVE against the discourse — every open parse is tried via
+    /// [`Self::resolve_with`] (the untrusted `proposer` suggests, the kernel re-gates), so a closed
+    /// reading no longer silently kills an anaphoric one, and a reading whose holes cannot resolve
+    /// drops out (the kernel veto acting as a selection filter). A pool of one is `Encoded`; a pool
+    /// of several goes to the `ranker` (below); an empty pool is `Open` (holes but no resolution —
+    /// **fail-closed**, never a wrong closed parse) or `Gap`. Then harvest the sentence's discourse
+    /// referents — named entities AND kinds ([`Self::discourse_candidates`]) — into the candidate
+    /// set, **most-recent-first**, for later sentences.
     ///
     /// This is the piece D64 §4 leaves to the caller: the resolver primitives already exist, but nothing
     /// assembled candidates or threaded the discourse. The `proposer` is impl-agnostic — a deterministic
     /// mock in tests, the live `AnthropicProposer` (`use-llm`) end to end, or the orchestrator bridge
-    /// (Phase 2). Recency is the only salience signal we model; the proposer does the ranking (§4). First
-    /// cut: candidate surfaces are the entity IRI local names (a readable label is a later refinement),
-    /// and only PRIOR-discourse entities are candidates (intra-sentential binding is a refinement).
+    /// (Phase 2). Recency is the only salience signal we model; the proposer does the ranking (§4).
+    /// Only PRIOR-discourse referents are candidates (intra-sentential binding is a refinement).
     ///
-    /// **Reading selection** (D63 `docs/notes/d63-reading-selection.md`): when a sentence has SEVERAL
-    /// closed readings and a `ranker` is installed, the ranker chooses one — in document context (the
+    /// **Reading selection** (D63 `docs/notes/d63-reading-selection.md`): when the pool holds SEVERAL
+    /// readings and a `ranker` is installed, the ranker chooses one — in document context (the
     /// surrounding text + the glosses of prior selections) — and the sentence becomes `Encoded` with a
     /// [`SelectionOutcome`] audit record. No ranker, or a ranker abstention, keeps the fail-open
-    /// `Ambiguous` outcome. There is no kernel veto on this choice (every candidate type-checks); the
-    /// audit record + the offline faithfulness gate are the controls.
+    /// `Ambiguous` outcome. There is no kernel veto on this choice (every pooled candidate
+    /// type-checks — the resolved-open ones through the re-gate); the audit record + the offline
+    /// faithfulness gate are the controls.
     pub fn resolve_document(
         &self,
         sentences: &[&str],
@@ -179,34 +190,41 @@ impl Parser {
         let mut prior: Vec<PriorSelection> = Vec::new();
         let mut out = Vec::with_capacity(sentences.len());
         for (ordinal, s) in sentences.iter().enumerate() {
-            let (mut closed, open) = self.parse_open(s, lemmatizer);
+            let (closed, open) = self.parse_open(s, lemmatizer);
+            // Pool = closed ∪ resolved-open, deduplicated by sem: two open parses resolving to
+            // the same closed proposition (or duplicating a closed reading) are ONE reading.
+            let mut pool = closed;
+            let mut seen: BTreeSet<String> = pool.iter().map(|it| pretty_term(it.sem())).collect();
+            for o in &open {
+                if let Some(item) = self.resolve_with(o, s, &candidates, proposer) {
+                    if seen.insert(pretty_term(item.sem())) {
+                        pool.push(item);
+                    }
+                }
+            }
             let mut selection = None;
-            let outcome = if closed.len() == 1 {
-                SentenceOutcome::Encoded(closed.pop().expect("len==1"))
-            } else if closed.len() > 1 {
+            let outcome = if pool.len() == 1 {
+                SentenceOutcome::Encoded(pool.pop().expect("len==1"))
+            } else if pool.len() > 1 {
                 match ranker
-                    .and_then(|r| self.select_reading(r, &document, s, lemmatizer, &prior, &closed))
+                    .and_then(|r| self.select_reading(r, &document, s, lemmatizer, &prior, &pool))
                 {
                     Some((idx, sel)) => {
-                        let item = closed.remove(idx);
+                        let item = pool.remove(idx);
                         selection = Some(sel);
                         SentenceOutcome::Encoded(item)
                     }
-                    None => SentenceOutcome::Ambiguous(closed),
+                    None => SentenceOutcome::Ambiguous(pool),
                 }
             } else if let Some(o) = open.first() {
-                // OPEN: try to resolve its referent holes against the discourse; unresolvable ⇒ stays open.
-                match self.resolve_with(o, s, &candidates, proposer) {
-                    Some(item) => SentenceOutcome::Encoded(item),
-                    None => SentenceOutcome::Open(o.clone()),
-                }
+                SentenceOutcome::Open(o.clone())
             } else {
                 SentenceOutcome::Gap
             };
             // Thread the discourse: the chosen reading's gloss joins the ranker's context for the later
-            // sentences (sequential consistency), and its named entities join the anaphora candidate
-            // set (most-recent-first). Gloss threading only runs with a ranker installed — without one
-            // nothing consumes it.
+            // sentences (sequential consistency), and its discourse referents join the anaphora
+            // candidate set (most-recent-first). Gloss threading only runs with a ranker installed —
+            // without one nothing consumes it.
             if ranker.is_some() {
                 if let SentenceOutcome::Encoded(item) = &outcome {
                     let gloss = match &selection {
@@ -222,13 +240,103 @@ impl Parser {
                 _ => None,
             };
             if let Some(sem) = harvest {
-                let mut fresh = entity_candidates(sem);
+                let mut fresh = self.discourse_candidates(s, lemmatizer, sem);
+                // Most-recent-first WITHOUT duplicates: a referent re-mentioned now moves to the
+                // front (recency is the salience signal); its older entry is dropped.
+                let fresh_keys: BTreeSet<String> = fresh.iter().map(Candidate::key).collect();
+                candidates.retain(|c| !fresh_keys.contains(&c.key()));
                 fresh.append(&mut candidates);
                 candidates = fresh;
             }
             out.push(SentenceResolution { outcome, selection });
         }
         out
+    }
+
+    /// The discourse-antecedent candidates one resolved sem contributes (D64 §4, plan §2.3): every
+    /// `EigonResource` — a committed named entity — and every CLOSED `ontology:kind_of(…)` subterm
+    /// — a kind this sentence makes discourse-referent ("…genome-scale shRNA **libraries**" →
+    /// "These libraries…") — in first-mention order, deduplicated. Surfaces are READABLE: an
+    /// individual's layer label ([`resource_label`], falling back to the IRI local name), a kind's
+    /// verbalized gloss over this sentence's own sense names. A `kind_of` subterm mentioning a
+    /// variable bound outside it is skipped — it is not a self-standing referent (and could never
+    /// re-gate closed; the closedness walk is a pre-filter, the empty-Γ re-gate stays the
+    /// authority). Landed CLAIMS as antecedents ("These findings…") are pending Stage 3's
+    /// incremental landing — a unit whose referent is a prior claim stays honestly `Open`.
+    fn discourse_candidates(
+        &self,
+        sentence: &str,
+        lemmatizer: &dyn Lemmatizer,
+        sem: &Exp,
+    ) -> Vec<Candidate> {
+        let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
+        let vb = Vb {
+            names: &names,
+            layer: &self.grammar.layer,
+        };
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        self.walk_candidates(sem, &vb, &mut out, &mut seen);
+        out
+    }
+
+    fn walk_candidates(
+        &self,
+        e: &Exp,
+        vb: &Vb,
+        out: &mut Vec<Candidate>,
+        seen: &mut BTreeSet<String>,
+    ) {
+        if let Exp::App(f, k) = e {
+            if matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of")
+                && closed_under(e, &mut Vec::new())
+            {
+                let cand = Candidate::Kind {
+                    term: e.clone(),
+                    surface: verbalize(e, vb),
+                };
+                if seen.insert(cand.key()) {
+                    out.push(cand);
+                }
+                // Keep walking INSIDE the kind: a refined kind's restrictor mentions further
+                // referents ("data sets **for genes**…" — the inner kind is anaphorable too).
+                self.walk_candidates(k, vb, out, seen);
+                return;
+            }
+        }
+        match e {
+            Exp::EigonResource(res) => {
+                if let Some(iri) = res.id() {
+                    let surface = resource_label(iri, &self.grammar.layer).unwrap_or_else(|| {
+                        iri.as_str().rsplit(':').next().unwrap_or("").to_string()
+                    });
+                    let cand = Candidate::Individual {
+                        iri: iri.clone(),
+                        surface,
+                    };
+                    if seen.insert(cand.key()) {
+                        out.push(cand);
+                    }
+                }
+            }
+            Exp::App(a, b)
+            | Exp::Arrow(a, b)
+            | Exp::Times(a, b)
+            | Exp::Pair(a, b)
+            | Exp::Pi(_, a, b)
+            | Exp::Sig(_, a, b)
+            | Exp::Ann(a, b) => {
+                self.walk_candidates(a, vb, out, seen);
+                self.walk_candidates(b, vb, out, seen);
+            }
+            Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => self.walk_candidates(b, vb, out, seen),
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+                for a in args {
+                    self.walk_candidates(a, vb, out, seen);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Present a sentence's surviving readings to the (untrusted) `ranker` — grouped by skeleton,
@@ -317,7 +425,8 @@ impl Parser {
 pub enum SentenceOutcome {
     /// A single closed, resolved proposition — the encoded knowledge (`item.sem()` is the `Prop`).
     Encoded(Item),
-    /// Multiple closed parses: the sentence parses but carries unresolved sense/structural ambiguity.
+    /// Multiple readings survive — closed parses and/or discourse-resolved open parses (the §2.2
+    /// pool): the sentence parses but carries unresolved sense/structural/referential ambiguity.
     Ambiguous(Vec<Item>),
     /// Parsed but carries an unresolved referent hole — the anaphora proposer found no antecedent.
     Open(OpenParse),
@@ -357,54 +466,79 @@ pub struct SelectionOutcome {
     pub candidates: usize,
 }
 
-/// The named-entity antecedent candidates a resolved sem references — every `EigonResource` IRI (a
-/// committed named entity), as a [`Candidate`] whose surface is the IRI local name (the part after the
-/// last `:`), in first-seen order. Used by [`Parser::resolve_document`] to build the discourse
-/// candidate set. (Kinds / prior propositions as antecedents are a later refinement.)
-fn entity_candidates(sem: &Exp) -> Vec<Candidate> {
-    fn walk(e: &Exp, out: &mut Vec<Candidate>, seen: &mut BTreeSet<Iri>) {
-        match e {
-            Exp::EigonResource(res) => {
-                if let Some(iri) = res.id() {
-                    if seen.insert(iri.clone()) {
-                        let surface = iri.as_str().rsplit(':').next().unwrap_or("").to_string();
-                        out.push(Candidate {
-                            iri: iri.clone(),
-                            surface,
-                        });
-                    }
-                }
+/// Is `e` closed under the binders WITHIN it (no variable bound outside)? The harvest
+/// pre-filter for kind candidates — a subterm mentioning an enclosing binder's variable is not a
+/// self-standing discourse referent. Unhandled `Exp` variants pass (the empty-Γ re-gate in
+/// [`Parser::resolve_open`] remains the authority on closedness).
+fn closed_under(e: &Exp, bound: &mut Vec<String>) -> bool {
+    fn bind(p: &Patt, bound: &mut Vec<String>) -> usize {
+        match p {
+            Patt::Var(n) => {
+                bound.push(n.clone());
+                1
             }
-            Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
-                walk(a, out, seen);
-                walk(b, out, seen);
-            }
-            Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Ann(a, b) => {
-                walk(a, out, seen);
-                walk(b, out, seen);
-            }
-            Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => walk(b, out, seen),
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-                for a in args {
-                    walk(a, out, seen);
-                }
-            }
-            _ => {}
+            Patt::Pair(a, b) => bind(a, bound) + bind(b, bound),
+            Patt::Unit => 0,
         }
     }
-    let mut out = Vec::new();
-    let mut seen = BTreeSet::new();
-    walk(sem, &mut out, &mut seen);
-    out
+    match e {
+        Exp::Var(v) => bound.iter().any(|b| b == v),
+        Exp::Lam(p, b) => {
+            let n = bind(p, bound);
+            let ok = closed_under(b, bound);
+            bound.truncate(bound.len() - n);
+            ok
+        }
+        Exp::Pi(p, a, b) | Exp::Sig(p, a, b) => {
+            let ok_a = closed_under(a, bound);
+            let n = bind(p, bound);
+            let ok_b = closed_under(b, bound);
+            bound.truncate(bound.len() - n);
+            ok_a && ok_b
+        }
+        Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) | Exp::Ann(a, b) => {
+            closed_under(a, bound) && closed_under(b, bound)
+        }
+        Exp::Fst(x) | Exp::Snd(x) => closed_under(x, bound),
+        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+            args.iter().all(|a| closed_under(a, bound))
+        }
+        _ => true,
+    }
 }
 
-/// A candidate antecedent for anaphora resolution (D64 §4): an in-scope committed chain entity,
-/// with its surface form for the proposer to rank against. The resolver assembles these from the
-/// discourse context; the (untrusted) [`Proposer`] ranks/selects, and the kernel re-gates.
+/// A candidate antecedent for anaphora resolution (D64 §4, plan §2.3), with its READABLE surface
+/// form for the proposer to rank against. The resolver assembles these from the discourse context
+/// ([`Parser::resolve_document`]); the (untrusted) [`Proposer`] selects among them by index, and
+/// the kernel re-gates. A third referent kind — a LANDED CLAIM ("These findings…") — is pending
+/// Stage 3's incremental landing: its resolution semantics (claim-resource typing, plural/group
+/// reference to a SET of claims) are undecided, so no variant exists yet and such units stay
+/// honestly `Open`.
 #[derive(Clone, Debug)]
-pub struct Candidate {
-    pub iri: Iri,
-    pub surface: String,
+pub enum Candidate {
+    /// A committed named entity — an in-scope chain individual.
+    Individual { iri: Iri, surface: String },
+    /// A kind made discourse-referent by a prior sentence — a closed `ontology:kind_of(…)` term
+    /// (possibly Σ-refined: ⟦MSI cell lines⟧). The kernel's derived-kind-predication coercion
+    /// lets it inhabit a restrictor-typed hole iff its base class subsumes into the restrictor.
+    Kind { term: Exp, surface: String },
+}
+
+impl Candidate {
+    /// The surface form presented to the proposer.
+    pub fn surface(&self) -> &str {
+        match self {
+            Candidate::Individual { surface, .. } | Candidate::Kind { surface, .. } => surface,
+        }
+    }
+
+    /// The dedup/recency key: identity for the discourse candidate set.
+    fn key(&self) -> String {
+        match self {
+            Candidate::Individual { iri, .. } => format!("i:{}", iri.as_str()),
+            Candidate::Kind { term, .. } => format!("k:{}", pretty_term(term)),
+        }
+    }
 }
 
 /// The context handed to a [`Proposer`] for one referent hole: the sentence, the hole (its type
@@ -416,10 +550,13 @@ pub struct ProposeCtx<'a> {
 }
 
 /// The **untrusted** anaphora proposer (D64 §4): given a hole and the in-scope candidates, return
-/// a **ranked** list of antecedent IRIs (most-preferred first; empty ⇒ unresolvable). It only
-/// *suggests*; the kernel re-gates every suggestion ([`Parser::resolve_open`]). Impls: a
-/// deterministic mock (tests), a feature-gated live LLM client (`use-llm`), and the production
-/// orchestrator bridge — all behind this one trait, so the algorithm is impl-agnostic.
+/// a **ranked** list of indices into `ctx.candidates` (most-preferred first; empty ⇒ unresolvable;
+/// out-of-range indices are ignored). The proposer only ever *selects among the assembled
+/// candidates* — it cannot introduce an antecedent of its own, which is what lets a kind (a term,
+/// not an IRI) be a candidate at all — and the kernel re-gates every selection
+/// ([`Parser::resolve_open`]). Impls: a deterministic mock (tests), a feature-gated live LLM
+/// client (`use-llm`), and the production orchestrator bridge — all behind this one trait, so the
+/// algorithm is impl-agnostic.
 pub trait Proposer {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<Iri>;
+    fn propose(&self, ctx: &ProposeCtx) -> Vec<usize>;
 }
