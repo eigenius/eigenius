@@ -49,8 +49,8 @@ per-antecedent before application (note §2a; subclass antecedents accepted via
 green. Slice 3 (lexicon swap + reseed + migration) DONE `2026-08-11`: 8 entries swapped, reseed →
 `wordnet-umls-aligned-2026-08-11-dem`; ranks replayed 62/0; open 2→20, readings 761→226; 19 pins
 re-migrated (hits 60/62 HOLDS); selection re-drawn (21/31 reading-correct, invalid 0); both
-baselines re-derived. Ledger: 74 new-unadjudicated rows pending a wave (hole types invisible to
-skeletons — note §5a, incl. the future instrument fix). **Active step: slice 4 — discourse
+baselines re-derived. Typed-skeleton instrument LANDED same day (note §5a: `OpenParse::skeleton` prints hole
+types; skeletons 139→144 = recovered structure; ledger + pins cover all 144 — no wave). **Active step: slice 4 — discourse
 close-out: DB-backed `resolve_document` over the page with the flipped-Open demonstrative units
 resolving; needs plan §2.2 (pooled closed∪resolved-open competition) + §2.3 (kind/claim
 candidates).** Stage 3's grader track (3.3 `DerivedClaimGrader`) can run in parallel.

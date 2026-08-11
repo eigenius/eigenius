@@ -183,17 +183,24 @@ discovered:
    their verified skeletons, the 2 documented misses kept — **expected-hits 60/62 holds**;
    ceilings re-ratcheted 1900→500 / 400→250. Selection re-drawn (eligible 46→31 — flipped-Open
    units left the pool): chose 31/31, reading-correct 21/31, invalid 0; 3 novel decisions
-   adjudicated (one CORRECTED a prior wrong pick). Skeleton ledger: 45 kept + 20 migrated + 55
-   stale dropped + **74 new-unadjudicated pending a wave** (see §5a).
+   adjudicated (one CORRECTED a prior wrong pick). Skeleton ledger: rebuilt from the pre-migration
+   commit; with the typed instrument (§5a) ledger + pins cover ALL skeletons — no wave.
 
-   **§5a — migration finding: hole types are invisible to skeletons.** A demonstrative NP's
-   internal restrictor structure ("data sets **for genes that…**") now lives in the hole's TYPE
-   (`HoleInfo.ty`); the carrier's `Exp::Lam` binders are untyped, so `pretty_term`/skeletons
-   cannot print it. Consequences: (a) pins on such units discriminate attachment *inside* the
-   demonstrative NP less than before (recorded in the affected pins' notes); (b) most old ledger
-   rows for these units could not be carried mechanically — hence the 74-row wave. Instrument
-   fix, future: print each hole's type alongside the skeleton (the `OpenParse.holes` carry it) in
-   the dump/ledger keys.
+   **§5a — migration finding: hole types are invisible to skeletons — FIXED same day.** A
+   demonstrative NP's internal restrictor structure ("data sets **for genes that…**") lives in
+   the hole's TYPE (`HoleInfo.ty`); the carrier's `Exp::Lam` binders are untyped, so the plain
+   sem skeleton cannot print it — pins stopped discriminating attachment *inside* the NP and
+   ledger rows could not be carried. The fix: **`OpenParse::skeleton()`** prints
+   `λ(h : ⌈T⌉). ⌈body⌉` through ONE `erase_senses` pass (binder names and body occurrences
+   co-normalize); the harness keys open readings on it. Results: skeletons 139 → **144** (the 5
+   splits are RECOVERED structure — open readings previously merged though differing in hole
+   type); the 19 re-pins re-keyed mechanically by untyped projection; the one genuine split
+   ("We analysed these data sets…" — FIVE attachment variants inside the NP, now visible)
+   adjudicated to the fully-nested restrictor matching the pre-migration verified pin verbatim;
+   the ledger rebuilt from the pre-migration commit via ι/typed detransforms. **Coverage is
+   complete: 84 ledger rows + the 60 pinned correct skeletons cover all 144 — the provisional
+   "74-row wave" was an artifact of the untyped instrument (and of counting pin-covered
+   skeletons as ledger debt) and is discharged.**
 4. **Discourse close-out** — with §2.2/§2.3 in place: the corpus page through DB-backed
    `resolve_document`, demonstrative units resolving to entity/kind antecedents; claim-referent
    units documented as pending §2.3's claim candidates.

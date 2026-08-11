@@ -209,6 +209,38 @@ pub struct OpenParse {
     pub holes: Vec<HoleInfo>,
 }
 
+impl OpenParse {
+    /// The open parse's **typed skeleton**: `λ(h₀ : ⌈T₀⌉)…. ⌈body⌉`, each piece sense-erased by
+    /// the ONE erasure (`crate::dcg::skeleton`). The plain `skeleton_of(item.sem())` prints the
+    /// untyped λ-chain — but a demonstrative NP's internal restrictor structure lives in the
+    /// hole's TYPE (`Exp::Lam` binders are untyped; the type is carried by [`HoleInfo`] and the
+    /// Π the gate checks), so the untyped form cannot discriminate readings that differ only
+    /// inside the NP ("data sets **for genes that…**" nested vs not —
+    /// `d64-demonstratives-as-holes.md` §5a). Pins and the adjudication ledger key OPEN readings
+    /// on THIS form.
+    pub fn skeleton(&self) -> String {
+        use crate::dcg::pretty::pretty_term;
+        use crate::dcg::skeleton::erase_senses;
+        // Peel exactly the holes' λ-binders off the sem; the binder names are the hole vars.
+        let mut body = self.item.sem();
+        for _ in &self.holes {
+            match body {
+                Exp::Lam(_, b) => body = b.as_ref(),
+                _ => break, // malformed carrier — fall through with what remains
+            }
+        }
+        // ONE raw string, ONE erasure pass: `erase_senses` fuses sense-erasure with hole-name
+        // α-normalization, so binder names (first appearance, in type position) and their body
+        // occurrences must go through the same pass to co-normalize.
+        let mut raw = String::new();
+        for h in &self.holes {
+            raw.push_str(&format!("λ({} : {}). ", h.var, pretty_term(&h.ty)));
+        }
+        raw.push_str(&pretty_term(body));
+        erase_senses(&raw)
+    }
+}
+
 /// The outcome of classifying a full-span candidate (see [`Parser::classify_felicitous`]).
 pub(super) enum FelicitousOutcome {
     Closed(Item),

@@ -758,10 +758,19 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
             if open.is_empty() {
                 Outcome::GrammarGap
             } else {
-                let open_items: Vec<Item> = open.iter().map(|o| o.item.clone()).collect();
+                // TYPED open skeletons (`OpenParse::skeleton`, d64-demonstratives-as-holes.md
+                // §5a): the hole's restrictor lives in its TYPE, so the untyped sem skeleton
+                // cannot discriminate readings differing inside a demonstrative NP. Pins and the
+                // ledger key open readings on the typed form.
+                let skels: Vec<String> = open
+                    .iter()
+                    .map(|o| o.skeleton())
+                    .collect::<BTreeSet<String>>()
+                    .into_iter()
+                    .collect();
                 Outcome::Open {
                     holes: open.iter().map(|o| o.holes.len()).max().unwrap_or(0),
-                    skeletons: skeleton_set(&open_items),
+                    skeletons: skels,
                 }
             }
         }

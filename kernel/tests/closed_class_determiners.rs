@@ -2671,6 +2671,31 @@ fn demonstrative_hole_accepts_a_subclass_antecedent() {
     );
 }
 
+/// The TYPED open skeleton (`d64-demonstratives-as-holes.md` §5a): the hole's restrictor lives in
+/// `HoleInfo.ty`, not the term (`Lam` binders are untyped), so the plain sem skeleton cannot
+/// discriminate readings differing only inside the demonstrative NP. `OpenParse::skeleton` prints
+/// `λ(h : ⌈T⌉). ⌈body⌉` — pins and the adjudication ledger key open readings on this form.
+#[test]
+fn open_skeleton_prints_the_hole_type() {
+    let (_layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects BRCA1", &Identity);
+    assert!(!open.is_empty());
+    let sk = open[0].skeleton();
+    assert!(
+        sk.contains(" : CellLine"),
+        "the typed skeleton shows the restrictor: {sk}"
+    );
+    assert!(
+        sk.starts_with("λ($demref$0 : "),
+        "binder name α-normalized consistently with the body: {sk}"
+    );
+    // Same-typed occurrences co-normalize: the binder's name and its body occurrence agree.
+    assert!(
+        sk.matches("$demref$0").count() >= 2,
+        "the hole var appears in both binder and body: {sk}"
+    );
+}
+
 #[test]
 fn two_demonstrative_occurrences_are_two_independent_holes() {
     let (layer, index) = index_with_demonstratives();
