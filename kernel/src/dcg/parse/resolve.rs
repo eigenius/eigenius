@@ -262,6 +262,7 @@ impl Parser {
         let chosen = *order.get(sel.chosen)?;
         let outcome = SelectionOutcome {
             chosen_skeleton: cands[sel.chosen].skeleton.clone(),
+            chosen_sem: cands[sel.chosen].sem.clone(),
             chosen_gloss: cands[sel.chosen].gloss.clone(),
             rationale: sel.rationale,
             runner_up_skeletons: sel
@@ -321,9 +322,12 @@ pub struct SentenceResolution {
 /// faithfulness gate are the controls.
 #[derive(Clone, Debug)]
 pub struct SelectionOutcome {
-    /// The chosen reading's sense-erased skeleton — the key the pins and the adjudication ledger
-    /// are written in.
+    /// The chosen reading's sense-erased skeleton — the structure key (the grammar-faithfulness
+    /// pins and the skeleton adjudication ledger are written in it).
     pub chosen_skeleton: String,
+    /// The chosen reading's pretty-printed sem — the READING's identity (structure + senses),
+    /// the key the reading-level adjudication ledger is written in.
+    pub chosen_sem: String,
     /// The chosen reading's verbalised gloss.
     pub chosen_gloss: String,
     /// The ranker's stated reason, verbatim.

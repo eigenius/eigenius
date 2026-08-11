@@ -22,9 +22,18 @@ to the kernel with a generic `resource_label`; `ReadingRanker` seam + record/rep
 line + `eval-parse-rate.sh` SELECTION-VALIDITY gate). Verified on a fresh consolidated reseed
 (`wordnet-umls-aligned-2026-08-11-consolidated`, the tracked ranks replay 62/0): every baseline
 metric EXACT (gap 0, encoded 14, readings 761, skeletons 144, hits 60/62); pin arm chose 10/46,
-correct 10/10, invalid-selected 0. **Active step: slice 4 — the live `AnthropicReadingRanker`,
-a recorded reference draw, and the gated `selection_correct`/`selection_curated` baseline from its
-drift-free replay.** Exit gate (Stage 1) unchanged.
+correct 10/10, invalid-selected 0. Slice 4 DONE `2026-08-11`: live `AnthropicReadingRanker`
+(abstain-capable, prompt = document + prior selections + structure-grouped glosses), reference
+draw recorded to `experiments/parsing/selections/2026-08-11-reference.json` (46 decisions incl. 2
+abstentions — abstentions are recorded, the draw-1 lesson), selection replay 46/0. **Metric
+corrected same day to READING-level** (pins = grammar instrument, not selection gold): the draw's
+44 chosen readings adjudicated in `reading-adjudications.tsv` → gated baseline **reading-correct
+28/44 (64%), invalid-selected 0** in `selection-baseline.json` — its OWN file, separate from the
+parse baseline: parse gates the grammar/forest, selection gates the ranker/choice (structure
+diagnostic 32/44; the 4-unit gap = sense errors inside the verified structure, invisible to
+skeleton metrics). Gate verified holding. Exit-gate
+criteria met. **Active step: slice 5 — emission: the `enc:DecisionPoint` computed-choice arm +
+the ranked path in `select.rs` beside `select_pinned`.**
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

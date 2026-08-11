@@ -301,7 +301,7 @@ mod tests {
     #[test]
     #[ignore = "hits the live Anthropic API; requires ANTHROPIC_API_KEY"]
     fn anthropic_proposer_live_recovers_non_parenthetical() {
-        let Some(proposer) = super::AnthropicAbbreviationProposer::from_env() else {
+        let Some(proposer) = crate::dcg::AnthropicAbbreviationProposer::from_env() else {
             panic!("ANTHROPIC_API_KEY not set");
         };
         // No parentheses → the deterministic extractor finds nothing; the LLM must supply it.

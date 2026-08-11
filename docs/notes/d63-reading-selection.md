@@ -53,9 +53,12 @@ Decisions carried by the contract:
   input text with the target sentence marked — preceding *and* following sentences — plus the
   glosses of prior sentences' already-selected readings (sequential consistency: the discourse
   loop has them as it advances).
-- **Selection is flat over readings; accuracy is measured at skeleton granularity.** Glosses name
-  concrete senses (via the promoted verbaliser), so the ranker sees both ambiguity axes, but gold
-  labels exist only per skeleton (the 62 pins). Candidates are presented grouped by skeleton.
+- **Selection is over FULL READINGS — structure and word senses together.** (Corrected
+  2026-08-11: an earlier revision measured accuracy at skeleton granularity, borrowing the pins as
+  selection gold. That was a category error — see §5.) Glosses name concrete senses (via the
+  promoted verbaliser), so the ranker sees both ambiguity axes; candidates are presented grouped
+  by skeleton for legibility, but the choice, and its evaluation, are per reading. Validity —
+  never choosing an `invalid`-adjudicated skeleton — is the only structural hard constraint.
 - **Abstention is legal.** `None` keeps the sentence `Ambiguous` — fail-open to the current
   behavior, never a forced wrong choice.
 
@@ -98,19 +101,37 @@ current behavior (the deterministic no-regression arm; the cap-only sweep is unc
 pin | ranker | replay, rationale, runner-up skeletons) for emission. Stage 2 widens the selection
 pool to resolved-open readings; this stage selects among closed readings only.
 
-## 5. Measurement
+## 5. Measurement (corrected 2026-08-11: reading-level, not skeleton-level)
 
-- **Gold set** (exists, currently consumed only as regression gates):
-  `experiments/parsing/expected-readings.tsv` — 62 human-verified correct skeletons;
-  `experiments/parsing/adjudications.tsv` — 105 `available` distractors, 15 `invalid` hard
-  negatives.
-- **New gated metrics** in `baseline.json` / `scripts/eval-parse-rate.sh`:
-  `selection_accuracy` = fraction of curated units whose selected skeleton equals the pin, and
-  `invalid_selected == 0`. Measured **with document context** (the corpus page in order) — a
-  context-free selection number is not the tracked metric.
+**What the pins are — and are not.** `expected-readings.tsv` is a *grammar-debugging /
+faithfulness instrument*: a human verified, per unit, the correct STRUCTURE, and its gate asserts
+the forest still *contains* that structure (so parser-rule work can't silently lose correct
+readings). It is sense-erased by construction and was never selection gold. In selection it plays
+two subordinate roles only: (a) **adjudication evidence** — a chosen reading whose structure
+contradicts the verified structure is a wrong reading, no sense judgment needed; (b) the
+**structure-correct diagnostic** (reported, not gated).
+
+- **The gated metric is READING-level.** Gold lives in
+  `experiments/parsing/reading-adjudications.tsv` — a ledger with one verdict per
+  `(sentence, chosen reading's sem)`: `correct` / `wrong` / `uncertain`, with evidence — authored
+  by adjudicating recorded draws (a `selections.json` records every candidate's skeleton, gloss,
+  AND sem, so any draw is adjudicable after the fact, the same way the pins were authored from
+  gloss dumps). The harness scores each chosen reading against the ledger:
+  `reading-correct` / `reading-wrong` / `reading-unadjudicated` (an unlisted decision is
+  *unadjudicated*, reported — and must be 0 on the tracked replay, else the number is not a
+  measurement). `uncertain` rows count as unadjudicated (excluded from the gate's denominator,
+  visible in the report).
+- **Gates** in `selection-baseline.json` / `scripts/eval-parse-rate.sh` — a SEPARATE baseline
+  from `baseline.json`, deliberately: the parse baseline gates the grammar+lexicon (the produced
+  forest), the selection baseline gates the ranker (the choice), and they re-baseline on
+  different triggers (grammar work vs draw/prompt/ledger changes): `reading-correct ≥
+  expected.reading_correct` (a drop = REGRESSION), `reading-unadjudicated == 0` on the tracked
+  replay, and `invalid_selected == 0`. `structure-correct` (chosen skeleton == pin, over chosen
+  pinned units) is reported as a diagnostic. Measured **with document context** (the corpus page
+  in order) — a context-free selection number is not the tracked metric.
 - **Recording**: `scripts/measure-parse-rate.sh` writes `selections.json` beside `ranks.json`;
-  `--replay` replays both. The committed baseline value is the drift-free replay, per the standing
-  measurement discipline.
+  `--selections` replays it (abstentions are recorded, so a faithful replay has 0 misses). The
+  committed baseline value is the drift-free replay, per the standing measurement discipline.
 - **Invariant**: parse metrics (grammar-gap, hits, skeletons, readings) are byte-identical with
   and without selection under replay — selection runs after the forest exists.
 
@@ -143,8 +164,31 @@ pool to resolved-open readings; this stage selects among closed readings only.
    arm reads: eligible 46, chose 10, abstained 36 (skeleton ties / unpinned), correct 10/10,
    invalid-selected 0. Also witnessed: on the WRONG snapshot (aligned-d66, 60/60 rank misses) the
    pin arm abstains 51/53 — fail-closed on a divergent forest.
-4. **Live ranker** — `AnthropicReadingRanker`; record a reference draw; measure
-   `selection_accuracy`; set the gated baseline from its replay.
+4. **Live ranker** — DONE (2026-08-11). `AnthropicReadingRanker` (`use-llm`): structured reply
+   with an explicit `abstain` field; errors and out-of-range replies abstain (never a fabricated
+   choice); prompt = the whole document + prior selections + glosses grouped by structure
+   (`EIGENIUS_DUMP_SELECT_PROMPT=1` dumps it); live unit test green. Harness arms mirror
+   `EIGENIUS_SENSE_RANKS`: `EIGENIUS_SELECTIONS` exists → REPLAY (misses asserted 0), missing →
+   LIVE-RECORD, unset → pin-backed; `measure-parse-rate.sh --selections` composes with `--replay`
+   so the reference draw ran LIVE selection over the DETERMINISTIC replayed forest.
+   **Finding: abstentions must be recorded** — draw 1 could not replay to 0 misses because its 2
+   abstentions left no records; `SelectionRecord.abstained` added, draw 2 re-recorded.
+   **Reference**: `experiments/parsing/selections/2026-08-11-reference.json` — 46 decisions (44
+   selections + 2 abstentions); selection replay 46 hits / 0 misses.
+   **Baseline (READING-level, corrected same day — see §5)**: the draw's 44 chosen readings
+   adjudicated in `experiments/parsing/reading-adjudications.tsv` (model-adjudicated from glosses
+   + sems + WordNet synset lookups, pending human sign-off): **reading-correct 28/44 (64%),
+   reading-wrong 16, unadjudicated 0, invalid-selected 0**; structure diagnostic 32/44. The 16
+   wrong = 12 structural (pins as evidence: PP attachment, modal scope, governed-complement vs
+   adjunct, WRN kind-vs-individual) + **4 sense errors inside the verified structure — invisible
+   to any skeleton metric** ('other'→UMLS qualifier junk, 'these libraries'→cDNA Library against
+   the ranker's own prior selections, 'MMR deficiency'→Turcot-syndrome alias,
+   'relationships'→human_relationship synset). Baseline: `selection-baseline.json` (its own file
+   — the ranker's baseline, separate from the parse baseline) with `reading_correct: 28` /
+   `reading_adjudicated: 44`; `eval-parse-rate.sh` gates reading-correct,
+   `reading-unadjudicated == 0`, and `invalid-selected == 0` (verified engaging:
+   `selection 28/44 → 28/44 (holds)`). Parse metrics byte-identical throughout. Stage-1 exit-gate
+   criteria are met; slice 5 (emission) completes the stage.
 5. **Emission** — `DecisionPoint` computed-choice arm; ranked path in `select.rs` beside
    `select_pinned`.
 

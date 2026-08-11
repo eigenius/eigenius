@@ -659,6 +659,34 @@ const ADJUDICATIONS: &str = concat!(
     "/../../experiments/parsing/adjudications.tsv"
 );
 
+/// The READING-level gold ledger (`d63-reading-selection.md` §5): one verdict per
+/// `(sentence, chosen reading's sem)` — `correct` / `wrong` / `uncertain`, with evidence —
+/// authored by adjudicating recorded selection draws. This is the ledger the gated
+/// `reading-correct` scores against; a chosen reading with no row (or an `uncertain` row) counts
+/// UNADJUDICATED, which must be 0 on the tracked replay. TAB-separated:
+/// `sentence <TAB> sem <TAB> verdict <TAB> evidence`. Missing file ⇒ empty.
+const READING_ADJUDICATIONS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../experiments/parsing/reading-adjudications.tsv"
+);
+
+fn load_reading_adjudications() -> std::collections::BTreeMap<(String, String), String> {
+    let Ok(text) = std::fs::read_to_string(READING_ADJUDICATIONS) else {
+        return std::collections::BTreeMap::new();
+    };
+    text.lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (s, sem, v) = (f.next()?, f.next()?, f.next()?);
+            Some((
+                (s.trim().to_string(), sem.trim().to_string()),
+                v.trim().to_string(),
+            ))
+        })
+        .collect()
+}
+
 /// The `(sentence, skeleton)` pairs adjudicated `invalid`. Missing file ⇒ empty (check inactive).
 fn load_invalid_adjudications() -> BTreeSet<(String, String)> {
     let Ok(text) = std::fs::read_to_string(ADJUDICATIONS) else {
@@ -2990,23 +3018,91 @@ fn wrn_first_page_over_full_lexicon() {
         eigenius_kernel::dcg::attribution::begin();
     }
 
-    // ── Reading selection (d63-reading-selection.md §5–6, slice 3): the deterministic pin-backed
-    // arm. Selection runs AFTER classification and changes NO parse metric — the summary line is
-    // identical with and without it. The pin ranker abstains on any unpinned sentence, a pin
-    // matching no reading, or a skeleton tie, so `correct == curated` holds by construction on
-    // this arm; slice 4 swaps in the live ranker and the same counters measure IT. Decisions are
-    // recorded (`EIGENIUS_SELECTIONS_OUT`) so a live draw can later be replayed drift-free.
+    // ── Reading selection (d63-reading-selection.md §5–6): choose one reading per ambiguous
+    // unit, in document order. Selection runs AFTER classification and changes NO parse metric —
+    // the summary line is identical with and without it. Arm choice mirrors the
+    // `EIGENIUS_SENSE_RANKS` discipline:
+    //   EIGENIUS_SELECTIONS file EXISTS → REPLAY it (deterministic, no LLM; a miss ABSTAINS and
+    //                                     is asserted 0 after the run — see the tail assert)
+    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   env unset                       → the deterministic PIN-BACKED arm (abstains on unpinned
+    //                                     sentences and skeleton ties, so correct == curated by
+    //                                     construction; recorded to EIGENIUS_SELECTIONS_OUT)
+    // Whatever the arm, `correct` scores the chosen skeleton against the pins.
     let pins: std::collections::BTreeMap<String, String> = load_expected_readings()
         .into_iter()
         .map(|e| (e.sentence, e.skeleton))
         .collect();
     let invalid_adjudicated = load_invalid_adjudications();
-    let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(
-        eigenius_kernel::dcg::PinReadingRanker::new(pins.clone()),
-    );
+    let selections_path = std::env::var("EIGENIUS_SELECTIONS").ok().map(PathBuf::from);
+    let mut selection_arm = "pin-backed";
+    let mut selection_replay: Option<Arc<eigenius_kernel::dcg::ReplayReadingRanker>> = None;
+    let inner_ranker: Box<dyn eigenius_kernel::dcg::ReadingRanker> = match &selections_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_kernel::dcg::ReplayReadingRanker::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_SELECTIONS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "reading ranker: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            selection_arm = "replay";
+            let r = Arc::new(r);
+            selection_replay = Some(Arc::clone(&r));
+            Box::new(r)
+        }
+        Some(p) => {
+            // RECORD mode: the path names where the live draw will be written. Without a live
+            // ranker the run would silently measure the pin arm while claiming a live draw —
+            // fatal, mirroring the EIGENIUS_SENSE_RANKS rule (the path must be ABSOLUTE: the
+            // test binary's CWD is the crate dir, not the repo root).
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                    panic!(
+                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live selection draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    p.display()
+                );
+                selection_arm = "live";
+                Box::new(r)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_SELECTIONS={} does not exist, and this binary has no live reading \
+                 ranker (built without --features use-llm) — to replay, point at an existing \
+                 selections.json; to record, rebuild with the feature",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("reading ranker: pin-backed (expected-readings corpus)");
+            Box::new(eigenius_kernel::dcg::PinReadingRanker::new(pins.clone()))
+        }
+    };
+    let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(inner_ranker);
+    // Where the recorded decisions land: the live arm writes to its EIGENIUS_SELECTIONS path;
+    // the other arms to EIGENIUS_SELECTIONS_OUT (per-run artifact).
+    let selections_out: Option<PathBuf> = if selection_arm == "live" {
+        selections_path.clone()
+    } else {
+        std::env::var("EIGENIUS_SELECTIONS_OUT")
+            .ok()
+            .map(PathBuf::from)
+    };
+    let reading_gold = load_reading_adjudications();
     let mut prior: Vec<eigenius_kernel::dcg::PriorSelection> = Vec::new();
     let (mut sel_eligible, mut sel_chose, mut sel_abstained) = (0usize, 0usize, 0usize);
-    let (mut sel_curated, mut sel_correct, mut sel_invalid) = (0usize, 0usize, 0usize);
+    let (mut sel_read_correct, mut sel_read_wrong, mut sel_read_unadj) = (0usize, 0usize, 0usize);
+    let (mut sel_struct_correct, mut sel_curated, mut sel_invalid) = (0usize, 0usize, 0usize);
 
     let mut report: Vec<UnitReport> = Vec::new();
     for (i, text) in segment_sentences(&page).into_iter().enumerate() {
@@ -3039,12 +3135,33 @@ fn wrn_first_page_over_full_lexicon() {
                 {
                     Some((_idx, sel)) => {
                         sel_chose += 1;
+                        // READING-level scoring — the gated metric (d63-reading-selection.md §5):
+                        // the ledger verdict for this exact (sentence, sem). No row / `uncertain`
+                        // ⇒ UNADJUDICATED (must be 0 on the tracked replay).
+                        match reading_gold
+                            .get(&(text.trim().to_string(), sel.chosen_sem.clone()))
+                            .map(String::as_str)
+                        {
+                            Some("correct") => sel_read_correct += 1,
+                            Some("wrong") => sel_read_wrong += 1,
+                            _ => {
+                                sel_read_unadj += 1;
+                                eprintln!(
+                                    "  READING-UNADJUDICATED: «{}» chose a reading with no \
+                                     ledger verdict (adjudicate it in reading-adjudications.tsv)",
+                                    text.trim()
+                                );
+                            }
+                        }
+                        // STRUCTURE diagnostic (reported, not gated): does the chosen reading sit
+                        // in the pin's human-verified structure? The pins are the GRAMMAR
+                        // instrument; here they are only evidence.
                         let pinned = pins.get(text.trim());
                         if pinned.is_some() {
                             sel_curated += 1;
                         }
                         if pinned == Some(&sel.chosen_skeleton) {
-                            sel_correct += 1;
+                            sel_struct_correct += 1;
                         }
                         if invalid_adjudicated
                             .contains(&(text.trim().to_string(), sel.chosen_skeleton.clone()))
@@ -3184,23 +3301,44 @@ fn wrn_first_page_over_full_lexicon() {
     summarize(&report);
 
     // Persist the selection decisions and print the SELECTION summary line BEFORE the replay
-    // assert (same discipline as `flush_sense_ranks`: a run that produced a number always leaves
-    // its artifacts, even when the assert then fails the run). `eval-parse-rate.sh` reads these
+    // asserts (same discipline as `flush_sense_ranks`: a run that produced a number always leaves
+    // its artifacts, even when an assert then fails the run). `eval-parse-rate.sh` reads these
     // metrics from THIS line only (trap 4 applies to selection too) and gates
     // `invalid-selected == 0`.
-    if let Ok(p) = std::env::var("EIGENIUS_SELECTIONS_OUT") {
-        match selection_ranker.write(std::path::Path::new(&p)) {
-            Ok(n) => eprintln!("selections: RECORDED {n} decision(s) → {p}"),
-            Err(e) => eprintln!("selections: FAILED to write {p}: {e}"),
+    if let Some(p) = &selections_out {
+        match selection_ranker.write(p) {
+            Ok(n) => eprintln!("selections: RECORDED {n} decision(s) → {}", p.display()),
+            Err(e) => eprintln!("selections: FAILED to write {}: {e}", p.display()),
         }
     }
     eprintln!(
-        "=== SELECTION (pin-backed): eligible {sel_eligible}, chose {sel_chose}, \
-         abstained {sel_abstained}, curated {sel_curated}, correct {sel_correct}, \
+        "=== SELECTION ({selection_arm}): eligible {sel_eligible}, chose {sel_chose}, \
+         abstained {sel_abstained}, reading-correct {sel_read_correct}, \
+         reading-wrong {sel_read_wrong}, reading-unadjudicated {sel_read_unadj}, \
+         structure-correct {sel_struct_correct}, curated {sel_curated}, \
          invalid-selected {sel_invalid} ==="
     );
 
     assert_replay_faithful();
+    // A selection replay with misses is not the recorded experiment: each miss ABSTAINS, so the
+    // selection numbers silently sag instead of failing. Asserted AFTER the ranks assert — a
+    // ranks-replay infidelity changes the forest, which makes every selection key miss too, so
+    // ranks report first as the root cause.
+    if let Some(r) = &selection_replay {
+        eprintln!(
+            "  selection replay: {} hits, {} misses",
+            r.hits(),
+            r.misses()
+        );
+        assert_eq!(
+            r.misses(),
+            0,
+            "SELECTION REPLAY had {} key MISSES — each abstains, so this run's selection numbers \
+             are not the recorded experiment's (the document, forest, glosses, or an upstream \
+             selection changed under the recording).",
+            r.misses()
+        );
+    }
 
     if rollup {
         if let Some(s) = eigenius_kernel::dcg::attribution::take() {

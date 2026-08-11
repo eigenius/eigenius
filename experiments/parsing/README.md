@@ -115,6 +115,44 @@ different experiment, not a reproduction.
 This is what lets a parser change be A/B'd against **fixed** rankings, isolating the code from the
 model.
 
+### Reading selection — the same discipline, one stage up
+
+The sweep also runs the **reading-selection** stage (`docs/notes/d63-reading-selection.md`): for
+each ambiguous unit a ranker chooses ONE reading — structure and word senses together — in
+document context (the whole page + the glosses of prior selections). Metrics come from the
+`=== SELECTION (…) ===` line **only**. The gated metric is **READING-level**:
+`reading-correct` / `reading-wrong` are the verdicts of `reading-adjudications.tsv` (one verdict
+per `(sentence, chosen sem)`, authored by adjudicating recorded draws) on the chosen readings;
+`reading-unadjudicated` must be 0 on the tracked replay. The **pins are the GRAMMAR instrument,
+not selection gold** — they appear here only as the `structure-correct`/`curated` diagnostic
+(chosen skeleton == pin) and as adjudication evidence (a chosen structure contradicting the
+verified structure is a wrong reading). `eval-parse-rate.sh` gates `reading-correct` against
+**`selection-baseline.json`** — a separate baseline from `baseline.json`, deliberately: the parse
+baseline gates the grammar+lexicon (the produced forest), the selection baseline gates the ranker
+(the choice), and they re-baseline on different triggers — plus `reading-unadjudicated == 0` and
+`invalid-selected == 0` (the ranker has **no kernel veto** — every candidate type-checks — so the
+ledger and the validity check are its controls).
+
+Arms, mirroring the ranks discipline:
+
+```bash
+scripts/measure-parse-rate.sh --selections <file>  # file EXISTS  → REPLAY it (0 misses asserted)
+                                                   # file MISSING → RECORD a live draw into it —
+                                                   #   composes with --replay <ranks>, so a reference
+                                                   #   draw is LIVE selection over the DETERMINISTIC
+                                                   #   replayed forest
+# without --selections: a live run draws live selections; a deterministic run (cap-only, or a
+# ranks replay) uses the pin-backed arm (abstains on ties and unpinned units by construction)
+```
+
+Selection runs **after** classification, so all parse metrics are identical with and without it.
+**Abstentions are recorded** as first-class decisions — a draw with abstentions must replay with 0
+misses, and an unrecorded abstention would be indistinguishable from a changed question. The
+committed reference recording is `selections/2026-08-11-reference.json` (46 decisions: 44
+selections + 2 abstentions); its drift-free replay is the baseline: **reading-correct 28/44**
+(structure diagnostic 32/44 — the 4-unit difference is sense errors inside the verified
+structure, invisible to any skeleton metric), `invalid-selected` 0.
+
 ### What is committed, and what is not
 
 `experiments/*/results/` is **gitignored** — run logs and rank recordings are large and

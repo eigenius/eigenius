@@ -47,8 +47,9 @@ use std::sync::Mutex;
 use sha2::{Digest, Sha256};
 
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
-/// skeleton (the caller orders them); selection is flat over readings, but accuracy is measured at
-/// skeleton granularity (gold labels exist only there).
+/// skeleton for legibility (the caller orders them), but the choice — and its evaluation — are
+/// per READING: structure and word senses together. The reading-level gold ledger
+/// (`experiments/parsing/reading-adjudications.tsv`) is keyed on the `sem`.
 #[derive(Clone, Debug)]
 pub struct ReadingCandidate {
     /// `skeleton_of(item.sem())` — the sense-erased structure key the pins and the adjudication
@@ -108,6 +109,26 @@ pub trait ReadingRanker {
     ) -> Option<ReadingSelection>;
 }
 
+impl<T: ReadingRanker + ?Sized> ReadingRanker for Box<T> {
+    fn select(
+        &self,
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        (**self).select(ctx, candidates)
+    }
+}
+
+impl<T: ReadingRanker + ?Sized> ReadingRanker for std::sync::Arc<T> {
+    fn select(
+        &self,
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        (**self).select(ctx, candidates)
+    }
+}
+
 /// The pin-backed selector — the ground-truth/gate arm. Selects the candidate whose skeleton
 /// equals the sentence's pinned skeleton; abstains when the sentence has no pin, the pin matches
 /// no candidate, or **two or more candidates share the pinned skeleton** (sense-level ambiguity a
@@ -164,6 +185,12 @@ pub struct SelectionRecord {
     #[serde(default)]
     pub prior_selections: Vec<PriorSelection>,
     pub candidates: Vec<RecordedCandidate>,
+    /// True when the ranker ABSTAINED on this question. Recorded (not omitted): an unrecorded
+    /// abstention would be indistinguishable from a changed question on replay, so a draw with
+    /// abstentions could never replay with 0 misses. `chosen`/`rationale`/`runners_up` are
+    /// meaningless when set.
+    #[serde(default)]
+    pub abstained: bool,
     pub chosen: usize,
     #[serde(default)]
     pub rationale: String,
@@ -225,8 +252,9 @@ fn recorded_candidates(candidates: &[ReadingCandidate]) -> Vec<RecordedCandidate
         .collect()
 }
 
-/// **Record** every selection an inner ranker produces (abstentions are not recorded — an absent
-/// key replays as an abstention anyway). Flush with [`Self::write`]. Same rationale as
+/// **Record** every decision an inner ranker produces — selections AND abstentions (an
+/// abstention is an answer to the question; leaving it out would make a draw with abstentions
+/// unable to replay with 0 misses). Flush with [`Self::write`]. Same rationale as
 /// [`crate::dcg::sense_ranker::RecordingSenseRanker`]: the LLM is the one component that can
 /// answer differently for the same code and store; recording turns it from an uncontrolled input
 /// into a recorded one.
@@ -260,23 +288,34 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
         ctx: &DocumentContext,
         candidates: &[ReadingCandidate],
     ) -> Option<ReadingSelection> {
-        let selection = self.inner.select(ctx, candidates)?;
+        let selection = self.inner.select(ctx, candidates);
         let recorded = recorded_candidates(candidates);
         let sha = document_sha(ctx.document);
         let key = selection_key(ctx.sentence, &sha, ctx.prior_selections, &recorded);
-        self.log.lock().expect("selection log").insert(
-            key,
-            SelectionRecord {
+        let record = match &selection {
+            Some(s) => SelectionRecord {
                 sentence: ctx.sentence.to_string(),
                 document_sha256: sha,
                 prior_selections: ctx.prior_selections.to_vec(),
                 candidates: recorded,
-                chosen: selection.chosen,
-                rationale: selection.rationale.clone(),
-                runners_up: selection.runners_up.clone(),
+                abstained: false,
+                chosen: s.chosen,
+                rationale: s.rationale.clone(),
+                runners_up: s.runners_up.clone(),
             },
-        );
-        Some(selection)
+            None => SelectionRecord {
+                sentence: ctx.sentence.to_string(),
+                document_sha256: sha,
+                prior_selections: ctx.prior_selections.to_vec(),
+                candidates: recorded,
+                abstained: true,
+                chosen: 0,
+                rationale: String::new(),
+                runners_up: Vec::new(),
+            },
+        };
+        self.log.lock().expect("selection log").insert(key, record);
+        selection
     }
 }
 
@@ -340,6 +379,9 @@ impl ReadingRanker for ReplayReadingRanker {
         match self.by_key.get(&key) {
             Some(r) => {
                 self.hits.fetch_add(1, Ordering::Relaxed);
+                if r.abstained {
+                    return None; // a RECORDED abstention — a hit, replayed as the abstention it was
+                }
                 Some(ReadingSelection {
                     chosen: r.chosen,
                     rationale: r.rationale.clone(),
@@ -353,6 +395,154 @@ impl ReadingRanker for ReplayReadingRanker {
         }
     }
 }
+
+// ───────────────────────── live Anthropic ranker (use-llm feature) ─────────────────────────
+
+#[cfg(feature = "use-llm")]
+mod anthropic {
+    use super::{DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection};
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    /// The model's structured reply. `abstain: true` ⇒ no selection (the sentence stays
+    /// Ambiguous); otherwise `chosen` indexes the candidate list.
+    #[derive(Deserialize, JsonSchema)]
+    struct ReadingSelectionReply {
+        /// True when no reading can be confidently identified as the intended one.
+        abstain: bool,
+        /// The index of the reading that expresses the sentence's intended meaning in context.
+        chosen: usize,
+        /// One sentence: why this reading (or why abstaining).
+        rationale: String,
+        /// The remaining reading indices in preference order, most plausible first.
+        runners_up: Vec<usize>,
+    }
+
+    /// A [`ReadingRanker`] backed by Anthropic Claude via the direct tool-use client
+    /// ([`crate::dcg::anthropic_client`]). On any error it ABSTAINS (`None`) — unlike the sense
+    /// ranker there is no harmless fallback order; a fabricated selection would be a wrong
+    /// answer, not a slower parse. A malformed reply (index out of range) likewise abstains.
+    pub struct AnthropicReadingRanker {
+        api_key: String,
+        model: String,
+    }
+
+    impl AnthropicReadingRanker {
+        pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+            Self {
+                api_key: api_key.into(),
+                model: model.into(),
+            }
+        }
+
+        /// From `$ANTHROPIC_API_KEY`, defaulting to the shared client model. `None` if unset.
+        pub fn from_env() -> Option<Self> {
+            std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+                .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
+        }
+
+        fn ask(&self, instructions: &str) -> Option<ReadingSelectionReply> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            match rt.block_on(crate::dcg::anthropic_client::anthropic_structured::<
+                ReadingSelectionReply,
+            >(&self.api_key, &self.model, instructions))
+            {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    eprintln!("anthropic reading-ranker error: {e}");
+                    None
+                }
+            }
+        }
+    }
+
+    impl ReadingRanker for AnthropicReadingRanker {
+        fn select(
+            &self,
+            ctx: &DocumentContext,
+            candidates: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            if candidates.len() < 2 {
+                return None; // nothing to disambiguate
+            }
+            // Prior selections — the discourse the ranker must stay consistent with.
+            let mut prior_block = String::new();
+            if !ctx.prior_selections.is_empty() {
+                prior_block.push_str(
+                    "Readings already selected for earlier sentences (stay consistent with them):\n",
+                );
+                for p in ctx.prior_selections {
+                    prior_block.push_str(&format!("  sentence {}: \"{}\"\n", p.ordinal, p.gloss));
+                }
+                prior_block.push('\n');
+            }
+            // Candidates, grouped by skeleton (the caller sorts them): a structure header per
+            // distinct skeleton, then each reading's index + gloss. The gloss names concrete
+            // senses, so readings within one structure differ by word sense.
+            let mut cand_block = String::new();
+            let mut last_skel: Option<&str> = None;
+            let mut structure = 0usize;
+            for (i, c) in candidates.iter().enumerate() {
+                if last_skel != Some(c.skeleton.as_str()) {
+                    structure += 1;
+                    cand_block.push_str(&format!("Structure {structure}:\n"));
+                    last_skel = Some(c.skeleton.as_str());
+                }
+                cand_block.push_str(&format!("  [{i}] {}\n", c.gloss));
+            }
+            let prompt = format!(
+                "A parser read the document below and produced several candidate READINGS \
+                 (interpretations) of one sentence. Choose the reading that expresses what the \
+                 sentence actually means in the context of the document.\n\n\
+                 Document:\n{}\n\n{prior_block}\
+                 The sentence to disambiguate:\n  \"{}\"\n\n\
+                 Candidate readings, grouped by grammatical structure (readings within one \
+                 structure differ only in word sense). Each gloss is approximate machine-generated \
+                 English; `⟦…⟧` marks a fragment that could not be rendered.\n\n{cand_block}\n\
+                 Return `chosen` = the index of the reading whose structure AND word senses match \
+                 the sentence's intended meaning, `rationale` = one sentence why, and `runners_up` \
+                 = the remaining indices in preference order. Set `abstain` = true only if no \
+                 reading can be identified as the intended one — prefer choosing when one reading \
+                 is clearly best.",
+                ctx.document.trim(),
+                ctx.sentence.trim(),
+            );
+            // `EIGENIUS_DUMP_SELECT_PROMPT=1` prints the exact prompt per sentence — the ranker
+            // decides which reading lands on the chain, so being able to READ what it was asked
+            // is the difference between debugging it and guessing at it.
+            if std::env::var("EIGENIUS_DUMP_SELECT_PROMPT").is_ok() {
+                eprintln!(
+                    "\n===== READING-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n"
+                );
+            }
+            let reply = self.ask(&prompt)?;
+            if reply.abstain || reply.chosen >= candidates.len() {
+                return None; // abstention, or an out-of-range reply from untrusted input
+            }
+            let n = candidates.len();
+            let mut seen = vec![false; n];
+            seen[reply.chosen] = true;
+            let runners_up: Vec<usize> = reply
+                .runners_up
+                .into_iter()
+                .filter(|&i| i < n && !std::mem::replace(&mut seen[i], true))
+                .collect();
+            Some(ReadingSelection {
+                chosen: reply.chosen,
+                rationale: reply.rationale,
+                runners_up,
+            })
+        }
+    }
+}
+
+#[cfg(feature = "use-llm")]
+pub use anthropic::AnthropicReadingRanker;
 
 #[cfg(test)]
 mod tests {
@@ -425,6 +615,46 @@ mod tests {
             .is_none());
     }
 
+    /// Live reading disambiguation: the document context must decide between two structurally
+    /// distinct readings. Skips without a key; runs with `--features use-llm` + `ANTHROPIC_API_KEY`.
+    #[cfg(feature = "use-llm")]
+    #[test]
+    fn live_anthropic_reading_ranker_picks_the_contextual_reading() {
+        let Some(ranker) = AnthropicReadingRanker::from_env() else {
+            eprintln!("SKIP live_anthropic_reading_ranker: ANTHROPIC_API_KEY unset");
+            return;
+        };
+        let candidates = vec![
+            ReadingCandidate {
+                skeleton: "see_with(§)(we, telescope, man)".to_string(),
+                gloss: "we saw the man by using a telescope".to_string(),
+                sem: String::new(),
+            },
+            ReadingCandidate {
+                skeleton: "see(§)(we, man_with(telescope))".to_string(),
+                gloss: "we saw the man who was holding a telescope".to_string(),
+                sem: String::new(),
+            },
+        ];
+        let ctx = DocumentContext {
+            document: "We set up our new telescope on the balcony at dusk. \
+                       We saw the man with the telescope. \
+                       The optics were remarkably sharp for the price.",
+            sentence: "We saw the man with the telescope.",
+            prior_selections: &[],
+        };
+        let sel = ranker
+            .select(&ctx, &candidates)
+            .expect("a clearly-contextual reading should be chosen, not abstained");
+        assert_eq!(
+            sel.chosen, 0,
+            "the document (we set up a telescope, its optics were sharp) selects the \
+             instrumental reading; rationale: {}",
+            sel.rationale
+        );
+        assert!(!sel.rationale.is_empty());
+    }
+
     #[test]
     fn a_replay_reproduces_the_recorded_selection_exactly() {
         let c = cands(3);
@@ -451,6 +681,39 @@ mod tests {
         assert_eq!(got.runners_up, live.runners_up);
         assert_eq!(replay.hits(), 1);
         assert_eq!(replay.misses(), 0, "a faithful replay misses nothing");
+    }
+
+    #[test]
+    fn a_recorded_abstention_replays_as_an_abstention_hit() {
+        struct Abstain;
+        impl ReadingRanker for Abstain {
+            fn select(
+                &self,
+                _ctx: &DocumentContext,
+                _c: &[ReadingCandidate],
+            ) -> Option<ReadingSelection> {
+                None
+            }
+        }
+        let c = cands(2);
+        let rec = RecordingReadingRanker::new(Abstain);
+        assert!(rec.select(&ctx("Doc.", "Doc.", &[]), &c).is_none());
+        let dir = std::env::temp_dir().join("eigenius-selection-replay-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("selections-abstain.json");
+        assert_eq!(rec.write(&path).unwrap(), 1, "the abstention IS recorded");
+        let replay = ReplayReadingRanker::load(&path).unwrap();
+        assert!(replay.select(&ctx("Doc.", "Doc.", &[]), &c).is_none());
+        assert_eq!(
+            replay.hits(),
+            1,
+            "a recorded abstention is a HIT, not a miss"
+        );
+        assert_eq!(
+            replay.misses(),
+            0,
+            "a draw with abstentions still replays with 0 misses"
+        );
     }
 
     #[test]

@@ -1,0 +1,28 @@
+{
+  "_comment": "The reading-SELECTION baseline -- a SEPARATE experiment from the parse baseline (baseline.json). The parse baseline gates the GRAMMAR + lexicon: what forest is produced (the pins ask whether the correct STRUCTURE survives). THIS file gates the RANKER: which reading gets chosen from that forest, scored READING-level (structure + word senses) against the adjudication ledger. Different re-baselining triggers: grammar work re-draws the parse baseline without touching this file; a new selection draw, a prompt change, or a ledger revision re-derives THIS baseline without touching the parse numbers. Update deliberately, never to make a red run go green.",
+  "provenance": {
+    "date": "2026-08-11",
+    "snapshot": "wordnet-umls-aligned-2026-08-11-consolidated",
+    "forest": "the parse baseline's drift-free replay: ranks experiments/parsing/ranks/2026-07-29-demonstratives.json, replayed 62 hits / 0 misses (baseline.json reproduced exactly -- also the proof that selection perturbs no parse metric)",
+    "ranker": "AnthropicReadingRanker (live draw over that deterministic forest), model claude-sonnet-4-6, temperature 0",
+    "selections": "experiments/parsing/selections/2026-08-11-reference.json -- 46 decisions: 44 selections + 2 RECORDED abstentions (abstentions are first-class records; draw 1 could not replay to 0 misses without them). Selection replay: 46 hits / 0 misses.",
+    "ledger": "experiments/parsing/reading-adjudications.tsv -- one verdict per (sentence, chosen sem); model-adjudicated 2026-08-11 from glosses + sems + WordNet synset lookups, PENDING HUMAN SIGN-OFF (a revision re-derives this baseline via the deterministic replay).",
+    "note": "READING-level is the corrected metric (the pins are the grammar instrument, not selection gold -- a reading can sit in the verified structure and still carry a wrong sense). The 16 wrong decompose as 12 STRUCTURE (adjudicated via the pins as evidence: PP attachment, modal scope, governed-complement-vs-adjunct, WRN kind-vs-individual/Axis B) + 4 SENSE errors inside the verified structure, invisible to any skeleton metric: 'other'->'Other Specimen Source Code' (UMLS qualifier junk), 'these libraries'->'cDNA Library' (contradicts the ranker's own upstream selections), 'MMR deficiency'->'Turcot syndrome (disorder)' (UMLS alias collision), 'relationships'->n13780719 'a relation between PEOPLE' (faithful sibling carries n13928668). Two live draws observed (structure view 33/44 then 32/44) -- temp-0 drift +-1 unit; the baseline is the recorded draw's replay, never a peak draw."
+  },
+  "expected": {
+    "eligible": 46,
+    "chose": 44,
+    "abstained": 2,
+    "reading_correct": 28,
+    "reading_adjudicated": 44,
+    "invalid_selected": 0,
+    "structure_correct_diagnostic": 32,
+    "structure_curated_diagnostic": 44
+  },
+  "gates": {
+    "reading_correct": "GATED: below expected.reading_correct = REGRESSION (eval-parse-rate.sh).",
+    "reading_unadjudicated": "GATED: must be 0 on the tracked replay -- an unadjudicated decision makes the number a partial count, not a measurement; a new draw choosing novel readings fails until its ledger rows are adjudicated (mirrors audit-skeletons).",
+    "invalid_selected": "GATED: must be 0 (SELECTION-VALIDITY). The ranker has no kernel veto -- every candidate type-checks -- so the ledger and this validity check are its controls.",
+    "structure_correct": "diagnostic only -- reported, never gated; the pins belong to the parse baseline's faithfulness gate."
+  }
+}

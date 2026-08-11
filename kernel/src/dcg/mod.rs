@@ -105,6 +105,8 @@ pub use parse::{
 };
 pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
 pub use pretty::pretty_term;
+#[cfg(feature = "use-llm")]
+pub use reading_ranker::AnthropicReadingRanker;
 pub use reading_ranker::{
     DocumentContext, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
     ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
