@@ -77,12 +77,20 @@ re-driven over `DocumentPipeline` (--proposals arm; `select_pinned`/`select_rank
 `resolve_document` takes the RAW document (joined-sentences sha would have missed every replay
 key); `ResolutionOutcome` binding audit → `enc:AnaphorBinding` (closed BindingAuthority enum,
 machine-readable antecedents). Close-out pin (12/35/15/0) + all isolated baselines hold EXACT
-(eval exit 0); 171 suites, clippy both configs. **Active step: the §8 claims-ontology revision
-note (two-axis claim model: discourse kind × epistemic source; set antecedents; per-kind
-alignment) — it gates slice 5 (claim antecedents, the 4 «These findings» units). Slice 6
-(artifact + 3.5 acceptance) additionally needs a FRESH ALIGNED demo snapshot: aligned-d66
-ManifestDrifts against the Stage-2 bootstrap and the dem snapshot's alignment differs (demo
-rank keys miss) — reseed + re-record + re-verify pins when picked up.**
+(eval exit 0); 171 suites, clippy both configs. **Active step: the §8 revision note is
+WRITTEN, awaiting review — [d68-claim-kinds.md](d68-claim-kinds.md): kind = a SECOND `is_a`
+class (multi-class inhabitation #91 — no new kernel rule, no reflection reshape), `enc:Claim`
+root + closed kind classes in encoding.esl, per-kind curated alignment in its own chain-loaded
+layer (Assertion aligned to nothing = unreferable, fail-closed), kind assignment =
+deterministic frame table + recorded untrusted classifier, plural sets = DISTRIBUTIVE
+resolution (And over per-member β-applications — the coordination shape; collective/group
+terms + hole number stay deferred). It gates slice 5 (the 4 «These findings» units). The fresh
+full aligned reseed is DONE and VERIFIED (`wordnet-umls-aligned-2026-08-12-d67`, 2.8G): the
+page baselines replay EXACT on it (ranks 62/0, selections 31/0, all numbers identical, eval
+exit 0) — reseed+alignment is deterministic across runs on one bootstrap, so the new snapshot
+is canonical, and the demo's rank misses are a cross-BOOTSTRAP artifact (d66-era chain). Slice
+6 opens with: re-record demo ranks on this snapshot + re-verify its 6 pins + regenerate
+artifacts (inference.esl re-derives if readings shift).**
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
