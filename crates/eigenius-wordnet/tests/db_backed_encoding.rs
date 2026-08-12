@@ -3409,9 +3409,12 @@ fn resolve_document_discourse_close_out() {
     let resolutions = index.resolve_document(&refs, &lem, &Recency, None);
     assert_eq!(resolutions.len(), sentences.len());
 
+    // Cosmetic log marker only. `that` is deliberately absent — its every occurrence on this
+    // page is the complementizer/relativizer homograph, so matching it would mark
+    // clause-embedding units as demonstrative.
     let is_dem = |t: &str| {
         let lt = format!(" {}", t.to_lowercase());
-        [" this ", " that ", " these ", " those "]
+        [" this ", " these ", " those "]
             .iter()
             .any(|d| lt.contains(d))
     };
@@ -3452,13 +3455,26 @@ fn resolve_document_discourse_close_out() {
     );
     eprintln!("    (isolated-sentence dem baseline: encoded 11, ambiguous 31, open 20, gap 0)");
 
-    // Fail-closed invariants — run-independent. Pooling only ADDS resolved readings to a
-    // sentence's pool: coverage cannot regress (no new Gap), and no isolated-closed unit can
-    // flip to Open.
+    // Fail-closed invariant — run-independent: pooling only ADDS resolved readings to a
+    // sentence's pool, so coverage cannot regress.
     assert_eq!(gap, 0, "pooling must not create grammar gaps");
-    assert!(
-        open_n <= 20,
-        "pooling can only close Open units, never create them (isolated baseline: 20)"
+    // The PINNED close-out baseline (2026-08-11, dem snapshot + ranks 2026-07-29-demonstratives
+    // replay, recency proposer, no ranker — deterministic up to the live-abbreviation overlay,
+    // which has been stable at PARP-1/MSI/MMR/MSS). 5 of the 20 isolated-Open units close:
+    // «These data sets are project Achilles and project DRIVE» → ENCODED (resolved to the
+    // harvested kind ⟦data from large-scale silencing screens⟧), and 4 more → Ambiguous
+    // (fail-open pools for the Stage-1 ranker, incl. the pre-migration comparative-hole unit
+    // «The lines from rare lineages…», all 48 readings resolved). The 15 residual Opens are the
+    // DOCUMENTED deferrals: claim referents ("These findings/observations", plan §2.3 landed
+    // claims), plural/group sets ("these two events", "These libraries"), quantifier-introduced
+    // witnesses ("This impairment"), and Σ-restrictored holes ("…these data sets for genes
+    // that…"). A change here is a re-baseline event — update the numbers WITH provenance, don't
+    // loosen to inequalities.
+    assert_eq!(
+        (enc, amb, open_n),
+        (12, 35, 15),
+        "discourse close-out drifted from the pinned 2026-08-11 baseline (encoded 12, \
+         ambiguous 35, open 15)"
     );
     assert_replay_faithful();
 }

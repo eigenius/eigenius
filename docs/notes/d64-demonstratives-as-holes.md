@@ -105,6 +105,38 @@ bootstrapped ι demonstratives don't interfere; no lexicon change):
 4. **Measurement shock** (§5) stands as planned: the ~19-unit flip to Open is a deliberate
    re-ratchet to honest numbers, executed as one migration with the reseed.
 
+## 2b. Kind antecedents — the derived-kind-predication coercion (slice 4, kernel rule)
+
+A kind referent is a TERM, `kind_of(K) : Entity` (Chierchia's ∩) — so a restrictor-typed hole
+(`Library`, `CellLine`) vetoed every kind: inference gives `Entity`, and `Entity ⋢ C`. But the
+grammar already indexes a bare-kind NP by `base(K)` so it sits in the subsumption lattice
+(`LexicalIndex::kind_raised_nps`) — the sem-level check disagreed with the categorial system's
+own indexing, and "…shRNA **libraries** … These libraries…" could never resolve. The fix is a
+third intensional rule in the CHECKER (`nbe/check`), beside resource-inhabits-class (#91) and
+CN-as-types subsumption: in check mode, `kind_of(K)` coerces into a class position `C` iff
+`base(K)` — the Σ-spine-peeled base class — is a reflexive-transitive subclass of `C` (the
+type-shift half of derived kind predication). Properties, each pinned by a test:
+check-mode-ONLY (inference still gives `Entity`; definitional equality stays exact); it only
+ADDS acceptances (on a miss the term falls back to plain inference, so `kind_of(K) : Entity`
+keeps typing through the axiom's codomain — the first cut errored instead and broke a
+witness-hash test); directional (a superclass kind does not narrow); a non-class base falls
+through. End to end: "yonder gene" resolves to the harvested ⟦genes⟧ kind, and the CellLine
+individual is still vetoed for the Gene-typed hole.
+
+## 2c. The resolution search is explicitly bounded (slice 4 finding)
+
+`resolve_with`'s docs claimed the assignment search was "bounded by the proposer's list
+lengths" — a bound the kernel does not own: the proposer is UNTRUSTED input, and the
+deterministic recency proposer (propose everything, let the veto filter) drove the first
+close-out run to 50 minutes inside one cross-product (two-hole parses × every candidate pair ×
+a full re-gate each). Two changes, both structural: (1) the restrictor veto is a
+per-(hole, candidate) fact, so it now PRE-FILTERS each hole's candidate list linearly before
+the search — the cross-product only ever enumerates hole-wise-typed assignments (this is also
+where a hole with zero surviving candidates fails closed early); (2) the search caps full
+re-gates at `MAX_REGATE_ATTEMPTS = 64` per open parse, fail-closed on exhaustion — the kernel
+self-protects instead of trusting the proposer's list to be short. The full-page discourse pass
+dropped to 25 s.
+
 ## 3. Alternatives considered
 
 - **(B) Dual entries** — keep the ι reading and ADD the hole reading; the Stage-1 ranker +
@@ -138,6 +170,10 @@ So the lexicon change lands **with** §2.2 (pooled closed∪resolved-open compet
 (candidate enum) — a demonstrative unit only leaves `Open` when its referent kind is
 representable. Units whose referents are not yet representable stay honestly `Open` (fail-open,
 never a wrong closed parse) until 2.3 catches up.
+
+*Status (slice 4, 2026-08-11):* entities and kinds are live (§2b coercion; measured in the
+slice-4 record below); claims, plural sets, quantifier witnesses, and Σ-restrictor discharge
+are the four residual referent kinds, each named in the close-out's residual list.
 
 ## 5. Measurement migration (bootstrap edit ⇒ reseed; batch it)
 
@@ -201,6 +237,39 @@ discovered:
    complete: 84 ledger rows + the 60 pinned correct skeletons cover all 144 — the provisional
    "74-row wave" was an artifact of the untyped instrument (and of counting pin-covered
    skeletons as ledger debt) and is discharged.**
-4. **Discourse close-out** — with §2.2/§2.3 in place: the corpus page through DB-backed
-   `resolve_document`, demonstrative units resolving to entity/kind antecedents; claim-referent
-   units documented as pending §2.3's claim candidates.
+4. **Discourse close-out** — DONE (2026-08-11). Plan §2.2 + §2.3 landed:
+   - **§2.2 pooled competition** in `resolve_document`: pool = closed readings ∪ open readings
+     whose holes resolve (EVERY open parse tried, sem-level dedup); pool of one → `Encoded`,
+     several → ranker or `Ambiguous` (fail-open), none → `Open`/`Gap`. A closed reading no
+     longer silently kills the anaphoric one (pinned by the `yonder cell line`
+     named-entity-vs-demonstrative competition test); an unresolvable anaphoric reading leaves
+     the closed one alone.
+   - **§2.3 candidates**: `Candidate` is an enum — `Individual { iri, surface }` /
+     `Kind { term, surface }` — with READABLE surfaces (the individual's layer label via
+     `resource_label`, the kind's verbalized gloss over its sentence's own sense names). The
+     proposer now selects BY INDEX among the assembled candidates (it can no longer introduce
+     its own IRIs — which is also what lets a kind, a term with no IRI, be a candidate at all).
+     Kinds harvest as CLOSED `kind_of(…)` subterms of each resolved sem; the candidate set
+     dedups by identity, most-recent-first. Landed-claim candidates stay pending Stage 3
+     (undecided: claim-resource typing, plural/group reference) — documented on the enum.
+   - **Kind typing** became a kernel rule (§2b) and the resolution search an explicitly bounded
+     one (§2c).
+   - **Measured** (`resolve_document_discourse_close_out`, DB-backed over the page: dem
+     snapshot + ranks replay, recency proposer, no ranker — PINNED in the test): encoded
+     11→12, ambiguous 31→35, **open 20→15**, gap 0; discourse pass 25 s; sense-rank replay
+     faithful. The 5 closures: «These data sets are project Achilles and project DRIVE» →
+     ENCODED, its demonstrative resolved to the harvested kind ⟦data from large-scale
+     silencing screens⟧ — unit 12's referent, the intended antecedent; «This state…», «These
+     groups…», «These cell lines contained fewer…» → Ambiguous pools for the Stage-1 ranker;
+     and «The lines from rare lineages…» (a PRE-migration Open unit — its elided comparative
+     standard) → all 48 readings resolve into the pool. The isolated-sentence sweep is
+     untouched: the full replay holds every baseline exactly (readings 226, skeletons 144,
+     hits 60/62, selection 21/31, eval exit 0).
+   - **Residual 15 Opens, by referent kind** — each a named deferral, none a defect:
+     claim referents («These findings/observations…», 4 units — §2.3 claim candidates on
+     Stage-3 landing); plural/group sets («these two events», «These libraries…» — D64 §4's
+     deferred set-antecedent question); quantifier-introduced witnesses («This impairment…» —
+     an existential's witness is not yet harvestable as a candidate); Σ-restrictored holes
+     («…these data sets for genes that…» — resolving one means discharging its restrictor
+     content against the referent, a presupposition-accommodation decision not yet taken; the
+     page splits 51 plain-class vs 25 Σ-typed demref binders).

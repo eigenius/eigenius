@@ -50,10 +50,22 @@ green. Slice 3 (lexicon swap + reseed + migration) DONE `2026-08-11`: 8 entries 
 `wordnet-umls-aligned-2026-08-11-dem`; ranks replayed 62/0; open 2→20, readings 761→226; 19 pins
 re-migrated (hits 60/62 HOLDS); selection re-drawn (21/31 reading-correct, invalid 0); both
 baselines re-derived. Typed-skeleton instrument LANDED same day (note §5a: `OpenParse::skeleton` prints hole
-types; skeletons 139→144 = recovered structure; ledger + pins cover all 144 — no wave). **Active step: slice 4 — discourse
-close-out: DB-backed `resolve_document` over the page with the flipped-Open demonstrative units
-resolving; needs plan §2.2 (pooled closed∪resolved-open competition) + §2.3 (kind/claim
-candidates).** Stage 3's grader track (3.3 `DerivedClaimGrader`) can run in parallel.
+types; skeletons 139→144 = recovered structure; ledger + pins cover all 144 — no wave). Slice 4
+(discourse close-out) DONE `2026-08-11`: §2.2 pooled closed∪resolved-open competition in
+`resolve_document`; §2.3 `Candidate` enum (Individual/Kind, readable labels, proposer selects
+by index); the derived-kind-predication coercion in the CHECKER (`kind_of(K) : C` iff
+`base(K) ⊑ C`, check-mode-only — note §2b) and the resolution search pre-filtered + bounded
+(`MAX_REGATE_ATTEMPTS`, note §2c — first run spent 50 min in the unbounded cross-product, now
+25 s/page). DB-backed close-out PINNED (`resolve_document_discourse_close_out`): open 20→**15**
+(encoded 12, ambiguous 35, gap 0); the 5 closures include «These data sets…» ENCODED to the
+semantically-correct harvested kind. Isolated sweep UNTOUCHED — full replay holds every
+baseline exactly (readings 226, skeletons 144, hits 60/62, selection 21/31, eval exit 0).
+Residual 15 Opens = named deferrals (claims / plural sets / quantifier witnesses / Σ-restrictor
+accommodation — note slice-4 record). **Active step: Stage-2 remainder — plan §2.4 proposer
+upgrades (DocumentContext in `ProposeCtx`, confidence+rationale, record/replay for the anaphora
+proposer — the recency floor is in; the LLM proposer replaces the ORDER, not the veto) + §2.5
+D64 doc sync to the Π-carrier.** Stage 3's grader track (3.3 `DerivedClaimGrader`) can run in
+parallel.
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

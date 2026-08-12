@@ -28,6 +28,14 @@ use crate::dcg::reading_ranker::{
 use crate::dcg::skeleton::skeleton_of;
 use crate::dcg::verbalize::{resource_label, unit_sense_names, verbalize, Vb};
 
+/// Cap on FULL re-gates ([`Parser::resolve_open`] calls) per [`Parser::resolve_with`] search —
+/// the kernel's self-protection against an over-proposing (untrusted) proposer: per-hole vetoes
+/// prune linearly before the search, but a multi-hole parse whose whole-term re-gate keeps
+/// failing would otherwise walk the full assignment cross-product at one term-sized
+/// eval+check each. Exhaustion fails CLOSED (the parse stays open). 64 mirrors the chart's
+/// cell-beam scale: the winner is expected within the first few ranked assignments.
+const MAX_REGATE_ATTEMPTS: usize = 64;
+
 impl Parser {
     /// Resolve an [`OpenParse`] by substituting each hole with a proposed antecedent and
     /// **re-gating** through the kernel (D64 §4 — the trusted half of anaphora resolution; the
@@ -59,10 +67,9 @@ impl Parser {
             // resource-inhabits-class rule walks `Layer::is_subclass_of`, so a SUBCLASS-typed
             // antecedent is accepted. (Found by the slice-2 veto test: without this check, the
             // Gene-for-CellLine antecedent resolved — the veto did not exist.)
-            let ty_val = eval(&hole.ty, &Rho::Nil).ok()?;
-            let mut ty_ctx =
-                CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
-            check(&mut ty_ctx, ante, &ty_val).ok()?;
+            if !self.hole_accepts(hole, ante) {
+                return None;
+            }
             term = Exp::App(Box::new(term), Box::new(ante.clone()));
         }
         let nf = readback_val(0, &eval(&term, &Rho::Nil).ok()?);
@@ -82,11 +89,17 @@ impl Parser {
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
     /// and re-gating through the kernel (D64 §4, the resolve loop). For each hole the proposer
     /// is asked, given the sentence and the in-scope `candidates`, for a **ranked** list of
-    /// candidate indices; the loop searches those assignments (depth-first, bounded by the
-    /// proposer's list lengths) and returns the first whole-parse assignment the kernel re-gates
-    /// to a closed `Prop`. **Fail-closed**: a hole the proposer leaves empty, or whose every
-    /// candidate the kernel vetoes (type mismatch), yields `None` — no committed parse. The
-    /// proposer never decides felicity; [`Self::resolve_open`] (the kernel) does.
+    /// candidate indices. The proposals are filtered per hole by the RESTRICTOR VETO
+    /// ([`Self::hole_accepts`]) — the veto is a per-(hole, candidate) fact, so it runs LINEARLY
+    /// here, never inside the assignment cross-product (an all-candidates proposer on a two-hole
+    /// parse otherwise re-checks every pair; the first close-out run spent 50 min there). The
+    /// depth-first search over the surviving assignments then re-gates whole parses, first
+    /// success wins, capped at [`MAX_REGATE_ATTEMPTS`] full re-gates — the kernel self-protects
+    /// against an over-proposing proposer (the proposer is untrusted input; "bounded by its list
+    /// lengths" is not a bound the kernel may rely on). **Fail-closed** everywhere: a hole with
+    /// no proposal, a hole whose every candidate is vetoed, and a search that exhausts its
+    /// budget all yield `None` — no committed parse. The proposer never decides felicity;
+    /// [`Self::resolve_open`] (the kernel) does.
     pub fn resolve_with(
         &self,
         open: &OpenParse,
@@ -105,32 +118,54 @@ impl Parser {
                 .iter()
                 .filter_map(|&i| candidates.get(i)) // out-of-range ⇒ ignored (untrusted input)
                 .filter_map(|c| self.antecedent_exp(c))
+                .filter(|a| self.hole_accepts(hole, a))
                 .collect();
             if antes.is_empty() {
-                return None; // unresolvable / unknown antecedent ⇒ fail closed
+                return None; // unresolvable / every candidate vetoed ⇒ fail closed
             }
             ranked.push(antes);
         }
-        self.search_resolve(open, &ranked, &mut Vec::new())
+        let mut budget = MAX_REGATE_ATTEMPTS;
+        self.search_resolve(open, &ranked, &mut Vec::new(), &mut budget)
+    }
+
+    /// Does `ante` inhabit the hole's declared type? The RESTRICTOR VETO as a standalone
+    /// per-(hole, antecedent) fact — [`Self::resolve_open`] enforces the same check per binding
+    /// (the soundness authority for direct callers); [`Self::resolve_with`] uses it to filter
+    /// each hole's candidates BEFORE the assignment search.
+    fn hole_accepts(&self, hole: &HoleInfo, ante: &Exp) -> bool {
+        let Ok(ty_val) = eval(&hole.ty, &Rho::Nil) else {
+            return false;
+        };
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+        check(&mut ctx, ante, &ty_val).is_ok()
     }
 
     /// Depth-first search over per-hole ranked antecedents: assign one antecedent per hole, then
     /// re-gate the whole assignment via [`Self::resolve_open`]; the first that type-checks closed
     /// wins, and a kernel veto backtracks to the next candidate (the trust boundary driving
-    /// retry). Bounded by the proposer's list lengths.
+    /// retry). `budget` caps the total number of full re-gates (fail closed on exhaustion).
     fn search_resolve(
         &self,
         open: &OpenParse,
         ranked: &[Vec<Exp>],
         acc: &mut Vec<(String, Exp)>,
+        budget: &mut usize,
     ) -> Option<Item> {
         let i = acc.len();
         if i == ranked.len() {
+            if *budget == 0 {
+                return None;
+            }
+            *budget -= 1;
             return self.resolve_open(open, acc);
         }
         for ante in &ranked[i] {
+            if *budget == 0 {
+                return None;
+            }
             acc.push((open.holes[i].var.clone(), ante.clone()));
-            if let Some(it) = self.search_resolve(open, ranked, acc) {
+            if let Some(it) = self.search_resolve(open, ranked, acc, budget) {
                 return Some(it);
             }
             acc.pop();
