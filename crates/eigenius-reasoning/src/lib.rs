@@ -56,6 +56,7 @@
 //! aligned with the kernel's standard "lift chain resource → typed Val"
 //! shape — same surface every other institution uses.
 
+pub mod claim_kind;
 pub mod consistency;
 pub mod entailment;
 pub mod extract;
@@ -65,11 +66,18 @@ pub mod institution;
 pub mod startup;
 pub mod validate;
 
+#[cfg(feature = "use-llm")]
+pub use claim_kind::AnthropicKindClassifier;
+pub use claim_kind::{
+    frame_kind, KindClassifier, KindRecord, NoKindClassifier, RecordingKindClassifier,
+    ReplayKindClassifier,
+};
 pub use grade::{
     ClaimGrader, ClaimSource, DeclaredClaimGrader, DerivedClaimGrader, Grade, GradeError,
     GradedClaim, Warrant,
 };
 pub use ingest::{
-    ClaimVerdict, DocumentIngestion, InProcessIngestion, IngestedDocument, IngestedSentence,
+    ClaimVerdict, DerivedClaimLander, DocumentIngestion, InProcessIngestion, IngestedDocument,
+    IngestedSentence,
 };
 pub use institution::ReasoningInstitution;

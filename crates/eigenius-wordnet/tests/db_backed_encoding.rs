@@ -3394,7 +3394,46 @@ fn resolve_document_discourse_close_out() {
         }
     };
     eprintln!("discourse close-out over: {page_path}");
-    let Some(head) = open_head(&path) else { return };
+    let Some((base_head, backend)) = open_head_and_backend(&path) else {
+        return;
+    };
+    // D68: chain-load the encoding vocabulary + the curated claim-kind alignment onto the
+    // working copy's main branch (classes only — NO lexical entries, so the forest and every
+    // rank/selection replay key are untouched). Committed persistently (§7-2: an in-memory
+    // layer over the DB base OOMs); the working copy is disposable.
+    let head = {
+        let persister = eigenius_kernel::commit::BackendPersister::new(Some(Arc::clone(&backend)));
+        let mut head = base_head;
+        for (name, src) in [
+            (
+                "encoding",
+                include_str!("../../../ontologies/encoding/encoding.esl"),
+            ),
+            (
+                "claim-kind-alignment",
+                include_str!("../../../ontologies/encoding/claim-kind-alignment.esl"),
+            ),
+        ] {
+            let resources = eigenius_kernel::esl::compile_against_layer(src, &head)
+                .unwrap_or_else(|e| panic!("{name} compiles against the chain: {e:?}"));
+            let mut b = eigenius_kernel::layer::LayerBuilder::new(name, Some(Arc::clone(&head)));
+            for r in resources {
+                b.add_resource(r)
+                    .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            }
+            let layer = Arc::new(
+                b.build(eigenius_kernel::layer::LayerStorage::with_persistent(
+                    Arc::clone(&backend),
+                )),
+            );
+            use eigenius_kernel::commit::LayerPersister;
+            let info = persister.persist("main", &layer).expect("persist layer");
+            assert!(info.branch_advanced, "{name} layer advances main");
+            eprintln!("chain-loaded {name} → {}", layer.id());
+            head = layer;
+        }
+        head
+    };
     let lem = morphy();
     let aug = page_augmentation(&head, &page, &lem);
     let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
@@ -3471,14 +3510,106 @@ fn resolve_document_discourse_close_out() {
     };
     let proposer = eigenius_kernel::dcg::RecordingProposer::new(inner_proposer);
 
+    // ── Kind-classifier arm (D68 §4) — the ranks/selections/proposals discipline:
+    //   EIGENIUS_KINDS file EXISTS → REPLAY it (deterministic; misses asserted 0)
+    //   file ABSENT + live         → LIVE AnthropicKindClassifier, RECORDED to that path
+    //   env unset                  → none (frame table only; unmarked claims land Assertion,
+    //                                unreferable — the deterministic floor)
+    let kinds_path = std::env::var("EIGENIUS_KINDS").ok().map(PathBuf::from);
+    let mut kinds_arm = "none";
+    let mut kinds_replay: Option<Arc<eigenius_reasoning::ReplayKindClassifier>> = None;
+    let inner_kinds: Box<dyn eigenius_reasoning::KindClassifier> = match &kinds_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_reasoning::ReplayKindClassifier::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_KINDS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "kind classifier: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            kinds_arm = "replay";
+            let r = Arc::new(r);
+            kinds_replay = Some(Arc::clone(&r));
+            Box::new(r)
+        }
+        Some(p) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&page) else {
+                    panic!(
+                        "EIGENIUS_KINDS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live kind draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "kind classifier: AnthropicKindClassifier (live) — RECORDING to {}",
+                    p.display()
+                );
+                kinds_arm = "live";
+                Box::new(c)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_KINDS={} does not exist, and this binary has no live classifier \
+                 (built without --features use-llm)",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("kind classifier: none (frame table only — unmarked claims land Assertion)");
+            Box::new(eigenius_reasoning::NoKindClassifier)
+        }
+    };
+    let kinds = eigenius_reasoning::RecordingKindClassifier::new(inner_kinds);
+    let lander = eigenius_reasoning::DerivedClaimLander::new("wrn-first-page", &kinds);
+
     let sentences: Vec<String> = segment_sentences(&page)
         .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect();
     let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
     let t = std::time::Instant::now();
-    let resolutions = index.resolve_document(&page, &refs, &lem, &proposer, None);
+    let resolutions = index.resolve_document(&page, &refs, &lem, &proposer, None, Some(&lander));
     assert_eq!(resolutions.len(), sentences.len());
+
+    // Persist the kind draw BEFORE any assert (flush-before-asserts).
+    let kinds_out: Option<PathBuf> = if kinds_arm == "live" {
+        kinds_path.clone()
+    } else {
+        std::env::var("EIGENIUS_KINDS_OUT").ok().map(PathBuf::from)
+    };
+    if let Some(p) = &kinds_out {
+        match kinds.write(p) {
+            Ok(n) => eprintln!("kinds: RECORDED {n} verdict(s) → {}", p.display()),
+            Err(e) => eprintln!("kinds: FAILED to write {}: {e}", p.display()),
+        }
+    }
+    // The landed-claim tally, by discourse kind (the two-axis is_a — D68 §2).
+    let landed = lander.take_landed();
+    let mut kind_tally: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for c in &landed {
+        let kind = c
+            .resources
+            .iter()
+            .find(|r| r.id() == Some(&c.claim_iri))
+            .and_then(|r| {
+                r.is_a()
+                    .iter()
+                    .find(|k| k.as_str() != "urn:eigenius:encoding:EncodedClaim")
+                    .map(|k| k.as_str().rsplit(':').next().unwrap_or("?").to_string())
+            })
+            .unwrap_or_else(|| "?".to_string());
+        *kind_tally.entry(kind).or_default() += 1;
+    }
+    eprintln!(
+        "landed {} claim(s) ({kinds_arm} kinds): {kind_tally:?}",
+        landed.len()
+    );
 
     // Persist the proposal draw BEFORE any assert (the flush-before-asserts discipline).
     let proposals_out: Option<PathBuf> = if proposer_arm == "live" {
@@ -3557,7 +3688,10 @@ fn resolve_document_discourse_close_out() {
     // witnesses ("This impairment"), and Σ-restrictored holes ("…these data sets for genes
     // that…"). A change here is a re-baseline event — update the numbers WITH provenance, don't
     // loosen to inequalities.
-    if proposer_arm == "recency" {
+    if proposer_arm == "recency" && kinds_arm == "none" {
+        // The deterministic floor (no kind classifier: unmarked claims land Assertion,
+        // unreferable — claim antecedents contribute nothing here, so the pre-D68 numbers
+        // must HOLD exactly).
         assert_eq!(
             (enc, amb, open_n),
             (12, 35, 15),
@@ -3565,7 +3699,34 @@ fn resolve_document_discourse_close_out() {
              ambiguous 35, open 15)"
         );
     }
+    if proposer_arm == "recency" && kinds_arm == "replay" {
+        // The D68 close-out baseline (2026-08-12, kinds draw
+        // experiments/parsing/kinds/2026-08-12-reference.json): ALL FIVE claim-referent units
+        // close — 19/20 «These findings show…», 45 «These classifications…», 49 «These
+        // findings remained true…», 60 «These observations suggest…» — each a fail-open
+        // Ambiguous pool awaiting the Stage-1 ranker. The draw landed 2 Finding + 4
+        // Observation + 3 Classification + 1 Suggestion + 2 Assertion over the 12 encoded
+        // sentences. A change here is a re-baseline event (update WITH provenance).
+        assert_eq!(
+            (enc, amb, open_n),
+            (12, 40, 10),
+            "discourse close-out drifted from the pinned 2026-08-12 D68 baseline (encoded 12, \
+             ambiguous 40, open 10)"
+        );
+    }
     assert_replay_faithful();
+    // A kind replay with misses is not the recorded experiment: each miss lands Assertion, so
+    // claim-referent units silently sag back to Open.
+    if let Some(r) = &kinds_replay {
+        eprintln!("  kind replay: {} hits, {} misses", r.hits(), r.misses());
+        assert_eq!(
+            r.misses(),
+            0,
+            "KIND REPLAY had {} MISSES — the sentence set or the chosen readings' glosses \
+             changed under the recording.",
+            r.misses()
+        );
+    }
     // A proposal replay with misses is not the recorded experiment: each miss answers EMPTY, so
     // units silently sag back to Open instead of failing. Asserted AFTER the ranks assert —
     // a ranks infidelity changes the forest, which makes proposal keys miss too.
@@ -3698,6 +3859,73 @@ fn pipeline_with_storage_commits_doc_branch() {
         doc_layer2.id(),
         "the rerun re-points the branch (drop-and-recreate lifecycle)"
     );
+}
+
+/// D68 alignment probe: the CONCRETE restrictor classes of the claim-referent demonstrative
+/// units — the `subclass_of` targets `claim-kind-alignment.esl` must name. Prints each open
+/// parse's holes with their UN-ERASED types (`pretty_term(hole.ty)`), per unit.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/ranks.json \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_claim_unit_restrictors -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed alignment probe (D68); --ignored --nocapture"]
+fn probe_claim_unit_restrictors() {
+    let Some(path) = snapshot_path() else { return };
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let Ok(page) = std::fs::read_to_string(&page_path) else {
+        eprintln!("SKIP: {page_path} not found");
+        return;
+    };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let aug = page_augmentation(&head, &page, &lem);
+    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+    let needles = [
+        "These findings show that WRN is a synthetic-lethal",
+        "These findings show that WRN is a promising drug",
+        "These classifications were highly concordant",
+        "These findings remained true",
+        "These observations suggest",
+    ];
+    for text in segment_sentences(&page) {
+        if !needles.iter().any(|n| text.contains(n)) {
+            continue;
+        }
+        let (closed, open) = index.parse_open(&text, &lem);
+        eprintln!(
+            "«{}»  ({} closed, {} open)",
+            text.trim(),
+            closed.len(),
+            open.len()
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for o in &open {
+            for h in &o.holes {
+                let ty = pretty_term(&h.ty);
+                if seen.insert(ty.clone()) {
+                    eprintln!("    hole {} : {ty}", h.var);
+                }
+            }
+        }
+    }
+}
+
+/// D68 alignment probe (companion of `probe_claim_unit_restrictors`): labels for the UMLS
+/// restrictor classes, so the curated alignment facts are written against known concepts.
+#[test]
+#[ignore = "DB-backed label probe (D68); --ignored --nocapture"]
+fn probe_restrictor_class_labels() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    for cui in ["C2825141", "C0037088", "C0302523", "C0700325", "C5890437"] {
+        let iri = Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).unwrap();
+        eprintln!(
+            "{cui}: {}",
+            eigenius_kernel::dcg::resource_label(&iri, &head)
+                .unwrap_or_else(|| "<no label>".to_string())
+        );
+    }
 }
 
 fn tag(o: &Outcome) -> &'static str {

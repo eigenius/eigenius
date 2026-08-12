@@ -27,6 +27,7 @@ use crate::dcg::reading_ranker::{
 };
 use crate::dcg::skeleton::skeleton_of;
 use crate::dcg::verbalize::{resource_label, unit_sense_names, verbalize, Vb};
+use crate::ontology::Resource;
 
 /// Cap on FULL re-gates ([`Parser::resolve_open`] calls) per [`Parser::resolve_with`] search —
 /// the kernel's self-protection against an over-proposing (untrusted) proposer: per-hole vetoes
@@ -48,31 +49,81 @@ impl Parser {
     /// the check fail and yields `None`, exactly the kernel veto that keeps the LLM from having
     /// the last word. A leftover (unbound) hole likewise fails closed.
     pub fn resolve_open(&self, open: &OpenParse, bindings: &[(String, Exp)]) -> Option<Item> {
-        // The open sem is `λ(h₀:T₀)…(hₙ:Tₙ). body` (D64 — a parametric proposition). Resolution is
-        // APPLICATION: apply each hole's antecedent in binder order (`holes[0]` is the outermost binder),
-        // then β-reduce. A hole with no binding ⇒ `None` (fail closed); the re-gate (empty Γ) rejects an
-        // antecedent that itself still carries a free variable.
-        let mut term = open.item.sem().clone();
+        let antes: Vec<(String, Ante)> = bindings
+            .iter()
+            .map(|(v, e)| (v.clone(), Ante::One(e.clone())))
+            .collect();
+        self.resolve_open_ante(open, &antes)
+    }
+
+    /// The set-aware resolution core. The open sem is `λ(h₀:T₀)…(hₙ:Tₙ). body` (D64 — a
+    /// parametric proposition); resolution is APPLICATION in binder order, then β-reduction and
+    /// the closed re-gate. A SET binding (D68 §5) resolves DISTRIBUTIVELY: the whole
+    /// application is built once per member and the results conjoin under `logic:And` — exactly
+    /// the term the grammar builds for the spelled-out coordination. At most ONE set binding
+    /// per parse (a second needs the pairwise-vs-product decision deferred with collective
+    /// readings — fail closed). A hole with no binding ⇒ `None`; the re-gate (empty Γ) rejects
+    /// an antecedent that itself still carries a free variable.
+    fn resolve_open_ante(&self, open: &OpenParse, bindings: &[(String, Ante)]) -> Option<Item> {
+        // Per-hole antecedents in BINDER order, each past the veto.
+        //
+        // **The hole-type veto, enforced HERE.** β-reduction ERASES the Π-binder's type
+        // annotation, and after substitution the antecedent only meets the body's own argument
+        // types (typically the wide `Entity` of a verb slot) — so the whole-term check below
+        // cannot see a restrictor. Checking `antecedent : Tᵢ` before applying is what makes a
+        // demonstrative's restrictor typing real ("these findings" resolves only to findings);
+        // for a SET, every member is checked. Subsumption comes with it: the checker's
+        // intensional resource-inhabits-class rule walks `Layer::is_subclass_of`, so
+        // subclass-typed antecedents (and, via the D68 alignment, kind-classed claims) are
+        // accepted. (Found by the slice-2 veto test: without this check, the Gene-for-CellLine
+        // antecedent resolved — the veto did not exist.)
+        let mut per_hole: Vec<&Ante> = Vec::with_capacity(open.holes.len());
+        let mut set_count = 0usize;
         for hole in &open.holes {
             let ante = bindings
                 .iter()
                 .find(|(v, _)| *v == hole.var)
                 .map(|(_, a)| a)?;
-            // **The hole-type veto, enforced HERE.** β-reduction ERASES the Π-binder's type
-            // annotation, and after substitution the antecedent only meets the body's own
-            // argument types (typically the wide `Entity` of a verb slot) — so the whole-term
-            // check below cannot see a restrictor. Checking `antecedent : Tᵢ` before applying is
-            // what makes a demonstrative's restrictor typing real ("these findings" resolves
-            // only to findings). Subsumption comes with it: the checker's intensional
-            // resource-inhabits-class rule walks `Layer::is_subclass_of`, so a SUBCLASS-typed
-            // antecedent is accepted. (Found by the slice-2 veto test: without this check, the
-            // Gene-for-CellLine antecedent resolved — the veto did not exist.)
-            if !self.hole_accepts(hole, ante) {
+            if !self.hole_accepts_ante(hole, ante) {
                 return None;
             }
-            term = Exp::App(Box::new(term), Box::new(ante.clone()));
+            if matches!(ante, Ante::Each(_)) {
+                set_count += 1;
+            }
+            per_hole.push(ante);
         }
-        let nf = readback_val(0, &eval(&term, &Rho::Nil).ok()?);
+        if set_count > 1 {
+            return None; // two set bindings ⇒ product-vs-pairwise ambiguity — fail closed
+        }
+
+        // One fully-applied normal form per set member (or exactly one when no set binds).
+        let variants: Vec<Exp> = match per_hole.iter().position(|a| matches!(a, Ante::Each(_))) {
+            None => vec![self.apply_holes(open, &per_hole, None)?],
+            Some(k) => {
+                let Ante::Each(ms) = per_hole[k] else {
+                    unreachable!()
+                };
+                ms.iter()
+                    .map(|m| self.apply_holes(open, &per_hole, Some((k, m))))
+                    .collect::<Option<Vec<_>>>()?
+            }
+        };
+        // Conjoin the variants (right-nested; `flatten_and_exp`-compatible either way). The
+        // single-variant path never touches `logic:And` — identical to pre-set behavior.
+        let nf = if variants.len() == 1 {
+            variants.into_iter().next().expect("len==1")
+        } else {
+            let and = super::super::category::resolve_inductive(
+                &self.grammar.layer,
+                "urn:eigenius:logic:And",
+            )?;
+            variants
+                .into_iter()
+                .rev()
+                .reduce(|acc, v| Exp::InductiveType(Arc::clone(&and), vec![v, acc]))
+                .expect("non-empty variants")
+        };
+
         let expected = denote_cat(open.item.cat()).ok()?;
         let expected_val = eval(&expected, &Rho::Nil).ok()?;
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
@@ -84,6 +135,27 @@ impl Parser {
             open.item.prov(),
             open.item.cost(),
         ))
+    }
+
+    /// Apply every hole's antecedent in binder order and β-reduce to the normal form. `member`
+    /// substitutes the given term at the set hole's position (`Ante::Each` holes have no single
+    /// term of their own).
+    fn apply_holes(
+        &self,
+        open: &OpenParse,
+        per_hole: &[&Ante],
+        member: Option<(usize, &Exp)>,
+    ) -> Option<Exp> {
+        let mut term = open.item.sem().clone();
+        for (i, ante) in per_hole.iter().enumerate() {
+            let arg = match (ante, member) {
+                (Ante::One(e), _) => e,
+                (Ante::Each(_), Some((k, m))) if i == k => m,
+                (Ante::Each(_), _) => return None, // a set hole with no member selected
+            };
+            term = Exp::App(Box::new(term), Box::new(arg.clone()));
+        }
+        Some(readback_val(0, &eval(&term, &Rho::Nil).ok()?))
     }
 
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
@@ -108,15 +180,16 @@ impl Parser {
         candidates: &[Candidate],
         proposer: &dyn Proposer,
     ) -> Option<(Item, ResolutionOutcome)> {
-        let mut ranked: Vec<Vec<(Candidate, Exp)>> = Vec::with_capacity(open.holes.len());
+        let mut ranked: Vec<Vec<(Candidate, Ante)>> = Vec::with_capacity(open.holes.len());
         let mut audits: Vec<(Option<String>, Option<f64>)> = Vec::with_capacity(open.holes.len());
         for hole in &open.holes {
-            // The type pre-filter: (candidate, antecedent term) pairs the veto admits for THIS hole.
-            let fits: Vec<(&Candidate, Exp)> = candidates
+            // The type pre-filter: (candidate, antecedent) pairs the veto admits for THIS hole
+            // (a set candidate passes iff every member does).
+            let fits: Vec<(&Candidate, Ante)> = candidates
                 .iter()
                 .filter_map(|c| {
-                    let ante = self.antecedent_exp(c)?;
-                    self.hole_accepts(hole, &ante).then_some((c, ante))
+                    let ante = self.antecedent_ante(c)?;
+                    self.hole_accepts_ante(hole, &ante).then_some((c, ante))
                 })
                 .collect();
             if fits.is_empty() {
@@ -128,7 +201,7 @@ impl Parser {
                 hole,
                 candidates: &presented,
             });
-            let antes: Vec<(Candidate, Exp)> = proposal
+            let antes: Vec<(Candidate, Ante)> = proposal
                 .ranked
                 .iter()
                 .filter_map(|&i| fits.get(i)) // out-of-range ⇒ ignored (untrusted input)
@@ -174,15 +247,16 @@ impl Parser {
     }
 
     /// Depth-first search over per-hole ranked antecedents: assign one antecedent per hole, then
-    /// re-gate the whole assignment via [`Self::resolve_open`]; the first that type-checks closed
-    /// wins, and a kernel veto backtracks to the next candidate (the trust boundary driving
-    /// retry). `budget` caps the total number of full re-gates (fail closed on exhaustion).
-    /// Returns the closed item plus the accepted candidates in hole order (the binding audit).
+    /// re-gate the whole assignment via [`Self::resolve_open_ante`]; the first that type-checks
+    /// closed wins, and a kernel veto backtracks to the next candidate (the trust boundary
+    /// driving retry). `budget` caps the total number of full re-gates (fail closed on
+    /// exhaustion). Returns the closed item plus the accepted candidates in hole order (the
+    /// binding audit).
     fn search_resolve(
         &self,
         open: &OpenParse,
-        ranked: &[Vec<(Candidate, Exp)>],
-        acc: &mut Vec<(String, Exp)>,
+        ranked: &[Vec<(Candidate, Ante)>],
+        acc: &mut Vec<(String, Ante)>,
         budget: &mut usize,
     ) -> Option<(Item, Vec<Candidate>)> {
         let i = acc.len();
@@ -191,7 +265,7 @@ impl Parser {
                 return None;
             }
             *budget -= 1;
-            return self.resolve_open(open, acc).map(|it| (it, Vec::new()));
+            return self.resolve_open_ante(open, acc).map(|it| (it, Vec::new()));
         }
         for (cand, ante) in &ranked[i] {
             if *budget == 0 {
@@ -207,17 +281,43 @@ impl Parser {
         None
     }
 
-    /// The antecedent term for a proposed [`Candidate`]: an individual resolves through the
-    /// chain to its sem (`EigonResource`/`EigonClass`/`EigonAxiom`, per the entity's kind —
-    /// `None` if the IRI does not resolve, so a stale candidate fails closed before re-gating);
-    /// a kind IS its harvested `kind_of(…)` term.
-    fn antecedent_exp(&self, cand: &Candidate) -> Option<Exp> {
+    /// The antecedent for a proposed [`Candidate`]: an individual resolves through the chain to
+    /// its sem (`None` if the IRI does not resolve, so a stale candidate fails closed before
+    /// re-gating); a kind IS its harvested `kind_of(…)` term; a claim IS its carried resource;
+    /// a claim SET is one antecedent per member, resolved distributively (D68 §5).
+    fn antecedent_ante(&self, cand: &Candidate) -> Option<Ante> {
         match cand {
             Candidate::Individual { iri, .. } => {
                 self.grammar.layer.resolve(iri)?;
-                Some(super::super::lexicon::resolve_sem(&self.grammar.layer, iri))
+                Some(Ante::One(super::super::lexicon::resolve_sem(
+                    &self.grammar.layer,
+                    iri,
+                )))
             }
-            Candidate::Kind { term, .. } => Some(term.clone()),
+            Candidate::Kind { term, .. } => Some(Ante::One(term.clone())),
+            Candidate::Claim { resource, .. } => {
+                Some(Ante::One(Exp::EigonResource(Box::new(resource.clone()))))
+            }
+            Candidate::ClaimSet { members, .. } => {
+                if members.is_empty() {
+                    return None;
+                }
+                Some(Ante::Each(
+                    members
+                        .iter()
+                        .map(|r| Exp::EigonResource(Box::new(r.clone())))
+                        .collect(),
+                ))
+            }
+        }
+    }
+
+    /// Does the veto admit `ante` for `hole`? A set antecedent passes iff EVERY member does —
+    /// the distributive reading predicates each member, so each must inhabit the restrictor.
+    fn hole_accepts_ante(&self, hole: &HoleInfo, ante: &Ante) -> bool {
+        match ante {
+            Ante::One(e) => self.hole_accepts(hole, e),
+            Ante::Each(ms) => ms.iter().all(|m| self.hole_accepts(hole, m)),
         }
     }
 
@@ -254,12 +354,18 @@ impl Parser {
         lemmatizer: &dyn Lemmatizer,
         proposer: &dyn Proposer,
         ranker: Option<&dyn ReadingRanker>,
+        lander: Option<&dyn ClaimLander>,
     ) -> Vec<SentenceResolution> {
         // `document` is the RAW surrounding text (the ranker/proposer record keys hash it — a
         // synthesized join of `sentences` would be a different string than the recordings key
         // on, and every replay would MISS); `sentences` is its segmentation, in order.
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut prior: Vec<PriorSelection> = Vec::new();
+        // The same-kind claim run (D68 §5): consecutively-landed claims sharing a discourse-kind
+        // class, offered as the plural SET antecedent. Any sentence that lands nothing (or a
+        // different kind) breaks it.
+        let mut run: Vec<Resource> = Vec::new();
+        let mut run_kind: Option<Iri> = None;
         let mut out = Vec::with_capacity(sentences.len());
         for (ordinal, s) in sentences.iter().enumerate() {
             let (closed, open) = self.parse_open(s, lemmatizer);
@@ -312,14 +418,35 @@ impl Parser {
                 SentenceOutcome::Gap
             };
             // Thread the discourse: the chosen reading's gloss joins the document context of the
-            // later sentences (sequential consistency). Threaded UNCONDITIONALLY since §2.4 —
-            // the anaphora proposer consumes prior selections too, not just the ranker.
+            // later sentences (sequential consistency) and is handed to the lander. Threaded
+            // UNCONDITIONALLY since §2.4 — the anaphora proposer consumes prior selections too.
+            let mut landed: Option<(Resource, String)> = None;
             if let SentenceOutcome::Encoded(item) = &outcome {
                 let gloss = match &selection {
                     Some(sel) => sel.chosen_gloss.clone(),
                     None => self.reading_gloss(s, lemmatizer, item),
                 };
+                if let Some(l) = lander {
+                    landed = l.land(ordinal, s, &gloss, item);
+                }
                 prior.push(PriorSelection { ordinal, gloss });
+            }
+            // The same-kind run: extend on a same-kind landing, restart on a different kind,
+            // break on no landing (consecutiveness is part of the set's meaning).
+            match &landed {
+                Some((res, _)) => {
+                    let kind = claim_kind(res);
+                    if kind.is_some() && kind == run_kind {
+                        run.push(res.clone());
+                    } else {
+                        run = vec![res.clone()];
+                        run_kind = kind;
+                    }
+                }
+                None => {
+                    run.clear();
+                    run_kind = None;
+                }
             }
             let harvest = match &outcome {
                 SentenceOutcome::Encoded(item) => Some(item.sem()),
@@ -327,7 +454,30 @@ impl Parser {
                 _ => None,
             };
             if let Some(sem) = harvest {
-                let mut fresh = self.discourse_candidates(s, lemmatizer, sem);
+                let mut fresh = Vec::new();
+                // This sentence's landed claim leads (it IS the sentence), then the grown
+                // same-kind set, then the sem's own referents.
+                if let Some((res, surface)) = landed {
+                    fresh.push(Candidate::Claim {
+                        resource: res,
+                        surface,
+                    });
+                    if run.len() >= 2 {
+                        let kind = run_kind.clone().expect("run has a kind");
+                        // The grown set REPLACES any smaller run of the same kind (its key
+                        // changes as it grows, so the generic dedup below cannot).
+                        candidates.retain(
+                            |c| !matches!(c, Candidate::ClaimSet { kind: k, .. } if *k == kind),
+                        );
+                        let local = kind.as_str().rsplit(':').next().unwrap_or("claim");
+                        fresh.push(Candidate::ClaimSet {
+                            surface: format!("the last {} {} claims, together", run.len(), local),
+                            kind,
+                            members: run.clone(),
+                        });
+                    }
+                }
+                fresh.extend(self.discourse_candidates(s, lemmatizer, sem));
                 // Most-recent-first WITHOUT duplicates: a referent re-mentioned now moves to the
                 // front (recency is the salience signal); its older entry is dropped.
                 let fresh_keys: BTreeSet<String> = fresh.iter().map(Candidate::key).collect();
@@ -583,6 +733,16 @@ pub struct SelectionOutcome {
     pub candidates: usize,
 }
 
+/// The discourse-KIND class of a landed claim: the first `is_a` entry that is not the
+/// pipeline-record class `enc:EncodedClaim` (D68 §2 — the two-axis claim carries both). `None`
+/// for a claim with no kind class (it forms no run).
+fn claim_kind(res: &Resource) -> Option<Iri> {
+    res.is_a()
+        .iter()
+        .find(|c| c.as_str() != "urn:eigenius:encoding:EncodedClaim")
+        .cloned()
+}
+
 /// Is `e` closed under the binders WITHIN it (no variable bound outside)? The harvest
 /// pre-filter for kind candidates — a subterm mentioning an enclosing binder's variable is not a
 /// self-standing discourse referent. Unhandled `Exp` variants pass (the empty-Γ re-gate in
@@ -624,13 +784,10 @@ fn closed_under(e: &Exp, bound: &mut Vec<String>) -> bool {
     }
 }
 
-/// A candidate antecedent for anaphora resolution (D64 §4, plan §2.3), with its READABLE surface
-/// form for the proposer to rank against. The resolver assembles these from the discourse context
-/// ([`Parser::resolve_document`]); the (untrusted) [`Proposer`] selects among them by index, and
-/// the kernel re-gates. A third referent kind — a LANDED CLAIM ("These findings…") — is pending
-/// Stage 3's incremental landing: its resolution semantics (claim-resource typing, plural/group
-/// reference to a SET of claims) are undecided, so no variant exists yet and such units stay
-/// honestly `Open`.
+/// A candidate antecedent for anaphora resolution (D64 §4, plan §2.3, D68), with its READABLE
+/// surface form for the proposer to rank against. The resolver assembles these from the
+/// discourse context ([`Parser::resolve_document`]); the (untrusted) [`Proposer`] selects among
+/// them by index, and the kernel re-gates.
 #[derive(Clone, Debug)]
 pub enum Candidate {
     /// A committed named entity — an in-scope chain individual.
@@ -639,13 +796,31 @@ pub enum Candidate {
     /// (possibly Σ-refined: ⟦MSI cell lines⟧). The kernel's derived-kind-predication coercion
     /// lets it inhabit a restrictor-typed hole iff its base class subsumes into the restrictor.
     Kind { term: Exp, surface: String },
+    /// A landed claim of this document (D68): the BUILT resource travels with the candidate
+    /// (the `Kind` pattern — no layer lookup). The checker reads `is_a` — including the
+    /// discourse-KIND class (`enc:Finding`, …) — off the embedded resource; only the
+    /// subsumption walk (kind class → lexicon class, the curated alignment layer) consults the
+    /// chain.
+    Claim { resource: Resource, surface: String },
+    /// The maximal run of consecutively-landed same-kind claims (D68 §5) — a plural
+    /// demonstrative's SET antecedent, resolved DISTRIBUTIVELY (`And` over per-member
+    /// applications; every member must pass the restrictor veto). `kind` is the shared
+    /// discourse-kind class — the run key.
+    ClaimSet {
+        kind: Iri,
+        members: Vec<Resource>,
+        surface: String,
+    },
 }
 
 impl Candidate {
     /// The surface form presented to the proposer.
     pub fn surface(&self) -> &str {
         match self {
-            Candidate::Individual { surface, .. } | Candidate::Kind { surface, .. } => surface,
+            Candidate::Individual { surface, .. }
+            | Candidate::Kind { surface, .. }
+            | Candidate::Claim { surface, .. }
+            | Candidate::ClaimSet { surface, .. } => surface,
         }
     }
 
@@ -655,8 +830,48 @@ impl Candidate {
         match self {
             Candidate::Individual { iri, .. } => format!("i:{}", iri.as_str()),
             Candidate::Kind { term, .. } => format!("k:{}", pretty_term(term)),
+            Candidate::Claim { resource, .. } => format!(
+                "c:{}",
+                resource.id().map(|i| i.as_str()).unwrap_or_default()
+            ),
+            Candidate::ClaimSet { kind, members, .. } => {
+                let ids: Vec<&str> = members
+                    .iter()
+                    .filter_map(|r| r.id())
+                    .map(|i| i.as_str())
+                    .collect();
+                format!("s:{}:{}", kind.as_str(), ids.join(","))
+            }
         }
     }
+}
+
+/// A veto-checked antecedent as the resolution core consumes it: one term, or a SET of terms a
+/// plural reference distributes over (D68 §5).
+#[derive(Clone)]
+enum Ante {
+    One(Exp),
+    Each(Vec<Exp>),
+}
+
+/// The LANDING seam (D67 §4 / D68 §6): turns an encoded sentence into its landed claim resource
+/// so LATER sentences can refer to it («These findings…»). Implemented outside the kernel — the
+/// grader and kind classifier live in the reasoning layer — behind this trait, the same
+/// inversion as [`Proposer`]/[`ReadingRanker`]. The impl owns and accumulates the full claim
+/// clusters (traces, decision records); the discourse loop threads only the claim RESOURCE
+/// (whose `is_a` carries the discourse-kind class) plus a display surface into the candidate
+/// set, and keys the same-kind run assembly off the resource's kind class.
+pub trait ClaimLander {
+    /// Land sentence `ordinal`'s encoded reading. `gloss` is the reading's verbalization (the
+    /// same string threaded as the ranker/proposer prior context). `None` = nothing landed
+    /// (the sentence contributes no claim antecedent, and any same-kind run BREAKS).
+    fn land(
+        &self,
+        ordinal: usize,
+        sentence: &str,
+        gloss: &str,
+        item: &Item,
+    ) -> Option<(Resource, String)>;
 }
 
 /// The context handed to a [`Proposer`] for one referent hole (plan §2.4): the full

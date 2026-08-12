@@ -158,6 +158,7 @@ pub fn emit_document(
             s.item.sem(),
             &provenance,
             timestamp,
+            &[],
         )
         .map_err(|e| EmitError::Encode {
             ordinal: n,
@@ -301,6 +302,26 @@ pub fn emit_document(
                         detail: format!("kind antecedent: {e:?}"),
                     })?;
                     ab.set(iri(&format!("{ENC}:antecedent_term")), encoded);
+                }
+                Candidate::Claim { resource, .. } => {
+                    if let Some(id) = resource.id() {
+                        ab.set(
+                            iri(&format!("{ENC}:antecedent_resource")),
+                            Value::ResourceRef(id.clone()),
+                        );
+                    }
+                }
+                // A SET antecedent (D68 §5): one resource ref per member, in run order.
+                Candidate::ClaimSet { members, .. } => {
+                    let refs: Vec<Value> = members
+                        .iter()
+                        .filter_map(|r| r.id())
+                        .map(|id| Value::ResourceRef(id.clone()))
+                        .collect();
+                    ab.set(
+                        iri(&format!("{ENC}:antecedent_resources")),
+                        Value::Array(refs),
+                    );
                 }
             }
             if let Some(a) = s.binding_authority {

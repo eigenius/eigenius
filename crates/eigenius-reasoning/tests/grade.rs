@@ -130,6 +130,7 @@ fn declared_grader_produces_a_commit_passing_claim() {
                 declared_by: "encoding-pipeline",
                 timestamp: "2026-08-03T00:00:00Z",
                 provenance: "",
+                kind_classes: &[],
             },
         )
         .expect("grade builds the cluster");
@@ -180,6 +181,7 @@ fn declared_claim_needs_its_declaration_trace() {
                 declared_by: "encoding-pipeline",
                 timestamp: "2026-08-03T00:00:00Z",
                 provenance: "",
+                kind_classes: &[],
             },
         )
         .expect("grade builds the cluster");

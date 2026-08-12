@@ -113,6 +113,10 @@ pub struct ClaimSource<'a> {
     /// "DCG parse (D63) of <path> chars a..b (source sha256 …)"). Ignored by the Declared
     /// grader (`declared_by` answers a different question: *who* asserts, not *what computed*).
     pub provenance: &'a str,
+    /// The discourse-KIND classes the claim carries beside its record class (D68 §2 — the
+    /// two-axis claim: `is_a = [enc:EncodedClaim, <kinds…>]`, what makes it referable by a
+    /// demonstrative's restrictor). Consumed by the Derived grader; ignored by Declared.
+    pub kind_classes: &'a [Iri],
 }
 
 /// A graded claim, ready to commit: the cluster's resources, the claim's chain identity, the
@@ -285,6 +289,7 @@ impl DerivedClaimGrader {
         proposition: &Exp,
         provenance: &str,
         timestamp: &str,
+        kind_classes: &[Iri],
     ) -> Result<(Resource, Resource), GradeError> {
         let prop_value =
             encode_type(proposition).map_err(|e| GradeError::Encode(format!("{e:?}")))?;
@@ -292,10 +297,9 @@ impl DerivedClaimGrader {
 
         let claim_id = iri(claim_iri)?;
         let mut claim = Resource::new(claim_id.clone());
-        claim.set(
-            iri(wk::IS_A)?,
-            Value::Array(vec![Value::ResourceRef(iri(ENCODED_CLAIM_CLASS)?)]),
-        );
+        let mut classes = vec![Value::ResourceRef(iri(ENCODED_CLAIM_CLASS)?)];
+        classes.extend(kind_classes.iter().map(|k| Value::ResourceRef(k.clone())));
+        claim.set(iri(wk::IS_A)?, Value::Array(classes));
         claim.set(iri(wk::CANONICAL_PROPOSITION)?, prop_value);
 
         let mut trace = Resource::new(iri(trace_iri)?);
@@ -326,6 +330,7 @@ impl ClaimGrader for DerivedClaimGrader {
             proposition,
             source.provenance,
             source.timestamp,
+            source.kind_classes,
         )?;
         let claim_iri = claim.id().expect("cluster sets the claim id").clone();
         Ok(GradedClaim {

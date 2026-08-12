@@ -101,9 +101,9 @@ pub use lexicon::{
 };
 pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
-    Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, Proposal, ProposeCtx, Proposer,
-    ResolutionOutcome, ResolvedBinding, SelectionOutcome, SentenceOutcome, SentenceResolution,
-    DEFAULT_FOREST_CAP,
+    Candidate, ClaimLander, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, Proposal,
+    ProposeCtx, Proposer, ResolutionOutcome, ResolvedBinding, SelectionOutcome, SentenceOutcome,
+    SentenceResolution, DEFAULT_FOREST_CAP,
 };
 pub use pipeline::{
     DocumentEncoding, DocumentPipeline, InProcessPipeline, PipelineError, SentenceEncoding,

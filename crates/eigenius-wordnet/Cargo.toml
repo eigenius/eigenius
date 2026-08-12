@@ -17,9 +17,11 @@ path = "src/bin/wordnet_import.rs"
 [features]
 # Forward the kernel's live-LLM reranker (use-llm) so the DB-backed (d) harness can use the
 # contextual `AnthropicSenseRanker`; default builds stay LLM-free (deterministic `IdentityRanker`).
-use-llm = ["eigenius-kernel/use-llm"]
+use-llm = ["eigenius-kernel/use-llm", "eigenius-reasoning/use-llm"]
 
 [dev-dependencies]
 # The on-disk RocksDB backend — so the DB-backed encoding measurement (D62 (d)) can open a
 # snapshot of the served store (full WordNet+UMLS) in-process and parse over the lazy LexicalIndex.
 eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
+# The claim lander + kind classifier (D68) — the discourse close-out lands claims in-loop.
+eigenius-reasoning = { path = "../eigenius-reasoning" }

@@ -1,6 +1,7 @@
 # D68 — claim kinds: the two-axis claim model (gates D67 slice 5)
 
-**Status: design note for review — precedes any code.** Parent: [d67-pipeline-unification.md](d67-pipeline-unification.md)
+**Status: BUILT (2026-08-12) — §7 records the implementation and the measured close-out; the
+design sections stand as written (one §5 refinement noted there).** Parent: [d67-pipeline-unification.md](d67-pipeline-unification.md)
 §8 (the claims-ontology question raised in review, 2026-08-11) and §4 (claim antecedents).
 Settled inputs: «These findings» refers to prior claims of the same document (user, 2026-08-11);
 plural demonstratives get REAL set antecedents, not a most-recent-single approximation (user
@@ -150,3 +151,52 @@ architecturally; Gundel et al. and Elbourne for the demonstrative/`the` division
 
 Not in slice 5: collective/group terms, hole number features, the reflection-lattice
 source-axis cleanup (recorded in D67 §8), any bootstrap edit.
+
+## 7. Implementation record (D67 slice 5, 2026-08-12)
+
+- **Vocabulary**: `enc:Claim` root + the six kind classes in `encoding.esl`;
+  `encoding_validates` pins the lattice. The curated alignment is
+  `ontologies/encoding/claim-kind-alignment.esl` — SHADOWING redeclarations adding the lexicon
+  parents (multi-parent `class X : A, B` syntax), with the full curation record in its header:
+  aligned = wn:n09279458 + umlscui:C2825141 (Finding), wn:n01002956 + C0302523 + C5890437
+  (Observation), wn:n01012712 (Classification); NOT aligned = the act/watching/group/process
+  senses and the clinical concepts ("Signs and Symptoms", "Patient observation") — readings
+  whose restrictor carries an unaligned sense do not resolve to claims, so the alignment
+  doubles as sense discrimination. Targets came from a restrictor probe over the page
+  (`probe_claim_unit_restrictors` + `probe_restrictor_class_labels`).
+- **Kernel**: `Candidate::Claim { resource, surface }` and `Candidate::ClaimSet { kind,
+  members, surface }` (both carry their content — no layer lookup); the internal `Ante`
+  (One/Each) machinery with per-member vetoes; the DISTRIBUTIVE arm in the resolution core
+  (per-member full application, `logic:And` right-fold, single closed re-gate; at most one set
+  binding per parse — a second fails closed pending the collective/group design); the
+  `ClaimLander` seam in `resolve_document` (the Proposer/ReadingRanker inversion — the
+  reasoning-side impl owns the clusters, the loop threads resource + surface); maximal
+  same-kind-run assembly keyed off the resource's kind class (broken by any non-landing
+  sentence). Fixture tests: a landed claim resolves through multi-class inhabitation with the
+  alignment analog, the wrong kind is vetoed, and a plural reference distributes over a 2-run
+  with the set membership in the binding audit.
+- **Reasoning**: `claim_kind.rs` — the frame table (`hypothesized/suggest that` → deterministic
+  kinds), the `KindClassifier` trait with Recording (memoizing) / Replay (miss = Assertion,
+  counted) arms and the live `AnthropicKindClassifier` (use-llm, document context);
+  `ClaimSource.kind_classes` → `DerivedClaimGrader::cluster` writes `is_a = [EncodedClaim,
+  <kinds…>]`; `DerivedClaimLander` composes frame → classifier → Assertion default and
+  accumulates the clusters.
+- **§5 refinement at implementation**: sets resolve at the plural hole with EVERY member
+  passing the restrictor veto individually, and the run breaks on any sentence that lands
+  nothing — including `Ambiguous` sentences (only `Encoded` ones land under no ranker), which
+  is what made the finding-run land exactly on the units «these findings» refers to.
+- **Measured** (the discourse close-out, dem→d67 snapshot + ranks replay, recency proposer,
+  no ranker):
+  - Deterministic floor (no classifier): 12 claims land, all `Assertion` — the pre-D68 pin
+    (12/35/15/0) HOLDS exactly with the whole machinery active.
+  - With the recorded kind draw (`experiments/parsing/kinds/2026-08-12-reference.json` — 12
+    verdicts: 2 Finding, 4 Observation, 3 Classification, 1 Suggestion, 2 Assertion, live
+    Anthropic, replay 12/0): **ALL FIVE claim-referent units close** — 19/20 «These findings
+    show…» AMBIG(12), 45 «These classifications…» AMBIG(6), 49 «These findings remained
+    true…» AMBIG(2), 60 «These observations suggest…» AMBIG(24) — **open 15 → 10** (encoded
+    12, ambiguous 40, gap 0), each a fail-open pool awaiting the Stage-1 ranker. Both arms
+    PINNED in the close-out test.
+  - The isolated-sentence sweep is untouched (the chain-loaded layers add classes, no lexical
+    entries) — baselines replay verified.
+- **Kind verdicts are model-adjudicated pending human sign-off**
+  (`experiments/parsing/kinds/README.md`), like the reading ledger.

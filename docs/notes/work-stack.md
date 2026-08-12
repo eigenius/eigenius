@@ -77,20 +77,23 @@ re-driven over `DocumentPipeline` (--proposals arm; `select_pinned`/`select_rank
 `resolve_document` takes the RAW document (joined-sentences sha would have missed every replay
 key); `ResolutionOutcome` binding audit → `enc:AnaphorBinding` (closed BindingAuthority enum,
 machine-readable antecedents). Close-out pin (12/35/15/0) + all isolated baselines hold EXACT
-(eval exit 0); 171 suites, clippy both configs. **Active step: the §8 revision note is
-WRITTEN, awaiting review — [d68-claim-kinds.md](d68-claim-kinds.md): kind = a SECOND `is_a`
-class (multi-class inhabitation #91 — no new kernel rule, no reflection reshape), `enc:Claim`
-root + closed kind classes in encoding.esl, per-kind curated alignment in its own chain-loaded
-layer (Assertion aligned to nothing = unreferable, fail-closed), kind assignment =
-deterministic frame table + recorded untrusted classifier, plural sets = DISTRIBUTIVE
-resolution (And over per-member β-applications — the coordination shape; collective/group
-terms + hole number stay deferred). It gates slice 5 (the 4 «These findings» units). The fresh
-full aligned reseed is DONE and VERIFIED (`wordnet-umls-aligned-2026-08-12-d67`, 2.8G): the
-page baselines replay EXACT on it (ranks 62/0, selections 31/0, all numbers identical, eval
-exit 0) — reseed+alignment is deterministic across runs on one bootstrap, so the new snapshot
-is canonical, and the demo's rank misses are a cross-BOOTSTRAP artifact (d66-era chain). Slice
-6 opens with: re-record demo ranks on this snapshot + re-verify its 6 pins + regenerate
-artifacts (inference.esl re-derives if readings shift).**
+(eval exit 0); 171 suites, clippy both configs. Slice 5 (claim antecedents) DONE
+`2026-08-12` per [d68-claim-kinds.md](d68-claim-kinds.md) §7: kind = a second `is_a` class
+(multi-class inhabitation, no new kernel rule); `enc:Claim` + closed kinds in encoding.esl;
+curated alignment layer (`claim-kind-alignment.esl`, probe-derived targets, unaligned senses =
+sense discrimination); frame table + recorded `KindClassifier` + Assertion default;
+`Candidate::Claim`/`ClaimSet` + the DISTRIBUTIVE set arm (per-member veto, And-fold, one set
+per parse) + `ClaimLander` seam + same-kind-run assembly. **Measured: with the tracked kind
+draw (`experiments/parsing/kinds/2026-08-12-reference.json`, replay 12/0) ALL FIVE
+claim-referent units close — open 15→10 (12/40/10/0, pinned beside the deterministic-floor pin
+12/35/15/0 which HOLDS)**; isolated baselines untouched; 171 suites, clippy both configs. Kind
+verdicts model-adjudicated pending sign-off. The `2026-08-12-d67` snapshot is canonical (page
+replay exact; reseed+alignment proven deterministic). **Active step: slice 6 — the
+full-document artifact (3.4) + the 3.5 acceptance run, opening with the demo refresh on the
+d67 snapshot (re-record demo ranks, re-verify its 6 pins, regenerate artifacts; inference.esl
+re-derives if readings shift). Remaining deferrals live in D68 §5/§5a (collective/group term +
+star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
+cleanup).**
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

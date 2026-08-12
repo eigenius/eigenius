@@ -1243,8 +1243,11 @@ name = "eigenius-reasoning"
 version = "0.1.0"
 dependencies = [
  "eigenius-kernel",
+ "schemars",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -1347,6 +1350,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eigenius-kernel",
+ "eigenius-reasoning",
  "eigenius-storage-rocksdb",
 ]
 

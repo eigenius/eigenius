@@ -2626,6 +2626,180 @@ fn index_with_pooled_fixture() -> (Arc<Layer>, Parser) {
     (layer, index)
 }
 
+/// The D68 claim-kind ALIGNMENT analog for the fixture world: a kind class that subsumes into
+/// the demonstrative's restrictor (CellLine), and one that does not — so a kind-classed claim
+/// resolves via the ordinary subsumption walk, and a wrong-kinded one is vetoed.
+const CLAIM_KIND_FIXTURE: &str = r#"
+namespace lexicon = "urn:eigenius:lexicon";
+class lexicon:TestFinding : lexicon:CellLine {
+    description = "test claim-kind class ALIGNED into the restrictor lattice (D68 §3 analog).";
+}
+class lexicon:TestOther {
+    description = "test claim-kind class with NO alignment — claims kinded here are unreferable.";
+}
+"#;
+
+fn index_with_claim_kinds() -> (Arc<Layer>, Parser) {
+    let (base, _) = index_with_demonstratives();
+    let resources =
+        esl::compile_against_layer(CLAIM_KIND_FIXTURE, &base).expect("claim-kind fixture compiles");
+    let mut b = LayerBuilder::new("claim-kind-fixture", Some(base));
+    for r in resources {
+        b.add_resource(r).expect("add claim-kind resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let index = Parser::build(Arc::clone(&layer));
+    (layer, index)
+}
+
+/// A mock [`ClaimLander`]: lands every encoded sentence as a claim resource kinded by the given
+/// class local name — `is_a = [enc:EncodedClaim, lexicon:<kind>]` (the D68 two-axis shape).
+struct KindLander(&'static str);
+impl eigenius_kernel::dcg::ClaimLander for KindLander {
+    fn land(
+        &self,
+        ordinal: usize,
+        _sentence: &str,
+        _gloss: &str,
+        _item: &Item,
+    ) -> Option<(eigenius_kernel::ontology::Resource, String)> {
+        use eigenius_kernel::ontology::resource::Value;
+        let mut r = eigenius_kernel::ontology::Resource::new(
+            Iri::parse(&format!("urn:eigenius:test:claim{ordinal}")).unwrap(),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            Value::Array(vec![
+                Value::String("urn:eigenius:encoding:EncodedClaim".to_string()),
+                Value::String(format!("urn:eigenius:lexicon:{}", self.0)),
+            ]),
+        );
+        Some((r, format!("the {} claim {ordinal}", self.0)))
+    }
+}
+
+#[test]
+fn a_demonstrative_resolves_to_a_landed_claim() {
+    // D68 §2 end to end at fixture scale: sentence 1 encodes and LANDS as a claim whose is_a
+    // carries the kind class TestFinding ⊑ CellLine (the alignment analog); sentence 2's
+    // demonstrative (restrictor CellLine) resolves to the claim RESOURCE through the ordinary
+    // multi-class inhabitation walk — no new kernel rule.
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    let (_layer, index) = index_with_claim_kinds();
+    let doc = ["HeLa affects BRCA1", "yonder cell line affects BRCA1"];
+    let lander = KindLander("TestFinding");
+    let resolved = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("the TestFinding claim 0"),
+        Some(&First),
+        Some(&lander),
+    );
+    let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
+        panic!("the demonstrative resolves to the landed claim");
+    };
+    assert!(
+        pretty_term(s2.sem()).contains("claim0"),
+        "the referent is the claim RESOURCE: {}",
+        pretty_term(s2.sem())
+    );
+
+    // The WRONG kind — TestOther has no alignment into the restrictor — is vetoed, and the
+    // sentence stays honestly Open (the claim class taxonomy is doing the soundness work).
+    let other = KindLander("TestOther");
+    let vetoed = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("the TestOther claim 0"),
+        Some(&First),
+        Some(&other),
+    );
+    assert!(
+        matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
+        "an unaligned claim kind cannot be the referent (fail-closed)"
+    );
+}
+
+#[test]
+fn a_plural_reference_resolves_distributively_to_a_claim_set() {
+    // D68 §5: two consecutively-landed same-kind claims form the SET candidate; resolving the
+    // demonstrative to it DISTRIBUTES — the resolved sem is the And of the per-member
+    // applications (the same term the grammar builds for the spelled-out coordination), and the
+    // binding audit records the membership.
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    let (_layer, index) = index_with_claim_kinds();
+    let doc = [
+        "HeLa affects BRCA1",
+        "BRCA1 affects HeLa",
+        "yonder cell line affects BRCA1",
+    ];
+    let lander = KindLander("TestFinding");
+    let resolved = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("the last 2 TestFinding claims, together"),
+        Some(&First),
+        Some(&lander),
+    );
+    let SentenceOutcome::Encoded(s3) = &resolved[2].outcome else {
+        panic!("the plural reference resolves to the claim SET");
+    };
+    let sem = pretty_term(s3.sem());
+    assert!(
+        sem.contains("claim0") && sem.contains("claim1"),
+        "BOTH members are predicated: {sem}"
+    );
+    assert!(sem.contains("And("), "the members conjoin: {sem}");
+    let audit = resolved[2]
+        .resolution
+        .as_ref()
+        .expect("a resolved reading carries its binding audit");
+    assert!(
+        matches!(
+            &audit.bindings[0].antecedent,
+            Candidate::ClaimSet { members, .. } if members.len() == 2
+        ),
+        "the audit records the set membership"
+    );
+}
+
 fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
     let (base, _) = index_over_bootstrap();
     let resources = esl::compile_against_layer(DEMONSTRATIVE_FIXTURE, &base)
@@ -2852,6 +3026,7 @@ fn resolve_document_threads_discourse_across_sentences() {
         &Identity,
         &PickBySurface("The BRCA1 gene"),
         None,
+        None,
     );
     assert_eq!(resolved.len(), 2);
     assert!(
@@ -2876,6 +3051,7 @@ fn resolve_document_threads_discourse_across_sentences() {
         &doc,
         &Identity,
         &PickBySurface("nonexistent"),
+        None,
         None,
     );
     assert!(
@@ -2931,6 +3107,7 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
         &Identity,
         &PickBySurface("The BRCA1 gene"),
         None,
+        None,
     );
     let abstained = index.resolve_document(
         &doc.join(" "),
@@ -2938,6 +3115,7 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
         &Identity,
         &PickBySurface("The BRCA1 gene"),
         Some(&Abstain),
+        None,
     );
     for (p, a) in plain.iter().zip(&abstained) {
         assert_eq!(
@@ -2954,6 +3132,7 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
         &Identity,
         &PickBySurface("The BRCA1 gene"),
         Some(&First),
+        None,
     );
     for (r, p) in ranked.iter().zip(&plain) {
         match (&p.outcome, &r.outcome) {
@@ -3003,8 +3182,14 @@ fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
 
     // The proposer picks the kind by its verbalized surface → the re-gate closes the parse
     // with the kind as the referent.
-    let resolved =
-        index.resolve_document(&doc.join(" "), &doc, &PluralS, &PickBySurface("Gene"), None);
+    let resolved = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &PluralS,
+        &PickBySurface("Gene"),
+        None,
+        None,
+    );
     let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
         panic!("the demonstrative resolves to the discourse kind ⟦genes⟧");
     };
@@ -3021,6 +3206,7 @@ fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
         &doc,
         &PluralS,
         &PickBySurface("The HeLa cell line"),
+        None,
         None,
     );
     assert!(
@@ -3049,6 +3235,7 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
         &doc,
         &Identity,
         &PickBySurface("The HeLa cell line"),
+        None,
         None,
     );
     let SentenceOutcome::Ambiguous(pool) = &plain[1].outcome else {
@@ -3082,6 +3269,7 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
         &Identity,
         &PickBySurface("nonexistent"),
         None,
+        None,
     );
     let SentenceOutcome::Encoded(only) = &alone[1].outcome else {
         panic!("with the anaphoric reading unresolvable, the closed reading encodes alone");
@@ -3113,6 +3301,7 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
         &Identity,
         &PickBySurface("The HeLa cell line"),
         Some(&First),
+        None,
     );
     let SentenceOutcome::Encoded(_) = &ranked[1].outcome else {
         panic!("a choosing ranker collapses the pooled competition");

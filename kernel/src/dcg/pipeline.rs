@@ -39,7 +39,7 @@ use super::augment::{
     LexiconAugmentation, NominalCategoryProposer,
 };
 use super::lemmatizer::Lemmatizer;
-use super::parse::{Parser, Proposer, SelectionOutcome, SentenceOutcome};
+use super::parse::{ClaimLander, Parser, Proposer, SelectionOutcome, SentenceOutcome};
 use super::reading_ranker::ReadingRanker;
 use super::segment::segment_sentences;
 
@@ -112,6 +112,10 @@ pub struct InProcessPipeline<'a> {
     /// D67 §2: `Some((backend, doc_id))` builds the doc layer on the persistent store and
     /// commits it to branch `doc-<doc_id>` (drop-and-recreate lifecycle — pre-production).
     storage: Option<(Arc<dyn PersistentBackend>, String)>,
+    /// The LANDING seam (D67 §4 / D68): lands each encoded sentence's claim inside the
+    /// discourse loop so later sentences can refer to it («These findings…»). `None` = no
+    /// landing, no claim antecedents.
+    claim_lander: Option<&'a dyn ClaimLander>,
     /// Configures the internally-built [`Parser`] — sense cap, cell beam, sense-rank
     /// record/replay, document context — the same knobs the measurement harness sets
     /// (`with_sense_cap(2)`, `with_cell_beam(64)`, …). Without one the parser runs on its
@@ -145,8 +149,15 @@ impl<'a> InProcessPipeline<'a> {
             augment_options: AugmentOptions::DocumentOnly,
             reading_ranker: None,
             storage: None,
+            claim_lander: None,
             parser_setup: None,
         }
+    }
+
+    /// Install the claim lander (D68) — landed claims join the discourse candidate set.
+    pub fn with_claim_lander(mut self, lander: &'a dyn ClaimLander) -> Self {
+        self.claim_lander = Some(lander);
+        self
     }
 
     /// Install the parser-configuration hook (see the field doc) — applied to the freshly-built
@@ -275,6 +286,7 @@ impl<'a> InProcessPipeline<'a> {
             self.lemmatizer,
             self.anaphora_proposer,
             self.reading_ranker,
+            self.claim_lander,
         );
 
         let sentences = bodies

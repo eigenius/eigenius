@@ -239,7 +239,7 @@ property enc:runner_up_skeletons : core:value_array {
 class enc:AnaphorBinding {
     description = "Records one RESOLVED referent hole (D64): the antecedent the kernel's re-gate ACCEPTED for an anaphor (pronoun / possessor / demonstrative) in a unit's encoded reading. The proposer only ranks (untrusted, recorded — proposals.json); the restrictor veto + closed re-gate decide, so this is the accepted-binding audit — the anaphora sibling of DecisionPoint. The antecedent is machine-readable: a resource reference for a named individual or landed claim, the D47 type_expr encoding for a kind term (which has no IRI); the surface is the display form the proposer saw.";
     requires enc:binding_unit, enc:hole_var, enc:antecedent_surface;
-    recommends enc:antecedent_resource, enc:antecedent_term, enc:bound_by, reflection:rationale, enc:confidence;
+    recommends enc:antecedent_resource, enc:antecedent_resources, enc:antecedent_term, enc:bound_by, reflection:rationale, enc:confidence;
 }
 
 property enc:binding_unit : core:resource {
@@ -260,6 +260,11 @@ property enc:antecedent_surface : core:string {
 
 property enc:antecedent_resource : core:resource {
     description = "The accepted antecedent, when it is a chain resource — a named individual, or a landed EncodedClaim (D67 §4).";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_resources : core:resource_array {
+    description = "The accepted antecedent SET (D68 §5), when a plural reference resolved distributively to several landed claims — one reference per member, in run order.";
     domain enc:AnaphorBinding;
 }
 
@@ -341,9 +346,45 @@ resource enc:cut_out_of_scope : enc:CutKind {
 // kernel attests (D56 IsDerivedAs); grade climbs to Verified only via D61 (deferred).
 
 class enc:EncodedClaim : reflection:DerivedResource {
-    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. Carries its source unit (provenance) and its grade (reflection:epistemic_status — Derived by construction; Verified only via the D61 faithfulness back-stop, deferred). The fidelity-to-intent check (S7) is deferred to D61.";
+    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. Carries its source unit (provenance) and its grade (reflection:epistemic_status — Derived by construction; Verified only via the D61 faithfulness back-stop, deferred). The fidelity-to-intent check (S7) is deferred to D61. A landed claim ALSO carries its discourse KIND as a second is_a class (enc:Finding / … — D68 §2, the two-axis claim model): the checker's multi-class inhabitation is what lets a demonstrative's restrictor resolve to it.";
     requires enc:from_unit, reflection:canonical_proposition;
     recommends enc:confidence;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The discourse-kind axis (D68 §2) — what the claim IS in the document's own terms,
+// orthogonal to the reflection: epistemic-SOURCE lattice (how it is warranted).
+// ════════════════════════════════════════════════════════════════════
+//
+// A landed claim carries BOTH axes as classes: is_a = [enc:EncodedClaim, enc:<Kind>]. The
+// discourse restrictor check ("these findings" resolves only to findings) rides the checker's
+// multi-class inhabitation + the PER-KIND curated alignment facts, which live in a separate
+// chain-loaded layer (ontologies/encoding/claim-kind-alignment.esl — they reference lexicon
+// sense classes this file's validation chain does not have). enc:Assertion is deliberately
+// aligned to NOTHING: an unmarked claim is not discourse-referable (fail-closed). A CLOSED set:
+// adding a kind is a vocabulary edit, never a silent mint.
+
+class enc:Claim {
+    description = "The abstract discourse-referable claim root (D68 §2): the resource a discourse anaphor («these findings») can bind — the reified assertion, whatever its epistemic source. Names the root the reflection: source lattice deliberately lacks, at the enc: level where discourse needs it. Subkinds are the closed discourse-kind classes below.";
+}
+
+class enc:Finding : enc:Claim {
+    description = "A claim the document presents as an established result of its own investigation («These findings show …»). Discourse kind, not epistemic grade: a finding may land Derived or Observed.";
+}
+class enc:Observation : enc:Claim {
+    description = "A claim the document presents as something observed/noticed («These observations suggest …»).";
+}
+class enc:Classification : enc:Claim {
+    description = "A claim assigning items to categories («These classifications were highly concordant …»).";
+}
+class enc:Hypothesis : enc:Claim {
+    description = "A claim the document marks as conjectured, typically by its matrix frame («We hypothesized that …»). Referable as a hypothesis; never as a finding.";
+}
+class enc:Suggestion : enc:Claim {
+    description = "A claim the document presents as suggested/indicated rather than established («… suggest that …» as the matrix frame).";
+}
+class enc:Assertion : enc:Claim {
+    description = "The unmarked default: a plain declarative with no frame evidence and no classifier verdict. Deliberately aligned to no lexicon class — an unmarked claim is not discourse-referable (fail-closed); re-classification is a re-land, not a mutation.";
 }
 
 property enc:from_unit : core:resource {

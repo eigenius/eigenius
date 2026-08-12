@@ -50,7 +50,7 @@ mod seed;
 // `pipeline.rs` import these paths).
 pub use felicity::{HoleInfo, HoleKind, OpenParse};
 pub use resolve::{
-    Candidate, Proposal, ProposeCtx, Proposer, ResolutionOutcome, ResolvedBinding,
+    Candidate, ClaimLander, Proposal, ProposeCtx, Proposer, ResolutionOutcome, ResolvedBinding,
     SelectionOutcome, SentenceOutcome, SentenceResolution,
 };
 

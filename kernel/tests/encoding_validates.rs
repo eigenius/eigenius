@@ -195,4 +195,41 @@ fn encoding_ontology_is_expressible_and_validates() {
             "enc:{a} is on the layer"
         );
     }
+
+    // The discourse-kind axis (D68 §2): the closed kind lattice under the enc:Claim root. Each
+    // kind subclasses enc:Claim ON THIS LAYER; the per-kind lexicon alignment lives in the
+    // separate chain-loaded claim-kind-alignment.esl (its targets are seeded sense classes this
+    // chain does not have).
+    for k in [
+        "Claim",
+        "Finding",
+        "Observation",
+        "Classification",
+        "Hypothesis",
+        "Suggestion",
+        "Assertion",
+    ] {
+        assert!(
+            encoding
+                .resolve(&iri(&format!("urn:eigenius:encoding:{k}")))
+                .is_some(),
+            "enc:{k} is on the layer"
+        );
+    }
+    for k in [
+        "Finding",
+        "Observation",
+        "Classification",
+        "Hypothesis",
+        "Suggestion",
+        "Assertion",
+    ] {
+        assert!(
+            encoding.is_subclass_of(
+                &iri(&format!("urn:eigenius:encoding:{k}")),
+                &iri("urn:eigenius:encoding:Claim")
+            ),
+            "enc:{k} ⊑ enc:Claim"
+        );
+    }
 }

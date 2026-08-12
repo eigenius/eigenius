@@ -38,9 +38,86 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 
-use crate::grade::{ClaimGrader, ClaimSource, GradedClaim, Warrant};
+use crate::claim_kind::{frame_kind, KindClassifier, KIND_ASSERTION};
+use crate::grade::{ClaimGrader, ClaimSource, DerivedClaimGrader, GradedClaim, Warrant};
 use crate::validate::do_validate_justification;
 use crate::ReasoningInstitution;
+
+/// The [`ClaimLander`] realization (D68 §4/§6): lands each encoded sentence as the Derived
+/// cluster, with the discourse kind assigned by (1) the deterministic frame table, else (2) the
+/// installed [`KindClassifier`] (recorded, untrusted), else (3) the `enc:Assertion` default
+/// (unreferable, fail-closed). The lander OWNS the built clusters — the discourse loop threads
+/// only the claim resource + surface; the caller collects [`Self::take_landed`] afterwards to
+/// commit/emit them.
+pub struct DerivedClaimLander<'a> {
+    doc_id: String,
+    declared_by: String,
+    timestamp: String,
+    classifier: &'a dyn KindClassifier,
+    landed: std::cell::RefCell<Vec<GradedClaim>>,
+}
+
+impl<'a> DerivedClaimLander<'a> {
+    pub fn new(doc_id: &str, classifier: &'a dyn KindClassifier) -> Self {
+        Self {
+            doc_id: doc_id.to_string(),
+            declared_by: "encoding-pipeline".to_string(),
+            timestamp: "2026-08-03T00:00:00Z".to_string(),
+            classifier,
+            landed: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    /// The accumulated claim clusters, in landing order (drains the lander).
+    pub fn take_landed(&self) -> Vec<GradedClaim> {
+        self.landed.take()
+    }
+}
+
+impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
+    fn land(
+        &self,
+        ordinal: usize,
+        sentence: &str,
+        gloss: &str,
+        item: &eigenius_kernel::dcg::Item,
+    ) -> Option<(Resource, String)> {
+        let mut kinds = match frame_kind(sentence) {
+            Some(k) => vec![k],
+            None => self.classifier.classify(ordinal, sentence, gloss),
+        };
+        if kinds.is_empty() {
+            kinds = vec![Iri::parse(KIND_ASSERTION).expect("static kind IRI")];
+        }
+        let stem = format!("urn:eigenius:doc:{}:s{}", self.doc_id, ordinal);
+        let provenance = format!(
+            "eigenius-reasoning lander: DCG parse (D63) of document {}, sentence {ordinal} \
+             «{sentence}»",
+            self.doc_id
+        );
+        let claim = DerivedClaimGrader
+            .grade(
+                item.sem(),
+                &ClaimSource {
+                    stem: &stem,
+                    warrant: Warrant::Derived,
+                    declared_by: &self.declared_by,
+                    timestamp: &self.timestamp,
+                    provenance: &provenance,
+                    kind_classes: &kinds,
+                },
+            )
+            .ok()?; // un-gradable ⇒ nothing lands (fail closed, run breaks)
+        let resource = claim
+            .resources
+            .iter()
+            .find(|r| r.id() == Some(&claim.claim_iri))?
+            .clone();
+        let surface = format!("claim {}: {}", ordinal + 1, gloss);
+        self.landed.borrow_mut().push(claim);
+        Some((resource, surface))
+    }
+}
 
 /// Encode a document all the way to graded, validated claims: prose → per-sentence closed propositions
 /// (the pipeline) → graded claims committed + checked (the grader + the D39 gate).
@@ -154,6 +231,7 @@ impl DocumentIngestion for InProcessIngestion<'_> {
                         declared_by: "encoding-pipeline",
                         timestamp: "2026-08-03T00:00:00Z",
                         provenance: &provenance,
+                        kind_classes: &[],
                     },
                 ) {
                     Ok(claim) => {

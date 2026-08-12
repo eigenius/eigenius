@@ -1,0 +1,48 @@
+// claim-kind-alignment — the CURATED per-kind lexicon alignment (D68 §3).
+//
+// CHAIN-LOADED over the seeded lexicon (never bootstrap; its targets are seeded sense classes
+// that exist only there), after encoding.esl. Each fact is a deliberate modeling statement —
+// "a landed claim of kind K IS a <sense-class>" — and is what lets a demonstrative's restrictor
+// («these findings» carries the lexicon's finding class) resolve to a kind-classed claim via the
+// checker's ordinary multi-class inhabitation + subclass walk. NOTHING here is a new mechanism.
+//
+// SHADOWING REDECLARATION: each kind class from encoding.esl is redeclared here with its lexicon
+// parents ADDED (the layered-resolution pattern the wordnet↔umls alignment established). The
+// enc:Claim parent is restated — a redeclaration replaces, it does not merge.
+//
+// CURATION RECORD (2026-08-12, from the D68 restrictor probe over the page + labels):
+//   aligned     — wn:n09279458  "finding: something that is found"        → Finding
+//                 umlscui:C2825141 "Experimental Finding"                 → Finding
+//                 wn:n01002956  "observation: the act of making and
+//                                recording a measurement"                 → Observation
+//                 umlscui:C0302523 "Observation in research"              → Observation
+//                 umlscui:C5890437 "Observation (finding)"                → Observation
+//                 wn:n01012712  "classification: the act of distributing
+//                                things into classes"                     → Classification
+//   NOT aligned — umlscui:C0037088 "Signs and Symptoms" (a clinical sign is not a claim);
+//                 umlscui:C0700325 "Patient observation" (a clinical procedure);
+//                 wn:n00151497 (the act-of-determining sense); wn:n00879759 (watching);
+//                 wn:n07939638 (the arranged group); wn:n05732756 (the cognitive process);
+//                 wn:n01148904 (government restriction).
+//   Readings whose restrictor carries an unaligned sense simply do not resolve to claims —
+//   the alignment doubles as sense discrimination, which is the point.
+//
+// enc:Hypothesis / enc:Suggestion have no alignment facts yet (the page never refers with
+// «these hypotheses»); enc:Assertion is deliberately unaligned FOREVER (an unmarked claim is
+// not discourse-referable — fail-closed).
+
+namespace enc     = "urn:eigenius:encoding";
+namespace wn      = "urn:eigenius:wn";
+namespace umlscui = "urn:eigenius:umlscui";
+
+class enc:Finding : enc:Claim, wn:n09279458, umlscui:C2825141 {
+    description = "A claim the document presents as an established result of its own investigation («These findings show …»). ALIGNED (this layer): wn finding = 'something that is found'; UMLS Experimental Finding.";
+}
+
+class enc:Observation : enc:Claim, wn:n01002956, umlscui:C0302523, umlscui:C5890437 {
+    description = "A claim the document presents as something observed/measured («These observations suggest …»). ALIGNED (this layer): wn observation = 'the act of making and recording a measurement'; UMLS Observation in research; UMLS Observation (finding).";
+}
+
+class enc:Classification : enc:Claim, wn:n01012712 {
+    description = "A claim assigning items to categories («These classifications were highly concordant …»). ALIGNED (this layer): wn classification = 'the act of distributing things into classes'.";
+}

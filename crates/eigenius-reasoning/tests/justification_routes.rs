@@ -212,6 +212,7 @@ fn modus_ponens_over_two_parsed_sentences() {
             declared_by: "demo:prose-mp",
             timestamp: "2026-08-03T00:00:00Z",
             provenance: "",
+            kind_classes: &[],
         },
     )
     .expect("conclusion builds");
@@ -247,6 +248,7 @@ fn modus_ponens_refuses_a_premise_that_is_not_the_antecedent() {
             declared_by: "demo:prose-mp",
             timestamp: "2026-08-03T00:00:00Z",
             provenance: "",
+            kind_classes: &[],
         },
     )
     .map(|_| ())
@@ -396,6 +398,7 @@ fn a_pinned_literature_rule_justifies_a_sentence_by_inference() {
         declared_by: "demo:inference",
         timestamp: "2026-08-03T00:00:00Z",
         provenance: "",
+        kind_classes: &[],
     })
     .expect("conclusion builds");
     rs.extend(concl.resources.clone());
