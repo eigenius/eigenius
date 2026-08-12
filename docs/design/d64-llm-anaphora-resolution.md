@@ -83,6 +83,19 @@ LLM.
 > neutrals — no NbE special-casing). D64 Phase A is the carrier MVP. See
 > `docs/notes/d62-d64-open-parse-carrier.md` (§2, §7).
 
+> **As-built note (2026-08-11; the code since 2026-07-23).** The carrier is the **Π-abstraction**:
+> the felicity gate abstracts each hole variable into a typed binder — an open parse's sem is the
+> CLOSED function `λ(h₀:T₀)…(hₙ:Tₙ). body : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧` (`OpenParse { item, holes }`,
+> `dcg/parse/felicity.rs`; each `HoleInfo` = binder name + type + resolver kind). Resolution is
+> **application**, not substitution: `resolve_open` checks each antecedent against its binder's
+> type (the restrictor veto — β-reduction erases the annotation, so the per-binding check is
+> where a hole's type is enforced), applies it, β-reduces, and re-gates the closed normal form
+> against `⟦cat⟧` under empty Γ. Holes are typed by their SOURCE: `Entity` for pronouns and
+> possessors (seed-time freshening, span-keyed), the **restrictor class** for demonstratives
+> (`lexicon:anaphor_of(A)`, freshened at the felicity gate where β has made `A` concrete —
+> `docs/notes/d64-demonstratives-as-holes.md`). The kernel and chain stay hole-free, as this
+> section requires; the engine-side context is `OpenParse.holes`.
+
 **Pronouns are case-marked NPs whose sem is a referent hole.** A pronoun does not denote; it marks a slot
 the resolver fills.
 
@@ -110,6 +123,19 @@ the resolver fills.
 The grammar layer is otherwise unchanged: pronoun entries are ordinary closed-class lexical entries.
 
 ## 4. The resolver (S3 component of the D62 pipeline institution): the LLM step
+
+> **As-built note (2026-08-11).** Steps 1–4 are realized IN-PROCESS behind the kernel's
+> `Proposer` trait (`dcg/parse/resolve.rs`), not yet as the orchestration component below (that
+> remains the Phase-2/served arm — a different impl of the same trait): candidates are the
+> discourse-harvested named entities AND kinds (`Candidate::{Individual, Kind}`, readable
+> surfaces), TYPE-pre-filtered per hole by the restrictor veto before presentation (step 1's
+> pre-filter, now the kernel's own check); the proposer sees the full `DocumentContext`
+> (document + target sentence + prior selections) and answers a ranked `Proposal { ranked,
+> rationale, confidence }` (step 2's schema; `AnthropicProposer` under `use-llm`); the recorded
+> arm is `RecordingProposer`/`ReplayProposer` (`dcg/proposer_record.rs`, the ranks.json/
+> selections.json sibling); the assignment search is depth-first over the ranked lists, capped
+> at 64 full re-gates, fail-closed (steps 3–4). "Introduce-new" is not offered — the proposer
+> selects among assembled candidates only.
 
 A new orchestration component (sibling of `complete_json.ts`, using `llm/adapter.ts` and the kernel
 bridge `kernel_client.ts`):

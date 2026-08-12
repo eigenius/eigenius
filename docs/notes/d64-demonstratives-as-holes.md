@@ -273,3 +273,18 @@ discovered:
      («…these data sets for genes that…» — resolving one means discharging its restrictor
      content against the referent, a presupposition-accommodation decision not yet taken; the
      page splits 51 plain-class vs 25 Σ-typed demref binders).
+5. **Proposer upgrades (plan §2.4) + doc sync (§2.5)** — DONE (2026-08-11). `ProposeCtx` now
+   carries the SAME `DocumentContext` as the reading ranker (document + target sentence + prior
+   selections, threaded unconditionally through the loop) plus the hole's restrictor type;
+   number features await a felicity-gate carrier change (noted on the struct). The trait answers
+   a `Proposal { ranked, rationale, confidence }`; `AnthropicProposer` prompts with the document
+   + the type-pre-filtered candidates (`EIGENIUS_DUMP_PROPOSE_PROMPT` dumps it). Record/replay
+   landed as `RecordingProposer`/`ReplayProposer` (`dcg/proposer_record.rs` — key covers
+   sentence, document sha, priors, hole var+type+kind, presented candidates; a recorded refusal
+   replays as a hit; a miss answers empty, fail-closed, counted; the recorder MEMOIZES repeat
+   questions — the worst unit carries 48 same-hole open parses). The close-out harness gained
+   the `EIGENIUS_PROPOSALS` three-arm discipline (exists→replay / absent+live→record /
+   unset→recency); the pinned recency baseline (12/35/15/0) holds under all of it.
+   `docs/design/d64-llm-anaphora-resolution.md` §3/§4 synced to the as-built Π-carrier and
+   in-process resolver. A live reference draw + referent-level adjudication is future
+   measurement work — the recency floor is the tracked deterministic arm.

@@ -24,14 +24,20 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{ProposeCtx, Proposer};
+use super::pretty_term;
+use super::{Proposal, ProposeCtx, Proposer};
 
-/// The model's structured reply: candidate indices, most-likely antecedent first.
+/// The model's structured reply: candidate indices, most-likely antecedent first, plus the
+/// audit fields the proposal record stores verbatim (plan §2.4).
 #[derive(Deserialize, JsonSchema)]
 struct Ranking {
     /// Indices into the presented candidate list, ranked most-likely-antecedent first.
     /// Empty if no candidate is a plausible antecedent.
     ranked_candidate_indices: Vec<usize>,
+    /// One sentence: why the top pick is the referent (or why none is).
+    rationale: String,
+    /// Confidence in the TOP pick, 0.0 to 1.0.
+    confidence: f64,
 }
 
 /// A [`Proposer`] backed by Anthropic Claude via the direct tool-use client. Ranks the in-scope candidate
@@ -85,9 +91,9 @@ impl AnthropicProposer {
 }
 
 impl Proposer for AnthropicProposer {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<usize> {
+    fn propose(&self, ctx: &ProposeCtx) -> Proposal {
         if ctx.candidates.is_empty() {
-            return Vec::new();
+            return Proposal::default();
         }
         let candidate_list = ctx
             .candidates
@@ -96,22 +102,50 @@ impl Proposer for AnthropicProposer {
             .map(|(i, c)| format!("[{i}] {}", c.surface()))
             .collect::<Vec<_>>()
             .join("\n");
+        // Prior selections — the discourse the referent must be consistent with (same block the
+        // reading ranker presents).
+        let mut prior_block = String::new();
+        if !ctx.doc.prior_selections.is_empty() {
+            prior_block
+                .push_str("Readings already selected for earlier sentences (the discourse):\n");
+            for p in ctx.doc.prior_selections {
+                prior_block.push_str(&format!("  sentence {}: \"{}\"\n", p.ordinal, p.gloss));
+            }
+            prior_block.push('\n');
+        }
         let instructions = format!(
-            "In the sentence:\n  \"{}\"\nan anaphor (pronoun, possessor, or demonstrative) refers \
-             to an earlier referent. Choose its most likely antecedent from these candidates:\n{}\
-             \n\nReturn `ranked_candidate_indices`: the candidate indices, most-likely antecedent \
-             first (empty if none is plausible).",
-            ctx.sentence, candidate_list,
+            "A parser is resolving an anaphor (a pronoun, possessor, or demonstrative like \
+             \"these X\") to its antecedent in the document below.\n\n\
+             Document:\n{}\n\n{prior_block}\
+             The sentence containing the anaphor:\n  \"{}\"\n\n\
+             The anaphor's referent must be of type `{}`. The candidates (already filtered to \
+             that type — earlier discourse referents, most recent first):\n{}\n\n\
+             Return `ranked_candidate_indices` (most-likely antecedent first; empty if none is \
+             the referent), `rationale` (one sentence), and `confidence` in the top pick (0-1).",
+            ctx.doc.document.trim(),
+            ctx.doc.sentence.trim(),
+            pretty_term(&ctx.hole.ty),
+            candidate_list,
         );
+        // `EIGENIUS_DUMP_PROPOSE_PROMPT=1` prints the exact prompt per hole — same rationale as
+        // the reading ranker's dump: the proposer decides which referent lands, so being able to
+        // READ what it was asked matters.
+        if std::env::var("EIGENIUS_DUMP_PROPOSE_PROMPT").is_ok() {
+            eprintln!("\n===== PROPOSER PROMPT =====\n{instructions}\n===== END PROMPT =====\n");
+        }
         let Some(ranking) = self.ask(&instructions) else {
-            return Vec::new();
+            return Proposal::default();
         };
         // Out-of-range indices are dropped here for a cleaner record; `resolve_with` would
         // ignore them anyway (the proposer is untrusted input).
-        ranking
-            .ranked_candidate_indices
-            .into_iter()
-            .filter(|&i| i < ctx.candidates.len())
-            .collect()
+        Proposal {
+            ranked: ranking
+                .ranked_candidate_indices
+                .into_iter()
+                .filter(|&i| i < ctx.candidates.len())
+                .collect(),
+            rationale: Some(ranking.rationale),
+            confidence: Some(ranking.confidence.clamp(0.0, 1.0)),
+        }
     }
 }

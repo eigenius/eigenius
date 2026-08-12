@@ -61,11 +61,17 @@ by index); the derived-kind-predication coercion in the CHECKER (`kind_of(K) : C
 semantically-correct harvested kind. Isolated sweep UNTOUCHED — full replay holds every
 baseline exactly (readings 226, skeletons 144, hits 60/62, selection 21/31, eval exit 0).
 Residual 15 Opens = named deferrals (claims / plural sets / quantifier witnesses / Σ-restrictor
-accommodation — note slice-4 record). **Active step: Stage-2 remainder — plan §2.4 proposer
-upgrades (DocumentContext in `ProposeCtx`, confidence+rationale, record/replay for the anaphora
-proposer — the recency floor is in; the LLM proposer replaces the ORDER, not the veto) + §2.5
-D64 doc sync to the Π-carrier.** Stage 3's grader track (3.3 `DerivedClaimGrader`) can run in
-parallel.
+accommodation — note slice-4 record). §2.4 + §2.5 DONE `2026-08-11` (note slice 5): `ProposeCtx`
+carries the ranker's `DocumentContext` + hole type; `Proposal { ranked, rationale, confidence }`;
+`RecordingProposer`/`ReplayProposer` (memoizing; refusals replay as hits, misses fail closed);
+`AnthropicProposer` context prompt; harness `EIGENIUS_PROPOSALS` three-arm; design doc §3/§4
+synced to the as-built Π-carrier. Recency pin (12/35/15/0) holds throughout; 171 suites, clippy
+both configs. **STAGE 2 EXIT GATE MET** (corpus page resolves through DB-backed
+`resolve_document`, fail-closed preserved; residuals are named deferrals). **Active step:
+Stage 3 — pipeline unification + Derived landing: 3.3 `DerivedClaimGrader` and/or 3.1
+persistent doc layer first (§2.3's claim candidates arrive WITH the Stage-3 incremental
+landing, which is what unblocks the claim-referent demonstrative units).** Live-proposer
+reference draw + referent-level adjudication = future measurement work on the recency floor.
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

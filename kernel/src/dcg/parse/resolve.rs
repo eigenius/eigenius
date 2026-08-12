@@ -87,41 +87,54 @@ impl Parser {
     }
 
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
-    /// and re-gating through the kernel (D64 §4, the resolve loop). For each hole the proposer
-    /// is asked, given the sentence and the in-scope `candidates`, for a **ranked** list of
-    /// candidate indices. The proposals are filtered per hole by the RESTRICTOR VETO
-    /// ([`Self::hole_accepts`]) — the veto is a per-(hole, candidate) fact, so it runs LINEARLY
-    /// here, never inside the assignment cross-product (an all-candidates proposer on a two-hole
-    /// parse otherwise re-checks every pair; the first close-out run spent 50 min there). The
-    /// depth-first search over the surviving assignments then re-gates whole parses, first
-    /// success wins, capped at [`MAX_REGATE_ATTEMPTS`] full re-gates — the kernel self-protects
-    /// against an over-proposing proposer (the proposer is untrusted input; "bounded by its list
-    /// lengths" is not a bound the kernel may rely on). **Fail-closed** everywhere: a hole with
-    /// no proposal, a hole whose every candidate is vetoed, and a search that exhausts its
-    /// budget all yield `None` — no committed parse. The proposer never decides felicity;
-    /// [`Self::resolve_open`] (the kernel) does.
+    /// and re-gating through the kernel (D64 §4, the resolve loop). Per hole, the in-scope
+    /// `candidates` are FIRST filtered by the RESTRICTOR VETO ([`Self::hole_accepts`]) — the
+    /// veto is a per-(hole, candidate) fact, so it runs LINEARLY here, never inside the
+    /// assignment cross-product (an all-candidates proposer on a two-hole parse otherwise
+    /// re-checks every pair; the first close-out run spent 50 min there) — and only the
+    /// type-passing subset is PRESENTED to the proposer (plan §2.4: the LLM never wastes prompt
+    /// tokens ranking candidates the kernel would veto; its indices refer to the presented
+    /// list). The depth-first search over the proposer-ranked assignments then re-gates whole
+    /// parses, first success wins, capped at [`MAX_REGATE_ATTEMPTS`] full re-gates — the kernel
+    /// self-protects against an over-proposing proposer (the proposer is untrusted input;
+    /// "bounded by its list lengths" is not a bound the kernel may rely on). **Fail-closed**
+    /// everywhere: a hole with every candidate vetoed, a proposer that returns no ranking, and
+    /// a search that exhausts its budget all yield `None` — no committed parse. The proposer
+    /// never decides felicity; [`Self::resolve_open`] (the kernel) does.
     pub fn resolve_with(
         &self,
         open: &OpenParse,
-        sentence: &str,
+        doc: &DocumentContext,
         candidates: &[Candidate],
         proposer: &dyn Proposer,
     ) -> Option<Item> {
         let mut ranked: Vec<Vec<Exp>> = Vec::with_capacity(open.holes.len());
         for hole in &open.holes {
-            let picks = proposer.propose(&ProposeCtx {
-                sentence,
-                hole,
-                candidates,
-            });
-            let antes: Vec<Exp> = picks
+            // The type pre-filter: (candidate, antecedent term) pairs the veto admits for THIS hole.
+            let fits: Vec<(&Candidate, Exp)> = candidates
                 .iter()
-                .filter_map(|&i| candidates.get(i)) // out-of-range ⇒ ignored (untrusted input)
-                .filter_map(|c| self.antecedent_exp(c))
-                .filter(|a| self.hole_accepts(hole, a))
+                .filter_map(|c| {
+                    let ante = self.antecedent_exp(c)?;
+                    self.hole_accepts(hole, &ante).then_some((c, ante))
+                })
+                .collect();
+            if fits.is_empty() {
+                return None; // every candidate vetoed ⇒ fail closed
+            }
+            let presented: Vec<Candidate> = fits.iter().map(|(c, _)| (*c).clone()).collect();
+            let proposal = proposer.propose(&ProposeCtx {
+                doc,
+                hole,
+                candidates: &presented,
+            });
+            let antes: Vec<Exp> = proposal
+                .ranked
+                .iter()
+                .filter_map(|&i| fits.get(i)) // out-of-range ⇒ ignored (untrusted input)
+                .map(|(_, a)| a.clone())
                 .collect();
             if antes.is_empty() {
-                return None; // unresolvable / every candidate vetoed ⇒ fail closed
+                return None; // proposer declined every presented candidate ⇒ fail closed
             }
             ranked.push(antes);
         }
@@ -230,10 +243,20 @@ impl Parser {
             // the same closed proposition (or duplicating a closed reading) are ONE reading.
             let mut pool = closed;
             let mut seen: BTreeSet<String> = pool.iter().map(|it| pretty_term(it.sem())).collect();
-            for o in &open {
-                if let Some(item) = self.resolve_with(o, s, &candidates, proposer) {
-                    if seen.insert(pretty_term(item.sem())) {
-                        pool.push(item);
+            {
+                // The proposer gets the SAME document context as the reading ranker (§2.4):
+                // surrounding text + prior selections. Scoped: it borrows `prior`, which the
+                // gloss threading below appends to.
+                let doc_ctx = DocumentContext {
+                    document: &document,
+                    sentence: s,
+                    prior_selections: &prior,
+                };
+                for o in &open {
+                    if let Some(item) = self.resolve_with(o, &doc_ctx, &candidates, proposer) {
+                        if seen.insert(pretty_term(item.sem())) {
+                            pool.push(item);
+                        }
                     }
                 }
             }
@@ -256,18 +279,15 @@ impl Parser {
             } else {
                 SentenceOutcome::Gap
             };
-            // Thread the discourse: the chosen reading's gloss joins the ranker's context for the later
-            // sentences (sequential consistency), and its discourse referents join the anaphora
-            // candidate set (most-recent-first). Gloss threading only runs with a ranker installed —
-            // without one nothing consumes it.
-            if ranker.is_some() {
-                if let SentenceOutcome::Encoded(item) = &outcome {
-                    let gloss = match &selection {
-                        Some(sel) => sel.chosen_gloss.clone(),
-                        None => self.reading_gloss(s, lemmatizer, item),
-                    };
-                    prior.push(PriorSelection { ordinal, gloss });
-                }
+            // Thread the discourse: the chosen reading's gloss joins the document context of the
+            // later sentences (sequential consistency). Threaded UNCONDITIONALLY since §2.4 —
+            // the anaphora proposer consumes prior selections too, not just the ranker.
+            if let SentenceOutcome::Encoded(item) = &outcome {
+                let gloss = match &selection {
+                    Some(sel) => sel.chosen_gloss.clone(),
+                    None => self.reading_gloss(s, lemmatizer, item),
+                };
+                prior.push(PriorSelection { ordinal, gloss });
             }
             let harvest = match &outcome {
                 SentenceOutcome::Encoded(item) => Some(item.sem()),
@@ -567,8 +587,9 @@ impl Candidate {
         }
     }
 
-    /// The dedup/recency key: identity for the discourse candidate set.
-    fn key(&self) -> String {
+    /// The candidate's stable identity — the dedup/recency key of the discourse candidate set,
+    /// and the identity the proposal record/replay key is written in.
+    pub fn key(&self) -> String {
         match self {
             Candidate::Individual { iri, .. } => format!("i:{}", iri.as_str()),
             Candidate::Kind { term, .. } => format!("k:{}", pretty_term(term)),
@@ -576,22 +597,65 @@ impl Candidate {
     }
 }
 
-/// The context handed to a [`Proposer`] for one referent hole: the sentence, the hole (its type
-/// + kind), and the in-scope candidate antecedents.
+/// The context handed to a [`Proposer`] for one referent hole (plan §2.4): the full
+/// [`DocumentContext`] — the SAME context the reading ranker gets (surrounding input text, the
+/// target sentence, the glosses of prior sentences' selected readings), because "these lines"
+/// is resolved by the surrounding prose, not the bare sentence — plus the hole (its restrictor
+/// type + kind) and the candidate antecedents ALREADY FILTERED to the hole's type (the §2.4
+/// pre-filter; `ctx.candidates` is the presented list the proposal's indices refer to). Number
+/// features (sg/pl of the anaphor) are NOT yet carried — [`HoleInfo`] has no number; threading
+/// it needs the felicity gate to capture cat features at freshening, a later increment.
 pub struct ProposeCtx<'a> {
-    pub sentence: &'a str,
+    pub doc: &'a DocumentContext<'a>,
     pub hole: &'a HoleInfo,
     pub candidates: &'a [Candidate],
 }
 
-/// The **untrusted** anaphora proposer (D64 §4): given a hole and the in-scope candidates, return
-/// a **ranked** list of indices into `ctx.candidates` (most-preferred first; empty ⇒ unresolvable;
-/// out-of-range indices are ignored). The proposer only ever *selects among the assembled
-/// candidates* — it cannot introduce an antecedent of its own, which is what lets a kind (a term,
-/// not an IRI) be a candidate at all — and the kernel re-gates every selection
-/// ([`Parser::resolve_open`]). Impls: a deterministic mock (tests), a feature-gated live LLM
-/// client (`use-llm`), and the production orchestrator bridge — all behind this one trait, so the
-/// algorithm is impl-agnostic.
+/// A proposer's answer for one hole: candidate indices ranked most-preferred first (into the
+/// presented `ctx.candidates`; empty ⇒ unresolvable; out-of-range indices are ignored), plus the
+/// audit fields a live proposer supplies (recorded verbatim; `None` from deterministic impls).
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct Proposal {
+    pub ranked: Vec<usize>,
+    /// Why this ranking — one sentence, recorded into the run's proposal artifact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// The proposer's own confidence in its TOP pick, `0.0..=1.0`. Advisory: nothing gates on
+    /// it yet; it is recorded so a later slice can calibrate abstention against it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+}
+
+impl Proposal {
+    /// A ranking with no audit fields — the deterministic-impl convenience.
+    pub fn ranked(ranked: Vec<usize>) -> Self {
+        Self {
+            ranked,
+            rationale: None,
+            confidence: None,
+        }
+    }
+}
+
+/// The **untrusted** anaphora proposer (D64 §4): given a hole and the presented candidates,
+/// return a ranked [`Proposal`]. The proposer only ever *selects among the assembled candidates*
+/// — it cannot introduce an antecedent of its own, which is what lets a kind (a term, not an
+/// IRI) be a candidate at all — and the kernel re-gates every selection
+/// ([`Parser::resolve_open`]). Impls: deterministic mocks (tests), the record/replay pair
+/// (`crate::dcg::proposer_record`), a feature-gated live LLM client (`use-llm`), and the
+/// production orchestrator bridge — all behind this one trait, so the algorithm is impl-agnostic.
 pub trait Proposer {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<usize>;
+    fn propose(&self, ctx: &ProposeCtx) -> Proposal;
+}
+
+impl<T: Proposer + ?Sized> Proposer for Box<T> {
+    fn propose(&self, ctx: &ProposeCtx) -> Proposal {
+        (**self).propose(ctx)
+    }
+}
+
+impl<T: Proposer + ?Sized> Proposer for std::sync::Arc<T> {
+    fn propose(&self, ctx: &ProposeCtx) -> Proposal {
+        (**self).propose(ctx)
+    }
 }

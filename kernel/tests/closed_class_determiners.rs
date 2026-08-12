@@ -25,8 +25,8 @@ use eigenius_kernel::dcg::{
     abbreviation_resources, apply, coordinate_np, coordinate_prop, entry_to_item,
     extract_abbreviations, glossary_resources, ground_long_form, is_ctor, pretty_term, type_raise,
     AbbrDef, AbbreviationBinding, Candidate, DocumentPipeline, Identity, InProcessPipeline, Item,
-    LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, ProposeCtx, Proposer, SenseRanker,
-    SentenceEncoding, SentenceOutcome, WordSenses,
+    LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, Proposal, ProposeCtx, Proposer,
+    SenseRanker, SentenceEncoding, SentenceOutcome, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -2758,13 +2758,25 @@ fn two_demonstrative_occurrences_are_two_independent_holes() {
 /// LLM proposer to exercise the resolve loop without an LLM.
 struct PickBySurface(&'static str);
 impl Proposer for PickBySurface {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<usize> {
-        ctx.candidates
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.surface() == self.0)
-            .map(|(i, _)| i)
-            .collect()
+    fn propose(&self, ctx: &ProposeCtx) -> Proposal {
+        Proposal::ranked(
+            ctx.candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.surface() == self.0)
+                .map(|(i, _)| i)
+                .collect(),
+        )
+    }
+}
+
+/// The isolated-sentence [`DocumentContext`] for direct `resolve_with` calls: the sentence is
+/// its own document, no prior selections.
+fn solo_ctx(sentence: &str) -> eigenius_kernel::dcg::DocumentContext<'_> {
+    eigenius_kernel::dcg::DocumentContext {
+        document: sentence,
+        sentence,
+        prior_selections: &[],
     }
 }
 
@@ -2790,7 +2802,7 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
     let resolved = index
         .resolve_with(
             &open[0],
-            "it affects HeLa",
+            &solo_ctx("it affects HeLa"),
             &candidates,
             &PickBySurface("BRCA1"),
         )
@@ -2808,7 +2820,7 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
         index
             .resolve_with(
                 &open[0],
-                "it affects HeLa",
+                &solo_ctx("it affects HeLa"),
                 &candidates,
                 &PickBySurface("NONE")
             )
@@ -3580,7 +3592,12 @@ fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
         },
     ];
     let resolved = index
-        .resolve_with(&open[0], "it affects HeLa", &candidates, &proposer)
+        .resolve_with(
+            &open[0],
+            &solo_ctx("it affects HeLa"),
+            &candidates,
+            &proposer,
+        )
         .expect("live LLM proposes an antecedent the kernel re-gates to a closed Prop");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");

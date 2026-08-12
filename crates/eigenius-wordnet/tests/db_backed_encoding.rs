@@ -46,7 +46,7 @@ use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
     is_nonprose, pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize,
     AbbreviationBinding, Identity, Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation,
-    Parser, Pos, ProposeCtx, Proposer, SentenceOutcome, Vb,
+    Parser, Pos, Proposal, ProposeCtx, Proposer, SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -3395,10 +3395,72 @@ fn resolve_document_discourse_close_out() {
     // the deterministic floor; the LLM proposer (§2.4) replaces the ORDER, not the veto.
     struct Recency;
     impl Proposer for Recency {
-        fn propose(&self, ctx: &ProposeCtx) -> Vec<usize> {
-            (0..ctx.candidates.len()).collect()
+        fn propose(&self, ctx: &ProposeCtx) -> Proposal {
+            Proposal::ranked((0..ctx.candidates.len()).collect())
         }
     }
+
+    // ── Proposer arm (plan §2.4) — the EIGENIUS_SENSE_RANKS / EIGENIUS_SELECTIONS discipline:
+    //   EIGENIUS_PROPOSALS file EXISTS → REPLAY it (deterministic, no LLM; misses asserted 0)
+    //   file ABSENT + live proposer    → LIVE AnthropicProposer, RECORDED to that path
+    //   env unset                      → the deterministic RECENCY arm (the pinned baseline)
+    // Whatever the arm, the RecordingProposer wraps it (memoizing repeat questions) and the
+    // draw lands at EIGENIUS_PROPOSALS (live) or EIGENIUS_PROPOSALS_OUT (per-run artifact).
+    let proposals_path = std::env::var("EIGENIUS_PROPOSALS").ok().map(PathBuf::from);
+    let mut proposer_arm = "recency";
+    let mut proposal_replay: Option<Arc<eigenius_kernel::dcg::ReplayProposer>> = None;
+    let inner_proposer: Box<dyn Proposer> = match &proposals_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_kernel::dcg::ReplayProposer::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_PROPOSALS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "anaphora proposer: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            proposer_arm = "replay";
+            let r = Arc::new(r);
+            proposal_replay = Some(Arc::clone(&r));
+            Box::new(r)
+        }
+        Some(p) => {
+            // RECORD mode — without a live proposer the run would silently measure the recency
+            // arm while claiming a live draw; fatal (the path must be ABSOLUTE: the test
+            // binary's CWD is the crate dir, not the repo root).
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(r) = eigenius_kernel::dcg::resolver_llm::AnthropicProposer::from_env()
+                else {
+                    panic!(
+                        "EIGENIUS_PROPOSALS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live proposal draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "anaphora proposer: AnthropicProposer (live) — RECORDING to {}",
+                    p.display()
+                );
+                proposer_arm = "live";
+                Box::new(r)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_PROPOSALS={} does not exist, and this binary has no live proposer \
+                 (built without --features use-llm) — to replay, point at an existing \
+                 proposals.json; to record, rebuild with the feature",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("anaphora proposer: recency (deterministic floor)");
+            Box::new(Recency)
+        }
+    };
+    let proposer = eigenius_kernel::dcg::RecordingProposer::new(inner_proposer);
 
     let sentences: Vec<String> = segment_sentences(&page)
         .into_iter()
@@ -3406,8 +3468,23 @@ fn resolve_document_discourse_close_out() {
         .collect();
     let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
     let t = std::time::Instant::now();
-    let resolutions = index.resolve_document(&refs, &lem, &Recency, None);
+    let resolutions = index.resolve_document(&refs, &lem, &proposer, None);
     assert_eq!(resolutions.len(), sentences.len());
+
+    // Persist the proposal draw BEFORE any assert (the flush-before-asserts discipline).
+    let proposals_out: Option<PathBuf> = if proposer_arm == "live" {
+        proposals_path.clone()
+    } else {
+        std::env::var("EIGENIUS_PROPOSALS_OUT")
+            .ok()
+            .map(PathBuf::from)
+    };
+    if let Some(p) = &proposals_out {
+        match proposer.write(p) {
+            Ok(n) => eprintln!("proposals: RECORDED {n} question(s) → {}", p.display()),
+            Err(e) => eprintln!("proposals: FAILED to write {}: {e}", p.display()),
+        }
+    }
 
     // Cosmetic log marker only. `that` is deliberately absent — its every occurrence on this
     // page is the complementizer/relativizer homograph, so matching it would mark
@@ -3448,8 +3525,8 @@ fn resolve_document_discourse_close_out() {
         }
     }
     eprintln!(
-        "=== DISCOURSE (recency proposer, no ranker, {:.0}s): encoded {enc}, ambiguous {amb}, \
-         open {open_n}, gap {gap} over {} units ===",
+        "=== DISCOURSE ({proposer_arm} proposer, no ranker, {:.0}s): encoded {enc}, ambiguous \
+         {amb}, open {open_n}, gap {gap} over {} units ===",
         t.elapsed().as_secs_f64(),
         sentences.len()
     );
@@ -3458,11 +3535,12 @@ fn resolve_document_discourse_close_out() {
     // Fail-closed invariant — run-independent: pooling only ADDS resolved readings to a
     // sentence's pool, so coverage cannot regress.
     assert_eq!(gap, 0, "pooling must not create grammar gaps");
-    // The PINNED close-out baseline (2026-08-11, dem snapshot + ranks 2026-07-29-demonstratives
-    // replay, recency proposer, no ranker — deterministic up to the live-abbreviation overlay,
-    // which has been stable at PARP-1/MSI/MMR/MSS). 5 of the 20 isolated-Open units close:
-    // «These data sets are project Achilles and project DRIVE» → ENCODED (resolved to the
-    // harvested kind ⟦data from large-scale silencing screens⟧), and 4 more → Ambiguous
+    // The PINNED close-out baseline — RECENCY ARM ONLY (a live/replayed proposal draw is its own
+    // experiment with its own numbers): 2026-08-11, dem snapshot + ranks
+    // 2026-07-29-demonstratives replay, no ranker — deterministic up to the live-abbreviation
+    // overlay, which has been stable at PARP-1/MSI/MMR/MSS. 5 of the 20 isolated-Open units
+    // close: «These data sets are project Achilles and project DRIVE» → ENCODED (resolved to
+    // the harvested kind ⟦data from large-scale silencing screens⟧), and 4 more → Ambiguous
     // (fail-open pools for the Stage-1 ranker, incl. the pre-migration comparative-hole unit
     // «The lines from rare lineages…», all 48 readings resolved). The 15 residual Opens are the
     // DOCUMENTED deferrals: claim referents ("These findings/observations", plan §2.3 landed
@@ -3470,13 +3548,33 @@ fn resolve_document_discourse_close_out() {
     // witnesses ("This impairment"), and Σ-restrictored holes ("…these data sets for genes
     // that…"). A change here is a re-baseline event — update the numbers WITH provenance, don't
     // loosen to inequalities.
-    assert_eq!(
-        (enc, amb, open_n),
-        (12, 35, 15),
-        "discourse close-out drifted from the pinned 2026-08-11 baseline (encoded 12, \
-         ambiguous 35, open 15)"
-    );
+    if proposer_arm == "recency" {
+        assert_eq!(
+            (enc, amb, open_n),
+            (12, 35, 15),
+            "discourse close-out drifted from the pinned 2026-08-11 baseline (encoded 12, \
+             ambiguous 35, open 15)"
+        );
+    }
     assert_replay_faithful();
+    // A proposal replay with misses is not the recorded experiment: each miss answers EMPTY, so
+    // units silently sag back to Open instead of failing. Asserted AFTER the ranks assert —
+    // a ranks infidelity changes the forest, which makes proposal keys miss too.
+    if let Some(r) = &proposal_replay {
+        eprintln!(
+            "  proposal replay: {} hits, {} misses",
+            r.hits(),
+            r.misses()
+        );
+        assert_eq!(
+            r.misses(),
+            0,
+            "PROPOSAL REPLAY had {} key MISSES — each answers empty (fail-closed), so this \
+             run's outcomes are not the recorded draw's (the document, forest, candidates, or \
+             an upstream selection changed under the recording).",
+            r.misses()
+        );
+    }
 }
 
 fn tag(o: &Outcome) -> &'static str {

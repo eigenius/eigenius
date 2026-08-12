@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
-    pretty_term, Identity, NoAbbreviationProposer, ProposeCtx, Proposer, SentenceOutcome,
+    pretty_term, Identity, NoAbbreviationProposer, Proposal, ProposeCtx, Proposer, SentenceOutcome,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -34,8 +34,8 @@ use eigenius_reasoning::{
 /// A no-op anaphora proposer — the demo document has no pronouns, so the resolver never consults it.
 struct NoProposer;
 impl Proposer for NoProposer {
-    fn propose(&self, _ctx: &ProposeCtx) -> Vec<usize> {
-        Vec::new()
+    fn propose(&self, _ctx: &ProposeCtx) -> Proposal {
+        Proposal::default()
     }
 }
 

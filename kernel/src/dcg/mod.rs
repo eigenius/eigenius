@@ -48,6 +48,7 @@ pub mod named_entity;
 pub mod parse;
 pub mod pipeline;
 pub mod pretty;
+pub mod proposer_record;
 pub mod reading_ranker;
 mod reserved;
 mod rules;
@@ -100,11 +101,14 @@ pub use lexicon::{
 };
 pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
-    Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, ProposeCtx, Proposer,
+    Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, Proposal, ProposeCtx, Proposer,
     SelectionOutcome, SentenceOutcome, SentenceResolution, DEFAULT_FOREST_CAP,
 };
 pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
 pub use pretty::pretty_term;
+pub use proposer_record::{
+    ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,
+};
 #[cfg(feature = "use-llm")]
 pub use reading_ranker::AnthropicReadingRanker;
 pub use reading_ranker::{
