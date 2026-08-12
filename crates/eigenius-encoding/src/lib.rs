@@ -37,5 +37,5 @@ pub mod select;
 pub mod snapshot;
 
 pub use emit::{emit_document, EmitError, ParsedSentence, SentenceSelection};
-pub use select::{select_pinned, select_ranked, Pin, SelectError};
+pub use select::{load_pins, Pin};
 pub use snapshot::{build_parser, open_head, ParserConfig};

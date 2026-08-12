@@ -132,8 +132,8 @@ impl<T: ReadingRanker + ?Sized> ReadingRanker for std::sync::Arc<T> {
 /// The pin-backed selector — the ground-truth/gate arm. Selects the candidate whose skeleton
 /// equals the sentence's pinned skeleton; abstains when the sentence has no pin, the pin matches
 /// no candidate, or **two or more candidates share the pinned skeleton** (sense-level ambiguity a
-/// skeleton pin cannot adjudicate — the same fail-closed rule as `select_pinned` in
-/// `eigenius-encoding`).
+/// skeleton pin cannot adjudicate — fail-closed; the encoding CLI turns such an abstention into
+/// a hard error with the pin diagnostics).
 pub struct PinReadingRanker {
     /// sentence → pinned skeleton.
     pins: BTreeMap<String, String>,

@@ -50,8 +50,8 @@ mod seed;
 // `pipeline.rs` import these paths).
 pub use felicity::{HoleInfo, HoleKind, OpenParse};
 pub use resolve::{
-    Candidate, Proposal, ProposeCtx, Proposer, SelectionOutcome, SentenceOutcome,
-    SentenceResolution,
+    Candidate, Proposal, ProposeCtx, Proposer, ResolutionOutcome, ResolvedBinding,
+    SelectionOutcome, SentenceOutcome, SentenceResolution,
 };
 
 use super::category::{is_adjective_cat, is_vp_adjunct_prep};

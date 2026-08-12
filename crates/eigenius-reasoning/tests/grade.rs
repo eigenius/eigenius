@@ -129,6 +129,7 @@ fn declared_grader_produces_a_commit_passing_claim() {
                 warrant: Warrant::Declared,
                 declared_by: "encoding-pipeline",
                 timestamp: "2026-08-03T00:00:00Z",
+                provenance: "",
             },
         )
         .expect("grade builds the cluster");
@@ -139,7 +140,7 @@ fn declared_grader_produces_a_commit_passing_claim() {
     let sentence = claim
         .resources
         .iter()
-        .find(|r| r.id() == Some(&claim.sentence_iri))
+        .find(|r| r.id() == claim.gate_sentence.as_ref())
         .expect("the sentence is in the cluster")
         .clone();
 
@@ -148,7 +149,7 @@ fn declared_grader_produces_a_commit_passing_claim() {
     let declaring_and_trace: Vec<Resource> = claim
         .resources
         .iter()
-        .filter(|r| r.id() != Some(&claim.sentence_iri))
+        .filter(|r| r.id() != claim.gate_sentence.as_ref())
         .cloned()
         .collect();
     let ctx = commit_over(&base, declaring_and_trace);
@@ -178,13 +179,14 @@ fn declared_claim_needs_its_declaration_trace() {
                 warrant: Warrant::Declared,
                 declared_by: "encoding-pipeline",
                 timestamp: "2026-08-03T00:00:00Z",
+                provenance: "",
             },
         )
         .expect("grade builds the cluster");
     let sentence = claim
         .resources
         .iter()
-        .find(|r| r.id() == Some(&claim.sentence_iri))
+        .find(|r| r.id() == claim.gate_sentence.as_ref())
         .expect("the sentence is in the cluster")
         .clone();
 
@@ -193,7 +195,7 @@ fn declared_claim_needs_its_declaration_trace() {
         .resources
         .iter()
         .filter(|r| {
-            r.id() != Some(&claim.sentence_iri)
+            r.id() != claim.gate_sentence.as_ref()
                 && !r
                     .id()
                     .is_some_and(|i| i.as_str().ends_with(":assertion_trace"))

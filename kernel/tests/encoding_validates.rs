@@ -148,4 +148,51 @@ fn encoding_ontology_is_expressible_and_validates() {
             "enc:{a} is on the layer"
         );
     }
+
+    // The AnaphorBinding vocabulary (D67 §3): the binding-authority enumeration is CLOSED the
+    // same way, and the machine-readable antecedent properties are declared.
+    let p = encoding
+        .resolve(&iri("urn:eigenius:encoding:bound_by"))
+        .expect("enc:bound_by is declared");
+    let allows = p
+        .get(&iri("urn:eigenius:core:allows_only"))
+        .expect("bound_by carries allows_only (the closed-enumeration pattern)");
+    let Value::Array(vals) = allows else {
+        panic!("allows_only is an array, got {allows:?}");
+    };
+    let mut got: Vec<String> = vals
+        .iter()
+        .map(|v| match v {
+            Value::ResourceRef(i) => i.as_str().to_string(),
+            other => panic!("allows_only entry should be a ResourceRef, got {other:?}"),
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            "urn:eigenius:encoding:binding_proposer".to_string(),
+            "urn:eigenius:encoding:binding_recency".to_string(),
+            "urn:eigenius:encoding:binding_replay".to_string(),
+        ],
+        "the binding-authority enumeration is exactly recency | proposer | replay"
+    );
+    for a in [
+        "AnaphorBinding",
+        "binding_unit",
+        "hole_var",
+        "antecedent_surface",
+        "antecedent_resource",
+        "antecedent_term",
+        "binding_recency",
+        "binding_proposer",
+        "binding_replay",
+    ] {
+        assert!(
+            encoding
+                .resolve(&iri(&format!("urn:eigenius:encoding:{a}")))
+                .is_some(),
+            "enc:{a} is on the layer"
+        );
+    }
 }

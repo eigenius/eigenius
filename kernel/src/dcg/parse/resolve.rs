@@ -107,8 +107,9 @@ impl Parser {
         doc: &DocumentContext,
         candidates: &[Candidate],
         proposer: &dyn Proposer,
-    ) -> Option<Item> {
-        let mut ranked: Vec<Vec<Exp>> = Vec::with_capacity(open.holes.len());
+    ) -> Option<(Item, ResolutionOutcome)> {
+        let mut ranked: Vec<Vec<(Candidate, Exp)>> = Vec::with_capacity(open.holes.len());
+        let mut audits: Vec<(Option<String>, Option<f64>)> = Vec::with_capacity(open.holes.len());
         for hole in &open.holes {
             // The type pre-filter: (candidate, antecedent term) pairs the veto admits for THIS hole.
             let fits: Vec<(&Candidate, Exp)> = candidates
@@ -127,19 +128,37 @@ impl Parser {
                 hole,
                 candidates: &presented,
             });
-            let antes: Vec<Exp> = proposal
+            let antes: Vec<(Candidate, Exp)> = proposal
                 .ranked
                 .iter()
                 .filter_map(|&i| fits.get(i)) // out-of-range ⇒ ignored (untrusted input)
-                .map(|(_, a)| a.clone())
+                .map(|(c, a)| ((*c).clone(), a.clone()))
                 .collect();
             if antes.is_empty() {
                 return None; // proposer declined every presented candidate ⇒ fail closed
             }
+            audits.push((proposal.rationale, proposal.confidence));
             ranked.push(antes);
         }
         let mut budget = MAX_REGATE_ATTEMPTS;
-        self.search_resolve(open, &ranked, &mut Vec::new(), &mut budget)
+        let (item, chosen) = self.search_resolve(open, &ranked, &mut Vec::new(), &mut budget)?;
+        // The audit: what the kernel ACCEPTED, per hole — the emission-side sibling of
+        // `SelectionOutcome` (the §2.4 proposal record stores what was ASKED).
+        let bindings = open
+            .holes
+            .iter()
+            .zip(chosen)
+            .zip(audits)
+            .map(
+                |((h, antecedent), (rationale, confidence))| ResolvedBinding {
+                    hole: h.var.clone(),
+                    antecedent,
+                    rationale,
+                    confidence,
+                },
+            )
+            .collect();
+        Some((item, ResolutionOutcome { bindings }))
     }
 
     /// Does `ante` inhabit the hole's declared type? The RESTRICTOR VETO as a standalone
@@ -158,28 +177,30 @@ impl Parser {
     /// re-gate the whole assignment via [`Self::resolve_open`]; the first that type-checks closed
     /// wins, and a kernel veto backtracks to the next candidate (the trust boundary driving
     /// retry). `budget` caps the total number of full re-gates (fail closed on exhaustion).
+    /// Returns the closed item plus the accepted candidates in hole order (the binding audit).
     fn search_resolve(
         &self,
         open: &OpenParse,
-        ranked: &[Vec<Exp>],
+        ranked: &[Vec<(Candidate, Exp)>],
         acc: &mut Vec<(String, Exp)>,
         budget: &mut usize,
-    ) -> Option<Item> {
+    ) -> Option<(Item, Vec<Candidate>)> {
         let i = acc.len();
         if i == ranked.len() {
             if *budget == 0 {
                 return None;
             }
             *budget -= 1;
-            return self.resolve_open(open, acc);
+            return self.resolve_open(open, acc).map(|it| (it, Vec::new()));
         }
-        for ante in &ranked[i] {
+        for (cand, ante) in &ranked[i] {
             if *budget == 0 {
                 return None;
             }
             acc.push((open.holes[i].var.clone(), ante.clone()));
-            if let Some(it) = self.search_resolve(open, ranked, acc, budget) {
-                return Some(it);
+            if let Some((it, mut rest)) = self.search_resolve(open, ranked, acc, budget) {
+                rest.insert(0, cand.clone());
+                return Some((it, rest));
             }
             acc.pop();
         }
@@ -228,12 +249,15 @@ impl Parser {
     /// faithfulness gate are the controls.
     pub fn resolve_document(
         &self,
+        document: &str,
         sentences: &[&str],
         lemmatizer: &dyn Lemmatizer,
         proposer: &dyn Proposer,
         ranker: Option<&dyn ReadingRanker>,
     ) -> Vec<SentenceResolution> {
-        let document = sentences.join(" ");
+        // `document` is the RAW surrounding text (the ranker/proposer record keys hash it — a
+        // synthesized join of `sentences` would be a different string than the recordings key
+        // on, and every replay would MISS); `sentences` is its segmentation, in order.
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut prior: Vec<PriorSelection> = Vec::new();
         let mut out = Vec::with_capacity(sentences.len());
@@ -242,33 +266,41 @@ impl Parser {
             // Pool = closed ∪ resolved-open, deduplicated by sem: two open parses resolving to
             // the same closed proposition (or duplicating a closed reading) are ONE reading.
             let mut pool = closed;
+            // Per-pool-member binding audits, index-aligned with `pool` (closed readings have
+            // none; resolved-open readings carry theirs to emission when chosen).
+            let mut audits: Vec<Option<ResolutionOutcome>> = vec![None; pool.len()];
             let mut seen: BTreeSet<String> = pool.iter().map(|it| pretty_term(it.sem())).collect();
             {
                 // The proposer gets the SAME document context as the reading ranker (§2.4):
                 // surrounding text + prior selections. Scoped: it borrows `prior`, which the
                 // gloss threading below appends to.
                 let doc_ctx = DocumentContext {
-                    document: &document,
+                    document,
                     sentence: s,
                     prior_selections: &prior,
                 };
                 for o in &open {
-                    if let Some(item) = self.resolve_with(o, &doc_ctx, &candidates, proposer) {
+                    if let Some((item, res)) = self.resolve_with(o, &doc_ctx, &candidates, proposer)
+                    {
                         if seen.insert(pretty_term(item.sem())) {
                             pool.push(item);
+                            audits.push(Some(res));
                         }
                     }
                 }
             }
             let mut selection = None;
+            let mut resolution = None;
             let outcome = if pool.len() == 1 {
+                resolution = audits.pop().expect("len==1");
                 SentenceOutcome::Encoded(pool.pop().expect("len==1"))
             } else if pool.len() > 1 {
                 match ranker
-                    .and_then(|r| self.select_reading(r, &document, s, lemmatizer, &prior, &pool))
+                    .and_then(|r| self.select_reading(r, document, s, lemmatizer, &prior, &pool))
                 {
                     Some((idx, sel)) => {
                         let item = pool.remove(idx);
+                        resolution = audits.remove(idx);
                         selection = Some(sel);
                         SentenceOutcome::Encoded(item)
                     }
@@ -303,7 +335,11 @@ impl Parser {
                 fresh.append(&mut candidates);
                 candidates = fresh;
             }
-            out.push(SentenceResolution { outcome, selection });
+            out.push(SentenceResolution {
+                outcome,
+                selection,
+                resolution,
+            });
         }
         out
     }
@@ -490,13 +526,39 @@ pub enum SentenceOutcome {
 }
 
 /// One sentence's result from the discourse loop: the classified outcome plus, when a reading
-/// ranker chose among several surviving readings, the selection audit record.
+/// ranker chose among several surviving readings, the selection audit record, and, when the
+/// encoded reading came from a RESOLVED open parse, the binding audit.
 #[derive(Clone)]
 pub struct SentenceResolution {
     pub outcome: SentenceOutcome,
     /// `Some` iff a [`ReadingRanker`] selection collapsed an ambiguous forest to the `Encoded`
     /// reading. Uniquely-encoded, resolved-open, and abstained sentences carry `None`.
     pub selection: Option<SelectionOutcome>,
+    /// `Some` iff the `Encoded` reading is a RESOLVED open parse — the accepted anaphora
+    /// bindings (D67 §3, emitted downstream as `enc:AnaphorBinding`s). `Ambiguous` pools drop
+    /// their members' audits (fail-open is terminal; only an encoded reading lands).
+    pub resolution: Option<ResolutionOutcome>,
+}
+
+/// The binding audit of a resolved open parse: what the kernel ACCEPTED, per hole — the
+/// emission-side record (the §2.4 proposal record stores what the proposer was ASKED). Sibling
+/// of [`SelectionOutcome`].
+#[derive(Clone, Debug)]
+pub struct ResolutionOutcome {
+    /// One entry per hole, in binder order.
+    pub bindings: Vec<ResolvedBinding>,
+}
+
+/// One accepted binding: the hole, the candidate the kernel's re-gate accepted for it, and the
+/// proposer's stated rationale/confidence for that hole's ranking (verbatim; `None` from
+/// deterministic proposers — note the rationale describes the RANKING, and the accepted
+/// candidate is the first type-passing entry of it, not necessarily its top pick).
+#[derive(Clone, Debug)]
+pub struct ResolvedBinding {
+    pub hole: String,
+    pub antecedent: Candidate,
+    pub rationale: Option<String>,
+    pub confidence: Option<f64>,
 }
 
 /// The audit record of an automated reading selection (`docs/notes/d63-reading-selection.md` §3):

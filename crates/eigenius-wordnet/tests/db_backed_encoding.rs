@@ -45,8 +45,9 @@ use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
     is_nonprose, pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize,
-    AbbreviationBinding, Identity, Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation,
-    Parser, Pos, Proposal, ProposeCtx, Proposer, SentenceOutcome, Vb,
+    AbbreviationBinding, Identity, InProcessPipeline, Lemmatizer, LexicalIndex, LexicalLookup,
+    LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx, Proposer,
+    SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -209,12 +210,20 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
 }
 
 fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
+    open_head_and_backend(path).map(|(head, _)| head)
+}
+
+/// Like [`open_head`], but also hands back the backend — for tests that WRITE to the working
+/// copy (doc branches, D67 §2). The working copy is disposable, so branch writes are safe.
+fn open_head_and_backend(
+    path: &std::path::Path,
+) -> Option<(Arc<Layer>, Arc<dyn PersistentBackend>)> {
     // Never open the caller's snapshot directly — see [`working_copy`]. RocksDB would rewrite it.
     let work = working_copy(path);
     let store = Arc::new(RocksStore::open(&work).expect("open RocksStore snapshot"));
     let backend: Arc<dyn PersistentBackend> = store;
     match bootstrap_persistent(Arc::clone(&backend)) {
-        Ok(ctx) => Some(Arc::clone(ctx.head())),
+        Ok(ctx) => Some((Arc::clone(ctx.head()), backend)),
         Err(e) => {
             eprintln!(
                 "SKIP db_backed_encoding: cannot resume the snapshot — {e:?}.\n  The store's \
@@ -3468,7 +3477,7 @@ fn resolve_document_discourse_close_out() {
         .collect();
     let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
     let t = std::time::Instant::now();
-    let resolutions = index.resolve_document(&refs, &lem, &proposer, None);
+    let resolutions = index.resolve_document(&page, &refs, &lem, &proposer, None);
     assert_eq!(resolutions.len(), sentences.len());
 
     // Persist the proposal draw BEFORE any assert (the flush-before-asserts discipline).
@@ -3575,6 +3584,120 @@ fn resolve_document_discourse_close_out() {
             r.misses()
         );
     }
+}
+
+/// D67 §2 (slice 3) — the PERSISTENT doc layer: over a DB-backed base the pipeline builds the
+/// doc-glossary layer ON the store and commits it to a `doc-<id>` branch (an in-memory overlay
+/// OOMs, §7-2; derived indexes populate in `store_layer`, so the layer must be built on the
+/// storage it is persisted to). STRUCTURAL gates, not parse pins: the pipeline's Stage A is its
+/// own augmentation (here `DocumentOnly`), a different overlay from the sweep's, so its forest
+/// is not comparable — the sweep numbers stay pinned by the close-out test above.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/ranks.json \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     pipeline_with_storage_commits_doc_branch -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed persistent doc layer (D67 §2); --ignored --nocapture"]
+fn pipeline_with_storage_commits_doc_branch() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let Ok(page) = std::fs::read_to_string(&page_path) else {
+        eprintln!("SKIP: {page_path} not found");
+        return;
+    };
+    let Some((head, backend)) = open_head_and_backend(&path) else {
+        return;
+    };
+    let lem = morphy();
+
+    struct NoProp;
+    impl Proposer for NoProp {
+        fn propose(&self, _c: &ProposeCtx) -> Proposal {
+            Proposal::default()
+        }
+    }
+
+    // The harness's parse config (caps + optional rank replay) applied through the pipeline's
+    // parser hook — the same knobs `build_index_over` sets, minus its record arms.
+    let setup = |p: Parser| {
+        let p = p.with_sense_cap(SENSE_CAP).with_cell_beam(CELL_BEAM);
+        match std::env::var("EIGENIUS_SENSE_RANKS")
+            .ok()
+            .map(PathBuf::from)
+        {
+            Some(rp) if rp.exists() => {
+                let r = eigenius_kernel::dcg::ReplaySenseRanker::load(&rp).expect("read ranks");
+                eprintln!("pipeline reranker: REPLAY from {}", rp.display());
+                p.with_sense_ranker(Box::new(r))
+            }
+            _ => {
+                eprintln!("pipeline reranker: none (cap-only)");
+                p
+            }
+        }
+    };
+    let pipeline =
+        InProcessPipeline::new(Arc::clone(&head), &lem, &NoAbbreviationProposer, &NoProp)
+            .with_storage(Arc::clone(&backend), "wrn-first-page")
+            .with_parser_setup(&setup);
+
+    let t = std::time::Instant::now();
+    let (encoding, doc_layer) = pipeline
+        .encode_with_layer(&page)
+        .expect("doc layer commits");
+    // The branch exists and points AT the returned layer, which chains on the base head.
+    let branch_head = backend
+        .get_branch("doc-wrn-first-page")
+        .expect("branch read")
+        .expect("doc branch exists");
+    assert_eq!(
+        &branch_head,
+        doc_layer.id(),
+        "the doc branch points at the committed doc layer"
+    );
+    assert_eq!(
+        doc_layer.parent().map(|p| p.id()),
+        Some(head.id()),
+        "the doc layer chains on the base head"
+    );
+
+    let (mut enc, mut amb, mut open_n, mut gap) = (0usize, 0usize, 0usize, 0usize);
+    for s in &encoding.sentences {
+        match &s.outcome {
+            SentenceOutcome::Encoded(_) => enc += 1,
+            SentenceOutcome::Ambiguous(_) => amb += 1,
+            SentenceOutcome::Open(_) => open_n += 1,
+            SentenceOutcome::Gap => gap += 1,
+        }
+    }
+    eprintln!(
+        "=== PERSISTENT PIPELINE ({:.0}s): encoded {enc}, ambiguous {amb}, open {open_n}, \
+         gap {gap} over {} units; doc-wrn-first-page @ {} ===",
+        t.elapsed().as_secs_f64(),
+        encoding.sentences.len(),
+        doc_layer.id()
+    );
+    assert!(
+        enc + amb > 0,
+        "the page parses over the persisted doc branch"
+    );
+
+    // Drop-and-recreate: a rerun of the same doc_id REPLACES the branch and lands pointing at
+    // its (re-)committed layer.
+    let (_, doc_layer2) = pipeline.encode_with_layer(&page).expect("rerun commits");
+    let branch_head2 = backend
+        .get_branch("doc-wrn-first-page")
+        .expect("branch read")
+        .expect("doc branch exists after rerun");
+    assert_eq!(
+        &branch_head2,
+        doc_layer2.id(),
+        "the rerun re-points the branch (drop-and-recreate lifecycle)"
+    );
 }
 
 fn tag(o: &Outcome) -> &'static str {

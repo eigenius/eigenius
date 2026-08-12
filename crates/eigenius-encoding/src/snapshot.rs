@@ -48,6 +48,15 @@ pub struct ParserConfig {
 /// store it opens, so pointing this at a shared snapshot would mutate it. `EIGENIUS_DB_WORKDIR`
 /// places the copy (default: the system temp dir).
 pub fn open_head(snapshot: &Path) -> Result<Arc<Layer>, String> {
+    open_head_and_backend(snapshot).map(|(head, _)| head)
+}
+
+/// Like [`open_head`], but also hands back the backend — the pipeline's persistent doc-layer
+/// path (D67 §2) commits doc branches onto it. The working copy is disposable, so branch writes
+/// never touch the caller's snapshot.
+pub fn open_head_and_backend(
+    snapshot: &Path,
+) -> Result<(Arc<Layer>, Arc<dyn PersistentBackend>), String> {
     if !snapshot.join("CURRENT").exists() {
         return Err(format!(
             "no RocksDB store at {} (a valid store has a CURRENT file)",
@@ -65,24 +74,30 @@ pub fn open_head(snapshot: &Path) -> Result<Arc<Layer>, String> {
              or reseed."
         )
     })?;
-    Ok(Arc::clone(ctx.head()))
+    Ok((Arc::clone(ctx.head()), backend))
 }
 
-/// The lazy parser over a resumed head: on-demand `lexicon:form` index probes (the only tractable
-/// path at 7.6M resources — an eager full-chain scan OOMs).
+/// The sense-ranker arm for a run (the `--ranks` semantics): `None` path ⇒ cap-only; exists ⇒
+/// REPLAY; absent ⇒ RECORD (needs `use-llm` + a key). Returned separately from the parser so
+/// the DocumentPipeline's parser hook can install it ([`crate::pipeline::run`] — the pipeline
+/// builds its own parser over the doc layer; D67 §3).
 ///
-/// In RECORD mode the returned [`Recording`] must be [`Recording::flush`]ed after parsing, or the
-/// run produces no replayable artifact.
-pub fn build_parser(head: &Arc<Layer>, cfg: &ParserConfig) -> Result<(Parser, Recording), String> {
-    let lex = LexicalIndex::build(Arc::clone(head));
-    let parser = Parser::over(Arc::new(lex), Arc::clone(head))
-        .with_sense_cap(SENSE_CAP)
-        .with_cell_beam(CELL_BEAM);
-    let Some(path) = &cfg.ranks else {
+/// In RECORD mode the returned [`Recording`] must be [`Recording::flush`]ed after parsing, or
+/// the run produces no replayable artifact.
+pub fn build_sense_ranker(
+    ranks: &Option<PathBuf>,
+) -> Result<
+    (
+        Option<Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>>,
+        Recording,
+    ),
+    String,
+> {
+    let Some(path) = ranks else {
         // Cap-only. Legitimate, but it is a DIFFERENT experiment: with no ranker there is no sense
         // ELIMINATION at all, so the reading set is not the one the pins were verified against.
         eprintln!("contextual reranker: none — cap-only (pins may not match)");
-        return Ok((parser, Recording::None));
+        return Ok((None, Recording::None));
     };
     if path.exists() {
         let replay = ReplaySenseRanker::load(path)
@@ -91,9 +106,23 @@ pub fn build_parser(head: &Arc<Layer>, cfg: &ParserConfig) -> Result<(Parser, Re
             "contextual reranker: REPLAY from {} (deterministic, no LLM)",
             path.display()
         );
-        return Ok((parser.with_sense_ranker(Box::new(replay)), Recording::None));
+        return Ok((Some(Box::new(replay)), Recording::None));
     }
-    record(parser, path.clone())
+    record(path.clone())
+}
+
+/// The lazy parser over a resumed head: on-demand `lexicon:form` index probes (the only tractable
+/// path at 7.6M resources — an eager full-chain scan OOMs).
+pub fn build_parser(head: &Arc<Layer>, cfg: &ParserConfig) -> Result<(Parser, Recording), String> {
+    let (ranker, recording) = build_sense_ranker(&cfg.ranks)?;
+    let lex = LexicalIndex::build(Arc::clone(head));
+    let mut parser = Parser::over(Arc::new(lex), Arc::clone(head))
+        .with_sense_cap(SENSE_CAP)
+        .with_cell_beam(CELL_BEAM);
+    if let Some(r) = ranker {
+        parser = parser.with_sense_ranker(r);
+    }
+    Ok((parser, recording))
 }
 
 /// A live recording in flight, or nothing. Returned by [`build_parser`] so the caller can write the
@@ -128,7 +157,15 @@ impl Recording {
 }
 
 #[cfg(feature = "use-llm")]
-fn record(parser: Parser, path: PathBuf) -> Result<(Parser, Recording), String> {
+fn record(
+    path: PathBuf,
+) -> Result<
+    (
+        Option<Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>>,
+        Recording,
+    ),
+    String,
+> {
     let Some(live) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() else {
         return Err(format!(
             "--ranks {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
@@ -140,15 +177,24 @@ fn record(parser: Parser, path: PathBuf) -> Result<(Parser, Recording), String> 
         path.display()
     );
     let rec = std::sync::Arc::new(eigenius_kernel::dcg::RecordingSenseRanker::new(live));
-    let parser = parser.with_sense_ranker(Box::new(ArcRanker(std::sync::Arc::clone(&rec))));
-    Ok((parser, Recording::Live(rec, path)))
+    let boxed: Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync> =
+        Box::new(ArcRanker(std::sync::Arc::clone(&rec)));
+    Ok((Some(boxed), Recording::Live(rec, path)))
 }
 
 /// **Fail loudly, never silently unranked.** Without `use-llm` there is no live ranker, so a
 /// non-existent `--ranks` would degrade the run to cap-only — where sense ELIMINATION is off and the
 /// reading set is not the one the pins were verified against.
 #[cfg(not(feature = "use-llm"))]
-fn record(_parser: Parser, path: PathBuf) -> Result<(Parser, Recording), String> {
+fn record(
+    path: PathBuf,
+) -> Result<
+    (
+        Option<Box<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>>,
+        Recording,
+    ),
+    String,
+> {
     Err(format!(
         "--ranks {} does not exist, and this binary has no live ranker (built without \
          --features use-llm), so the run would silently degrade to CAP-ONLY.\n  To replay: point at \

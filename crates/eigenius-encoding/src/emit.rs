@@ -31,11 +31,12 @@
 
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
-use eigenius_kernel::dcg::SelectionOutcome;
+use eigenius_kernel::dcg::{Candidate, ResolvedBinding, SelectionOutcome};
 use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
+use eigenius_reasoning::DerivedClaimGrader;
 
 use crate::select::Pin;
 
@@ -69,6 +70,13 @@ pub struct ParsedSentence<'a> {
     pub candidates: usize,
     /// How the reading was selected — recorded on the chain via the `DecisionPoint`.
     pub selection: SentenceSelection<'a>,
+    /// The accepted anaphora bindings when the reading is a RESOLVED open parse (D67 §3) —
+    /// emitted as one `enc:AnaphorBinding` per hole. Empty for closed readings, so the pin-arm
+    /// artifacts regenerate byte-identically.
+    pub bindings: Vec<ResolvedBinding>,
+    /// The `enc:BindingAuthority` local name (`binding_recency` / `binding_proposer` /
+    /// `binding_replay`) behind [`Self::bindings`]. `None` omits `enc:bound_by`.
+    pub binding_authority: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -135,12 +143,26 @@ pub fn emit_document(
         );
         out.push(scoped);
 
-        let prop = encode_type(s.item.sem()).map_err(|e| EmitError::Encode {
+        // The Derived claim cluster — claim + ProgramTrace — comes from the ONE construction
+        // (`DerivedClaimGrader::cluster`, D67 §1); this emitter keeps its historical
+        // `claim_{n}` / `trace_{n}` naming (committed artifacts regenerate byte-identically)
+        // and adds only the document-structural fields the grader does not know about.
+        let provenance = format!(
+            "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
+             chars {}..{} (source sha256 {source_sha256})",
+            s.span.0, s.span.1
+        );
+        let (mut claim, trace) = DerivedClaimGrader::cluster(
+            &claim_iri,
+            &format!("{ns}:trace_{n}"),
+            s.item.sem(),
+            &provenance,
+            timestamp,
+        )
+        .map_err(|e| EmitError::Encode {
             ordinal: n,
-            detail: format!("{e:?}"),
+            detail: e.to_string(),
         })?;
-        let mut claim = res(&claim_iri, &[&format!("{ENC}:EncodedClaim")]);
-        claim.set(iri(&format!("{REFL}:canonical_proposition")), prop);
         claim.set(
             iri(&format!("{ENC}:from_unit")),
             Value::ResourceRef(iri(&scoped_iri)),
@@ -165,29 +187,6 @@ pub fn emit_document(
             Value::String(claim_desc),
         );
         out.push(claim);
-
-        // The witness. `reflection:resource` → the claim, so the emitter mints
-        // `IsDerivedAs claim_iri P` where P is the claim's canonical_proposition.
-        let mut trace = res(
-            &format!("{ns}:trace_{n}"),
-            &[&format!("{REFL}:ProgramTrace")],
-        );
-        trace.set(
-            iri(&format!("{REFL}:resource")),
-            Value::ResourceRef(iri(&claim_iri)),
-        );
-        trace.set(
-            iri(&format!("{REFL}:source")),
-            Value::String(format!(
-                "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
-                 chars {}..{} (source sha256 {source_sha256})",
-                s.span.0, s.span.1
-            )),
-        );
-        trace.set(
-            iri(&format!("{REFL}:timestamp")),
-            Value::String(timestamp.to_string()),
-        );
         out.push(trace);
 
         // Selection is recorded even when the unit was unambiguous, so the chain always says on
@@ -268,6 +267,56 @@ pub fn emit_document(
             }
         }
         out.push(dp);
+
+        // Anaphora bindings (D67 §3) — one `enc:AnaphorBinding` per resolved hole: the accepted
+        // antecedent, machine-readable (a ResourceRef for individuals/claims, the D47 encoding
+        // for kind terms), plus the proposing authority and the proposer's audit fields.
+        for (k, b) in s.bindings.iter().enumerate() {
+            let mut ab = res(
+                &format!("{ns}:binding_{n}_{k}"),
+                &[&format!("{ENC}:AnaphorBinding")],
+            );
+            ab.set(
+                iri(&format!("{ENC}:binding_unit")),
+                Value::ResourceRef(iri(&scoped_iri)),
+            );
+            ab.set(
+                iri(&format!("{ENC}:hole_var")),
+                Value::String(b.hole.clone()),
+            );
+            ab.set(
+                iri(&format!("{ENC}:antecedent_surface")),
+                Value::String(b.antecedent.surface().to_string()),
+            );
+            match &b.antecedent {
+                Candidate::Individual { iri: ante, .. } => {
+                    ab.set(
+                        iri(&format!("{ENC}:antecedent_resource")),
+                        Value::ResourceRef(ante.clone()),
+                    );
+                }
+                Candidate::Kind { term, .. } => {
+                    let encoded = encode_type(term).map_err(|e| EmitError::Encode {
+                        ordinal: n,
+                        detail: format!("kind antecedent: {e:?}"),
+                    })?;
+                    ab.set(iri(&format!("{ENC}:antecedent_term")), encoded);
+                }
+            }
+            if let Some(a) = s.binding_authority {
+                ab.set(
+                    iri(&format!("{ENC}:bound_by")),
+                    Value::ResourceRef(iri(&format!("{ENC}:{a}"))),
+                );
+            }
+            if let Some(r) = &b.rationale {
+                ab.set(iri(&format!("{REFL}:rationale")), Value::String(r.clone()));
+            }
+            if let Some(c) = b.confidence {
+                ab.set(iri(&format!("{ENC}:confidence")), Value::Float(c));
+            }
+            out.push(ab);
+        }
     }
     Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize Eigon-JSON"))
 }
@@ -311,6 +360,8 @@ mod tests {
             item,
             candidates: 3,
             selection,
+            bindings: Vec::new(),
+            binding_authority: None,
         }
     }
 

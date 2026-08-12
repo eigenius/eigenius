@@ -211,12 +211,20 @@ fn modus_ponens_over_two_parsed_sentences() {
             warrant: Warrant::Declared,
             declared_by: "demo:prose-mp",
             timestamp: "2026-08-03T00:00:00Z",
+            provenance: "",
         },
     )
     .expect("conclusion builds");
 
     rs.extend(concl.resources.clone());
-    let (ctor, diag) = verdict(&base, rs, &concl.sentence_iri);
+    let (ctor, diag) = verdict(
+        &base,
+        rs,
+        concl
+            .gate_sentence
+            .as_ref()
+            .expect("inference cluster carries a gate sentence"),
+    );
     assert_eq!(ctor, "Holds", "diagnostic: {diag:?}");
 }
 
@@ -238,6 +246,7 @@ fn modus_ponens_refuses_a_premise_that_is_not_the_antecedent() {
             warrant: Warrant::Declared,
             declared_by: "demo:prose-mp",
             timestamp: "2026-08-03T00:00:00Z",
+            provenance: "",
         },
     )
     .map(|_| ())
@@ -386,10 +395,18 @@ fn a_pinned_literature_rule_justifies_a_sentence_by_inference() {
         warrant: Warrant::Declared,
         declared_by: "demo:inference",
         timestamp: "2026-08-03T00:00:00Z",
+        provenance: "",
     })
     .expect("conclusion builds");
     rs.extend(concl.resources.clone());
 
-    let (ctor, diag) = verdict(&base, rs, &concl.sentence_iri);
+    let (ctor, diag) = verdict(
+        &base,
+        rs,
+        concl
+            .gate_sentence
+            .as_ref()
+            .expect("inference cluster carries a gate sentence"),
+    );
     assert_eq!(ctor, "Holds", "diagnostic: {diag:?}");
 }

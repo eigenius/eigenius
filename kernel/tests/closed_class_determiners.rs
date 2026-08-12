@@ -2799,7 +2799,7 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
     ];
 
     // The mock proposes BRCA1 → the loop resolves it through the kernel to a closed Prop.
-    let resolved = index
+    let (resolved, audit) = index
         .resolve_with(
             &open[0],
             &solo_ctx("it affects HeLa"),
@@ -2813,6 +2813,13 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
         readback_val(0, &ty),
         Exp::Sort(0),
         "the resolved parse denotes Prop"
+    );
+    // The binding AUDIT records what the kernel accepted (D67 §3).
+    assert_eq!(audit.bindings.len(), 1, "one hole, one accepted binding");
+    assert_eq!(
+        audit.bindings[0].antecedent.surface(),
+        "BRCA1",
+        "the audit names the accepted antecedent"
     );
 
     // A proposer that suggests nothing ⇒ fail closed (no committed parse).
@@ -2839,7 +2846,13 @@ fn resolve_document_threads_discourse_across_sentences() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("The BRCA1 gene"), None);
+    let resolved = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("The BRCA1 gene"),
+        None,
+    );
     assert_eq!(resolved.len(), 2);
     assert!(
         matches!(
@@ -2858,7 +2871,13 @@ fn resolve_document_threads_discourse_across_sentences() {
     );
 
     // Fail-closed: a proposer that finds no antecedent ⇒ the sentence stays Open, not a wrong closed parse.
-    let none = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"), None);
+    let none = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("nonexistent"),
+        None,
+    );
     assert!(
         matches!(none[1].outcome, SentenceOutcome::Open(_)),
         "an unresolvable pronoun stays Open (fail-closed)"
@@ -2906,8 +2925,15 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let plain = index.resolve_document(&doc, &Identity, &PickBySurface("The BRCA1 gene"), None);
+    let plain = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("The BRCA1 gene"),
+        None,
+    );
     let abstained = index.resolve_document(
+        &doc.join(" "),
         &doc,
         &Identity,
         &PickBySurface("The BRCA1 gene"),
@@ -2923,6 +2949,7 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
     }
 
     let ranked = index.resolve_document(
+        &doc.join(" "),
         &doc,
         &Identity,
         &PickBySurface("The BRCA1 gene"),
@@ -2976,7 +3003,8 @@ fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
 
     // The proposer picks the kind by its verbalized surface → the re-gate closes the parse
     // with the kind as the referent.
-    let resolved = index.resolve_document(&doc, &PluralS, &PickBySurface("Gene"), None);
+    let resolved =
+        index.resolve_document(&doc.join(" "), &doc, &PluralS, &PickBySurface("Gene"), None);
     let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
         panic!("the demonstrative resolves to the discourse kind ⟦genes⟧");
     };
@@ -2988,7 +3016,13 @@ fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
 
     // A type-wrong candidate — the CellLine individual for the Gene-typed hole — is VETOED by
     // the re-gate, and the sentence stays honestly Open (fail-closed).
-    let vetoed = index.resolve_document(&doc, &PluralS, &PickBySurface("The HeLa cell line"), None);
+    let vetoed = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &PluralS,
+        &PickBySurface("The HeLa cell line"),
+        None,
+    );
     assert!(
         matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
         "a kind-typed hole rejects a class-incompatible individual antecedent"
@@ -3010,7 +3044,13 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
 
     // No ranker: BOTH readings survive as Ambiguous — the anaphoric reading (resolved to the
     // discourse HeLa) sits in the pool beside the named-entity reading.
-    let plain = index.resolve_document(&doc, &Identity, &PickBySurface("The HeLa cell line"), None);
+    let plain = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("The HeLa cell line"),
+        None,
+    );
     let SentenceOutcome::Ambiguous(pool) = &plain[1].outcome else {
         panic!(
             "closed + resolved-open must POOL to Ambiguous, got {}",
@@ -3036,7 +3076,13 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
 
     // An unresolvable discourse (no antecedent proposed) leaves the closed reading alone — a
     // pool of one, Encoded, never a false Open.
-    let alone = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"), None);
+    let alone = index.resolve_document(
+        &doc.join(" "),
+        &doc,
+        &Identity,
+        &PickBySurface("nonexistent"),
+        None,
+    );
     let SentenceOutcome::Encoded(only) = &alone[1].outcome else {
         panic!("with the anaphoric reading unresolvable, the closed reading encodes alone");
     };
@@ -3062,6 +3108,7 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
         }
     }
     let ranked = index.resolve_document(
+        &doc.join(" "),
         &doc,
         &Identity,
         &PickBySurface("The HeLa cell line"),
@@ -3426,7 +3473,9 @@ fn in_process_pipeline_encodes_a_document_end_to_end() {
         &NoAbbreviationProposer,
         &PickBySurface("The HeLa cell line"),
     );
-    let enc = pipeline.encode(doc);
+    let enc = pipeline
+        .encode(doc)
+        .expect("the in-memory pipeline arm is infallible");
 
     // Stage A — the abbreviation was harvested as a grounded binding in the document augmentation.
     assert!(
@@ -3591,7 +3640,7 @@ fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
             surface: "HeLa".into(),
         },
     ];
-    let resolved = index
+    let (resolved, _audit) = index
         .resolve_with(
             &open[0],
             &solo_ctx("it affects HeLa"),

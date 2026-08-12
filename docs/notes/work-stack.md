@@ -67,11 +67,22 @@ carries the ranker's `DocumentContext` + hole type; `Proposal { ranked, rational
 `AnthropicProposer` context prompt; harness `EIGENIUS_PROPOSALS` three-arm; design doc §3/§4
 synced to the as-built Π-carrier. Recency pin (12/35/15/0) holds throughout; 171 suites, clippy
 both configs. **STAGE 2 EXIT GATE MET** (corpus page resolves through DB-backed
-`resolve_document`, fail-closed preserved; residuals are named deferrals). **Active step:
-Stage 3 — pipeline unification + Derived landing: 3.3 `DerivedClaimGrader` and/or 3.1
-persistent doc layer first (§2.3's claim candidates arrive WITH the Stage-3 incremental
-landing, which is what unblocks the claim-referent demonstrative units).** Live-proposer
-reference draw + referent-level adjudication = future measurement work on the recency floor.
+`resolve_document`, fail-closed preserved; residuals are named deferrals). Stage 3 —
+[d67-pipeline-unification.md](d67-pipeline-unification.md) — slices 2–4 DONE `2026-08-12` (note
+§7 records): `DerivedClaimGrader` + `GradedClaim` reshape (claim_iri / gate_sentence), emit via
+the ONE `cluster()` ctor (byte-identity proven old-vs-new via HEAD-worktree probe), ingest lands
+Derived with the `IsDerivedAs` witness asserted; `with_storage` doc branches (+
+`with_parser_setup` seam; §7-2 OOM confirmed live) with the DB-backed pipeline test; CLI
+re-driven over `DocumentPipeline` (--proposals arm; `select_pinned`/`select_ranked` deleted);
+`resolve_document` takes the RAW document (joined-sentences sha would have missed every replay
+key); `ResolutionOutcome` binding audit → `enc:AnaphorBinding` (closed BindingAuthority enum,
+machine-readable antecedents). Close-out pin (12/35/15/0) + all isolated baselines hold EXACT
+(eval exit 0); 171 suites, clippy both configs. **Active step: the §8 claims-ontology revision
+note (two-axis claim model: discourse kind × epistemic source; set antecedents; per-kind
+alignment) — it gates slice 5 (claim antecedents, the 4 «These findings» units). Slice 6
+(artifact + 3.5 acceptance) additionally needs a FRESH ALIGNED demo snapshot: aligned-d66
+ManifestDrifts against the Stage-2 bootstrap and the dem snapshot's alignment differs (demo
+rank keys miss) — reseed + re-record + re-verify pins when picked up.**
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):

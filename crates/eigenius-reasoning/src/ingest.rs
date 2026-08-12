@@ -128,7 +128,9 @@ impl DocumentIngestion for InProcessIngestion<'_> {
             self.abbreviation_proposer,
             self.anaphora_proposer,
         );
-        let (encoding, doc_layer) = pipeline.encode_with_layer(document);
+        let (encoding, doc_layer) = pipeline
+            .encode_with_layer(document)
+            .expect("the in-memory pipeline arm is infallible");
 
         // Grade each closed sentence into its claim cluster; collect the cluster resources to commit.
         let mut sentences: Vec<IngestedSentence> = Vec::with_capacity(encoding.sentences.len());
@@ -138,13 +140,20 @@ impl DocumentIngestion for InProcessIngestion<'_> {
         {
             let claim = if let SentenceOutcome::Encoded(item) = &outcome {
                 let stem = format!("urn:eigenius:doc:{doc_id}:s{i}");
+                let provenance = format!(
+                    "eigenius-reasoning ingest: DCG parse (D63) of document {doc_id}, sentence \
+                     {i} «{text}»"
+                );
                 match self.grader.grade(
                     item.sem(),
                     &ClaimSource {
                         stem: &stem,
-                        warrant: Warrant::Declared,
+                        // Parsed sentences land DERIVED (D67 §1): a program (the parser)
+                        // produced the claim from the source text; the trace is the warrant.
+                        warrant: Warrant::Derived,
                         declared_by: "encoding-pipeline",
                         timestamp: "2026-08-03T00:00:00Z",
+                        provenance: &provenance,
                     },
                 ) {
                     Ok(claim) => {
@@ -186,10 +195,12 @@ impl DocumentIngestion for InProcessIngestion<'_> {
             let Some(claim) = &sentence.claim else {
                 continue;
             };
-            let Some(sentence_res) = claim
-                .resources
-                .iter()
-                .find(|r| r.id() == Some(&claim.sentence_iri))
+            // Only clusters carrying a gate-validatable ReasoningSentence get a verdict; a
+            // Derived cluster's trust story is its ProgramTrace (D67 §1) — verdict stays `None`.
+            let Some(gate_iri) = &claim.gate_sentence else {
+                continue;
+            };
+            let Some(sentence_res) = claim.resources.iter().find(|r| r.id() == Some(gate_iri))
             else {
                 continue;
             };

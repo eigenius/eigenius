@@ -66,7 +66,8 @@ pub mod startup;
 pub mod validate;
 
 pub use grade::{
-    ClaimGrader, ClaimSource, DeclaredClaimGrader, Grade, GradeError, GradedClaim, Warrant,
+    ClaimGrader, ClaimSource, DeclaredClaimGrader, DerivedClaimGrader, Grade, GradeError,
+    GradedClaim, Warrant,
 };
 pub use ingest::{
     ClaimVerdict, DocumentIngestion, InProcessIngestion, IngestedDocument, IngestedSentence,

@@ -233,6 +233,69 @@ property enc:runner_up_skeletons : core:value_array {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// S3 — AnaphorBinding: a resolved referent hole (D64 / D67 §3)
+// ════════════════════════════════════════════════════════════════════
+
+class enc:AnaphorBinding {
+    description = "Records one RESOLVED referent hole (D64): the antecedent the kernel's re-gate ACCEPTED for an anaphor (pronoun / possessor / demonstrative) in a unit's encoded reading. The proposer only ranks (untrusted, recorded — proposals.json); the restrictor veto + closed re-gate decide, so this is the accepted-binding audit — the anaphora sibling of DecisionPoint. The antecedent is machine-readable: a resource reference for a named individual or landed claim, the D47 type_expr encoding for a kind term (which has no IRI); the surface is the display form the proposer saw.";
+    requires enc:binding_unit, enc:hole_var, enc:antecedent_surface;
+    recommends enc:antecedent_resource, enc:antecedent_term, enc:bound_by, reflection:rationale, enc:confidence;
+}
+
+property enc:binding_unit : core:resource {
+    description = "The ScopedUnit whose encoded reading carries this binding.";
+    class_types enc:ScopedUnit;
+    domain enc:AnaphorBinding;
+}
+
+property enc:hole_var : core:string {
+    description = "The hole's binder name in the open parse (e.g. `$demref$0_0`) — joins this record to the reading's typed skeleton.";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_surface : core:string {
+    description = "The accepted antecedent's display surface (the form presented to the proposer) — always recorded; the machine-readable identity is antecedent_resource / antecedent_term.";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_resource : core:resource {
+    description = "The accepted antecedent, when it is a chain resource — a named individual, or a landed EncodedClaim (D67 §4).";
+    domain enc:AnaphorBinding;
+}
+
+property enc:antecedent_term : core:resource {
+    description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:TypeExpr of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
+    class_types eigentt:TypeExpr;
+    domain enc:AnaphorBinding;
+}
+
+// Binding-authority enumeration (the SelectionAuthority pattern): WHO ranked the candidates the
+// kernel then vetoed/accepted. The kernel's re-gate is the same whatever the authority.
+class enc:BindingAuthority {
+    description = "On whose ranking an AnaphorBinding's antecedent was reached: the deterministic recency floor, the live (untrusted, recorded) anaphora proposer, or a replayed recording.";
+}
+
+resource enc:binding_recency : enc:BindingAuthority {
+    core:short_name = "recency";
+    core:description = "The deterministic recency floor — every in-scope candidate in most-recent-first order; the kernel's restrictor veto is the entire filter.";
+}
+resource enc:binding_proposer : enc:BindingAuthority {
+    core:short_name = "proposer";
+    core:description = "The live anaphora proposer (D64 §4) — an untrusted LLM ranking in document context, recorded to proposals.json.";
+}
+resource enc:binding_replay : enc:BindingAuthority {
+    core:short_name = "replay";
+    core:description = "A replayed proposal recording (proposals.json) — deterministic, no LLM; a replay miss fails closed and is counted.";
+}
+
+property enc:bound_by : core:resource {
+    description = "The BindingAuthority behind this binding — a closed enumeration (allows_only, the epistemic_status pattern): adding an authority is a deliberate vocabulary edit, never a silent mint.";
+    class_types enc:BindingAuthority;
+    allows_only enc:binding_recency, enc:binding_proposer, enc:binding_replay;
+    domain enc:AnaphorBinding;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // S5b — CutItem: an explicit, justified non-encoding (fail-closed)
 // ════════════════════════════════════════════════════════════════════
 
@@ -290,8 +353,8 @@ property enc:from_unit : core:resource {
 }
 
 property enc:confidence : core:float {
-    description = "Pipeline confidence in this encoding (0..1) — from disambiguation/reference/reformulation. Advisory; not a grade. Low confidence routes to human review (D61).";
-    domain enc:EncodedClaim;
+    description = "Pipeline confidence (0..1) — on an EncodedClaim, confidence in the encoding; on an AnaphorBinding, the proposer's stated confidence in its top-ranked antecedent. Advisory; not a grade. Low confidence routes to human review (D61).";
+    domain enc:EncodedClaim, enc:AnaphorBinding;
 }
 
 // ════════════════════════════════════════════════════════════════════

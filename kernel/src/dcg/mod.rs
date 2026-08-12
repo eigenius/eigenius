@@ -102,9 +102,12 @@ pub use lexicon::{
 pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
     Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, Proposal, ProposeCtx, Proposer,
-    SelectionOutcome, SentenceOutcome, SentenceResolution, DEFAULT_FOREST_CAP,
+    ResolutionOutcome, ResolvedBinding, SelectionOutcome, SentenceOutcome, SentenceResolution,
+    DEFAULT_FOREST_CAP,
 };
-pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
+pub use pipeline::{
+    DocumentEncoding, DocumentPipeline, InProcessPipeline, PipelineError, SentenceEncoding,
+};
 pub use pretty::pretty_term;
 pub use proposer_record::{
     ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,

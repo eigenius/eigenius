@@ -14,10 +14,16 @@
 
 //! The prose → chain-record pipeline, shared by the `prose-to-eigon` and `prose-to-esl` binaries.
 //!
-//! Parse a text file over a lexicon snapshot and write the D62 pipeline record — as Eigon-JSON
-//! ready for `eigenius load`, or as the ESL source that compiles to it. The two differ only in
-//! [`OutputFormat`]; everything upstream of the write is identical, so the two commands cannot
-//! drift into encoding different things.
+//! Since D67 §3 this is a **thin driver over the kernel's [`DocumentPipeline`]** — the same
+//! Stage A → parse → select → resolve loop the measurement harness and ingestion run; the CLI
+//! only maps its deterministic replay arms onto the pipeline's seams and emits the record:
+//!
+//! - `--pins`       → [`PinReadingRanker`] (the declared gate arm)
+//! - `--selections` → [`ReplayReadingRanker`] (the computed arm — replay-only here)
+//! - `--ranks`      → the sense-rank replay/record arm (via the parser hook)
+//! - `--proposals`  → [`ReplayProposer`] (anaphora — replay-only here; record a draw with the
+//!   close-out harness's `EIGENIUS_PROPOSALS` arm). Without it, no anaphora resolves — open
+//!   parses stay `Open`, which keeps the pin-arm artifacts byte-stable.
 //!
 //! ```bash
 //! prose-to-eigon --snapshot ../db-snapshot/wordnet-umls-aligned-2026-08-02-consolidated \
@@ -28,18 +34,21 @@
 //!                --out    /tmp/03-parsed.json
 //! ```
 //!
-//! **Fail closed everywhere.** A sentence that does not parse, whose pin is missing, or whose pinned
-//! reading is absent from the forest, aborts the whole emission with a diagnostic — a partial
-//! encoding is not a result.
+//! **Fail closed everywhere.** A sentence that does not encode — a gap, an unresolved referent
+//! hole, a pin that matches zero or several pooled readings, a selection-replay abstention —
+//! aborts the whole emission with a diagnostic: a partial encoding is not a result.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use crate::emit::{emit_document, ParsedSentence, SentenceSelection};
-use crate::select::{load_pins, select_pinned, select_ranked};
-use crate::snapshot::{build_parser, open_head, ParserConfig};
+use crate::select::load_pins;
+use crate::snapshot::{build_sense_ranker, open_head_and_backend, CELL_BEAM, SENSE_CAP};
 use clap::Parser as ClapParser;
+use eigenius_kernel::dcg::skeleton::skeleton_of;
 use eigenius_kernel::dcg::{
-    segment_sentences, tokenize, PriorSelection, ReplayReadingRanker, SelectionOutcome,
+    InProcessPipeline, NoAbbreviationProposer, Parser, PinReadingRanker, Proposal, ProposeCtx,
+    Proposer, ReadingRanker, ReplayProposer, ReplayReadingRanker, SentenceOutcome,
 };
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 use sha2::{Digest, Sha256};
@@ -77,6 +86,12 @@ pub struct Args {
     /// experiment: sense elimination is off, so the pins may not match).
     #[arg(long)]
     ranks: Option<PathBuf>,
+    /// A recorded anaphora-proposal draw (`proposals.json`) to REPLAY (D67 §3) — resolves
+    /// referent holes through the discourse loop, deterministically. Replay-only here; record a
+    /// draw with the close-out harness's `EIGENIUS_PROPOSALS` arm. Omit ⇒ no anaphora resolves
+    /// (open parses stay Open — and abort the emission, which is fail-closed).
+    #[arg(long)]
+    proposals: Option<PathBuf>,
     /// IRI prefix for the emitted resources.
     #[arg(long, default_value = "urn:eigenius:demo:prose")]
     ns: String,
@@ -116,6 +131,14 @@ fn write_doc(path: &Path, json: &str, format: OutputFormat) -> Result<(), String
     std::fs::write(path, body).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
+/// A proposer that never proposes — no anaphora resolves; open parses stay `Open`.
+struct NoProposer;
+impl Proposer for NoProposer {
+    fn propose(&self, _ctx: &ProposeCtx) -> Proposal {
+        Proposal::default()
+    }
+}
+
 pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     let doc = std::fs::read_to_string(&args.source)
         .map_err(|e| format!("read {}: {e}", args.source.display()))?;
@@ -123,137 +146,183 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     eprintln!("source: {} (sha256 {sha})", args.source.display());
 
     // Exactly one selection authority per run — an emission with a mixed or defaulted authority
-    // would be unauditable.
-    enum Authority {
-        Pins(std::collections::BTreeMap<String, crate::select::Pin>),
-        Replay(ReplayReadingRanker),
-    }
-    let authority =
+    // would be unauditable. The pins double as the emission's byte-stable `Pinned` records.
+    let pins =
         match (&args.pins, &args.selections) {
             (Some(p), None) => {
                 let pins = load_pins(p).map_err(|e| format!("read {}: {e}", p.display()))?;
                 eprintln!("pins:   {} entries", pins.len());
-                Authority::Pins(pins)
+                Some(pins)
             }
-            (None, Some(s)) => {
-                let ranker = ReplayReadingRanker::load(s)
-                    .map_err(|e| format!("read {}: {e}", s.display()))?;
-                eprintln!("selections: REPLAY {} (deterministic, no LLM)", s.display());
-                Authority::Replay(ranker)
-            }
+            (None, Some(_)) => None,
             _ => return Err(
                 "exactly one of --pins (declared arm) / --selections (computed arm) is required"
                     .to_string(),
             ),
         };
+    let ranker: Box<dyn ReadingRanker> = match (&pins, &args.selections) {
+        (Some(pins), _) => Box::new(PinReadingRanker::new(
+            pins.iter()
+                .map(|(s, p)| (s.clone(), p.skeleton.clone()))
+                .collect(),
+        )),
+        (None, Some(s)) => {
+            let r =
+                ReplayReadingRanker::load(s).map_err(|e| format!("read {}: {e}", s.display()))?;
+            eprintln!("selections: REPLAY {} (deterministic, no LLM)", s.display());
+            Box::new(r)
+        }
+        _ => unreachable!("validated above"),
+    };
 
-    let head = open_head(&args.snapshot)?;
-    let (parser, recording) = build_parser(
-        &head,
-        &ParserConfig {
-            ranks: args.ranks.clone(),
-        },
-    )?;
+    // Anaphora arm (D67 §3): replay-only. Without it no referent hole resolves.
+    let proposer: Box<dyn Proposer> = match &args.proposals {
+        Some(p) => {
+            let r = ReplayProposer::load(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+            eprintln!("proposals:  REPLAY {} (deterministic, no LLM)", p.display());
+            Box::new(r)
+        }
+        None => Box::new(NoProposer),
+    };
+    let binding_authority = args.proposals.as_ref().map(|_| "binding_replay");
+
+    let (head, backend) = open_head_and_backend(&args.snapshot)?;
     let lem = MorphyLemmatizer::load(&args.dict)
         .map_err(|e| format!("load Morphy from {}: {e}", args.dict.display()))?;
+    // The doc layer goes through the PERSISTENT path (D67 §2), committed to a `doc-<id>` branch
+    // of the working copy (disposable — removed on exit): an in-memory doc layer over the
+    // DB-backed base OOMs (§7-2, build-time index population walks the full chain).
+    let doc_id: String = args
+        .source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("prose")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
 
-    // Parse every sentence first: `ParsedSentence` borrows its `Item` out of the forest, so the
-    // forests have to outlive the emission.
-    let sentences = segment_sentences(&doc);
-    let mut forests = Vec::new();
-    for (i, text) in sentences.iter().enumerate() {
-        let n = i + 1;
-        let unknown: Vec<String> = tokenize(text)
-            .into_iter()
-            .filter(|t| !parser.has_token(t, &lem))
-            .collect();
-        if !unknown.is_empty() {
-            return Err(format!(
-                "sentence {n} «{text}»: out-of-vocabulary tokens {unknown:?} — the demo does not \
-                 ground OOV (that is D62 S5a); either extend the lexicon or pick prose the \
-                 committed lexicon covers"
-            ));
+    // The sense-rank arm, installed through the pipeline's parser hook (the pipeline builds its
+    // own parser over the doc layer). Built HERE so its errors surface before any parse and the
+    // RECORD arm's artifact can be flushed after.
+    let (sense_ranker, recording) = build_sense_ranker(&args.ranks)?;
+    let ranker_slot = RefCell::new(sense_ranker);
+    let setup = move |p: Parser| {
+        let p = p.with_sense_cap(SENSE_CAP).with_cell_beam(CELL_BEAM);
+        match ranker_slot.borrow_mut().take() {
+            Some(r) => p.with_sense_ranker(r),
+            None => p,
         }
-        let (closed, open) = parser.parse_open(text, &lem);
-        if closed.is_empty() {
-            return Err(format!(
-                "sentence {n} «{text}»: no closed parse ({} open, hole-bearing) — a grammar gap or \
-                 an unresolved referent, neither of which this demo encodes",
-                open.len()
-            ));
-        }
-        eprintln!("  [{n}] {} closed reading(s) — {text}", closed.len());
-        forests.push((n, text.clone(), closed));
-    }
-    // Before selection: a RECORD run must leave its artifact even if a pin then fails to match,
-    // because the recording is exactly what a re-run needs to diagnose the mismatch deterministically.
+    };
+
+    let pipeline = InProcessPipeline::new(head, &lem, &NoAbbreviationProposer, &proposer)
+        .with_reading_ranker(&ranker)
+        .with_parser_setup(&setup)
+        .with_storage(backend, &doc_id);
+    let (encoding, _doc_layer) = pipeline
+        .encode_with_layer(&doc)
+        .map_err(|e| format!("{e}"))?;
+    // A RECORD run leaves its ranks artifact even if a pin then fails to match below — the
+    // recording is exactly what a re-run needs to diagnose the mismatch deterministically.
     recording.flush()?;
 
-    // Selection. The ranked arm's per-sentence records are hoisted so `ParsedSentence` can
-    // borrow them past the match; the pin arm borrows the pins out of `authority` directly.
-    let mut ranked: Vec<(usize, Option<SelectionOutcome>)> = Vec::new();
-    let mut parsed = Vec::new();
-    match &authority {
-        Authority::Pins(pins) => {
-            for (n, text, closed) in &forests {
-                let (item, pin) = select_pinned(text, closed, pins).map_err(|e| e.to_string())?;
-                let start = doc.find(text.as_str()).unwrap_or(0);
-                parsed.push(ParsedSentence {
-                    ordinal: *n,
-                    text: text.clone(),
-                    span: (start, start + text.len()),
-                    item,
-                    candidates: closed.len(),
-                    selection: SentenceSelection::Pinned(pin),
-                });
-            }
-        }
-        Authority::Replay(ranker) => {
-            // Thread the discourse exactly as the recording harness did: prior selections
-            // accumulate in SEGMENT order with 0-based ordinals — they are part of the replay
-            // KEY, so a divergent gloss or ordinal is a counted miss (→ Abstained, fail-closed),
-            // never a silently different question.
-            let mut prior: Vec<PriorSelection> = Vec::new();
-            for (n, text, closed) in &forests {
-                let ordinal = *n - 1;
-                if closed.len() == 1 {
-                    prior.push(PriorSelection {
-                        ordinal,
-                        gloss: parser.reading_gloss(text, &lem, &closed[0]),
-                    });
-                    eprintln!("  [{n}] sole reading — no selection to make");
-                    ranked.push((0, None));
-                } else {
-                    let (idx, sel) =
-                        select_ranked(&parser, ranker, &doc, text, &lem, &prior, closed)
-                            .map_err(|e| e.to_string())?;
-                    eprintln!(
-                        "  [{n}] ranker selected 1 of {}: {}",
-                        closed.len(),
-                        sel.chosen_skeleton
-                    );
-                    prior.push(PriorSelection {
-                        ordinal,
-                        gloss: sel.chosen_gloss.clone(),
-                    });
-                    ranked.push((idx, Some(sel)));
-                }
-            }
-            for ((n, text, closed), (idx, outcome)) in forests.iter().zip(&ranked) {
-                let start = doc.find(text.as_str()).unwrap_or(0);
-                parsed.push(ParsedSentence {
-                    ordinal: *n,
-                    text: text.clone(),
-                    span: (start, start + text.len()),
-                    item: &closed[*idx],
-                    candidates: closed.len(),
-                    selection: match outcome {
-                        Some(sel) => SentenceSelection::Ranked(sel),
-                        None => SentenceSelection::Sole,
+    // Map each sentence's outcome to the emission record — fail-closed on anything that did not
+    // encode under the chosen authority.
+    let mut parsed: Vec<ParsedSentence> = Vec::new();
+    for (i, se) in encoding.sentences.iter().enumerate() {
+        let n = i + 1;
+        let text = se.text.trim();
+        let item = match &se.outcome {
+            SentenceOutcome::Encoded(item) => item,
+            SentenceOutcome::Ambiguous(pool) => {
+                let skels: Vec<String> = pool.iter().map(|it| skeleton_of(it.sem())).collect();
+                return Err(match &pins {
+                    Some(pins) => match pins.get(text) {
+                        None => format!("sentence {n} «{text}»: no pin, {} readings", pool.len()),
+                        Some(pin) => {
+                            let hits = skels.iter().filter(|s| **s == pin.skeleton).count();
+                            if hits == 0 {
+                                format!(
+                                    "sentence {n} «{text}»: the pinned skeleton matches none of \
+                                     the {} readings\n  pinned: {}\n  forest:\n    {}",
+                                    pool.len(),
+                                    pin.skeleton,
+                                    skels.join("\n    ")
+                                )
+                            } else {
+                                format!(
+                                    "sentence {n} «{text}»: the pinned skeleton matches {hits} \
+                                     readings — a sense-level tie a skeleton pin cannot break \
+                                     (fail-closed)",
+                                )
+                            }
+                        }
                     },
+                    None => format!(
+                        "sentence {n} «{text}»: the selection replay abstained or missed \
+                         ({} readings) — the recording does not answer this question",
+                        pool.len()
+                    ),
                 });
             }
-        }
+            SentenceOutcome::Open(o) => {
+                return Err(format!(
+                    "sentence {n} «{text}»: {} unresolved referent hole(s) — provide --proposals \
+                     with a recorded draw that resolves them, or pick prose without anaphora",
+                    o.holes.len()
+                ));
+            }
+            SentenceOutcome::Gap => {
+                return Err(format!(
+                    "sentence {n} «{text}»: no parse — a grammar gap or out-of-vocabulary tokens"
+                ));
+            }
+        };
+        // The emission's selection record. Under pins, verify the encoded reading IS the pinned
+        // one even when it was the sole survivor (the ranker only fires on pools > 1).
+        let selection = match &pins {
+            Some(pins) => {
+                let pin = pins
+                    .get(text)
+                    .ok_or_else(|| format!("sentence {n} «{text}»: no pin"))?;
+                let sk = skeleton_of(item.sem());
+                if sk != pin.skeleton {
+                    return Err(format!(
+                        "sentence {n} «{text}»: the encoded reading is not the pinned one\n  \
+                         pinned: {}\n  got:    {sk}",
+                        pin.skeleton
+                    ));
+                }
+                SentenceSelection::Pinned(pin)
+            }
+            None => match &se.selection {
+                Some(sel) => SentenceSelection::Ranked(sel),
+                None => SentenceSelection::Sole,
+            },
+        };
+        let candidates = se.selection.as_ref().map(|s| s.candidates).unwrap_or(1);
+        eprintln!(
+            "  [{n}] encoded (of {candidates} reading(s)){} — {text}",
+            if se.resolution.is_some() {
+                " [anaphora resolved]"
+            } else {
+                ""
+            }
+        );
+        let start = doc.find(se.text.as_str()).unwrap_or(0);
+        parsed.push(ParsedSentence {
+            ordinal: n,
+            text: se.text.clone(),
+            span: (start, start + se.text.len()),
+            item,
+            candidates,
+            selection,
+            bindings: se
+                .resolution
+                .as_ref()
+                .map(|r| r.bindings.clone())
+                .unwrap_or_default(),
+            binding_authority,
+        });
     }
 
     let json = emit_document(
@@ -266,7 +335,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     write_doc(&args.out, &json, format)?;
     eprintln!(
-        "\nwrote {} ({} sentences × 5 resources)",
+        "\nwrote {} ({} sentences)",
         args.out.display(),
         parsed.len()
     );
