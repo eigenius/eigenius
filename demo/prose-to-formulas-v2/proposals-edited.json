@@ -5,7 +5,7 @@
     "prior_selections": [
       {
         "ordinal": 0,
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)"
+        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
       },
       {
         "ordinal": 1,
@@ -19,14 +19,24 @@
       {
         "key": "c:urn:eigenius:demo:v2:claim_2",
         "surface": "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      },
+      {
+        "key": "s:urn:eigenius:encoding:Finding:urn:eigenius:demo:v2:claim_1,urn:eigenius:demo:v2:claim_2",
+        "surface": "the last 2 Finding claims, together"
+      },
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_1",
+        "surface": "claim 1: not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
       }
     ],
     "proposal": {
       "ranked": [
-        0
+        1,
+        0,
+        2
       ],
-      "rationale": "\"These findings\" is a plural demonstrative anaphor referring to the accumulated claims from both preceding sentences (the exonuclease and helicase findings), and the most recent discourse referent of type C2825141 — claim 2 about the helicase activity requirement — is the closest and most salient antecedent representing those findings collectively.",
-      "confidence": 0.82
+      "rationale": "\"These findings\" is a plural demonstrative that collectively refers to both preceding claims (sentences 0 and 1 together), making candidate [1] \"the last 2 Finding claims, together\" the best antecedent.",
+      "confidence": 0.95
     }
   },
   {
@@ -35,7 +45,7 @@
     "prior_selections": [
       {
         "ordinal": 0,
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)"
+        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
       },
       {
         "ordinal": 1,
@@ -49,14 +59,24 @@
       {
         "key": "c:urn:eigenius:demo:v2:claim_2",
         "surface": "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      },
+      {
+        "key": "s:urn:eigenius:encoding:Finding:urn:eigenius:demo:v2:claim_1,urn:eigenius:demo:v2:claim_2",
+        "surface": "the last 2 Finding claims, together"
+      },
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_1",
+        "surface": "claim 1: not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
       }
     ],
     "proposal": {
       "ranked": [
-        0
+        1,
+        0,
+        2
       ],
-      "rationale": "\"These findings\" is a demonstrative anaphor referring to the accumulated findings from both preceding sentences, and the most recent discourse referent (claim 2: MSI cancer models required the helicase activity of WRN) is the closest and most salient antecedent of type `n09279458` available, representing the findings being summarized.",
-      "confidence": 0.82
+      "rationale": "\"These findings\" is a plural demonstrative that collectively refers to both preceding findings (sentences 0 and 1 together), making candidate [1] \"the last 2 Finding claims, together\" the best antecedent.",
+      "confidence": 0.95
     }
   }
 ]

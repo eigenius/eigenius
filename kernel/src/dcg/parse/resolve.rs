@@ -23,10 +23,10 @@ use super::*;
 
 use crate::dcg::pretty::pretty_term;
 use crate::dcg::reading_ranker::{
-    DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
+    first_collision, DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
 };
 use crate::dcg::skeleton::skeleton_of;
-use crate::dcg::verbalize::{resource_label, unit_sense_names, verbalize, Vb};
+use crate::dcg::verbalize::{concept_notes, resource_label, unit_sense_names, verbalize, Vb};
 use crate::ontology::Resource;
 
 /// Cap on FULL re-gates ([`Parser::resolve_open`] calls) per [`Parser::resolve_with`] search —
@@ -384,6 +384,9 @@ impl Parser {
                     document,
                     sentence: s,
                     prior_selections: &prior,
+                    // The proposer ranks ANTECEDENTS, not readings; its candidates carry their
+                    // own surfaces, so there is no concept legend to add here.
+                    concepts: &[],
                 };
                 for o in &open {
                     if let Some((item, res)) = self.resolve_with(o, &doc_ctx, &candidates, proposer)
@@ -511,10 +514,7 @@ impl Parser {
         sem: &Exp,
     ) -> Vec<Candidate> {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
-        let vb = Vb {
-            names: &names,
-            layer: &self.grammar.layer,
-        };
+        let vb = Vb::surface(&names, &self.grammar.layer);
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
         self.walk_candidates(sem, &vb, &mut out, &mut seen);
@@ -598,10 +598,9 @@ impl Parser {
         closed: &[Item],
     ) -> Option<(usize, SelectionOutcome)> {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
-        let vb = Vb {
-            names: &names,
-            layer: &self.grammar.layer,
-        };
+        // The chooser's register (D69 §4): the ranker is being asked which reading is right, and
+        // in Surface these 120 readings render to 4 strings.
+        let vb = Vb::expanded(&names, &self.grammar.layer);
         let skels: Vec<String> = closed.iter().map(|it| skeleton_of(it.sem())).collect();
         // Present GROUPED BY SKELETON (the stable sort keeps the forest's cost order within a
         // group), so structural alternatives sit side by side for the ranker.
@@ -615,17 +614,43 @@ impl Parser {
                 sem: pretty_term(closed[i].sem()),
             })
             .collect();
+        // The legend: every concept these readings name, once, with the chain's definition
+        // (D69 §4). Built from the pool, not per candidate, so the definitions appear once.
+        let sems: Vec<&Exp> = closed.iter().map(|it| it.sem()).collect();
+        let concepts = concept_notes(&sems, &vb);
         let ctx = DocumentContext {
             document,
             sentence,
             prior_selections: prior,
+            concepts: &concepts,
         };
+        // D69 §3 — the invariant, enforced before ANY ranker sees the pool: candidates that
+        // render identically cannot be chosen between. A model asked to do it answers anyway,
+        // with a rationale about whatever axes happen to be visible; the pin arm would match
+        // several; the replay arm would key on an ambiguous presentation. Fail closed and name
+        // the two sems, so the renderer gets fixed instead of the symptom.
+        if let Some((i, j)) = first_collision(&cands) {
+            eprintln!(
+                "reading-ranker: ABSTAINED on «{}» — candidates [{i}] and [{j}] render                  identically, so the choice between them cannot be put to a ranker (D69).\n                   rendering: {}\n  sem [{i}]: {}\n  sem [{j}]: {}",
+                sentence.trim(),
+                cands[i].gloss,
+                cands[i].sem,
+                cands[j].sem
+            );
+            return None;
+        }
         let sel = ranker.select(&ctx, &cands)?;
         let chosen = *order.get(sel.chosen)?;
         let outcome = SelectionOutcome {
             chosen_skeleton: cands[sel.chosen].skeleton.clone(),
             chosen_sem: cands[sel.chosen].sem.clone(),
-            chosen_gloss: cands[sel.chosen].gloss.clone(),
+            // SURFACE, deliberately — not the `Expanded` string the ranker was shown. This gloss
+            // is threaded into the DISCOURSE (later sentences' context, the kind classifier, the
+            // anaphora proposer's priors), and those consumers are reading the sentence, not
+            // choosing between renderings of it. Letting the chooser's register leak into them
+            // would degrade three prompts to fix one — and would invalidate their recorded draws
+            // every time the ranker's presentation changed (D69 §6).
+            chosen_gloss: self.reading_gloss(sentence, lemmatizer, &closed[chosen]),
             rationale: sel.rationale,
             runner_up_skeletons: sel
                 .runners_up
@@ -649,13 +674,7 @@ impl Parser {
         item: &Item,
     ) -> String {
         let names = unit_sense_names(sentence, self, lemmatizer, &self.grammar.layer);
-        verbalize(
-            item.sem(),
-            &Vb {
-                names: &names,
-                layer: &self.grammar.layer,
-            },
-        )
+        verbalize(item.sem(), &Vb::surface(&names, &self.grammar.layer))
     }
 }
 

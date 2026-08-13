@@ -15,28 +15,28 @@
     "candidates": [
       {
         "skeleton": "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN protein, human is a vulnerability of a Microsatellite Instability Cancer Model",
+        "gloss": "[claim] «show» [v00664788] «WRN protein, human» [C0388246] is a «vulnerability» [n14543931] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
         "sem": "v00664788_c(is_a(kind_of(C0388246), ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
       },
       {
         "skeleton": "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN protein, human is a vulnerability of a Microsatellite Instability Cancer Model",
+        "gloss": "[claim] «show» [v00664788] «WRN protein, human» [C0388246] is a «vulnerability» [n05042871] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
         "sem": "v00664788_c(is_a(kind_of(C0388246), ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
       },
       {
         "skeleton": "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN gene is a vulnerability of a Microsatellite Instability Cancer Model",
+        "gloss": "[claim] «show» [v00664788] «WRN gene» [C1337007] is a «vulnerability» [n14543931] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
         "sem": "v00664788_c(is_a(C1337007, ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
       },
       {
         "skeleton": "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN gene is a vulnerability of a Microsatellite Instability Cancer Model",
+        "gloss": "[claim] «show» [v00664788] «WRN gene» [C1337007] is a «vulnerability» [n05042871] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
         "sem": "v00664788_c(is_a(C1337007, ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
       }
     ],
     "abstained": false,
     "chosen": 0,
-    "rationale": "The earlier sentences consistently refer to WRN as a protein (WRN protein, human) with exonuclease and helicase activities, so the intended reading here also refers to WRN protein, human as the vulnerability of MSI cancer models (Structure 1, reading 0).",
+    "rationale": "The prior sentences establish that WRN's enzymatic activities (exonuclease and helicase) are what MSI cancer models depend on, making WRN a therapeutic target/weakness — best captured by \"vulnerability\" as \"the state of being exposed/vulnerable\" (n14543931) referring to the protein (C0388246), consistent with the prior readings that reference WRN protein activities.",
     "runners_up": [
       1,
       2,

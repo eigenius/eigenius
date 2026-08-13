@@ -46,6 +46,8 @@ use std::sync::Mutex;
 
 use sha2::{Digest, Sha256};
 
+use crate::dcg::verbalize::ConceptNote;
+
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
 /// skeleton for legibility (the caller orders them), but the choice — and its evaluation — are
 /// per READING: structure and word senses together. The reading-level gold ledger
@@ -83,6 +85,11 @@ pub struct DocumentContext<'a> {
     pub sentence: &'a str,
     /// Glosses of the already-selected readings of prior sentences, in document order.
     pub prior_selections: &'a [PriorSelection],
+    /// The concepts the candidates name, each once, with the chain's definition where it has one
+    /// (D69 §4). Printed as a legend beside the candidates: the definitions are what separate a
+    /// named concept from a compound that says the same words, and repeating them on every
+    /// candidate line would be unreadable. Empty is fine — the caller may not have a chain.
+    pub concepts: &'a [ConceptNote],
 }
 
 /// A ranker's answer: the chosen candidate plus the audit trail the caller records.
@@ -461,6 +468,27 @@ mod anthropic {
         }
     }
 
+    /// The concept legend: each concept the candidates name, once, with its definition. Empty string
+    /// when there is nothing to say, so the prompt gains no dangling header.
+    fn concept_legend(concepts: &[super::ConceptNote]) -> String {
+        let with_defs: Vec<&super::ConceptNote> =
+            concepts.iter().filter(|c| c.definition.is_some()).collect();
+        if with_defs.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from("\nWhat the concepts mean (from the knowledge graph):\n");
+        for c in with_defs {
+            let d = c.definition.as_deref().unwrap_or_default();
+            let d: String = if d.chars().count() > 240 {
+                format!("{}…", d.chars().take(240).collect::<String>())
+            } else {
+                d.to_string()
+            };
+            out.push_str(&format!("  [{}] «{}» — {}\n", c.id, c.label, d));
+        }
+        out
+    }
+
     impl ReadingRanker for AnthropicReadingRanker {
         fn select(
             &self,
@@ -495,6 +523,7 @@ mod anthropic {
                 }
                 cand_block.push_str(&format!("  [{i}] {}\n", c.gloss));
             }
+            let legend = concept_legend(ctx.concepts);
             let prompt = format!(
                 "A parser read the document below and produced several candidate READINGS \
                  (interpretations) of one sentence. Choose the reading that expresses what the \
@@ -502,8 +531,10 @@ mod anthropic {
                  Document:\n{}\n\n{prior_block}\
                  The sentence to disambiguate:\n  \"{}\"\n\n\
                  Candidate readings, grouped by grammatical structure (readings within one \
-                 structure differ only in word sense). Each gloss is approximate machine-generated \
-                 English; `⟦…⟧` marks a fragment that could not be rendered.\n\n{cand_block}\n\
+                 structure differ only in word sense). Each reading is rendered as what it \
+                 COMMITS TO: `«label» [id]` names a concept, `+ relation X` is an explicit \
+                 relation the reading asserts, and `⟦…⟧` marks a fragment that could not be \
+                 rendered.\n\n{cand_block}\n{legend}\
                  Return `chosen` = the index of the reading whose structure AND word senses match \
                  the sentence's intended meaning, `rationale` = one sentence why, and `runners_up` \
                  = the remaining indices in preference order. Set `abstain` = true only if no \
@@ -544,6 +575,22 @@ mod anthropic {
 #[cfg(feature = "use-llm")]
 pub use anthropic::AnthropicReadingRanker;
 
+/// The first pair of candidates that render identically (D69 §3) — `None` when the pool is
+/// injective, which is the required state before any pool is put to a ranker.
+///
+/// Checked by the CALLER, before any ranker sees the pool: the invariant is about what may be
+/// ASKED, so it must hold for the pin-backed and replay arms too, not only the live one.
+pub fn first_collision(candidates: &[ReadingCandidate]) -> Option<(usize, usize)> {
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, c) in candidates.iter().enumerate() {
+        if let Some(&j) = seen.get(c.gloss.as_str()) {
+            return Some((j, i));
+        }
+        seen.insert(c.gloss.as_str(), i);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,6 +614,7 @@ mod tests {
             document,
             sentence,
             prior_selections: prior,
+            concepts: &[],
         }
     }
 
@@ -642,6 +690,7 @@ mod tests {
                        The optics were remarkably sharp for the price.",
             sentence: "We saw the man with the telescope.",
             prior_selections: &[],
+            concepts: &[],
         };
         let sel = ranker
             .select(&ctx, &candidates)

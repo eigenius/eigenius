@@ -9,7 +9,40 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 1. ▲ ACTIVE — [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stage 1 of 4: reading selection**
+### 0. ▲ ACTIVE — [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
+Pushed `2026-08-13` from the v2 demo review. MEASURED: for «MSI cancer models did not have the
+exonuclease activity of WRN.» the ranker prompt carries **120 candidates with 120 distinct sems
+but only 4 distinct strings** (13.5 KB, 8 structure headers showing 1 gloss each) — «exonuclease
+activity» renders identically for the single concept C1148824 and for the
+`activity ⊗ exonuclease` compound, so the reading that landed in the demo artifact was not chosen
+over its competitor, it was chosen blind. Two defects: **A** the rendering is not injective on the
+candidate set; **B** indistinguishable candidates are presented as separate choices. ROOT CAUSE
+(user, `2026-08-13`): strict verbalization is ~a left inverse of parsing — it reconstructs the
+input sentence, so all readings of one sentence converge BY CONSTRUCTION, and the discrimination
+we do get is an accident of label strings. Fix = a second rendering mode, an **expanded
+verbalizer** exposing what a reading COMMITS TO (concept label + IRI + the chain's definition;
+the compound relation shown as unspecified; attachment/scope), with `Surface` unchanged for
+humans/gate; contrast becomes an economy (factor out the pool's invariants) rather than the
+mechanism; fail closed if two candidates still collide. SLICES 2/3/5 DONE `2026-08-13` (note
+§7a–§7c): `Register::{Surface,Expanded}`, concept legend with the chain's definitions,
+injectivity guard in `resolve_document` before ANY ranker; the guard then FOUND a second lossy
+site (a comparative's dropped standard) whose fix took the composed configuration from
+**50/1/11/0 to 51 encoded / 0 ambiguous / 11 open / 0 gap**, replay-verified (39/0 selections,
+48/0 kinds). `chosen_gloss` recomputed in Surface so the chooser's register cannot leak into the
+discourse/kind/proposer prompts — which shrank the blast radius to selections only. Coupled draws
+must be recorded in ONE pass (kinds→antecedents→pools→selection keys). Demo v2 regenerated: the
+two variants now differ ONLY by the negation, independently selected. STILL OPEN: the page's
+reading-level score is **14 correct / 7 wrong / 10 UNADJUDICATED** (structure 23/31 unchanged) —
+bounds 14–24 of 31 against a 21/31 baseline, so inconclusive until those 10 are adjudicated, and
+the judge should not be the same class of model that chose them. B = two-level structure-then-senses
+presentation + logged truncation. The rendering's surface is settled by A/B on selection accuracy,
+not by taste (§4a).
+Invalidates the selections/kinds/proposals draws (verified: they key on the gloss) but NOT the
+gold sets (`reading-adjudications.tsv` keys on the sem) and NOT any parse metric. Slices in the
+note; slice 3 answers "how much of the ranker's 21/31 was blindness". NOT in scope: the negated
+sentence's 308-vs-2 cap-only forest — a grammar-side multiplicity question, named in §8.
+
+### 1. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
 The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
 → unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a

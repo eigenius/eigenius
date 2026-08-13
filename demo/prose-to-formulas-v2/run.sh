@@ -40,12 +40,12 @@
 # The edit negates the first sentence — the measurement. It still parses; the proposition is a
 # different term, so the certificate that cites the original has no witness.
 #
-# HONEST CAVEAT, stated because the demo would otherwise imply more than it shows: the two
-# variants are parsed and selected INDEPENDENTLY, and their sense-rank draws differ (the negated
-# sentence keeps more senses than the plain one). So the edited `claim_1` differs from the intact
-# one by more than the negation. What the gate turns on is unaffected — no proposition in the
-# edited document matches the one the certificate cites — but "one token changed the formula" is
-# v1's claim, not this one's.
+# The two variants are parsed and selected INDEPENDENTLY — no shared draw, no shared pin — and
+# they nevertheless land the SAME term apart from the negation: `claim_1`'s proposition here is
+# `<intact term> -> logic:False`, byte-identical otherwise. That did not hold before D69: the
+# negated sentence's 120-reading pool rendered to 4 distinct strings, so the ranker could not see
+# the concept-vs-compound distinction and picked a compound reading. With the expanded register
+# it sees it and picks the same reading a human pinned.
 #
 # Prerequisites:
 #   docker compose build kernel                      ← REBUILD AFTER ANY KERNEL CHANGE.
@@ -221,9 +221,8 @@ echo "   the measurement's formula, before and after:"
 echo "   before:"; narrate "$HERE/claims-intact.esl" claim_1
 echo "   after :"; narrate "$HERE/claims-edited.esl" claim_1
 echo
-echo "   (The two variants are parsed and selected independently; their sense draws differ, so"
-echo "    the edited term differs by more than the negation. What matters below is only that NO"
-echo "    proposition in this document is the one the certificate cites.)"
+echo "   Parsed and selected INDEPENDENTLY — no shared draw, no pin — and identical apart from"
+echo "   the trailing -> False. One token of prose, one line of formula."
 echo
 echo "-- THE INFERENCE that stood on sentence 1 — the same file step 2 committed:"
 if eig_load --branch v2-edited "$HERE/inference.esl"; then

@@ -275,6 +275,7 @@ mod tests {
             document,
             sentence,
             prior_selections: &[],
+            concepts: &[],
         }
     }
 

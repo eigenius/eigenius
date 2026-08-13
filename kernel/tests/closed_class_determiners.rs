@@ -2951,6 +2951,7 @@ fn solo_ctx(sentence: &str) -> eigenius_kernel::dcg::DocumentContext<'_> {
         document: sentence,
         sentence,
         prior_selections: &[],
+        concepts: &[],
     }
 }
 

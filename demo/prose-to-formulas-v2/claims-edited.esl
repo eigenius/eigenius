@@ -22,25 +22,17 @@ resource v2:scoped_1 : encoding:ScopedUnit {
     encoding:unit = "urn:eigenius:demo:v2:unit_1";
 }
 
-resource v2:claim_1 : encoding:EncodedClaim, encoding:Observation {
-    core:description = "«MSI cancer models did not have the exonuclease activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False";
+resource v2:claim_1 : encoding:EncodedClaim, encoding:Finding {
+    core:description = "«MSI cancer models did not have the exonuclease activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False";
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_1";
     reflection:canonical_proposition = type_expr(
         wn:v02203362_t(
             eigentt:fst(ontology:the(
-                            (exists x0 : wn:n00407535 =>
-                                logic:And(
-                                    ontology:compound_kind(x0, wn:n14606137),
-                                    ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246))
-                                ))
+                            (exists x0 : umlscui:C1148824 =>
+                                ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246)))
                         )),
             ontology:kind_of(
-                (exists x0 : wn:n05890249 =>
-                    ontology:compound_kind(
-                        x0,
-                        (exists x1 : wn:n14239918 =>
-                            ontology:compound_kind(x1, umlscui:C0920269))
-                    ))
+                (exists x0 : umlscui:C1516211 => ontology:compound_kind(x0, umlscui:C0920269))
             )
         )
         -> logic:False
@@ -56,10 +48,10 @@ resource v2:trace_1 : reflection:ProgramTrace {
 resource v2:decision_1 : encoding:DecisionPoint {
     encoding:candidate_count = 120;
     encoding:decision_unit = "urn:eigenius:demo:v2:scoped_1";
-    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False"];
+    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_1";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence refers to MSI cancer models (lowercase \"cancer model\" as a general experimental model, not a proper compound noun) not requiring the exonuclease activity of WRN as a protein (human WRN protein, a well-known helicase/exonuclease), making Structure 2 with \"WRN protein, human\" the best fit, and index 12 is the first representative of that structure.";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence is about MSI cancer models (a recognized biomedical concept, C1516211) lacking the exonuclease activity (C1148824, the specific biochemical catalytic activity) of WRN protein (C0388246), and \"have\" in the sense of possessing a property (v02203362) best fits; Structure 5 reading [96] captures \"MSI Cancer Model\" as a unified concept, \"exonuclease activity\" as the consolidated biomedical term, and WRN as the human protein.";
 }
 
 resource v2:unit_2 : encoding:DiscourseUnit {
@@ -117,22 +109,38 @@ resource v2:scoped_3 : encoding:ScopedUnit {
 }
 
 resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
-    core:description = "«These findings show that WRN is a vulnerability of MSI cancer models.» — the reading the ranker selected: §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)";
+    core:description = "«These findings show that WRN is a vulnerability of MSI cancer models.» — the reading the ranker selected: And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))";
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_3";
     reflection:canonical_proposition = type_expr(
-        wn:v00664788_c(
-            ontology:is_a(
-                ontology:kind_of(umlscui:C0388246),
-                (exists x0 : wn:n14543931 =>
-                    ontology:prep_of(
-                        x0,
-                        ontology:kind_of(
-                            (exists x1 : umlscui:C1516211 =>
-                                ontology:compound_kind(x1, umlscui:C0920269))
-                        )
-                    ))
+        logic:And(
+            wn:v00664788_c(
+                ontology:is_a(
+                    ontology:kind_of(umlscui:C0388246),
+                    (exists x0 : wn:n14543931 =>
+                        ontology:prep_of(
+                            x0,
+                            ontology:kind_of(
+                                (exists x1 : umlscui:C1516211 =>
+                                    ontology:compound_kind(x1, umlscui:C0920269))
+                            )
+                        ))
+                ),
+                v2:claim_1
             ),
-            v2:claim_2
+            wn:v00664788_c(
+                ontology:is_a(
+                    ontology:kind_of(umlscui:C0388246),
+                    (exists x0 : wn:n14543931 =>
+                        ontology:prep_of(
+                            x0,
+                            ontology:kind_of(
+                                (exists x1 : umlscui:C1516211 =>
+                                    ontology:compound_kind(x1, umlscui:C0920269))
+                            )
+                        ))
+                ),
+                v2:claim_2
+            )
         )
     );
 }
@@ -146,18 +154,18 @@ resource v2:trace_3 : reflection:ProgramTrace {
 resource v2:decision_3 : encoding:DecisionPoint {
     encoding:candidate_count = 4;
     encoding:decision_unit = "urn:eigenius:demo:v2:scoped_3";
-    encoding:runner_up_skeletons = ["§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)"];
+    encoding:runner_up_skeletons = ["And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_3";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The prior sentences reference WRN's exonuclease and helicase *activities* (protein-level functions), making WRN protein (human) the consistent referent; readings 0/1 both capture this, and reading 0 is selected as the first representative of that structure.";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The prior sentences establish WRN's protein-level activities (helicase and exonuclease), so \"WRN\" here refers to the protein (C0388246), and \"vulnerability\" in the sense of an exposed/susceptible state (n14543931, \"the state of being vulnerable or exposed\") best fits the oncology context where WRN is a targetable weakness of MSI cancer models.";
 }
 
 resource v2:binding_3_0 : encoding:AnaphorBinding {
-    encoding:antecedent_resource = "urn:eigenius:demo:v2:claim_2";
-    encoding:antecedent_surface = "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human";
+    encoding:antecedent_resources = ["urn:eigenius:demo:v2:claim_1", "urn:eigenius:demo:v2:claim_2"];
+    encoding:antecedent_surface = "the last 2 Finding claims, together";
     encoding:binding_unit = "urn:eigenius:demo:v2:scoped_3";
     encoding:bound_by = "urn:eigenius:encoding:binding_replay";
-    encoding:confidence = 0.82;
+    encoding:confidence = 0.95;
     encoding:hole_var = "$demref$0_0";
-    reflection:rationale = "\"These findings\" is a plural demonstrative anaphor referring to the accumulated claims from both preceding sentences (the exonuclease and helicase findings), and the most recent discourse referent of type C2825141 — claim 2 about the helicase activity requirement — is the closest and most salient antecedent representing those findings collectively.";
+    reflection:rationale = "\"These findings\" is a plural demonstrative that collectively refers to both preceding claims (sentences 0 and 1 together), making candidate [1] \"the last 2 Finding claims, together\" the best antecedent.";
 }

@@ -6,665 +6,617 @@
     "candidates": [
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, kind_of(C0388246)))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n00407535] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n00407535. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14006945] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14006945. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n13440063] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n13440063. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «activity» [n14531203] + compound-with «exonuclease» [n14606137] (relation unspecified) + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:n14531203. And(compound_kind(G#0, n14606137), prep_of(G#0, C1337007))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, kind_of(C0388246))).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False",
-        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:C1516211. compound_kind(G#0, C0920269))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05890249] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n05890249. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n03777283] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n03777283. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02203362] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02203362_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02630189] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02630189_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       },
       {
         "skeleton": "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)))) → False",
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN gene)",
+        "gloss": "not (a «model» [n05937112] + compound-with «cancer» [n14239918] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) (relation unspecified) «have» [v02204692] the «exonuclease activity» [C1148824] + of «WRN gene» [C1337007])",
         "sem": "v02204692_t(the(ΣG#0:C1148824. prep_of(G#0, C1337007)).1, kind_of(ΣG#0:n05937112. compound_kind(G#0, ΣG#1:n14239918. compound_kind(G#1, C0920269)))) → False"
       }
     ],
     "abstained": false,
-    "chosen": 12,
-    "rationale": "The sentence refers to MSI cancer models (lowercase \"cancer model\" as a general experimental model, not a proper compound noun) not requiring the exonuclease activity of WRN as a protein (human WRN protein, a well-known helicase/exonuclease), making Structure 2 with \"WRN protein, human\" the best fit, and index 12 is the first representative of that structure.",
+    "chosen": 96,
+    "rationale": "The sentence is about MSI cancer models (a recognized biomedical concept, C1516211) lacking the exonuclease activity (C1148824, the specific biochemical catalytic activity) of WRN protein (C0388246), and \"have\" in the sense of possessing a property (v02203362) best fits; Structure 5 reading [96] captures \"MSI Cancer Model\" as a unified concept, \"exonuclease activity\" as the consolidated biomedical term, and WRN as the human protein.",
     "runners_up": [
-      13,
-      14,
-      15,
-      16,
-      17,
-      18,
-      19,
-      20,
-      21,
-      22,
-      23,
-      24,
-      25,
-      26,
-      27,
-      28,
-      29,
-      30,
-      31,
-      32,
-      33,
-      34,
-      35,
-      36,
-      37,
-      38,
-      39,
-      40,
-      41,
-      42,
-      43,
-      44,
-      45,
-      46,
-      47,
-      99,
-      100,
-      101,
-      102,
-      103,
-      104,
-      105,
-      106,
-      107,
+      97,
+      98,
+      108,
+      109,
+      110,
       0,
       1,
-      2,
-      3,
-      4,
-      5,
-      6,
-      7,
-      8,
-      9,
-      10,
-      11
+      2
     ]
   },
   {
@@ -673,7 +625,7 @@
     "prior_selections": [
       {
         "ordinal": 0,
-        "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)"
+        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
       },
       {
         "ordinal": 1,
@@ -682,29 +634,29 @@
     ],
     "candidates": [
       {
-        "skeleton": "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN protein, human is a vulnerability of a Microsatellite Instability Cancer Model",
-        "sem": "v00664788_c(is_a(kind_of(C0388246), ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
+        "skeleton": "And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))",
+        "gloss": "[claim] «show» [v00664788] «WRN protein, human» [C0388246] is a «vulnerability» [n14543931] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) and [claim] «show» [v00664788] «WRN protein, human» [C0388246] is a «vulnerability» [n14543931] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
+        "sem": "And(v00664788_c(is_a(kind_of(C0388246), ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_1), v00664788_c(is_a(kind_of(C0388246), ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2))"
       },
       {
-        "skeleton": "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN protein, human is a vulnerability of a Microsatellite Instability Cancer Model",
-        "sem": "v00664788_c(is_a(kind_of(C0388246), ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
+        "skeleton": "And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))",
+        "gloss": "[claim] «show» [v00664788] «WRN protein, human» [C0388246] is a «vulnerability» [n05042871] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) and [claim] «show» [v00664788] «WRN protein, human» [C0388246] is a «vulnerability» [n05042871] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
+        "sem": "And(v00664788_c(is_a(kind_of(C0388246), ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_1), v00664788_c(is_a(kind_of(C0388246), ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2))"
       },
       {
-        "skeleton": "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN gene is a vulnerability of a Microsatellite Instability Cancer Model",
-        "sem": "v00664788_c(is_a(C1337007, ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
+        "skeleton": "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))",
+        "gloss": "[claim] «show» [v00664788] «WRN gene» [C1337007] is a «vulnerability» [n14543931] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) and [claim] «show» [v00664788] «WRN gene» [C1337007] is a «vulnerability» [n14543931] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
+        "sem": "And(v00664788_c(is_a(C1337007, ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_1), v00664788_c(is_a(C1337007, ΣG#0:n14543931. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2))"
       },
       {
-        "skeleton": "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)",
-        "gloss": "claim show WRN gene is a vulnerability of a Microsatellite Instability Cancer Model",
-        "sem": "v00664788_c(is_a(C1337007, ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2)"
+        "skeleton": "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))",
+        "gloss": "[claim] «show» [v00664788] «WRN gene» [C1337007] is a «vulnerability» [n05042871] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified) and [claim] «show» [v00664788] «WRN gene» [C1337007] is a «vulnerability» [n05042871] + of a «Cancer Model» [C1516211] + compound-with «Microsatellite Instability» [C0920269] (relation unspecified)",
+        "sem": "And(v00664788_c(is_a(C1337007, ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_1), v00664788_c(is_a(C1337007, ΣG#0:n05042871. prep_of(G#0, kind_of(ΣG#1:C1516211. compound_kind(G#1, C0920269)))), claim_2))"
       }
     ],
     "abstained": false,
     "chosen": 0,
-    "rationale": "The prior sentences reference WRN's exonuclease and helicase *activities* (protein-level functions), making WRN protein (human) the consistent referent; readings 0/1 both capture this, and reading 0 is selected as the first representative of that structure.",
+    "rationale": "The prior sentences establish WRN's protein-level activities (helicase and exonuclease), so \"WRN\" here refers to the protein (C0388246), and \"vulnerability\" in the sense of an exposed/susceptible state (n14543931, \"the state of being vulnerable or exposed\") best fits the oncology context where WRN is a targetable weakness of MSI cancer models.",
     "runners_up": [
       1,
       2,

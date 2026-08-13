@@ -3145,10 +3145,7 @@ fn wrn_first_page_over_full_lexicon() {
         match &outcome {
             Outcome::Encoded { reading, .. } => {
                 let vnames = unit_sense_names(&text, &index, &lem, &head);
-                let vb = Vb {
-                    names: &vnames,
-                    layer: &head,
-                };
+                let vb = Vb::surface(&vnames, &head);
                 prior.push(eigenius_kernel::dcg::PriorSelection {
                     ordinal: i,
                     gloss: verbalize(reading.sem(), &vb),
@@ -3223,10 +3220,7 @@ fn wrn_first_page_over_full_lexicon() {
         // `EIGENIUS_DUMP_SKELETONS` block, which prints the same set in the same (sorted) order.
         if std::env::var("EIGENIUS_GLOSS_READINGS").is_ok() {
             let vnames = unit_sense_names(&text, &index, &lem, &head);
-            let vb = Vb {
-                names: &vnames,
-                layer: &head,
-            };
+            let vb = Vb::surface(&vnames, &head);
             eprintln!("  «{}»", text.trim());
             let mut by_skel: std::collections::BTreeMap<String, String> =
                 std::collections::BTreeMap::new();
@@ -3271,10 +3265,7 @@ fn wrn_first_page_over_full_lexicon() {
             // a different reading set — "These data sets are project Achilles and project DRIVE."
             // has 0 readings there and 1 here. The adjudication ledger is keyed on THIS sweep.
             let vnames = unit_sense_names(&text, &index, &lem, &head);
-            let vb = Vb {
-                names: &vnames,
-                layer: &head,
-            };
+            let vb = Vb::surface(&vnames, &head);
             // Use `parse_open`, not `parse`: the latter returns CLOSED readings only, so the two
             // units with an unresolved referent hole ("MSI cell lines from these four lineages …",
             // "The lines from rare lineages …") dumped nothing at all — 48 and 4 skeletons with no
@@ -5325,10 +5316,7 @@ fn trace_one_sentence() {
         }
     } else {
         let vnames = unit_sense_names(&text, &index, &lem, &head);
-        let vb = Vb {
-            names: &vnames,
-            layer: &head,
-        };
+        let vb = Vb::surface(&vnames, &head);
         for (i, it) in f.iter().enumerate().take(20) {
             println!("  reading[{i}]: {}", pretty_term(it.sem()));
             println!("      ≈ \"{}\"", verbalize(it.sem(), &vb));

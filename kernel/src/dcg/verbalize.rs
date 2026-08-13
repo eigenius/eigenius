@@ -108,6 +108,95 @@ pub fn resource_label(iri: &Iri, layer: &Arc<Layer>) -> Option<String> {
     Some(name.trim().trim_end_matches('.').trim().to_string())
 }
 
+/// The right-hand side of a comparative: the implicit norm (`std_a…`) or the term compared
+/// against (`deg_a…(t)` — an elided «than t», recovered from the discourse).
+fn comparative_standard(e: &Exp, vb: &Vb) -> String {
+    let (h, a) = app_spine(e);
+    match axiom_local(h) {
+        Some(l) if l.starts_with("std_") => "the norm".to_string(),
+        Some(l) if l.starts_with("deg_") && !a.is_empty() => verbalize(a[0], vb),
+        _ => verbalize(e, vb),
+    }
+}
+
+/// One concept a candidate reading names, with whatever the chain says it MEANS (D69 §4).
+///
+/// The decisive fact when choosing between «exonuclease activity» as the single GO concept
+/// C1148824 and as `activity ⊗ exonuclease` is C1148824's definition — and it is sitting on the
+/// chain, unused, while the ranker guesses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConceptNote {
+    /// The atom's local name — `C1148824`, `n00407535`. What `Expanded` prints in `[…]`.
+    pub id: String,
+    pub label: String,
+    /// The chain's `core:description` with the leading label stripped, when there is one beyond
+    /// the label itself.
+    pub definition: Option<String>,
+}
+
+/// Every concept named across `terms`, once each, in a stable order — the legend a presentation
+/// prints beside the candidates instead of repeating definitions on every line.
+pub fn concept_notes(terms: &[&Exp], vb: &Vb) -> Vec<ConceptNote> {
+    let mut seen: BTreeMap<String, ConceptNote> = BTreeMap::new();
+    for t in terms {
+        collect_concepts(t, vb, &mut seen);
+    }
+    seen.into_values().collect()
+}
+
+fn collect_concepts(e: &Exp, vb: &Vb, out: &mut BTreeMap<String, ConceptNote>) {
+    if let Exp::EigonClass(iri) = e {
+        let id = iri.as_str().rsplit(':').next().unwrap_or("").to_string();
+        if !id.is_empty() && !out.contains_key(&id) {
+            let label = atom_label(&id, vb).unwrap_or_else(|| id.clone());
+            out.insert(
+                id.clone(),
+                ConceptNote {
+                    definition: concept_definition(iri, &label, vb),
+                    id,
+                    label,
+                },
+            );
+        }
+    }
+    for child in child_exps(e) {
+        collect_concepts(child, vb, out);
+    }
+}
+
+/// The chain's description for `iri`, minus the leading label and the importer's provenance
+/// suffix. `None` when the description says nothing the label does not already say.
+fn concept_definition(iri: &Iri, label: &str, vb: &Vb) -> Option<String> {
+    let res = vb.layer.resolve(iri)?;
+    let Value::String(d) = res.get(&Iri::parse("urn:eigenius:core:description").ok()?)? else {
+        return None;
+    };
+    let body = d.split(" UMLS CUI ").next().unwrap_or(d);
+    // "Label — Definition …" → the definition half.
+    let body = match body.split_once('—') {
+        Some((_, rest)) => rest,
+        None => body.strip_prefix(label).unwrap_or(body),
+    };
+    let body = body.trim().trim_start_matches(['-', ':']).trim();
+    if body.is_empty() || body.eq_ignore_ascii_case(label) {
+        return None;
+    }
+    Some(body.to_string())
+}
+
+/// The immediate sub-expressions of `e` — enough of the shape for a concept sweep.
+fn child_exps(e: &Exp) -> Vec<&Exp> {
+    match e {
+        Exp::App(f, x) => vec![f.as_ref(), x.as_ref()],
+        Exp::Sig(_, a, b) | Exp::Pi(_, a, b) => vec![a.as_ref(), b.as_ref()],
+        Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
+        Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => vec![b.as_ref()],
+        Exp::Pair(a, b) => vec![a.as_ref(), b.as_ref()],
+        Exp::InductiveType(_, args) => args.iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// A concept label from a bare CUI embedded in a lexicon atom's LOCAL NAME (`C0333668`, or the
 /// stripped core of a `deg_C…_rel` wrapper). The `urn:eigenius:umlscui:` reconstruction exists
 /// because derived atoms carry only the sense key, not a link to the concept resource; it goes
@@ -122,6 +211,56 @@ fn cui_label(cui: &str, layer: &Arc<Layer>) -> Option<String> {
 pub struct Vb<'a> {
     pub names: &'a BTreeMap<String, String>,
     pub layer: &'a Arc<Layer>,
+    /// Which register to render in — see [`Register`]. [`Vb::surface`] is the historical
+    /// behaviour and is what every human-facing caller wants.
+    pub register: Register,
+}
+
+impl<'a> Vb<'a> {
+    /// The reader's register: prose that reads like the source sentence.
+    pub fn surface(names: &'a BTreeMap<String, String>, layer: &'a Arc<Layer>) -> Self {
+        Self {
+            names,
+            layer,
+            register: Register::Surface,
+        }
+    }
+
+    /// The chooser's register: the reading's semantic commitments, spelled out (D69 §4).
+    pub fn expanded(names: &'a BTreeMap<String, String>, layer: &'a Arc<Layer>) -> Self {
+        Self {
+            names,
+            layer,
+            register: Register::Expanded,
+        }
+    }
+
+    fn expanded_mode(&self) -> bool {
+        self.register == Register::Expanded
+    }
+}
+
+/// Which register [`verbalize`] renders in (D69).
+///
+/// Strict verbalization is approximately a LEFT INVERSE OF PARSING: it reconstructs the input
+/// sentence, so every reading of one sentence converges on that sentence and the renderer
+/// collapses exactly the ambiguities the parse resolved. Measured 2026-08-13 on «MSI cancer
+/// models did not have the exonuclease activity of WRN.»: 120 candidate readings carrying 120
+/// DISTINCT sems rendered to **4 distinct strings** — «exonuclease activity» is what both the
+/// single UMLS concept C1148824 and the `activity ⊗ exonuclease` compound come out as. A model
+/// asked to choose between them was choosing blind.
+///
+/// So a chooser needs a different function, not better prose.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Register {
+    /// Reads like the source sentence. Humans, the gate's narration, `narrate.py`, claim
+    /// descriptions. Byte-stable — D69 slice 2 gates on it not moving.
+    #[default]
+    Surface,
+    /// Says what the reading COMMITS TO: every content position carries its concept label AND
+    /// IRI (labels collide, IRIs do not), a compound modifier is marked as the unspecified
+    /// relation it is, and structure is explicit rather than implied by word order.
+    Expanded,
 }
 
 fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
@@ -178,15 +317,27 @@ fn name_atom(local: &str, vb: &Vb) -> String {
         .or_else(|| local.strip_prefix("std_"))
         .unwrap_or(local);
     let key = core.split('_').next().unwrap_or(core);
+    let label = atom_label(key, vb);
+    if vb.expanded_mode() {
+        // Label AND identity: two concepts routinely share a label (C1148824's label IS
+        // "exonuclease activity"), and the identity is what a chooser needs.
+        return match label {
+            Some(l) if l != key => format!("«{l}» [{key}]"),
+            _ => format!("[{key}]"),
+        };
+    }
+    label.unwrap_or_else(|| key.to_string())
+}
+
+/// The display label for an atom's key, or `None` when the lexicon offers none.
+fn atom_label(key: &str, vb: &Vb) -> Option<String> {
     if let Some(w) = vb.names.get(key) {
-        return w.clone();
+        return Some(w.clone());
     }
     if key.starts_with('C') && key[1..].chars().all(|c| c.is_ascii_digit()) {
-        if let Some(w) = cui_label(key, vb.layer) {
-            return w;
-        }
+        return cui_label(key, vb.layer);
     }
-    key.to_string()
+    None
 }
 
 pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
@@ -575,7 +726,15 @@ fn bare_np(e: &Exp, vb: &Vb) -> String {
 }
 
 /// "adjs compound-mods HEAD pps" from a Σ's base type and restrictor conjuncts.
+///
+/// In [`Register::Expanded`] the same conjuncts are rendered as an explicit commitment list
+/// instead — see [`noun_phrase_expanded`]. The two shapes must differ: this function is where
+/// the measured collision lives, because "modifier head" is also how a single concept whose
+/// label happens to be two words comes out.
 fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
+    if vb.expanded_mode() {
+        return noun_phrase_expanded(base, restr, vb);
+    }
     let head = verbalize(base, vb);
     let (mut pre, mut post): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     let mut conj = Vec::new();
@@ -643,6 +802,69 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
     s.trim().to_string()
 }
 
+/// The chooser's rendering of a Σ noun phrase (D69 §4): head concept, then each restrictor as a
+/// NAMED commitment, so nothing rides on word order.
+///
+/// The contrast this exists for:
+///
+/// ```text
+/// Σx:C1148824. of(x, WRN)                        → «exonuclease activity» [C1148824] of …
+/// Σx:n00407535. compound(x, n14606137) ∧ of(…)   → «activity» [n00407535]
+///                                                    + compound-with «exonuclease» [n14606137]
+///                                                      (relation unspecified) of …
+/// ```
+///
+/// In `Surface` both are "the exonuclease activity of WRN".
+fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
+    let head = verbalize(base, vb);
+    let mut parts: Vec<String> = Vec::new();
+    let mut conj = Vec::new();
+    flatten_and_exp(restr, &mut conj);
+    for c in conj {
+        let (h, a) = app_spine(c);
+        match axiom_local(h) {
+            // The whole point: a compound asserts that SOME relation holds between the head and
+            // the modifier, and the parse does not say which. Surface hides that behind
+            // juxtaposition — the reading it is competing with names one concept outright.
+            Some("compound_kind" | "compound") if a.len() == 2 => parts.push(format!(
+                "compound-with {} (relation unspecified)",
+                bare_np(a[1], vb)
+            )),
+            Some(p) if p.starts_with("prep_") => {
+                if let Some(x) = a.get(1) {
+                    parts.push(format!("{} {}", &p[5..], verbalize(x, vb)));
+                }
+            }
+            Some("is_a") if a.len() == 2 => parts.push(format!("is-a {}", bare_np(a[1], vb))),
+            Some("named") if a.len() == 2 => parts.push(format!("named {}", verbalize(a[1], vb))),
+            Some("poss_of") if a.len() == 2 || a.len() == 3 => {
+                parts.push(format!("possessed-by {}", verbalize(a[a.len() - 1], vb)))
+            }
+            // A comparative carries a STANDARD, and the standard is exactly what two readings of
+            // an elided «stronger» differ by: `std_a…` (the norm) vs `deg_a…(t)` (than t,
+            // recovered from the discourse). Dropping it made those two readings identical — the
+            // injectivity guard caught it live on «…a stronger mutation phenotype» (D69 §7a).
+            Some(cmp @ ("gt" | "lt")) if a.len() == 2 => {
+                let dir = if cmp == "gt" { "greater" } else { "less" };
+                let adj = axiom_local(app_spine(a[0]).0)
+                    .map(|l| name_atom(l, vb))
+                    .unwrap_or_default();
+                parts.push(format!(
+                    "degree-{dir} {adj} than {}",
+                    comparative_standard(a[1], vb)
+                ));
+            }
+            _ => parts.push(verbalize(c, vb)),
+        }
+    }
+    let parts: Vec<String> = parts.into_iter().filter(|p| !p.trim().is_empty()).collect();
+    if parts.is_empty() {
+        head
+    } else {
+        format!("{head} + {}", parts.join(" + "))
+    }
+}
+
 fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
     if let Exp::InductiveType(decl, args) = e {
         if decl.iri.as_str().ends_with("logic:And") && args.len() == 2 {
@@ -652,4 +874,130 @@ fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
         }
     }
     out.push(e);
+}
+
+#[cfg(test)]
+mod register_tests {
+    use super::*;
+    use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::nbe::term::Patt;
+
+    fn layer() -> Arc<Layer> {
+        Arc::new(LayerBuilder::new("t", None).build(LayerStorage::in_memory()))
+    }
+
+    fn cls(iri: &str) -> Exp {
+        Exp::EigonClass(Iri::parse(iri).expect("iri"))
+    }
+
+    /// `Σ x0 : dom. restr` — the shape a refined noun takes.
+    fn sig(dom: Exp, restr: Exp) -> Exp {
+        Exp::Sig(Patt::Var("x0".into()), Box::new(dom), Box::new(restr))
+    }
+
+    fn app2(axiom: &str, a: Exp, b: Exp) -> Exp {
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::EigonAxiom(Iri::parse(axiom).expect("iri"))),
+                Box::new(a),
+            )),
+            Box::new(b),
+        )
+    }
+
+    /// THE MEASURED COLLISION (D69 §1). «exonuclease activity» is C1148824's own label, so the
+    /// single-concept reading and the `activity ⊗ exonuclease` compound reading are the same
+    /// string in `Surface`. In `Expanded` they must not be.
+    #[test]
+    fn expanded_separates_a_named_concept_from_a_compound() {
+        let l = layer();
+        let mut names = BTreeMap::new();
+        names.insert("C1148824".to_string(), "exonuclease activity".to_string());
+        names.insert("n00407535".to_string(), "activity".to_string());
+        names.insert("n14606137".to_string(), "exonuclease".to_string());
+        names.insert("C0388246".to_string(), "WRN".to_string());
+
+        let of = |x: Exp| {
+            app2(
+                "urn:eigenius:ontology:prep_of",
+                x,
+                cls("urn:eigenius:umlscui:C0388246"),
+            )
+        };
+        let concept = sig(
+            cls("urn:eigenius:umlscui:C1148824"),
+            of(Exp::Var("x0".into())),
+        );
+        // `logic:And` is an INDUCTIVE, not an axiom application — that is the shape
+        // `flatten_and_exp` splits and the shape the resolver builds.
+        let and_decl = Arc::new(crate::nbe::term::InductiveDecl {
+            iri: Iri::parse("urn:eigenius:logic:And").expect("iri"),
+            name: "And".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let compound = sig(
+            cls("urn:eigenius:wn:n00407535"),
+            Exp::InductiveType(
+                and_decl,
+                vec![
+                    app2(
+                        "urn:eigenius:ontology:compound_kind",
+                        Exp::Var("x0".into()),
+                        cls("urn:eigenius:wn:n14606137"),
+                    ),
+                    of(Exp::Var("x0".into())),
+                ],
+            ),
+        );
+
+        let surface = Vb::surface(&names, &l);
+        let s_concept = verbalize(&concept, &surface);
+        let s_compound = verbalize(&compound, &surface);
+        assert_eq!(
+            s_concept, s_compound,
+            "the collision this register exists for must still be reproducible in Surface \
+             (if this ever fails, Surface changed — check the byte-stability gate)"
+        );
+
+        let expanded = Vb::expanded(&names, &l);
+        let e_concept = verbalize(&concept, &expanded);
+        let e_compound = verbalize(&compound, &expanded);
+        assert_ne!(
+            e_concept, e_compound,
+            "Expanded must distinguish a named concept from a compound with the same surface"
+        );
+        assert!(
+            e_concept.contains("C1148824"),
+            "the concept's identity is named: {e_concept}"
+        );
+        assert!(
+            e_compound.contains("compound-with") && e_compound.contains("relation unspecified"),
+            "the compound's unspecified relation is stated: {e_compound}"
+        );
+    }
+
+    /// Surface keeps its historical shape — the property the gate narration and the committed
+    /// claim descriptions depend on.
+    #[test]
+    fn surface_is_unchanged_by_the_new_register() {
+        let l = layer();
+        let mut names = BTreeMap::new();
+        names.insert("n00407535".to_string(), "activity".to_string());
+        names.insert("n14606137".to_string(), "exonuclease".to_string());
+        let e = sig(
+            cls("urn:eigenius:wn:n00407535"),
+            app2(
+                "urn:eigenius:ontology:compound_kind",
+                Exp::Var("x0".into()),
+                cls("urn:eigenius:wn:n14606137"),
+            ),
+        );
+        assert_eq!(
+            verbalize(&e, &Vb::surface(&names, &l)),
+            "an exonuclease activity"
+        );
+    }
 }

@@ -58,11 +58,16 @@ hashes the *proposition*; the edited sentence parses to a different term, so the
 under that key and the load is **rejected at the gate**. The asserted route (sentence 2 states the
 conclusion) survives; the derived one does not.
 
-**Stated honestly:** the two variants are parsed and selected independently, and their sense-rank
-draws differ — the negated sentence keeps more senses than the plain one, so the edited `claim_1`
-differs from the intact one by more than the negation. What the gate turns on is unaffected (no
-proposition in the edited document is the one the certificate cites), but v1's sharper claim —
-"one token changed one line of the formula" — is not what this run demonstrates.
+**One token, one line.** The two variants are parsed and selected **independently** — no shared
+draw, no pin — and they still land the same term apart from the negation: the edited `claim_1` is
+the intact proposition with a trailing `-> logic:False`, byte-identical otherwise.
+
+That did not hold when this demo was first built. The negated sentence's 120-reading pool
+rendered to **4 distinct strings**, so the ranker could not see the difference between
+«exonuclease activity» as the single GO concept C1148824 and as an `activity ⊗ exonuclease`
+compound, and it picked a compound reading. The expanded rendering register
+([D69](../../docs/notes/d69-reading-presentation.md)) shows concept identities and definitions,
+and with it the ranker picks the reading a human had pinned — on both variants, independently.
 
 ## Files
 
