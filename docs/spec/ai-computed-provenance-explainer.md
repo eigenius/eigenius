@@ -20,28 +20,41 @@ implementation. Nothing below should be read as reflecting consensus.
 
 An AI-assisted research system produces a conclusion. You want to know whether to act on it.
 
-Today you get a provenance record: this was derived from that, by this model, at this time. Every
-field in that record was written by the system that produced the conclusion. If the system is wrong,
-the record is wrong in exactly the same way, and it will look just as complete. If the system is a
-proprietary service, you have no recourse but to trust it.
+Today you get a provenance record: this was derived from that, by this model, at this time. It is a
+graph of assertions — nodes and edges, each atomic and opaque. Such a graph can record *that* things
+are related. It cannot record *why a claim holds*, because it has no notion of what a claim says and
+no notion of validity. A sound derivation and an invented one have the same shape in it.
 
-This is not a quality problem that better engineering fixes. It is a structural property: when every
-field is writable by the producer, the record's value equals the producer's trustworthiness, and no
-amount of detail changes that.
+That is the first gap, and it is representational, not cryptographic. The second gap compounds it:
+every field in the record was written by the system that produced the conclusion, so even the
+relationships it can express are worth exactly the producer's trustworthiness.
 
-This specification proposes a different arrangement. Some statements in the record are **not
-writable at all**. They exist only because an implementation performed and checked a specific piece
-of work, and there is no syntax, API, or configuration through which anyone can supply one. Claims
-ground out in those statements. A third party re-checks them by recomputing hashes and looking for
-the work that admits them — without asking the producer anything.
+This specification closes both, and it does so by **changing levels** — from flat data to reasoning.
 
-We call the distinction **Computed ≠ Asserted**.
+In the record we propose, a claim has **content**: a proposition in a formal language, with a
+decidable notion of when two claims are the same one. A warrant has **structure**: a term recording
+which evidence it grounds in and how those groundings compose. And validity is **decidable**: whether
+a warrant justifies a claim is settled by type-checking, not by inspection.
+
+That level shift is what makes the second gap closable. Once a warrant is a checkable object, its
+leaves can be made unforgeable — statements that exist only because an implementation performed and
+validated specific work, with no syntax, API, or configuration through which anyone can supply one.
+A third party re-checks them by recomputing hashes and looking for the work that admits them, without
+asking the producer anything.
+
+We call that second property **Computed ≠ Asserted**. It is the headline, but it rests on the level
+shift: you cannot make a warrant unforgeable until you have a warrant.
 
 ---
 
 ## The user-facing problem
 
-Three people are hurt today, concretely.
+Existing provenance formats sit at the artifact level: what came from what, what ran, who signed it.
+That is the right level for the questions they were built for, and the wrong level for "is this
+conclusion warranted, and by what?" — a question about claims, not artifacts. Asking it of a
+lineage graph gets an answer about file ancestry.
+
+Three people are hurt by this, concretely.
 
 **The reviewer** reads a conclusion and wants its dependencies. They can get a list of cited
 documents. They cannot get an answer to "which steps here were *checked* and which were *chosen*,
@@ -87,11 +100,76 @@ spot-check, so the properties have to be structural or they are not there.
 3. **Not a domain vocabulary.** What a biology claim means is authored, not standardised here.
 4. **Not model evaluation.** Nothing here scores a model, and confidence values are explicitly not
    grades.
-5. **Not a replacement for W3C PROV.** PROV describes provenance. This constrains who may write it.
+5. **Not a replacement for W3C PROV.** PROV answers artifact-level questions and answers them well.
+   This sits a level above and maps down to PROV for tooling interop, rather than competing with it.
    See [alternatives](#considered-alternatives).
 6. **Not prescriptive about AI.** How a model is invoked, prompted, or chosen is out of scope; only
    what must be *recorded* about its choices is in scope.
 7. **Not defeasible reasoning.** Belief revision is a structural marker, not a non-monotonic logic.
+
+---
+
+## The level shift: three theories, three jobs
+
+Nothing in the foundations below is invented here. Each is decades-old, well-understood mathematics
+with textbooks, proof assistants, and independent implementations behind it. The contribution is the
+assembly and the interfaces — which is the right posture for standards work, because implementers can
+reason about established theory and check our use of it against sources we do not control.
+
+Each of the three does one job that the other two cannot.
+
+### Constructive type theory — gives claims content
+
+A proposition is a type; a proof is a term inhabiting it; checking a proof is type-checking. The
+constructive commitment is that to assert something exists you must **exhibit it**: a proof is not a
+certificate that a witness could be found, it is the witness.
+
+Two decidable questions follow, and everything else depends on them:
+
+- **Are these the same claim?** Settled by the language's equivalence relation, not by string
+  comparison. This is what lets a citation bind to a proposition rather than to a name.
+- **Does this warrant justify this claim?** Settled by type-checking.
+
+*Without it:* claims are strings, sameness is textual, and nothing is checkable. This is the position
+flat-data provenance is in.
+
+### Justification logic — makes the warrant an object
+
+Artemov's Logic of Proofs treats the warrant as first-class syntax: `t : A` reads "*t* is a
+justification for *A*", with explicit operators for composing justifications.
+
+The practical consequence is that a warrant is **stored, inspected, and audited** rather than
+discarded once checked. An auditor reads *how* a claim was justified. Several independent warrants for
+one claim coexist without collapsing into one. And — the part no proof system gives on its own — a
+single calculus expresses *justified by authority* alongside *justified by proof*, so the epistemic
+grade is computed from the warrant's shape rather than attached as a label.
+
+*Without it:* you would have proofs but no audit surface, and no uniform way to represent a claim
+resting on somebody's say-so next to one resting on a machine-checked proof.
+
+### Institution theory — lets many logics coexist
+
+Goguen and Burstall's institutions formalise what a *logical system* is — signatures, sentences,
+models, satisfaction — together with the satisfaction condition: truth is invariant under change of
+notation. **Comorphisms** are truth-preserving translations between logical systems.
+
+This is what makes the platform extensible without a universal ontology. A statistics system, a proof
+assistant, a solver each keep their own sentences and their own notion of a verdict, and are related
+by *declared* translations with stated semantics rather than by ad-hoc glue.
+
+*Without it:* either one global logic — which no real scientific domain has — or bridges between
+systems whose meaning nobody can state.
+
+**This is also the formal content of the group's neutrality commitment.** "Immune to single-vendor
+enclosure" is usually a governance aspiration. Here it has a mathematical counterpart: the framework
+does not privilege one logic, and adding one is a declared institution with declared comorphisms — an
+extension, not a change to the core. A vendor cannot enclose a framework whose extension mechanism is
+a published translation with a satisfaction condition attached.
+
+> **Implementation status.** Institutions are built, not aspirational: three implementations exist
+> (reasoning, statistics, and a Lean proof-checking institution), two are registered on the chain, and
+> the kernel carries the comorphism registry. The reasoning institution's validation gate is what
+> type-checks the certificates described below.
 
 ---
 
@@ -223,23 +301,57 @@ choice call for entirely different responses.
 
 ## Considered alternatives
 
+A note on the first three. They are not really alternatives — they operate at the **artifact level**
+(what came from what, what ran, who signed it) and this operates at the **claim level** (why does this
+hold, and can I check it). They compose with this specification rather than competing with it, and the
+sections below say in which direction. They are listed as alternatives because they are what a
+reviewer will reasonably ask about first.
+
 ### Profile W3C PROV-O
 
-The obvious move, and the first question any reviewer will ask.
+The obvious move, and the first question any reviewer will ask. There are two reasons it does not
+work, and the representational one is the more fundamental.
 
-PROV gives a mature, widely-understood model of entities, activities and agents, and `wasDerivedFrom`
-expresses most of the graph shape we need. What it does not have is a place for the distinction this
-specification is about: in PROV, `wasDerivedFrom` is an *assertion*, and a producer that never ran the
-derivation can write it. PROV describes provenance; it does not constrain who may write which parts.
+**PROV cannot express reasoning.** RDF is open, so one can always mint classes — but the gap is not
+vocabulary, and adding terms does not close it:
 
-We could profile PROV and add a constraint layer on top. But the constraint layer is the entire
-contribution, and PROV's model has no seam to attach it to — there is nothing in PROV that is
-admitted by a validator rather than asserted by an author.
+| Reasoning requires | PROV's nearest construct | What is missing |
+|---|---|---|
+| The content of a claim | `prov:Entity` | Deliberately opaque. PROV models identity and lineage, not meaning. |
+| "P follows from Q by rule R" | Activity `used` Q, `generated` P, `wasAssociatedWith` an Agent that `hadPlan` R | Records that a step occurred. R is an opaque `prov:Plan`; nothing states it and nothing checks conformance to it. |
+| A checkable warrant | — | PROV has no proof objects of any kind. |
+| Composing warrants | Activity chaining | Chains *activities*, not *justifications*. No notion of a composite warrant being valid because its parts are. |
+| Truth-preserving vs. guessed | — | `wasDerivedFrom` is deliberately general and covers both. |
+| Validity | PROV-CONSTRAINTS | Constrains the provenance graph's well-formedness — ordering, uniqueness — not the logical validity of anything. |
 
-**What we should do instead of dismissing it:** publish a mapping, so records can be consumed by
-existing PROV tooling. Grades map onto PROV agents and activities readily. The mapping is lossy in
-one direction — PROV cannot express non-forgeability — and stating exactly where it loses information
-is a useful contribution in itself. This is not yet drafted.
+Closing this needs two things RDF vocabulary cannot supply: content with a decidable identity, and a
+checking relation. That is what [the three theories](#the-level-shift-three-theories-three-jobs) are
+for.
+
+There is also a structural mismatch at exactly our motivating case. PROV's entity/generation model is
+oriented to "this artifact was produced by this process", so one proposition warranted two
+*independent* ways has no natural home — one gets two entities and an `alternateOf`, losing the fact
+that they are the same claim.
+
+**And separately, everything in PROV is producer-writable.** Even the lineage PROV *can* express is
+asserted by whoever writes the graph; a `wasDerivedFrom` from a producer that never ran the derivation
+is a perfectly well-formed PROV statement.
+
+**What we should do rather than dismiss it:** publish a downward mapping, so records are consumable by
+existing PROV tooling. The mapping is heavily lossy and worth stating precisely — a PROV export
+flattens every certificate to `wasDerivedFrom` edges, so the calculus does not survive translation at
+all. That is the point rather than an embarrassment: the flattening is what makes the extra layer
+legible to someone who only knows PROV. Not yet drafted.
+
+> **Prior art to verify — this matters.** The genuine precedent for reasoning-level provenance is the
+> **Proof Markup Language** (PML), from the Inference Web project (McGuinness, Pinheiro da Silva,
+> mid-2000s), whose justification layer modelled inference steps with antecedents and named inference
+> rules. Our recollection is that PML fed into the W3C Provenance Incubator Group, and that the
+> resulting PROV work deliberately narrowed scope from justification toward lineage. If that history
+> holds it is a far better argument than "PROV did not consider this": the W3C looked at
+> reasoning-level provenance and scoped it out, and the question for this group is whether twenty
+> intervening years of proof assistants and machine-generated claims change the calculation.
+> **Unverified — check before circulating.**
 
 ### Signed attestations (in-toto / SLSA)
 
@@ -356,11 +468,33 @@ observer confirm a guess about data never disclosed.
 
 ## References
 
-- [AI Computed Provenance 1.0](ai-computed-provenance-1.0.md) — the specification this explains.
-- Artemov, S. and Fitting, M. (2020). *Justification Logic: Reasoning with Reasons.* Cambridge
-  University Press. The calculus of moves 5 and 6 is a fragment of the Logic of Proofs.
+**The specification.**
 
-> **Unverified.** Characterisations of W3C PROV, the Verifiable Credentials Data Model, C2PA, in-toto
-> and SLSA in the alternatives section are written from the editors' understanding and have **not**
-> been checked against primary sources or against those specifications' current state. They must be
-> verified before this document is circulated.
+- [AI Computed Provenance 1.0](ai-computed-provenance-1.0.md) — the specification this explains.
+
+**Foundations.**
+
+- Martin-Löf, P. (1984). *Intuitionistic Type Theory.* Bibliopolis. And Coquand, T. and Huet, G.
+  (1988), "The Calculus of Constructions", *Information and Computation* 76(2–3). The
+  propositions-as-types substrate; the binding's type theory is a fragment of the Calculus of
+  Inductive Constructions, the same family underlying Rocq and Lean.
+- Artemov, S. (2008). "The Logic of Justification", *Review of Symbolic Logic* 1(4). And Artemov, S.
+  and Fitting, M. (2020), *Justification Logic: Reasoning with Reasons*, Cambridge University Press.
+  The warrant calculus is a fragment of the Logic of Proofs.
+- Goguen, J. and Burstall, R. (1992). "Institutions: Abstract Model Theory for Specification and
+  Programming", *Journal of the ACM* 39(1). Signatures, sentences, models, satisfaction, and the
+  satisfaction condition; comorphisms as truth-preserving translation between logical systems.
+
+**Prior art in the alternatives section.**
+
+- W3C PROV (PROV-DM, PROV-O, PROV-CONSTRAINTS); Verifiable Credentials Data Model; C2PA; in-toto and
+  SLSA; RO-Crate.
+- McGuinness, D. and Pinheiro da Silva, P. — the Proof Markup Language and the Inference Web project.
+  The closest precedent for reasoning-level provenance, and the one whose relationship to the W3C
+  provenance work most needs establishing.
+
+> **Unverified.** Every characterisation in the alternatives section — W3C PROV, the Verifiable
+> Credentials Data Model, C2PA, in-toto/SLSA, RO-Crate, and the PML history — is written from the
+> editors' understanding and has **not** been checked against primary sources or against those
+> specifications' current state. Citation details above are approximate where publication data was not
+> confirmed. All of it must be verified before this document is circulated.
