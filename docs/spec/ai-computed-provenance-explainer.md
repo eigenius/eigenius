@@ -57,7 +57,7 @@ These challenges are exacerbated by the scale of automated generation. A system 
 2. **Not a correctness oracle.** A conforming record can faithfully document a logically flawed conclusion. The generated grades indicate *how* a claim was established, not its ultimate truth value.  
 3. **Not a domain vocabulary.** The semantic meaning of domain-specific claims (e.g., in biology or law) is authored externally and is not standardized here.  
 4. **Not a model evaluation tool.** This framework does not score AI models, and confidence values are explicitly excluded from being treated as logical grades.  
-5. **Not a replacement for W3C PROV.** PROV effectively addresses artifact-level lineage. This specification operates a level above and is designed to map down to PROV for tooling interoperability. See [alternatives](https://www.google.com/search?q=%23considered-alternatives).  
+5. **Not a replacement for W3C PROV.** PROV effectively addresses artifact-level lineage. This specification operates a level above and is designed to map down to PROV for tooling interoperability. See [alternatives](#considered-alternatives).  
 6. **Not prescriptive regarding AI architectures.** The methods used to invoke, prompt, or select models are out of scope; the specification only dictates what must be *recorded* regarding their choices.  
 7. **Not a system for defeasible reasoning.** Belief revision is treated as a structural marker rather than a native implementation of non-monotonic logic.
 
@@ -96,8 +96,6 @@ This mechanism enables platform extensibility without requiring a universal, mon
 
 **This formalizes the group's neutrality commitment.** True vendor neutrality is achieved structurally: the framework does not privilege any single logic, and expanding it requires registering a declared institution with specific comorphisms. This prevents vendor lock-in, as the extension mechanism relies on transparent, published translations.
 
-> **Implementation status.** Institutions are active components of the reference implementation: three exist (reasoning, statistics, and a Lean proof-checking institution), two are registered on the chain, and the kernel maintains the comorphism registry. The reasoning institution's validation gate is responsible for type-checking the certificates detailed below.
-
 ## **Proposed approach**
 
 The proposed architecture consists of seven core mechanisms. The overall integrity guarantee emerges from their combination.
@@ -132,37 +130,75 @@ The record also strictly distinguishes between **vetoed** and **unvetoed** choic
 
 ## **Key scenarios**
 
-### **Scenario 1 — A dependency that is live, not narrated**
+### **Scenario 1 — Verifiable literature citations**
 
-This capability is currently active in the reference implementation.
+A citation is a pointer to a document. It records where an author looked — not what they relied on, and not whether what they relied on holds. That gap is where a fabricated reference hides, and equally where a real reference that does not say what the argument needs hides, which is the more common and less discussed failure.
 
-Consider a processed academic paper. Sentence 1 establishes a specific measurement. A formalized rule from the literature dictates that anything with this measurement requires a secondary property. Sentence 2 asserts a conclusion—but that *same* conclusion can also be logically derived from sentence 1 combined with the rule.
+The framework splits the two things the word "citation" conflates. A **Reference** is the cited work: DOI, PMID, title, year. A **Citation** is *this* argument's use of that work — its rhetorical function drawn from a closed vocabulary (cites as authority, uses method in, obtains background from), the citing document's own label, and, when the citation is doing logical work, the **proposition being imported**.
 
-The conclusion is now justified by two independent warrants: the explicit textual assertion in the document, and the logical derivation from the measurement.
+That last field is the whole distinction. A Citation carrying a proposition is a *literature warrant*: a premise the argument composes. A Citation without one is pure provenance: it records that the author read something. Both are legitimate; conflating them is how an argument's real dependencies become invisible. In the reference encoding of a synthetic-lethality study, reference [14] carries the proposition that WRN's exonuclease and helicase activities are separable, typed *cites as authority*, and is a premise in the leg concluding that the helicase is the required activity — remove it and that leg does not close.
 
-If sentence 1 is subsequently negated in the source text, it parses to a different proposition and hashes to a new witness key. The inferential warrant no longer has a valid premise to apply the rule to, and the commit is refused with a precise diagnostic:
+Once a citation carries a proposition, the proposition can be **checked**. That is what verifying a citation actually means: not that the identifier resolves, but that the claim it imports survives contact with the data behind it.
 
-no admitted IsDerivedAs witness for urn:…:claim\_1 with proposition …
+The same study, encoded as a chain with its statistical claims recomputed from the deposited public data rather than transcribed, produces three kinds of outcome — and records all three.
 
-Sentence 2's explicit claim remains intact and commits successfully. The document still asserts the conclusion; it is simply no longer mathematically *derived*. The dependency tracking functioned seamlessly because the citation was bound to the cryptographic hash of the proposition, not a localized string.
+The headline reproduces exactly. The gene is the top differential dependency in the relevant cell lines at Q = 4.81 × 10⁻²⁴ against a published 4.8 × 10⁻²⁴, recovered by moderated-t regression over a 187 MB dependency matrix.
 
-> Note: The literature rule in the reference demo is illustrative. The focus is on the mechanics of claim justification, not domain-specific accuracy.
+A competition assay also reproduces exactly — published P = 2.7 × 10⁻¹⁹, recomputed 2.74 × 10⁻¹⁹ — and the record adds what the published figure does not say: that model tests the *technical* residual, because replicates within a guide are not independent. The biological-unit model, taking the guide as the unit of analysis, gives P ≈ 2.2 × 10⁻⁶. **Neither number is wrong.** They answer different questions, and in the record they are different propositions carrying different scope of inference. The study's qualitative conclusion survives; the strength of the warrant behind it does not, and the record says which warrant supports which claim.
 
-### **Scenario 2 — Authority surface mapping**
+A third claim reproduces in effect but not in extent: a correlation's coefficient recovers exactly at ρ = −0.74 while its sample count does not — the paper reports 54, the recomputation finds 51. Classified, recorded, left visible.
 
-Consider a reviewer analyzing the authority surface of a 500-claim record. By filtering for Declared groundings, they obtain an exhaustive list (due to the constraints of mechanism 6). No hidden implications can bypass this filter. The result is a concise list of dependencies, with each entry identifying a responsible party and an explicit rationale. Without mechanism 6, systems could quietly derive their own bridges, rendering such a list useless.
+This is what checking a citation produces when the citation carries a claim rather than a pointer: confirmations, refinements, and divergences, each a recorded finding rather than a note in a reviewer's margin that never reaches the record. And because no rule introduces an implication, the question *what does this argument import from outside itself?* has a finite, exhaustive answer.
 
-### **Scenario 3 — Independent re-checking**
+One boundary is worth stating plainly. The record does not establish that a cited work exists; resolving an identifier against a registry is an external check that belongs with attribution. What the record establishes is that a citation commits its author to a specific proposition, in the open, where it can be disputed — and that a fabricated citation, while it can be declared, can only do the single job it states and cannot hide inside a derivation.
 
-A secondary party receives a provenance record without access to the original producer's environment. They can recompute every content address, re-check every certificate against its underlying proposition, recalculate every epistemic grade, and verify that every witness is backed by a valid trace within the record.
+### **Scenario 2 — Reading the output of an AI scientist**
 
-This confirms the internal consistency of the record and ensures that claims terminate in actual traces. It does *not* prove the real-world truth of the traces—a verifier cannot re-run physical laboratory experiments. However, it successfully **localizes and enumerates** trust. Rather than relying on blind faith across the entire pipeline, the auditor has a specific, constrained list of verifiable traces.
+Someone is handed a body of work they did not watch being produced. The useful question is not "is this correct?" — at volume, nobody answers that by reading. The question is **where do I look?**
 
-### **Scenario 4 — Honest coverage**
+The record answers it by construction, through three filters. **Unvetoed choices** are the places a model selected among options the system itself could not tell apart; these are where an error enters with nothing to catch it. **Declared groundings** are what the work takes on authority. **Omission records** are what the pipeline could not process at all.
 
-If a pipeline processes 62 units of a document but successfully encodes only 50, a standard output file will display 100% coverage of the included claims, hiding the dropped units.
+The vetoed/unvetoed split is not a gradation of confidence. It is a difference in kind, and the same pipeline exhibits both. Resolving a phrase like "these findings" to its referent is *vetoed*: a proposed antecedent that fails to type-check against the referring expression's restriction is rejected outright, and the reading dies with it — the model ranks candidates, the type system decides. Choosing among competing readings of an ambiguous sentence is *unvetoed*: every candidate type-checks, nothing mechanical discriminates, and the model's choice stands, recorded with its alternatives and its stated reasoning. A record that presents these two as the same event tells the reader nothing.
 
-Under this specification, conformance requires all 62 units to be present: 50 completed claims and 12 explicit omission records. Each omission must include a standardized reason class (e.g., vocabulary gap, grammar gap, unresolved selection, unresolved reference, out of scope). This transparency allows users to respond appropriately, as a vocabulary failure requires a different intervention than an unresolved logical reference.
+Concretely, a pipeline over one paper's 62 sentences encodes 50, leaving 1 unresolved for ambiguity and 11 for unresolved reference, with no grammatical gaps. Its 39 recorded selection decisions score 23 matching independent human adjudication, 6 wrong, 1 abstained — and 9 that the existing gold standard cannot score at all, because those readings were resolved using discourse context the gold standard was not built to evaluate.
+
+That last figure is in the record too, and it is the point. The claim is not that the pipeline is accurate. It is that a reader who was not present can compute the pipeline's error rate from the artifact — including the part where the measurement does not yet apply.
+
+### **Scenario 3 — Collaboration between research groups**
+
+A second group builds on the first group's result. The first group later revises it.
+
+Today nothing happens. The citation still formats correctly, the identifier still resolves, and the sentence in the second group's paper reads exactly as before. The conclusion is now unsupported and no mechanism anywhere says so; discovery depends on somebody noticing.
+
+Here the citation is bound to the claim rather than to the name. A witness is keyed on the grade, the identifier, **and the hash of the proposition** — so when the first group revises what the claim says, the key changes and the second group's citation no longer resolves. The dependency breaks loudly, at the moment the dependent work is re-checked.
+
+This is Scenario 1 seen from the other side: that one asks what an argument imports, this one asks what happens when an import changes underneath. Both are the same mechanism.
+
+Order becomes a structural property rather than an editorial convention. In the reference encoding, the recompute layers land in two phases: the statistical analysis plans first, because their validated commit is what emits the witnesses, and the conclusions second, because they cite those witnesses and can only gate against them once they are ancestors. A conclusion cannot commit before the thing it depends on exists. The dependency ordering a paper leaves implicit is enforced by the substrate.
+
+When two groups' contributions genuinely conflict, the resolution is itself recorded on the chain — which strategy was applied, by whom, across which layers — rather than settled in private correspondence whose outcome surfaces only as a changed number.
+
+### **Scenario 4 — Multi-disciplinary research teams**
+
+A screening team holds 24 IC₅₀ measurements across six compounds and four targets. Flat queries answer every question *about that data*: selectivity matrices, scaffold rollups, quality-control distributions. What they cannot answer is anything about the mechanisms underneath, and each such question belongs to a different discipline with its own formalism.
+
+| Question | What answering it requires | Whose formalism |
+| --- | --- | --- |
+| What are the binding kinetics at the target, and does the steady state agree with the measured IC₅₀? | Integrating a system of ODEs derived from a chemical reaction network | Reaction-network kinetics → numerical integration |
+| What inhibition constant underlies the measured IC₅₀, given the substrate concentration and the target's Michaelis constant? | A least-squares fit across dose–response readings at several concentrations | Symbolic algebra → mathematical optimization |
+| Given the confidence intervals on each measurement, what range can predicted occupancy take? | Rigorous interval arithmetic with rounding-mode discipline | Symbolic algebra → validated numerics |
+
+Each discipline keeps its own formalism. The chemist's reaction network remains a reaction network; the optimizer's problem remains an optimization problem. Nobody restates their methods in a neighbouring field's vocabulary in order to participate. Declared translations carry a claim from one system into the next, and each translation states what it preserves.
+
+The receiving system does not take the claim's word. Committing the ODE solution fires a check that **re-integrates** the system; committing the optimization result fires a check that **re-solves** the problem. The verdict records agreement between an independent recomputation and the claim, not the claim itself.
+
+The loop then closes numerically, which is what makes the composition worth doing. The fit recovers an inhibition constant of 17 nM. The Cheng–Prusoff relation, applied at the screening protocol's substrate concentration, predicts an IC₅₀ of 17 × (1 + 80/20) = 85 nM. The screening measurement for that compound–target pair is 85 nM with a 95% confidence interval of [72, 100]. The prediction lands inside the interval — and every input is chain-resident: the target's Michaelis constant, the protocol's substrate concentration, the fitted constant. A reader can do the arithmetic without asking anyone.
+
+Reproducibility is carried with the verdict rather than assumed. Each one arrives with the digest of the image that computed it and the numerical metadata captured when that worker started — BLAS implementation, fused-multiply-add availability, determinism flags — so re-running the same gate on the same image reproduces the same bytes, not merely a similar answer.
+
+This is where the framework's pluralism does real work. No universal ontology is imposed and no discipline is subordinated to another's schema. A team adds a discipline by declaring an institution and its translations, which is an extension rather than a renegotiation — and it is why the neutrality commitment is structural rather than aspirational.
+
+The worked example uses values constructed so that every step has an independently checkable answer; real screening substitutes noisy observations, and the same chain shapes apply.
 
 ## **Considered alternatives**
 
@@ -183,7 +219,7 @@ While profiling W3C PROV-O is a natural starting point, it presents fundamental 
 | Truth-preserving vs. guessed | — | wasDerivedFrom is highly general and covers both equally. |
 | Validity | PROV-CONSTRAINTS | Constrains structural well-formedness (ordering, uniqueness), not logical validity. |
 
-To express reasoning, a system requires content with a decidable identity and a strict checking relation—features provided by the [three foundational theories](https://www.google.com/search?q=%23the-level-shift-three-theories-three-jobs) discussed earlier. Furthermore, PROV's entity/generation model struggles with multiple independent justifications for a single proposition, often resulting in duplicated entities rather than unified claims.
+To express reasoning, a system requires content with a decidable identity and a strict checking relation—features provided by the [three foundational theories](#the-level-shift-three-theories-three-jobs) discussed earlier. Furthermore, PROV's entity/generation model struggles with multiple independent justifications for a single proposition, often resulting in duplicated entities rather than unified claims.
 
 Most importantly, PROV graphs are entirely producer-writable. A system can assert a wasDerivedFrom relationship without ever executing the derivation, and the PROV statement remains structurally valid.
 
@@ -221,7 +257,7 @@ This remains the current de-facto industry practice. However, confidence scores 
 
 ## **Security and privacy considerations**
 
-Summarized from [§11 of the specification](https://www.google.com/search?q=ai-computed-provenance-1.0.md%2311-security-and-privacy-considerations).
+Summarized from [§11 of the specification](./ai-computed-provenance-1.0.md#11-security-and-privacy-considerations).
 
 **Addressed vulnerabilities:** Silent substitution of propositions beneath stable citations; undetected historical alterations; undocumented epistemic grades; asserted-but-unperformed computations; and the artificial inflation of coverage metrics by silently dropping input.
 
@@ -246,7 +282,7 @@ Summarized from [§11 of the specification](https://www.google.com/search?q=ai-c
 
 **The specification.**
 
-* [AI Computed Provenance 1.0](https://www.google.com/search?q=ai-computed-provenance-1.0.md) — the specification this document explains.
+* [AI Computed Provenance 1.0](./ai-computed-provenance-1.0.md) — the specification this document explains.
 
 **Foundations.**
 
