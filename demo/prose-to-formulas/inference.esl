@@ -47,16 +47,16 @@ namespace wn          = "urn:eigenius:wn";
 // The vocabulary every proposition below is built from — all of it already on the chain, from two
 // different lexicons occupying the same argument slots:
 //
-//   umlscui:C0388246   WRN            (a UMLS concept)
-//   wn:n14606137       exonuclease    (a WordNet synset)
-//   umlscui:C0920283   helicase       (a UMLS concept)
-//   umlscui:C0920269   MSI            (a UMLS concept)
-//   wn:n05890249       model          (a WordNet synset)
-//   wn:n14239918       cancer         (a WordNet synset)
+//   umlscui:C0388246   WRN                    (a UMLS concept)
+//   umlscui:C1148824   exonuclease activity   (a UMLS concept — d67 alignment: the activity is
+//                                              a dedicated concept, no compound)
+//   umlscui:C1149627   helicase activity      (a UMLS concept)
+//   umlscui:C0920269   MSI                    (a UMLS concept)
+//   umlscui:C1516211   cancer model           (a UMLS concept)
 //
-// The MODEL is not a single class. «MSI cancer models» parses to a nested compound kind — models
-// whose kind is (cancers whose kind is MSI) — and that whole term is what the sentences are about.
-// Writing it out is the honest thing: the claim really is about that kind, not about a name.
+// The MODEL is not a single class. «MSI cancer models» parses to a compound kind — cancer models
+// whose kind is MSI — and that whole term is what the sentences are about. Writing it out is the
+// honest thing: the claim really is about that kind, not about a name.
 
 resource inferred:sentence : reasoning:ReasoningSentence {
     core:description = "«MSI cancer models required the helicase activity of WRN» — CONCLUDED by applying the pinned literature rule to sentence 1's parsed measurement. The document asserts this too; this justification does not depend on it doing so.";
@@ -76,19 +76,16 @@ resource inferred:sentence : reasoning:ReasoningSentence {
     // `alias` names the model term once instead of four times. It is compile-time substitution —
     // the stored proposition is identical to writing the term out at each site.
     reasoning:certificate = type_expr(
-        alias msi = (exists x0 : wn:n05890249 =>
-                        ontology:compound_kind(
-                            x0,
-                            (exists x1 : wn:n14239918 =>
-                                ontology:compound_kind(x1, umlscui:C0920269)))) in
+        alias msi = (exists x0 : umlscui:C1516211 =>
+                        ontology:compound_kind(x0, umlscui:C0920269)) in
         reasoning:app(
             // A — the antecedent. Sentence 1's proposition. `HasActivity` is a DEFINITION, so this
             // unfolds to exactly the term `claim_1` carries; the witness below matches by
             // conversion, not by assertion.
-            onco_typed:HasActivity(msi, umlscui:C0388246, wn:n14606137),
+            onco_typed:HasActivity(msi, umlscui:C0388246),
 
             // B — the consequent, and the claim this whole sentence concludes.
-            onco_typed:RequiresActivity(msi, umlscui:C0388246, umlscui:C0920283),
+            onco_typed:RequiresActivity(msi, umlscui:C0388246),
 
             // j1 — the warrant for the implication: the literature rule SPECIALIZED to this model.
             // `SpecStr` records that a universal was instantiated; the tag names the instantiation
@@ -115,8 +112,8 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             reasoning:spec_poly(
                 Set,
                 (fun (m : Set) =>
-                    onco_typed:HasActivity(m, umlscui:C0388246, wn:n14606137)
-                      -> onco_typed:RequiresActivity(m, umlscui:C0388246, umlscui:C0920283)),
+                    onco_typed:HasActivity(m, umlscui:C0388246)
+                      -> onco_typed:RequiresActivity(m, umlscui:C0388246)),
                 reasoning:DeclaredEvidence(
                     "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
                 ),
@@ -125,8 +122,8 @@ resource inferred:sentence : reasoning:ReasoningSentence {
                 reasoning:declared(
                     "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
                     forall (m : Set) =>
-                        onco_typed:HasActivity(m, umlscui:C0388246, wn:n14606137)
-                          -> onco_typed:RequiresActivity(m, umlscui:C0388246, umlscui:C0920283),
+                        onco_typed:HasActivity(m, umlscui:C0388246)
+                          -> onco_typed:RequiresActivity(m, umlscui:C0388246),
                     ()
                 )
             ),
@@ -142,7 +139,7 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             // the conclusion. Nothing compared the two texts; the dependency did the work.
             reasoning:derived(
                 "urn:eigenius:demo:formulas:claim_1",
-                onco_typed:HasActivity(msi, umlscui:C0388246, wn:n14606137),
+                onco_typed:HasActivity(msi, umlscui:C0388246),
                 ()
             )
         )
@@ -165,12 +162,8 @@ resource inferred:sentence : reasoning:ReasoningSentence {
     // very same proposition directly — that is the point of the demo, not a redundancy.
     reasoning:proposition = type_expr(
         onco_typed:RequiresActivity(
-            (exists x0 : wn:n05890249 =>
-                ontology:compound_kind(
-                    x0,
-                    (exists x1 : wn:n14239918 =>
-                        ontology:compound_kind(x1, umlscui:C0920269)))),
-            umlscui:C0388246,
-            umlscui:C0920283)
+            (exists x0 : umlscui:C1516211 =>
+                ontology:compound_kind(x0, umlscui:C0920269)),
+            umlscui:C0388246)
     );
 }

@@ -79,6 +79,30 @@ pub struct ParsedSentence<'a> {
     pub binding_authority: Option<&'a str>,
 }
 
+/// Why a sentence did not encode — mapped to the committed `enc:CutKind` individuals. The
+/// artifact records every unit; a non-encoding is stated, never dropped (D67 §5).
+pub enum CutReason {
+    /// Multiple readings survived and the run's selection authority did not choose.
+    Ambiguous { readings: usize },
+    /// Every surviving reading carries a referent hole no antecedent resolved.
+    Unresolved { holes: usize },
+    /// No parse. `oov` lists the sentence's residual out-of-vocabulary surfaces (from the
+    /// Stage-A augmentation) — non-empty classifies the cut as a vocabulary gap, empty as a
+    /// grammar gap.
+    NoParse { oov: Vec<String> },
+}
+
+/// One sentence that did NOT encode — emitted as its `enc:DiscourseUnit` plus an `enc:CutItem`
+/// carrying the reason (fail-closed provenance; D62 §3).
+pub struct CutSentence {
+    /// 1-based position in the document — shares the numbering space with [`ParsedSentence`].
+    pub ordinal: usize,
+    pub text: String,
+    /// Character offsets of `text` in the source file.
+    pub span: (usize, usize),
+    pub reason: CutReason,
+}
+
 #[derive(Debug)]
 pub enum EmitError {
     /// The parsed `Prop` is outside the D47 chain-mirrored type fragment.
@@ -101,40 +125,36 @@ impl std::fmt::Display for EmitError {
 ///
 /// `ns` is the IRI prefix the emitted resources live under (e.g. `urn:eigenius:demo:prose`);
 /// `source_sha256` and `source_path` pin *which bytes* were parsed, so a prose edit is visible on
-/// the chain and not only in the propositions.
+/// the chain and not only in the propositions. `glossary` is the Stage-A lexicon augmentation
+/// (`LexiconAugmentation::resources()`) — the entries that grounded the parse belong in the
+/// artifact, which is otherwise not self-contained (a claim's proposition may reference a
+/// doc-glossary-only concept). `cuts` are the sentences that did not encode, each landed as its
+/// `DiscourseUnit` + an `enc:CutItem` — the artifact states what did not encode; it never
+/// silently drops a unit (D67 §5).
 pub fn emit_document(
     ns: &str,
     source_path: &str,
     source_sha256: &str,
     timestamp: &str,
+    glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
+    cuts: &[CutSentence],
 ) -> Result<String, EmitError> {
-    let mut out: Vec<Resource> = Vec::new();
+    let mut out: Vec<Resource> = glossary.to_vec();
     for s in sentences {
         let n = s.ordinal;
         let unit_iri = format!("{ns}:unit_{n}");
         let scoped_iri = format!("{ns}:scoped_{n}");
         let claim_iri = format!("{ns}:claim_{n}");
 
-        let mut unit = res(&unit_iri, &[&format!("{ENC}:DiscourseUnit")]);
-        unit.set(iri(&format!("{ENC}:prose")), Value::String(s.text.clone()));
-        unit.set(
-            iri(&format!("{ENC}:unit_kind")),
-            Value::ResourceRef(iri(&format!("{ENC}:kind_prose"))),
-        );
-        unit.set(
-            iri(&format!("{ENC}:span_start")),
-            Value::Integer(s.span.0 as i64),
-        );
-        unit.set(
-            iri(&format!("{ENC}:span_end")),
-            Value::Integer(s.span.1 as i64),
-        );
-        unit.set(
-            iri(&format!("{ENC}:section")),
-            Value::String(format!("{source_path} (sha256 {source_sha256})")),
-        );
-        out.push(unit);
+        out.push(discourse_unit(
+            ns,
+            n,
+            &s.text,
+            s.span,
+            source_path,
+            source_sha256,
+        ));
 
         let mut scoped = res(&scoped_iri, &[&format!("{ENC}:ScopedUnit")]);
         scoped.set(
@@ -339,7 +359,98 @@ pub fn emit_document(
             out.push(ab);
         }
     }
+
+    // Non-encoded units: the DiscourseUnit (same shape as an encoded unit's) + the CutItem
+    // stating why. `cut_unit` references the unit; no ScopedUnit/claim exists to reference.
+    for c in cuts {
+        let n = c.ordinal;
+        let unit_iri = format!("{ns}:unit_{n}");
+        out.push(discourse_unit(
+            ns,
+            n,
+            &c.text,
+            c.span,
+            source_path,
+            source_sha256,
+        ));
+        let (kind, rationale) = match &c.reason {
+            CutReason::Ambiguous { readings } => (
+                "cut_ambiguous",
+                format!(
+                    "{readings} readings survived and the run's selection authority did not \
+                     choose among them — a selection gap, recorded fail-closed."
+                ),
+            ),
+            CutReason::Unresolved { holes } => (
+                "cut_unresolved",
+                format!(
+                    "{holes} referent hole(s) no discourse antecedent resolved — an open parse, \
+                     recorded fail-closed."
+                ),
+            ),
+            CutReason::NoParse { oov } if !oov.is_empty() => (
+                "cut_vocabulary",
+                format!(
+                    "no parse; residual out-of-vocabulary surfaces (Stage A): {}",
+                    oov.join(", ")
+                ),
+            ),
+            CutReason::NoParse { .. } => (
+                "cut_grammar",
+                "no parse with every token in vocabulary — the grammar could not compose the \
+                 construction."
+                    .to_string(),
+            ),
+        };
+        let mut cut = res(&format!("{ns}:cut_{n}"), &[&format!("{ENC}:CutItem")]);
+        cut.set(
+            iri(&format!("{ENC}:cut_unit")),
+            Value::ResourceRef(iri(&unit_iri)),
+        );
+        cut.set(
+            iri(&format!("{ENC}:cut_kind")),
+            Value::ResourceRef(iri(&format!("{ENC}:{kind}"))),
+        );
+        cut.set(iri(&format!("{REFL}:rationale")), Value::String(rationale));
+        out.push(cut);
+    }
     Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize Eigon-JSON"))
+}
+
+/// The `enc:DiscourseUnit` record — identical for encoded and cut sentences.
+fn discourse_unit(
+    ns: &str,
+    ordinal: usize,
+    text: &str,
+    span: (usize, usize),
+    source_path: &str,
+    source_sha256: &str,
+) -> Resource {
+    let mut unit = res(
+        &format!("{ns}:unit_{ordinal}"),
+        &[&format!("{ENC}:DiscourseUnit")],
+    );
+    unit.set(
+        iri(&format!("{ENC}:prose")),
+        Value::String(text.to_string()),
+    );
+    unit.set(
+        iri(&format!("{ENC}:unit_kind")),
+        Value::ResourceRef(iri(&format!("{ENC}:kind_prose"))),
+    );
+    unit.set(
+        iri(&format!("{ENC}:span_start")),
+        Value::Integer(span.0 as i64),
+    );
+    unit.set(
+        iri(&format!("{ENC}:span_end")),
+        Value::Integer(span.1 as i64),
+    );
+    unit.set(
+        iri(&format!("{ENC}:section")),
+        Value::String(format!("{source_path} (sha256 {source_sha256})")),
+    );
+    unit
 }
 
 /// The skeleton the parser actually produced for a reading — used by the driver's report.
@@ -387,12 +498,18 @@ mod tests {
     }
 
     fn emit(s: &[ParsedSentence<'_>]) -> String {
+        emit_full(&[], s, &[])
+    }
+
+    fn emit_full(glossary: &[Resource], s: &[ParsedSentence<'_>], cuts: &[CutSentence]) -> String {
         emit_document(
             "urn:eigenius:test:doc",
             "test.txt",
             "deadbeef",
             "2026-08-11T00:00:00Z",
+            glossary,
             s,
+            cuts,
         )
         .expect("emits")
     }
@@ -427,6 +544,69 @@ mod tests {
         assert!(json.contains("urn:eigenius:encoding:authority_sole"));
         assert!(!json.contains("runner_up_skeletons"));
         assert!(json.contains("Sole surviving reading"));
+    }
+
+    /// A cut sentence lands as its DiscourseUnit + a CutItem naming the reason — never dropped.
+    #[test]
+    fn cut_sentences_land_as_units_with_cut_items() {
+        let cuts = [
+            CutSentence {
+                ordinal: 1,
+                text: "Ambiguous prose.".to_string(),
+                span: (0, 16),
+                reason: CutReason::Ambiguous { readings: 7 },
+            },
+            CutSentence {
+                ordinal: 2,
+                text: "These findings dangle.".to_string(),
+                span: (17, 39),
+                reason: CutReason::Unresolved { holes: 1 },
+            },
+            CutSentence {
+                ordinal: 3,
+                text: "Zorblax fixination.".to_string(),
+                span: (40, 59),
+                reason: CutReason::NoParse {
+                    oov: vec!["zorblax".to_string(), "fixination".to_string()],
+                },
+            },
+            CutSentence {
+                ordinal: 4,
+                text: "Known words, no parse.".to_string(),
+                span: (60, 82),
+                reason: CutReason::NoParse { oov: vec![] },
+            },
+        ];
+        let json = emit_full(&[], &[], &cuts);
+        for n in 1..=4 {
+            assert!(json.contains(&format!("urn:eigenius:test:doc:unit_{n}")));
+            assert!(json.contains(&format!("urn:eigenius:test:doc:cut_{n}")));
+        }
+        assert!(json.contains("urn:eigenius:encoding:cut_ambiguous"));
+        assert!(json.contains("7 readings survived"));
+        assert!(json.contains("urn:eigenius:encoding:cut_unresolved"));
+        assert!(json.contains("1 referent hole(s)"));
+        assert!(json.contains("urn:eigenius:encoding:cut_vocabulary"));
+        assert!(json.contains("zorblax, fixination"));
+        assert!(json.contains("urn:eigenius:encoding:cut_grammar"));
+        assert!(
+            !json.contains("claim_") && !json.contains("scoped_"),
+            "a cut unit carries no claim cluster and no ScopedUnit"
+        );
+    }
+
+    /// Stage-A glossary resources pass through into the artifact verbatim.
+    #[test]
+    fn glossary_resources_are_emitted() {
+        let mut g = Resource::new(iri("urn:eigenius:test:doc:lex:msi"));
+        g.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("MSI".to_string()),
+        );
+        let it = item();
+        let json = emit_full(&[g], &[sentence(&it, SentenceSelection::Sole)], &[]);
+        assert!(json.contains("urn:eigenius:test:doc:lex:msi"));
+        assert!(json.contains("urn:eigenius:test:doc:unit_1"));
     }
 
     /// The PIN arm's record is BYTE-STABLE: no `selected_by`, the historical rationale text —

@@ -36,12 +36,16 @@
 //!
 //! **Fail closed everywhere.** A sentence that does not encode — a gap, an unresolved referent
 //! hole, a pin that matches zero or several pooled readings, a selection-replay abstention —
-//! aborts the whole emission with a diagnostic: a partial encoding is not a result.
+//! aborts the whole emission with a diagnostic: a partial encoding is not a result. Under
+//! `--partial` the non-encoding is instead RECORDED — the unit lands as its `DiscourseUnit` plus
+//! an `enc:CutItem` naming the reason (D67 §5: the artifact states what did not encode; it never
+//! silently drops a unit) — and a pin contradiction still aborts. Stage-A glossary resources are
+//! emitted into the artifact in both modes.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use crate::emit::{emit_document, ParsedSentence, SentenceSelection};
+use crate::emit::{emit_document, CutReason, CutSentence, ParsedSentence, SentenceSelection};
 use crate::select::load_pins;
 use crate::snapshot::{build_sense_ranker, open_head_and_backend, CELL_BEAM, SENSE_CAP};
 use clap::Parser as ClapParser;
@@ -76,10 +80,13 @@ pub struct Args {
     /// Exactly one of `--pins` / `--selections` is required.
     #[arg(long)]
     pins: Option<PathBuf>,
-    /// A recorded reading-selection draw (`selections.json`) to REPLAY — the COMPUTED selection
-    /// arm (d63-reading-selection.md). Replay-only here, deliberately: artifact generation stays
-    /// deterministic; record a draw with `scripts/measure-parse-rate.sh --selections <new-file>`.
-    /// Exactly one of `--pins` / `--selections` is required.
+    /// A reading-selection draw (`selections.json`) — the COMPUTED selection arm
+    /// (d63-reading-selection.md). **Exists → REPLAY** (deterministic, no LLM); **absent →
+    /// RECORD** a live draw into it (needs `use-llm` + a key) while generating. The record arm
+    /// lives HERE because selection keys hash the presented pool, and this pipeline's pool
+    /// (its own Stage A) is not the measurement harness's — a draw recorded there cannot
+    /// answer this driver's questions (found 2026-08-12). Exactly one of `--pins` /
+    /// `--selections` is required.
     #[arg(long)]
     selections: Option<PathBuf>,
     /// A recorded `ranks.json` to replay — deterministic, no LLM. Omit for cap-only (a DIFFERENT
@@ -106,6 +113,14 @@ pub struct Args {
     /// WordNet dict for the Morphy lemmatizer.
     #[arg(long, default_value = "references/WordNet-3.0/dict")]
     dict: PathBuf,
+    /// Emit a PARTIAL artifact: a sentence that does not encode lands as its `DiscourseUnit` +
+    /// an `enc:CutItem` naming the reason (ambiguous / unresolved referent / no parse) instead
+    /// of aborting the run (D67 §5 — the artifact states what did not encode). Selection
+    /// authority becomes optional: with neither `--pins` nor `--selections`, only sole-survivor
+    /// readings encode and every multi-reading unit is cut. A pin that CONTRADICTS the encoded
+    /// reading still aborts — that is pin drift, not a coverage gap.
+    #[arg(long)]
+    partial: bool,
 }
 
 /// Write an emitted Eigon-JSON document in the requested format.
@@ -155,24 +170,67 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                 Some(pins)
             }
             (None, Some(_)) => None,
+            (None, None) if args.partial => {
+                // NO authority — only sole-survivor readings encode; the rest are cuts.
+                eprintln!("selection: NONE (--partial) — sole-survivor readings only");
+                None
+            }
             _ => return Err(
-                "exactly one of --pins (declared arm) / --selections (computed arm) is required"
+                "exactly one of --pins (declared arm) / --selections (computed arm) is required \
+                 (or --partial with neither: sole-survivor readings only)"
                     .to_string(),
             ),
         };
-    let ranker: Box<dyn ReadingRanker> = match (&pins, &args.selections) {
-        (Some(pins), _) => Box::new(PinReadingRanker::new(
+    #[cfg(feature = "use-llm")]
+    let mut selection_recording: Option<(
+        std::sync::Arc<
+            eigenius_kernel::dcg::RecordingReadingRanker<
+                eigenius_kernel::dcg::AnthropicReadingRanker,
+            >,
+        >,
+        PathBuf,
+    )> = None;
+    let ranker: Option<Box<dyn ReadingRanker>> = match (&pins, &args.selections) {
+        (Some(pins), _) => Some(Box::new(PinReadingRanker::new(
             pins.iter()
                 .map(|(s, p)| (s.clone(), p.skeleton.clone()))
                 .collect(),
-        )),
-        (None, Some(s)) => {
+        ))),
+        (None, Some(s)) if s.exists() => {
             let r =
                 ReplayReadingRanker::load(s).map_err(|e| format!("read {}: {e}", s.display()))?;
             eprintln!("selections: REPLAY {} (deterministic, no LLM)", s.display());
-            Box::new(r)
+            Some(Box::new(r))
         }
-        _ => unreachable!("validated above"),
+        (None, None) => None,
+        (None, Some(s)) => {
+            // RECORD mode — the live ranker answers and the draw is written after generation.
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(live) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                    return Err(format!(
+                        "--selections {} does not exist (RECORD mode) but ANTHROPIC_API_KEY \
+                         is unset",
+                        s.display()
+                    ));
+                };
+                eprintln!(
+                    "selections: AnthropicReadingRanker (live) — RECORDING to {}",
+                    s.display()
+                );
+                let rec =
+                    std::sync::Arc::new(eigenius_kernel::dcg::RecordingReadingRanker::new(live));
+                selection_recording = Some((std::sync::Arc::clone(&rec), s.clone()));
+                Some(Box::new(rec))
+            }
+            #[cfg(not(feature = "use-llm"))]
+            return Err(format!(
+                "--selections {} does not exist, and this binary has no live reading ranker \
+                 (built without --features use-llm) — to replay, point at an existing \
+                 selections.json; to record, rebuild with the feature",
+                s.display()
+            ));
+        }
     };
 
     // Anaphora arm (D67 §3): replay-only. Without it no referent hole resolves.
@@ -214,26 +272,65 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         }
     };
 
-    let pipeline = InProcessPipeline::new(head, &lem, &NoAbbreviationProposer, &proposer)
-        .with_reading_ranker(&ranker)
+    let mut pipeline = InProcessPipeline::new(head, &lem, &NoAbbreviationProposer, &proposer)
         .with_parser_setup(&setup)
         .with_storage(backend, &doc_id);
+    if let Some(r) = &ranker {
+        pipeline = pipeline.with_reading_ranker(r);
+    }
     let (encoding, _doc_layer) = pipeline
         .encode_with_layer(&doc)
         .map_err(|e| format!("{e}"))?;
     // A RECORD run leaves its ranks artifact even if a pin then fails to match below — the
     // recording is exactly what a re-run needs to diagnose the mismatch deterministically.
     recording.flush()?;
+    #[cfg(feature = "use-llm")]
+    if let Some((rec, path)) = &selection_recording {
+        let n = rec
+            .write(path)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        eprintln!("selections: recorded {n} decision(s) → {}", path.display());
+    }
 
-    // Map each sentence's outcome to the emission record — fail-closed on anything that did not
-    // encode under the chosen authority.
+    // Map each sentence's outcome to the emission record. Default: fail-closed on anything that
+    // did not encode under the chosen authority. Under `--partial`: the non-encoding lands as a
+    // `CutSentence` (DiscourseUnit + CutItem) and the run continues — the artifact states what
+    // did not encode (D67 §5).
     let mut parsed: Vec<ParsedSentence> = Vec::new();
+    let mut cuts: Vec<CutSentence> = Vec::new();
+    let cut = |cuts: &mut Vec<CutSentence>, n: usize, se_text: &str, reason: CutReason| {
+        let label = match &reason {
+            CutReason::Ambiguous { readings } => format!("ambiguous ({readings} readings)"),
+            CutReason::Unresolved { holes } => format!("unresolved ({holes} hole(s))"),
+            CutReason::NoParse { oov } if !oov.is_empty() => format!("no parse (OOV: {oov:?})"),
+            CutReason::NoParse { .. } => "no parse (grammar)".to_string(),
+        };
+        eprintln!("  [{n}] CUT — {label} — {}", se_text.trim());
+        let start = doc.find(se_text).unwrap_or(0);
+        cuts.push(CutSentence {
+            ordinal: n,
+            text: se_text.to_string(),
+            span: (start, start + se_text.len()),
+            reason,
+        });
+    };
     for (i, se) in encoding.sentences.iter().enumerate() {
         let n = i + 1;
         let text = se.text.trim();
         let item = match &se.outcome {
             SentenceOutcome::Encoded(item) => item,
             SentenceOutcome::Ambiguous(pool) => {
+                if args.partial {
+                    cut(
+                        &mut cuts,
+                        n,
+                        &se.text,
+                        CutReason::Ambiguous {
+                            readings: pool.len(),
+                        },
+                    );
+                    continue;
+                }
                 let skels: Vec<String> = pool.iter().map(|it| skeleton_of(it.sem())).collect();
                 return Err(match &pins {
                     Some(pins) => match pins.get(text) {
@@ -265,6 +362,17 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                 });
             }
             SentenceOutcome::Open(o) => {
+                if args.partial {
+                    cut(
+                        &mut cuts,
+                        n,
+                        &se.text,
+                        CutReason::Unresolved {
+                            holes: o.holes.len(),
+                        },
+                    );
+                    continue;
+                }
                 return Err(format!(
                     "sentence {n} «{text}»: {} unresolved referent hole(s) — provide --proposals \
                      with a recorded draw that resolves them, or pick prose without anaphora",
@@ -272,28 +380,44 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                 ));
             }
             SentenceOutcome::Gap => {
+                if args.partial {
+                    // Classify: residual Stage-A OOV surfaces occurring in this sentence make it
+                    // a vocabulary cut; none makes it a grammar cut.
+                    let oov: Vec<String> = encoding
+                        .augmentation
+                        .missing_oov
+                        .iter()
+                        .map(|g| g.surface.clone())
+                        .filter(|s| contains_word(&se.text, s))
+                        .collect();
+                    cut(&mut cuts, n, &se.text, CutReason::NoParse { oov });
+                    continue;
+                }
                 return Err(format!(
                     "sentence {n} «{text}»: no parse — a grammar gap or out-of-vocabulary tokens"
                 ));
             }
         };
         // The emission's selection record. Under pins, verify the encoded reading IS the pinned
-        // one even when it was the sole survivor (the ranker only fires on pools > 1).
+        // one even when it was the sole survivor (the ranker only fires on pools > 1). A pin
+        // CONTRADICTION stays fatal even under --partial (pin drift, not a coverage gap); a
+        // missing pin for a sole survivor is tolerated under --partial (no choice existed).
         let selection = match &pins {
-            Some(pins) => {
-                let pin = pins
-                    .get(text)
-                    .ok_or_else(|| format!("sentence {n} «{text}»: no pin"))?;
-                let sk = skeleton_of(item.sem());
-                if sk != pin.skeleton {
-                    return Err(format!(
-                        "sentence {n} «{text}»: the encoded reading is not the pinned one\n  \
-                         pinned: {}\n  got:    {sk}",
-                        pin.skeleton
-                    ));
+            Some(pins) => match pins.get(text) {
+                None if args.partial => SentenceSelection::Sole,
+                None => return Err(format!("sentence {n} «{text}»: no pin")),
+                Some(pin) => {
+                    let sk = skeleton_of(item.sem());
+                    if sk != pin.skeleton {
+                        return Err(format!(
+                            "sentence {n} «{text}»: the encoded reading is not the pinned one\n  \
+                             pinned: {}\n  got:    {sk}",
+                            pin.skeleton
+                        ));
+                    }
+                    SentenceSelection::Pinned(pin)
                 }
-                SentenceSelection::Pinned(pin)
-            }
+            },
             None => match &se.selection {
                 Some(sel) => SentenceSelection::Ranked(sel),
                 None => SentenceSelection::Sole,
@@ -325,19 +449,30 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         });
     }
 
+    // Stage-A glossary resources go into the artifact — the entries that grounded the parse
+    // (a claim's proposition may reference a doc-glossary-only concept; without them the
+    // artifact does not load on a chain that lacks the doc branch).
+    let glossary = encoding.augmentation.resources();
+    if !glossary.is_empty() {
+        eprintln!("glossary: {} Stage-A resource(s) emitted", glossary.len());
+    }
     let json = emit_document(
         &args.ns,
         &args.source.display().to_string(),
         &sha,
         &args.timestamp,
+        &glossary,
         &parsed,
+        &cuts,
     )
     .map_err(|e| e.to_string())?;
     write_doc(&args.out, &json, format)?;
     eprintln!(
-        "\nwrote {} ({} sentences)",
+        "\nwrote {} ({} encoded, {} cut, {} glossary)",
         args.out.display(),
-        parsed.len()
+        parsed.len(),
+        cuts.len(),
+        glossary.len()
     );
 
     Ok(())
@@ -345,4 +480,40 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Does `sentence` contain `word` as a whole token (case-insensitive)? Attributing a residual
+/// OOV surface to a sentence by substring would credit «then» to «strengthen» — the artifact's
+/// cut reason has to name surfaces the sentence actually contains. Alphanumerics bound a token;
+/// a hyphen does not (`Cas9-mediated` is one Stage-A surface).
+fn contains_word(sentence: &str, word: &str) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+    let hay: Vec<char> = sentence.to_lowercase().chars().collect();
+    let needle: Vec<char> = word.to_lowercase().chars().collect();
+    let bounded = |c: Option<&char>| c.is_none_or(|c| !c.is_alphanumeric());
+    hay.windows(needle.len()).enumerate().any(|(i, w)| {
+        w == needle.as_slice()
+            && bounded(i.checked_sub(1).and_then(|p| hay.get(p)))
+            && bounded(hay.get(i + needle.len()))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contains_word;
+
+    #[test]
+    fn oov_attribution_is_token_bounded() {
+        assert!(contains_word("We then evaluated MSI.", "then"));
+        assert!(!contains_word("Chromatin can strengthen it.", "then"));
+        assert!(contains_word(
+            "CRISPR–Cas9-mediated knockout",
+            "Cas9-mediated"
+        ));
+        assert!(contains_word("essential in vitro and in vivo", "VITRO"));
+        assert!(!contains_word("nitrovitrogen", "vitro"));
+        assert!(!contains_word("anything", ""));
+    }
 }

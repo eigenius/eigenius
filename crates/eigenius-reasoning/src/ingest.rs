@@ -82,9 +82,11 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
         gloss: &str,
         item: &eigenius_kernel::dcg::Item,
     ) -> Option<(Resource, String)> {
+        // The frame table first (the prose marks the kind explicitly — «We hypothesized that…»);
+        // only an unmarked sentence is put to the classifier.
         let mut kinds = match frame_kind(sentence) {
             Some(k) => vec![k],
-            None => self.classifier.classify(ordinal, sentence, gloss),
+            None => self.classifier.classify(ordinal, sentence, gloss).kinds,
         };
         if kinds.is_empty() {
             kinds = vec![Iri::parse(KIND_ASSERTION).expect("static kind IRI")];

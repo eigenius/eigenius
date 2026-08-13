@@ -337,6 +337,14 @@ resource enc:cut_out_of_scope : enc:CutKind {
     core:short_name = "out_of_scope";
     core:description = "Content not intended for prose encoding (e.g. a raw data table).";
 }
+resource enc:cut_ambiguous : enc:CutKind {
+    core:short_name = "ambiguous";
+    core:description = "Multiple readings survived and the run's selection authority did not choose (no matching pin, a replay abstention, or no authority configured). The unit parses; the residual is a selection gap, not a grammar or vocabulary gap.";
+}
+resource enc:cut_unresolved : enc:CutKind {
+    core:short_name = "unresolved_referent";
+    core:description = "Every surviving reading carries a referent hole no discourse antecedent resolved (D64/D67 §3) — an open parse. The unit parses; the residual is an anaphora gap.";
+}
 
 // ════════════════════════════════════════════════════════════════════
 // S6 — EncodedClaim: a committed, graded, witnessed Prop

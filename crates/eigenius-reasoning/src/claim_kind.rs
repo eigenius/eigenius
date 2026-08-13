@@ -62,26 +62,47 @@ pub fn frame_kind(sentence: &str) -> Option<Iri> {
 /// (unreferable). Impls: the live LLM classifier (`use-llm`), the record/replay pair, and
 /// [`NoKindClassifier`] (always abstains — the deterministic floor).
 pub trait KindClassifier {
-    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> Vec<Iri>;
+    /// The kinds this claim carries, and — when the classifier is a judgment rather than a
+    /// lookup — one sentence saying why. The rationale is RECORDED, not consumed: a kind verdict
+    /// is an untrusted judgment awaiting human sign-off, and a draw without its reasoning cannot
+    /// be reviewed (the same discipline the selection and proposal draws already follow).
+    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict;
+}
+
+/// A classifier's answer: the kinds, plus the reasoning when there is any.
+#[derive(Debug, Default, Clone)]
+pub struct KindVerdict {
+    pub kinds: Vec<Iri>,
+    pub rationale: Option<String>,
+}
+
+impl KindVerdict {
+    /// A verdict with no stated reasoning (the deterministic arms).
+    pub fn bare(kinds: Vec<Iri>) -> Self {
+        Self {
+            kinds,
+            rationale: None,
+        }
+    }
 }
 
 /// Always abstains — every unmarked claim lands `enc:Assertion`. The deterministic floor: with
 /// it, only frame-marked sentences are discourse-referable.
 pub struct NoKindClassifier;
 impl KindClassifier for NoKindClassifier {
-    fn classify(&self, _ordinal: usize, _sentence: &str, _gloss: &str) -> Vec<Iri> {
-        Vec::new()
+    fn classify(&self, _ordinal: usize, _sentence: &str, _gloss: &str) -> KindVerdict {
+        KindVerdict::default()
     }
 }
 
 impl<T: KindClassifier + ?Sized> KindClassifier for Box<T> {
-    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> Vec<Iri> {
+    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict {
         (**self).classify(ordinal, sentence, gloss)
     }
 }
 
 impl<T: KindClassifier + ?Sized> KindClassifier for std::sync::Arc<T> {
-    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> Vec<Iri> {
+    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict {
         (**self).classify(ordinal, sentence, gloss)
     }
 }
@@ -96,6 +117,10 @@ pub struct KindRecord {
     pub sentence: String,
     pub gloss: String,
     pub kinds: Vec<String>,
+    /// The classifier's stated reasoning, when it gave one. `default` so draws recorded before
+    /// this field still replay (the replay key is sentence+gloss; the rationale is for review).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
 }
 
 fn kind_key(sentence: &str, gloss: &str) -> String {
@@ -128,22 +153,30 @@ impl<C: KindClassifier> RecordingKindClassifier<C> {
 }
 
 impl<C: KindClassifier> KindClassifier for RecordingKindClassifier<C> {
-    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> Vec<Iri> {
+    fn classify(&self, ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict {
         let key = kind_key(sentence, gloss);
         if let Some(r) = self.log.lock().expect("kind log").get(&key) {
             // Memoized — same question, same answer (one ask per sentence per draw).
-            return r.kinds.iter().filter_map(|k| Iri::parse(k).ok()).collect();
+            return KindVerdict {
+                kinds: r.kinds.iter().filter_map(|k| Iri::parse(k).ok()).collect(),
+                rationale: r.rationale.clone(),
+            };
         }
-        let kinds = self.inner.classify(ordinal, sentence, gloss);
+        let verdict = self.inner.classify(ordinal, sentence, gloss);
         self.log.lock().expect("kind log").insert(
             key,
             KindRecord {
                 sentence: sentence.to_string(),
                 gloss: gloss.to_string(),
-                kinds: kinds.iter().map(|k| k.as_str().to_string()).collect(),
+                kinds: verdict
+                    .kinds
+                    .iter()
+                    .map(|k| k.as_str().to_string())
+                    .collect(),
+                rationale: verdict.rationale.clone(),
             },
         );
-        kinds
+        verdict
     }
 }
 
@@ -183,15 +216,18 @@ impl ReplayKindClassifier {
 }
 
 impl KindClassifier for ReplayKindClassifier {
-    fn classify(&self, _ordinal: usize, sentence: &str, gloss: &str) -> Vec<Iri> {
+    fn classify(&self, _ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict {
         match self.by_key.get(&kind_key(sentence, gloss)) {
             Some(r) => {
                 self.hits.fetch_add(1, Ordering::Relaxed);
-                r.kinds.iter().filter_map(|k| Iri::parse(k).ok()).collect()
+                KindVerdict {
+                    kinds: r.kinds.iter().filter_map(|k| Iri::parse(k).ok()).collect(),
+                    rationale: r.rationale.clone(),
+                }
             }
             None => {
                 self.misses.fetch_add(1, Ordering::Relaxed);
-                Vec::new()
+                KindVerdict::default()
             }
         }
     }
@@ -239,7 +275,7 @@ mod anthropic {
     }
 
     impl KindClassifier for AnthropicKindClassifier {
-        fn classify(&self, _ordinal: usize, sentence: &str, gloss: &str) -> Vec<Iri> {
+        fn classify(&self, _ordinal: usize, sentence: &str, gloss: &str) -> KindVerdict {
             let prompt = format!(
                 "A scientific document is being encoded claim by claim. Classify what the \
                  sentence below IS, in the document's own discourse terms — the kind a later \
@@ -261,7 +297,7 @@ mod anthropic {
                 .build()
             {
                 Ok(rt) => rt,
-                Err(_) => return Vec::new(),
+                Err(_) => return KindVerdict::default(),
             };
             let reply = match rt.block_on(
                 eigenius_kernel::dcg::anthropic_client::anthropic_structured::<KindReply>(
@@ -273,18 +309,29 @@ mod anthropic {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("anthropic kind-classifier error: {e}");
-                    return Vec::new();
+                    return KindVerdict::default();
                 }
             };
+            // An abstention is a RECORDED answer, and its reasoning is the part a reviewer
+            // most needs — keep the rationale on both branches.
+            let rationale = Some(reply.rationale);
             let iri = match reply.kind.trim().to_lowercase().as_str() {
                 "finding" => KIND_FINDING,
                 "observation" => KIND_OBSERVATION,
                 "classification" => KIND_CLASSIFICATION,
                 "hypothesis" => KIND_HYPOTHESIS,
                 "suggestion" => KIND_SUGGESTION,
-                _ => return Vec::new(),
+                _ => {
+                    return KindVerdict {
+                        kinds: Vec::new(),
+                        rationale,
+                    }
+                }
             };
-            vec![Iri::parse(iri).expect("static kind IRI")]
+            KindVerdict {
+                kinds: vec![Iri::parse(iri).expect("static kind IRI")],
+                rationale,
+            }
         }
     }
 }
@@ -317,22 +364,31 @@ mod tests {
     fn a_kind_replay_reproduces_the_draw_and_counts_misses() {
         struct AlwaysFinding;
         impl KindClassifier for AlwaysFinding {
-            fn classify(&self, _o: usize, _s: &str, _g: &str) -> Vec<Iri> {
-                vec![Iri::parse(KIND_FINDING).unwrap()]
+            fn classify(&self, _o: usize, _s: &str, _g: &str) -> KindVerdict {
+                KindVerdict {
+                    kinds: vec![Iri::parse(KIND_FINDING).unwrap()],
+                    rationale: Some("it reports the study's own result".to_string()),
+                }
             }
         }
         let rec = RecordingKindClassifier::new(AlwaysFinding);
-        assert_eq!(rec.classify(0, "S.", "g").len(), 1);
+        assert_eq!(rec.classify(0, "S.", "g").kinds.len(), 1);
         let dir = std::env::temp_dir().join("eigenius-kind-replay-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("kinds.json");
         assert_eq!(rec.write(&path).unwrap(), 1);
 
         let replay = ReplayKindClassifier::load(&path).unwrap();
-        assert_eq!(replay.classify(0, "S.", "g")[0].as_str(), KIND_FINDING);
+        let hit = replay.classify(0, "S.", "g");
+        assert_eq!(hit.kinds[0].as_str(), KIND_FINDING);
+        assert_eq!(
+            hit.rationale.as_deref(),
+            Some("it reports the study's own result"),
+            "the reasoning survives the round-trip — it is what a reviewer signs off on"
+        );
         assert_eq!(replay.hits(), 1);
         // A different gloss is a different question (a different reading was classified).
-        assert!(replay.classify(0, "S.", "other gloss").is_empty());
+        assert!(replay.classify(0, "S.", "other gloss").kinds.is_empty());
         assert_eq!(replay.misses(), 1, "counted, not hidden");
     }
 }

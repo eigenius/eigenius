@@ -69,7 +69,7 @@ pub mod validate;
 #[cfg(feature = "use-llm")]
 pub use claim_kind::AnthropicKindClassifier;
 pub use claim_kind::{
-    frame_kind, KindClassifier, KindRecord, NoKindClassifier, RecordingKindClassifier,
+    frame_kind, KindClassifier, KindRecord, KindVerdict, NoKindClassifier, RecordingKindClassifier,
     ReplayKindClassifier,
 };
 pub use grade::{

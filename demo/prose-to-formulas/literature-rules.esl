@@ -51,8 +51,8 @@ namespace wn         = "urn:eigenius:wn";
 // The classes the rule mentions, drawn from two different lexicons the graph already held:
 //
 //   umlscui:C0388246   WRN           (a UMLS concept)
-//   wn:n14606137       exonuclease   (a WordNet synset)
-//   umlscui:C0920283   helicase      (a UMLS concept)
+//   umlscui:C1148824   exonuclease activity   (a UMLS concept, d67 alignment)
+//   umlscui:C1149627   helicase activity      (a UMLS concept)
 //
 // The model is not fixed here — that is the point of the quantifier.
 
@@ -84,8 +84,8 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
     // sides, so the match is on the unfolded terms and holds by construction.
     reflection:canonical_proposition = type_expr(
         forall (m : Set) =>
-            onco2:HasActivity(m, umlscui:C0388246, wn:n14606137)
-              -> onco2:RequiresActivity(m, umlscui:C0388246, umlscui:C0920283)
+            onco2:HasActivity(m, umlscui:C0388246)
+              -> onco2:RequiresActivity(m, umlscui:C0388246)
     );
 }
 

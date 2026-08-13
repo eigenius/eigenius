@@ -36,6 +36,8 @@ pub mod pipeline;
 pub mod select;
 pub mod snapshot;
 
-pub use emit::{emit_document, EmitError, ParsedSentence, SentenceSelection};
+pub use emit::{
+    emit_document, CutReason, CutSentence, EmitError, ParsedSentence, SentenceSelection,
+};
 pub use select::{load_pins, Pin};
 pub use snapshot::{build_parser, open_head, ParserConfig};

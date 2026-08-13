@@ -113,8 +113,12 @@ if [[ $REPARSE == 1 ]]; then
         --source "$HERE/paragraph.txt"        --pins "$HERE/pins.tsv" \
         --ranks  "$HERE/ranks.json"           --ns   "urn:eigenius:demo:formulas" \
         --out    "$HERE/claims-intact.esl"
+    # The EDITED variant selects by the recorded reading-selection draw (computed arm), not by
+    # pin: on the d67 inventory the negated sentence's pinned skeleton matches 3 readings that
+    # differ only in sense — a tie a sense-erased skeleton pin cannot break (fail-closed). The
+    # draw is committed (selections-edited.json) and replays deterministically.
     "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
-        --source "$HERE/paragraph-edited.txt" --pins "$HERE/pins.tsv" \
+        --source "$HERE/paragraph-edited.txt" --selections "$HERE/selections-edited.json" \
         --ranks  "$HERE/ranks-edited.json"    --ns   "urn:eigenius:demo:formulas" \
         --out    "$HERE/claims-edited.esl"
     echo "NOTE: inference.esl is NOT regenerated — it is the RECORDED derivation."

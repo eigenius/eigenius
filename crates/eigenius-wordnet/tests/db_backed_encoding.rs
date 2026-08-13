@@ -80,6 +80,16 @@ const WRN_PAGE: &str = concat!(
     "/../../references/publications/WRN-Helicase-Nature-OCR/first-page-cleaned.txt"
 );
 
+/// The controlled-English rewrite of the same page (D62 CNL experiment) — 62 units, grammar-gap
+/// 0. Every TRACKED measurement is against this page (`scripts/measure-parse-rate.sh` defaults
+/// to it), so a test whose assertions are calibrated on the tracked numbers defaults HERE, not
+/// to [`WRN_PAGE`]: the raw page has 18 known grammar gaps and would fail a gap-free assert
+/// before the run said anything about the change under test.
+const WRN_PAGE_CNL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt"
+);
+
 /// Adaptive-supertagging sense cap (Lever A, GH #97): keep the top-N senses per lemma so
 /// WordNet+UMLS polysemy doesn't blow up the chart at the leaf.
 const SENSE_CAP: usize = 2;
@@ -3374,7 +3384,12 @@ fn wrn_first_page_over_full_lexicon() {
 /// (pending the restrictor-accommodation decision) stay honestly `Open`. Parses over the SAME
 /// overlay + rank replay as the sweep, so the forests are comparable.
 ///
+/// Every path in the environment must be ABSOLUTE — the test binary's CWD is the crate dir.
+/// The page defaults to the CNL rewrite ([`WRN_PAGE_CNL`]), which is what the tracked numbers
+/// and the gap-free assert are measured on.
+///
 ///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/path/ranks.json \
+///   EIGENIUS_KINDS=/abs/experiments/parsing/kinds/2026-08-12-reference.json \
 ///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
 ///     resolve_document_discourse_close_out -- --ignored --nocapture
 #[test]
@@ -3385,7 +3400,9 @@ fn resolve_document_discourse_close_out() {
         eprintln!("SKIP: WordNet dict not found under {DICT}");
         return;
     }
-    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    // The CNL page by default — the pinned outcome tally and the gap-free assert below are the
+    // TRACKED numbers, which are measured on it (§WRN_PAGE_CNL).
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE_CNL.to_string());
     let page = match std::fs::read_to_string(&page_path) {
         Ok(s) => s,
         Err(_) => {
@@ -3567,14 +3584,106 @@ fn resolve_document_discourse_close_out() {
     let kinds = eigenius_reasoning::RecordingKindClassifier::new(inner_kinds);
     let lander = eigenius_reasoning::DerivedClaimLander::new("wrn-first-page", &kinds);
 
+    // ── Reading-ranker arm — the COMPOSED configuration (plan §1.3 + §2.2: selection lives
+    // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).
+    // Same three-arm discipline as every other recorded stage:
+    //   EIGENIUS_SELECTIONS file EXISTS → REPLAY (deterministic, no LLM; misses ABSTAIN)
+    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   env unset                       → NO ranker: multi-reading pools stay Ambiguous. This is
+    //                                     the arm the pinned tallies below are measured on — it
+    //                                     isolates the RESOLVER, which is what those pins gate.
+    // The sweep (`wrn_first_page_over_full_lexicon`) measures selection ACCURACY against the
+    // pins on isolated sentences; this measures what selection does to the document's OUTCOMES
+    // once anaphora resolution is in the loop with it. Neither substitutes for the other.
+    let selections_path = std::env::var("EIGENIUS_SELECTIONS").ok().map(PathBuf::from);
+    let mut selection_arm = "none";
+    let mut selection_replay: Option<Arc<eigenius_kernel::dcg::ReplayReadingRanker>> = None;
+    let ranker: Option<Box<dyn eigenius_kernel::dcg::ReadingRanker>> = match &selections_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_kernel::dcg::ReplayReadingRanker::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_SELECTIONS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "reading ranker: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            selection_arm = "replay";
+            let r = Arc::new(r);
+            selection_replay = Some(Arc::clone(&r));
+            Some(Box::new(r) as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
+        }
+        Some(p) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                    panic!(
+                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live selection draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    p.display()
+                );
+                selection_arm = "live";
+                Some(Box::new(r) as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_SELECTIONS={} does not exist, and this binary has no live reading \
+                 ranker (built without --features use-llm)",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("reading ranker: none (multi-reading pools stay Ambiguous)");
+            None
+        }
+    };
+
+    // Whatever the arm, the recorder wraps it, so a run that produced a number always leaves the
+    // draw that reproduces it (same discipline as the kinds/proposal arms). The live arm's draw
+    // lands at EIGENIUS_SELECTIONS; the others at EIGENIUS_SELECTIONS_OUT.
+    let selection_recorder = ranker.map(eigenius_kernel::dcg::RecordingReadingRanker::new);
+
     let sentences: Vec<String> = segment_sentences(&page)
         .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect();
     let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
     let t = std::time::Instant::now();
-    let resolutions = index.resolve_document(&page, &refs, &lem, &proposer, None, Some(&lander));
+    let resolutions = index.resolve_document(
+        &page,
+        &refs,
+        &lem,
+        &proposer,
+        selection_recorder
+            .as_ref()
+            .map(|r| r as &dyn eigenius_kernel::dcg::ReadingRanker),
+        Some(&lander),
+    );
     assert_eq!(resolutions.len(), sentences.len());
+
+    // Flush the selection draw BEFORE any assert.
+    if let Some(rec) = &selection_recorder {
+        let out: Option<PathBuf> = if selection_arm == "live" {
+            selections_path.clone()
+        } else {
+            std::env::var("EIGENIUS_SELECTIONS_OUT")
+                .ok()
+                .map(PathBuf::from)
+        };
+        if let Some(p) = &out {
+            match rec.write(p) {
+                Ok(n) => eprintln!("selections: RECORDED {n} decision(s) → {}", p.display()),
+                Err(e) => eprintln!("selections: FAILED to write {}: {e}", p.display()),
+            }
+        }
+    }
 
     // Persist the kind draw BEFORE any assert (flush-before-asserts).
     let kinds_out: Option<PathBuf> = if kinds_arm == "live" {
@@ -3665,7 +3774,7 @@ fn resolve_document_discourse_close_out() {
         }
     }
     eprintln!(
-        "=== DISCOURSE ({proposer_arm} proposer, no ranker, {:.0}s): encoded {enc}, ambiguous \
+        "=== DISCOURSE ({proposer_arm} proposer, {selection_arm} ranker, {:.0}s): encoded {enc}, ambiguous \
          {amb}, open {open_n}, gap {gap} over {} units ===",
         t.elapsed().as_secs_f64(),
         sentences.len()
@@ -3688,7 +3797,11 @@ fn resolve_document_discourse_close_out() {
     // witnesses ("This impairment"), and Σ-restrictored holes ("…these data sets for genes
     // that…"). A change here is a re-baseline event — update the numbers WITH provenance, don't
     // loosen to inequalities.
-    if proposer_arm == "recency" && kinds_arm == "none" {
+    // Every pinned tally below is a NO-RANKER measurement (it gates the resolver). With a ranker
+    // in the loop the ambiguous pools collapse into Encoded by design, so the tuple necessarily
+    // differs — asserting it there would be asserting the ranker's draw, which the sweep's
+    // selection-accuracy gate is what measures.
+    if proposer_arm == "recency" && kinds_arm == "none" && selection_arm == "none" {
         // The deterministic floor (no kind classifier: unmarked claims land Assertion,
         // unreferable — claim antecedents contribute nothing here, so the pre-D68 numbers
         // must HOLD exactly).
@@ -3699,7 +3812,7 @@ fn resolve_document_discourse_close_out() {
              ambiguous 35, open 15)"
         );
     }
-    if proposer_arm == "recency" && kinds_arm == "replay" {
+    if proposer_arm == "recency" && kinds_arm == "replay" && selection_arm == "none" {
         // The D68 close-out baseline (2026-08-12, kinds draw
         // experiments/parsing/kinds/2026-08-12-reference.json): ALL FIVE claim-referent units
         // close — 19/20 «These findings show…», 45 «These classifications…», 49 «These
@@ -3715,6 +3828,22 @@ fn resolve_document_discourse_close_out() {
         );
     }
     assert_replay_faithful();
+    // A selection replay with misses is not the recorded experiment: each miss ABSTAINS, so the
+    // pool stays Ambiguous and the encoded count silently sags instead of failing.
+    if let Some(r) = &selection_replay {
+        eprintln!(
+            "  selection replay: {} hits, {} misses",
+            r.hits(),
+            r.misses()
+        );
+        assert_eq!(
+            r.misses(),
+            0,
+            "SELECTION REPLAY had {} MISSES — the document, forest, or an upstream selection \
+             changed under the recording.",
+            r.misses()
+        );
+    }
     // A kind replay with misses is not the recorded experiment: each miss lands Assertion, so
     // claim-referent units silently sag back to Open.
     if let Some(r) = &kinds_replay {
@@ -3913,18 +4042,57 @@ fn probe_claim_unit_restrictors() {
 
 /// D68 alignment probe (companion of `probe_claim_unit_restrictors`): labels for the UMLS
 /// restrictor classes, so the curated alignment facts are written against known concepts.
+/// `EIGENIUS_PROBE_CUIS=C1148824,C1149627` probes any other concepts — e.g. the ones a
+/// generated formula or a hand-authored definition names, when reading the term back.
+/// Prints each concept's label and its `is_a` parents (with labels), which is what says
+/// where in the lattice it sits.
 #[test]
 #[ignore = "DB-backed label probe (D68); --ignored --nocapture"]
 fn probe_restrictor_class_labels() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
-    for cui in ["C2825141", "C0037088", "C0302523", "C0700325", "C5890437"] {
+    let cuis = std::env::var("EIGENIUS_PROBE_CUIS")
+        .unwrap_or_else(|_| "C2825141,C0037088,C0302523,C0700325,C5890437".to_string());
+    for cui in cuis.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         let iri = Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).unwrap();
         eprintln!(
             "{cui}: {}",
             eigenius_kernel::dcg::resource_label(&iri, &head)
                 .unwrap_or_else(|| "<no label>".to_string())
         );
+        let Some(r) = head.resolve(&iri) else {
+            eprintln!("    <not on the chain>");
+            continue;
+        };
+        for (prop, value) in r.properties() {
+            let name = prop.as_str().rsplit(':').next().unwrap_or_default();
+            let rendered = match value {
+                eigenius_kernel::ontology::resource::Value::Array(a) => a
+                    .iter()
+                    .map(|v| describe_probe_value(v, &head))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                v => describe_probe_value(v, &head),
+            };
+            eprintln!("    {name} = {rendered}");
+        }
+    }
+}
+
+/// One property value for the label probe: a resource reference also gets its label, since an
+/// IRI alone does not say what the parent concept IS.
+fn describe_probe_value(
+    value: &eigenius_kernel::ontology::resource::Value,
+    head: &Arc<eigenius_kernel::layer::Layer>,
+) -> String {
+    use eigenius_kernel::ontology::resource::Value;
+    match value {
+        Value::ResourceRef(iri) => match eigenius_kernel::dcg::resource_label(iri, head) {
+            Some(l) => format!("{iri} «{l}»"),
+            None => iri.to_string(),
+        },
+        Value::String(s) => format!("{s:?}"),
+        other => format!("{other:?}"),
     }
 }
 

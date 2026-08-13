@@ -230,9 +230,10 @@ change does not fail at all.
 |---|---|---|
 | `paragraph.txt` | — | the two sentences, verbatim from CNL-v3 |
 | `paragraph-edited.txt` | — | the same, with the measurement negated («had» → «did not have») |
-| `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon — `Set -> Set -> Set -> Prop`, model explicit |
-| `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) |
+| `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon — `Set -> Set -> Prop`, model explicit. The activity concept is fixed IN each definition (C1148824 exonuclease / C1149627 helicase): abstracting it as a third parameter makes the body untypable, since `fst(the(Σ x0:a. …))` has type `a` and an abstract `a : Set` has no subsumption path to the verb axiom's `Entity` slot. |
+| `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) — the INTACT variant's authority |
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
+| `selections-edited.json` | recorded once | the reading-selection draw for the EDITED variant, replayed. It selects by draw, not by pin, because the negated sentence's pinned skeleton matches three readings differing only in sense — a tie a sense-erased pin cannot break, so the pin arm fails closed there (correctly). |
 | `literature-rules.esl` | — | the pinned `∀m. A → B`, cited — the ONLY DeclarationTrace on the branch |
 | `claims-intact.esl` | `prose-to-esl` | units + encoded claims + ProgramTraces + decision points |
 | `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
@@ -310,8 +311,10 @@ pipeline's call). Every selection is recorded on chain as an `enc:DecisionPoint`
 rationale. Both sentences here reach a single reading.
 
 A third sentence — *"We found that WRN was selectively essential in MSI models"* — was dropped for
-exactly this reason: on this snapshot it yields two readings sharing the pinned skeleton, and
-`select_pinned` refused to choose. That refusal is the design working.
+exactly this reason: on this snapshot it yields two readings sharing the pinned skeleton, and the
+pin arm refused to choose. That refusal is the design working — and the edited variant now hits the
+same wall (three sense-variant readings under one skeleton), which is why it selects by the recorded
+draw in `selections-edited.json` instead. The two arms are the same seam: a `ReadingRanker`.
 
 **The literature rule is Declared, and has to be.** Definitions make the parse and the domain
 formula one term, so the lift Declares nothing — but a rule relating two propositions is a claim

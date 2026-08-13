@@ -88,12 +88,31 @@ draw (`experiments/parsing/kinds/2026-08-12-reference.json`, replay 12/0) ALL FI
 claim-referent units close — open 15→10 (12/40/10/0, pinned beside the deterministic-floor pin
 12/35/15/0 which HOLDS)**; isolated baselines untouched; 171 suites, clippy both configs. Kind
 verdicts model-adjudicated pending sign-off. The `2026-08-12-d67` snapshot is canonical (page
-replay exact; reseed+alignment proven deterministic). **Active step: slice 6 — the
-full-document artifact (3.4) + the 3.5 acceptance run, opening with the demo refresh on the
-d67 snapshot (re-record demo ranks, re-verify its 6 pins, regenerate artifacts; inference.esl
-re-derives if readings shift). Remaining deferrals live in D68 §5/§5a (collective/group term +
+replay exact; reseed+alignment proven deterministic). Slice 6 (3.4 artifact + 3.5 acceptance)
+DONE `2026-08-12` (note §7-6): demo refreshed on d67 (pins RESTORED to the page-verified
+`expected-readings.tsv` shapes; ranks re-recorded; `selections-edited.json` recorded through
+the CLI's own new RECORD arm; run.sh's EDITED variant selects by that draw — its pinned
+skeleton matches 3 sense-variant readings, a tie a skeleton pin cannot break);
+`onco-typed.esl` re-derived to the d67 concepts, and the SERVED load caught a real type error
+the in-process build path does not run (`exists x0 : a` with an abstract Σ domain →
+`DefinitionMalformed Var(TC#2) ≠ Entity`; the activity concept is now fixed in the definition
+body); acceptance passes both ways (in-process Holds/Fails with the diagnostic surfaced —
+the run.sh:222 gap; served `run.sh` exit 0, intact COMMITTED / edited REJECTED), both demo
+artifacts regenerate BYTE-IDENTICALLY; artifact completeness landed (Stage-A glossary
+resources + one `DiscourseUnit`+`CutItem` per non-encoded unit, `enc:cut_ambiguous` /
+`enc:cut_unresolved` added, token-bounded OOV attribution, CLI `--partial`), proven to LOAD
+through the kernel by `artifact_completeness.rs`. **The COMPOSED configuration is measured for
+the first time (review catch: every prior number was a no-ranker floor) — discourse loop + reading
+ranker = encoded 50 / ambiguous 1 / open 11 / gap 0 over 62 units, replay-verified (selections
+39/0, kinds 47/0, ranks 62/0), vs the 12/40/10/0 floor. Its 39 decisions score 23 pinned-correct
+/ 6 wrong / 1 abstained / 9 UNSCORABLE — the pins are isolated-sentence skeletons, so gating the
+composed pipeline needs pins for discourse-resolved readings (named, not closed). The sweep's
+selection accuracy on d67 reproduces the tracked baseline exactly (21/31).** **STAGE 3 EXIT GATE
+MET.** **Active step:
+Stage 4 — the `FormalizeDocument` institution (parser-pipeline plan §4); its design note is
+the first deliverable.** Remaining deferrals live in D68 §5/§5a (collective/group term +
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
-cleanup).**
+cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
 
 ### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
