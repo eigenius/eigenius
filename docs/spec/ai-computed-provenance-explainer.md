@@ -1,8 +1,6 @@
 # **Explainer: AI Computed Provenance**
 
-Draft — 12 August 2026 · Companion to
-
-[AI Computed Provenance 1.0](https://www.google.com/search?q=ai-computed-provenance-1.0.md) · Non-normative
+Draft — 12 August 2026 · Companion to [AI Computed Provenance 1.0](./ai-computed-provenance-1.0.md) · Non-normative
 
 ## **Participants**
 
