@@ -1,500 +1,282 @@
-# Explainer: AI Computed Provenance
+# **Explainer: AI Computed Provenance**
 
 Draft — 12 August 2026 · Companion to
-[AI Computed Provenance 1.0](ai-computed-provenance-1.0.md) · Non-normative
 
----
+[AI Computed Provenance 1.0](https://www.google.com/search?q=ai-computed-provenance-1.0.md) · Non-normative
 
-## Participants
-
-Editors: *to be named.* Input to the proposed **AI Computed Provenance Community Group** (proposed
-11 August 2026).
+## **Participants**
 
-**Stakeholder feedback: none yet.** The group is proposed, not chartered. This document has not been
-reviewed by W3C, by the group, or by implementers other than the authors of the reference
-implementation. Nothing below should be read as reflecting consensus.
+Editors: *to be named.* Input to the proposed **AI Computed Provenance Community Group** (proposed 11 August 2026).
 
----
+**Stakeholder feedback: none yet.** The group is proposed, not chartered. This document has not been reviewed by W3C, by the group, or by implementers other than the authors of the reference implementation. Nothing below should be read as reflecting consensus.
 
-## Introduction
+## **Introduction**
 
-An AI-assisted research system produces a conclusion. You want to know whether to act on it.
+Scientific and engineering practice is increasingly reorganized around AI systems whose reasoning cannot be inspected. Large language models and agentic tools now generate hypotheses, select methods, execute analyses, and draft conclusions across quantitative disciplines. These systems produce fluent, plausible outputs that arrive merely as assertions, unaccompanied by any checkable account of how they were reached or what assumptions they rest upon.
 
-Today you get a provenance record: this was derived from that, by this model, at this time. It is a
-graph of assertions — nodes and edges, each atomic and opaque. Such a graph can record *that* things
-are related. It cannot record *why a claim holds*, because it has no notion of what a claim says and
-no notion of validity. A sound derivation and an invented one have the same shape in it.
+This exposes a structural gap. The dominant artifact of scientific communication—the prose narrative—was designed for an era where human authorship was the rate limiter and manual reading was the means of verification. Today, the constraint on generating claims has been removed, but the verification burden remains entirely on human experts who must reconstruct reasoning the narrative does not actually carry. This asymmetry produces severe failure modes: formatted citations that do not exist, statistics that do not follow from deposited data, and analytical methods that cannot be transferred across laboratories because their underlying assumptions remain tacit. Prevailing governance responses, such as disclosure requirements, detection tools, or appeals to human responsibility, attempt to manage this bottleneck through policy and labor without fixing the underlying artifact.
 
-That is the first gap, and it is representational, not cryptographic. The second gap compounds it:
-every field in the record was written by the system that produced the conclusion, so even the
-relationships it can express are worth exactly the producer's trustworthiness.
+Current provenance records attempt to fill this gap but operate at the wrong conceptual level. They typically provide a lineage graph outlining what a claim was derived from, the model used, and the timestamp. While such a graph can document that entities are related, it cannot verify *why a claim holds*. It lacks an underlying concept of what a claim actually says or what constitutes validity. In this model, a mathematically sound derivation and a completely hallucinated one are structurally indistinguishable.
 
-This specification closes both, and it does so by **changing levels** — from flat data to reasoning.
+This is a fundamental representational gap. A second vulnerability compounds the issue: every field in a standard lineage record is written by the system that produced the conclusion. The relationships expressed are only as reliable as the producer's intrinsic trustworthiness.
 
-In the record we propose, a claim has **content**: a proposition in a formal language, with a
-decidable notion of when two claims are the same one. A warrant has **structure**: a term recording
-which evidence it grounds in and how those groundings compose. And validity is **decidable**: whether
-a warrant justifies a claim is settled by type-checking, not by inspection.
+This specification addresses both limitations by shifting the focus from flat data lineage to formal reasoning, ensuring that verification becomes a mechanically checkable property of the artifact itself rather than a manual task performed on it. A claim travels with a checkable record of what was declared, observed, and derived.
 
-That level shift is what makes the second gap closable. Once a warrant is a checkable object, its
-leaves can be made unforgeable — statements that exist only because an implementation performed and
-validated specific work, with no syntax, API, or configuration through which anyone can supply one.
-A third party re-checks them by recomputing hashes and looking for the work that admits them, without
-asking the producer anything.
+In the proposed framework, a claim has **content**: it functions as a proposition in a formal language, complete with a decidable method for determining when two claims are identical. A warrant has **structure**: it is a term that records the specific evidence it is grounded in, alongside how those groundings compose. Finally, validity becomes **decidable**: whether a warrant justifies a claim is determined by mathematical type-checking rather than manual inspection.
 
-We call that second property **Computed ≠ Asserted**. It is the headline, but it rests on the level
-shift: you cannot make a warrant unforgeable until you have a warrant.
+This framework does not attempt to formalize the underlying science. The empirical substance of disciplines like biology or chemistry remains exactly as difficult, wet, and contested as it has always been. What becomes checkable is the *reasoning about* the science—the logical inference from evidence to conclusion, the origin of each datum, the epistemic status of each claim, and the soundness of translations between domains.
 
----
+This representational shift enables robust verification. By treating a warrant as a checkable object, its foundational components (leaves) can be rendered unforgeable. These take the form of statements that exist solely because an implementation performed and validated specific computational work. There is no syntax, API, or configuration parameter that allows a user or system to manually supply one. A third-party auditor can independently verify them by recomputing hashes and validating the computational work, without needing to query the original producer.
 
-## The user-facing problem
+We refer to this secondary property as **Computed ≠ Asserted**. While it is the primary benefit of the specification, it relies entirely on the foundational shift in representation: a warrant cannot be made unforgeable until it exists as a formal structure.
 
-Existing provenance formats sit at the artifact level: what came from what, what ran, who signed it.
-That is the right level for the questions they were built for, and the wrong level for "is this
-conclusion warranted, and by what?" — a question about claims, not artifacts. Asking it of a
-lineage graph gets an answer about file ancestry.
+## **The user-facing problem**
 
-Three people are hurt by this, concretely.
+Existing provenance formats operate at the artifact level, tracking document ancestry, execution logs, and signatures. This is suitable for managing files, but inadequate for answering whether a specific conclusion is logically warranted and by what evidence. Asking this question of a standard lineage graph yields information about file ancestry rather than logical validity.
 
-**The reviewer** reads a conclusion and wants its dependencies. They can get a list of cited
-documents. They cannot get an answer to "which steps here were *checked* and which were *chosen*,
-and by what?" — because the record does not distinguish them. A retrieval that found the right
-paper and a model that picked one reading of an ambiguous sentence appear in the record as the same
-kind of event.
+This limitation creates practical difficulties for three key stakeholders:
 
-**The second laboratory** wants to reproduce. They can re-run the pipeline and compare outputs. When
-the outputs differ they cannot localise the difference, because the non-deterministic steps were not
-recorded in a form that can be replayed independently of the components that made them.
+**The reviewer** analyzing a conclusion needs to understand its dependencies. While they can access a list of cited documents, they cannot determine which specific steps were mechanically *checked* versus logically *chosen*, or by what mechanism. An information retrieval step that found a relevant paper and a model's subjective interpretation of an ambiguous sentence appear identical within a standard provenance record.
 
-**The regulator** asks what a submission takes on authority. The honest answer is a number: how many
-claims in this record rest on somebody's say-so rather than on measurement or proof, and which ones.
-No current format can produce that number, because "somebody's say-so" is not a distinguished
-category and inferential steps are not represented at all.
+**The second laboratory** attempting to reproduce a finding can re-run the pipeline and compare the final outputs. If the outputs differ, they cannot isolate the divergence. Because non-deterministic steps are not recorded in a form that allows independent replay, the specific point of failure remains obscured.
 
-The volume makes all three worse. A system generating thousands of claims exceeds the capacity to
-spot-check, so the properties have to be structural or they are not there.
+**The regulator** evaluating a submission must understand how much of the underlying data relies on authority. Ideally, this should be an exact metric detailing how many claims rest on assumptions rather than measurement or formal proof. Current formats cannot supply this metric because inferential steps are absent from the record, and authoritative assertions are not treated as a distinct, trackable category.
 
----
+These challenges are exacerbated by the scale of automated generation. A system generating thousands of claims rapidly exceeds any capacity for manual spot-checking, necessitating structural guarantees.
 
-## Goals
+## **Goals**
 
-1. **Make grounding non-forgeable.** A record cannot state that something was computed unless it was.
-2. **Make audit independently reproducible.** A verifier sharing no code with the producer can
-   re-check every address, every certificate, and every grade, using only the record.
-3. **Make authority enumerable.** A reader can list exactly what a record takes on somebody's word,
-   and that list is finite and small.
-4. **Record AI choices honestly.** Every step whose outcome the input did not determine is recorded
-   with its authority, its alternatives, and a key that replays it.
-5. **Account for failure.** A record covers every unit of input, including the units that produced
-   nothing.
-6. **Stay implementable by anyone.** No component of the guarantee may depend on a specific vendor,
-   service, or hardware root of trust.
+1. **Ensure unforgeable grounding.** A record must mathematically guarantee that any claimed computation was actually performed.  
+2. **Enable independent reproducibility.** A verifier sharing no code with the producer must be able to re-check every address, certificate, and grade using only the provided record.  
+3. **Make authority enumerable.** Readers must be able to extract a precise, finite list of every claim within a record that relies on external authority or assumption.  
+4. **Record AI choices transparently.** Every step where the outcome was not strictly determined by the input must be documented with its authorizing agent, the considered alternatives, and a key to facilitate replay.  
+5. **Account for omissions.** Records must cover every unit of input, including units that yielded no output or failed processing.  
+6. **Maintain vendor neutrality.** No component of the security guarantee may depend on a specific vendor, proprietary service, or localized hardware root of trust.
 
-## Non-goals
+## **Non-goals**
 
-1. **Not attribution.** This specification does not establish *who* produced a record. It provides
-   integrity and reproducibility. Signing belongs in a layer above, and the specification says so
-   rather than implying otherwise.
-2. **Not a correctness oracle.** A conforming record can faithfully document a wrong conclusion. The
-   grades say how a claim was established, not whether it is true.
-3. **Not a domain vocabulary.** What a biology claim means is authored, not standardised here.
-4. **Not model evaluation.** Nothing here scores a model, and confidence values are explicitly not
-   grades.
-5. **Not a replacement for W3C PROV.** PROV answers artifact-level questions and answers them well.
-   This sits a level above and maps down to PROV for tooling interop, rather than competing with it.
-   See [alternatives](#considered-alternatives).
-6. **Not prescriptive about AI.** How a model is invoked, prompted, or chosen is out of scope; only
-   what must be *recorded* about its choices is in scope.
-7. **Not defeasible reasoning.** Belief revision is a structural marker, not a non-monotonic logic.
+1. **Not an attribution system.** This specification does not authenticate *who* produced a record; it ensures structural integrity and reproducibility. Cryptographic signing belongs in a higher-level layer.  
+2. **Not a correctness oracle.** A conforming record can faithfully document a logically flawed conclusion. The generated grades indicate *how* a claim was established, not its ultimate truth value.  
+3. **Not a domain vocabulary.** The semantic meaning of domain-specific claims (e.g., in biology or law) is authored externally and is not standardized here.  
+4. **Not a model evaluation tool.** This framework does not score AI models, and confidence values are explicitly excluded from being treated as logical grades.  
+5. **Not a replacement for W3C PROV.** PROV effectively addresses artifact-level lineage. This specification operates a level above and is designed to map down to PROV for tooling interoperability. See [alternatives](https://www.google.com/search?q=%23considered-alternatives).  
+6. **Not prescriptive regarding AI architectures.** The methods used to invoke, prompt, or select models are out of scope; the specification only dictates what must be *recorded* regarding their choices.  
+7. **Not a system for defeasible reasoning.** Belief revision is treated as a structural marker rather than a native implementation of non-monotonic logic.
 
----
+## **The level shift: three theories, three jobs**
 
-## The level shift: three theories, three jobs
+The core framework relies entirely on established mathematical foundations rather than novel cryptographic primitives. The specification assembles these proven concepts and defines their interfaces, allowing implementers to verify the theory against independent, established literature.
 
-Nothing in the foundations below is invented here. Each is decades-old, well-understood mathematics
-with textbooks, proof assistants, and independent implementations behind it. The contribution is the
-assembly and the interfaces — which is the right posture for standards work, because implementers can
-reason about established theory and check our use of it against sources we do not control.
+Each of these three foundational theories performs a distinct, necessary function.
 
-Each of the three does one job that the other two cannot.
+### **Constructive type theory — gives claims content**
 
-### Constructive type theory — gives claims content
+In this framework, a proposition is treated as a type; a proof is a term inhabiting it; and checking a proof is equivalent to type-checking. The constructive commitment dictates that to assert something exists, one must **exhibit it**. A proof is not merely a certificate that a witness *could* be found; it is the witness itself.
 
-A proposition is a type; a proof is a term inhabiting it; checking a proof is type-checking. The
-constructive commitment is that to assert something exists you must **exhibit it**: a proof is not a
-certificate that a witness could be found, it is the witness.
+This approach yields two decidable properties that form the foundation of the system:
 
-Two decidable questions follow, and everything else depends on them:
+* **Are these the same claim?** This is resolved by the formal language's equivalence relation rather than standard string comparison. This ensures that a citation binds to a conceptual proposition rather than a specific textual representation.  
+* **Does this warrant justify this claim?** This is definitively settled by type-checking.
 
-- **Are these the same claim?** Settled by the language's equivalence relation, not by string
-  comparison. This is what lets a citation bind to a proposition rather than to a name.
-- **Does this warrant justify this claim?** Settled by type-checking.
+*Absent this foundation:* claims are merely strings, sameness is strictly textual, and logical validity cannot be mechanically checked. This is the current state of flat-data provenance.
 
-*Without it:* claims are strings, sameness is textual, and nothing is checkable. This is the position
-flat-data provenance is in.
+### **Justification logic — makes the warrant an object**
 
-### Justification logic — makes the warrant an object
+Artemov's Logic of Proofs treats the warrant as first-class syntax: t : A reads "*t* is a justification for *A*", providing explicit operators for composing justifications.
 
-Artemov's Logic of Proofs treats the warrant as first-class syntax: `t : A` reads "*t* is a
-justification for *A*", with explicit operators for composing justifications.
+Practically, this means a warrant is **stored, inspected, and audited** rather than discarded immediately after being checked. An auditor can read exactly *how* a claim was justified. Multiple independent warrants for a single claim can coexist without overriding one another. Crucially, a single calculus can express a claim *justified by authority* alongside one *justified by proof*. Consequently, the epistemic grade is derived directly from the warrant's structural shape rather than attached as an arbitrary metadata label.
 
-The practical consequence is that a warrant is **stored, inspected, and audited** rather than
-discarded once checked. An auditor reads *how* a claim was justified. Several independent warrants for
-one claim coexist without collapsing into one. And — the part no proof system gives on its own — a
-single calculus expresses *justified by authority* alongside *justified by proof*, so the epistemic
-grade is computed from the warrant's shape rather than attached as a label.
+*Absent this foundation:* proof systems would lack an audit surface, and there would be no uniform method to represent varying types of justification (e.g., authoritative assertion vs. machine-checked proof).
 
-*Without it:* you would have proofs but no audit surface, and no uniform way to represent a claim
-resting on somebody's say-so next to one resting on a machine-checked proof.
+### **Institution theory — lets many logics coexist**
 
-### Institution theory — lets many logics coexist
+Goguen and Burstall's institutions formalize the concept of a *logical system*—encompassing signatures, sentences, models, and satisfaction—alongside the satisfaction condition, which ensures truth remains invariant under changes in notation. **Comorphisms** act as truth-preserving translations between these logical systems.
 
-Goguen and Burstall's institutions formalise what a *logical system* is — signatures, sentences,
-models, satisfaction — together with the satisfaction condition: truth is invariant under change of
-notation. **Comorphisms** are truth-preserving translations between logical systems.
+This mechanism enables platform extensibility without requiring a universal, monolithic ontology. A statistical engine, a proof assistant, and a solver can each maintain their own syntax and verification methods. They are integrated via *declared* translations with explicitly stated semantics rather than ad-hoc middleware.
 
-This is what makes the platform extensible without a universal ontology. A statistics system, a proof
-assistant, a solver each keep their own sentences and their own notion of a verdict, and are related
-by *declared* translations with stated semantics rather than by ad-hoc glue.
+*Absent this foundation:* systems would be forced into either an impossible global logic or reliant on undocumented bridges between disparate tools.
 
-*Without it:* either one global logic — which no real scientific domain has — or bridges between
-systems whose meaning nobody can state.
+**This formalizes the group's neutrality commitment.** True vendor neutrality is achieved structurally: the framework does not privilege any single logic, and expanding it requires registering a declared institution with specific comorphisms. This prevents vendor lock-in, as the extension mechanism relies on transparent, published translations.
 
-**This is also the formal content of the group's neutrality commitment.** "Immune to single-vendor
-enclosure" is usually a governance aspiration. Here it has a mathematical counterpart: the framework
-does not privilege one logic, and adding one is a declared institution with declared comorphisms — an
-extension, not a change to the core. A vendor cannot enclose a framework whose extension mechanism is
-a published translation with a satisfaction condition attached.
+> **Implementation status.** Institutions are active components of the reference implementation: three exist (reasoning, statistics, and a Lean proof-checking institution), two are registered on the chain, and the kernel maintains the comorphism registry. The reasoning institution's validation gate is responsible for type-checking the certificates detailed below.
 
-> **Implementation status.** Institutions are built, not aspirational: three implementations exist
-> (reasoning, statistics, and a Lean proof-checking institution), two are registered on the chain, and
-> the kernel carries the comorphism registry. The reasoning institution's validation gate is what
-> type-checks the certificates described below.
+## **Proposed approach**
 
----
+The proposed architecture consists of seven core mechanisms. The overall integrity guarantee emerges from their combination.
 
-## Proposed approach
+**1\. Content, not files.** Every element is a resource identified by an IRI, arranged in immutable layers forming a hash-linked graph. A layer's identity is derived from a hash of its content; its positional identity incorporates its parents, ensuring that altering historical data changes all subsequent descendants.
 
-Seven moves. Each is small; the guarantee comes from their combination.
+**2\. Claims carry propositions.** Claims are not strings, but terms in a language equipped with a decidable notion of equivalence and a canonical encoding.
 
-**1. Content, not files.** Everything is a resource with an IRI, in immutable layers forming a
-hash-linked graph. A layer's identity is a hash of its content; its position identity folds in its
-parents, so altering history changes every descendant.
+**3\. Validated commits emit traces.** When the implementation validates a commit that establishes a claim, it automatically writes a *trace* detailing the claim, the method of establishment, the authorizing party, and the timestamp.
 
-**2. A claim carries a proposition.** Not a string — a term in a language with a decidable notion of
-"the same proposition", and a canonical encoding. This matters for move 4.
+**4\. Traces admit witnesses, and witnesses cannot be written manually.** A *witness* serves as the machine-checkable component of a trace. It is identified by its grade, IRI, and **a hash of the proposition**. Including the proposition hash prevents citation drift: if a resource's meaning changes, citations linked to the older hash will no longer resolve.
 
-**3. Validated commits emit traces.** When an implementation validates a commit that establishes a
-claim, it writes a *trace*: this claim, established this way, by this party or program, at this time.
+Witnesses are implemented as types with **no constructors**, meaning there is no syntax available to manually forge them. The author of a proof simply leaves a designated hole:
 
-**4. Traces admit witnesses, and witnesses cannot be written.** A *witness* is the machine-checkable
-side of a trace. It is identified by three things: the grade, the IRI, and **a hash of the
-proposition**. Including the proposition hash is what stops a citation from drifting: change what a
-resource says, and every citation written against the old content stops resolving.
+derived("urn:…:claim\_1",  HasActivity(msi, WRN),  ())  
+                                                   ↑  
+                            The author writes a hole here and cannot write anything else.  
+                            The implementation fills it by finding a trace that admits  
+                            (Derived, claim\_1, hash of that proposition), or it refuses the commit.
 
-Witnesses are realised as types with **no constructors**. There is no syntax for them. The author of
-a proof writes a hole:
+This ensures that grounding cannot be independently asserted by a user or system; its existence can only be mechanically verified.
 
-```
-derived("urn:…:claim_1",  HasActivity(msi, WRN),  ())
-                                                   ↑
-                            the author writes a hole here — and cannot write anything else.
-                            The implementation fills it by finding a trace that admits
-                            (Derived, claim_1, hash of that proposition), or refuses the commit.
-```
+**5\. Warrants compose, and only witnesses are leaves.** A specialized calculus builds composite warrants (e.g., applying a rule to a premise, offering alternatives, or specializing a general claim). Every terminal leaf in this structure is a witness. Because certificates are stored and re-checkable, verifiers can independently recreate the check rather than trusting previous execution logs.
 
-That hole is the whole mechanism. You cannot assert the grounding; you can only ask whether it
-exists.
+**6\. No rule introduces an implication.** This is a subtle but highly consequential design constraint. The calculus lacks a general deduction theorem: systems cannot inherently *derive* "if A then B" merely by assuming A and concluding B. Implication can only be introduced if it is explicitly **grounded**—carried by a resource, at a specific grade, with a trace attributing it to a named party.
 
-**5. Warrants compose, and only witnesses are leaves.** A small calculus builds composite warrants —
-apply a rule to a premise, offer alternatives, specialise a general claim to a case. Every leaf is a
-witness. A certificate is stored and re-checkable, so a verifier redoes the check rather than
-trusting that it happened.
+Consequently, every inferential leap within a record is explicitly visible as a claim backed by an identifiable authority. Systems cannot manufacture untraceable warrants. This satisfies Goal 3: users can easily filter for declared groundings to isolate exactly what a record assumes on authority.
 
-**6. No rule introduces an implication.** This is the least obvious move and the most consequential.
-The calculus has no deduction theorem: you cannot *derive* "if A then B" by assuming A and
-concluding B. An implication can only enter a warrant by being **grounded** — carried by some
-resource, at some grade, with a trace naming a party.
+**7\. Choices and failures are recorded.** Every non-deterministic action—whether by a model, heuristic, or human—must be logged. This includes the responsible authority, considered alternatives, rationale, and a replay key covering the *exact context presented*. Altering the context during replay registers as a documented deviation rather than a silent reuse. Furthermore, input units that fail to produce a claim generate an omission record detailing the exact reason for failure.
 
-The effect is that every inferential bridge in a record is visible as a claim somebody stands behind.
-A system cannot manufacture a warrant whose bridging premise nobody asserted. Goal 3 falls out of
-this: to find what a record takes on authority, list its Declared groundings.
+The record also strictly distinguishes between **vetoed** and **unvetoed** choices. If a mechanical check filters out unacceptable model outputs, the model acts only as a proposer. If all generated candidates are technically acceptable and the model selects one, its choice is final and constrained only by the audit trail. Conflating these two operational modes is misleading, so explicit disclosure of the mechanism is mandatory.
 
-**7. Record the choices, and the failures.** Every non-deterministic step — a model's, a heuristic's,
-a human's — is recorded with the authority that made it (from a closed list), the alternatives it was
-chosen against, any rationale, and a replay key that covers the *context presented*, so that changing
-the context is a counted miss rather than a silent reuse. Every input unit that produced no claim
-gets an omission record naming why.
+## **Key scenarios**
 
-The record also distinguishes **vetoed** from **unvetoed** choices. Where a mechanical check rejects
-unacceptable outcomes, the model only proposes and cannot introduce an error the implementation would
-accept. Where every candidate is acceptable, the model's choice stands and only the audit trail
-constrains it. Collapsing these two is the most likely way for an "AI provenance" record to mislead,
-so disclosure of which one applies is required.
+### **Scenario 1 — A dependency that is live, not narrated**
 
----
+This capability is currently active in the reference implementation.
 
-## Key scenarios
+Consider a processed academic paper. Sentence 1 establishes a specific measurement. A formalized rule from the literature dictates that anything with this measurement requires a secondary property. Sentence 2 asserts a conclusion—but that *same* conclusion can also be logically derived from sentence 1 combined with the rule.
 
-### Scenario 1 — A dependency that is live, not narrated
+The conclusion is now justified by two independent warrants: the explicit textual assertion in the document, and the logical derivation from the measurement.
 
-This one runs today in the reference implementation.
+If sentence 1 is subsequently negated in the source text, it parses to a different proposition and hashes to a new witness key. The inferential warrant no longer has a valid premise to apply the rule to, and the commit is refused with a precise diagnostic:
 
-A paragraph of a paper is encoded. Sentence 1 establishes a measurement. A rule pinned from the
-literature says that anything with that property requires another. Sentence 2 asserts a conclusion —
-and the *same* conclusion also follows from sentence 1 plus the rule.
+no admitted IsDerivedAs witness for urn:…:claim\_1 with proposition …
 
-So the conclusion ends up justified twice, by two independent warrants: the document says it, and it
-follows from a measurement and a published rule.
+Sentence 2's explicit claim remains intact and commits successfully. The document still asserts the conclusion; it is simply no longer mathematically *derived*. The dependency tracking functioned seamlessly because the citation was bound to the cryptographic hash of the proposition, not a localized string.
 
-Now negate sentence 1 in the source text. It parses to a different proposition, which hashes to a
-different witness key. The inferential warrant has nothing to apply the rule to, and the commit is
-refused with a diagnostic naming the missing witness:
+> Note: The literature rule in the reference demo is illustrative. The focus is on the mechanics of claim justification, not domain-specific accuracy.
 
-```
-no admitted IsDerivedAs witness for urn:…:claim_1 with proposition …
-```
+### **Scenario 2 — Authority surface mapping**
 
-Sentence 2's own claim is untouched and still commits. The document still says the conclusion; it is
-simply no longer *derived*.
+Consider a reviewer analyzing the authority surface of a 500-claim record. By filtering for Declared groundings, they obtain an exhaustive list (due to the constraints of mechanism 6). No hidden implications can bypass this filter. The result is a concise list of dependencies, with each entry identifying a responsible party and an explicit rationale. Without mechanism 6, systems could quietly derive their own bridges, rendering such a list useless.
 
-Nothing compared the two texts. No rule fired about negation. The dependency did the work, because
-the citation was bound to the proposition rather than to the name.
+### **Scenario 3 — Independent re-checking**
 
-> The literature rule in the demo is illustrative and invented for it — it is not a finding of the
-> paper. The demo is about how a claim becomes justified, not about the biology.
+A secondary party receives a provenance record without access to the original producer's environment. They can recompute every content address, re-check every certificate against its underlying proposition, recalculate every epistemic grade, and verify that every witness is backed by a valid trace within the record.
 
-### Scenario 2 — "What does this rest on?"
+This confirms the internal consistency of the record and ensures that claims terminate in actual traces. It does *not* prove the real-world truth of the traces—a verifier cannot re-run physical laboratory experiments. However, it successfully **localizes and enumerates** trust. Rather than relying on blind faith across the entire pipeline, the auditor has a specific, constrained list of verifiable traces.
 
-A reviewer wants the authority surface of a 500-claim record. They filter for Declared groundings.
-Because of move 6, that filter is exhaustive: no implication reached the record any other way. The
-answer is a list, typically short, each entry naming a party and a rationale.
+### **Scenario 4 — Honest coverage**
 
-Without move 6 the same filter returns the same list and it means nothing, because the system could
-have derived bridges of its own.
+If a pipeline processes 62 units of a document but successfully encodes only 50, a standard output file will display 100% coverage of the included claims, hiding the dropped units.
 
-### Scenario 3 — Independent re-checking
+Under this specification, conformance requires all 62 units to be present: 50 completed claims and 12 explicit omission records. Each omission must include a standardized reason class (e.g., vocabulary gap, grammar gap, unresolved selection, unresolved reference, out of scope). This transparency allows users to respond appropriately, as a vocabulary failure requires a different intervention than an unresolved logical reference.
 
-A second party receives the record and no access to the producer. They recompute every content
-address, re-check every certificate against its proposition, recompute every grade from its
-justification, and confirm every witness is admitted by a trace present in the record.
+## **Considered alternatives**
 
-What this establishes is that the record is internally consistent and that every claim terminates in
-a trace rather than in nothing. What it does *not* establish is that the traces are true — a verifier
-cannot re-run the world.
+The following frameworks operate primarily at the **artifact level** (tracking file lineage and signatures) rather than the **claim level** (tracking logical justification and validity). They are complementary to this specification and generally compose well with it.
 
-The gain is that the trust is **localised and enumerable**. Before, every field was a place to lie.
-After, the places are exactly the traces, and they can be listed.
+### **Profile W3C PROV-O**
 
-### Scenario 4 — Honest coverage
+While profiling W3C PROV-O is a natural starting point, it presents fundamental representational limitations for this specific use case.
 
-A pipeline processes 62 units of a document and encodes 50. A record containing only the 50 reports
-100% coverage by construction, and no reader can distinguish it from a pipeline that processed
-everything.
-
-Conformance requires all 62 present: 50 claims and 12 omission records, each naming a reason class —
-vocabulary gap, grammar gap, unresolved selection, unresolved reference, out of scope. Those
-distinctions are what make the residue actionable, since a vocabulary failure and an unresolved
-choice call for entirely different responses.
-
----
-
-## Considered alternatives
-
-A note on the first three. They are not really alternatives — they operate at the **artifact level**
-(what came from what, what ran, who signed it) and this operates at the **claim level** (why does this
-hold, and can I check it). They compose with this specification rather than competing with it, and the
-sections below say in which direction. They are listed as alternatives because they are what a
-reviewer will reasonably ask about first.
-
-### Profile W3C PROV-O
-
-The obvious move, and the first question any reviewer will ask. There are two reasons it does not
-work, and the representational one is the more fundamental.
-
-**PROV cannot express reasoning.** RDF is open, so one can always mint classes — but the gap is not
-vocabulary, and adding terms does not close it:
+**PROV cannot express formal reasoning.** While RDF allows for minting new classes, the gap is structural rather than purely vocabulary-based:
 
 | Reasoning requires | PROV's nearest construct | What is missing |
-|---|---|---|
-| The content of a claim | `prov:Entity` | Deliberately opaque. PROV models identity and lineage, not meaning. |
-| "P follows from Q by rule R" | Activity `used` Q, `generated` P, `wasAssociatedWith` an Agent that `hadPlan` R | Records that a step occurred. R is an opaque `prov:Plan`; nothing states it and nothing checks conformance to it. |
-| A checkable warrant | — | PROV has no proof objects of any kind. |
-| Composing warrants | Activity chaining | Chains *activities*, not *justifications*. No notion of a composite warrant being valid because its parts are. |
-| Truth-preserving vs. guessed | — | `wasDerivedFrom` is deliberately general and covers both. |
-| Validity | PROV-CONSTRAINTS | Constrains the provenance graph's well-formedness — ordering, uniqueness — not the logical validity of anything. |
+| :---- | :---- | :---- |
+| The content of a claim | prov:Entity | Deliberately opaque. PROV models identity and lineage, not semantic meaning. |
+| "P follows from Q by rule R" | Activity used Q, generated P, wasAssociatedWith an Agent that hadPlan R | Records that an event occurred. R is an opaque prov:Plan; nothing states its logic or checks conformance. |
+| A checkable warrant | — | PROV has no proof objects or logical validation mechanisms. |
+| Composing warrants | Activity chaining | Chains *activities*, not *logical justifications*. Cannot validate a composite warrant. |
+| Truth-preserving vs. guessed | — | wasDerivedFrom is highly general and covers both equally. |
+| Validity | PROV-CONSTRAINTS | Constrains structural well-formedness (ordering, uniqueness), not logical validity. |
 
-Closing this needs two things RDF vocabulary cannot supply: content with a decidable identity, and a
-checking relation. That is what [the three theories](#the-level-shift-three-theories-three-jobs) are
-for.
+To express reasoning, a system requires content with a decidable identity and a strict checking relation—features provided by the [three foundational theories](https://www.google.com/search?q=%23the-level-shift-three-theories-three-jobs) discussed earlier. Furthermore, PROV's entity/generation model struggles with multiple independent justifications for a single proposition, often resulting in duplicated entities rather than unified claims.
 
-There is also a structural mismatch at exactly our motivating case. PROV's entity/generation model is
-oriented to "this artifact was produced by this process", so one proposition warranted two
-*independent* ways has no natural home — one gets two entities and an `alternateOf`, losing the fact
-that they are the same claim.
+Most importantly, PROV graphs are entirely producer-writable. A system can assert a wasDerivedFrom relationship without ever executing the derivation, and the PROV statement remains structurally valid.
 
-**And separately, everything in PROV is producer-writable.** Even the lineage PROV *can* express is
-asserted by whoever writes the graph; a `wasDerivedFrom` from a producer that never ran the derivation
-is a perfectly well-formed PROV statement.
+**Future integration:** The group intends to publish a downward mapping to ensure records remain consumable by existing PROV tooling. This mapping will be inherently lossy (flattening certificates into standard wasDerivedFrom edges), but it will provide essential backwards compatibility.
 
-**What we should do rather than dismiss it:** publish a downward mapping, so records are consumable by
-existing PROV tooling. The mapping is heavily lossy and worth stating precisely — a PROV export
-flattens every certificate to `wasDerivedFrom` edges, so the calculus does not survive translation at
-all. That is the point rather than an embarrassment: the flattening is what makes the extra layer
-legible to someone who only knows PROV. Not yet drafted.
+> **Prior art to verify:** The Proof Markup Language (PML) from the Inference Web project (McGuinness, Pinheiro da Silva, mid-2000s) represents the closest historical precedent for reasoning-level provenance. PML's justification layer modeled inference steps with antecedents and rules. Understanding why the W3C Provenance Incubator Group narrowed its scope away from PML-style justification toward artifact lineage is critical context for this ongoing work.
 
-> **Prior art to verify — this matters.** The genuine precedent for reasoning-level provenance is the
-> **Proof Markup Language** (PML), from the Inference Web project (McGuinness, Pinheiro da Silva,
-> mid-2000s), whose justification layer modelled inference steps with antecedents and named inference
-> rules. Our recollection is that PML fed into the W3C Provenance Incubator Group, and that the
-> resulting PROV work deliberately narrowed scope from justification toward lineage. If that history
-> holds it is a far better argument than "PROV did not consider this": the W3C looked at
-> reasoning-level provenance and scoped it out, and the question for this group is whether twenty
-> intervening years of proof assistants and machine-generated claims change the calculation.
 > **Unverified — check before circulating.**
 
-### Signed attestations (in-toto / SLSA)
+### **Signed attestations (in-toto / SLSA)**
 
-The closest neighbour, and the comparison most worth getting right. SLSA's provenance thesis is
-nearly ours: an attestation about how an artifact was built, produced by the build platform rather
-than asserted by the publisher.
+SLSA provides a highly relevant model centered on build-platform attestations rather than publisher assertions.
 
-The difference is where the non-forgeability comes from. SLSA gets it by **trusting the builder** —
-the guarantee is "this attestation came from a build platform you have decided to trust", carried by
-a signature. Ours comes from the **record's own structure**: the witness types have no constructors,
-and a verifier confirms that by reading the record.
+However, SLSA derives its security by **trusting the builder**—the guarantee relies on a cryptographic signature from an approved platform. The framework proposed here derives non-forgeability from the **record's structural properties**: witness types lack constructors, a fact a verifier can independently confirm. The two approaches are complementary; signing handles identity and attribution, while this framework ensures computational validity.
 
-These are complementary, not competing. Signing answers *who*; this answers *was it computed*. The
-specification explicitly leaves the first to a layer above.
+### **Verifiable Credentials**
 
-### Verifiable Credentials
+Verifiable Credentials (VCs) offer issuer-signed claims with mature revocation systems. Like SLSA, they establish authenticity rather than computational proof. VCs are a strong candidate for integration at the attribution layer.
 
-Issuer-signed claims with a mature revocation and key-discovery story. Same analysis as above: VCs
-establish authenticity, not computation. A strong candidate for the attribution layer the
-specification defers.
+### **Log every model call**
 
-### Log every model call
+Storing all prompts and responses creates massive, unwieldy datasets that do not structurally compose. A log of prior API calls does not inherently explain the logical dependencies of an isolated claim. Furthermore, raw logs pose severe data privacy risks. Recording explicit decisions, alternatives, and replay keys is vastly more efficient and less disclosive.
 
-Store prompts and responses; let auditors read them.
+### **Trusted execution / remote attestation**
 
-Logs are producer-writable, so they inherit the original problem. They are also enormous, they do not
-compose — a log of ten calls does not tell you what claim 7 depends on — and they leak far more than a
-decision record does. Recording the decision, its alternatives, and a replay key is smaller, more
-useful, and less disclosive.
+Hardware attestation proves that a specific binary executed within a secure enclave. It does not evaluate the logical soundness of the binary's output, and it requires trusting a specific hardware vendor—violating the group's strict vendor neutrality requirements.
 
-### Trusted execution / remote attestation
+### **Require formal proof everywhere**
 
-Hardware attestation proves that a particular binary ran in a particular enclave. It does not say what
-the binary concluded or why, and it requires trusting a vendor's root of trust — which is the
-single-vendor enclosure the group's mission specifically disclaims.
+Restricting the system exclusively to machine-checked claims is impractical and would render the framework unusable for most real-world research. This is why the system supports four distinct epistemic grades. The record remains highly valuable even before formal proofs are applied, as it clearly demarcates the boundary between checked computations and authoritative assumptions.
 
-### Require formal proof everywhere
+### **Confidence scores plus human review**
 
-Admit only machine-checked claims. This yields a system with almost nothing in it, and it is why four
-grades exist rather than one. The record is useful before any formal proof exists, and it always shows
-where the boundary between checked and unchecked lies. Verification deepens over time on the
-conclusions that warrant the cost.
+This remains the current de-facto industry practice. However, confidence scores do not compose across inferential steps, lack standardization between distinct models, and provide no dependency tracking. Furthermore, manual review cannot scale alongside automated generation. The specification allows for confidence metadata but strictly prohibits substituting confidence scores for structural epistemic grades.
 
-### Confidence scores plus human review
+## **Security and privacy considerations**
 
-The current de-facto practice. Confidence does not compose across inference steps, is not comparable
-between components, and says nothing about dependencies. Review capacity does not grow with generation
-volume. The specification permits confidence values and forbids treating them as grades.
+Summarized from [§11 of the specification](https://www.google.com/search?q=ai-computed-provenance-1.0.md%2311-security-and-privacy-considerations).
 
----
+**Addressed vulnerabilities:** Silent substitution of propositions beneath stable citations; undetected historical alterations; undocumented epistemic grades; asserted-but-unperformed computations; and the artificial inflation of coverage metrics by silently dropping input.
 
-## Security and privacy considerations
+**Unaddressed vulnerabilities:** A malicious producer claiming conformance while generating non-conforming, structurally inconsistent records will fail local verification, but this requires an active auditor. The absence of a strict attribution layer leaves this open to spoofing. The framework also does not address underlying implementation defects, accurate documentation of factually incorrect conclusions, or general system availability.
 
-Summarised from [§11 of the specification](ai-computed-provenance-1.0.md#11-security-and-privacy-considerations).
+**Privacy constraints:** Conforming records carry detailed source spans, extracted text, model rationales, and rejected alternatives. For clinical, proprietary, or embargoed data, this level of disclosure may be unacceptable. The specification permits redaction, provided it is explicitly declared and addresses are correctly recomputed over the redacted content to prevent cryptographic mismatches.
 
-**What is addressed:** silent substitution of a proposition under a stable citation; undetected
-alteration of history; grades recorded without support; asserted-but-not-performed computation; and
-coverage inflation by dropping unprocessable input.
+**Cryptographic exposure:** Content addressing inherently reveals content equality. If two distinct parties hold the identical dataset, they will generate identical addresses. While this allows laboratories to verify shared data without direct disclosure, it also permits observers to confirm hypotheses about undisclosed data by matching hashes.
 
-**What is not:** a producer that claims conformance and does not conform will emit records a verifier
-finds internally consistent, because the inconsistency is not in the record. This is precisely the gap
-attribution would narrow, and its absence leaves open. Also unaddressed: implementation defects,
-correct records of wrong conclusions, and availability.
+## **Open questions**
 
-**Disclosure is a real cost.** A conforming record carries source spans, extracted text, model
-rationales, and the alternatives considered at every decision. For clinical or embargoed corpora this
-may be unshareable even when the conclusions are shareable. Redaction is permitted, must be declared,
-and requires recomputing addresses over the redacted content — an address that does not match the
-content beside it is worse than no address.
+1. **Cross-binding agreement.** The specification outlines four necessary properties for a proposition language. Whether these are sufficient to guarantee that two independent implementations interpret a proposition's *meaning* identically remains unsettled, though they are currently sufficient for verification within a single binding.  
+2. **The PROV mapping.** The structural mapping to W3C PROV-O must be formally drafted.  
+3. **Attribution integration.** The specification mandates that signing layers bind to content addresses rather than serializations. The group must determine if this constraint is sufficient and which existing attribution model (e.g., VCs, SLSA) should be officially recommended.  
+4. **Registrations.** The reference binding utilizes an unregistered media type and an unassigned CBOR tag. Both require formal IANA registration prior to standardization.  
+5. **Identifiers.** The reference implementation relies on vendor-namespaced IRIs. The working group must decide whether to mint a dedicated namespace, adopt the existing ones, or define a new registry model.  
+6. **Grade propagation constraints.** The specification dictates that the Verified grade survives composition only when every sub-warrant (including the inference rule itself) is also Verified. This strict propagation rule is not yet active in the reference implementation, which currently projects grades from the landing warrant.  
+7. **Selective disclosure proofs.** Proving that a redacted record is a mathematically faithful subset of a specific original—rather than merely an internally consistent standalone record—requires further specification, likely utilizing hash-tree constructions.  
+8. **Deliverable scope.** The proposed charter references "architectural guidelines ensuring the protocol remains inspectable and protected from commercial capture." Because anti-capture mechanisms within W3C are primarily procedural rather than technical, this likely represents two distinct deliverables that should be separated for project management clarity.
 
-**Content addressing reveals content equality.** Two parties holding the same data compute the same
-address. That lets laboratories confirm they hold the same dataset without disclosing it, and lets an
-observer confirm a guess about data never disclosed.
-
----
-
-## Open questions
-
-1. **Cross-binding agreement.** The specification states four properties a proposition language must
-   have. Whether they suffice to make two independently built implementations agree on what a
-   proposition *means* is unsettled. They suffice for verification within one binding, which is what
-   conformance requires today.
-
-2. **The PROV mapping.** Should be written. Not yet drafted.
-
-3. **Does attribution layer, or integrate?** The specification requires that any signing layer bind to
-   content addresses rather than to a serialization. Whether that is enough, and which existing
-   attribution model to adopt, is open.
-
-4. **Registrations.** The binding currently uses an unregistered media type and a CBOR tag from IANA's
-   unassigned range. Both need resolving before anything is standardised.
-
-5. **Identifiers.** The reference implementation's IRIs are vendor-namespaced. Whether the group mints
-   its own, adopts these, or defines a registry is undecided. Nothing in the abstract core depends on
-   the answer.
-
-6. **Grade propagation is specified but unimplemented.** The rule that `Verified` survives composition
-   only when every sub-warrant is `Verified` — including the inference rule itself — is normative in
-   the specification and does not yet exist in the reference implementation, which projects grades from
-   the landing warrant instead. Flagged in place rather than quietly omitted.
-
-7. **Selective disclosure.** Proving that a redacted record is a faithful redaction of a specific
-   original, rather than merely internally consistent, is not specified. Hash-tree constructions are the
-   obvious direction.
-
-8. **What the third deliverable is.** The group's charter promises "architectural guidelines ensuring
-   the protocol remains inspectable and protected from commercial capture." W3C's actual anti-capture
-   mechanisms are procedural — the Royalty-Free patent policy, and for a Community Group the Final
-   Specification Agreement — rather than documentary. A document asserting neutrality does not create
-   it. This is likely two deliverables that were named as one, and separating them early matters because
-   only one of them has deadlines.
-
----
-
-## References
+## **References**
 
 **The specification.**
 
-- [AI Computed Provenance 1.0](ai-computed-provenance-1.0.md) — the specification this explains.
+* [AI Computed Provenance 1.0](https://www.google.com/search?q=ai-computed-provenance-1.0.md) — the specification this document explains.
 
 **Foundations.**
 
-- Martin-Löf, P. (1984). *Intuitionistic Type Theory.* Bibliopolis. And Coquand, T. and Huet, G.
-  (1988), "The Calculus of Constructions", *Information and Computation* 76(2–3). The
-  propositions-as-types substrate; the binding's type theory is a fragment of the Calculus of
-  Inductive Constructions, the same family underlying Rocq and Lean.
-- Artemov, S. (2008). "The Logic of Justification", *Review of Symbolic Logic* 1(4). And Artemov, S.
-  and Fitting, M. (2020), *Justification Logic: Reasoning with Reasons*, Cambridge University Press.
-  The warrant calculus is a fragment of the Logic of Proofs.
-- Goguen, J. and Burstall, R. (1992). "Institutions: Abstract Model Theory for Specification and
-  Programming", *Journal of the ACM* 39(1). Signatures, sentences, models, satisfaction, and the
+* Martin-Löf, P. (1984). *Intuitionistic Type Theory.* Bibliopolis. And Coquand, T. and Huet, G.  
+  (1988), "The Calculus of Constructions", *Information and Computation* 76(2–3). The  
+  propositions-as-types substrate; the binding's type theory is a fragment of the Calculus of  
+  Inductive Constructions, the same family underlying Rocq and Lean.  
+* Artemov, S. (2008). "The Logic of Justification", *Review of Symbolic Logic* 1(4). And Artemov, S.  
+  and Fitting, M. (2020), *Justification Logic: Reasoning with Reasons*, Cambridge University Press.  
+  The warrant calculus is a fragment of the Logic of Proofs.  
+* Goguen, J. and Burstall, R. (1992). "Institutions: Abstract Model Theory for Specification and  
+  Programming", *Journal of the ACM* 39(1). Signatures, sentences, models, satisfaction, and the  
   satisfaction condition; comorphisms as truth-preserving translation between logical systems.
 
 **Prior art in the alternatives section.**
 
-- W3C PROV (PROV-DM, PROV-O, PROV-CONSTRAINTS); Verifiable Credentials Data Model; C2PA; in-toto and
-  SLSA; RO-Crate.
-- McGuinness, D. and Pinheiro da Silva, P. — the Proof Markup Language and the Inference Web project.
-  The closest precedent for reasoning-level provenance, and the one whose relationship to the W3C
+* W3C PROV (PROV-DM, PROV-O, PROV-CONSTRAINTS); Verifiable Credentials Data Model; C2PA; in-toto and  
+  SLSA; RO-Crate.  
+* McGuinness, D. and Pinheiro da Silva, P. — the Proof Markup Language and the Inference Web project.  
+  The closest precedent for reasoning-level provenance, and the one whose relationship to the W3C  
   provenance work most needs establishing.
 
 > **Unverified.** Every characterisation in the alternatives section — W3C PROV, the Verifiable
+
 > Credentials Data Model, C2PA, in-toto/SLSA, RO-Crate, and the PML history — is written from the
+
 > editors' understanding and has **not** been checked against primary sources or against those
+
 > specifications' current state. Citation details above are approximate where publication data was not
+
 > confirmed. All of it must be verified before this document is circulated.
