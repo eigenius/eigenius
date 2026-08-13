@@ -258,7 +258,12 @@ fn widen_on_failure_overrides_a_misranking_reranker() {
 /// [`PreferSense`]).
 struct BurySense(&'static str);
 impl SenseRanker for BurySense {
-    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(
+        &self,
+        _sentence: &str,
+        _context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<Vec<usize>>> {
         words
             .iter()
             .map(|w| {
@@ -266,7 +271,8 @@ impl SenseRanker for BurySense {
                 idx.sort_by_key(|&i| w.candidates[i].sense == self.0); // target (true) sorts LAST
                 idx
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .into()
     }
 }
 
@@ -406,7 +412,12 @@ fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>
 /// (others keep seed order) — the CI stand-in for "the context prefers this sense".
 struct PreferSense(&'static str);
 impl SenseRanker for PreferSense {
-    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(
+        &self,
+        _sentence: &str,
+        _context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<Vec<usize>>> {
         words
             .iter()
             .map(|w| {
@@ -414,7 +425,8 @@ impl SenseRanker for PreferSense {
                 idx.sort_by_key(|&i| w.candidates[i].sense != self.0); // target (false) sorts first
                 idx
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .into()
     }
 }
 

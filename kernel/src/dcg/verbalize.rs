@@ -145,8 +145,20 @@ pub fn concept_notes(terms: &[&Exp], vb: &Vb) -> Vec<ConceptNote> {
 }
 
 fn collect_concepts(e: &Exp, vb: &Vb, out: &mut BTreeMap<String, ConceptNote>) {
-    if let Exp::EigonClass(iri) = e {
-        let id = iri.as_str().rsplit(':').next().unwrap_or("").to_string();
+    // Classes AND axioms: a verb or adjective atom is a choice the ranker makes just as much as
+    // a noun concept is, and WordNet gives it a gloss the chain carries. Missing them left the
+    // legend naming «screen» [v02533109] without saying that THAT sense is "test or examine for
+    // the presence of disease or infection" while its rival is "examine in order to test
+    // suitability" — the concept-vs-compound blindness one level down (found 2026-08-13).
+    if let Exp::EigonClass(iri) | Exp::EigonAxiom(iri) = e {
+        // The gloss prints the STRIPPED key (`name_atom` drops the `_t`/`deg_` wrappers), so the
+        // legend must key on that to line up — while the DEFINITION lives at the full IRI.
+        let local = iri.as_str().rsplit(':').next().unwrap_or("");
+        let core = local
+            .strip_prefix("deg_")
+            .or_else(|| local.strip_prefix("std_"))
+            .unwrap_or(local);
+        let id = core.split('_').next().unwrap_or(core).to_string();
         if !id.is_empty() && !out.contains_key(&id) {
             let label = atom_label(&id, vb).unwrap_or_else(|| id.clone());
             out.insert(

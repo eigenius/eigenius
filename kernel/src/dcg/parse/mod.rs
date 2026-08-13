@@ -822,7 +822,10 @@ impl Parser {
                 candidates: c,
             })
             .collect();
-        let rankings = ranker.rank(text, &self.document_context(text), &words);
+        // `None` = the ranker did not answer (failure, or a replay miss). Degrade to the static
+        // cap, exactly as a malformed reply does — and, crucially, the recorder writes nothing,
+        // so the non-answer is not frozen into the draw (D69 §7e).
+        let rankings = ranker.rank(text, &self.document_context(text), &words)?;
         if rankings.len() != words.len() {
             return None; // malformed reply ⇒ degrade to the static cap
         }

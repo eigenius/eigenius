@@ -219,7 +219,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Vec<Vec<usize>> {
+    ) -> Option<Vec<Vec<usize>>> {
         self.0.rank(sentence, context, words)
     }
 }

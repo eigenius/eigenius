@@ -256,7 +256,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Vec<Vec<usize>> {
+    ) -> Option<Vec<Vec<usize>>> {
         self.0.rank(sentence, context, words)
     }
 }
@@ -657,7 +657,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Vec<Vec<usize>> {
+    ) -> Option<Vec<Vec<usize>>> {
         self.0.rank(sentence, context, words)
     }
 }
@@ -4045,7 +4045,12 @@ fn probe_restrictor_class_labels() {
     let cuis = std::env::var("EIGENIUS_PROBE_CUIS")
         .unwrap_or_else(|_| "C2825141,C0037088,C0302523,C0700325,C5890437".to_string());
     for cui in cuis.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-        let iri = Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).unwrap();
+        // Bare `C…` is a UMLS CUI; anything namespace-qualified (`wn:n00029677`) is taken as
+        // given, so a WordNet synset can be probed with the same instrument.
+        let iri = match cui.split_once(':') {
+            Some((ns, local)) => Iri::parse(&format!("urn:eigenius:{ns}:{local}")).unwrap(),
+            None => Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).unwrap(),
+        };
         eprintln!(
             "{cui}: {}",
             eigenius_kernel::dcg::resource_label(&iri, &head)
@@ -4084,6 +4089,41 @@ fn describe_probe_value(
         },
         Value::String(s) => format!("{s:?}"),
         other => format!("{other:?}"),
+    }
+}
+
+/// D69 §7f — every lexical entry a SURFACE resolves to, with its grammatical category.
+///
+/// Answers "the sense ranker kept concept X, so why is X not in the parse?" — which is a
+/// different question from "is X in the lexicon". Found this way (2026-08-13): «screens» offers
+/// C0220908 (the screening-procedure concept), the ranker KEEPS it, and the parse still uses only
+/// the projection-surface and CRT-display nouns.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_PROBE_FORM=screens \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_form_entries -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed lexical-entry probe (D69); --ignored --nocapture"]
+fn probe_form_entries() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    for form in std::env::var("EIGENIUS_PROBE_FORM")
+        .unwrap_or_else(|_| "screens".to_string())
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let rows = index.debug_form_entries(form, &lem);
+        eprintln!("\n«{form}» — {} entries", rows.len());
+        for (closed, cat, sense) in rows {
+            eprintln!(
+                "   {:<34} {:<8} {cat}",
+                sense,
+                if closed { "closed" } else { "open" }
+            );
+        }
     }
 }
 

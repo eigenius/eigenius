@@ -411,17 +411,39 @@ mod anthropic {
     use schemars::JsonSchema;
     use serde::Deserialize;
 
-    /// The model's structured reply. `abstain: true` ⇒ no selection (the sentence stays
+    /// What the ranker concluded. A STRING ENUM, not a flag beside a mandatory `chosen`: the old
+    /// shape required an index even when abstaining, so "none of these is right" could only be
+    /// said while also naming a winner. Measured consequence (D69 §7d): on a pool where every
+    /// reading was unfaithful, three different models all chose and justified, one of them
+    /// reporting `abstain: false` alongside a full 19-deep ranking.
+    #[derive(Deserialize, JsonSchema, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    enum Verdict {
+        /// One candidate faithfully expresses the sentence; `chosen` names it.
+        Chose,
+        /// NO candidate does. A correct answer, not a failure — `missing_sense` says what the
+        /// candidate set lacks.
+        NoneFaithful,
+    }
+
+    /// The model's structured reply. `none_faithful` ⇒ no selection (the sentence stays
     /// Ambiguous); otherwise `chosen` indexes the candidate list.
     #[derive(Deserialize, JsonSchema)]
     struct ReadingSelectionReply {
-        /// True when no reading can be confidently identified as the intended one.
-        abstain: bool,
-        /// The index of the reading that expresses the sentence's intended meaning in context.
-        chosen: usize,
-        /// One sentence: why this reading (or why abstaining).
+        /// `chose` when one candidate faithfully expresses the sentence; `none_faithful` when
+        /// none does.
+        verdict: Verdict,
+        /// The index of the faithful reading. Required when `verdict` is `chose`; omit otherwise.
+        chosen: Option<usize>,
+        /// When `verdict` is `none_faithful`: which sense or structure the candidates lack, e.g.
+        /// "no disease sense of «cancer» — only the crab genus and the astrological sign".
+        /// Recorded as the diagnostic that points at the gap.
+        missing_sense: Option<String>,
+        /// One sentence: why this reading, or why none is faithful.
         rationale: String,
-        /// The remaining reading indices in preference order, most plausible first.
+        /// The remaining reading indices in preference order, most plausible first. May be empty
+        /// — a full ranking of readings you did not discriminate is noise, not information.
+        #[serde(default)]
         runners_up: Vec<usize>,
     }
 
@@ -552,19 +574,36 @@ mod anthropic {
                 );
             }
             let reply = self.ask(&prompt)?;
-            if reply.abstain || reply.chosen >= candidates.len() {
-                return None; // abstention, or an out-of-range reply from untrusted input
+            // "No candidate is faithful" is a RESULT, and its diagnostic is the valuable half:
+            // it names the sense the pool lacks, which is the upstream bug (a sense that exists
+            // in the lexicon but never entered this sentence's candidate set — D69 §7d).
+            if reply.verdict == Verdict::NoneFaithful {
+                eprintln!(
+                    "reading-ranker: NONE FAITHFUL on «{}» — {}{}",
+                    ctx.sentence.trim(),
+                    reply.rationale,
+                    reply
+                        .missing_sense
+                        .as_deref()
+                        .map(|m| format!("  [missing: {m}]"))
+                        .unwrap_or_default()
+                );
+                return None;
+            }
+            let chosen = reply.chosen?; // `chose` without an index is malformed ⇒ fail closed
+            if chosen >= candidates.len() {
+                return None; // out-of-range index from untrusted input
             }
             let n = candidates.len();
             let mut seen = vec![false; n];
-            seen[reply.chosen] = true;
+            seen[chosen] = true;
             let runners_up: Vec<usize> = reply
                 .runners_up
                 .into_iter()
                 .filter(|&i| i < n && !std::mem::replace(&mut seen[i], true))
                 .collect();
             Some(ReadingSelection {
-                chosen: reply.chosen,
+                chosen,
                 rationale: reply.rationale,
                 runners_up,
             })

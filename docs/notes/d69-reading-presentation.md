@@ -275,6 +275,106 @@ from the negation: the edited `claim_1` is the intact proposition with a trailin
 the negated sentence because it could not see the concept. `run.sh --reparse` passes end to end
 (intact COMMITTED, edited REJECTED) with all four stages replaying.
 
+## 7d. Cross-model probe on the crab sentence (`2026-08-13`)
+
+The exact prompt (captured and verified in `experiments/parsing/results/prompt-sentence6-2026-08-13.txt`)
+was put to three different models. «WRN was dispensable in models of microsatellite-stable
+cancers.», 20 readings = 2 structures (WRN gene / WRN protein) × 2 cancer senses (crab genus /
+astrological sign) × 5 "stable" adjectives. **No faithful reading exists**: the disease sense and
+the model-system sense are absent from this pool.
+
+| | chose | WRN | cancers | "stable" | abstained |
+|---|---|---|---|---|---|
+| model 1 (the recorded draw) | [12] | gene | crab | a02274089 "firm and dependable; *the economy is stable*" | no |
+| model 2 | [10] | gene | crab | a02290998 "resistant to change of position; *a stable ladder*" | no |
+| model 3 | [10] | gene | crab | (not stated) | no |
+
+**Unanimous where evidence exists, arbitrary where it does not.** All three take the GENE over the
+protein — the substantive call — and two cite the prior sentence's «WRN gene» for consistency, so
+the discourse threading is working. All three take the crab, because nothing better is offered.
+They split only on which non-genomic "stable" to attach; none of the five is *microsatellite*
+stability.
+
+**The intra-structure choice looks POSITIONAL, not semantic.** [10] is the first reading of the
+gene structure and two of three picked it; model 3's `runners_up` is literally `11,12,…,19,0,…,9`
+— sequential order within the preferred structure, then the other structure. That is what a
+ranker emits when it is discriminating structures and not senses. **This is the empirical case for
+§5 (D69-B):** ten near-identical lines per structure invite a positional pick, and presenting the
+sense assignment as an explicit small table is the fix. Slice 4 now has a measurement behind it,
+not just prompt economy.
+
+**Three failures to abstain.** The prompt offers abstention but discourages it — "*prefer choosing
+when one reading is clearly best*". Facing a pool where every option is wrong, all three chose and
+justified. A two-model result would be an anecdote; three is a defect in the instruction. Fix:
+make "no candidate faithfully expresses the sentence" a first-class outcome, and say that a
+reading whose concepts contradict their own definitions is not a candidate.
+
+**All three rationales are DISEASE rationales — none of them thinks it is picking a crab.**
+Model 1: "n01977832, the biological disease concept, not the astrological sign". Model 2: "avoids
+the astrological sense of Cancer". Model 3: "the WRN gene's essentiality … in cancer cell line
+models". Read together they show what actually happened, and it is not evidence-overriding: the
+two options are LABELLED IDENTICALLY in the candidate lines — «Cancer» [n01977832] and «Cancer»
+[n09752657] — one is transparently astrology, so the models eliminated it and took the survivor to
+be the disease sense. Model 1's "biological" is even literally true of Cancridae; only "disease"
+is false. Under a forced choice, that is sound reasoning about an unsound pool.
+
+Which relocates the defect a second time. It is not the ranker's judgment, and it is not (here)
+the legend's absence. It is that **the pool offers two senses sharing one label, no faithful
+option, and an instruction that discourages saying so.** The disease sense n14239918 is labelled
+«cancer» lowercase and is not in this pool at all. Presentation fixes that follow: an explicit
+"none of these readings is faithful" affordance (not a reluctant `abstain` flag), and a label
+collision — two candidates whose labels match but whose ids differ — treated as a signal to
+surface the definitions inline rather than only in the legend.
+
+## 7e. The crab was a FROZEN FAILURE in the sense-rank draw (`2026-08-13`)
+
+Raised in review: "crab and the zodiac sign shouldn't have made it into the parse to begin with."
+Correct, and the upstream stage is where the defect is.
+
+**The measurement.** In `ranks/2026-07-29-demonstratives.json`, «WRN was dispensable in models of
+microsatellite-stable cancers.» carries `order = 0..N-1` for EVERY word — all 20 senses of
+«models», all 7 of «cancers», nothing eliminated, nothing even reordered. Across the file's 422
+word-entries, 80% are proper subsets (real elimination) and exactly **one sentence of 62** is
+identity throughout: this one. And identity-for-everything is precisely what the code returned on
+failure:
+
+```rust
+let Some(reply) = self.ask(&prompt) else { return identity(); };
+if reply.rankings.len() != words.len() { return identity(); }
+```
+
+So a failed call was recorded as a ranking. On replay the key is FOUND, so it counts as a hit,
+`assert_replay_faithful` passes at 62/0, and the run reports clean. The crab and the astrological
+sign reached the reading ranker because for this one sentence the sense ranker never ran, and the
+fallback keeps everything. The prompt was never the problem — it shows each candidate's WordNet
+definition, and re-asked, the live ranker keeps **2 of 7** senses for «cancers»: `n14239918` "any
+malignant growth or tumor" and its UMLS twin C0006826, dropping the crab, the zodiac sign and the
+rest; and **5 of 20** for «models», dropping `n00898804` "the act of representing something". That
+sentence's forest halves, 20 readings → 10.
+
+**Three fixes, all landed.**
+
+1. **`SenseRanker::rank` returns `Option`.** A transport failure, a malformed reply, or a replay
+   miss is a NON-ANSWER, structurally distinct from "I ranked and kept everything". The caller
+   falls back to seed order exactly as before; the difference is that the RECORDER now writes
+   nothing, so a re-run asks again instead of inheriting the failure. Locked by
+   `a_ranker_that_does_not_answer_records_nothing`.
+2. **Identity answers are flagged at record time.** An answer that eliminates nothing anywhere is
+   either a ranker declining to work or a failure that slipped through some other impl's
+   fallback; the recorder says so on stderr while the run can still be repeated.
+3. **Re-asked live** — the result above, obtained through the real CLI path without touching any
+   committed draw.
+
+**Consequence for the open adjudications.** Item 6's crab is not a ranker error and not a lexicon
+gap: the disease sense exists, is chosen elsewhere on the same page, and was excluded from this
+sentence's pool by a recorded failure. The reading is still `wrong`, but the finding is upstream.
+
+**Not yet done — a re-baseline event.** The committed draw still contains the poisoned entry, and
+`baseline.json`'s parse metrics (226 readings, 144 skeletons) are calibrated ON it. Re-recording
+the page fixes the entry and moves those totals (that unit alone drops ~10 readings), so it needs
+`baseline.json` AND `selection-baseline.json` re-derived together with provenance. Proposed, not
+performed.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×
