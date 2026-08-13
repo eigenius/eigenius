@@ -16,7 +16,7 @@ sha2 = "0.10"
 [features]
 # The contextual sense reranker. RECORD needs it; REPLAY does not (a recorded
 # `ranks.json` replays with no LLM at all), which is what the demo ships with.
-use-llm = ["eigenius-kernel/use-llm"]
+use-llm = ["eigenius-kernel/use-llm", "eigenius-reasoning/use-llm"]
 
 [[bin]]
 name = "prose-to-eigon"

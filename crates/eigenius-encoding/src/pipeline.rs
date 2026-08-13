@@ -93,12 +93,27 @@ pub struct Args {
     /// experiment: sense elimination is off, so the pins may not match).
     #[arg(long)]
     ranks: Option<PathBuf>,
-    /// A recorded anaphora-proposal draw (`proposals.json`) to REPLAY (D67 §3) — resolves
-    /// referent holes through the discourse loop, deterministically. Replay-only here; record a
-    /// draw with the close-out harness's `EIGENIUS_PROPOSALS` arm. Omit ⇒ no anaphora resolves
-    /// (open parses stay Open — and abort the emission, which is fail-closed).
+    /// An anaphora-proposal draw (`proposals.json`) — D64/D67 §3, resolves referent holes
+    /// through the discourse loop. **Exists → REPLAY** (deterministic, no LLM); **absent →
+    /// RECORD** a live draw into it (needs `use-llm` + a key). Omit ⇒ no anaphora resolves (open
+    /// parses stay Open — and abort the emission, which is fail-closed).
     #[arg(long)]
     proposals: Option<PathBuf>,
+    /// A recorded discourse-KIND draw (`kinds.json`) — D68. Installing it turns on the CLAIM
+    /// LANDER: each closed sentence's claim is graded and landed INSIDE the discourse loop, so a
+    /// later demonstrative («these findings») can bind to it. **Exists → REPLAY** (deterministic);
+    /// **absent → RECORD** a live draw into it (needs `use-llm` + a key). Omit ⇒ no lander: claims
+    /// are emitted at the end as before and no claim is available as an antecedent.
+    #[arg(long)]
+    kinds: Option<PathBuf>,
+    /// ESL file(s) to chain-load onto the working copy's `main` before parsing, in order —
+    /// vocabulary the parse needs that the LEXICON snapshot does not carry. Repeatable. The
+    /// claim-kind machinery needs exactly this: a demonstrative's restrictor («these findings»)
+    /// is vetoed against the claim's kind class, and that class plus its lexicon alignment
+    /// (`ontologies/encoding/encoding.esl`, `ontologies/encoding/claim-kind-alignment.esl`) are
+    /// not in the snapshot. Classes only — a lexical entry here would change the forest.
+    #[arg(long = "chain-load")]
+    chain_load: Vec<PathBuf>,
     /// IRI prefix for the emitted resources.
     #[arg(long, default_value = "urn:eigenius:demo:prose")]
     ns: String,
@@ -233,18 +248,94 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         }
     };
 
-    // Anaphora arm (D67 §3): replay-only. Without it no referent hole resolves.
-    let proposer: Box<dyn Proposer> = match &args.proposals {
-        Some(p) => {
+    // Anaphora arm (D64/D67 §3), same three-arm discipline as every other recorded stage.
+    // Without it no referent hole resolves.
+    // RECORD mode is decided by the same condition the arm below matches on (a named draw that
+    // does not exist yet), so it needs no mutation — and stays warning-clean in the build without
+    // a live proposer, where that arm returns an error instead.
+    let proposal_recording = matches!(&args.proposals, Some(p) if !p.exists());
+    let inner_proposer: Box<dyn Proposer> = match &args.proposals {
+        Some(p) if p.exists() => {
             let r = ReplayProposer::load(p).map_err(|e| format!("read {}: {e}", p.display()))?;
             eprintln!("proposals:  REPLAY {} (deterministic, no LLM)", p.display());
             Box::new(r)
         }
+        Some(p) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(live) = eigenius_kernel::dcg::resolver_llm::AnthropicProposer::from_env()
+                else {
+                    return Err(format!(
+                        "--proposals {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is                          unset",
+                        p.display()
+                    ));
+                };
+                eprintln!(
+                    "proposals:  AnthropicProposer (live) — RECORDING to {}",
+                    p.display()
+                );
+                Box::new(live) as Box<dyn Proposer>
+            }
+            #[cfg(not(feature = "use-llm"))]
+            return Err(format!(
+                "--proposals {} does not exist, and this binary has no live proposer (built                  without --features use-llm)",
+                p.display()
+            ));
+        }
         None => Box::new(NoProposer),
     };
-    let binding_authority = args.proposals.as_ref().map(|_| "binding_replay");
+    // The recorder wraps whichever arm (memoizing), so a run always leaves the draw that
+    // reproduces it; a replayed draw re-recorded is a no-op copy.
+    let proposer = eigenius_kernel::dcg::RecordingProposer::new(inner_proposer);
+    let binding_authority = args.proposals.as_ref().map(|_| {
+        if proposal_recording {
+            "binding_proposer"
+        } else {
+            "binding_replay"
+        }
+    });
 
     let (head, backend) = open_head_and_backend(&args.snapshot)?;
+    // Chain-load the extra vocabulary onto the working copy's main (§7-2: build the layer ON the
+    // storage it is persisted to). The working copy is disposable, so this never touches the
+    // source snapshot.
+    let mut head = head;
+    for path in &args.chain_load {
+        let src =
+            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("chain-load");
+        let resources = eigenius_kernel::esl::compile_against_layer(&src, &head).map_err(|e| {
+            format!(
+                "{} does not compile against the chain: {e:?}",
+                path.display()
+            )
+        })?;
+        let mut b =
+            eigenius_kernel::layer::LayerBuilder::new(name, Some(std::sync::Arc::clone(&head)));
+        for r in resources {
+            b.add_resource(r)
+                .map_err(|e| format!("{}: {e:?}", path.display()))?;
+        }
+        let layer = std::sync::Arc::new(b.build(
+            eigenius_kernel::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend)),
+        ));
+        use eigenius_kernel::commit::LayerPersister;
+        let info =
+            eigenius_kernel::commit::BackendPersister::new(Some(std::sync::Arc::clone(&backend)))
+                .persist("main", &layer)
+                .map_err(|e| format!("persist {}: {e:?}", path.display()))?;
+        if !info.branch_advanced {
+            return Err(format!(
+                "chain-load {} did not advance main",
+                path.display()
+            ));
+        }
+        eprintln!("chain-load: {} → {}", path.display(), layer.id());
+        head = layer;
+    }
     let lem = MorphyLemmatizer::load(&args.dict)
         .map_err(|e| format!("load Morphy from {}: {e}", args.dict.display()))?;
     // The doc layer goes through the PERSISTENT path (D67 §2), committed to a `doc-<id>` branch
@@ -272,15 +363,102 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         }
     };
 
+    // The CLAIM LANDER (D68): with a kind draw, each closed sentence's claim is graded and landed
+    // INSIDE the discourse loop, which is what makes it available as an antecedent to a later
+    // demonstrative. The kinds arm mirrors every other recorded stage (exists → replay, absent +
+    // live → record); the recorder wraps whichever arm, so a run always leaves its draw.
+    let kind_classifier: Option<Box<dyn eigenius_reasoning::KindClassifier>> = match &args.kinds {
+        Some(p) if p.exists() => {
+            let r = eigenius_reasoning::ReplayKindClassifier::load(p)
+                .map_err(|e| format!("read {}: {e}", p.display()))?;
+            eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
+            Some(Box::new(r))
+        }
+        Some(p) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&doc) else {
+                    return Err(format!(
+                        "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
+                        p.display()
+                    ));
+                };
+                eprintln!(
+                    "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
+                    p.display()
+                );
+                Some(Box::new(c) as Box<dyn eigenius_reasoning::KindClassifier>)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            return Err(format!(
+                "--kinds {} does not exist, and this binary has no live classifier (built \
+                 without --features use-llm)",
+                p.display()
+            ));
+        }
+        None => None,
+    };
+    let kind_recorder = kind_classifier.map(eigenius_reasoning::RecordingKindClassifier::new);
+    // ONE claim identity: the lander names claims exactly as the emitter will, so the
+    // `enc:AnaphorBinding` this run records points at resources this run's artifact contains.
+    let lander = kind_recorder.as_ref().map(|k| {
+        eigenius_reasoning::DerivedClaimLander::new(&doc_id, k).with_emission_namespace(&args.ns)
+    });
+
     let mut pipeline = InProcessPipeline::new(head, &lem, &NoAbbreviationProposer, &proposer)
         .with_parser_setup(&setup)
         .with_storage(backend, &doc_id);
     if let Some(r) = &ranker {
         pipeline = pipeline.with_reading_ranker(r);
     }
+    if let Some(l) = &lander {
+        pipeline = pipeline.with_claim_lander(l);
+    }
     let (encoding, _doc_layer) = pipeline
         .encode_with_layer(&doc)
         .map_err(|e| format!("{e}"))?;
+    // Flush the proposal draw before any fail-closed abort below.
+    if proposal_recording {
+        if let Some(p) = &args.proposals {
+            let n = proposer
+                .write(p)
+                .map_err(|e| format!("write {}: {e}", p.display()))?;
+            eprintln!("proposals:  recorded {n} proposal(s) → {}", p.display());
+        }
+    }
+    // Flush the kind draw before any fail-closed abort below.
+    if let (Some(rec), Some(p)) = (&kind_recorder, &args.kinds) {
+        if !p.exists() {
+            let n = rec
+                .write(p)
+                .map_err(|e| format!("write {}: {e}", p.display()))?;
+            eprintln!("kinds:      recorded {n} verdict(s) → {}", p.display());
+        }
+    }
+    // The lander's clusters, keyed by claim IRI — the artifact emits THESE (they carry the
+    // discourse kind an anaphor's restrictor was checked against).
+    let landed: std::collections::BTreeMap<
+        String,
+        (
+            eigenius_kernel::ontology::resource::Resource,
+            eigenius_kernel::ontology::resource::Resource,
+        ),
+    > = match &lander {
+        Some(l) => {
+            let clusters = l.take_landed();
+            eprintln!("claims:     {} landed in-loop", clusters.len());
+            clusters
+                .into_iter()
+                .filter_map(|c| {
+                    let mut it = c.resources.into_iter();
+                    let claim = it.next()?;
+                    let trace = it.next()?;
+                    Some((claim.id()?.as_str().to_string(), (claim, trace)))
+                })
+                .collect()
+        }
+        None => Default::default(),
+    };
     // A RECORD run leaves its ranks artifact even if a pin then fails to match below — the
     // recording is exactly what a re-run needs to diagnose the mismatch deterministically.
     recording.flush()?;
@@ -446,6 +624,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                 .map(|r| r.bindings.clone())
                 .unwrap_or_default(),
             binding_authority,
+            cluster: landed.get(&format!("{}:claim_{n}", args.ns)).cloned(),
         });
     }
 

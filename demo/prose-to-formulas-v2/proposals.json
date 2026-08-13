@@ -1,0 +1,62 @@
+[
+  {
+    "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",
+    "document_sha256": "0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c",
+    "prior_selections": [
+      {
+        "ordinal": 0,
+        "gloss": "a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human"
+      },
+      {
+        "ordinal": 1,
+        "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      }
+    ],
+    "hole_var": "$demref$0_0",
+    "hole_ty": "C2825141",
+    "hole_kind": "EntityRef",
+    "candidates": [
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_2",
+        "surface": "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      }
+    ],
+    "proposal": {
+      "ranked": [
+        0
+      ],
+      "rationale": "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim from sentence 1), it is the top-ranked antecedent as the closest and most recent of the two findings being summarized.",
+      "confidence": 0.85
+    }
+  },
+  {
+    "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",
+    "document_sha256": "0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c",
+    "prior_selections": [
+      {
+        "ordinal": 0,
+        "gloss": "a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human"
+      },
+      {
+        "ordinal": 1,
+        "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      }
+    ],
+    "hole_var": "$demref$0_0",
+    "hole_ty": "n09279458",
+    "hole_kind": "EntityRef",
+    "candidates": [
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_2",
+        "surface": "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      }
+    ],
+    "proposal": {
+      "ranked": [
+        0
+      ],
+      "rationale": "\"These findings\" is a plural anaphor referring to the accumulated findings from both preceding sentences, and the most recent discourse referent (claim 2, sentence 1) is the closest and most salient antecedent representing those findings collectively.",
+      "confidence": 0.85
+    }
+  }
+]

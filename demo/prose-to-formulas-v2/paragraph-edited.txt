@@ -1,0 +1,1 @@
+MSI cancer models did not have the exonuclease activity of WRN. MSI cancer models required the helicase activity of WRN. These findings show that WRN is a vulnerability of MSI cancer models.

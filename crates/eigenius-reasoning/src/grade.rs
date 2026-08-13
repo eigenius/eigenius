@@ -85,8 +85,10 @@ pub enum Warrant {
 }
 
 impl Warrant {
-    /// The grade this warrant projects to.
-    fn grade(self) -> Grade {
+    /// The grade this warrant projects to. Public because a caller that builds a cluster through
+    /// [`DerivedClaimGrader::cluster`] directly (to control the IRIs) still has to state the
+    /// grade, and it must be THIS projection, not a second hand-written mapping.
+    pub fn grade(self) -> Grade {
         match self {
             Warrant::Declared => Grade::Declared,
             Warrant::Derived => Grade::Derived,

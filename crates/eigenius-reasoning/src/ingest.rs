@@ -53,6 +53,9 @@ pub struct DerivedClaimLander<'a> {
     doc_id: String,
     declared_by: String,
     timestamp: String,
+    /// When set, claims are named `{ns}:claim_{ordinal+1}` instead of the trait path's
+    /// `urn:eigenius:doc:{doc_id}:s{ordinal}:claim` — see [`Self::with_emission_namespace`].
+    emission_ns: Option<String>,
     classifier: &'a dyn KindClassifier,
     landed: std::cell::RefCell<Vec<GradedClaim>>,
 }
@@ -63,9 +66,25 @@ impl<'a> DerivedClaimLander<'a> {
             doc_id: doc_id.to_string(),
             declared_by: "encoding-pipeline".to_string(),
             timestamp: "2026-08-03T00:00:00Z".to_string(),
+            emission_ns: None,
             classifier,
             landed: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// Name landed claims the way the EMITTER will name them (`{ns}:claim_{n}`, 1-based — the
+    /// `emit_document` convention).
+    ///
+    /// A claim landed in-loop becomes an anaphora ANTECEDENT, and the binding records the
+    /// antecedent by IRI. If the lander and the emitter name the same claim differently, the
+    /// artifact's `enc:AnaphorBinding` points at a resource the artifact does not contain — a
+    /// dangling reference that no validation catches, because the emitted document simply lacks
+    /// the target. One claim, one identity: a driver that emits its own document sets this so
+    /// both halves agree. Without it the trait's own naming stands (ingestion commits the
+    /// clusters the lander built, so there is no second namer).
+    pub fn with_emission_namespace(mut self, ns: &str) -> Self {
+        self.emission_ns = Some(ns.to_string());
+        self
     }
 
     /// The accumulated claim clusters, in landing order (drains the lander).
@@ -91,25 +110,48 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
         if kinds.is_empty() {
             kinds = vec![Iri::parse(KIND_ASSERTION).expect("static kind IRI")];
         }
-        let stem = format!("urn:eigenius:doc:{}:s{}", self.doc_id, ordinal);
         let provenance = format!(
             "eigenius-reasoning lander: DCG parse (D63) of document {}, sentence {ordinal} \
              «{sentence}»",
             self.doc_id
         );
-        let claim = DerivedClaimGrader
-            .grade(
-                item.sem(),
-                &ClaimSource {
-                    stem: &stem,
-                    warrant: Warrant::Derived,
-                    declared_by: &self.declared_by,
-                    timestamp: &self.timestamp,
-                    provenance: &provenance,
-                    kind_classes: &kinds,
-                },
-            )
-            .ok()?; // un-gradable ⇒ nothing lands (fail closed, run breaks)
+        let claim = match &self.emission_ns {
+            // The emitter's identity: `{ns}:claim_{n}` / `{ns}:trace_{n}`, 1-based. Built through
+            // the SAME `cluster()` constructor the trait path uses, so the shape is identical and
+            // only the naming differs.
+            Some(ns) => {
+                let n = ordinal + 1;
+                let (claim, trace) = DerivedClaimGrader::cluster(
+                    &format!("{ns}:claim_{n}"),
+                    &format!("{ns}:trace_{n}"),
+                    item.sem(),
+                    &provenance,
+                    &self.timestamp,
+                    &kinds,
+                )
+                .ok()?;
+                let claim_iri = claim.id().expect("cluster sets the claim id").clone();
+                GradedClaim {
+                    resources: vec![claim, trace],
+                    claim_iri,
+                    gate_sentence: None,
+                    grade: Warrant::Derived.grade(),
+                }
+            }
+            None => DerivedClaimGrader
+                .grade(
+                    item.sem(),
+                    &ClaimSource {
+                        stem: &format!("urn:eigenius:doc:{}:s{}", self.doc_id, ordinal),
+                        warrant: Warrant::Derived,
+                        declared_by: &self.declared_by,
+                        timestamp: &self.timestamp,
+                        provenance: &provenance,
+                        kind_classes: &kinds,
+                    },
+                )
+                .ok()?, // un-gradable ⇒ nothing lands (fail closed, run breaks)
+        };
         let resource = claim
             .resources
             .iter()

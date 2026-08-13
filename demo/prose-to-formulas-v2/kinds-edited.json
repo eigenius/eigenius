@@ -1,0 +1,26 @@
+[
+  {
+    "sentence": "MSI cancer models did not have the exonuclease activity of WRN.",
+    "gloss": "not (a Microsatellite Instability cancer model have the exonuclease activity of WRN protein, human)",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a directly measured/detected property of MSI cancer models (the absence of WRN exonuclease activity), which is a primary empirical datum that the subsequent \"These findings…\" sentence draws upon as evidence — making it an observation rather than an interpreted result."
+  },
+  {
+    "sentence": "MSI cancer models required the helicase activity of WRN.",
+    "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence reports a result of the document's own investigation (that MSI cancer models specifically required WRN's helicase activity), and the subsequent sentence explicitly refers back to it — along with the preceding sentence — as \"these findings,\" confirming the discourse role assigned to it by the document itself."
+  },
+  {
+    "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",
+    "gloss": "claim show WRN protein, human is a vulnerability of a Microsatellite Instability Cancer Model",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence explicitly uses \"These findings show…\" to synthesize the results of the document's own investigation (the two preceding empirical claims about WRN's exonuclease and helicase activities), presenting a concluded result rather than a raw observation, category assignment, or speculative claim."
+  }
+]

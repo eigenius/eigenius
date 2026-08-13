@@ -77,6 +77,16 @@ pub struct ParsedSentence<'a> {
     /// The `enc:BindingAuthority` local name (`binding_recency` / `binding_proposer` /
     /// `binding_replay`) behind [`Self::bindings`]. `None` omits `enc:bound_by`.
     pub binding_authority: Option<&'a str>,
+    /// The claim cluster the CLAIM LANDER built for this sentence in-loop, when one is installed
+    /// (`claim`, `trace`).
+    ///
+    /// Emitting the lander's resources rather than rebuilding them is not an optimization: the
+    /// landed claim carries its DISCOURSE KIND as a second `is_a` class, and a later sentence's
+    /// proposition may USE that claim as a term (an anaphor resolved to it). A rebuilt cluster
+    /// has no kind, so the claim no longer inhabits the lexicon class the kind aligns to, and
+    /// the artifact fails to load — `TypeExprIllTyped: … does not inhabit lexicon:Entity`,
+    /// witnessed 2026-08-12. One claim, one resource.
+    pub cluster: Option<(Resource, Resource)>,
 }
 
 /// Why a sentence did not encode — mapped to the committed `enc:CutKind` individuals. The
@@ -172,18 +182,21 @@ pub fn emit_document(
              chars {}..{} (source sha256 {source_sha256})",
             s.span.0, s.span.1
         );
-        let (mut claim, trace) = DerivedClaimGrader::cluster(
-            &claim_iri,
-            &format!("{ns}:trace_{n}"),
-            s.item.sem(),
-            &provenance,
-            timestamp,
-            &[],
-        )
-        .map_err(|e| EmitError::Encode {
-            ordinal: n,
-            detail: e.to_string(),
-        })?;
+        let (mut claim, trace) = match &s.cluster {
+            Some((claim, trace)) => (claim.clone(), trace.clone()),
+            None => DerivedClaimGrader::cluster(
+                &claim_iri,
+                &format!("{ns}:trace_{n}"),
+                s.item.sem(),
+                &provenance,
+                timestamp,
+                &[],
+            )
+            .map_err(|e| EmitError::Encode {
+                ordinal: n,
+                detail: e.to_string(),
+            })?,
+        };
         claim.set(
             iri(&format!("{ENC}:from_unit")),
             Value::ResourceRef(iri(&scoped_iri)),
@@ -494,6 +507,7 @@ mod tests {
             selection,
             bindings: Vec::new(),
             binding_authority: None,
+            cluster: None,
         }
     }
 
