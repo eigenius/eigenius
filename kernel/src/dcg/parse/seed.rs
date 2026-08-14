@@ -269,6 +269,9 @@ impl Parser {
                 //      grammatical core. A real fix needs a POSITIVE closed-class marker (or a
                 //      category-shape test), not the absence of a lexicon tag.
                 let mut eff = cap;
+                // (The cut below is `apply_sense_cap`'s body, kept inline here for the commentary;
+                // `apply_sense_cap` is the same computation, exposed so the widen ladder can ask
+                // "what would survive for this word?" without re-deriving it.)
                 // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
                 // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
                 // grows to admit some word's deeper RANKED sense, so a sentence that widens for ONE word
@@ -434,6 +437,12 @@ impl Parser {
     /// Empty when no base resolves.
     fn derived_adjective_items(&self, surface: &str) -> Vec<Item> {
         let s = surface.trim().to_lowercase();
+        // A hyphenated surface whose SPACE form is a real entry denotes THAT — the multiword
+        // reading wins over the right-headed-head identity rule, which would drop the left half
+        // (D69 §7h). `candidate_lemmas` seeds the multiword entry for this same span.
+        if s.contains('-') && !self.lex.entries_for(&s.replace('-', " ")).is_empty() {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         // Slice 1 (identity): reuse the base adjective's own items.
         for b in adjective_bases(&s) {
@@ -1046,6 +1055,49 @@ pub(super) fn dedup_same_concept(entries: &mut FormEntries) {
         i += 1;
         keep
     });
+}
+
+/// The sense cap as the seed applies it: how many of `entries` survive, and which.
+///
+/// Exposed so the widen ladder can ask what a word is left with WITHOUT re-deriving the rule
+/// (D69 §7g). `eff = min(cap, ranked)` — the ranker's elimination cut — then a sort by
+/// [`sense_cap_key`] and a truncate.
+pub(super) fn apply_sense_cap(
+    entries: &mut Vec<LexEntry>,
+    ranks: Option<&BTreeMap<String, u32>>,
+    cap: usize,
+) {
+    let mut eff = cap;
+    if let Some(r) = ranks {
+        let ranked = entries
+            .iter()
+            .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
+            .count();
+        if ranked > 0 {
+            eff = eff.min(ranked);
+        }
+    }
+    if entries.len() > eff {
+        entries.sort_by_key(|e| sense_cap_key(e, ranks));
+        entries.truncate(eff);
+    }
+}
+
+/// The head constructor of a category — `cat_n`, `cat_np`, `fwd`, `bwd`, … — as a coarse
+/// "what slot could this fill" key (D69 §7g).
+pub(super) fn cat_shape(cat: &Exp) -> String {
+    let mut head = cat;
+    while let Exp::App(f, _) = head {
+        head = f;
+    }
+    match head {
+        Exp::InductiveType(d, _) => d.iri.as_str().rsplit(':').next().unwrap_or("?").to_string(),
+        Exp::InductiveCtor(_, n, _) => n.clone(),
+        Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
+            i.as_str().rsplit(':').next().unwrap_or("?").to_string()
+        }
+        other => format!("{other:?}").chars().take(16).collect(),
+    }
 }
 
 pub(super) fn sense_cap_key(

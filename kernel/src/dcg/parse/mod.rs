@@ -458,6 +458,20 @@ impl Parser {
                 candidates.insert(lemma.trim().to_lowercase());
             }
         }
+        // **Hyphen-joined multiword** (D69 §7h): a hyphenated surface whose SPACE form is a real
+        // lexical entry denotes that entry. The corpus writes «microsatellite-stable»; the lexicon
+        // holds «microsatellite stable» = C4321493 «Microsatellite Stable». Without this the token
+        // falls to the right-headed hyphen-compound rule, which treats the left half as transparent
+        // and reads the term as plain «stable» — the qualifier that carries the entire content
+        // silently disappears from the proposition (measured 2026-08-13: «microsatellite» occurs in
+        // none of that sentence's 10 readings). Gated on the entry EXISTING, so it never invents a
+        // span reading: `double-stranded` has no multiword entry and keeps the head rule.
+        if surface.contains('-') {
+            let spaced = surface.trim().to_lowercase().replace('-', " ");
+            if !self.lex.entries_for(&spaced).is_empty() {
+                candidates.insert(spaced);
+            }
+        }
         // Domain-plural fallback (D63 §5.1, [`Lemmatizer::regular_plural_stem`]): a DOMAIN-lexicon plural
         // the (validated) lemmatizer can't reduce (`biomarkers` — `biomarker` ∉ WordNet) gets its crude
         // singular stem here, so a real entry for that singular is offered a PLURAL reading (stem ≠
@@ -632,9 +646,29 @@ impl Parser {
         if !closed.is_empty() || !open.is_empty() {
             return (closed, open);
         }
-        // Pass 2 — the static-rank fallback (only when a ranker actually reordered, and the gap could
-        // be a pruning artifact rather than an OOV miss).
         if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+            // Pass 1b — TARGETED RECOVERY (D69 §7g). Pass 2 below rescues the sentence by throwing
+            // the ranking away for EVERY word, and then every word takes its most frequent sense.
+            // Measured cost of that: «We analysed data from large-scale silencing screens.» parsed
+            // with «screens» = "a white or silvered surface where pictures can be projected",
+            // because the ranker had wrongly eliminated the nominal senses of «silencing» and the
+            // elimination cut holds at every widen rung, so Pass 1 could never build the noun
+            // phrase. Five of that sentence's words were ranked correctly and all five were
+            // discarded to rescue the two that were not.
+            //
+            // So first retry with the ranking dropped ONLY for the words that lost a category
+            // SHAPE to the cut — the ones that cannot fill any slot they could have filled. Every
+            // other word keeps its ranking. Strictly narrower than Pass 2, and tried before it.
+            if let Some(r) = ranks.as_ref() {
+                if let Some(recovered) = self.recovery_ranks(text, lemmatizer, scope, r) {
+                    let (c, o) =
+                        self.widen(text, lemmatizer, initial_beam, Some(&recovered), &attempt);
+                    if !c.is_empty() || !o.is_empty() {
+                        return (c, o);
+                    }
+                }
+            }
+            // Pass 2 — the static-rank fallback: the ranking dropped everywhere.
             return self.widen(text, lemmatizer, initial_beam, None, &attempt);
         }
         (closed, open)
@@ -696,6 +730,90 @@ impl Parser {
                 return (closed, open);
             }
         }
+    }
+
+    /// A ranking adjusted for a TARGETED RECOVERY (D69 §7g), or `None` when nothing needs it.
+    ///
+    /// For every word whose surviving entries lost a category SHAPE that its full entry set had —
+    /// it can no longer fill a slot it could have filled — PROMOTE that word's highest-ranked
+    /// sense of each missing shape to the front of the ranking. Everything else keeps its order.
+    ///
+    /// Promote rather than un-rank. Un-ranking a word drops it to STATIC FREQUENCY, which is how
+    /// «screens» ends up as a projection surface: the screening concept C0220908 is rare, so
+    /// frequency buries it however much the ranker liked it. Promotion keeps the ranker's
+    /// judgment and merely lets the sense it chose actually reach the chart.
+    ///
+    /// Called only after a parse has already failed. The alternative on that path is Pass 2,
+    /// which discards the ranking for every word in the sentence.
+    fn recovery_ranks(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        ranks: &BTreeMap<String, u32>,
+    ) -> Option<BTreeMap<String, u32>> {
+        let cap = self.config.sense_cap?;
+        let mut promote: BTreeSet<String> = BTreeSet::new();
+        for tok in tokenize(text) {
+            let surface = tok.to_lowercase();
+            let mut all: Vec<crate::dcg::lexicon::LexEntry> = Vec::new();
+            for cand in self.candidate_lemmas(&surface, lemmatizer) {
+                all.extend(self.scoped(self.lex.entries_for(&cand), scope));
+            }
+            if all.len() < 2 {
+                continue;
+            }
+            let full: BTreeSet<String> =
+                all.iter().map(|e| seed::cat_shape(e.item.cat())).collect();
+            let mut kept = all.clone();
+            seed::apply_sense_cap(&mut kept, Some(ranks), cap);
+            let survived: BTreeSet<String> =
+                kept.iter().map(|e| seed::cat_shape(e.item.cat())).collect();
+            // The highest-RANKED entry of each shape the cut removed. Sorting by the cap's own key
+            // means "highest-ranked" is exactly what the cap would have taken next.
+            let mut by_rank = all.clone();
+            by_rank.sort_by_key(|e| seed::sense_cap_key(e, Some(ranks)));
+            for shape in full.difference(&survived) {
+                let of_shape =
+                    |e: &&crate::dcg::lexicon::LexEntry| seed::cat_shape(e.item.cat()) == *shape;
+                // Prefer a sense the ranker KEPT for this shape — its judgment, merely unreachable
+                // past the cap (the «screens» case: C0220908 ranked 4th, cap 2).
+                let ranked_pick = by_rank
+                    .iter()
+                    .filter(of_shape)
+                    .find(|e| e.sense.as_deref().is_some_and(|s| ranks.contains_key(s)))
+                    .and_then(|e| e.sense.clone());
+                if let Some(sense) = ranked_pick {
+                    promote.insert(sense);
+                    continue;
+                }
+                // Otherwise the ranker eliminated EVERY sense of this shape — the «silencing» case,
+                // where it kept two verb senses and dropped all the nominals. Nothing of its
+                // judgment survives to promote, so restore the word's senses of the missing shape
+                // and let the cap (and, if the parse still fails, the widen ladder) choose among
+                // them. This is the only branch that overrides an elimination, and it fires only
+                // when that elimination made the word unable to fill any slot it could fill.
+                promote.extend(
+                    by_rank
+                        .iter()
+                        .filter(of_shape)
+                        .filter_map(|e| e.sense.clone()),
+                );
+            }
+        }
+        if promote.is_empty() {
+            return None;
+        }
+        // Shift every existing rank by one and put the promoted senses at 0, so their entries sort
+        // ahead of everything and the cap admits them.
+        let mut out: BTreeMap<String, u32> = ranks
+            .iter()
+            .map(|(k, v)| (k.clone(), v.saturating_add(1)))
+            .collect();
+        for sense in promote {
+            out.insert(sense, 0);
+        }
+        Some(out)
     }
 
     /// Whether every prose token (non-`is_nonprose`) of `text` is lexically known

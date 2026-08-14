@@ -375,6 +375,44 @@ the page fixes the entry and moves those totals (that unit alone drops ~10 readi
 `baseline.json` AND `selection-baseline.json` re-derived together with provenance. Proposed, not
 performed.
 
+## 7f. Why a correct sense ranking produced a projection screen (`2026-08-13`)
+
+«We analysed data from large-scale silencing screens.» The parse uses `n04152829` "a white or
+silvered surface where pictures can be projected". Traced end to end:
+
+1. **The ranker eliminated every NOMINAL sense of «silencing»** — it kept 2 of 7, both verb senses
+   (`silence.v.00461493`, `silence.v.00463007`). The nominal senses (`C0858952`, `n13925550`, …)
+   are absent from its answer. That is a judgment error: the sentence needs a noun modifier.
+2. **For «screens» it ranked three verb senses above the three screening nouns**, and the cap
+   compounds that: the cap counts ENTRIES while the ranking keys SENSES, and the rank-0 verb sense
+   owns FOUR entries (one per grammatical category), so a cap of 2 is consumed by two categorial
+   variants of one verb. The known gap of 2026-07-24, here changing which sense lands rather than
+   only how much ambiguity there is.
+3. **The noun phrase cannot be built** — neither word offers a noun — so the sentence yields
+   nothing at the base cap.
+4. **Pass 1 of the widen ladder cannot recover it.** The elimination cut is applied at EVERY rung
+   (`eff = min(cap, ranked)`), so a sense the ranker omitted can never seed while ranks are in
+   force. No cap value produces a noun for «silencing». This is the July change that stopped widen
+   from flooding other words with rejects; the cost, unmeasured until now, is that a WRONG
+   elimination has no in-Pass-1 recovery at all.
+5. **Pass 2 discards the ranking wholesale** (`ranks = None`, no cut, static frequency) and parses.
+   Static frequency for «screen» is the projection surface and the CRT display; for «silencing»,
+   "the state of being silent". Those two axes give exactly the 4 readings observed.
+
+**Two experiments confirm the chain.** Re-ranking only «screens» so the screening noun is rank 0
+changes nothing — the pool is still the same 4 Pass-2 readings, because «silencing» is still
+verbs-only. Re-ranking BOTH words' nominal senses to rank 0 yields
+`kind_of(Σx0 : C0220908. compound_kind(x0, C0858952) ∧ large-scale(x0))` — the correct reading,
+and the pool drops to 2. A third check: the candidate pool is byte-identical with the ranking
+applied and with no ranking at all, which is the signature of Pass 2.
+
+**The design tension, stated plainly.** Pass 2 exists so a wrong elimination costs a slower parse
+rather than a lost one. It does prevent the gap. But it converts a wrong elimination on ONE word
+into "no ranking at all for the whole sentence", so the recovery silently substitutes the most
+frequent senses everywhere. A targeted relaxation — restore the eliminated senses of the word that
+has no admissible category, keep the ranking on every other word — would have kept this sentence's
+other five words correctly ranked and admitted the screening noun.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×
