@@ -268,33 +268,13 @@ impl Parser {
                 //      tests rely on their being capped, so the predicate exempts far more than the
                 //      grammatical core. A real fix needs a POSITIVE closed-class marker (or a
                 //      category-shape test), not the absence of a lexicon tag.
-                let mut eff = cap;
-                // (The cut below is `apply_sense_cap`'s body, kept inline here for the commentary;
-                // `apply_sense_cap` is the same computation, exposed so the widen ladder can ask
-                // "what would survive for this word?" without re-deriving it.)
-                // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
-                // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
-                // grows to admit some word's deeper RANKED sense, so a sentence that widens for ONE word
-                // (e.g. `cause`/`mutations` needing its #3–4 sense) does not FLOOD every OTHER word with
-                // its rejects — the `gene` junk (`C5849123` = "Gross Extranodal Extension" re-seeding for
-                // `gene` via a "gENE" synonym) that only ever appeared because widen used to un-eliminate.
-                // The wrong-elimination SAFETY that once justified the base-cap-only cut is provided by
-                // [`Self::parse_widening`]'s PASS 2 — a ranks-`None` widen (pure frequency, no cut),
-                // reached only when Pass 1 yields nothing, i.e. exactly when a NEEDED sense was wrongly
-                // eliminated. So the cut can hold at all caps without ever costing a grammar gap.
-                if let Some(r) = ranks {
-                    let ranked = entries
-                        .iter()
-                        .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
-                        .count();
-                    if ranked > 0 {
-                        eff = eff.min(ranked);
-                    }
-                }
-                if entries.len() > eff {
-                    entries.sort_by_key(|e| sense_cap_key(e, ranks));
-                    entries.truncate(eff);
-                }
+                // ONE cap rule, in `apply_sense_cap` — counted by SENSE, keeping every category
+                // of a kept sense (D69 §7i), with the reranker's ELIMINATION cut applied at EVERY
+                // rung including widen. The rung-wide cut is what stops a sentence that widens for
+                // ONE word from flooding every OTHER word with that ranker's rejects (the `gene`
+                // /`C5849123` bug); its cost — a wrong elimination has no in-Pass-1 recovery — is
+                // paid by `recovery_ranks` (D69 §7g), not by loosening the cut here.
+                apply_sense_cap(&mut entries, ranks, cap);
             }
             // **Collapse entries that denote the SAME concept — AFTER the cap** (D63 cross-lexicon
             // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`). Structural `Exp`
@@ -1067,20 +1047,60 @@ pub(super) fn apply_sense_cap(
     ranks: Option<&BTreeMap<String, u32>>,
     cap: usize,
 ) {
+    // **THE CAP COUNTS SENSES, AND KEEPS EVERY CATEGORY OF A KEPT SENSE** (D69 §7i).
+    //
+    // It used to count ENTRIES. One sense legitimately owns several entries — the same meaning in
+    // different grammatical categories (`C0388246` as count and as mass; a verb sense in bse /
+    // fin-sg / fin-pl frames) — so a cap of 2 was routinely spent on two categorial variants of ONE
+    // sense, and the next sense never reached the chart. Two measured consequences, both of them
+    // wrong READINGS rather than merely lost ambiguity:
+    //
+    //   * «screens»: the top-ranked verb sense owns 4 entries, so no NOUN survived, the phrase
+    //     could not be built, and the recovery path substituted "a white or silvered surface where
+    //     pictures can be projected" for C0220908 «Screening procedure».
+    //   * «WRN»: `C0388246` owns 2 entries (count + mass) and took both slots, so `C1337007`'s
+    //     PROPER-NOUN entry — WRN the gene, the individual the pin wants — never seeded. That is
+    //     the standing "Axis B" miss.
+    //
+    // The two axes are different and the system already separates them elsewhere: sense ambiguity
+    // is Lever A (this cap — «breaks» offers 75 senses and that is what the cap is for), while one
+    // sense appearing in several categories is a SYNTACTIC axis, which the cell beam (Lever B)
+    // bounds. Counting entries silently spent Lever A's budget on Lever B's axis.
     let mut eff = cap;
     if let Some(r) = ranks {
-        let ranked = entries
+        let ranked: BTreeSet<&str> = entries
             .iter()
-            .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
-            .count();
-        if ranked > 0 {
-            eff = eff.min(ranked);
+            .filter_map(|e| e.sense.as_deref())
+            .filter(|s| r.contains_key(*s))
+            .collect();
+        if !ranked.is_empty() {
+            eff = eff.min(ranked.len());
         }
     }
-    if entries.len() > eff {
-        entries.sort_by_key(|e| sense_cap_key(e, ranks));
-        entries.truncate(eff);
+    let distinct: BTreeSet<&str> = entries.iter().filter_map(|e| e.sense.as_deref()).collect();
+    if distinct.len() <= eff {
+        return; // already within the cap, counted by sense
     }
+    entries.sort_by_key(|e| sense_cap_key(e, ranks));
+    // Walk the sorted entries and keep every entry whose sense is among the first `eff` DISTINCT
+    // senses. An entry with no sense label (the closed class, test fixtures) is kept: it has no
+    // sense to count and the cap has never been the right instrument for it.
+    let mut kept_senses: BTreeSet<&str> = BTreeSet::new();
+    let mut keep: Vec<bool> = Vec::with_capacity(entries.len());
+    for e in entries.iter() {
+        let k = match e.sense.as_deref() {
+            None => true,
+            Some(s) if kept_senses.contains(s) => true,
+            Some(s) if kept_senses.len() < eff => {
+                kept_senses.insert(s);
+                true
+            }
+            Some(_) => false,
+        };
+        keep.push(k);
+    }
+    let mut it = keep.into_iter();
+    entries.retain(|_| it.next().unwrap_or(false));
 }
 
 /// The head constructor of a category — `cat_n`, `cat_np`, `fwd`, `bwd`, … — as a coarse

@@ -413,6 +413,30 @@ frequent senses everywhere. A targeted relaxation — restore the eliminated sen
 has no admissible category, keep the ranking on every other word — would have kept this sentence's
 other five words correctly ranked and admitted the screening noun.
 
+## 7j. Method: name the best reading, then move the processing to it (`2026-08-13`)
+
+Stated by the maintainer while working the adjudication backlog, and it is the rule the whole
+day's work retrospectively followed:
+
+> The objective is to identify the most appropriate reading of each sentence. Once that has been
+> established, we can use that as goal post to adjust the processing.
+
+The consequence is that "is the chosen reading faithful?" is the wrong terminal question. Once the
+best reading is named, every gap becomes mechanical and measurable:
+
+| the best reading is… | the defect is | fixed on 2026-08-13 by |
+|---|---|---|
+| not in the forest at all | coverage — lexicon, cap, tokenisation | re-recording the frozen sense-rank draw (crab); the hyphen-joined multiword (C4321493); the sense-counted cap (C0220908, and WRN as an individual) |
+| in the forest, not chosen | selection — presentation, ranker, prompt | the `Expanded` register + concept legend; the injectivity guard; the comparative standard |
+
+Four fixes in a day, each triggered by someone naming the reading that should have won. None of
+them would have been found by asking whether the chosen reading was acceptable — each chosen
+reading WAS acceptable-looking, which is exactly why the defects survived so long.
+
+The tension this creates with the twins policy is real and deliberate: `correct` marks a faithful
+reading, but faithful-but-weaker is not the goal post. The ledger header now asks that the
+evidence name the BEST reading even when several are faithful, so the signal is not lost.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×
