@@ -1103,6 +1103,50 @@ pub(super) fn apply_sense_cap(
     entries.retain(|_| it.next().unwrap_or(false));
 }
 
+/// A category's **frame**: its head constructor plus, for a slash category, the head constructor of
+/// the ARGUMENT it takes — `fwd/cat_np`, `fwd/cat_cp`, `bwd/cat_np`.
+///
+/// [`cat_shape`] is deliberately coarse and answers "what slot could this fill". That is the wrong
+/// question for [`super::Parser::recovery_ranks`], which must answer "can this word still do what it
+/// could do". A verb wanting an object NP and a verb wanting a that-clause are BOTH `fwd`, so under
+/// `cat_shape` a word can lose its clausal frame entirely and nothing looks missing.
+///
+/// Measured (D69 §7k, `2026-08-15`): «These observations suggest that WRN dependency is not simply a
+/// result of MMR deficiency.» — the draw kept `suggest` senses `00930806` (`fwd/cat_np` only) and
+/// `00930368` (`fwd/cat_np` + `bwd/cat_np`) and ELIMINATED `00927430`, the only sense carrying
+/// `fwd/cat_cp`. Under `cat_shape` the full set `{fwd, bwd}` equals the survivors, so targeted
+/// recovery promoted nothing, the sentence failed at every cap, and Pass 2 rescued it by discarding
+/// ALL TEN words' rankings — which is how Turcot syndrome and the WRN protein-kind reached the
+/// reading. Under `cat_frame` the lost `fwd/cat_cp` is visible and only `suggest` is touched.
+///
+/// Second measured case, same shape of bug in a different feature: «Germline mutations … cause Lynch
+/// syndrome.» The span «lynch syndrome» carries `cat_n(C4552100, num_any)` (kept, rank 0) and both
+/// `cat_n(C1333990, num_any)` and `cat_n(C1333990, mass)` (eliminated). Elimination is hard — the cap
+/// does not backfill from an omitted sense — so C1333990 never seeds and the MASS entry, which is the
+/// bare-noun reading the sentence needs, goes with it. Head constructor `cat_n` for all three, so the
+/// loss is invisible unless the number index is part of the key.
+///
+/// Kept SEPARATE from `cat_shape` on purpose: `cat_shape` is also the [`apply_sense_cap`] key, where
+/// a finer grain would change which categories survive the cap for every word in every sentence.
+/// Two callers, two questions, two keys.
+pub(super) fn cat_frame(cat: &Exp) -> String {
+    let head = cat_shape(cat);
+    // The constructor's LAST argument is the slot that says what this category takes or how it is
+    // indexed: a slash's ARGUMENT (`fwd(m, VP, cat_cp)` — takes a that-clause) and a noun's NUMBER
+    // (`cat_n(T, mass)` — the bare-noun reading). Both distinctions are ones a word can lose while
+    // its head constructor stays put, and both were invisible to `cat_shape`.
+    let mut spine = cat;
+    while let Exp::App(f, _) = spine {
+        spine = f;
+    }
+    match spine {
+        Exp::InductiveCtor(_, _, args) if !args.is_empty() => {
+            format!("{head}/{}", cat_shape(&args[args.len() - 1]))
+        }
+        _ => head,
+    }
+}
+
 /// The head constructor of a category — `cat_n`, `cat_np`, `fwd`, `bwd`, … — as a coarse
 /// "what slot could this fill" key (D69 §7g).
 pub(super) fn cat_shape(cat: &Exp) -> String {

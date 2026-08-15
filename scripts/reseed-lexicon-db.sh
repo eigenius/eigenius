@@ -62,7 +62,12 @@ UMLS_RELEASE="${RELEASE:-2026AA}"
 UMLS_META="references/umls/${UMLS_RELEASE}/META"
 DICT="references/WordNet-3.0/dict"
 
-UMLS_ALL=0
+# UMLS scope: -1 = UNSET (the operator must choose). Defaulting here is what makes the trap: the
+# tracked snapshots are all --umls-all, so a bare invocation silently built an 8-TUI store that
+# DROPPED whole concepts (C0085104 vanished rather than being edited) and every measurement against
+# it was meaningless. Cost one full reseed on 2026-08-14; README §2 documents --umls-all as the
+# protocol. Now the run refuses rather than picking for you.
+UMLS_ALL=-1
 BUILD_IMAGE=1
 SNAPSHOT_DIR=""
 # Bytes of ESL per concept chunk = bytes per LAYER COMMIT. Empty ⇒ leave the importer's own default
@@ -85,12 +90,27 @@ SPLIT_BYTES="${SPLIT_BYTES:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --umls-all)     UMLS_ALL=1; shift ;;
+    --umls-wrn-subset) UMLS_ALL=0; shift ;;
     --no-build)     BUILD_IMAGE=0; shift ;;
     --snapshot-dir) SNAPSHOT_DIR="$2"; shift 2 ;;
     --split-bytes)  SPLIT_BYTES="$2"; shift 2 ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+if [[ "$UMLS_ALL" == "-1" ]]; then
+  cat >&2 <<'EOF'
+error: choose the UMLS scope explicitly — there is no safe default.
+
+  --umls-all          all semantic types (~3.1 GB store). THIS is what every tracked snapshot and
+                      experiments/parsing/baseline.json were built with; use it unless you know
+                      otherwise (experiments/parsing/README.md §2).
+  --umls-wrn-subset   only the 8 WRN-relevant TUIs (~1.2 GB). A DIFFERENT lexicon, not a smaller
+                      copy of the same one: concepts outside those types are absent entirely, so
+                      measurements are not comparable to the baseline.
+EOF
+  exit 2
+fi
 [[ -n "$SNAPSHOT_DIR" ]] || SNAPSHOT_DIR="$SNAPSHOT_ROOT/wordnet-umls-$(date +%Y-%m-%d)"
 # A bare NAME (no `/`) means "under SNAPSHOT_ROOT", matching the default's shape. Anything with a
 # `/` is a path. Either way SNAPSHOT_DIR ends up ABSOLUTE before it reaches `docker -v`, and that is
@@ -168,6 +188,13 @@ UMLS_COUNTABILITY_ARGS=()
 # the spurious biomedical reading of it.
 UMLS_DROP_ARGS=()
 [[ -f "$DROPS" ]] && UMLS_DROP_ARGS+=(--drop-atoms "$DROPS")
+# `--atom-overrides`: CURATED (cui, form) drops and adds, adjudicated from PARSE evidence rather than
+# from the alignment pipeline. Separate from $DROPS because `lexicon-align drops` regenerates that file
+# wholesale and would clobber hand-made decisions. Adds inject a surface UMLS does not carry for a
+# concept it should reach (`synthetic lethal` → C4280020); drops suppress an atom that maps a surface
+# onto a concept it does not denote (`drug target` → C0085104 «Drug Delivery Systems»).
+OVERRIDES="${OVERRIDES:-experiments/lexicon-align/atom-overrides.json}"
+[[ -f "$OVERRIDES" ]] && UMLS_DROP_ARGS+=(--atom-overrides "$OVERRIDES")
 # `--drop-chv-redundant` (A2, D63): drop each concept's redundant multiword CHV-only alias (a compound
 # surface only CHV gives it, already covered by an authoritative source) — removes a spurious second
 # concept-reading of a compound; coverage-safe. Opt-out with DROP_CHV_REDUNDANT=0.
@@ -215,6 +242,21 @@ docker run --rm -v "$VOLUME":/src:ro -v "$SNAPSHOT_DIR":/dst alpine \
 # ── VERIFY the copy. A reseed that reports success on an empty directory is worse than one that
 # fails: the emptiness is discovered later, by a measurement that silently used the wrong store.
 # `du` showing kilobytes after copying gigabytes is a hard error, not a line of output.
+# Stamp WHAT BUILT THIS into the snapshot. Without it a store is anonymous: scope, drops and
+# overrides are invisible to anyone who later measures against it, which is exactly how the
+# 2026-08-14 scope mismatch went unnoticed until a probe happened to look for a T074 concept.
+{
+  echo "built           : $(date -Is)"
+  echo "git             : $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)$(git -C "$ROOT" diff --quiet 2>/dev/null || echo ' (dirty)')"
+  echo "umls_scope      : $([[ "$UMLS_ALL" == "1" ]] && echo 'all' || printf '%s' "tuis=${UMLS_TUIS[*]}")"
+  echo "umls_release    : $UMLS_RELEASE"
+  echo "drop_atoms      : $([[ -f "$DROPS" ]] && echo "$DROPS" || echo none)"
+  echo "atom_overrides  : $([[ -f "$OVERRIDES" ]] && echo "$OVERRIDES" || echo none)"
+  echo "countability    : $([[ -f "$COUNTABILITY" ]] && echo "$COUNTABILITY" || echo none)"
+  echo "chv_redundant   : ${DROP_CHV_REDUNDANT:-1}"
+  echo "alignment       : none (raw reseed; scripts/build-alignment-snapshot.sh layers merges on top)"
+} > "$SNAPSHOT_DIR/PROVENANCE"
+
 SNAP_BYTES="$(du -sb "$SNAPSHOT_DIR" | cut -f1)"
 MIN_BYTES=$((512 * 1024 * 1024))
 if [[ ! -f "$SNAPSHOT_DIR/CURRENT" ]] || (( SNAP_BYTES < MIN_BYTES )); then

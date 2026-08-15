@@ -233,6 +233,43 @@ if [[ "$USE_JSON" == "1" ]]; then
     echo "    expected-hits    (not in this log — predates the faithfulness gate; re-measure)"
   fi
 
+  # ── Faithfulness gate, part 2: the miss SET, not just the count ──────────────────────────────────
+  # A scalar hides a SWAP. On 2026-08-14 hits moved 60 → 61 and that was recorded as one unit
+  # recovering; in fact THREE units changed state (the Depletion and draw-variance units began
+  # hitting, «These observations suggest … MMR deficiency» began missing) and the provenance note
+  # went in wrong. At CONSTANT count the scalar gate is silent altogether. Diffing the recorded miss
+  # set makes a swap visible and regresses on it — a newly-missing unit is a regression even when the
+  # count holds or improves.
+  if [[ -n "$EH" ]]; then
+    MISS_DIFF=$(python3 - "$LOG" "$BASELINE_JSON" <<'PY'
+import json, re, sys
+log, base = sys.argv[1], sys.argv[2]
+now = {m.group(1) for m in
+       re.finditer(r'FAITHFULNESS MISS: «([^»]*)»', open(log, encoding='utf-8').read())}
+exp = json.load(open(base))['expected']
+if 'expected_reading_misses' not in exp:
+    print('UNRECORDED\tbaseline has no expected_reading_misses — record it to enable this gate')
+else:
+    want = set(exp['expected_reading_misses'])
+    for s in sorted(now - want):
+        print('NEW-MISS\t' + s)
+    for s in sorted(want - now):
+        print('RECOVERED\t' + s)
+PY
+)
+    if [[ -z "$MISS_DIFF" ]]; then
+      echo "    miss-set         (unchanged — the same units miss as the baseline records)"
+    else
+      while IFS=$'\t' read -r kind sentence; do
+        case "$kind" in
+          NEW-MISS)   printf '    %-16s NEWLY MISSING: «%s»   REGRESSION\n' "miss-set" "$sentence"; RC=2 ;;
+          RECOVERED)  printf '    %-16s recovered: «%s»\n' "miss-set" "$sentence" ;;
+          UNRECORDED) printf '    %-16s %s\n' "miss-set" "$sentence" ;;
+        esac
+      done <<<"$MISS_DIFF"
+    fi
+  fi
+
   # ── Multiplicity gate: total_readings must not exceed the ceiling (over-generation must not grow) ─
   BCEIL=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings_ceiling',0))")
   BTR=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings',0))")

@@ -1352,6 +1352,7 @@ dependencies = [
  "eigenius-kernel",
  "eigenius-reasoning",
  "eigenius-storage-rocksdb",
+ "serde_json",
 ]
 
 [[package]]

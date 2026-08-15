@@ -20,6 +20,8 @@ path = "src/bin/wordnet_import.rs"
 use-llm = ["eigenius-kernel/use-llm", "eigenius-reasoning/use-llm"]
 
 [dev-dependencies]
+# Read the recorded sense draw (ranks.json) in the leave-one-out blocking-word probe.
+serde_json = "1"
 # The on-disk RocksDB backend — so the DB-backed encoding measurement (D62 (d)) can open a
 # snapshot of the served store (full WordNet+UMLS) in-process and parse over the lazy LexicalIndex.
 eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }

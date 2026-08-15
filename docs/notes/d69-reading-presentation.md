@@ -437,6 +437,89 @@ The tension this creates with the twins policy is real and deliberate: `correct`
 reading, but faithful-but-weaker is not the goal post. The ledger header now asks that the
 evidence name the BEST reading even when several are faithful, so the signal is not lost.
 
+## 7k. Why three units fall to Pass 2 — `cat_shape` cannot see a lost ARGUMENT category (`2026-08-15`)
+
+Measured with two new instruments: `WidenTrace`/`WidenPass` (which pass and rung produced a forest,
+printed per unit as a `WIDEN` line) and `probe_blocking_word` (leave-one-out over the recorded sense
+draw — blank ONE word's ranking, keep every other word's, and see which one rescues the sentence).
+
+**Three of 62 units resolve only on `StaticFallback`, with the ranking discarded for every word:**
+
+| unit | attempts | Pass 1b | Pass 2 succeeded at | blocking word |
+|---|---|---|---|---|
+| These observations suggest … MMR deficiency | 9 | ran, promoted 19 | **cap 2** | «suggest» |
+| Germline mutations … cause Lynch syndrome | 10 | ran, promoted 8 | cap 4 | «Lynch syndrome» |
+| MSI cell lines from these four lineages … | 12 | ran, promoted 11 | cap 16 | «greater» |
+
+The MMR row is the diagnostic one: it fails under the ranking at caps 2, 4, 8 and 16 — every rung,
+twice, once in Pass 1 and once in Pass 1b — then parses on the FIRST Pass-2 attempt at the BASE cap of
+2. Widening was never the issue. The ranking itself blocks composition, and exactly one word is
+responsible in each of the three.
+
+**The mechanism, for «suggest».** The draw kept `v00930806_t` (rank 0) and `v00930368_i` (rank 1) and
+ELIMINATED `v00927430_c`. The suffixes are the frame: `_t` transitive, `_i` intransitive, `_c` clausal
+complement. «These observations suggest THAT …» needs the clausal frame, and it was the one thrown
+away, so no cap admits it and no widening recovers it.
+
+**Why Pass 1b could not fix it.** `recovery_ranks` promotes the highest-ranked sense of every category
+SHAPE the cut removed — and `seed::cat_shape` walks to the head of the application spine and returns
+only that constructor's name. A transitive verb `fwd(m, bwd(m, S, NP), NP)` and a clausal verb
+`fwd(m, bwd(m, S, NP), S)` therefore BOTH hash to `"fwd"`. With `_t` (fwd) and `_i` (bwd) surviving,
+`full.difference(&survived)` is empty for «suggest»: nothing looks lost, so nothing is promoted. The
+detector is blind to a lost ARGUMENT category because it only looks at the top-level slash direction.
+
+This is the class §7g was NOT built for. Pass 1b's trigger is "the word can no longer fill any slot it
+could have filled", measured at head-constructor granularity. Here the word still fills a slot — just
+not the slot the sentence needs.
+
+**Consequence, and why it matters beyond these three sentences.** Pass 2 rescues the sentence by
+discarding EVERY word's ranking, so one blocked word costs the whole sentence its sense selection.
+That is the confirmed cause of both anomalies in the MMR unit: the ranker kept `C4522088` and dropped
+Turcot, and put the WRN GENE individual at rank 0 — and neither survived, so static frequency chose
+«Turcot syndrome» and the protein kind. The unit's pin (which wants the bare-individual `compound`)
+misses for the same reason. **Readings from a `StaticFallback` unit are not evidence about the
+ranker**, and before `WidenTrace` there was no way to tell them apart from readings it did choose.
+
+**OUTCOME (`2026-08-15`) — fixed, and it closed the thread.** Two changes to `recovery_ranks`, both
+making it see what the ranker can act on:
+
+1. **Granularity.** New `seed::cat_frame` = head constructor + the constructor's LAST argument, used
+   ONLY by `recovery_ranks` (`cat_shape` is untouched because `apply_sense_cap` keys on it). The last
+   argument is the slot saying what a category TAKES or how it is INDEXED, which covers both observed
+   losses: a slash's argument (`fwd/cat_cp` vs `fwd/cat_np` — «suggest») and a noun's number
+   (`cat_n/mass` vs `cat_n/num_any` — «Lynch syndrome», where the ranker eliminated C1333990 and,
+   because elimination is HARD, took its bare-noun `mass` entry with it).
+2. **Scope.** `recovery_ranks` iterated single TOKENS while `contextual_sense_ranks` ranks SPANS, so a
+   multiword blocker was invisible by construction. It now enumerates the same spans via `span_limit`.
+
+| | before | after |
+|---|---|---|
+| units on `StaticFallback` (ranking discarded) | 3 | **0** |
+| expected-hits | 61/62 | **62/62** |
+| total-skeletons | 180 | 174 |
+| total-readings | 594 | 594 |
+
+«These observations suggest … MMR deficiency» RECOVERED its pin — the pin wants WRN as the bare
+individual, the ranker had put the WRN GENE at rank 0 all along, and Pass 2 was discarding it. The
+page now has NO unit whose readings were chosen by static frequency, and 62/62 is its first full
+faithfulness sweep. `expected_reading_misses` is empty.
+
+Neither change was reached by reasoning alone. `probe_blocking_word` named one word per sentence
+(«suggest», «greater», «Lynch syndrome»), and the second gap only surfaced because fixing the first
+left «Lynch syndrome» still falling back.
+
+FOLLOW-UP: the MMR unit's reading-level ledger rows describe readings produced under the old fallback
+(Turcot syndrome, the WRN protein-kind). They need re-adjudicating against a fresh composed draw.
+
+**The fix this pointed at** (now made): give the recovery detector a finer
+shape that includes the ARGUMENT's head constructor, so `fwd(…, NP)` ≠ `fwd(…, S)`. Then the lost
+clausal frame is visible, Pass 1b promotes `v00927430_c`, and every other word keeps its ranking —
+the narrow rescue, exactly as designed. CAUTION: `cat_shape` is also used by `apply_sense_cap`, where
+finer shapes would change which categories the cap keeps, so the safer change is a SEPARATE finer
+function used only by `recovery_ranks`, measured on its own. The leave-one-out probe is the
+instrument for checking it: all three units should flip from `StaticFallback` to a ranking-respecting
+pass, and no unit that currently parses may regress.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×

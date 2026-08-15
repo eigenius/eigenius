@@ -153,6 +153,72 @@ pub const SENSE_CAP_WIDEN_MAX: usize = 16;
 /// genuinely intractable sentence can't re-OOM the chart.
 pub const CELL_BEAM_WIDEN_MAX: usize = 512;
 
+/// Which pass of the widen ladder ([`Parser::parse_widening`]) produced the forest.
+///
+/// The ladder is not a detail: **whether the contextual sense ranking was still in force when a
+/// sentence parsed decides what its readings can contain.** Pass 2 throws the ranking away for every
+/// word and lets static frequency choose, so a sentence that falls to it can carry a sense the ranker
+/// explicitly rejected — which looks, from the outside, exactly like the ranker being wrong.
+///
+/// That ambiguity was unresolvable until this type existed. Two anomalies in
+/// «These observations suggest that WRN dependency is not simply a result of MMR deficiency.» —
+/// `MMR deficiency` resolving to Turcot syndrome though the ranker KEPT `C4522088`, and `WRN`
+/// realising as a kind though the ranker put the gene individual at rank 0 — were both attributed to
+/// "the ranker's answer is not reaching the parse" with no way to confirm it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WidenPass {
+    /// Pass 1 — the contextual sense ranking in force (or the static order, when no ranker is
+    /// configured). The elimination cut holds at every rung.
+    #[default]
+    Ranked,
+    /// Pass 1b — targeted recovery (D69 §7g): the ranking KEPT, with the highest-ranked sense of each
+    /// lost category shape promoted for the words that lost one. Strictly narrower than Pass 2.
+    TargetedRecovery,
+    /// Pass 2 — the static-frequency fallback: the ranking discarded for EVERY word. A reading from
+    /// here is not evidence about the ranker; the ranker did not choose it.
+    StaticFallback,
+    /// Every pass and rung was exhausted without a forest.
+    Exhausted,
+}
+
+/// Which rung of the widen ladder produced a forest, and what it cost to get there.
+///
+/// Returned by [`Parser::parse_scoped_open_traced`]. `cap`/`beam` are the settings that SUCCEEDED,
+/// so a value above the configured base means the sentence needed widening; `attempts` counts every
+/// `attempt()` call across all passes, so it is the honest cost of the parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WidenTrace {
+    /// The pass that produced the forest.
+    pub pass: WidenPass,
+    /// Total parse attempts across every pass and rung (≥ 1 for any completed parse).
+    pub attempts: usize,
+    /// The sense cap that succeeded (`None` = uncapped).
+    pub cap: Option<usize>,
+    /// The cell beam that succeeded (`None` = the packed path, which has no beam rung).
+    pub beam: Option<usize>,
+    /// Targeted recovery (Pass 1b): `None` = it never ran, because no word had lost a category SHAPE
+    /// for it to promote; `Some(n)` = it ran, promoting `n` senses. Distinguishing these is the whole
+    /// point — a unit that reaches [`WidenPass::StaticFallback`] with `None` was never a candidate for
+    /// the narrow rescue, while one with `Some(n)` had the narrow rescue TRIED AND FAIL, and those want
+    /// different fixes. Recorded because deducing it from `attempts` arithmetic is possible but fragile
+    /// (it assumes the rung count per pass, which the beam rung changes).
+    pub recovery_promoted: Option<usize>,
+}
+
+impl WidenTrace {
+    /// Whether the contextual sense ranking was still in force for the forest that came back.
+    /// `false` means static frequency chose the senses, so the readings are NOT evidence about the
+    /// ranker's judgment.
+    pub fn ranking_survived(&self) -> bool {
+        matches!(self.pass, WidenPass::Ranked | WidenPass::TargetedRecovery)
+    }
+
+    /// Whether the forest came from the first attempt — no widening, no fallback.
+    pub fn is_base_rung(&self) -> bool {
+        self.attempts <= 1 && self.pass == WidenPass::Ranked
+    }
+}
+
 /// The **processing parameters** of a parse — every knob that is a decision about *how hard to look*,
 /// not about what the language means. Kept in one struct, owned by [`Parser`], and deliberately NOT on
 /// the lexicon: a lexicon has no opinion about beam widths.
@@ -539,6 +605,23 @@ impl Parser {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
+        let (closed, open, _) = self.parse_scoped_open_traced(text, lemmatizer, scope);
+        (closed, open)
+    }
+
+    /// [`Self::parse_scoped_open`] plus the [`WidenTrace`] — which pass and rung of the widen ladder
+    /// actually produced this forest.
+    ///
+    /// Use this wherever a reading is being JUDGED. A forest from [`WidenPass::StaticFallback`] was
+    /// chosen by static frequency with the contextual ranking discarded, so blaming (or crediting) the
+    /// sense ranker for it is a category error — and the two are indistinguishable from the readings
+    /// alone, which is what made the 2026-08-14 `WRN` / `MMR deficiency` anomalies unfalsifiable.
+    pub fn parse_scoped_open_traced(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> (Vec<Item>, Vec<OpenParse>, WidenTrace) {
         // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
         // when packing is enabled, the combinatory-core spike is off, and this sentence is not
         // pied-piping (the one construct the packed forest builds no edge for — `parse_needs_unpacked`).
@@ -632,7 +715,7 @@ impl Parser {
         scope: Option<&[Iri]>,
         initial_beam: Option<usize>,
         attempt: F,
-    ) -> (Vec<Item>, Vec<OpenParse>)
+    ) -> (Vec<Item>, Vec<OpenParse>, WidenTrace)
     where
         F: Fn(
             Option<usize>,
@@ -641,10 +724,19 @@ impl Parser {
         ) -> (Vec<Item>, Vec<OpenParse>),
     {
         let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        let mut trace = WidenTrace::default();
         // Pass 1 — the reranked order (static, if no ranker configured).
-        let (closed, open) = self.widen(text, lemmatizer, initial_beam, ranks.as_ref(), &attempt);
+        let (closed, open) = self.widen(
+            text,
+            lemmatizer,
+            initial_beam,
+            ranks.as_ref(),
+            &attempt,
+            &mut trace,
+        );
         if !closed.is_empty() || !open.is_empty() {
-            return (closed, open);
+            trace.pass = WidenPass::Ranked;
+            return (closed, open, trace);
         }
         if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
             // Pass 1b — TARGETED RECOVERY (D69 §7g). Pass 2 below rescues the sentence by throwing
@@ -660,18 +752,34 @@ impl Parser {
             // SHAPE to the cut — the ones that cannot fill any slot they could have filled. Every
             // other word keeps its ranking. Strictly narrower than Pass 2, and tried before it.
             if let Some(r) = ranks.as_ref() {
-                if let Some(recovered) = self.recovery_ranks(text, lemmatizer, scope, r) {
-                    let (c, o) =
-                        self.widen(text, lemmatizer, initial_beam, Some(&recovered), &attempt);
+                if let Some((recovered, promoted)) = self.recovery_ranks(text, lemmatizer, scope, r)
+                {
+                    trace.recovery_promoted = Some(promoted);
+                    let (c, o) = self.widen(
+                        text,
+                        lemmatizer,
+                        initial_beam,
+                        Some(&recovered),
+                        &attempt,
+                        &mut trace,
+                    );
                     if !c.is_empty() || !o.is_empty() {
-                        return (c, o);
+                        trace.pass = WidenPass::TargetedRecovery;
+                        return (c, o, trace);
                     }
                 }
             }
             // Pass 2 — the static-rank fallback: the ranking dropped everywhere.
-            return self.widen(text, lemmatizer, initial_beam, None, &attempt);
+            let (c, o) = self.widen(text, lemmatizer, initial_beam, None, &attempt, &mut trace);
+            trace.pass = if c.is_empty() && o.is_empty() {
+                WidenPass::Exhausted
+            } else {
+                WidenPass::StaticFallback
+            };
+            return (c, o, trace);
         }
-        (closed, open)
+        trace.pass = WidenPass::Exhausted;
+        (closed, open, trace)
     }
 
     /// One full **widen-on-failure escalation** under a FIXED sense order (`ranks`): parse at the base
@@ -692,6 +800,7 @@ impl Parser {
         initial_beam: Option<usize>,
         ranks: Option<&BTreeMap<String, u32>>,
         attempt: &F,
+        trace: &mut WidenTrace,
     ) -> (Vec<Item>, Vec<OpenParse>)
     where
         F: Fn(
@@ -704,7 +813,10 @@ impl Parser {
         let mut beam = initial_beam;
         loop {
             let (closed, open) = attempt(cap, beam, ranks);
+            trace.attempts += 1;
             if !closed.is_empty() || !open.is_empty() {
+                trace.cap = cap;
+                trace.beam = beam;
                 return (closed, open);
             }
             // Widen only if a pruning artifact could be the cause (no OOV token).
@@ -734,9 +846,15 @@ impl Parser {
 
     /// A ranking adjusted for a TARGETED RECOVERY (D69 §7g), or `None` when nothing needs it.
     ///
-    /// For every word whose surviving entries lost a category SHAPE that its full entry set had —
-    /// it can no longer fill a slot it could have filled — PROMOTE that word's highest-ranked
-    /// sense of each missing shape to the front of the ranking. Everything else keeps its order.
+    /// For every word whose surviving entries lost a category FRAME that its full entry set had —
+    /// it can no longer do something it could have done — PROMOTE that word's highest-ranked sense of
+    /// each missing frame to the front of the ranking. Everything else keeps its order.
+    ///
+    /// The key is [`seed::cat_frame`] (head constructor + the argument it takes), NOT the coarser
+    /// [`seed::cat_shape`]. With `cat_shape` a verb that lost its that-clause frame still looked
+    /// intact, because a clausal and a transitive verb are both `fwd` — see D69 §7k, where that
+    /// blindness sent three of the page's 62 units to Pass 2 and cost every word in them its
+    /// ranking.
     ///
     /// Promote rather than un-rank. Un-ranking a word drops it to STATIC FREQUENCY, which is how
     /// «screens» ends up as a projection surface: the screening concept C0220908 is rare, so
@@ -751,54 +869,68 @@ impl Parser {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
         ranks: &BTreeMap<String, u32>,
-    ) -> Option<BTreeMap<String, u32>> {
+    ) -> Option<(BTreeMap<String, u32>, usize)> {
         let cap = self.config.sense_cap?;
         let mut promote: BTreeSet<String> = BTreeSet::new();
-        for tok in tokenize(text) {
-            let surface = tok.to_lowercase();
-            let mut all: Vec<crate::dcg::lexicon::LexEntry> = Vec::new();
-            for cand in self.candidate_lemmas(&surface, lemmatizer) {
-                all.extend(self.scoped(self.lex.entries_for(&cand), scope));
-            }
-            if all.len() < 2 {
-                continue;
-            }
-            let full: BTreeSet<String> =
-                all.iter().map(|e| seed::cat_shape(e.item.cat())).collect();
-            let mut kept = all.clone();
-            seed::apply_sense_cap(&mut kept, Some(ranks), cap);
-            let survived: BTreeSet<String> =
-                kept.iter().map(|e| seed::cat_shape(e.item.cat())).collect();
-            // The highest-RANKED entry of each shape the cut removed. Sorting by the cap's own key
-            // means "highest-ranked" is exactly what the cap would have taken next.
-            let mut by_rank = all.clone();
-            by_rank.sort_by_key(|e| seed::sense_cap_key(e, Some(ranks)));
-            for shape in full.difference(&survived) {
-                let of_shape =
-                    |e: &&crate::dcg::lexicon::LexEntry| seed::cat_shape(e.item.cat()) == *shape;
-                // Prefer a sense the ranker KEPT for this shape — its judgment, merely unreachable
-                // past the cap (the «screens» case: C0220908 ranked 4th, cap 2).
-                let ranked_pick = by_rank
-                    .iter()
-                    .filter(of_shape)
-                    .find(|e| e.sense.as_deref().is_some_and(|s| ranks.contains_key(s)))
-                    .and_then(|e| e.sense.clone());
-                if let Some(sense) = ranked_pick {
-                    promote.insert(sense);
+        // SPANS, not tokens — the same enumeration `contextual_sense_ranks` uses to build the
+        // ranking. The two must agree on what a "word" is: the ranker ranks (and can therefore
+        // ELIMINATE the senses of) a multiword span like «Lynch syndrome», but this loop used to see
+        // only «Lynch» and «syndrome», so a multiword blocker was invisible to the rescue by
+        // construction and the sentence could only be saved by Pass 2 discarding every word's
+        // ranking. Measured on «Germline mutations in the MMR genes … cause Lynch syndrome.», whose
+        // sole blocking word is that span (D69 §7k).
+        let tokens = tokenize(text);
+        let n = tokens.len();
+        let span_limit = self.lex.span_limit(n);
+        for i in 0..n {
+            let last = (i + span_limit).min(n);
+            for j in i..last {
+                let surface = tokens[i..=j].join(" ").to_lowercase();
+                let mut all: Vec<crate::dcg::lexicon::LexEntry> = Vec::new();
+                for cand in self.candidate_lemmas(&surface, lemmatizer) {
+                    all.extend(self.scoped(self.lex.entries_for(&cand), scope));
+                }
+                if all.len() < 2 {
                     continue;
                 }
-                // Otherwise the ranker eliminated EVERY sense of this shape — the «silencing» case,
-                // where it kept two verb senses and dropped all the nominals. Nothing of its
-                // judgment survives to promote, so restore the word's senses of the missing shape
-                // and let the cap (and, if the parse still fails, the widen ladder) choose among
-                // them. This is the only branch that overrides an elimination, and it fires only
-                // when that elimination made the word unable to fill any slot it could fill.
-                promote.extend(
-                    by_rank
+                let full: BTreeSet<String> =
+                    all.iter().map(|e| seed::cat_frame(e.item.cat())).collect();
+                let mut kept = all.clone();
+                seed::apply_sense_cap(&mut kept, Some(ranks), cap);
+                let survived: BTreeSet<String> =
+                    kept.iter().map(|e| seed::cat_frame(e.item.cat())).collect();
+                // The highest-RANKED entry of each shape the cut removed. Sorting by the cap's own key
+                // means "highest-ranked" is exactly what the cap would have taken next.
+                let mut by_rank = all.clone();
+                by_rank.sort_by_key(|e| seed::sense_cap_key(e, Some(ranks)));
+                for shape in full.difference(&survived) {
+                    let of_shape = |e: &&crate::dcg::lexicon::LexEntry| {
+                        seed::cat_frame(e.item.cat()) == *shape
+                    };
+                    // Prefer a sense the ranker KEPT for this shape — its judgment, merely unreachable
+                    // past the cap (the «screens» case: C0220908 ranked 4th, cap 2).
+                    let ranked_pick = by_rank
                         .iter()
                         .filter(of_shape)
-                        .filter_map(|e| e.sense.clone()),
-                );
+                        .find(|e| e.sense.as_deref().is_some_and(|s| ranks.contains_key(s)))
+                        .and_then(|e| e.sense.clone());
+                    if let Some(sense) = ranked_pick {
+                        promote.insert(sense);
+                        continue;
+                    }
+                    // Otherwise the ranker eliminated EVERY sense of this shape — the «silencing» case,
+                    // where it kept two verb senses and dropped all the nominals. Nothing of its
+                    // judgment survives to promote, so restore the word's senses of the missing shape
+                    // and let the cap (and, if the parse still fails, the widen ladder) choose among
+                    // them. This is the only branch that overrides an elimination, and it fires only
+                    // when that elimination made the word unable to fill any slot it could fill.
+                    promote.extend(
+                        by_rank
+                            .iter()
+                            .filter(of_shape)
+                            .filter_map(|e| e.sense.clone()),
+                    );
+                }
             }
         }
         if promote.is_empty() {
@@ -806,6 +938,7 @@ impl Parser {
         }
         // Shift every existing rank by one and put the promoted senses at 0, so their entries sort
         // ahead of everything and the cap admits them.
+        let promoted = promote.len();
         let mut out: BTreeMap<String, u32> = ranks
             .iter()
             .map(|(k, v)| (k.clone(), v.saturating_add(1)))
@@ -813,7 +946,7 @@ impl Parser {
         for sense in promote {
             out.insert(sense, 0);
         }
-        Some(out)
+        Some((out, promoted))
     }
 
     /// Whether every prose token (non-`is_nonprose`) of `text` is lexically known
@@ -1179,6 +1312,110 @@ mod tests {
             gloss: None,
             form: String::new(),
         }
+    }
+
+    /// `cat_frame` must separate a verb that wants an OBJECT from one that wants a THAT-CLAUSE.
+    /// `cat_shape` cannot: both are `fwd`, which is why targeted recovery was blind to «suggest»
+    /// losing its only clausal sense and three units fell to Pass 2 (D69 §7k).
+    #[test]
+    fn cat_frame_separates_frames_that_cat_shape_conflates() {
+        use crate::dcg::parse::seed::{cat_frame, cat_shape};
+        use crate::nbe::term::{InductiveDecl, Name};
+        use std::sync::Arc;
+
+        fn decl(local: &str) -> Arc<InductiveDecl> {
+            Arc::new(InductiveDecl {
+                iri: Iri::parse(&format!("urn:eigenius:lexicon:{local}")).unwrap(),
+                name: Name::from(local),
+                params: Vec::new(),
+                indices: Vec::new(),
+                sort: Exp::Sort(0),
+                ctors: Vec::new(),
+            })
+        }
+        let ctor =
+            |local: &str, args: Vec<Exp>| Exp::InductiveCtor(decl(local), Name::from(local), args);
+        let m = ctor("m_all", vec![]);
+        let vp = ctor(
+            "bwd",
+            vec![m.clone(), ctor("cat_s", vec![]), ctor("cat_np", vec![])],
+        );
+        // `suggest a thing` vs `suggest that S` — same head, different argument.
+        let transitive = ctor("fwd", vec![m.clone(), vp.clone(), ctor("cat_np", vec![])]);
+        let clausal = ctor("fwd", vec![m.clone(), vp.clone(), ctor("cat_cp", vec![])]);
+
+        assert_eq!(
+            cat_shape(&transitive),
+            cat_shape(&clausal),
+            "the blind spot"
+        );
+        assert_eq!(cat_frame(&transitive), "fwd/cat_np");
+        assert_eq!(cat_frame(&clausal), "fwd/cat_cp");
+        assert_ne!(
+            cat_frame(&transitive),
+            cat_frame(&clausal),
+            "losing the clausal frame must be visible to recovery_ranks"
+        );
+        // A non-slash category is unchanged, so nothing that is not a functor moves.
+        let noun = ctor("cat_n", vec![]);
+        assert_eq!(cat_frame(&noun), cat_shape(&noun));
+    }
+
+    /// The trace's whole purpose is answering "was the ranking in force?", so that predicate is
+    /// pinned rather than left to the reader of a `#[derive(Debug)]` dump. `StaticFallback` says NO:
+    /// Pass 2 discards the ranking for every word, so a reading from there is not evidence about the
+    /// ranker — the distinction the 2026-08-14 WRN / MMR anomalies turned on.
+    #[test]
+    fn only_the_ranked_passes_count_as_the_ranking_being_in_force() {
+        use super::{WidenPass, WidenTrace};
+        let with = |pass| WidenTrace {
+            pass,
+            ..Default::default()
+        };
+        assert!(with(WidenPass::Ranked).ranking_survived());
+        assert!(with(WidenPass::TargetedRecovery).ranking_survived());
+        assert!(
+            !with(WidenPass::StaticFallback).ranking_survived(),
+            "Pass 2 drops the ranking — its readings are not the ranker's choice"
+        );
+        assert!(!with(WidenPass::Exhausted).ranking_survived());
+    }
+
+    /// `is_base_rung` must mean "ranked order, first attempt" — the silent case. A widened parse and a
+    /// fallback parse both have to be visible, or the instrument reports nothing where it matters.
+    #[test]
+    fn the_base_rung_is_the_first_attempt_under_the_ranking() {
+        use super::{WidenPass, WidenTrace};
+        assert!(WidenTrace {
+            pass: WidenPass::Ranked,
+            attempts: 1,
+            cap: Some(2),
+            beam: Some(64),
+            recovery_promoted: None,
+        }
+        .is_base_rung());
+        assert!(
+            !WidenTrace {
+                pass: WidenPass::Ranked,
+                attempts: 2,
+                cap: Some(4),
+                beam: Some(64),
+                recovery_promoted: None,
+            }
+            .is_base_rung(),
+            "a widened parse is not the base rung"
+        );
+        assert!(
+            !WidenTrace {
+                pass: WidenPass::StaticFallback,
+                attempts: 1,
+                cap: Some(2),
+                beam: Some(64),
+                recovery_promoted: Some(3),
+            }
+            .is_base_rung(),
+            "a fallback parse is never the base rung, however few attempts it took"
+        );
     }
 
     /// The reranker's ranking OMITS a sense ⇒ it is eliminated ⇒ the cap must NOT backfill from it.

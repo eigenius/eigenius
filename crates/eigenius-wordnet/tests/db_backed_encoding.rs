@@ -852,7 +852,35 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
     // Parse to distinguish the fully-known outcomes. Use the open-parse carrier so a unit that only
     // yields an OPEN parse (referent holes from `we`/`its`/pronouns, D64) is NOT misfiled as a
     // grammar gap — it parses, awaiting reference resolution.
-    let (closed, open) = index.parse_open(text, lem);
+    let (closed, open, trace) = index.parse_scoped_open_traced(text, lem, None);
+    // WIDEN LADDER — report any unit whose forest did NOT come from the first attempt under the
+    // contextual ranking. Silence here means "ranked order, base cap and beam, one attempt"; anything
+    // printed is a unit whose readings must NOT be read as the ranker's judgment without checking how
+    // it got here. `StaticFallback` in particular DISCARDS the ranking for every word, so a sense the
+    // ranker explicitly rejected can win on static frequency — indistinguishable from the readings
+    // alone, which is exactly what made the WRN / MMR-deficiency anomalies unfalsifiable until now.
+    if !trace.is_base_rung() {
+        println!(
+            "  WIDEN [{:?}] attempts={} cap={:?} beam={:?} ranking={} recovery={} — {:?}",
+            trace.pass,
+            trace.attempts,
+            trace.cap,
+            trace.beam,
+            if trace.ranking_survived() {
+                "IN FORCE"
+            } else {
+                "DISCARDED"
+            },
+            // Pass 1b's status, which separates two different failures on the same fallback: NOT-RUN
+            // means no word had lost a category shape, so the narrow rescue never applied; promoted=n
+            // means it applied, promoted n senses, and the parse still failed.
+            match trace.recovery_promoted {
+                None => "NOT-RUN".to_string(),
+                Some(n) => format!("promoted={n}"),
+            },
+            text
+        );
+    }
     match closed.len() {
         0 => {
             if open.is_empty() {
@@ -4090,6 +4118,152 @@ fn describe_probe_value(
         Value::String(s) => format!("{s:?}"),
         other => format!("{other:?}"),
     }
+}
+
+/// **Which word's ranking blocks the parse?** — leave-one-out over the recorded sense draw.
+///
+/// `EIGENIUS_PROBE_BLOCKER="<sentence>"` (default: the MMR unit) re-parses the sentence once per
+/// ranked word, each time BLANKING that one word's ranking and keeping every other word's. A blanked
+/// word's senses leave the rank map, so `sense_cap_key` scores them `(true, 0, static_rank)` — sorted
+/// after every ranked sense and ordered among themselves by static frequency. That is exactly what
+/// Pass 2 does to the whole sentence, applied to one word.
+///
+/// WHY: three of the page's 62 units resolve only on `WidenPass::StaticFallback` — the ranking
+/// discarded for every word — even though targeted recovery (Pass 1b) ran first and promoted senses.
+/// «These observations suggest … MMR deficiency» is the sharpest: it fails under the ranking at caps
+/// 2, 4, 8 and 16, then parses on the FIRST Pass-2 attempt at the base cap of 2. So widening was never
+/// the issue and the ranking itself blocks composition. Pass 1b cannot see this class, because it only
+/// promotes senses of a LOST CATEGORY SHAPE — when the shape is present and merely the wrong sense of
+/// it wins, there is nothing for it to target.
+///
+/// A word that RESCUES the sentence when blanked is a blocker. If several do, the blockage is joint.
+/// If none does, no single word is responsible and the narrow fix does not exist for that sentence.
+#[test]
+#[ignore = "DB-backed; needs snapshot + a recorded ranks draw; --ignored --nocapture"]
+fn probe_blocking_word() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let Ok(ranks_path) = std::env::var("EIGENIUS_SENSE_RANKS") else {
+        eprintln!("SKIP: set EIGENIUS_SENSE_RANKS to a recorded draw");
+        return;
+    };
+    let sentence = std::env::var("EIGENIUS_PROBE_BLOCKER").unwrap_or_else(|_| {
+        "These observations suggest that WRN dependency is not simply a result of MMR deficiency."
+            .to_string()
+    });
+    let lem = morphy();
+    // The parser MUST be built exactly as the sweep builds it. `rank_key` covers the candidate sense
+    // lists, so the page augmentation (OOV grounding injects entries) and the document window both
+    // feed the key — omitting either turns every replay lookup into a miss, which is how the first
+    // run of this probe reported all ten words as blockers when there was no ranking at all.
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let Ok(page) = std::fs::read_to_string(&page_path) else {
+        eprintln!("SKIP: {page_path} not found");
+        return;
+    };
+    let aug = page_augmentation(&head, &page, &lem);
+    let ctx_window: usize = std::env::var("EIGENIUS_CONTEXT_SENTENCES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let draw: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&ranks_path).expect("read ranks"))
+            .expect("parse ranks");
+    let entry = draw
+        .as_array()
+        .expect("ranks is an array")
+        .iter()
+        .find(|e| e["sentence"].as_str() == Some(sentence.as_str()))
+        .unwrap_or_else(|| panic!("sentence not in the draw: {sentence}"));
+    let surfaces: Vec<String> = entry["words"]
+        .as_array()
+        .expect("words")
+        .iter()
+        .map(|w| w["surface"].as_str().unwrap_or("?").to_string())
+        .collect();
+
+    let replay = std::sync::Arc::new(
+        eigenius_kernel::dcg::ReplaySenseRanker::load(std::path::Path::new(&ranks_path))
+            .expect("load ranks"),
+    );
+
+    /// Wraps a recorded draw and blanks ONE word's ranking, leaving the rest exactly as recorded.
+    struct LeaveOneOut {
+        inner: std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>,
+        blank: usize,
+    }
+    impl eigenius_kernel::dcg::SenseRanker for LeaveOneOut {
+        fn rank(
+            &self,
+            sentence: &str,
+            context: &str,
+            words: &[eigenius_kernel::dcg::WordSenses],
+        ) -> Option<Vec<Vec<usize>>> {
+            let mut r = self.inner.rank(sentence, context, words)?;
+            if let Some(v) = r.get_mut(self.blank) {
+                v.clear(); // this word only: out of the map ⇒ static frequency, as Pass 2 does
+            }
+            Some(r)
+        }
+    }
+
+    eprintln!("\n«{sentence}»\n  {} ranked words\n", surfaces.len());
+    // Control: the recorded ranking, untouched.
+    let base = build_index_over(&head, Some(&aug))
+        .with_document(segment_sentences(&page), ctx_window)
+        .with_sense_ranker(Box::new(ArcReplay(std::sync::Arc::clone(&replay))));
+    let (c, o, t) = base.parse_scoped_open_traced(&sentence, &lem, None);
+    eprintln!(
+        "  CONTROL (ranking as recorded): closed={} open={} pass={:?} attempts={} replay hits={} misses={}",
+        c.len(),
+        o.len(),
+        t.pass,
+        t.attempts,
+        replay.hits(),
+        replay.misses()
+    );
+    // GUARD: a replay MISS means the ranker did not answer, so there is no ranking to leave one word
+    // out OF — every arm below would be identical and the probe would report every word as a blocker.
+    // The key covers the candidate sense lists, so a lexicon/augmentation difference from the sweep
+    // silently produces this. Fail loudly rather than print ten meaningless rescues.
+    assert_eq!(
+        replay.misses(),
+        0,
+        "replay MISS on the control — this probe is not reproducing the sweep's ranking; \
+         the leave-one-out arms would all be no-ops"
+    );
+
+    let mut blockers: Vec<String> = Vec::new();
+    for (k, surface) in surfaces.iter().enumerate() {
+        let idx = build_index_over(&head, Some(&aug))
+            .with_document(segment_sentences(&page), ctx_window)
+            .with_sense_ranker(Box::new(LeaveOneOut {
+                inner: std::sync::Arc::clone(&replay),
+                blank: k,
+            }));
+        let (c, o, t) = idx.parse_scoped_open_traced(&sentence, &lem, None);
+        // A rescue means: with ONLY this word unranked, the ranking-respecting passes now succeed.
+        let rescued = (!c.is_empty() || !o.is_empty()) && t.ranking_survived();
+        if rescued {
+            blockers.push(surface.clone());
+        }
+        eprintln!(
+            "  [{k:>2}] blank «{surface}» → closed={} open={} pass={:?} attempts={} {}",
+            c.len(),
+            o.len(),
+            t.pass,
+            t.attempts,
+            if rescued { "  <-- RESCUES" } else { "" }
+        );
+    }
+    eprintln!(
+        "\n  BLOCKERS: {}",
+        if blockers.is_empty() {
+            "none — no single word's ranking is responsible".to_string()
+        } else {
+            blockers.join(", ")
+        }
+    );
 }
 
 /// D69 §7f — every lexical entry a SURFACE resolves to, with its grammatical category.

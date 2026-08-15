@@ -47,7 +47,7 @@ use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_umls::convert::{
-    header, render_base, render_concept_block, render_document, DropSet, MassNouns,
+    header, render_base, render_concept_block, render_document, AddSet, DropSet, MassNouns,
 };
 use eigenius_umls::rrf::{
     parse_mrconso_line, parse_mrdef_line, parse_mrrank, parse_mrsab, parse_mrsty_line,
@@ -83,6 +83,13 @@ struct Args {
     /// stays; the common word is covered by WordNet). Absent ⇒ no drops.
     #[arg(long)]
     drop_atoms: Option<PathBuf>,
+    /// Curated atom overrides (`atom-overrides.json`): a hand-maintained `{ "drop": [...], "add": [...] }`
+    /// of `{cui, form, why}` rows adjudicated from PARSE evidence rather than from the D63 alignment
+    /// pipeline. `drop` rows merge into `--drop-atoms`; `add` rows inject a surface UMLS does not carry
+    /// for a concept it should reach. Kept SEPARATE from `drops.json` because `lexicon-align drops`
+    /// regenerates that file wholesale and would clobber curated decisions. Absent ⇒ no overrides.
+    #[arg(long)]
+    atom_overrides: Option<PathBuf>,
     /// A2 CHV-redundant filter (D63): drop each concept's REDUNDANT multiword CHV-only alias — a
     /// compound surface it gets ONLY from CHV (Consumer Health Vocabulary) that an authoritative
     /// source already provides elsewhere (`C0610268` aliasing `dna helicase`). Removes a spurious
@@ -199,11 +206,71 @@ fn load_drops(path: Option<&Path>) -> DropSet {
     }
 }
 
+/// Load the curated override file (`{ "drop": [...], "add": [...] }` of `{cui, form, why}` rows) into
+/// a `(DropSet, AddSet)` pair. Absent/unreadable/malformed ⇒ empty (fail soft, like `load_drops`, so a
+/// missing curation file never blocks an import — the run just reports zero overrides).
+fn load_overrides(path: Option<&Path>) -> (DropSet, AddSet) {
+    #[derive(serde::Deserialize)]
+    struct OverrideRow {
+        cui: String,
+        form: String,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct Overrides {
+        #[serde(default)]
+        drop: Vec<OverrideRow>,
+        #[serde(default)]
+        add: Vec<OverrideRow>,
+    }
+    let Some(path) = path else {
+        return (DropSet::new(), AddSet::new());
+    };
+    let Ok(s) = fs::read_to_string(path) else {
+        eprintln!(
+            "atom-overrides: {} not found — no overrides",
+            path.display()
+        );
+        return (DropSet::new(), AddSet::new());
+    };
+    let ov: Overrides = serde_json::from_str(&s).unwrap_or_else(|e| {
+        eprintln!(
+            "atom-overrides: {} — malformed JSON: {e}; no overrides",
+            path.display()
+        );
+        Overrides::default()
+    });
+    let mut drops = DropSet::new();
+    for r in &ov.drop {
+        drops
+            .entry(r.cui.clone())
+            .or_default()
+            .insert(r.form.clone());
+    }
+    let mut adds = AddSet::new();
+    for r in &ov.add {
+        adds.entry(r.cui.clone())
+            .or_default()
+            .insert(r.form.clone());
+    }
+    eprintln!(
+        "atom-overrides: {} drop + {} add across {} concepts from {}",
+        ov.drop.len(),
+        ov.add.len(),
+        drops.len() + adds.len(),
+        path.display()
+    );
+    (drops, adds)
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     let meta = &args.meta_dir;
     let mass = load_countability(args.countability.as_deref());
-    let drops = load_drops(args.drop_atoms.as_deref());
+    let mut drops = load_drops(args.drop_atoms.as_deref());
+    let (curated_drops, adds) = load_overrides(args.atom_overrides.as_deref());
+    for (cui, forms) in curated_drops {
+        drops.entry(cui).or_default().extend(forms);
+    }
 
     // Small files read whole: SRL-0 allowlist + the name-ranking precedence.
     let mrsab = match fs::read_to_string(meta.join("MRSAB.RRF")) {
@@ -274,10 +341,18 @@ fn main() -> ExitCode {
     // Partitioned emit: a base layer (semantic types + descriptor) + concept-batch
     // chunks, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
-        return emit_partitioned(&subset, &args.version, dir, args.split_bytes, &mass, &drops);
+        return emit_partitioned(
+            &subset,
+            &args.version,
+            dir,
+            args.split_bytes,
+            &mass,
+            &drops,
+            &adds,
+        );
     }
 
-    let (doc, rep) = render_document(&subset, &args.version, &mass, &drops);
+    let (doc, rep) = render_document(&subset, &args.version, &mass, &drops, &adds);
     eprintln!(
         "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries \
          ({} junk atoms dropped; {} inflected duplicates pruned)",
@@ -332,6 +407,7 @@ fn emit_partitioned(
     split_bytes: usize,
     mass: &MassNouns,
     drops: &DropSet,
+    adds: &AddSet,
 ) -> ExitCode {
     if let Err(e) = fs::create_dir_all(dir) {
         eprintln!("error: creating {}: {e}", dir.display());
@@ -364,7 +440,7 @@ fn emit_partitioned(
     };
 
     for c in &subset.concepts {
-        let (block, brep) = render_concept_block(c, mass, drops);
+        let (block, brep) = render_concept_block(c, mass, drops, adds);
         // Roll over before exceeding the cap (but never write an empty chunk).
         if chunk_concepts > 0 && cur.len() + block.len() > split_bytes {
             match flush(idx, &cur) {
