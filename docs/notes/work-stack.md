@@ -9,7 +9,28 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
+### 0. ▲ ACTIVE — [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **one flag decides two unrelated things**
+Pushed `2026-08-15` from the MMR-deficiency adjudication. The UMLS importer decides "named individual?"
+with `Concept::symbol`, and that flag fixes BOTH how a term behaves syntactically (bare, no determiner,
+no plural) AND what it denotes (entity vs kind). For a gene locus those coincide; for a disease or a
+protein species they come apart, so the lexicon offers only two of the four combinations and the corpus
+keeps asking for the missing one — a bare-standing, KIND-referring NP («Lynch syndrome causes …», «MSI
+is associated with …»). Three measured failures, one axis: (a) «Depletion of WRN» cannot have *bare
+individual + the protein* — C1337007 is `cat_np` only, C0388246 `cat_n` only — so the 2026-08-14 re-pin
+chose which half to give up; (b) named conditions reach bare standing only via a `mass` entry granted by
+the preferred name's HEAD, so C4552100 «Lynch Syndrome» lacks it while C1333990 «Hereditary Nonpolyposis
+Colorectal Cancer» — THE SAME DISEASE — has it; (c) D69 §7k's `cat_frame` rescue, keyed on the number
+index, restores ranker-ELIMINATED senses to obtain a mass variant: benign for «lynch syndrome»
+(C4552100→C1333990, a synonym) and WRONG for «mmr deficiency» (C4522088→C0265325 Turcot syndrome). The
+2026-08-15 «Lynch syndrome» rescue was therefore not a fix — it was concept substitution that happened
+to land on a synonym, recorded as a success because the unit stopped falling back. IMMEDIATE, not
+blocked on the design: drop the NUMBER index from `cat_frame` (substitution to obtain countability is
+unsound however it arrives — this WILL regress 62/62 and the zero-fallback count until O1 lands), and
+O1 = add T047/T191 to `MASS_DENOTING_TUIS` so bare standing follows what a concept IS, not what it is
+called. DECISIONS in §5 D1–D3; O2 (decouple syntax from denotation) is a bootstrap change ⇒ reseed, and
+it is what unblocks the «Depletion of WRN» pin and the gene-vs-protein question.
+
+### 1. ▼ [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
 Pushed `2026-08-13` from the v2 demo review. MEASURED: for «MSI cancer models did not have the
 exonuclease activity of WRN.» the ranker prompt carries **120 candidates with 120 distinct sems
 but only 4 distinct strings** (13.5 KB, 8 structure headers showing 1 gloss each) — «exonuclease
@@ -42,7 +63,7 @@ gold sets (`reading-adjudications.tsv` keys on the sem) and NOT any parse metric
 note; slice 3 answers "how much of the ranker's 21/31 was blindness". NOT in scope: the negated
 sentence's 308-vs-2 cap-only forest — a grammar-side multiplicity question, named in §8.
 
-### 1. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
+### 2. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
 The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
 → unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
@@ -147,7 +168,7 @@ the first deliverable.** Remaining deferrals live in D68 §5/§5a (collective/gr
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
 cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
 
-### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
+### 3. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
 
@@ -231,7 +252,7 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 4. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (2) is a detour from — now largely folded into (1)'s Stages 3–4.
 Remaining once (2) pops, in order:
 **address ambiguity** (0 encoded → clean single parses) + long-sentence perf → **grading-phase gaps**

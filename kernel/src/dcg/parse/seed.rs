@@ -1119,31 +1119,33 @@ pub(super) fn apply_sense_cap(
 /// ALL TEN words' rankings — which is how Turcot syndrome and the WRN protein-kind reached the
 /// reading. Under `cat_frame` the lost `fwd/cat_cp` is visible and only `suggest` is touched.
 ///
-/// Second measured case, same shape of bug in a different feature: «Germline mutations … cause Lynch
-/// syndrome.» The span «lynch syndrome» carries `cat_n(C4552100, num_any)` (kept, rank 0) and both
-/// `cat_n(C1333990, num_any)` and `cat_n(C1333990, mass)` (eliminated). Elimination is hard — the cap
-/// does not backfill from an omitted sense — so C1333990 never seeds and the MASS entry, which is the
-/// bare-noun reading the sentence needs, goes with it. Head constructor `cat_n` for all three, so the
-/// loss is invisible unless the number index is part of the key.
+/// **The number index is deliberately NOT part of this key** (added `2026-08-15`, REMOVED the same day
+/// after measurement — D70 §1c). Including it looked right: «Germline mutations … cause Lynch
+/// syndrome.» has `cat_n(C4552100, num_any)` kept and `cat_n(C1333990, num_any|mass)` eliminated, so a
+/// lost `cat_n/mass` frame would let the rescue restore the bare-noun reading. It does — by restoring a
+/// DIFFERENT CONCEPT. Elimination is hard (the cap does not backfill an omitted sense), so the only way
+/// to obtain a mass variant is to resurrect the sense that carries one, and that sense denotes
+/// something else. Measured consequences on one page: «lynch syndrome» C4552100 → C1333990, which is
+/// the same disease under its former name (Hereditary Nonpolyposis Colorectal Cancer) and therefore
+/// looked like a success; «mmr deficiency» C4522088 → C0265325, «Mismatch Repair Deficiency» replaced
+/// by **Turcot syndrome**, which is simply wrong. One mechanism, and it is unsound in both: a parse must
+/// not swap in a different concept to obtain a countability variant. That a swap sometimes lands on a
+/// synonym is luck.
+///
+/// A slash's argument is a different case and stays in the key: promoting another SENSE OF THE SAME
+/// WORD to restore a lost syntactic frame changes which reading is reachable, not which entity is
+/// being denoted. The bare-standing problem the number index was reaching for is real, and belongs to
+/// countability assignment (D70 O1) rather than to sense recovery.
 ///
 /// Kept SEPARATE from `cat_shape` on purpose: `cat_shape` is also the [`apply_sense_cap`] key, where
 /// a finer grain would change which categories survive the cap for every word in every sentence.
 /// Two callers, two questions, two keys.
 pub(super) fn cat_frame(cat: &Exp) -> String {
     let head = cat_shape(cat);
-    // The constructor's LAST argument is the slot that says what this category takes or how it is
-    // indexed: a slash's ARGUMENT (`fwd(m, VP, cat_cp)` — takes a that-clause) and a noun's NUMBER
-    // (`cat_n(T, mass)` — the bare-noun reading). Both distinctions are ones a word can lose while
-    // its head constructor stays put, and both were invisible to `cat_shape`.
-    let mut spine = cat;
-    while let Exp::App(f, _) = spine {
-        spine = f;
-    }
-    match spine {
-        Exp::InductiveCtor(_, _, args) if !args.is_empty() => {
-            format!("{head}/{}", cat_shape(&args[args.len() - 1]))
-        }
-        _ => head,
+    // A SLASH's argument only. NOT the number index of a `cat_n` — see the doc-comment above.
+    match slash_parts(cat, "fwd").or_else(|| slash_parts(cat, "bwd")) {
+        Some((_m, _res, arg)) => format!("{head}/{}", cat_shape(arg)),
+        None => head,
     }
 }
 

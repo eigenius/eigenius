@@ -1,0 +1,354 @@
+[
+  {
+    "sentence": "DNA repair processes are attractive synthetic-lethal targets.",
+    "gloss": "every DNA Repair process is a Synthetic Lethality attractive target",
+    "kinds": [],
+    "rationale": "The sentence is a general background assertion about the appeal of DNA repair processes as therapeutic targets, not a result of the document's own investigation, a direct measurement, a categorical assignment, or a testable hypothesis — it functions as motivating framing/context that a later sentence would not naturally refer back to as \"these findings,\" \"these observations,\" \"these classifications,\" or \"these hypotheses.\""
+  },
+  {
+    "sentence": "Defects in DNA mismatch repair promote a hypermutable state.",
+    "gloss": "some a00356339 state, a defect in a DNA Mismatch Repair promote it",
+    "kinds": [],
+    "rationale": "The sentence states a general, established biological principle about MMR defects causing hypermutability — it is background knowledge introduced to contextualize the study, not a result of the document's own investigation, a direct measurement, a category assignment, or a hypothesis being tested here."
+  },
+  {
+    "sentence": "Depletion of WRN induced double-stranded DNA breaks.",
+    "gloss": "a depletion of WRN protein, human induce DNA Breaks, Double-Stranded",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a causal result established through the document's own experimental investigation (depletion of WRN was performed and its consequence — induction of double-stranded DNA breaks — was determined), making it a finding of the study rather than a raw measurement or categorical assignment."
+  },
+  {
+    "sentence": "Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.",
+    "gloss": "a depletion of WRN protein, human promote apoptosis and a depletion of WRN protein, human promote a Cell Cycle Arrest in a Microsatellite Instability model",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a result directly produced by the authors' own experimental investigation (depletion of WRN causing apoptosis and cell cycle arrest in MSI models), and it is explicitly grouped with the other results under the umbrella phrase \"These findings show…\" later in the same paragraph, marking it as an established outcome of the study."
+  },
+  {
+    "sentence": "Each event alone does not lead to cell death.",
+    "gloss": "no event ⟦sole(G#0)⟧, it lead n11486178",
+    "kinds": [],
+    "rationale": "The sentence is a definitional/background assertion characterizing the concept of synthetic lethality (i.e., that neither genetic event alone causes cell death), not a result of the document's own investigation, a direct measurement, a category assignment, or a hypothesis — it is simply a conceptual property stated as background fact."
+  },
+  {
+    "sentence": "Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome.",
+    "gloss": "a Germ-Line Mutation in the gene named MSH2 gene or in the gene named MSH6 gene or in the gene named PMS2 gene or in the gene named MLH1 gene cause Hereditary Nonpolyposis Colorectal Cancer",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ],
+    "rationale": "The sentence assigns specific germline mutations in MMR genes (MSH2, MSH6, PMS2, MLH1) to the category of Lynch syndrome causes, which is a classificatory act of placing genetic events into a defined disease category rather than reporting a new finding, observation, or hypothesis from the document's own investigation."
+  },
+  {
+    "sentence": "MSI can arise from Lynch syndrome.",
+    "gloss": "possibly, Microsatellite Instability arise from Hereditary Nonpolyposis Colorectal Cancer",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a known, externally documented fact about the origin of MSI (i.e., it can arise from Lynch syndrome), functioning as a background observation about a phenomenon noted in the literature rather than a result of the document's own investigation, a categorical assignment, or a hypothesis."
+  },
+  {
+    "sentence": "MSI cancer models did not require the exonuclease activity of WRN.",
+    "gloss": "not (a Microsatellite Instability Cancer Model require the exonuclease activity of WRN protein, human)",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a specific result of the authors' own experimental investigation — that WRN's exonuclease activity is dispensable in MSI cancer models — making it an established result (finding) of the document's inquiry, as confirmed by the immediately following summary sentence that groups it with other results under \"These findings show…\"."
+  },
+  {
+    "sentence": "MSI cancer models required the helicase activity of WRN.",
+    "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a specific result established by the document's own experimental investigation — that the helicase (but not the exonuclease) activity of WRN is required in MSI cancer models — making it an established finding of the study, as confirmed by its inclusion in the summary cluster introduced by \"These findings show…\"."
+  },
+  {
+    "sentence": "MSI contributes to several cancers.",
+    "gloss": "some cancer, Microsatellite Instability contribute it",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a noted, pre-established fact about MSI's role across cancer types — something recorded/noted from the literature rather than produced by the document's own experiments, a classification of cases, or a hypothesis — making it an observation in the document's discourse."
+  },
+  {
+    "sentence": "MSI is associated with notable responses to immune checkpoint blockade.",
+    "gloss": "Microsatellite Instability associate a notable response to Immune Checkpoint Blockade",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a noted association drawn from the existing literature/clinical record rather than from the document's own experiments, making it an observation of an externally established pattern rather than a finding of this study's investigation."
+  },
+  {
+    "sentence": "MSI is most commonly observed in colorectal, endometrial, gastric and ovarian cancers.",
+    "gloss": "Microsatellite Instability is observed and Microsatellite Instability in a cancer ⟦a02700434(G#0)⟧ or ⟦a03063492(G#0)⟧ or ⟦a02733187(G#0)⟧ or ⟦a02932685(G#0)⟧",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a noted epidemiological pattern about where MSI is seen in the real world (colorectal, endometrial, gastric, ovarian cancers), making it an observed fact drawn from the literature rather than a result of the document's own experiments, a classification, or a hypothesis."
+  },
+  {
+    "sentence": "MSI occurs in colon, gastric, endometrial and ovarian cancers.",
+    "gloss": "Microsatellite Instability occur n14247239 and Microsatellite Instability occur Malignant neoplasm of stomach and Microsatellite Instability occur n14247458 and Microsatellite Instability occur Malignant neoplasm of ovary",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a noted epidemiological fact about where MSI is observed in cancer types, making it an observation of an existing pattern rather than a result of the document's own experiments, a categorical assignment, or a hypothesis."
+  },
+  {
+    "sentence": "MSI results from deficient DNA mismatch repair.",
+    "gloss": "Microsatellite Instability result from a DNA deficient Mismatch Repair",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a known, directly observable biological fact about the mechanistic origin of MSI — something noted/measured in the field and invoked here as background context — rather than a result of the document's own experiments, a categorical assignment, a hypothesis, or a suggestion."
+  },
+  {
+    "sentence": "Many cancers exhibit an impairment of a DNA repair pathway.",
+    "gloss": "some cancer, some impairment some DNA Repair Pathway, of it, it exhibit it",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a general, empirically noted pattern in the existing cancer literature (that many cancers show DNA repair pathway impairment), making it an observation of a known phenomenon rather than a result of the document's own investigation, a categorical assignment, or a hypothesis."
+  },
+  {
+    "sentence": "More commonly, MSI cancers arise from somatic MMR inactivation.",
+    "gloss": "a Microsatellite Instability cancer arise from a Mismatch Repair somatic inactivation",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a noted pattern in the existing literature/field (that somatic MMR inactivation is the more common origin of MSI cancers), making it an observation about the world rather than a result of the document's own experiments, a formal categorization, or a hypothesis."
+  },
+  {
+    "sentence": "Nucleotide repeat regions are microsatellites.",
+    "gloss": "every nucleotide Repeat Pattern region is a Short Tandem Repeat",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ],
+    "rationale": "The sentence assigns nucleotide repeat regions to the established category \"microsatellites,\" functioning as a definitional/taxonomic classification rather than a result of the document's own investigation or a measured observation."
+  },
+  {
+    "sentence": "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.",
+    "gloss": "a PARP1 protein, human inhibitor is successful and a PARP1 protein, human inhibitor in a cancer with a deficiency in Homologous Recombination",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports an empirically noted fact from the existing literature (the clinical success of PARP-1 inhibitors in HR-deficient cancers) that the authors cite as a motivating precedent, making it an observation of an established real-world outcome rather than a result of this document's own investigation, a category assignment, or a hypothesis."
+  },
+  {
+    "sentence": "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.",
+    "gloss": "the project named Achilles identify WRN gene as the preferential top dependency  compare a Microsatellite Stable Cultured Cell Line in a Microsatellite Instability Cultured Cell Line and the project named ni identify WRN gene as the preferential top dependency  compare a Microsatellite Stable Cultured Cell Line in a Microsatellite Instability Cultured Cell Line",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports the established result of the authors' own analysis of two independent screening datasets, identifying WRN as the top preferential dependency in MSI versus MSS cell lines — exactly the kind of result a later sentence would refer back to as \"these findings.\""
+  },
+  {
+    "sentence": "Project Achilles screened cell lines with a CRISPR library.",
+    "gloss": "ni screen a Cultured Cell Line some Clustered Regularly Interspaced Short Palindromic Repeats DNA Library, with it",
+    "kinds": [],
+    "rationale": "The sentence is a methodological description of how a referenced external project (Project Achilles) conducted its screen, not a result, measurement, categorization, or hypothesis produced by the document's own investigation."
+  },
+  {
+    "sentence": "Project DRIVE analysed cell lines with an RNA interference library.",
+    "gloss": "ni analyse a Cultured Cell Line some RNA Interference DNA Library, with it",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a directly observed/measured methodological fact about what Project DRIVE did (analysed cell lines using an RNA interference library), describing an empirical action that was witnessed and recorded rather than a derived result, category assignment, or hypothesis."
+  },
+  {
+    "sentence": "Scientists can exploit synthetic lethality for cancer therapeutics.",
+    "gloss": "possibly, scientist exploit a Synthetic Lethality for a cancer therapeutic",
+    "kinds": [
+      "urn:eigenius:encoding:Suggestion"
+    ],
+    "rationale": "The sentence proposes a practical application (\"can exploit\") of synthetic lethality, framing it as a recommended or actionable direction rather than a result of the document's own investigation, a direct measurement, or a categorical assignment."
+  },
+  {
+    "sentence": "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter.",
+    "gloss": "a Mismatch Repair somatic inactivation arise from a Hypermethylation of the MLH1 gene Promoter",
+    "kinds": [],
+    "rationale": "This sentence states a well-known background fact from the literature about the typical mechanism of somatic MMR inactivation, not a result of the document's own investigation, a direct measurement, a category assignment, or a hypothesis — making it an unmarked general assertion of established prior knowledge."
+  },
+  {
+    "sentence": "Some cancers do not respond to immune checkpoint blockade.",
+    "gloss": "some cancer, not (it respond to Immune Checkpoint Blockade)",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a clinically noted fact about the behavior of certain cancers in response to immune checkpoint blockade — something observed in the field rather than a result of the document's own experiments, a categorical assignment, or a hypothesis — making it an observation that a later sentence could refer back to as \"these observations.\""
+  },
+  {
+    "sentence": "Synthetic lethality is an interaction between two genetic events.",
+    "gloss": "Synthetic Lethality is an interaction between a two event ⟦a02734544(G#1)⟧",
+    "kinds": [],
+    "rationale": "The sentence is a definitional/background assertion establishing what synthetic lethality is, not a result of the document's own investigation, a direct measurement, a category assignment, a hypothesis, or a suggestion — it is introductory conceptual framing that a later sentence would refer back to as \"this concept\" or \"this definition,\" not as a finding, observation, classification, or hypothesis."
+  },
+  {
+    "sentence": "The MSI relationship compared favourably to other strong biomarkers for vulnerabilities.",
+    "gloss": "the Microsatellite Instability relationship compare to an other strong Biological Markers and the Microsatellite Instability relationship for vulnerability",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a result of the authors' own evaluative analysis — they assessed MSI as a biomarker for WRN dependency and determined it compares favourably to other established biomarkers, making it an established result (finding) of their investigation rather than a raw measurement, a categorisation, or a speculation."
+  },
+  {
+    "sentence": "The four other RecQ DNA helicases were not preferentially essential in MSI cell lines.",
+    "gloss": "not (the four Other location of complaint RecQ Helicases DNA Helicases is essential) and the four Other location of complaint RecQ Helicases DNA Helicases in a Microsatellite Instability Cultured Cell Line",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a result derived from the authors' own analysis of the dependency datasets (Achilles and DRIVE), establishing that WRN's essentiality in MSI lines is specific among RecQ helicases — a conclusion of the investigation rather than a raw measurement or category assignment."
+  },
+  {
+    "sentence": "The lines from rare lineages were less dependent on WRN.",
+    "gloss": "a Microsatellite Instability Cultured Cell Line from a rare lineage is more dependent on WRN protein, human than the line from a rare lineage",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a result directly produced by the document's own analysis of MSI cell lines from rare lineages, establishing a specific outcome of the investigation (reduced WRN dependency) that the subsequent sentence (\"these observations suggest…\") refers back to as part of the study's conclusions."
+  },
+  {
+    "sentence": "The use of immune checkpoint blockade can be limited by toxicity.",
+    "gloss": "possibly, Toxic effect limit the use of Immune Checkpoint Blockade",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence reports a noted, real-world clinical fact about immune checkpoint blockade—that its use can be curtailed by toxicity—which is presented as something observed/known from existing evidence rather than a result of the document's own experiments, a categorical assignment, or a testable hypothesis."
+  },
+  {
+    "sentence": "These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency.",
+    "gloss": "claim is concordant and claim with a Microsatellite Instability Phenotyping (qualifier value) Polymerase Chain Reaction v00636888 and claim is concordant and claim with a Mismatch Repair deficiency some Entity, it predict and claim is concordant and claim with a Microsatellite Instability Phenotyping (qualifier value) Polymerase Chain Reaction v00636888 and claim is concordant and claim with a Mismatch Repair deficiency some Entity, it predict",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence reports a result of the authors' own validation analysis — that their MSI/MSS/indeterminate groupings agreed strongly with two independent reference methods (PCR-based phenotyping and predicted MMR deficiency) — making it an established result of the document's investigation that a later sentence would naturally refer back to as \"these findings.\""
+  },
+  {
+    "sentence": "These findings remained true with PCR-based MSI classifications.",
+    "gloss": "claim remain  is true and claim with a Microsatellite Instability classification Polymerase Chain Reaction v00636888",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence reports a validated result of the study's own analysis — that the WRN preferential dependency identified in MSI cell lines held up under an alternative (PCR-based) MSI classification scheme — making it an established result of the investigation rather than a raw observation, a categorisation, or a hypothesis."
+  },
+  {
+    "sentence": "These findings show that WRN is a promising drug target for MSI cancers.",
+    "gloss": "claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer and claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer and claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer and claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer and claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer and claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer and claim show WRN protein, human is a drug promising target for a Microsatellite Instability cancer",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence is introduced by \"These findings show…,\" explicitly framing it as a conclusion drawn from the document's own experimental investigation, marking it as an established result of the study rather than a hypothesis, observation, or classification."
+  },
+  {
+    "sentence": "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.",
+    "gloss": "claim show WRN protein, human is a Synthetic Lethality vulnerability for a Microsatellite Instability cancer and claim show WRN protein, human is a Synthetic Lethality vulnerability for a Microsatellite Instability cancer and claim show WRN protein, human is a Synthetic Lethality vulnerability for a Microsatellite Instability cancer and claim show WRN protein, human is a Synthetic Lethality vulnerability for a Microsatellite Instability cancer and claim show WRN protein, human is a Synthetic Lethality vulnerability for a Microsatellite Instability cancer and claim show WRN protein, human is a Synthetic Lethality vulnerability for a Microsatellite Instability cancer",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence explicitly synthesizes the results of the document's own experimental investigation (\"These findings show…\"), presenting WRN's synthetic-lethal vulnerability in MSI cancers as an established conclusion drawn from the study's data, which is the hallmark of a finding."
+  },
+  {
+    "sentence": "These groups are MSI lines, microsatellite-stable lines and indeterminate lines.",
+    "gloss": "a n08462320 from a silence a01388418 Screening procedure is a Microsatellite Instability line and a n08462320 from a silence a01388418 Screening procedure is a Microsatellite Stable line and a n08462320 from a silence a01388418 Screening procedure is an indeterminate line",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ],
+    "rationale": "The sentence explicitly assigns the identified cell lines into named categories (MSI, microsatellite-stable, and indeterminate), which is the defining act of classification — grouping items into discrete types — rather than reporting a measured result or a hypothesis."
+  },
+  {
+    "sentence": "This state has frequent insertion or deletion mutations.",
+    "gloss": "a n14464005 in a n14830364 Mismatch Repair have a frequent Insertion Mutation or a n14464005 in a n14830364 Mismatch Repair have a frequent Deletion Mutation",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence describes a measurable, empirically noted characteristic (frequent insertion or deletion mutations) of the hypermutable state associated with MMR deficiency — it is a reported property observed in such cancers, not a result of this document's own experiments, a categorical assignment, or a hypothesis."
+  },
+  {
+    "sentence": "Thus, MSI tumours need novel therapies.",
+    "gloss": "a Microsatellite Instability tumour need a novel therapy",
+    "kinds": [],
+    "rationale": "The sentence is a concluding rhetorical assertion (\"Thus, MSI tumours need novel therapies\") that motivates the study rather than reporting a result, measurement, categorization, or hypothesis of the document's own investigation — it functions as a background motivation statement, not a discourse-typed claim a later sentence would refer back to as a finding, observation, classification, or hypothesis."
+  },
+  {
+    "sentence": "WRN dependency may require specific lineages or a stronger mutation phenotype.",
+    "gloss": "possibly, a WRN gene dependency require a specific lineage or some mutation strong phenotype, possibly, a WRN gene dependency require it",
+    "kinds": [
+      "urn:eigenius:encoding:Hypothesis"
+    ],
+    "rationale": "The sentence proposes a tentative, unconfirmed explanatory claim (\"may require\") about the conditions governing WRN dependency, functioning as a speculative interpretation of the preceding observations rather than an established result or direct measurement."
+  },
+  {
+    "sentence": "WRN encodes a RecQ DNA helicase.",
+    "gloss": "some RecQ Helicases DNA Helicases, WRN gene encode it",
+    "kinds": [],
+    "rationale": "The sentence is a background factual assertion about WRN's known molecular identity, not a result of the document's own investigation, a direct measurement, a category assignment within the study, or a hypothesis — it is simply an established biological fact stated as contextual information."
+  },
+  {
+    "sentence": "WRN was dispensable in models of microsatellite-stable cancers.",
+    "gloss": "WRN gene is dispensable and WRN gene in a model of a Microsatellite Stable cancer",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "This sentence reports a result of the authors' own investigation — that WRN is dispensable in microsatellite-stable cancer models — serving as the contrastive counterpart to the positive finding about MSI models, and is explicitly grouped with the other results referred back to as \"these findings\" in the abstract summary sentences."
+  },
+  {
+    "sentence": "We also identified MSI cell lines from rare lineages.",
+    "gloss": "we identify a Microsatellite Instability Cultured Cell Line from a rare lineage",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence reports a concrete result of the authors' own analysis of the dependency datasets — the identification of MSI cell lines from rare lineages — making it an established result of the document's investigation, as confirmed by the follow-up sentences that elaborate on what was found about those lines."
+  },
+  {
+    "sentence": "We analysed data from large-scale silencing screens.",
+    "gloss": "we analyse a data from a silence large-scale Screening procedure",
+    "kinds": [],
+    "rationale": "The sentence describes a methodological action (what the authors did), not a result, measurement, categorization, or hypothesis — it is a procedural statement about the analytical approach taken, which does not fit any of the target discourse kinds."
+  },
+  {
+    "sentence": "We analysed two independent cancer dependency data sets.",
+    "gloss": "some cancer dependency independent Data Set, we analyse it",
+    "kinds": [],
+    "rationale": "The sentence is a methodological statement describing a procedural action taken by the authors (which datasets they analysed), not a result, measurement, categorisation, or interpretive claim — it would be referred back to as \"this approach\" or \"this analysis,\" not as a finding, observation, classification, hypothesis, or suggestion."
+  },
+  {
+    "sentence": "We ascertained MSI status with sequencing.",
+    "gloss": "we ascertain a Microsatellite Instability status with DNA Sequence",
+    "kinds": [
+      "urn:eigenius:encoding:Observation"
+    ],
+    "rationale": "The sentence describes a direct measurement/data-collection act performed by the authors (ascertaining MSI status via sequencing), making it an observation — a methodological observation of sample properties — rather than an interpreted result, a categorisation, or a hypothesis."
+  },
+  {
+    "sentence": "We evaluated MSI as a biomarker for WRN dependency.",
+    "gloss": "some Biological Markers for a WRN gene dependency, we evaluate Microsatellite Instability as it",
+    "kinds": [],
+    "rationale": "The sentence is a procedural/methodological statement describing an analytical action the authors performed (\"we evaluated\"), not a result, observation, classification, or hypothesis — it is an unmarked assertion about what was done rather than what was found or inferred."
+  },
+  {
+    "sentence": "We found that WRN was selectively essential in MSI models.",
+    "gloss": "we find WRN gene is essential and WRN gene in a Microsatellite Instability model",
+    "kinds": [
+      "urn:eigenius:encoding:Finding"
+    ],
+    "rationale": "The sentence reports a concluded result of the authors' own investigation (\"We found…\"), representing an established outcome of their analysis rather than a raw measurement or category assignment, and the document itself later refers back to it with \"These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.\""
+  },
+  {
+    "sentence": "We identified three groups of cell lines.",
+    "gloss": "some group of Cultured Cell Line, we identify it",
+    "kinds": [
+      "urn:eigenius:encoding:Classification"
+    ],
+    "rationale": "The sentence explicitly assigns cell lines into named categorical groups (MSI, microsatellite-stable, and indeterminate), which is the defining act of classification rather than reporting a measured result or a hypothesis."
+  },
+  {
+    "sentence": "We queried dependencies in cancers with MSI.",
+    "gloss": "we query a dependency in a cancer with Microsatellite Instability",
+    "kinds": [],
+    "rationale": "The sentence describes a methodological action (querying a dataset) rather than reporting a result, observation, classification, or hypothesis — it is a procedural statement about what the investigators did, which does not fit any of the defined discourse kinds."
+  }
+]

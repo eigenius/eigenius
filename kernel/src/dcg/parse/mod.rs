@@ -1359,6 +1359,25 @@ mod tests {
         // A non-slash category is unchanged, so nothing that is not a functor moves.
         let noun = ctor("cat_n", vec![]);
         assert_eq!(cat_frame(&noun), cat_shape(&noun));
+
+        // The NUMBER index must NOT split a frame. A mass and a count entry of the same concept are
+        // ONE frame, so `recovery_ranks` can never see "the mass variant is missing" and resurrect a
+        // ranker-eliminated sense to supply it — which would substitute a different CONCEPT to fix a
+        // countability gap (D70 §1c: C4522088 «Mismatch Repair Deficiency» → C0265325 «Turcot
+        // syndrome»). Bare-standing capability belongs to countability assignment, not sense recovery.
+        let count = ctor(
+            "cat_n",
+            vec![ctor("C4522088", vec![]), ctor("num_any", vec![])],
+        );
+        let mass = ctor(
+            "cat_n",
+            vec![ctor("C4522088", vec![]), ctor("mass", vec![])],
+        );
+        assert_eq!(
+            cat_frame(&count),
+            cat_frame(&mass),
+            "a number index must not make the mass entry look like a lost frame"
+        );
     }
 
     /// The trace's whole purpose is answering "was the ranking in force?", so that predicate is
