@@ -89,6 +89,18 @@ data lexicon:Num {
     mass,     // mass / uncountable (D62 CNL) — "MSI", "DNA", "apoptosis": used BARE as an argument
               // (no determiner) and grammatically singular. Does not meet sg/pl (so `*a MSI` /
               // `*two MSI` fail); the bare-singular-mass shift gives it an argument NP reading.
+    name,     // PROPER NAME OF A KIND (D70) — "Lynch syndrome", "MMR deficiency", "Turcot syndrome":
+              // stands BARE like `mass` and denotes its KIND, but makes NO mass claim. Same
+              // distribution as `mass` in the flat feature lattice (meets `name` and `num_any` only,
+              // so `*a Lynch syndrome` / `*two Lynch syndromes` fail) and takes the same bare shift.
+              //
+              // Split out from `mass` because that value bundled two independent things: "stands
+              // bare" and "is an uncountable substance". A named condition needs the first and not
+              // the second, and conflating them made bare standing depend on whether the concept's
+              // UMLS preferred name happened to end in an uncountable head — so C1333990
+              // «Hereditary Nonpolyposis Colorectal Cancer» could stand bare and C4552100 «Lynch
+              // Syndrome», the SAME DISEASE, could not, and every bare use of the term denoted the
+              // wrong concept. See d70-named-entities-syntax-vs-denotation.md §1b/§1d.
 }
 
 // Fin — clause/predicate form (finiteness / non-finite shape + the adjectival

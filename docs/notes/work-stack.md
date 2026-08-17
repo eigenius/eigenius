@@ -9,28 +9,22 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **one flag decides two unrelated things**
-Pushed `2026-08-15` from the MMR-deficiency adjudication. The UMLS importer decides "named individual?"
-with `Concept::symbol`, and that flag fixes BOTH how a term behaves syntactically (bare, no determiner,
-no plural) AND what it denotes (entity vs kind). For a gene locus those coincide; for a disease or a
-protein species they come apart, so the lexicon offers only two of the four combinations and the corpus
-keeps asking for the missing one — a bare-standing, KIND-referring NP («Lynch syndrome causes …», «MSI
-is associated with …»). Three measured failures, one axis: (a) «Depletion of WRN» cannot have *bare
-individual + the protein* — C1337007 is `cat_np` only, C0388246 `cat_n` only — so the 2026-08-14 re-pin
-chose which half to give up; (b) named conditions reach bare standing only via a `mass` entry granted by
-the preferred name's HEAD, so C4552100 «Lynch Syndrome» lacks it while C1333990 «Hereditary Nonpolyposis
-Colorectal Cancer» — THE SAME DISEASE — has it; (c) D69 §7k's `cat_frame` rescue, keyed on the number
-index, restores ranker-ELIMINATED senses to obtain a mass variant: benign for «lynch syndrome»
-(C4552100→C1333990, a synonym) and WRONG for «mmr deficiency» (C4522088→C0265325 Turcot syndrome). The
-2026-08-15 «Lynch syndrome» rescue was therefore not a fix — it was concept substitution that happened
-to land on a synonym, recorded as a success because the unit stopped falling back. IMMEDIATE, not
-blocked on the design: drop the NUMBER index from `cat_frame` (substitution to obtain countability is
-unsound however it arrives — this WILL regress 62/62 and the zero-fallback count until O1 lands), and
-O1 = add T047/T191 to `MASS_DENOTING_TUIS` so bare standing follows what a concept IS, not what it is
-called. DECISIONS in §5 D1–D3; O2 (decouple syntax from denotation) is a bootstrap change ⇒ reseed, and
-it is what unblocks the «Depletion of WRN» pin and the gene-vs-protein question.
+### 0. ▼ [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **IMPLEMENTED `2026-08-15`; 62/62**
+The UMLS importer decided "named individual?" with one flag (`Concept::symbol`) that fixed BOTH syntax
+(bare, no determiner) and denotation (entity vs kind), so the lexicon offered two of four combinations
+and the corpus kept asking for the missing one — a bare-standing KIND-referring NP. DONE (§0): new
+`lexicon:Num::name` (bare + kind-denoting, no mass claim) granted by T047/T191; T033 Finding removed
+from `COUNT_VETO_TUIS` (its one motivating collision, `gENE`, is handled per-atom by drops.json, while
+the veto blocked head-inheritance for 107591 concepts including C4522088 «Mismatch Repair
+Deficiency»). RESULT: «MMR deficiency causes cancer» and «Lynch syndrome causes cancer» reach
+C4522088/C4552100 instead of Turcot/HNPCC; expected-hits 62/62 with an EMPTY miss-set; 0 units
+discarding their sense ranking; readings 637 (ceiling 700), skeletons 175. Everything the D69 chase
+compensated for was a concept that could not compose bare. STILL OPEN: D2 (disease kind-vs-entity) is
+unanswerable on this corpus; O4 (term-type strength — a concept's own PT vs another's CE for the same
+string, §1d) unimplemented and orthogonal; abbreviations still reach bare standing via the glossary's
+`mass` inheritance rather than `name` (§D3) — the same conflation one level down.
 
-### 1. ▼ [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
+### 1. ▲ ACTIVE — [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
 Pushed `2026-08-13` from the v2 demo review. MEASURED: for «MSI cancer models did not have the
 exonuclease activity of WRN.» the ranker prompt carries **120 candidates with 120 distinct sems
 but only 4 distinct strings** (13.5 KB, 8 structure headers showing 1 gloss each) — «exonuclease

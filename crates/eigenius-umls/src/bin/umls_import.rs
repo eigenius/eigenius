@@ -429,6 +429,7 @@ fn emit_partitioned(
     let mut cur = hdr.clone();
     let mut total_entries = 0usize;
     let mut total_mass = 0usize;
+    let mut total_name = 0usize;
     let mut total_junk = 0usize;
     let mut total_inflected = 0usize;
     let mut chunk_concepts = 0usize;
@@ -457,6 +458,7 @@ fn emit_partitioned(
         cur.push_str(&block);
         total_entries += brep.entries;
         total_mass += brep.mass_entries;
+        total_name += brep.name_entries;
         total_junk += brep.junk_skipped;
         total_inflected += brep.inflected_skipped;
         chunk_concepts += 1;
@@ -472,7 +474,7 @@ fn emit_partitioned(
     }
 
     eprintln!(
-        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_junk} junk atoms dropped; {total_inflected} inflected duplicates pruned)",
+        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_name} additive name entries, D70 named conditions; {total_junk} junk atoms dropped; {total_inflected} inflected duplicates pruned)",
         subset.concepts.len(),
     );
     eprintln!(

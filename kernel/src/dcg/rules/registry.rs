@@ -741,7 +741,13 @@ impl Grammar {
                             base_class(t),
                             Exp::InductiveCtor(
                                 num_decl.clone(),
-                                if want_num == "mass" { "sg" } else { want_num }.into(),
+                                // `mass` and `name` both surface as singular agreement (D70).
+                                if want_num == "mass" || want_num == "name" {
+                                    "sg"
+                                } else {
+                                    want_num
+                                }
+                                .into(),
                                 Vec::new(),
                             ),
                         ],
@@ -758,6 +764,18 @@ impl Grammar {
     /// Bare-MASS NP shift — the kind shift over a mass noun, singular agreement (reuse `a`).
     fn bare_mass_nps(&self, noun: &Item) -> Vec<Item> {
         self.kind_raised_nps(noun, &self.dets.a, "mass")
+    }
+
+    /// Bare-NAME NP shift (D70) — the kind shift over a `name`-marked noun, singular agreement.
+    ///
+    /// Mechanically identical to [`Self::bare_mass_nps`]: a proper name OF A KIND stands bare and
+    /// denotes that kind, exactly as a mass noun does. It is a SEPARATE `Num` value because that is
+    /// the only difference that matters — `name` makes no uncountable-substance claim, so «Lynch
+    /// syndrome» can stand bare without the lexicon asserting it is a substance. Splitting the value
+    /// rather than the shift is what keeps this one line: the flat feature lattice gives `name` the
+    /// same distribution as `mass` for free (meets `name` and `num_any` only).
+    fn bare_name_nps(&self, noun: &Item) -> Vec<Item> {
+        self.kind_raised_nps(noun, &self.dets.a, "name")
     }
 
     /// Bare-PLURAL NP shift — the kind shift over a plural noun, plural agreement (reuse `these`). A bare
@@ -793,6 +811,7 @@ impl Grammar {
             .collect();
         v.extend(self.bare_plural_nps(it));
         v.extend(self.bare_mass_nps(it));
+        v.extend(self.bare_name_nps(it));
         v
     }
 }

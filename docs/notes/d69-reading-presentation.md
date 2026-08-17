@@ -480,7 +480,7 @@ Turcot, and put the WRN GENE individual at rank 0 — and neither survived, so s
 misses for the same reason. **Readings from a `StaticFallback` unit are not evidence about the
 ranker**, and before `WidenTrace` there was no way to tell them apart from readings it did choose.
 
-**OUTCOME (`2026-08-15`) — fixed, and it closed the thread.** Two changes to `recovery_ranks`, both
+**OUTCOME (`2026-08-15`) — half of it; D70 closed the thread.** Two changes to `recovery_ranks`, both
 making it see what the ranker can act on:
 
 1. **Granularity.** New `seed::cat_frame` = head constructor + the constructor's LAST argument, used
@@ -492,12 +492,24 @@ making it see what the ranker can act on:
 2. **Scope.** `recovery_ranks` iterated single TOKENS while `contextual_sense_ranks` ranks SPANS, so a
    multiword blocker was invisible by construction. It now enumerates the same spans via `span_limit`.
 
-| | before | after |
-|---|---|---|
-| units on `StaticFallback` (ranking discarded) | 3 | **0** |
-| expected-hits | 61/62 | **62/62** |
-| total-skeletons | 180 | 174 |
-| total-readings | 594 | 594 |
+**CORRECTED `2026-08-15` (same day) — this table over-credited the change.** The figures below were
+measured with BOTH halves of `cat_frame` in place, and the second half (the NUMBER index) was reverted
+hours later as unsound: it obtained a missing `cat_n/mass` frame by restoring a ranker-ELIMINATED
+sense, i.e. by substituting a different CONCEPT (D70 §1c — «mmr deficiency» C4522088 → C0265325 Turcot
+syndrome). What this note's change is actually responsible for is the SLASH-ARGUMENT half.
+
+| | before | after `cat_frame` (slash-argument only, as shipped) | after D70 |
+|---|---|---|---|
+| units on `StaticFallback` | 3 | **1** | **0** |
+| expected-hits | 61/62 | 61/62 | **62/62** |
+| total-skeletons | 180 | 180 | 175 |
+| total-readings | 594 | 594 | 637 |
+
+The slash-argument key is what fixed «suggest» (lost `fwd/cat_cp`) and «greater»; it is well-founded
+because promoting another sense OF THE SAME WORD changes which reading is reachable, not which entity
+is denoted. The remaining fallback — «Germline mutations … cause Lynch syndrome.» — and the MMR unit's
+pin both needed D70, where the real cause turned out to be a concept that could not compose in a bare
+position at all.
 
 «These observations suggest … MMR deficiency» RECOVERED its pin — the pin wants WRN as the bare
 individual, the ranker had put the WRN GENE at rank 0 all along, and Pass 2 was discarding it. The
