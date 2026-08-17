@@ -13,7 +13,7 @@
     "kinds": [
       "urn:eigenius:encoding:Finding"
     ],
-    "rationale": "The sentence reports a specific result of the document's own investigation (that MSI cancer models required WRN helicase activity), and the subsequent sentence explicitly refers back to both this sentence and the preceding one collectively as \"these findings,\" confirming the discourse role assigned to it."
+    "rationale": "The sentence reports a specific result of the document's own investigation (that MSI cancer models required WRN's helicase activity), and the subsequent sentence explicitly refers back to it — along with the preceding sentence — as \"these findings,\" confirming the document's own discourse label for it."
   },
   {
     "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",
@@ -21,6 +21,6 @@
     "kinds": [
       "urn:eigenius:encoding:Finding"
     ],
-    "rationale": "The sentence explicitly uses \"these findings show…\" to synthesize the results of the document's own investigation (the two preceding observations about WRN's exonuclease and helicase activities), presenting a concluded, established result — the hallmark of a finding."
+    "rationale": "The sentence explicitly uses \"these findings show,\" synthesizing the results of the document's own investigation (the two preceding observations about WRN's exonuclease and helicase activities) into an established conclusion, which is the hallmark of a finding."
   }
 ]

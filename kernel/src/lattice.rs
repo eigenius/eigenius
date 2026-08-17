@@ -823,12 +823,9 @@ pub fn update_branch(
                 Err(MergeError::InvalidHeads(msg)) => Err(BranchUpdateError::Storage(
                     StorageError::Internal(format!("merge during update_branch: {msg}")),
                 )),
-                Err(MergeError::Validation(v)) => {
-                    Err(BranchUpdateError::Storage(StorageError::Internal(format!(
-                        "merge layer failed validation ({} errors)",
-                        v.len()
-                    ))))
-                }
+                Err(MergeError::Validation(v)) => Err(BranchUpdateError::Storage(
+                    StorageError::Internal(merge_validation_message(&v)),
+                )),
             }
         }
     }
@@ -932,7 +929,7 @@ pub fn merge_branch_tips(
             StorageError::Internal(format!("merge during merge_branch_tips: {msg}")),
         )),
         Err(MergeError::Validation(v)) => Err(BranchUpdateError::Storage(StorageError::Internal(
-            format!("merge layer failed validation ({} errors)", v.len()),
+            merge_validation_message(&v),
         ))),
     }
 }
@@ -1232,6 +1229,32 @@ pub enum MergeError {
     /// already-validated heads, but surfaces if a corrupted source
     /// layer slips through.
     Validation(Vec<ValidationError>),
+}
+
+/// Render a merge-validation failure with its ERRORS, not just their count.
+///
+/// `MergeError::Validation` carries every `ValidationError`, and both `update_branch` and
+/// `merge_branch_tips` used to discard them for `v.len()` — so a rejected merge surfaced as
+/// `merge layer failed validation (1 errors)` through the kernel log, the gRPC response and every
+/// caller, with no rule, no resource and no message anywhere in the stack. Diagnosing one then meant
+/// reconstructing the layer by hand; it cost a full session on 2026-08-17 and had already cost one on
+/// the served-path `DefinitionMalformed` before that. The `Display` impl below always knew how to
+/// print them.
+///
+/// Capped so a large failure cannot produce an unbounded message — the count is always exact, and the
+/// first [`MERGE_ERR_SHOWN`] carry the detail.
+const MERGE_ERR_SHOWN: usize = 10;
+
+fn merge_validation_message(errs: &[ValidationError]) -> String {
+    use std::fmt::Write as _;
+    let mut msg = format!("merge layer failed validation ({} errors)", errs.len());
+    for e in errs.iter().take(MERGE_ERR_SHOWN) {
+        let _ = write!(msg, "\n  {e}");
+    }
+    if errs.len() > MERGE_ERR_SHOWN {
+        let _ = write!(msg, "\n  … {} more", errs.len() - MERGE_ERR_SHOWN);
+    }
+    msg
 }
 
 impl std::fmt::Display for MergeError {

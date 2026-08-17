@@ -9,7 +9,24 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▼ [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **IMPLEMENTED `2026-08-15`; 62/62**
+### 0. ▲ ACTIVE — demo repair after the D70 bootstrap edit (`2026-08-17`)
+`lexicon:Num` gained `name` (D70), which changes the `lexicon` bootstrap hash — measured
+`c4a471f7…` stored vs `51aa4972…` current, every OTHER bootstrap layer identical. So EVERY snapshot
+built before 2026-08-15 fails to resume with `ManifestDrift`, and both demos pinned dead ones
+(`aligned-d66`, `aligned-2026-08-12-d67`). Defaults re-pointed at `wordnet-umls-aligned-2026-08-15-d70b`
+(`2026-08-17`); the runs themselves are NOT yet verified.
+WHY IT MATTERS: demo v2 IS the D67 §3.5 acceptance artifact (both paragraph variants land, the rule +
+inference files load on top, intact justifies twice / edited `Fails`). A bootstrap edit invalidated it
+and NOTHING in `cargo test --workspace` noticed, because both demos are shell scripts outside the test
+suite — that gap is the real finding here, not the stale path.
+TODO: (a) run v2 end-to-end; its four recorded draws (ranks/selections/kinds/proposals) will MISS
+against the changed forest, so re-record in ONE pass (coupled-stage discipline, D69 §7c) and check the
+two variants still differ ONLY by the negation; (b) decide v1 — it was already slated for retirement
+pending migration of its pin-check into a test, and this is the second time it has needed
+snapshot maintenance; (c) consider a cheap guard so a bootstrap edit fails a TEST rather than a demo:
+e.g. a workspace test asserting the demos' default snapshots resume.
+
+### 1. ▼ [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **IMPLEMENTED `2026-08-15`; 62/62**
 The UMLS importer decided "named individual?" with one flag (`Concept::symbol`) that fixed BOTH syntax
 (bare, no determiner) and denotation (entity vs kind), so the lexicon offered two of four combinations
 and the corpus kept asking for the missing one — a bare-standing KIND-referring NP. DONE (§0): new
@@ -24,7 +41,7 @@ unanswerable on this corpus; O4 (term-type strength — a concept's own PT vs an
 string, §1d) unimplemented and orthogonal; abbreviations still reach bare standing via the glossary's
 `mass` inheritance rather than `name` (§D3) — the same conflation one level down.
 
-### 1. ▲ ACTIVE — [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
+### 2. [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
 Pushed `2026-08-13` from the v2 demo review. MEASURED: for «MSI cancer models did not have the
 exonuclease activity of WRN.» the ranker prompt carries **120 candidates with 120 distinct sems
 but only 4 distinct strings** (13.5 KB, 8 structure headers showing 1 gloss each) — «exonuclease
@@ -57,7 +74,7 @@ gold sets (`reading-adjudications.tsv` keys on the sem) and NOT any parse metric
 note; slice 3 answers "how much of the ranker's 21/31 was blindness". NOT in scope: the negated
 sentence's 308-vs-2 cap-only forest — a grammar-side multiplicity question, named in §8.
 
-### 2. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
+### 3. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
 The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
 → unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
@@ -162,7 +179,7 @@ the first deliverable.** Remaining deferrals live in D68 §5/§5a (collective/gr
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
 cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
 
-### 3. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
+### 4. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
 
@@ -246,7 +263,7 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 4. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 5. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (2) is a detour from — now largely folded into (1)'s Stages 3–4.
 Remaining once (2) pops, in order:
 **address ambiguity** (0 encoded → clean single parses) + long-sentence perf → **grading-phase gaps**

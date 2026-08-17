@@ -46,12 +46,12 @@ resource v2:trace_1 : reflection:ProgramTrace {
 }
 
 resource v2:decision_1 : encoding:DecisionPoint {
-    encoding:candidate_count = 120;
+    encoding:candidate_count = 210;
     encoding:decision_unit = "urn:eigenius:demo:v2:scoped_1";
-    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False"];
+    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, kind_of(§)))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False", "§(the(ΣG#0:§. And(compound_kind(G#0, §), prep_of(G#0, §))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_1";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence is about MSI cancer models (a recognized biomedical concept, C1516211) lacking the exonuclease activity (C1148824, the specific biochemical catalytic activity) of WRN protein (C0388246), and \"have\" in the sense of possessing a property (v02203362) best fits; Structure 5 reading [96] captures \"MSI Cancer Model\" as a unified concept, \"exonuclease activity\" as the consolidated biomedical term, and WRN as the human protein.";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: Reading 168 best captures the sentence: \"MSI cancer models\" maps to «Cancer Model» [C1516211] + «Microsatellite Instability» [C0920269] (Structure 1/5 preferred over Structure 2/6 which splits \"cancer\" and \"model\" separately), \"did not have\" maps to «have» [v02203362] (possess/own sense), and \"the exonuclease activity of WRN\" is best rendered as the unified concept «exonuclease activity» [C1148824] + of «WRN protein, human» [C0388246] (Structure 5 over Structures 1–4 which split \"exonuclease\" and \"activity\" separately, and WRN protein over WRN gene since the sentence discusses enzymatic activity).";
 }
 
 resource v2:unit_2 : encoding:DiscourseUnit {
@@ -67,7 +67,7 @@ resource v2:scoped_2 : encoding:ScopedUnit {
 }
 
 resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
-    core:description = "«MSI cancer models required the helicase activity of WRN.» — the sole surviving reading: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))";
+    core:description = "«MSI cancer models required the helicase activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))";
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_2";
     reflection:canonical_proposition = type_expr(
         wn:v02627934_t(
@@ -89,11 +89,12 @@ resource v2:trace_2 : reflection:ProgramTrace {
 }
 
 resource v2:decision_2 : encoding:DecisionPoint {
-    encoding:candidate_count = 1;
+    encoding:candidate_count = 2;
     encoding:decision_unit = "urn:eigenius:demo:v2:scoped_2";
-    encoding:selected_by = "urn:eigenius:encoding:authority_sole";
+    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))"];
+    encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_2";
-    reflection:rationale = "Sole surviving reading — the forest offered exactly one felicitous parse; no selection existed to make.";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence refers to WRN as a protein (consistent with sentence 0 which uses \"WRN protein, human\"), and the document discusses WRN's enzymatic activities (exonuclease and helicase), making the protein concept the correct referent rather than the gene.";
 }
 
 resource v2:unit_3 : encoding:DiscourseUnit {
@@ -113,7 +114,7 @@ resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_3";
     reflection:canonical_proposition = type_expr(
         logic:And(
-            wn:v00664788_c(
+            wn:v01015244_c(
                 ontology:is_a(
                     ontology:kind_of(umlscui:C0388246),
                     (exists x0 : wn:n14543931 =>
@@ -127,7 +128,7 @@ resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
                 ),
                 v2:claim_1
             ),
-            wn:v00664788_c(
+            wn:v01015244_c(
                 ontology:is_a(
                     ontology:kind_of(umlscui:C0388246),
                     (exists x0 : wn:n14543931 =>
@@ -152,12 +153,12 @@ resource v2:trace_3 : reflection:ProgramTrace {
 }
 
 resource v2:decision_3 : encoding:DecisionPoint {
-    encoding:candidate_count = 4;
+    encoding:candidate_count = 8;
     encoding:decision_unit = "urn:eigenius:demo:v2:scoped_3";
-    encoding:runner_up_skeletons = ["And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))"];
+    encoding:runner_up_skeletons = ["And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))", "And(§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_3";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The prior sentences establish WRN's protein-level activities (helicase and exonuclease), so \"WRN\" here refers to the protein (C0388246), and \"vulnerability\" in the sense of an exposed/susceptible state (n14543931, \"the state of being vulnerable or exposed\") best fits the oncology context where WRN is a targetable weakness of MSI cancer models.";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence uses \"WRN\" in the context of its protein activities (helicase and exonuclease, as established in sentences 0–1), so WRN protein (C0388246) is the right referent; \"show\" means \"provide evidence for\" (v01015244), consistent with findings serving as evidence; and \"vulnerability\" as \"the state of being vulnerable or exposed\" (n14543931) fits the biological sense of a dependency/weakness in MSI cancer models.";
 }
 
 resource v2:binding_3_0 : encoding:AnaphorBinding {

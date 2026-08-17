@@ -76,7 +76,7 @@ hr "0. Kernel on the LEXICON snapshot"
 # of `require`, and so on), so the chain the claims commit to must be the one that DEFINES those
 # axioms. Committing a parsed proposition onto a bare core+domain chain fails at the D47 decode with
 # `ConstRef references unresolved IRI` — the parser and the chain have to share a lexicon.
-SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-d66}"
+SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-15-d70b}"
 [[ -f "$SNAPSHOT/CURRENT" ]] || {
     echo "ERROR: no lexicon snapshot at $SNAPSHOT" >&2
     echo "  build one: scripts/reseed-lexicon-db.sh && scripts/build-alignment-snapshot.sh …" >&2

@@ -5,7 +5,7 @@
     "kinds": [
       "urn:eigenius:encoding:Observation"
     ],
-    "rationale": "The sentence reports a directly measured/detected property (exonuclease activity of WRN) in MSI cancer models, making it a primary empirical observation that the subsequent \"These findings…\" sentence draws upon to state a conclusion."
+    "rationale": "The sentence reports a directly measured/detected property (exonuclease activity of WRN) in MSI cancer models, making it a primary empirical observation rather than an interpreted result or conclusion — the subsequent sentence \"These findings show…\" refers back to both this and the helicase sentence collectively as the raw evidential base from which the finding is drawn."
   },
   {
     "sentence": "MSI cancer models required the helicase activity of WRN.",
@@ -13,7 +13,7 @@
     "kinds": [
       "urn:eigenius:encoding:Finding"
     ],
-    "rationale": "The sentence reports a result of the document's own investigation (that MSI cancer models required WRN helicase activity), and the subsequent sentence explicitly refers back to both this sentence and its companion as \"these findings,\" confirming the discourse role assigned to it."
+    "rationale": "The sentence reports a result of the document's own investigation (that MSI cancer models require WRN helicase activity), and the immediately following sentence explicitly refers back to both this sentence and its predecessor as \"these findings,\" confirming the discourse role assigned to it."
   },
   {
     "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",

@@ -25,7 +25,7 @@
       "ranked": [
         0
       ],
-      "rationale": "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim), candidate [0] is the best (and only) match, representing the immediately preceding finding that collectively with sentence 0 constitutes \"these findings.\"",
+      "rationale": "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim from sentence 1), it is the top-ranked antecedent, with the understanding that it collectively represents the set of findings established in the discourse.",
       "confidence": 0.85
     }
   },
@@ -55,8 +55,8 @@
       "ranked": [
         0
       ],
-      "rationale": "\"These findings\" is a plural anaphor referring to the cumulative set of findings from both preceding sentences, and the most recent discourse referent (claim 2, sentence 1) is the closest and most salient antecedent representing those findings.",
-      "confidence": 0.82
+      "rationale": "\"These findings\" is a plural anaphor referring to the accumulated claims/findings from both preceding sentences, and the most recent discourse referent (claim 2, sentence 1) is the closest and most salient antecedent of type `n09279458` available, representing the set of findings collectively.",
+      "confidence": 0.72
     }
   }
 ]

@@ -80,7 +80,7 @@ eig_load() {
 hr() { printf '\n\033[1m%s\033[0m\n' "── $* ─────────────────────────────────────────"; }
 
 hr "0. Kernel on the LEXICON snapshot"
-SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-12-d67}"
+SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-15-d70b}"
 [[ -d "$SNAPSHOT" ]] || { echo "ERROR: snapshot not found: $SNAPSHOT" >&2; exit 1; }
 VOLUME="${VOLUME:-eigenius_eigenius_db}"
 echo "staging $(basename "$SNAPSHOT") into volume $VOLUME (the snapshot itself is read-only)"
