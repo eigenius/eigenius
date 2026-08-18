@@ -9,7 +9,7 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — demo repair after the D70 bootstrap edit (`2026-08-17`) — **(a),(b),(d) done; (c) — the CI guard — open**
+### 0. ▼ demo repair after the D70 bootstrap edit (`2026-08-17`) — **(a)–(d) all done `2026-08-17`; ready to pop**
 `lexicon:Num` gained `name` (D70), which changes the `lexicon` bootstrap hash — measured
 `c4a471f7…` stored vs `51aa4972…` current, every OTHER bootstrap layer identical. So EVERY snapshot
 built before 2026-08-15 fails to resume with `ManifestDrift`, and both demos pinned dead ones
@@ -33,10 +33,14 @@ acceptance), which the deletion BROKE; repointed to v2's artifacts — both the 
 namespace (`urn:eigenius:demo:formulas:` -> `urn:eigenius:demo:v2:`). Verified on d70b: intact `Holds`,
 edited `Fails` with the missing-IsDerivedAs-witness diagnostic. LOST: the pin-check — `pins.tsv` was
 exercised only by the broken `--reparse` path, never by a test, and is now deleted (see TODO (d)).
-TODO (c) STILL OPEN, and it is the real lesson: a cheap guard so a bootstrap edit fails a TEST rather
-than a demo. `acceptance.rs` is `#[ignore]`d and DB-backed, so `cargo test --workspace` stayed green
-while the acceptance artifacts were invalid. A test asserting the demos' default snapshots RESUME would
-have caught the ManifestDrift immediately.
+DONE (c) `2026-08-17`: `kernel::bootstrap::tests::bootstrap_manifest_is_pinned` pins the per-layer
+bootstrap manifest. A snapshot-resume test was the first idea and was rejected: it needs a snapshot on
+disk, so it would skip in CI — exactly where the signal is wanted. Pinning `current_manifest()` needs
+NO database and NO snapshot, and it is the same hash the drift check compares, so it fires on the
+precise condition that invalidates stores. Verified BOTH ways: passes as committed, and fails on a
+one-line edit to lexicon-ontology.esl naming the moved layer with was/now hashes. Failure text lists
+the follow-through (reseed, re-point snapshot paths, re-record draws that miss, update the constant in
+the SAME commit).
 CORRECTED (d) `2026-08-17`: the earlier note here said v1's pin-check was "lost" and needed migrating
 into a test. That OVERSTATED it. The pin MECHANISM — `PinReadingRanker` / `load_pins` /
 `prose-to-esl --pins` — is a first-class selection arm and the parse-rate sweep's DEFAULT: with no

@@ -616,7 +616,16 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn current_manifest() -> Vec<u8> {
+/// The **bootstrap manifest**: newline-separated `<name>:<sha256_hex>` over [`BOOTSTRAP_CHAIN`] in
+/// chain order, hashing each embedded ontology's raw source.
+///
+/// This is the content-drift signal a persisted store is stamped with, and the value
+/// [`bootstrap_persistent`] compares on resume — a mismatch is `BootstrapError::ManifestDrift` and the
+/// store cannot be opened. Public because it is a fact callers legitimately need: tooling that builds
+/// or records against a store (the reseed script's `PROVENANCE` stamp, an experiment harness checking
+/// its snapshot is current) should be able to read the same value the drift check uses, rather than
+/// discovering drift by failing to open something.
+pub fn current_manifest() -> Vec<u8> {
     // Newline-separated "<name>:<sha256_hex>" lines over the single-source-of-
     // truth [`BOOTSTRAP_CHAIN`], in chain order. Hashing the raw source bytes is
     // exactly the content-drift signal we want for both JSON and ESL layers — a
@@ -758,6 +767,7 @@ fn resume_from_backend(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::ontology::iri::Iri;
 
