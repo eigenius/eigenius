@@ -47,6 +47,14 @@ use std::sync::Mutex;
 use sha2::{Digest, Sha256};
 
 use crate::dcg::verbalize::ConceptNote;
+/// D69-B truncation cap: how many STRUCTURES a single prompt may show.
+///
+/// Chosen so the worst case on the corpus page stays legible — «The use of immune checkpoint blockade
+/// can be limited by toxicity.» reaches 171 readings — while leaving every structure that IS shown
+/// complete, since a half-shown structure would make the sense table lie. Dropping is logged and
+/// stated in the prompt; a silent cap would let the model pick "the best of what it saw" and report it
+/// as the best reading (the D62 no-silent-caps rule).
+const MAX_STRUCTURES_SHOWN: usize = 12;
 
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
 /// skeleton for legibility (the caller orders them), but the choice — and its evaluation — are
@@ -405,6 +413,103 @@ impl ReadingRanker for ReplayReadingRanker {
 
 // ───────────────────────── live Anthropic ranker (use-llm feature) ─────────────────────────
 
+/// Split a gloss into its `«label» [id]` atoms, in order, with the literal text between them.
+///
+/// Returns `(frame, atoms)`: `frame` is the gloss with each atom replaced by `{}` — the part that is
+/// INVARIANT across readings of one structure — and `atoms` are the `(label, id)` pairs in order.
+fn split_atoms(gloss: &str) -> (String, Vec<(String, String)>) {
+    let mut frame = String::new();
+    let mut atoms = Vec::new();
+    let mut rest = gloss;
+    while let Some(open) = rest.find('«') {
+        let after = &rest[open + '«'.len_utf8()..];
+        let Some(close) = after.find('»') else { break };
+        let label = &after[..close];
+        let tail = &after[close + '»'.len_utf8()..];
+        // The id must follow immediately as ` [id]`, else this is not an atom.
+        let Some(stripped) = tail.strip_prefix(" [") else {
+            frame.push_str(&rest[..open + '«'.len_utf8()]);
+            rest = after;
+            continue;
+        };
+        let Some(idend) = stripped.find(']') else {
+            break;
+        };
+        frame.push_str(&rest[..open]);
+        frame.push_str("{}");
+        atoms.push((label.to_string(), stripped[..idend].to_string()));
+        rest = &stripped[idend + 1..];
+    }
+    frame.push_str(rest);
+    (frame, atoms)
+}
+
+/// D69-B: render one structure ONCE with its varying slots marked, then the slot options, then the
+/// readings as slot assignments rather than as repeated full glosses.
+///
+/// The pool factorizes — structures × sense assignments — and repeating every invariant part once
+/// per reading is what made the prompt 13 KB of near-duplicates (§1). Here the invariant frame is
+/// stated once and only the positions that actually differ are enumerated. Falls back to the flat
+/// listing when the group's glosses do not align (different atom counts ⇒ no positional slots).
+fn render_structure_group(n: usize, group: &[(usize, &ReadingCandidate)]) -> String {
+    let mut out = format!("Structure {n}:\n");
+    let parsed: Vec<(String, Vec<(String, String)>)> =
+        group.iter().map(|(_, c)| split_atoms(&c.gloss)).collect();
+    let aligned = parsed
+        .windows(2)
+        .all(|w| w[0].0 == w[1].0 && w[0].1.len() == w[1].1.len());
+    if !aligned || group.len() < 2 {
+        for (i, c) in group {
+            out.push_str(&format!("  [{i}] {}\n", c.gloss));
+        }
+        return out;
+    }
+    let natoms = parsed[0].1.len();
+    let varying: Vec<usize> = (0..natoms)
+        .filter(|&k| parsed.iter().any(|p| p.1[k] != parsed[0].1[k]))
+        .collect();
+    // The frame, with fixed atoms filled in and varying ones left as named slots.
+    let mut shown = String::new();
+    let mut slot_no = 0usize;
+    let mut names: Vec<String> = Vec::new();
+    for (k, piece) in parsed[0].0.split("{}").enumerate() {
+        shown.push_str(piece);
+        if k < natoms {
+            let (label, id) = &parsed[0].1[k];
+            if varying.contains(&k) {
+                slot_no += 1;
+                let nm = format!("{}", (b'A' + (slot_no as u8 - 1)) as char);
+                shown.push_str(&format!("{{{nm}}}"));
+                names.push(nm);
+            } else {
+                shown.push_str(&format!("«{label}» [{id}]"));
+            }
+        }
+    }
+    out.push_str(&format!("  {shown}\n"));
+    // The options per slot — this is the only place a sense is named more than once.
+    for (si, &k) in varying.iter().enumerate() {
+        let mut seen: Vec<&(String, String)> = Vec::new();
+        for p in &parsed {
+            if !seen.iter().any(|o| **o == p.1[k]) {
+                seen.push(&p.1[k]);
+            }
+        }
+        let opts: Vec<String> = seen.iter().map(|(l, i)| format!("«{l}» [{i}]")).collect();
+        out.push_str(&format!("    {} = {}\n", names[si], opts.join(" | ")));
+    }
+    // Each reading as its slot assignment, so the index the model must return is unambiguous.
+    for (p, (i, _)) in parsed.iter().zip(group.iter()) {
+        let asg: Vec<String> = varying
+            .iter()
+            .enumerate()
+            .map(|(si, &k)| format!("{}=[{}]", names[si], p.1[k].1))
+            .collect();
+        out.push_str(&format!("      [{i}] {}\n", asg.join(" ")));
+    }
+    out
+}
+
 #[cfg(feature = "use-llm")]
 mod anthropic {
     use super::{DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection};
@@ -534,16 +639,60 @@ mod anthropic {
             // Candidates, grouped by skeleton (the caller sorts them): a structure header per
             // distinct skeleton, then each reading's index + gloss. The gloss names concrete
             // senses, so readings within one structure differ by word sense.
-            let mut cand_block = String::new();
+            // D69-B — TWO-LEVEL presentation. Group by skeleton (the caller sorts), render each
+            // structure's invariant frame ONCE, and enumerate only the slots whose sense actually
+            // varies. §1's prompt spent 13 KB repeating near-identical glosses 120 times; the pool
+            // factorizes, so the repetition was pure noise around the two real axes.
+            let mut groups: Vec<Vec<(usize, &ReadingCandidate)>> = Vec::new();
             let mut last_skel: Option<&str> = None;
-            let mut structure = 0usize;
             for (i, c) in candidates.iter().enumerate() {
                 if last_skel != Some(c.skeleton.as_str()) {
-                    structure += 1;
-                    cand_block.push_str(&format!("Structure {structure}:\n"));
+                    groups.push(Vec::new());
                     last_skel = Some(c.skeleton.as_str());
                 }
-                cand_block.push_str(&format!("  [{i}] {}\n", c.gloss));
+                groups
+                    .last_mut()
+                    .expect("a group was just pushed")
+                    .push((i, c));
+            }
+            // TRUNCATION, if any, is EXPLICIT and LOGGED — never silent (the D62 rule). Structures
+            // are dropped whole, lowest-ranked last, so a kept structure is always shown complete.
+            let total_structures = groups.len();
+            let kept = groups.len().min(super::MAX_STRUCTURES_SHOWN);
+            let dropped_readings: usize = groups[kept..].iter().map(Vec::len).sum();
+            groups.truncate(kept);
+            let mut cand_block = String::new();
+            // TWO-LEVEL (D69-B) is OPT-IN and OFF by default — the A/B rejected it. Measured
+            // 2026-08-17 on the same forest and the same ranks, fully adjudicated both ways:
+            // flat 30/40 correct with structure 33/40, two-level 24/40 with structure 29/40. §4a of
+            // the note says the surface is settled by selection accuracy and not by taste, so the
+            // flat listing stays. Kept behind a flag because the A/B should be repeatable and the
+            // idea may be right with a different realisation (a two-CALL ranker rather than a
+            // two-level prompt — the note's own preferred shape, which this was the cheap proxy for).
+            let two_level = std::env::var("EIGENIUS_SELECT_TWO_LEVEL").is_ok();
+            for (n, g) in groups.iter().enumerate() {
+                if two_level {
+                    cand_block.push_str(&super::render_structure_group(n + 1, g));
+                } else {
+                    cand_block.push_str(&format!("Structure {}:\n", n + 1));
+                    for (i, c) in g {
+                        cand_block.push_str(&format!("  [{i}] {}\n", c.gloss));
+                    }
+                }
+            }
+            if dropped_readings > 0 {
+                let msg = format!(
+                    "reading-ranker: TRUNCATED «{}» — showed {kept} of {total_structures} structures, \
+                     omitting {dropped_readings} reading(s); the omitted ones cannot be chosen",
+                    ctx.sentence.trim()
+                );
+                eprintln!("{msg}");
+                cand_block.push_str(&format!(
+                    "\n(NOTE: {dropped_readings} further reading(s) in {} more structure(s) are not \
+                     shown and cannot be chosen. If none of the above is faithful, say so rather than \
+                     picking the closest.)\n",
+                    total_structures - kept
+                ));
             }
             let legend = concept_legend(ctx.concepts);
             let prompt = format!(
@@ -552,11 +701,11 @@ mod anthropic {
                  sentence actually means in the context of the document.\n\n\
                  Document:\n{}\n\n{prior_block}\
                  The sentence to disambiguate:\n  \"{}\"\n\n\
-                 Candidate readings, grouped by grammatical structure (readings within one \
-                 structure differ only in word sense). Each reading is rendered as what it \
-                 COMMITS TO: `«label» [id]` names a concept, `+ relation X` is an explicit \
-                 relation the reading asserts, and `⟦…⟧` marks a fragment that could not be \
-                 rendered.\n\n{cand_block}\n{legend}\
+                 Candidate readings, grouped by grammatical STRUCTURE. Each structure is shown \
+                 once, as what it COMMITS TO: `«label» [id]` names a concept, `+ relation X` is an \
+                 explicit relation the reading asserts, and `⟦…⟧` marks a fragment that could not \
+                 be rendered. Readings within one structure differ only in word \
+                 sense.\n\n{cand_block}\n{legend}\
                  Return `chosen` = the index of the reading whose structure AND word senses match \
                  the sentence's intended meaning, `rationale` = one sentence why, and `runners_up` \
                  = the remaining indices in preference order. Set `abstain` = true only if no \
@@ -836,5 +985,74 @@ mod tests {
         // The recorded question still replays.
         assert!(replay.select(&ctx("Doc A.", "Doc A.", &[]), &c).is_some());
         assert_eq!(replay.hits(), 1);
+    }
+}
+
+#[cfg(test)]
+mod d69b_tests {
+    use super::{render_structure_group, split_atoms, ReadingCandidate};
+
+    fn cand(gloss: &str) -> ReadingCandidate {
+        ReadingCandidate {
+            skeleton: "§(§, §)".into(),
+            gloss: gloss.into(),
+            sem: String::new(),
+        }
+    }
+
+    #[test]
+    fn split_atoms_separates_the_invariant_frame_from_the_senses() {
+        let (frame, atoms) = split_atoms("a «target» [n05981230] + of «WRN» [C0388246] here");
+        assert_eq!(frame, "a {} + of {} here");
+        assert_eq!(
+            atoms,
+            vec![
+                ("target".to_string(), "n05981230".to_string()),
+                ("WRN".to_string(), "C0388246".to_string())
+            ]
+        );
+    }
+
+    /// The point of D69-B: the invariant part is stated ONCE and only the differing position is
+    /// enumerated, instead of repeating the whole gloss per reading (§1's 13 KB of near-duplicates).
+    #[test]
+    fn only_the_varying_slot_is_enumerated() {
+        let group = [
+            cand("a «target» [n05981230] + of «WRN protein» [C0388246]"),
+            cand("a «target» [n05981230] + of «WRN gene» [C1337007]"),
+        ];
+        let g: Vec<(usize, &ReadingCandidate)> = group.iter().enumerate().collect();
+        let out = render_structure_group(1, &g);
+        assert!(
+            out.contains("a «target» [n05981230] + of {A}"),
+            "frame once: {out}"
+        );
+        assert!(
+            out.contains("A = «WRN protein» [C0388246] | «WRN gene» [C1337007]"),
+            "{out}"
+        );
+        assert!(
+            out.contains("[0] A=[C0388246]") && out.contains("[1] A=[C1337007]"),
+            "{out}"
+        );
+        assert_eq!(
+            out.matches("«target»").count(),
+            1,
+            "the shared slot is not repeated: {out}"
+        );
+    }
+
+    /// Misaligned glosses (different atom counts) have no positional slots, so the flat listing is
+    /// kept rather than inventing an alignment.
+    #[test]
+    fn unalignable_groups_fall_back_to_the_flat_listing() {
+        let group = [
+            cand("a «target» [n05981230]"),
+            cand("a «target» [n05981230] + of «WRN» [C0388246]"),
+        ];
+        let g: Vec<(usize, &ReadingCandidate)> = group.iter().enumerate().collect();
+        let out = render_structure_group(1, &g);
+        assert!(out.contains("[0] a «target» [n05981230]\n"), "{out}");
+        assert!(!out.contains("{A}"), "no slots when unaligned: {out}");
     }
 }

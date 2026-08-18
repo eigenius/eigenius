@@ -171,7 +171,7 @@ Rendering feeds three recorded keys. Verified in code:
 The gold sets surviving is what makes this affordable: re-drawing is mechanical, re-adjudicating
 would not have been.
 
-## 7. Slices
+## 7. Slices (ALL DONE — 2 and 5 on 2026-08-13, 3 and 4 on 2026-08-17)
 
 1. **This note** — review gate.
 2. **D69-A**: the `Expanded` mode + the injectivity assert, with unit tests on the
@@ -531,6 +531,56 @@ finer shapes would change which categories the cap keeps, so the safer change is
 function used only by `recovery_ranks`, measured on its own. The leave-one-out probe is the
 instrument for checking it: all three units should flip from `StaticFallback` to a ranking-respecting
 pass, and no unit that currently parses may regress.
+
+## 7m. Slice 4 — D69-B measured and REJECTED (`2026-08-17`)
+
+Implemented as specified in §5: each structure's invariant frame rendered ONCE, the positions whose
+sense varies enumerated as slots `{A}`, `{B}`, … with their options, and each reading given as its
+slot assignment plus its index. Plus §5's other requirement, explicit LOGGED truncation
+(`MAX_STRUCTURES_SHOWN`, structures dropped whole so a shown structure is never half-shown, the drop
+both `eprintln!`-ed and stated in the prompt — the D62 no-silent-caps rule).
+
+It produces exactly the intended shape:
+
+```
+Structure 1:
+  possibly, «scientist» [n10560637] {A} «Synthetic Lethality» [C4280020] and «scientist» … {B} … {C}
+    A = «exploit» [v01162754] | «exploit» [v01164273]
+    B = «therapeutic» [n04074482] | «Therapeutic procedure» [C0087111]
+    C = «cancer» [n14239918] | «Malignant Neoplasms» [C0006826]
+      [0] A=[v01162754] B=[n04074482] C=[n14239918]
+      …
+```
+
+**And it is WORSE.** Same forest, same ranks replay (2026-08-17-d70b, 62/0), both draws fully
+adjudicated:
+
+| | reading-correct | reading-wrong | structure-correct |
+|---|---|---|---|
+| slice 3 — flat `Expanded` listing | **30/40** | 10 | **33/40** |
+| slice 4 — two-level slots | **24/40** | 16 | 29/40 |
+
+Six decisions lost, and the structure diagnostic fell too — which is the telling part, since presenting
+structures once and named was supposed to make the structural choice EASIER. What the two-level draw
+picked instead, on units the flat draw got right: narrow modal scope on «WRN dependency may require…»
+(and the protein where the page uses the gene), a THREE-way conjunction split on «PARP-1 inhibitors…»
+that detaches «with deficiencies» from «cancers», `v01753788` 'bring into existence' for «create»,
+n14561618 'a symptom of' for «impairment», C0600688 «Toxic effect» for the property «toxicity».
+
+Reading the pattern honestly: the model must recombine `A=[…] B=[…] C=[…]` back into a proposition
+before it can judge one, and it appears to judge the recombination less reliably than a rendered
+sentence — the economy was bought from the reader's comprehension, not from redundancy. §4a said the
+surface is settled by A/B on selection accuracy and not by taste; the A/B has answered.
+
+**Disposition.** The flat listing is the DEFAULT again. The two-level renderer is kept behind
+`EIGENIUS_SELECT_TWO_LEVEL=1` so the A/B is repeatable and because the idea may be right in the
+realisation §5 actually preferred — a two-CALL ranker (structure, then senses), of which this
+single-call prompt was the cheap proxy. The truncation half is kept ON unconditionally: it is
+independently correct and unrelated to the presentation question.
+
+**Variance caveat.** A re-run of the restored default drew 28/40 correct with 2 novel readings, against
+slice 3's 30/40 — same code, same forest. Draw-to-draw variance is real at this scale, so a 2-decision
+difference is not a signal; the 6-decision gap to D69-B is.
 
 ## 8. What this does not fix
 

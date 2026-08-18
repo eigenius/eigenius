@@ -9,40 +9,7 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
-Pushed `2026-08-13` from the v2 demo review. MEASURED: for «MSI cancer models did not have the
-exonuclease activity of WRN.» the ranker prompt carries **120 candidates with 120 distinct sems
-but only 4 distinct strings** (13.5 KB, 8 structure headers showing 1 gloss each) — «exonuclease
-activity» renders identically for the single concept C1148824 and for the
-`activity ⊗ exonuclease` compound, so the reading that landed in the demo artifact was not chosen
-over its competitor, it was chosen blind. Two defects: **A** the rendering is not injective on the
-candidate set; **B** indistinguishable candidates are presented as separate choices. ROOT CAUSE
-(user, `2026-08-13`): strict verbalization is ~a left inverse of parsing — it reconstructs the
-input sentence, so all readings of one sentence converge BY CONSTRUCTION, and the discrimination
-we do get is an accident of label strings. Fix = a second rendering mode, an **expanded
-verbalizer** exposing what a reading COMMITS TO (concept label + IRI + the chain's definition;
-the compound relation shown as unspecified; attachment/scope), with `Surface` unchanged for
-humans/gate; contrast becomes an economy (factor out the pool's invariants) rather than the
-mechanism; fail closed if two candidates still collide. SLICES 2/3/5 DONE `2026-08-13` (note
-§7a–§7c): `Register::{Surface,Expanded}`, concept legend with the chain's definitions,
-injectivity guard in `resolve_document` before ANY ranker; the guard then FOUND a second lossy
-site (a comparative's dropped standard) whose fix took the composed configuration from
-**50/1/11/0 to 51 encoded / 0 ambiguous / 11 open / 0 gap**, replay-verified (39/0 selections,
-48/0 kinds). `chosen_gloss` recomputed in Surface so the chooser's register cannot leak into the
-discourse/kind/proposer prompts — which shrank the blast radius to selections only. Coupled draws
-must be recorded in ONE pass (kinds→antecedents→pools→selection keys). Demo v2 regenerated: the
-two variants now differ ONLY by the negation, independently selected. STILL OPEN: the page's
-reading-level score is **14 correct / 7 wrong / 10 UNADJUDICATED** (structure 23/31 unchanged) —
-bounds 14–24 of 31 against a 21/31 baseline, so inconclusive until those 10 are adjudicated, and
-the judge should not be the same class of model that chose them. B = two-level structure-then-senses
-presentation + logged truncation. The rendering's surface is settled by A/B on selection accuracy,
-not by taste (§4a).
-Invalidates the selections/kinds/proposals draws (verified: they key on the gloss) but NOT the
-gold sets (`reading-adjudications.tsv` keys on the sem) and NOT any parse metric. Slices in the
-note; slice 3 answers "how much of the ranker's 21/31 was blindness". NOT in scope: the negated
-sentence's 308-vs-2 cap-only forest — a grammar-side multiplicity question, named in §8.
-
-### 1. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
+### 0. ▲ ACTIVE — [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
 The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
 → unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
@@ -147,7 +114,7 @@ the first deliverable.** Remaining deferrals live in D68 §5/§5a (collective/gr
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
 cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
 
-### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
+### 1. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
 
@@ -231,7 +198,7 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (2) is a detour from — now largely folded into (1)'s Stages 3–4.
 Remaining once (2) pops, in order:
 **address ambiguity** (0 encoded → clean single parses) + long-sentence perf → **grading-phase gaps**
@@ -301,6 +268,21 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   ([[gene_family_lexicon_gap]]) + a lexicon/ontology index.
 
 ## Completed (record, not work)
+- [d69-reading-presentation.md](d69-reading-presentation.md) — **COMPLETED `2026-08-17`.** The ranker's
+  question was unanswerable as posed: for «MSI cancer models did not have the exonuclease activity of
+  WRN» the prompt carried 120 candidates with 120 distinct sems as only **4 distinct strings**, so the
+  reading that landed in the demo artifact was chosen BLIND. Root cause (maintainer): strict
+  verbalization is ~a left inverse of parsing, so all readings of one sentence converge by
+  construction. Slices 2/5 (`Register::{Surface,Expanded}`, concept legend, injectivity guard, demo v2
+  regeneration) done 2026-08-13 — the guard immediately found a second lossy site, a comparative's
+  dropped standard, worth 50/1/11 → 51/0/11. Slice 3 done 2026-08-17: selection **21/31 (68%) →
+  30/40 (75%)**, structure 23/31 → 33/40, 0 unadjudicated, live run and replay agreeing exactly
+  (62/0 ranks, 40/0 selections). So blindness was PART of the earlier error, not all of it — 10
+  decisions are still wrong with the pool fully visible. Slice 4 (D69-B two-level presentation)
+  implemented, measured and **REJECTED**: 24/40 correct, structure 29/40 — six worse, on the same
+  forest and ranks. Flat listing remains default; two-level kept behind `EIGENIUS_SELECT_TWO_LEVEL=1`
+  since §5's preferred realisation was a two-CALL ranker and this was the cheap proxy. Logged
+  truncation kept ON (D62 no-silent-caps). Detail in §7m.
 - [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) —
   **COMPLETED `2026-08-15`, demo fallout closed `2026-08-17`.** One importer flag (`Concept::symbol`)
   decided BOTH proper-name syntax and entity-vs-kind denotation, so the lexicon offered two of four
