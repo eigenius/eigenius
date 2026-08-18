@@ -1,3 +1,42 @@
+> # ⚠️ RETIRED `2026-08-17` — superseded by [`demo/prose-to-formulas-v2`](../prose-to-formulas-v2/)
+>
+> **The files are gone.** Only this README remains, as the record of what the demo was and why it was
+> retired. The runnable demo, and the artifacts the acceptance test reads, are v2's.
+>
+> **Why it was retired.** Selection here was by SKELETON PIN (`pins.tsv`), and a pin is sense-erased,
+> so it cannot break a tie between readings that differ only in sense — `PinReadingRanker` abstains
+> (`kernel/src/dcg/reading_ranker.rs`: *"no match, or ≥2 readings share the pinned skeleton — abstain"*)
+> and the run fails closed. That made the demo INVENTORY-DEPENDENT: any lexicon change adding a sense
+> to a word in its paragraph could defeat it, and twice did.
+>
+> * On the d67 inventory the EDITED variant's pin matched 3 readings; it was moved to a recorded
+>   selections draw.
+> * On `2026-08-15` (D70) `C0043119` «Werner Syndrome» — a T047 disease — gained a bare-standing
+>   `name` entry, so «the exonuclease activity of **WRN**» acquired a second kind reading (the
+>   syndrome beside `C0388246` «WRN protein, human»). The INTACT variant's pin then matched 2
+>   readings and abstained. Note the sense ranker had ALREADY eliminated the syndrome and put the
+>   protein at rank 0 — the pin simply cannot act on that, being sense-erased.
+>
+> Fixing it would have meant giving the intact variant a selections draw too, leaving `pins.tsv`
+> unused and the demo differing from v2 only in prose and in lacking the anaphora and claim-kind
+> stages. v2 selects with the reading ranker, which survives inventory changes.
+>
+> **Where its role went.** `crates/eigenius-encoding/tests/acceptance.rs` — the in-process D67 §3.5
+> acceptance — read this demo's artifacts and now reads v2's (paths AND the IRI namespace: v1 used
+> `urn:eigenius:demo:formulas:`, v2 uses `urn:eigenius:demo:v2:`). It passes: intact `Holds`, edited
+> `Fails` with the missing-witness diagnostic.
+>
+> **What was NOT lost.** The pin MECHANISM is alive and covered. `PinReadingRanker` / `load_pins` /
+> `prose-to-esl --pins` remain a first-class selection arm, and the parse-rate sweep uses it as its
+> DEFAULT: with no `EIGENIUS_SELECTIONS` the harness reports *"reading ranker: pin-backed
+> (expected-readings corpus)"* and selects from `experiments/parsing/expected-readings.tsv` — a
+> different file from this demo's, and the one behind the tracked 62/62. The abstain-on-tie behaviour
+> that retired this demo is the same code path, exercised there on every deterministic run.
+>
+> What went with the deletion is only this demo's WORKED EXAMPLE of a pins file — there is now no
+> committed `pins.tsv` anywhere. Anyone adding one should also add a test, since a shell script was
+> the only thing exercising this one.
+
 # prose-to-formulas
 
 A paragraph of the WRN paper, parsed into typed propositions, committed to a chain — and then edited

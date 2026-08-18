@@ -25,14 +25,24 @@
 //!   close-out harness's `EIGENIUS_PROPOSALS` arm). Without it, no anaphora resolves — open
 //!   parses stay `Open`, which keeps the pin-arm artifacts byte-stable.
 //!
+//! The `--selections` arm, as the maintained demo drives it (`demo/prose-to-formulas-v2/run.sh`):
+//!
 //! ```bash
-//! prose-to-eigon --snapshot ../db-snapshot/wordnet-umls-aligned-2026-08-02-consolidated \
-//!                --source demo/prose-to-chain/paragraph.txt \
-//!                --pins   demo/prose-to-chain/pins.tsv \
-//!                --ranks  demo/prose-to-chain/ranks.json \
-//!                --ns     urn:eigenius:demo:prose \
-//!                --out    /tmp/03-parsed.json
+//! prose-to-esl --snapshot ../db-snapshot/wordnet-umls-aligned-2026-08-15-d70b \
+//!              --source     demo/prose-to-formulas-v2/paragraph.txt \
+//!              --ranks      demo/prose-to-formulas-v2/ranks.json \
+//!              --selections demo/prose-to-formulas-v2/selections.json \
+//!              --proposals  demo/prose-to-formulas-v2/proposals.json \
+//!              --kinds      demo/prose-to-formulas-v2/kinds.json \
+//!              --ns         urn:eigenius:demo:v2 \
+//!              --out        demo/prose-to-formulas-v2/claims-intact.esl
 //! ```
+//!
+//! The `--pins` arm takes the same shape with `--pins <file>` in place of `--selections`. There is no
+//! committed example of a pins file: `demo/prose-to-formulas/pins.tsv` was the only one and it was
+//! retired 2026-08-17 (a sense-erased pin cannot break a sense-only tie, so it was inventory-dependent
+//! — see that demo's README). The arm itself is exercised on every deterministic parse-rate sweep,
+//! where [`PinReadingRanker`] selects from `experiments/parsing/expected-readings.tsv`.
 //!
 //! **Fail closed everywhere.** A sentence that does not encode — a gap, an unresolved referent
 //! hole, a pin that matches zero or several pooled readings, a selection-replay abstention —

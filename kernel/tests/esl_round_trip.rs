@@ -37,15 +37,24 @@ use serde_json::Value;
 /// one and round-trips the terms the compiler produced. That checks the committed source, not a
 /// separate JSON copy of it.
 const CORPUS: &[&str] = &[
-    "../demo/prose-to-formulas/claims-intact.esl",
-    "../demo/prose-to-formulas/claims-edited.esl",
-    "../demo/prose-to-formulas/inference.esl",
+    "../demo/prose-to-formulas-v2/claims-intact.esl",
+    "../demo/prose-to-formulas-v2/claims-edited.esl",
+    "../demo/prose-to-formulas-v2/inference.esl",
     // D66 replaced the generated shape rules and per-sentence bridges with transparent
     // definitions, so `rules.esl` and `bridges.esl` no longer exist. The definitions and the
     // quantified literature rule take their place in this corpus.
-    "../demo/prose-to-formulas/onco-typed.esl",
-    "../demo/prose-to-formulas/literature-rules.esl",
-    "../demo/prose-to-formulas/rule-general.esl",
+    "../demo/prose-to-formulas-v2/onco-typed.esl",
+    "../demo/prose-to-formulas-v2/literature-rules.esl",
+    // Repointed from `demo/prose-to-formulas/` to v2 on 2026-08-17: v1 was retired and its files
+    // deleted (a sense-erased skeleton pin cannot break a sense-only tie, so it was
+    // inventory-dependent — see that demo's README).
+    //
+    // COVERAGE NOTE — one artifact had no v2 counterpart and is GONE: `rule-general.esl`, whose term
+    // nested THREE quantifiers over mixed domains (`forall v0:Set. forall v1:Set. forall
+    // v2:lexicon:Entity. …`). What remains is shallower: `literature-rules.esl` has a single
+    // `forall (m : Set)` and `inference.esl` two. So quantified terms are still round-tripped, but
+    // DEEP nesting is not. If the printer/parser regresses on nested binders this corpus will no
+    // longer catch it — worth a purpose-built fixture rather than relying on a demo artifact.
 ];
 
 /// A D47 node: an object carrying `ctor` + `args`.

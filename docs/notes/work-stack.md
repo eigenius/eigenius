@@ -9,7 +9,7 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — demo repair after the D70 bootstrap edit (`2026-08-17`)
+### 0. ▲ ACTIVE — demo repair after the D70 bootstrap edit (`2026-08-17`) — **(a),(b),(d) done; (c) — the CI guard — open**
 `lexicon:Num` gained `name` (D70), which changes the `lexicon` bootstrap hash — measured
 `c4a471f7…` stored vs `51aa4972…` current, every OTHER bootstrap layer identical. So EVERY snapshot
 built before 2026-08-15 fails to resume with `ManifestDrift`, and both demos pinned dead ones
@@ -19,12 +19,33 @@ WHY IT MATTERS: demo v2 IS the D67 §3.5 acceptance artifact (both paragraph var
 inference files load on top, intact justifies twice / edited `Fails`). A bootstrap edit invalidated it
 and NOTHING in `cargo test --workspace` noticed, because both demos are shell scripts outside the test
 suite — that gap is the real finding here, not the stale path.
-TODO: (a) run v2 end-to-end; its four recorded draws (ranks/selections/kinds/proposals) will MISS
-against the changed forest, so re-record in ONE pass (coupled-stage discipline, D69 §7c) and check the
-two variants still differ ONLY by the negation; (b) decide v1 — it was already slated for retirement
-pending migration of its pin-check into a test, and this is the second time it has needed
-snapshot maintenance; (c) consider a cheap guard so a bootstrap edit fails a TEST rather than a demo:
-e.g. a workspace test asserting the demos' default snapshots resume.
+DONE (a) `2026-08-17`: v2 re-recorded (all four stages, ONE pass) and verified end-to-end on
+wordnet-umls-aligned-2026-08-15-d70b — intact commits and is justified twice, edited loads and the
+inference is rejected, the two variants differing ONLY by the trailing `-> False`. NOTE: an apparent
+"regression" during this (claims-edited failing merge validation) was MY OWN contamination — hand-loading
+onto a branch the previous run had already populated; run.sh re-stages the volume, so a clean run is fine.
+DONE (b) `2026-08-17`: v1 RETIRED — files DELETED by the maintainer, README kept as the record. Its
+`--reparse` is known broken: `PinReadingRanker` abstains when ≥2 readings share the pinned skeleton, and
+D70 gave C0043119 «Werner Syndrome» a bare-standing `name` entry so «the exonuclease activity of WRN»
+gained a second kind reading. Sense-erased pins are inventory-dependent; this defeated v1 twice. Its
+artifacts were feeding `crates/eigenius-encoding/tests/acceptance.rs` (the in-process D67 §3.5
+acceptance), which the deletion BROKE; repointed to v2's artifacts — both the paths and the IRI
+namespace (`urn:eigenius:demo:formulas:` -> `urn:eigenius:demo:v2:`). Verified on d70b: intact `Holds`,
+edited `Fails` with the missing-IsDerivedAs-witness diagnostic. LOST: the pin-check — `pins.tsv` was
+exercised only by the broken `--reparse` path, never by a test, and is now deleted (see TODO (d)).
+TODO (c) STILL OPEN, and it is the real lesson: a cheap guard so a bootstrap edit fails a TEST rather
+than a demo. `acceptance.rs` is `#[ignore]`d and DB-backed, so `cargo test --workspace` stayed green
+while the acceptance artifacts were invalid. A test asserting the demos' default snapshots RESUME would
+have caught the ManifestDrift immediately.
+CORRECTED (d) `2026-08-17`: the earlier note here said v1's pin-check was "lost" and needed migrating
+into a test. That OVERSTATED it. The pin MECHANISM — `PinReadingRanker` / `load_pins` /
+`prose-to-esl --pins` — is a first-class selection arm and the parse-rate sweep's DEFAULT: with no
+`EIGENIUS_SELECTIONS` the harness prints "reading ranker: pin-backed (expected-readings corpus)" and
+selects from `experiments/parsing/expected-readings.tsv` (db_backed_encoding.rs:3141). That is a
+DIFFERENT file from the demo's, it is the one behind the tracked 62/62, and the abstain-on-tie
+behaviour that retired v1 is the same code path exercised there every deterministic run. What the
+deletion actually cost is the only committed EXAMPLE of a pins file — nothing more. Also fixed: the
+`pipeline.rs` doc comment showed `--pins demo/prose-to-chain/pins.tsv`, a path that never existed.
 
 ### 1. ▼ [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **IMPLEMENTED `2026-08-15`; 62/62**
 The UMLS importer decided "named individual?" with one flag (`Concept::symbol`) that fixed BOTH syntax

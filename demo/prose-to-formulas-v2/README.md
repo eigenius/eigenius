@@ -1,6 +1,13 @@
 # prose-to-formulas **v2** — the composed pipeline
 
-Same argument as [v1](../prose-to-formulas/), produced end to end by the pipeline the
+> **v1 is RETIRED (`2026-08-17`) — this is the maintained demo.** v1 selected by skeleton pin, which
+> is sense-erased and cannot break a tie between readings differing only in sense, so it broke on any
+> lexicon change that added a sense to its paragraph — twice. This one selects with the reading
+> ranker and survives inventory changes. v1's files were deleted; only its README remains as the
+> record. The in-process D67 §3.5 acceptance test (`crates/eigenius-encoding/tests/acceptance.rs`)
+> now reads THIS demo's artifacts.
+
+Same argument as [v1](../prose-to-formulas/) (retired, README only), produced end to end by the pipeline the
 [parser-pipeline plan](../../docs/notes/parser-pipeline-plan.md) specifies: **glossary → parse →
 sense rank → reading selection → anaphora resolution → claim landing → artifact → commit**. v1
 stops after selection-by-human-pin; this runs the whole thing.
