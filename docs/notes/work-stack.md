@@ -9,64 +9,7 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▼ demo repair after the D70 bootstrap edit (`2026-08-17`) — **(a)–(d) all done `2026-08-17`; ready to pop**
-`lexicon:Num` gained `name` (D70), which changes the `lexicon` bootstrap hash — measured
-`c4a471f7…` stored vs `51aa4972…` current, every OTHER bootstrap layer identical. So EVERY snapshot
-built before 2026-08-15 fails to resume with `ManifestDrift`, and both demos pinned dead ones
-(`aligned-d66`, `aligned-2026-08-12-d67`). Defaults re-pointed at `wordnet-umls-aligned-2026-08-15-d70b`
-(`2026-08-17`); the runs themselves are NOT yet verified.
-WHY IT MATTERS: demo v2 IS the D67 §3.5 acceptance artifact (both paragraph variants land, the rule +
-inference files load on top, intact justifies twice / edited `Fails`). A bootstrap edit invalidated it
-and NOTHING in `cargo test --workspace` noticed, because both demos are shell scripts outside the test
-suite — that gap is the real finding here, not the stale path.
-DONE (a) `2026-08-17`: v2 re-recorded (all four stages, ONE pass) and verified end-to-end on
-wordnet-umls-aligned-2026-08-15-d70b — intact commits and is justified twice, edited loads and the
-inference is rejected, the two variants differing ONLY by the trailing `-> False`. NOTE: an apparent
-"regression" during this (claims-edited failing merge validation) was MY OWN contamination — hand-loading
-onto a branch the previous run had already populated; run.sh re-stages the volume, so a clean run is fine.
-DONE (b) `2026-08-17`: v1 RETIRED — files DELETED by the maintainer, README kept as the record. Its
-`--reparse` is known broken: `PinReadingRanker` abstains when ≥2 readings share the pinned skeleton, and
-D70 gave C0043119 «Werner Syndrome» a bare-standing `name` entry so «the exonuclease activity of WRN»
-gained a second kind reading. Sense-erased pins are inventory-dependent; this defeated v1 twice. Its
-artifacts were feeding `crates/eigenius-encoding/tests/acceptance.rs` (the in-process D67 §3.5
-acceptance), which the deletion BROKE; repointed to v2's artifacts — both the paths and the IRI
-namespace (`urn:eigenius:demo:formulas:` -> `urn:eigenius:demo:v2:`). Verified on d70b: intact `Holds`,
-edited `Fails` with the missing-IsDerivedAs-witness diagnostic. LOST: the pin-check — `pins.tsv` was
-exercised only by the broken `--reparse` path, never by a test, and is now deleted (see TODO (d)).
-DONE (c) `2026-08-17`: `kernel::bootstrap::tests::bootstrap_manifest_is_pinned` pins the per-layer
-bootstrap manifest. A snapshot-resume test was the first idea and was rejected: it needs a snapshot on
-disk, so it would skip in CI — exactly where the signal is wanted. Pinning `current_manifest()` needs
-NO database and NO snapshot, and it is the same hash the drift check compares, so it fires on the
-precise condition that invalidates stores. Verified BOTH ways: passes as committed, and fails on a
-one-line edit to lexicon-ontology.esl naming the moved layer with was/now hashes. Failure text lists
-the follow-through (reseed, re-point snapshot paths, re-record draws that miss, update the constant in
-the SAME commit).
-CORRECTED (d) `2026-08-17`: the earlier note here said v1's pin-check was "lost" and needed migrating
-into a test. That OVERSTATED it. The pin MECHANISM — `PinReadingRanker` / `load_pins` /
-`prose-to-esl --pins` — is a first-class selection arm and the parse-rate sweep's DEFAULT: with no
-`EIGENIUS_SELECTIONS` the harness prints "reading ranker: pin-backed (expected-readings corpus)" and
-selects from `experiments/parsing/expected-readings.tsv` (db_backed_encoding.rs:3141). That is a
-DIFFERENT file from the demo's, it is the one behind the tracked 62/62, and the abstain-on-tie
-behaviour that retired v1 is the same code path exercised there every deterministic run. What the
-deletion actually cost is the only committed EXAMPLE of a pins file — nothing more. Also fixed: the
-`pipeline.rs` doc comment showed `--pins demo/prose-to-chain/pins.tsv`, a path that never existed.
-
-### 1. ▼ [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) — **IMPLEMENTED `2026-08-15`; 62/62**
-The UMLS importer decided "named individual?" with one flag (`Concept::symbol`) that fixed BOTH syntax
-(bare, no determiner) and denotation (entity vs kind), so the lexicon offered two of four combinations
-and the corpus kept asking for the missing one — a bare-standing KIND-referring NP. DONE (§0): new
-`lexicon:Num::name` (bare + kind-denoting, no mass claim) granted by T047/T191; T033 Finding removed
-from `COUNT_VETO_TUIS` (its one motivating collision, `gENE`, is handled per-atom by drops.json, while
-the veto blocked head-inheritance for 107591 concepts including C4522088 «Mismatch Repair
-Deficiency»). RESULT: «MMR deficiency causes cancer» and «Lynch syndrome causes cancer» reach
-C4522088/C4552100 instead of Turcot/HNPCC; expected-hits 62/62 with an EMPTY miss-set; 0 units
-discarding their sense ranking; readings 637 (ceiling 700), skeletons 175. Everything the D69 chase
-compensated for was a concept that could not compose bare. STILL OPEN: D2 (disease kind-vs-entity) is
-unanswerable on this corpus; O4 (term-type strength — a concept's own PT vs another's CE for the same
-string, §1d) unimplemented and orthogonal; abbreviations still reach bare standing via the glossary's
-`mass` inheritance rather than `name` (§D3) — the same conflation one level down.
-
-### 2. [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
+### 0. ▲ ACTIVE — [d69-reading-presentation.md](d69-reading-presentation.md) — **the ranker's question is unanswerable as posed**
 Pushed `2026-08-13` from the v2 demo review. MEASURED: for «MSI cancer models did not have the
 exonuclease activity of WRN.» the ranker prompt carries **120 candidates with 120 distinct sems
 but only 4 distinct strings** (13.5 KB, 8 structure headers showing 1 gloss each) — «exonuclease
@@ -99,7 +42,7 @@ gold sets (`reading-adjudications.tsv` keys on the sem) and NOT any parse metric
 note; slice 3 answers "how much of the ranker's 21/31 was blindness". NOT in scope: the negated
 sentence's 308-vs-2 cap-only forest — a grammar-side multiplicity question, named in §8.
 
-### 3. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
+### 1. [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
 The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
 → unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
@@ -204,7 +147,7 @@ the first deliverable.** Remaining deferrals live in D68 §5/§5a (collective/gr
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
 cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
 
-### 4. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
+### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
 
@@ -288,7 +231,7 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 5. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (2) is a detour from — now largely folded into (1)'s Stages 3–4.
 Remaining once (2) pops, in order:
 **address ambiguity** (0 encoded → clean single parses) + long-sentence perf → **grading-phase gaps**
@@ -358,6 +301,27 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   ([[gene_family_lexicon_gap]]) + a lexicon/ontology index.
 
 ## Completed (record, not work)
+- [d70-named-entities-syntax-vs-denotation.md](../design/d70-named-entities-syntax-vs-denotation.md) —
+  **COMPLETED `2026-08-15`, demo fallout closed `2026-08-17`.** One importer flag (`Concept::symbol`)
+  decided BOTH proper-name syntax and entity-vs-kind denotation, so the lexicon offered two of four
+  combinations and the corpus kept needing the missing one — a bare-standing KIND-referring NP. Fixed
+  at source, two causes: new `lexicon:Num::name` (bare + kind-denoting, no mass claim) granted by
+  T047/T191; and T033 Finding removed from `COUNT_VETO_TUIS`, its one motivating collision (`gENE`)
+  being handled per-atom by drops.json while the veto blocked head-inheritance for 107591 concepts.
+  «MMR deficiency» and «Lynch syndrome» now reach C4522088 / C4552100 instead of Turcot / HNPCC;
+  expected-hits 62/62 with an empty miss-set; 0 units discarding their sense ranking; readings 637
+  (ceiling 700), skeletons 175. Everything the D69 chase compensated for was a concept that could not
+  compose bare. FALLOUT, all closed `2026-08-17`: the bootstrap edit invalidated every snapshot
+  (ManifestDrift on the `lexicon` layer), which broke both demos and — silently — the D67 §3.5
+  acceptance and the ESL round-trip corpus. v2 re-recorded and verified; v1 RETIRED and deleted
+  (sense-erased pins are inventory-dependent; README kept as the record); `acceptance.rs` and
+  `esl_round_trip.rs` repointed at v2 (paths AND the `demo:formulas:` → `demo:v2:` namespace);
+  `kernel/tests/bootstrap_manifest_pinned.rs` now pins the manifest so the next such edit fails in
+  `cargo test` rather than days later by hand. RESIDUE (not blocking, none gated): D2 disease
+  kind-vs-entity is unanswerable on this corpus; O4 (a concept's own PT outranking another's CE for
+  the same string) unimplemented; abbreviations still reach bare standing via the glossary's `mass`
+  inheritance rather than `name`; deep-binder round-trip coverage lost with v1's `rule-general.esl`;
+  a lexicon-content change still moves no manifest, so that staleness class has no guard.
 - **Phase-2 constructions, Step 5/5b/5c — COMPLETED `2026-07-06`** (uncommitted on `13c5bbe` + the
   refactor on top). RC-6 apposition (`appose_group`, bidirectional concept↔semantic-type felicity),
   comma-list connective inheritance (neutral comma finalized by the trailing `and`/`or`), and the
