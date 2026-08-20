@@ -79,9 +79,20 @@ stage-snapshot snapshot="":
     fi
     [[ -f "$snap/CURRENT" ]] || { echo "not a RocksDB store: $snap" >&2; exit 1; }
     snap="$(cd "$snap" && pwd)"
+    # DESTRUCTIVE, and not obviously so from the name: this wipes the volume,
+    # taking every branch with it — doc-<id> working branches, their glossary
+    # layers, and their recorded proposer draws. Doing it under a LIVE kernel
+    # also pulls RocksDB's store out from under the process. Stop it first.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx kernel; then
+        echo "kernel is running — stopping it first (staging deletes the store it has open)"
+        docker compose stop kernel >/dev/null
+        restart=1
+    fi
     docker run --rm -v "$snap":/src:ro -v eigenius_eigenius_db:/dst alpine \
         sh -c 'rm -rf /dst/* && cp -a /src/. /dst/'
-    echo "staged $(basename "$snap") into eigenius_eigenius_db"
+    echo "staged $(basename "$snap") into eigenius_eigenius_db (all previous branches are gone)"
+    [[ -n "${restart:-}" ]] && { docker compose start kernel >/dev/null; echo "kernel restarted"; }
+    true
 
 # Which snapshot is currently staged (the reseed stamps a PROVENANCE file).
 which-snapshot:
