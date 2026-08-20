@@ -347,15 +347,16 @@ impl Parser {
     /// `Ambiguous` outcome. There is no kernel veto on this choice (every pooled candidate
     /// type-checks — the resolved-open ones through the re-gate); the audit record + the offline
     /// faithfulness gate are the controls.
-    pub fn resolve_document(
-        &self,
-        document: &str,
-        sentences: &[&str],
-        lemmatizer: &dyn Lemmatizer,
-        proposer: &dyn Proposer,
-        ranker: Option<&dyn ReadingRanker>,
-        lander: Option<&dyn ClaimLander>,
-    ) -> Vec<SentenceResolution> {
+    pub fn resolve_document(&self, run: &DiscourseRun<'_>) -> Vec<SentenceResolution> {
+        let DiscourseRun {
+            document,
+            sentences,
+            lemmatizer,
+            proposer,
+            ranker,
+            lander,
+            scope,
+        } = *run;
         // `document` is the RAW surrounding text (the ranker/proposer record keys hash it — a
         // synthesized join of `sentences` would be a different string than the recordings key
         // on, and every replay would MISS); `sentences` is its segmentation, in order.
@@ -368,7 +369,12 @@ impl Parser {
         let mut run_kind: Option<Iri> = None;
         let mut out = Vec::with_capacity(sentences.len());
         for (ordinal, s) in sentences.iter().enumerate() {
-            let (closed, open) = self.parse_open(s, lemmatizer);
+            // SCOPED (D65 §4): the caller's lexicon order is the parse rank's primary key, so a
+            // document formalized against a domain profile ranks that profile's senses first. The
+            // single-sentence `ParseSentence` RPC has taken a scope since D65; the document path
+            // passed `None` unconditionally until D71 §7.1 put the same two fields on the
+            // formalization request, at which point ignoring them would have been a lie.
+            let (closed, open) = self.parse_scoped_open(s, lemmatizer, scope);
             // Pool = closed ∪ resolved-open, deduplicated by sem: two open parses resolving to
             // the same closed proposition (or duplicating a closed reading) are ONE reading.
             let mut pool = closed;
@@ -692,6 +698,30 @@ pub enum SentenceOutcome {
     Open(OpenParse),
     /// No parse — an OOV token, or an all-known-tokens grammar gap.
     Gap,
+}
+
+/// Everything one document's discourse loop needs, as one value.
+///
+/// These are seven genuinely-required inputs to a single operation, not accumulated configuration —
+/// but seven positional arguments (three of them `Option`) is a shape where a caller can transpose
+/// two and still compile. Clippy's `too_many_arguments` said so when `scope` was added (D71 §7.1);
+/// bundling is the fix, suppressing the lint would have been the wedge.
+pub struct DiscourseRun<'a> {
+    /// The RAW surrounding text. The ranker and proposer record keys hash it, so a synthesized join
+    /// of `sentences` would be a different string than the recordings key on and every replay would
+    /// MISS.
+    pub document: &'a str,
+    /// `document`'s segmentation, in order.
+    pub sentences: &'a [&'a str],
+    pub lemmatizer: &'a dyn Lemmatizer,
+    pub proposer: &'a dyn Proposer,
+    /// Collapses an ambiguous forest to one reading. `None` leaves it `Ambiguous` (fail-open).
+    pub ranker: Option<&'a dyn ReadingRanker>,
+    /// Lands each encoded claim inside the loop, so a later demonstrative can refer to it.
+    pub lander: Option<&'a dyn ClaimLander>,
+    /// D65 §4 parse scope — ordered `lexicon:Lexicon` IRIs, position is the rank's primary key.
+    /// `None` is the whole chain.
+    pub scope: Option<&'a [Iri]>,
 }
 
 /// One sentence's result from the discourse loop: the classified outcome plus, when a reading

@@ -45,9 +45,9 @@ use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
     is_nonprose, pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize,
-    AbbreviationBinding, Identity, InProcessPipeline, Lemmatizer, LexicalIndex, LexicalLookup,
-    LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx, Proposer,
-    SentenceOutcome, Vb,
+    AbbreviationBinding, DiscourseRun, Identity, InProcessPipeline, Lemmatizer, LexicalIndex,
+    LexicalLookup, LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx,
+    Proposer, SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -3675,16 +3675,17 @@ fn resolve_document_discourse_close_out() {
         .collect();
     let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
     let t = std::time::Instant::now();
-    let resolutions = index.resolve_document(
-        &page,
-        &refs,
-        &lem,
-        &proposer,
-        selection_recorder
+    let resolutions = index.resolve_document(&DiscourseRun {
+        document: &page,
+        sentences: &refs,
+        lemmatizer: &lem,
+        proposer: &proposer,
+        ranker: selection_recorder
             .as_ref()
             .map(|r| r as &dyn eigenius_kernel::dcg::ReadingRanker),
-        Some(&lander),
-    );
+        lander: Some(&lander),
+        scope: None,
+    });
     assert_eq!(resolutions.len(), sentences.len());
 
     // Flush the selection draw BEFORE any assert.

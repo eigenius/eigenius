@@ -24,9 +24,9 @@ use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
     abbreviation_resources, apply, coordinate_np, coordinate_prop, entry_to_item,
     extract_abbreviations, glossary_resources, ground_long_form, is_ctor, pretty_term, type_raise,
-    AbbrDef, AbbreviationBinding, Candidate, DocumentPipeline, Identity, InProcessPipeline, Item,
-    LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, Proposal, ProposeCtx, Proposer,
-    SenseRanker, SentenceEncoding, SentenceOutcome, WordSenses,
+    AbbrDef, AbbreviationBinding, Candidate, DiscourseRun, DocumentPipeline, Identity,
+    InProcessPipeline, Item, LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, Proposal,
+    ProposeCtx, Proposer, SenseRanker, SentenceEncoding, SentenceOutcome, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -1078,6 +1078,48 @@ fn pied_piping_respects_the_lexicon_scope() {
         "pied-piping admitted an OUT-OF-SCOPE preposition — the rule reads the lexicon directly and \
          never applies the scope filter (D65 §4). Got: {:?}",
         scoped.iter().map(|it| pretty_term(it.sem())).collect::<Vec<_>>()
+    );
+}
+
+/// **The DOCUMENT path respects the lexicon scope too** (D65 §4 / D71 §7.1).
+///
+/// `resolve_document` called `parse_open`, which is `parse_scoped_open(.., None)` — so the document
+/// pipeline was unconditionally unscoped while the single-sentence `ParseSentence` RPC had taken a
+/// scope since D65. That gap only became visible when the formalization request grew the same
+/// `scope` / `profile` fields: accepting them and ignoring them would have been worse than not
+/// offering them.
+///
+/// Same fixture and same witness as `pied_piping_respects_the_lexicon_scope`, one level up: the
+/// tagged `beside` is in scope by default and out of scope under an empty one, so the sentence
+/// encodes in the first case and does not in the second.
+#[test]
+fn resolve_document_respects_the_lexicon_scope() {
+    let index = parser_with_pied_prep().with_packing(false);
+    let doc = PIED_BESIDE;
+    let sentences = [PIED_BESIDE];
+    let resolve = |scope: Option<&[eigenius_kernel::ontology::Iri]>| {
+        index.resolve_document(&DiscourseRun {
+            document: doc,
+            sentences: &sentences,
+            lemmatizer: &Identity,
+            proposer: &PickBySurface(""),
+            ranker: None,
+            lander: None,
+            scope,
+        })
+    };
+
+    let unscoped = resolve(None);
+    assert!(
+        !matches!(unscoped[0].outcome, SentenceOutcome::Gap),
+        "control: the document path parses when the tagged lexicon is in scope"
+    );
+
+    let scoped = resolve(Some(&[]));
+    assert!(
+        matches!(scoped[0].outcome, SentenceOutcome::Gap),
+        "the document path admitted an OUT-OF-SCOPE preposition — `resolve_document` is not \
+         threading its scope to the parse (D65 §4)"
     );
 }
 
@@ -2719,14 +2761,15 @@ fn a_demonstrative_resolves_to_a_landed_claim() {
     let (_layer, index) = index_with_claim_kinds();
     let doc = ["HeLa affects BRCA1", "yonder cell line affects BRCA1"];
     let lander = KindLander("TestFinding");
-    let resolved = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("the TestFinding claim 0"),
-        Some(&First),
-        Some(&lander),
-    );
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("the TestFinding claim 0"),
+        ranker: Some(&First),
+        lander: Some(&lander),
+        scope: None,
+    });
     let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
         panic!("the demonstrative resolves to the landed claim");
     };
@@ -2739,14 +2782,15 @@ fn a_demonstrative_resolves_to_a_landed_claim() {
     // The WRONG kind — TestOther has no alignment into the restrictor — is vetoed, and the
     // sentence stays honestly Open (the claim class taxonomy is doing the soundness work).
     let other = KindLander("TestOther");
-    let vetoed = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("the TestOther claim 0"),
-        Some(&First),
-        Some(&other),
-    );
+    let vetoed = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("the TestOther claim 0"),
+        ranker: Some(&First),
+        lander: Some(&other),
+        scope: None,
+    });
     assert!(
         matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
         "an unaligned claim kind cannot be the referent (fail-closed)"
@@ -2784,14 +2828,15 @@ fn a_plural_reference_resolves_distributively_to_a_claim_set() {
         "yonder cell line affects BRCA1",
     ];
     let lander = KindLander("TestFinding");
-    let resolved = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("the last 2 TestFinding claims, together"),
-        Some(&First),
-        Some(&lander),
-    );
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("the last 2 TestFinding claims, together"),
+        ranker: Some(&First),
+        lander: Some(&lander),
+        scope: None,
+    });
     let SentenceOutcome::Encoded(s3) = &resolved[2].outcome else {
         panic!("the plural reference resolves to the claim SET");
     };
@@ -3035,14 +3080,15 @@ fn resolve_document_threads_discourse_across_sentences() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let resolved = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("The BRCA1 gene"),
-        None,
-        None,
-    );
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     assert_eq!(resolved.len(), 2);
     assert!(
         matches!(
@@ -3061,14 +3107,15 @@ fn resolve_document_threads_discourse_across_sentences() {
     );
 
     // Fail-closed: a proposer that finds no antecedent ⇒ the sentence stays Open, not a wrong closed parse.
-    let none = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("nonexistent"),
-        None,
-        None,
-    );
+    let none = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("nonexistent"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     assert!(
         matches!(none[1].outcome, SentenceOutcome::Open(_)),
         "an unresolvable pronoun stays Open (fail-closed)"
@@ -3116,22 +3163,24 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let plain = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("The BRCA1 gene"),
-        None,
-        None,
-    );
-    let abstained = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("The BRCA1 gene"),
-        Some(&Abstain),
-        None,
-    );
+    let plain = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
+    let abstained = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: Some(&Abstain),
+        lander: None,
+        scope: None,
+    });
     for (p, a) in plain.iter().zip(&abstained) {
         assert_eq!(
             std::mem::discriminant(&p.outcome),
@@ -3141,14 +3190,15 @@ fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
         assert!(a.selection.is_none(), "an abstention records no selection");
     }
 
-    let ranked = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("The BRCA1 gene"),
-        Some(&First),
-        None,
-    );
+    let ranked = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: Some(&First),
+        lander: None,
+        scope: None,
+    });
     for (r, p) in ranked.iter().zip(&plain) {
         match (&p.outcome, &r.outcome) {
             // A sentence the no-ranker run left ambiguous is now Encoded, with the audit record.
@@ -3197,14 +3247,15 @@ fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
 
     // The proposer picks the kind by its verbalized surface → the re-gate closes the parse
     // with the kind as the referent.
-    let resolved = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &PluralS,
-        &PickBySurface("Gene"),
-        None,
-        None,
-    );
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &PluralS,
+        proposer: &PickBySurface("Gene"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
         panic!("the demonstrative resolves to the discourse kind ⟦genes⟧");
     };
@@ -3216,14 +3267,15 @@ fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
 
     // A type-wrong candidate — the CellLine individual for the Gene-typed hole — is VETOED by
     // the re-gate, and the sentence stays honestly Open (fail-closed).
-    let vetoed = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &PluralS,
-        &PickBySurface("The HeLa cell line"),
-        None,
-        None,
-    );
+    let vetoed = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &PluralS,
+        proposer: &PickBySurface("The HeLa cell line"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     assert!(
         matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
         "a kind-typed hole rejects a class-incompatible individual antecedent"
@@ -3245,14 +3297,15 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
 
     // No ranker: BOTH readings survive as Ambiguous — the anaphoric reading (resolved to the
     // discourse HeLa) sits in the pool beside the named-entity reading.
-    let plain = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("The HeLa cell line"),
-        None,
-        None,
-    );
+    let plain = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The HeLa cell line"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     let SentenceOutcome::Ambiguous(pool) = &plain[1].outcome else {
         panic!(
             "closed + resolved-open must POOL to Ambiguous, got {}",
@@ -3278,14 +3331,15 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
 
     // An unresolvable discourse (no antecedent proposed) leaves the closed reading alone — a
     // pool of one, Encoded, never a false Open.
-    let alone = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("nonexistent"),
-        None,
-        None,
-    );
+    let alone = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("nonexistent"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     let SentenceOutcome::Encoded(only) = &alone[1].outcome else {
         panic!("with the anaphoric reading unresolvable, the closed reading encodes alone");
     };
@@ -3310,14 +3364,15 @@ fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
             })
         }
     }
-    let ranked = index.resolve_document(
-        &doc.join(" "),
-        &doc,
-        &Identity,
-        &PickBySurface("The HeLa cell line"),
-        Some(&First),
-        None,
-    );
+    let ranked = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The HeLa cell line"),
+        ranker: Some(&First),
+        lander: None,
+        scope: None,
+    });
     let SentenceOutcome::Encoded(_) = &ranked[1].outcome else {
         panic!("a choosing ranker collapses the pooled competition");
     };

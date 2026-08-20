@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 use crate::commit::{BackendPersister, LayerPersister};
 use crate::layer::{Layer, LayerBuilder, LayerStorage};
+use crate::ontology::iri::Iri;
 use crate::storage::PersistentBackend;
 
 use super::abbrev::AbbreviationProposer;
@@ -39,7 +40,9 @@ use super::augment::{
     LexiconAugmentation, NominalCategoryProposer,
 };
 use super::lemmatizer::Lemmatizer;
-use super::parse::{ClaimLander, Parser, Proposer, SelectionOutcome, SentenceOutcome};
+use super::parse::{
+    ClaimLander, DiscourseRun, Parser, Proposer, SelectionOutcome, SentenceOutcome,
+};
 use super::reading_ranker::ReadingRanker;
 use super::segment::segment_sentences;
 
@@ -122,6 +125,10 @@ pub struct InProcessPipeline<'a> {
     /// defaults, which is only safe over small bases; over the full lexicon the caps and the
     /// rank replay are load-bearing.
     parser_setup: Option<&'a dyn Fn(Parser) -> Parser>,
+    /// D65 §4 parse scope — ordered `lexicon:Lexicon` IRIs whose position is the rank's primary
+    /// key. `None` is the whole chain, unscoped. Set from a formalization request's `scope` /
+    /// `profile` (D71 §7.1); the single-sentence `ParseSentence` RPC has taken one since D65.
+    scope: Option<Vec<Iri>>,
 }
 
 /// The default (deterministic) POS proposer — a `'static` ZST so [`InProcessPipeline::new`] can hand out
@@ -151,7 +158,15 @@ impl<'a> InProcessPipeline<'a> {
             storage: None,
             claim_lander: None,
             parser_setup: None,
+            scope: None,
         }
+    }
+
+    /// Set the parse scope (D65 §4): ordered `lexicon:Lexicon` IRIs, earlier ranking first. A
+    /// caller that resolved a `lexicon:LexiconProfile` passes the profile's `lexica` list.
+    pub fn with_scope(mut self, scope: Vec<Iri>) -> Self {
+        self.scope = Some(scope);
+        self
     }
 
     /// Install the claim lander (D68) — landed claims join the discourse candidate set.
@@ -280,14 +295,15 @@ impl<'a> InProcessPipeline<'a> {
             .filter(|s| !s.trim().is_empty())
             .collect();
         let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
-        let resolutions = index.resolve_document(
+        let resolutions = index.resolve_document(&DiscourseRun {
             document,
-            &refs,
-            self.lemmatizer,
-            self.anaphora_proposer,
-            self.reading_ranker,
-            self.claim_lander,
-        );
+            sentences: &refs,
+            lemmatizer: self.lemmatizer,
+            proposer: self.anaphora_proposer,
+            ranker: self.reading_ranker,
+            lander: self.claim_lander,
+            scope: self.scope.as_deref(),
+        });
 
         let sentences = bodies
             .into_iter()
