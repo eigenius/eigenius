@@ -31,12 +31,20 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), CheckError> {
     // D49 §8 — ChainWitness values are opaque kernel-internal markers
     // that intentionally do not read back into surface syntax. Equality
     // on them is key-based: two witnesses with the same `WitnessKey`
-    // are definitionally equal. (D46 proof irrelevance further
-    // collapses *any* two witnesses of the same Prop-typed predicate
-    // type to equal at that type via `def_eq_at_type`; this branch is
-    // the conservative fast path used when the proof-irrelevance
-    // shortcut wasn't reachable — e.g., direct `eq_nf` calls without
-    // a type in hand.)
+    // are definitionally equal, and two with different keys are a type
+    // mismatch.
+    //
+    // Key comparison is not a fast path: it is the only path. D46 proof
+    // irrelevance would collapse *any* two witnesses of the same
+    // Prop-typed predicate to equal at that type, but that route runs
+    // through `def_eq_at_type`, whose only two production call sites are
+    // both inside the `(Exp::Refl(a), Val::Id(..))` arm of `check`
+    // (`check/mod.rs`). `eq_nf` takes no type and has no propositional
+    // short-circuit, so every witness comparison that is not a `refl`
+    // check lands here and is decided by key equality alone. Two
+    // witnesses of one Prop-typed predicate with different keys are
+    // therefore rejected, where D46 says they are equal. Wiring
+    // irrelevance into the conversion algorithm is D46 §5.1 and is not
     match (v1, v2) {
         (Val::ChainWitness(k1), Val::ChainWitness(k2)) => {
             return if k1 == k2 {

@@ -867,23 +867,19 @@ const LEXICON_STANDINS: &str = r#"
     namespace lexicon = "urn:eigenius:lexicon";
     namespace wn      = "urn:eigenius:wn";
     namespace umlscui = "urn:eigenius:umlscui";
-    class wn:n13440063 { }
-    class wn:n14606137 { }
-    class wn:n05890249 { }
-    class wn:n14239918 { }
+    class umlscui:C1148824 { }
+    class umlscui:C1149627 { }
+    class umlscui:C1516211 { }
     class umlscui:C0388246 { }
     class umlscui:C0920269 { }
-    class umlscui:C0920283 { }
     axiom wn:v02203362_t : lexicon:Entity -> lexicon:Entity -> Prop
     axiom wn:v02627934_t : lexicon:Entity -> lexicon:Entity -> Prop
 "#;
 
-/// The MSI-cancer-model term, shared by both sentences. Not a class — a nested compound kind.
-const MSI: &str = r#"(exists x0 : wn:n05890249 =>
-                        ontology:compound_kind(
-                            x0,
-                            (exists x1 : wn:n14239918 =>
-                                ontology:compound_kind(x1, umlscui:C0920269))))"#;
+/// The MSI-cancer-model term, shared by both sentences. Not a class — a compound kind (the
+/// d67 alignment gives «cancer model» a dedicated concept, C1516211).
+const MSI: &str = r#"(exists x0 : umlscui:C1516211 =>
+                        ontology:compound_kind(x0, umlscui:C0920269))"#;
 
 /// `demo/prose-to-formulas/claims-intact.esl` commits each sentence's parse. D66 replaces the
 /// generated shape rules with definitions, so a use of `HasActivity` / `RequiresActivity` must
@@ -906,11 +902,8 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
             reflection:canonical_proposition = type_expr(
                 {verb_axiom}(
                     eigentt:fst(ontology:the(
-                        (exists x0 : wn:n13440063 =>
-                            logic:And(
-                                ontology:compound_kind(x0, {activity}),
-                                ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246))
-                            )))),
+                        (exists x0 : {activity} =>
+                            ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246))))),
                     ontology:kind_of({MSI})
                 )
             );
@@ -927,20 +920,17 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace onco = "urn:eigenius:demo:onco";
         namespace d = "urn:eigenius:demo:def";
 
-        def onco:{def_name}(m : Set, g : Set, a : Set) : Prop =
+        def onco:{def_name}(m : Set, g : Set) : Prop =
             {verb_axiom}(
                 eigentt:fst(ontology:the(
-                    (exists x0 : wn:n13440063 =>
-                        logic:And(
-                            ontology:compound_kind(x0, a),
-                            ontology:prep_of(x0, ontology:kind_of(g))
-                        )))),
+                    (exists x0 : {activity} =>
+                        ontology:prep_of(x0, ontology:kind_of(g))))),
                 ontology:kind_of(m));
 
         resource d:claim : reflection:DeclaredResource {{
             reflection:declared_by = "test";
             reflection:canonical_proposition = type_expr(
-                onco:{def_name}({MSI}, umlscui:C0388246, {activity})
+                onco:{def_name}({MSI}, umlscui:C0388246)
             );
         }}"#
     );
@@ -986,7 +976,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
 /// Sentence 1 — «MSI cancer models had the exonuclease activity of WRN» (`claim_1`).
 #[test]
 fn has_activity_unfolds_to_exactly_the_committed_parse() {
-    definition_matches_committed_parse("wn:v02203362_t", "wn:n14606137", "HasActivity");
+    definition_matches_committed_parse("wn:v02203362_t", "umlscui:C1148824", "HasActivity");
 }
 
 /// Sentence 2 — «MSI cancer models required the helicase activity of WRN» (`claim_2`).
@@ -995,5 +985,5 @@ fn has_activity_unfolds_to_exactly_the_committed_parse() {
 /// "justified twice" turns on them being the same term.
 #[test]
 fn requires_activity_unfolds_to_exactly_the_committed_parse() {
-    definition_matches_committed_parse("wn:v02627934_t", "umlscui:C0920283", "RequiresActivity");
+    definition_matches_committed_parse("wn:v02627934_t", "umlscui:C1149627", "RequiresActivity");
 }

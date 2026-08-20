@@ -19,8 +19,12 @@ patterns will join them.
 operate on the same kind of data (numerical expressions, planning trees,
 logical clauses). The cost is up-front coordination — every consuming
 institution has to agree on the encoding — and the saving is structural:
-O(N) boundaries instead of O(N²) per-bridge converters, and identity
-comorphisms become possible (chapter 3 §3.3).
+one interpreter per *consuming institution* rather than one converter per
+*ordered pair* of institutions, and a comorphism's declared middle becomes
+the identity (chapter 3 §3.3). Be precise about what the second half buys:
+the identity middle relocates the translation into the source institution's
+`ExportFormat` procedure rather than removing it
+([chapter 2 §2.4b](02-shared-payload-languages.md#2-4b-what-the-shared-payload-did-not-buy)).
 
 **Use a per-bridge converter when** institutions genuinely operate on
 different shapes — one stream-based, one record-based, one with explicit

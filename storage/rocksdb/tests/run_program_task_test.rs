@@ -137,7 +137,11 @@ async fn run_program_persists_task_record() {
     assert_eq!(record.task_id, task_id);
     assert_eq!(record.session_id, Uuid::nil());
     assert_eq!(record.status, TaskStatus::Completed);
-    assert_eq!(record.program_iri, "urn:eigenius:test:program:identity");
+    assert_eq!(record.kind.label(), "ProgramRun");
+    assert_eq!(
+        record.kind.program_iri(),
+        Some("urn:eigenius:test:program:identity")
+    );
     // `result_layer_head` is set to the trace layer when one commits.
     // An identity program has no dispatched ComponentTraces, so the
     // trace commit may be a no-op (nothing but the `ProgramTrace`

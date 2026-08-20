@@ -48,6 +48,11 @@ import { create, toJson } from "@bufbuild/protobuf";
 import { decode as cborDecode } from "cbor-x";
 import type { KernelClient, LoadPolicy } from "../client/kernel_client.ts";
 import {
+  FormalizationOptionsSchema,
+  FormalizeDocumentRequestSchema,
+  FormalizeDocumentResponseSchema,
+  GetFormalizationResultRequestSchema,
+  GetFormalizationResultResponseSchema,
   GetSchemaRequestSchema,
   GetSchemaResponseSchema,
   GetTaskStatusRequestSchema,
@@ -440,6 +445,144 @@ export function createMcpServer(client: KernelClient): McpServer {
     async () => {
       const resp = await client.raw.health(create(HealthRequestSchema, {}));
       return jsonResult(toJson(HealthResponseSchema, resp));
+    },
+  );
+
+  server.tool(
+    "eigenius_formalize_document",
+    "Formalize prose into typed, kernel-checked claims (D71). Returns a " +
+      "TASK ID, not the result: a document costs minutes and N LLM " +
+      "round-trips. Poll `eigenius_get_task_status` until the task is " +
+      "Completed, then fetch the artifact with " +
+      "`eigenius_get_formalization_result`. The artifact is NOT committed — " +
+      "read it, then load it with `eigenius_load` if you want it on the " +
+      "chain. Vocabulary is not passed here: commit it with `eigenius_load` " +
+      "and name the resulting branch.",
+    {
+      sourceText: z.string().describe("The prose to formalize."),
+      docId: z.string().describe(
+        "Names the run's `doc-<id>` working branch, which holds the document " +
+          "glossary and this run's recorded LLM draws. Re-using a doc id " +
+          "replays those draws instead of re-asking the model.",
+      ),
+      sourcePath: z.string().optional().describe(
+        "Where the bytes came from; recorded on the artifact root. Free text " +
+          "— the sha256 is what pins them.",
+      ),
+      sourceRef: z.string().optional().describe(
+        "An existing reference:Reference IRI to cite. Omit to mint a " +
+          "document-local one into the artifact.",
+      ),
+      ns: z.string().optional().describe(
+        "IRI prefix for the emitted resources (default urn:eigenius:doc:<docId>).",
+      ),
+      branch: z.string().optional().describe(
+        "Branch to parse over — this is how you say WHICH LEXICON (default 'main').",
+      ),
+      atLayer: z.string().optional().describe(
+        "Hex LayerId to parse over; mutually exclusive with branch.",
+      ),
+      scope: z.array(z.string()).optional().describe(
+        "Ordered lexicon:Lexicon IRIs — array order IS resolution precedence " +
+          "(D65 §4). Mutually exclusive with profile.",
+      ),
+      profile: z.string().optional().describe(
+        "A lexicon:LexiconProfile IRI naming that ordered list.",
+      ),
+      model: z.string().optional().describe(
+        "Anthropic model for this run's proposers; also what each recorded " +
+          "draw names as its answerer.",
+      ),
+      strict: z.boolean().optional().describe(
+        "Abort on the first unit that does not encode, instead of recording " +
+          "it as an enc:CutItem (default false — an interactive caller wants " +
+          "the failing units named, not an aborted run).",
+      ),
+      format: z.enum([
+        "application/cbor",
+        "application/eigon+json",
+        "text/x-esl",
+      ]).optional().describe(
+        "Artifact encoding. Prefer text/x-esl when you intend to READ it.",
+      ),
+    },
+    async (
+      args: {
+        sourceText: string;
+        docId: string;
+        sourcePath?: string;
+        sourceRef?: string;
+        ns?: string;
+        branch?: string;
+        atLayer?: string;
+        scope?: string[];
+        profile?: string;
+        model?: string;
+        strict?: boolean;
+        format?: string;
+      },
+    ) => {
+      const resp = await client.raw.formalizeDocument(
+        create(FormalizeDocumentRequestSchema, {
+          sourceText: args.sourceText,
+          docId: args.docId,
+          sourcePath: args.sourcePath ?? "",
+          sourceRef: args.sourceRef ?? "",
+          ns: args.ns ?? "",
+          branch: args.branch ?? "",
+          atLayer: args.atLayer ?? "",
+          scope: args.scope ?? [],
+          profile: args.profile ?? "",
+          format: args.format ?? "",
+          options: create(FormalizationOptionsSchema, {
+            model: args.model ?? "",
+            strict: args.strict ?? false,
+          }),
+        }),
+      );
+      return jsonResult(toJson(FormalizeDocumentResponseSchema, resp));
+    },
+  );
+
+  server.tool(
+    "eigenius_get_formalization_result",
+    "Fetch the artifact a completed formalization task produced. " +
+      "`found: false` means the task has not finished — poll " +
+      "`eigenius_get_task_status` first. A text artifact " +
+      "(application/eigon+json, text/x-esl) comes back as text; CBOR comes " +
+      "back base64-encoded, since it is bytes.",
+    {
+      taskId: z.string().describe(
+        "Task UUID from eigenius_formalize_document.",
+      ),
+    },
+    async (args: { taskId: string }) => {
+      const resp = await client.raw.getFormalizationResult(
+        create(GetFormalizationResultRequestSchema, { taskId: args.taskId }),
+      );
+      const json = toJson(GetFormalizationResultResponseSchema, resp) as Record<
+        string,
+        unknown
+      >;
+      // protobuf-es OMITS default-valued fields, so an unfinished run would come
+      // back as `{}` — `found: false` disappears exactly when a polling caller
+      // needs it, and `encoded: 0` disappears exactly when a document encoded
+      // nothing, which is a result and not an absence. State them explicitly.
+      json.found = resp.found;
+      json.encoded = resp.encoded;
+      json.cut = resp.cut;
+      json.drawsCommitted = resp.drawsCommitted;
+      // protobuf-es renders `bytes` as base64. For the text encodings that is an
+      // extra hop the caller should not have to make — the whole point of asking
+      // for ESL is to read it — so decode those in place and leave CBOR base64,
+      // which is bytes and stays bytes.
+      if (
+        resp.contentType === "text/x-esl" ||
+        resp.contentType === "application/eigon+json"
+      ) {
+        json.artifact = new TextDecoder().decode(resp.artifact);
+      }
+      return jsonResult(json);
     },
   );
 

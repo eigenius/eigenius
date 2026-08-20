@@ -7,6 +7,16 @@
 > institutions or external institutions via the runtime substrate (see
 > [11. Runtime substrate](11-runtime-substrate.md)). Background:
 > [D12](../../design/d12-wasm-extensibility.md).
+>
+> **How to read the rest of this chapter.** The body below is preserved
+> unedited from before the removal and is written throughout in the present
+> tense. Every present-tense statement in it describes the system as it stood
+> on 2026-07-07, not as it stands now. In particular: the `wit/` directory
+> does not exist, `examples/wasm-*` contains no tracked files, `just
+> build-wasm` is gone, `kernel/tests/d14_dock_assay_demo_wasm.rs` is gone,
+> and the kernel carries no `wasmtime` dependency. Relative links to any of
+> those paths are dead by design; they are kept so the historical text still
+> reads as it was written.
 
 WASM components extend the platform with custom dispatch logic. Each component is a sandboxed `.wasm` binary that implements the [`eigenius-component`](../../../wit/eigenius-component.wit) WIT interface, built with `cargo-component`, and installed at runtime via `eigenius capability install`.
 

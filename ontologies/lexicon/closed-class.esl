@@ -67,14 +67,16 @@ resource lexicon:obj_no_sem : lexicon:SemTerm {
     );
 }
 
-// ── Definite / demonstrative determiners — REFERENTIAL, not existential ───────────────
-// A definite ("the", "this"/"that", "these"/"those") denotes a fixed, presupposed referent
-// `ontology:the(A) : A` (the ι operator), NOT an existential quantifier. Referential ⇒
-// SCOPELESS: `¬require(the(A), subj)` is one reading, whereas reusing the existential
-// (`obj_exists_sem`, a documented first-cut) spuriously split into `¬∃x.P` / `∃x.¬P` under
-// negation — equivalent for a unique referent (the WRN-paper "did not require the exonuclease
-// activity of WRN"). Genuine existentials (`a`/`an`/`some`) and cardinals keep the quantifier
-// sems above, whose negation-scope split is real.
+// ── Definite determiner `the` — REFERENTIAL, not existential ──────────────────────────
+// The plain definite denotes a fixed, presupposed referent `ontology:the(A) : A` (the ι
+// operator), NOT an existential quantifier. Referential ⇒ SCOPELESS: `¬require(the(A), subj)`
+// is one reading, whereas reusing the existential (`obj_exists_sem`, a documented first-cut)
+// spuriously split into `¬∃x.P` / `∃x.¬P` under negation — equivalent for a unique referent
+// (the WRN-paper "did not require the exonuclease activity of WRN"). Genuine existentials
+// (`a`/`an`/`some`) and cardinals keep the quantifier sems above, whose negation-scope split is
+// real. DEMONSTRATIVES ("this"/"that"/"these"/"those") are NOT ι — they are anaphoric
+// (`dem_ref_*_sem` below, D64): their referent is a discourse antecedent, carried as a
+// restrictor-typed hole.
 // Subject definite: λA. λV. V(the(A)).
 resource lexicon:the_ref_subj_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -87,6 +89,34 @@ resource lexicon:the_ref_obj_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
             TV(ontology:the(T), subj)
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+
+// ── Demonstratives are ANAPHORIC, not ι (D64, docs/notes/d64-demonstratives-as-holes.md) ──────
+// "these findings" refers back into the discourse; denoting it `ontology:the(A)` (as above) was a
+// misparse this corpus had been blessing — the discourse link was unrepresented. A demonstrative
+// NP now carries a RESTRICTOR-TYPED referent hole: `lexicon:anaphor_of : ∀(A:Set) → A` is the
+// polymorphic sibling of `lexicon:anaphor` (pronouns, below). It cannot be freshened at seed time
+// (the determiner has not met its noun, so the hole's type is unknown); the applied form rides
+// the derivation as a closed constant and the FELICITY GATE freshens `anaphor_of(A)` — the
+// restrictor concrete after β — into a hole typed AT `A`, so the resolution re-gate vetoes a
+// type-wrong antecedent ("these findings" resolves only to findings; subclass antecedents
+// accepted via `Layer::is_subclass_of`). Plain `the` STAYS ι — "the MLH1 promoter" is genuinely
+// unique-referential.
+axiom lexicon:anaphor_of : forall (A : Set) => A
+// Subject demonstrative: λA. λV. V(anaphor_of(A)).
+resource lexicon:dem_ref_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) => V(lexicon:anaphor_of(A))
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+// Object demonstrative: λT. λTV. λsubj. TV(anaphor_of(T), subj).
+resource lexicon:dem_ref_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            TV(lexicon:anaphor_of(T), subj)
           : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -2234,7 +2264,7 @@ resource lexicon:this_subj : lexicon:LexicalEntry {
     core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "this";
     lexicon:grade    = epistemic:declared;
@@ -2243,7 +2273,7 @@ resource lexicon:this_obj : lexicon:LexicalEntry {
     core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "this";
     lexicon:grade    = epistemic:declared;
@@ -2252,7 +2282,7 @@ resource lexicon:that_dem_subj : lexicon:LexicalEntry {
     core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "that_dem";
     lexicon:grade    = epistemic:declared;
@@ -2261,19 +2291,20 @@ resource lexicon:that_dem_obj : lexicon:LexicalEntry {
     core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "that_dem";
     lexicon:grade    = epistemic:declared;
 }
 
-// Plural demonstratives `these`/`those` (D62 connectives batch): the plural of `this`/`that`
-// — same existential treatment (`exists_sem`), plural number (mirrors `all`'s `pl` cat shape).
+// Plural demonstratives `these`/`those`: the plural of `this`/`that` — anaphoric
+// (`dem_ref_*_sem`, restrictor-typed referent holes; see the D64 block above), plural number
+// (mirrors `all`'s `pl` cat shape).
 resource lexicon:these_subj : lexicon:LexicalEntry {
     core:description = "grammatical: plural proximal demonstrative determiner ('these cells').";
     lexicon:form     = "these";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "these";
     lexicon:grade    = epistemic:declared;
@@ -2282,7 +2313,7 @@ resource lexicon:these_obj : lexicon:LexicalEntry {
     core:description = "grammatical: plural proximal demonstrative determiner ('these cells').";
     lexicon:form     = "these";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "these";
     lexicon:grade    = epistemic:declared;
@@ -2291,7 +2322,7 @@ resource lexicon:those_subj : lexicon:LexicalEntry {
     core:description = "grammatical: plural distal demonstrative determiner ('those lines').";
     lexicon:form     = "those";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:the_ref_subj_sem;
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "those";
     lexicon:grade    = epistemic:declared;
@@ -2300,7 +2331,7 @@ resource lexicon:those_obj : lexicon:LexicalEntry {
     core:description = "grammatical: plural distal demonstrative determiner ('those lines').";
     lexicon:form     = "those";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:the_ref_obj_sem;
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "those";
     lexicon:grade    = epistemic:declared;

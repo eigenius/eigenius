@@ -10,18 +10,23 @@ This chapter is the operational reference for the notebook UX. Chain operations 
 
 ## 14.1. What's in a notebook
 
-A notebook is an ordered sequence of typed cells. Six cell types are supported:
+A notebook is an ordered sequence of typed cells. Seven cell types are supported:
 
 | Type | What it does | Run dispatch |
 |---|---|---|
 | `markdown` | Render-only prose (Github-flavoured Markdown). Click the eye/edit toggle to switch to source view. | None — it just renders. |
 | `esl` | Eigenius Surface Language. Compiles + commits a layer on Run; output shows resource count + the new layer ID, with an expandable "View layer stack" accordion. | `eigen.load(source, "application/x-esl")` |
 | `eigenql` | EigenQL query against the active layer chain. Output renders in a Fluent `DataGrid` with column types from the synthesized Property metadata. | `eigen.query(source)` |
-| `typescript` | Sandboxed TS that runs in the browser with the SDK in scope. The cell's `return` value is auto-rendered (Resource → inspector, ResultSet → table, Topology → layer stack, plain object → JSON tree). | `new Function("eigen", "previousOutputs", source)` |
+| `typescript` | Sandboxed TS that runs in the browser with the SDK in scope. The cell's `return` value is auto-rendered (Resource → inspector, ResultSet → table, Topology → layer stack, plain object → JSON tree). | `new Function("eigen", "previousOutputs", "console", "React", "h", "charts", "nb", source)` — seven injected names, not two: the SDK client, the previous cells' outputs, a captured `console`, `React` and its `createElement` as `h`, the chart components, and `nb` notebook helpers (`nb.rows(document)` decodes a ResultSet). A cell may return a React element and the auto-renderer mounts it. |
 | `program-run` | Form-based program invocation: program IRI + one or more input IRIs. Single input renders as inspector + trace; multiple inputs render as a results table. | `eigen.runProgramByIri(programIri, inputIri)` per input |
 | `chart` | Form-based chart: pick a chart kind (`grouped-bar` / `vertical-bar` / `horizontal-bar` / `donut` / `line` / `area`), write an EigenQL query, bind axis columns by `RETURN` short-name. Output is the corresponding Fluent `@fluentui/react-charts` component. | `eigen.query(query)` then pivot rows into the kind's data shape |
+| `formalize` | **Prose, not code** (D71). Runs the formalization service over the cell's text and renders the per-unit outcome: claims, the `DecisionPoint` recording which reading was chosen against which runners-up, the `AnaphorBinding`s, and an `enc:CutItem` for every unit that did not encode. ASYNCHRONOUS — a document costs minutes and several LLM round-trips, so the cell starts a task and polls it; watch it in the Tasks panel with kind `Formalize`. **The artifact is NOT committed**: generation stays decoupled from commitment, so you read and diff it, then land it with an explicit `esl` cell. `Document id` names the run's `doc-<id>` working branch, which holds the document glossary and the run's recorded proposer draws — keep it stable and a re-run replays those instead of re-asking the model. | `eigen.formalizeDocument(prose, docId)` → poll `getTaskStatus` → `getFormalizationResult` |
 
-Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete). Notebook-level toolbar (top): editable title · cell count · `Open…` (file picker) · `Save` (browser download) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §14.5) · `Run all` (top-to-bottom, halts on first error).
+Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete).
+
+Notebook-level toolbar (top), left to right: editable title (required — `Export…` and `Publish` are disabled while it is empty) · an edit-metadata pencil · cell count and last-modified · `New` (empty notebook) · `Open…` (**opens the published-notebook dialog**, listing notebooks in the chain — not a file picker) · `Import…` (the file picker, `<input type="file">`) · `Export…` (browser download) · `Collapse all` / `Expand all` (one button, label follows state) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §14.5) · `Run all` (top-to-bottom, halts on first error).
+
+Note the split: **`Open…` is the chain, `Import…` is the filesystem.** An older version of this guide described `Open…` as the file picker and `Save` as the download button; those are now `Import…` and `Export…`.
 
 Source: [`notebooks/`](../../../notebooks/).
 
@@ -89,6 +94,14 @@ Ten cells alternating markdown (audit-chain narrative) and EigenQL (one query pe
 
 See [chapter 8 §8.5](08-demos.md#85-lean-verification--lean-4-verification-audit-chain) for the storyline overview and [`platform/lean-institution/`](lean-institution/) for the in-process verification-side slow-walk.
 
+### Formalizing prose (D71)
+
+[`notebooks/examples/d71-formalize-prose.json`](../../../notebooks/examples/d71-formalize-prose.json). The showcase for the `formalize` cell: prose in, typed kernel-checked claims out. Uses the WRN paragraph from the `prose-to-formulas-v2` demo deliberately — that paragraph's expected output is a committed, byte-compared fixture, so the cell's result can be checked against a known-correct artifact rather than eyeballed.
+
+Six cells: intro → prerequisites → **the formalize cell** → how to read the output → how to land it → an EigenQL query over the landed claims. The markdown carries the three things that are otherwise easy to get wrong — that the artifact is not committed, that the `doc-<id>` branch is prunable scaffolding whose draws make a re-run free, and that an `enc:CutItem` is a recorded *result* rather than a failure.
+
+**Prerequisites: a lexicon snapshot, and nothing else to load.** The encoding contract is in the kernel's bootstrap chain and the claim-kind alignment is layered into the aligned snapshot (see the repo README, *Building the lexicon image*). A first run on a fresh `Document id` asks the model, so it needs a kernel built `--features use-llm` (`just up-llm`) and an `ANTHROPIC_API_KEY`; every later run on the same id replays the recorded draws for free.
+
 ### Markdown maths
 
 Markdown cells render `$inline$` and `$$display$$` LaTeX via [remark-math](https://github.com/remarkjs/remark-math) + [rehype-katex](https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex). The kinase notebook uses this extensively to render the Michaelis–Menten / competitive-inhibition equations alongside the FormulaTerm encodings of the same expressions, so the surface and the chain payload align visually.
@@ -117,11 +130,13 @@ Notebooks are versioned JSON with a discriminated cell-type union. Schema in [`n
 }
 ```
 
-`Save` from the toolbar serialises the current store state to this JSON (with `meta.modified` updated to the save time) and triggers a browser download. `Open…` reads a file via `<input type="file">`, validates the shape, and replaces the store contents. Cell outputs are NOT persisted — they're re-derived by re-running the cells.
+`meta.title` is **required** and must be non-empty — `parseNotebook` rejects a document without it, and the toolbar disables `Export…` and `Publish` until one is set. The other `meta` fields are optional.
+
+`Export…` from the toolbar serialises the current store state to this JSON (with `meta.modified` updated to the export time) and triggers a browser download. `Import…` reads a file via `<input type="file">`, validates the shape, and replaces the store contents. Cell outputs are NOT persisted — they're re-derived by re-running the cells.
 
 ## 14.5. Publish to layer
 
-Beyond the on-disk file, a notebook can be published as resources in the kernel's knowledge graph. Click **Publish** in the toolbar; the SDK translates the notebook into a `notebook:Notebook` resource referencing one `notebook:Cell` resource per cell, then loads them into a new layer. The accompanying ontology — [`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json) — is part of the kernel's boot chain (5th layer, after core / program / reflection / institution), so publish succeeds without first registering anything.
+Beyond the on-disk file, a notebook can be published as resources in the kernel's knowledge graph. Click **Publish** in the toolbar; the SDK translates the notebook into a `notebook:Notebook` resource referencing one `notebook:Cell` resource per cell, then loads them into a new layer. The accompanying ontology — [`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json) — is part of the kernel's twenty-layer boot chain (14th, after `statistics`), so publish succeeds without first registering anything.
 
 IRIs are content-addressed:
 
@@ -151,8 +166,9 @@ Chart cells handle one Fluent quirk worth knowing about: `LineChart` and `AreaCh
 ```
 notebooks/
 ├── src/
-│   ├── App.tsx                  # FluentProvider + EigenProvider + Notebook
+│   ├── App.tsx                  # FluentProvider + EigenProvider + WorkspaceShell
 │   ├── components/
+│   │   ├── workspace/WorkspaceShell.tsx  # App root: chrome + panels, renders Notebook
 │   │   ├── Notebook.tsx          # Toolbar + cell list
 │   │   ├── Cell.tsx              # Per-cell shell (toolbar + body + output)
 │   │   ├── CellInsertGap.tsx     # Hover-revealed "+" between cells

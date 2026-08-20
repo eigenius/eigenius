@@ -161,26 +161,38 @@ re-gate (structural truth), marked *"fidelity check deferred."* When D61 lands, 
 scores → a **Derived** verdict (never auto-Verified), with a human-review surface — slotting into
 this seam without reshaping the driver.
 
-## 8. The engine as an institution
+## 8. The engine as an institution — SUPERSEDED by D71 (`2026-08-19`)
 
-The driver's home is a **dispatched institution** (D14), the same pattern as Julia/Lean/R and the
-reasoning checker. Harvested from the old §6, with the D61 half deferred:
+> **This section was wrong and is retained as the record.** It assigned the engine a home as a
+> dispatched D14 institution, the same pattern as Julia/Lean/R and the reasoning checker.
+> [D71](d71-document-formalization-service.md) §1 tested that against D14 §1.2's own four criteria
+> and it satisfies one: the engine has no satisfaction relation of its own (it borrows the kernel
+> validator and the felicity re-gate, which D14 §1.1 excludes from the protocol), no fibre
+> (`enc:EncodedClaim` is a `reflection:DerivedResource`, graded in the reasoning fibre), and answers
+> no queries about its results. Every registered institution in the tree decides something; five
+> importers doing source→resource-set→`Load` are institutions none. **The engine is a service over
+> the kernel's `DocumentPipeline`, emitting a resource-set artifact.** The declarations this section
+> motivated (`enc:FormalizeDocument`, `enc:qc_formalize_unit`) were deleted from `encoding.esl` on
+> `2026-08-19` — nothing had ever implemented their handler.
 
-- **Generation = OnDemand.** `FormalizeDocument` / `EncodeProse` QueryClass, invoked via a
-  commit-capable `FIBER … INTO`; the engine *generates*, it does not gate arbitrary commits.
-- **Derived by construction.** An institution dispatch emits a `DerivedResource` under a
-  `ProgramTrace → IsDerivedAs` (D56) — so output is **Derived** ("the kernel attests the engine
-  computed this"), never Verified. The provisional-until-checked discipline is framework-enforced.
-- **Felicity = AutoOnLoad.** The commit-time type-check on the emitted `lexicon:`/encoding classes is
-  a deterministic, fail-closed D14 gate — structural truth, present today (D63).
-- **Faithfulness = a separate (deferred) verification institution (D61).** The clean
-  *generation institution (D62, Derived) + verification institution (D61, Verified)* pair; the
-  second is deferred.
-- **The comorphism reading (intended direction, not settled):** autoformalization is a translation
-  from the natural-language source into the EigenTT/reasoning institution (D10; cf. D37). The
-  faithfulness gap *is* that satisfaction-preservation is not guaranteed by construction (the LLM
-  proposers make it approximate) — which is exactly why the verification half (D61) is mandatory,
-  not optional.
+Where each bullet's property actually comes from, since three of the four survive the reassignment:
+
+- **Generation = OnDemand.** A claim about *invocation*, not about institution-ness. D71 §6/§7: the
+  operation is an async D21 task started by RPC, because a document costs minutes and N LLM
+  round-trips and the MCP surface has no long-call idiom.
+- **Derived by construction.** True, and supplied by `DerivedClaimGrader` + the reflection ontology
+  (`ProgramTrace → IsDerivedAs`, D56), not by institution dispatch. Output is Derived, never
+  Verified; the discipline holds.
+- **Felicity = AutoOnLoad.** This is *structural validation* — a kernel service, which D14 §1.1
+  explicitly excludes from the institution protocol. Still fail-closed, still present (D63).
+- **Faithfulness = a separate (deferred) verification institution (D61).** **Correct, and the only
+  half that earns the shape**: D61 has its own satisfaction relation (does back-translation recover
+  the source?), gates `enc:EncodedClaim` AutoOnLoad with a `Verdict`, and promotes Derived →
+  Verified. It gates the vocabulary D62 emits without D62 declaring anything institution-shaped.
+- **The comorphism reading (intended direction, not settled):** unchanged as a reading, but not
+  declarable while the generation half owns no institution — a `Comorphism` needs an `ExportFormat`,
+  which needs an `institution_ref`. So `enc:EncodedClaim → reasoning:ReasoningSentence` stays inside
+  `DerivedClaimGrader` until D61 owns the class. D71 §10.
 
 ## 9. Coverage feedback loop
 
@@ -210,7 +222,8 @@ verifiable behind its contract:
    full upfront lexicon (keyed off the parser's unknown-token signal).
 4. **S0 segment + S1 scope** — the document front-end.
 5. **S4 disambiguation** (D67), then **S5b reformulation** (D66) — the hardest; the gap-harvest loop.
-6. **S6 assemble & ground**; **S8 institution wrapper** (`FormalizeDocument`).
+6. **S6 assemble & ground**; **S8 the service wrapper** — the four surfaces over one contract
+   ([D71](d71-document-formalization-service.md) §7), not an institution wrapper (§8 above).
 7. **S7 faithfulness** — last, with D61.
 
 **Test discipline (three layers, mirroring D63):** (1) deterministic-core exact tests on toy fixture
@@ -261,10 +274,12 @@ committed prefix via EigenQL** — no new kernel surface, just `kernel_client.qu
 ### 11.3 New components to add — and where
 
 **Kernel (Rust):**
-- `ontologies/encoding/encoding-ontology.esl` — the §6 contract classes (`DiscourseUnit`,
-  `ScopedUnit`, `LexicalGap`, `DecisionPoint`, `CutItem`, `EncodedClaim`, `ReasoningStructure`) +
-  the `FormalizeDocument` Institution and its OnDemand `QueryClass`. Insert into `BOOTSTRAP_CHAIN`
-  (`kernel/src/bootstrap/mod.rs`) **after `lexicon`** (it references `lexicon:`/EigenTT vocab).
+- `ontologies/encoding/encoding.esl` — the §6 contract classes (`DiscourseUnit`, `ScopedUnit`,
+  `LexicalGap`, `DecisionPoint`, `CutItem`, `EncodedClaim`, `ReasoningStructure`). **Not** inserted
+  into `BOOTSTRAP_CHAIN`: it loads as a user layer, which keeps a vocabulary change off the
+  bootstrap manifest and out of the reseed path. The `FormalizeDocument` Institution + OnDemand
+  `QueryClass` this line also called for were written, never implemented, and deleted `2026-08-19`
+  (§8 above).
 - D64 grammar side (`kernel/src/dcg/`): the **open-parse carrier** (engine-side free-var holes +
   context — *no* new `nbe/term.rs` node; the kernel stays hole-free), `Case`, the **open forest**
   (`docs/notes/d62-d64-open-parse-carrier.md`).
@@ -283,7 +298,8 @@ constructors stamping `is_a`). Register each in `main.ts` (`components.register(
   — or, preferred, reach them through **EigenQL `~`** via `kernel_client.query` to avoid new surface.
 - **Institution/dispatch:** `InstitutionIndex` + `QueryClassEntry` + `DispatchRole`
   (`institution/registry.rs`), FIBER eval (`query/evaluate/fiber.rs`), AutoOnLoad
-  (`institution/dispatch.rs`) — `FormalizeDocument` is declared as data, no new dispatch code.
+  (`institution/dispatch.rs`) — reached by the *reasoning* institution's D39 gate on the emitted
+  claims, and by D61 when it lands. The engine itself dispatches nothing (§8).
 - **Commit + Derived witness:** `CommitPipeline` (`commit/pipeline.rs`) — felicity runs in
   `structural_validate`; `WitnessKey`/`IsDerivedAs` (`witness/mod.rs`, `program/trace.rs`) gives the
   Derived grade by construction.
@@ -310,8 +326,8 @@ Small, localized — the spine exists; these are the seams:
    currently internal to the similarity pre-pass. Recommendation: **reuse EigenQL** and skip this.
 6. **D64 re-gate reachable from the resolver** — the resolver substitutes a binding and needs the
    kernel to re-check the resolved `sem : Prop`. `reduced_felicitous` already does this; expose it
-   on the resolved-tree path (a focused RPC, or fold into the S3 resolver component of the
-   `FormalizeDocument` pipeline institution).
+   on the resolved-tree path (a focused RPC, or fold into the S3 resolver step of the formalization
+   service, D71 §3).
 7. **Open parses carrying proof obligations** (the *factive-subordinator* engine extension —
    `dcg/parser.rs`, `dcg/lexicon.rs`, the bridge in `dcg/lookup.rs`, and the felicity gate). This is
    **not small** — it is the substantive prerequisite for factive connectives (`because`/`although`/
@@ -352,8 +368,8 @@ Small, localized — the spine exists; these are the seams:
 Net new kernel surface is small *except* for item 7: the parse-failure/open-forest fields on
 `ParseSentence`, a lexical-entry constructor, and the D64 grammar nodes are minor; the
 open-parse/proof-obligation extension (item 7) is the one substantive engine change, and is gated and
-scoped on its own. Everything else is **data** (the encoding ontology + `FormalizeDocument`
-declaration) and **orchestration components** over existing RPCs.
+scoped on its own. Everything else is **data** (the encoding ontology) and **service surfaces** over
+existing RPCs (D71 §7).
 
 ## 12. Deferred D61 seams
 

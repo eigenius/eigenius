@@ -3,16 +3,20 @@
 *Status: design (not yet implemented). The decision — anaphora is resolved by an **LLM proposer behind
 the kernel felicity oracle**, not a core engine dependency nor a compositional-dynamic-semantics rewrite.
 This doc specifies the three-layer subsystem: the grammar's referent **holes** (D63), the **resolver
-component** — a *step in the D62 `FormalizeDocument` pipeline institution* (§8 of D62), **not its own
-institution** — and the kernel **re-gate** + faithfulness verdict (D61). Builds directly on D63 §5.3
+component** — a *step in the D62 pipeline* (D71 §3), **not its own institution** — and the kernel
+**re-gate** + faithfulness verdict (D61). Builds directly on D63 §5.3
 (anaphora → committed-resource IRI references; the donkey-anaphora Σ-truncation escape hatch) and is the
 first concrete consumer of the D61 faithfulness machinery.*
 
-> **Layering note.** The *dispatched-institution* property (untrusted LLM proposer behind the kernel
-> felicity boundary, like Lean/R/Julia) belongs to the **whole encoding pipeline** — the single D62
-> `FormalizeDocument` institution wraps all of S0–S7. The reference resolver is **one component/step
-> (S3)** inside that pipeline, not a separate institution. Earlier wording in this doc that calls the
-> resolver itself "a dispatched institution" is superseded by this note.
+> **Layering note** (revised `2026-08-19`). The property this doc cares about — an untrusted LLM
+> proposer behind the kernel felicity boundary — belongs to the **whole encoding pipeline**, which
+> wraps all of S0–S7. The reference resolver is **one step (S3)** inside it, never its own
+> institution; that has not changed. What changed is the pipeline's own shape: D62 §8 called it a
+> dispatched institution, and [D71](d71-document-formalization-service.md) §1 replaced that with a
+> **service** over the kernel's `DocumentPipeline`. The trust boundary this doc is built on is
+> unaffected — it was always the kernel re-gate, which is a kernel service and never was
+> institution-provided. Earlier wording calling the resolver itself "a dispatched institution" is
+> superseded.
 
 ## 1. The problem, and the decision
 
@@ -25,8 +29,8 @@ different:
   has relied on — that meaning is **sentence-level and context-free** (lookup → CKY → felicity yields a
   closed `Prop` per sentence, no cross-sentence state). Anaphora is inherently discourse-level.
 
-**Decision (this doc): resolve anaphora with LLM-based machinery, as a post-parse component of the D62
-`FormalizeDocument` pipeline institution (not a separate institution — see the layering note above).**
+**Decision (this doc): resolve anaphora with LLM-based machinery, as a post-parse step of the D62
+pipeline (not a separate institution — see the layering note above).**
 The two rejected alternatives:
 - *Compositional dynamic semantics* (DRT / dynamic predicate logic): thread a discourse context through
   composition, changing the sem type of **everything** to context-passing. Powerful (handles donkey
@@ -83,6 +87,19 @@ LLM.
 > neutrals — no NbE special-casing). D64 Phase A is the carrier MVP. See
 > `docs/notes/d62-d64-open-parse-carrier.md` (§2, §7).
 
+> **As-built note (2026-08-11; the code since 2026-07-23).** The carrier is the **Π-abstraction**:
+> the felicity gate abstracts each hole variable into a typed binder — an open parse's sem is the
+> CLOSED function `λ(h₀:T₀)…(hₙ:Tₙ). body : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧` (`OpenParse { item, holes }`,
+> `dcg/parse/felicity.rs`; each `HoleInfo` = binder name + type + resolver kind). Resolution is
+> **application**, not substitution: `resolve_open` checks each antecedent against its binder's
+> type (the restrictor veto — β-reduction erases the annotation, so the per-binding check is
+> where a hole's type is enforced), applies it, β-reduces, and re-gates the closed normal form
+> against `⟦cat⟧` under empty Γ. Holes are typed by their SOURCE: `Entity` for pronouns and
+> possessors (seed-time freshening, span-keyed), the **restrictor class** for demonstratives
+> (`lexicon:anaphor_of(A)`, freshened at the felicity gate where β has made `A` concrete —
+> `docs/notes/d64-demonstratives-as-holes.md`). The kernel and chain stay hole-free, as this
+> section requires; the engine-side context is `OpenParse.holes`.
+
 **Pronouns are case-marked NPs whose sem is a referent hole.** A pronoun does not denote; it marks a slot
 the resolver fills.
 
@@ -110,6 +127,19 @@ the resolver fills.
 The grammar layer is otherwise unchanged: pronoun entries are ordinary closed-class lexical entries.
 
 ## 4. The resolver (S3 component of the D62 pipeline institution): the LLM step
+
+> **As-built note (2026-08-11).** Steps 1–4 are realized IN-PROCESS behind the kernel's
+> `Proposer` trait (`dcg/parse/resolve.rs`), not yet as the orchestration component below (that
+> remains the Phase-2/served arm — a different impl of the same trait): candidates are the
+> discourse-harvested named entities AND kinds (`Candidate::{Individual, Kind}`, readable
+> surfaces), TYPE-pre-filtered per hole by the restrictor veto before presentation (step 1's
+> pre-filter, now the kernel's own check); the proposer sees the full `DocumentContext`
+> (document + target sentence + prior selections) and answers a ranked `Proposal { ranked,
+> rationale, confidence }` (step 2's schema; `AnthropicProposer` under `use-llm`); the recorded
+> arm is `RecordingProposer`/`ReplayProposer` (`dcg/proposer_record.rs`, the ranks.json/
+> selections.json sibling); the assignment search is depth-first over the ranked lists, capped
+> at 64 full re-gates, fail-closed (steps 3–4). "Introduce-new" is not offered — the proposer
+> selects among assembled candidates only.
 
 A new orchestration component (sibling of `complete_json.ts`, using `llm/adapter.ts` and the kernel
 bridge `kernel_client.ts`):
@@ -165,8 +195,8 @@ faithful*). Therefore:
 ## 7. Decisions — resolved and open
 
 *Resolved:*
-- LLM resolver as a **post-parse component of the D62 `FormalizeDocument` pipeline institution** (not
-  its own institution; not dynamic semantics, not symbolic).
+- LLM resolver as a **post-parse step of the D62 pipeline** (not its own institution; not dynamic
+  semantics, not symbolic).
 - Hole = a **fresh free variable + engine-side context** (`id`/`ty`/`features`), **kernel hole-free** —
   *revised from the original `Exp::Anaphor` kernel node* per the carrier note (`nanoda_lib`/Lean: no
   kernel metavariable). See `docs/notes/d62-d64-open-parse-carrier.md`.

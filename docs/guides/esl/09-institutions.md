@@ -4,7 +4,7 @@ An **institution** is a domain-specific reasoning system registered with the ker
 
 This chapter covers the institution surface from a program-author's perspective in ESL: how qualified-name function calls dispatch to a `Decidable` `QueryClass`, how the resulting `Verdict` flows through EigenTT, and the worked life-science example that drove the design.
 
-The implementer view (writing a new institution as a WASM binary) lives in [platform §10](../platform/10-wasm-institutions.md). The query-language view of the same surface is [EigenQL §8](../eigenql/08-institutions.md). The protocol spec is [D14](../../design/d14-institution-realisation.md).
+The implementer view (writing a new institution as a WASM binary) lives in [platform §10](../platform/10-wasm-institutions.md). The query-language view of the same surface is [EigenQL §8](../eigenql/09-institutions.md). The protocol spec is [D14](../../design/d14-institution-realisation.md).
 
 ## 9.1. What an institution declares
 
@@ -31,9 +31,14 @@ When the ESL compiler encounters a function-call expression with a qualified nam
 | `Decidable` `QueryClass` | `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)` — a EigenTT term that reduces a `Verdict` to either `Refl(v)` (Holds), a failing neutral (Fails), or stays as a passthrough neutral (Undecidable). |
 | Otherwise | Falls through to component dispatch / class constructor / unbound — same as today. If nothing matches, the call fails at compile or evaluate time with `unknown function`. |
 
-Two changes from D10's classifier:
+The classifier recognises a second institution shape as well:
 
-- **No `Comorphism` from expression position.** D10 emitted `Exp::InstitutionInvoke { iri, source }` for `cap:translate(source)` calls. Under D14, comorphisms surface only in EigenQL FIBER param coercion. ESL programs that need a translated resource construct it explicitly (or invoke a derived program over the comorphism Component, which is just a regular EigenTT Component).
+| Classification | ESL emits |
+|---|---|
+| `Comorphism` | `program:ComorphismInvokeApply`, which `program/expr.rs` decodes to `Exp::InstitutionInvoke { comorphism_iri, source, target_iri }` (D14 §9.3). Exactly one source argument, and no configuration block, or the compile fails. See [§9.5](#95-invoking-comorphisms-from-esl-programs). |
+
+One shape stays out of expression position:
+
 - **No `OnDemand` `QueryClass` from expression position.** OnDemand QueryClasses are reachable only from EigenQL `FIBER` clauses. ESL programs that need a structured response from an institution embed a FIBER call into an EigenQL query (and feed the bound response back as a EigenTT value if needed).
 
 The classifier is consulted only by `compile_with_institutions`. The plain `compile` entry point still works for programs that don't reference institution-dispatched IRIs:
@@ -42,7 +47,7 @@ The classifier is consulted only by `compile_with_institutions`. The plain `comp
 let resources = esl::compile_with_institutions(source, Arc::clone(&institution_index))?;
 ```
 
-This is the same single-source-of-truth classification used by EigenQL ([EigenQL §8](../eigenql/08-institutions.md)) — both surface languages share `InstitutionIndex`, so the same IRI dispatches identically.
+This is the same single-source-of-truth classification used by EigenQL ([EigenQL §8](../eigenql/09-institutions.md)) — both surface languages share `InstitutionIndex`, so the same IRI dispatches identically.
 
 ## 9.3. Invoking a Decidable QueryClass
 
@@ -70,7 +75,7 @@ Lam(input,
         input))
 ```
 
-**At type-check (Check mode):** the kernel resolves the constraint IRI in the `InstitutionIndex`, reads the QueryClass's `institution_ref` and `query_handler`, and calls [`Institution::query`](../../../kernel/src/institution/runtime.rs) on the registered runtime. The institution returns a `Verdict` resource; the kernel reads its `ctor_name` property and reduces:
+**At type-check:** the kernel resolves the constraint IRI in the `InstitutionIndex`, reads the QueryClass's `institution_ref` and `query_handler`, and calls [`Institution::query`](../../../kernel/src/institution/runtime.rs) on the registered runtime. The institution returns a `Verdict` resource; the kernel reads its `ctor_name` property and reduces:
 
 | `ctor_name` | Kernel behaviour |
 |---|---|
@@ -78,7 +83,7 @@ Lam(input,
 | `Fails` | Emits a failing neutral — type-check rejects the program with the institution's diagnostic. |
 | `Undecidable` | Stays as a passthrough neutral — the predicate is left for runtime. |
 
-**At runtime (IO mode):** same dispatch path. An `Undecidable` from check time becomes a runtime call with the same outcome semantics.
+**At runtime:** same dispatch path, through an IO-tier engine. An `Undecidable` from check time becomes a runtime call with the same outcome semantics.
 
 **Synthetic input shape.** The kernel constructs a synthetic input resource of the QueryClass's declared `query_class`. Positional arguments are attached as the property `urn:eigenius:institution:decide_args` (an array). Institutions whose handlers expect named-property inputs (typical when the QC is also FIBER-callable) read the args off named properties; institutions whose handlers expect positional args read `decide_args`. The dock-assay demo's [`AssayInstitution::within_tolerance_verdict`](../../../examples/wasm-d14-assay/src/lib.rs) shows both shapes side by side.
 
@@ -137,7 +142,7 @@ The wrapper program takes a `SymbolicsToJuMPInput` (carrying a typed objective e
    ```esl
    let ic50 : core:float = cm_arrhenius(delta_g);
    ```
-2. **Translate inside an EigenQL query.** Use a `FIBER` clause whose param value is `comorphism(source)` (see [EigenQL §8.6](../eigenql/08-institutions.md#86-comorphism-coercion-in-fiber-params)). The query runs the four-step pipeline and the resulting reified resource flows into the FIBER's input — without chain reinsertion unless `INTO "<iri>"` is added (see [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri)).
+2. **Translate inside an EigenQL query.** Use a `FIBER` clause whose param value is `comorphism(source)` (see [EigenQL §8.6](../eigenql/09-institutions.md#86-comorphism-coercion-in-fiber-params)). The query runs the four-step pipeline and the resulting reified resource flows into the FIBER's input — without chain reinsertion unless `INTO "<iri>"` is added (see [EigenQL §7.6](../eigenql/08-fiber-clauses.md#76-into--pinning-the-response-iri)).
 
 ## 9.6. Constraints attached to properties
 
@@ -160,7 +165,7 @@ This is the mechanism that makes domain reasoning *automatic* — the program au
 
 ## 9.7. Worked example: docking + assay
 
-The M8 worked example ships with the kernel ([`ontologies/examples/d14-dock-assay/dock-assay.json`](../../../ontologies/examples/d14-dock-assay/dock-assay.json), tested in [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs)). Two institutions:
+The M8 worked example ships with the kernel ([`ontologies/examples/d14-dock-assay/dock-assay.json`](../../../ontologies/examples/dock-assay/dock-assay.json), tested in [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/dock_assay_demo.rs)). Two institutions:
 
 - `dock` — owns the `DockingResult` class. Declares an `ExportFormat` (`ef_dock_to_dg`) extracting `delta_g` as a `Float`.
 - `assay` — owns the `AssayPrediction` class. Declares an `ImportFormat` (`if_assay_from_ic50`) reifying a `Float` as `ic50`. Also declares three `QueryClass`es: `within_tolerance` (Decidable, three-arg predicate), `assay_prediction_validity` (AutoOnLoad, validates positive IC₅₀ on Load), and `validate_prediction` (OnDemand, FIBER-callable).
@@ -199,19 +204,23 @@ let (idx, _) = InstitutionIndex::from_layer(&layer);
 let resources = esl::compile_with_institutions(source, Arc::new(idx))?;
 ```
 
-To run it under Check or IO mode, the caller threads the `InstitutionRuntime` (with a runtime-registered or auto-registered `WasmInstitution`) through the kernel's `EvalCtx::IO`:
+To run it, the caller threads the `InstitutionRuntime` (with a runtime-registered or auto-registered `WasmInstitution`) into an `InstitutionEngine` and hands that to an effectful `EvalCtx` ([chapter 8](08-capability-modes.md)):
 
 ```rust
-let runtime_ctx = EvalCtx::IO {
-    layer: Arc::clone(&layer),
-    registry: components,
-    institution_index: Some(Arc::clone(&index)),
-    institution_runtime: Some(Arc::clone(&inst_runtime)),
-    trace_store: None,
-    dispatched_traces: Default::default(),
-    task_context: None,
-};
+let engine = InstitutionEngine::for_io(
+    Arc::clone(&layer),
+    components,                              // Arc<ComponentRegistry>
+    None,                                    // trace store
+    Arc::new(Mutex::new(Vec::new())),        // dispatched traces
+    Arc::new(Mutex::new(Vec::new())),        // produced resources
+    None,                                    // task context
+    Some(Arc::clone(&index)),
+    Some(Arc::clone(&inst_runtime)),
+);
+let runtime_ctx = EvalCtx::effectful(Some(Arc::clone(&layer)), Arc::new(engine));
 ```
+
+For a check-time context — institution constraints fire, components do not dispatch — use `InstitutionEngine::for_check(layer, index, runtime)` instead.
 
 For the WASM-hosted variant, see [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs) — it constructs the same surface but with `WasmInstitution` instances auto-registered from a child layer carrying `runtime: wasm` + inline `wasm_binary` declarations.
 
@@ -228,7 +237,7 @@ The same classification mechanism powers ESL and EigenQL. When the same IRI appe
 | `Comorphism` | qualified-name function call in expression position — `comorphisms:foo(input)` — lowers to `Exp::InstitutionInvoke` (D14 §9.3); reify output commits at `urn:eigenius:comorphism-output:…` | FIBER param coercion (overlay-only); or `FIBER ... INTO "<iri>"` for chain reinsertion at a caller-named IRI | `extract_typed → transformation → reify` four-step pipeline; reify output commits to the chain |
 | Class / primitive / literal | `Exp::EigonClass(iri)` etc. | resolved via layer | various |
 
-Cross-link: [EigenQL chapter 8](../eigenql/08-institutions.md) covers the same table from the query-language side.
+Cross-link: [EigenQL chapter 8](../eigenql/09-institutions.md) covers the same table from the query-language side.
 
 ## 9.9. Where the implementation lives
 
@@ -239,8 +248,8 @@ Cross-link: [EigenQL chapter 8](../eigenql/08-institutions.md) covers the same t
 | [`kernel/src/institution/dispatch.rs`](../../../kernel/src/institution/dispatch.rs) | Auto-on-Load dispatch |
 | [`kernel/src/institution/error.rs`](../../../kernel/src/institution/error.rs) | `InstitutionError` |
 | [`kernel/src/esl/compile.rs`](../../../kernel/src/esl/compile.rs) | Compile-time classification of `Apply` expressions through `InstitutionIndex` |
-| [`kernel/src/nbe/check.rs`](../../../kernel/src/nbe/check.rs) | `NativeDecide` check arm — fires Decidable QueryClasses at type-check time |
-| [`kernel/src/nbe/eval.rs`](../../../kernel/src/nbe/eval.rs) | `decide_constraint` evaluation |
+| [`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) | `NativeDecide` check arm — fires Decidable QueryClasses at type-check time |
+| [`kernel/src/nbe/eval/mod.rs`](../../../kernel/src/nbe/eval/mod.rs) | `decide_constraint` evaluation |
 | [`kernel/src/capability/registration.rs`](../../../kernel/src/capability/registration.rs) | `build_wasm_institution_runtime` — auto-registration from chain scan |
 | [`kernel/src/capability/wasm_institution_d14.rs`](../../../kernel/src/capability/wasm_institution_d14.rs) | `WasmInstitution` host bridge to the `eigenius-institution-d14` WIT world |
 

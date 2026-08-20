@@ -115,7 +115,7 @@ it end-to-end. So:
 
 1. **Build the carrier on the entity case = D64 Phase A.** The `OpenParse` structure
    (free-var holes + engine-side `holes` context) + `Case` feature + open forest + the D62
-   resolver *component* (a step in the D62 `FormalizeDocument` pipeline institution, not its own
+   resolver *component* (a step in the D62 pipeline — a service since D71, not its own
    institution) + kernel re-gate. This *is* the carrier MVP, de-risked on the simpler
    hole. Carry `kind` in `HoleInfo` from the start (only `EntityRef` used initially) so adding
    `ProofObligation` is a new resolver arm, not a representation change.
@@ -150,7 +150,7 @@ once it exists.
   the context built from `holes`** (reusing `CheckCtx`'s context); the **engine** marks
   non-empty-`holes` parses as open and never emits them as final closed parses.
 - `proto/eigenius.proto`, `server/parse.rs`, `orchestration` — open forest + holes on
-  `ParseSentence` (D62 §11.5 item 2); the resolver *component* (a step in the `FormalizeDocument`
+  `ParseSentence` (D62 §11.5 item 2); the resolver *component* (a step in the formalization
   pipeline institution, not its own institution) dispatches per `kind`
   (D64 §4 for `EntityRef`; grounding for `ProofObligation`); kernel re-gate of the resolved
   closed term (§11.5 item 6). **The kernel and the chain only ever see closed terms.**

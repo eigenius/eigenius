@@ -376,8 +376,20 @@ pub(super) fn task_record_to_info(record: crate::task::TaskRecord) -> TaskInfo {
     TaskInfo {
         task_id: record.task_id.to_string(),
         session_id: record.session_id.to_string(),
-        program_iri: record.program_iri,
-        input_iri: record.input_iri,
+        // `program_iri` / `input_iri` stay populated for ProgramRun and EMPTY for every other kind
+        // — a reader that only understands programs sees nothing rather than something false. The
+        // kind's own fields travel beside them.
+        kind: record.kind.label().to_string(),
+        program_iri: record.kind.program_iri().unwrap_or_default().to_string(),
+        input_iri: record.kind.input_iri().unwrap_or_default().to_string(),
+        doc_id: match &record.kind {
+            crate::task::TaskKind::Formalize { doc_id, .. } => doc_id.clone(),
+            _ => String::new(),
+        },
+        source_sha256: match &record.kind {
+            crate::task::TaskKind::Formalize { source_sha256, .. } => source_sha256.clone(),
+            _ => String::new(),
+        },
         status: format!("{:?}", record.status),
         layer_head: hex::encode(record.layer_head.0),
         step_seq: record.step_seq,

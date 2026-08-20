@@ -4,7 +4,7 @@
 mass-shim ([d63-parse-gap-closure.md §6](d63-parse-gap-closure.md)) with a **subsumption-based**
 countability rule over the shared `lexicon:Entity` lattice that both importers already populate. Motivated
 by the ambiguity/parse-time blow-up the loose shim causes (the `gENE`→"extension" false positive). Related:
-[d62-controlled-language-style-guide.md](d62-controlled-language-style-guide.md), the domain-lexicon-
+[controlled-english-style-guide.md](../method/controlled-english-style-guide.md), the domain-lexicon-
 injection alignment discipline.
 
 **One-line problem.** "Is this noun grammatically *mass* (so a bare singular occurrence shifts to an NP

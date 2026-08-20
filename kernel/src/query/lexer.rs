@@ -77,8 +77,11 @@ pub enum TokenKind {
     MaxFn,
 
     // D43 §3.7 — ranked-retrieval clause
-    /// `TOP K BY ?score [DESC|ASC]` (D43 §3.7). Mutually exclusive
-    /// with `ORDER BY` / `LIMIT` in the same query.
+    /// `TOP <integer>` — ranked truncation (D43 §3.3). The parser
+    /// takes an integer only; the `TOP K BY ?score [DESC|ASC]` form of
+    /// D43 §3.7 was never built, and neither `BY` nor a sort direction
+    /// is accepted here. Mutually exclusive with `ORDER BY` / `LIMIT`
+    /// in the same query, enforced at typecheck.
     Top,
 
     // Literals

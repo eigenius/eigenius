@@ -1,0 +1,28 @@
+{
+  "_comment": "The reading-SELECTION baseline -- a SEPARATE experiment from the parse baseline (baseline.json). The parse baseline gates the GRAMMAR + lexicon: what forest is produced (the pins ask whether the correct STRUCTURE survives). THIS file gates the RANKER: which reading gets chosen from that forest, scored READING-level (structure + word senses) against the adjudication ledger. Different re-baselining triggers: grammar work re-draws the parse baseline without touching this file; a new selection draw, a prompt change, or a ledger revision re-derives THIS baseline without touching the parse numbers. Update deliberately, never to make a red run go green.",
+  "provenance": {
+    "date": "2026-08-17 (D69 slice 3 — the measurement the note exists to produce)",
+    "snapshot": "wordnet-umls-aligned-2026-08-15-d70b",
+    "forest": "ranks experiments/parsing/ranks/2026-08-17-d70b.json, RE-RECORDED live on this snapshot. The prior draw (2026-08-13-d69-corrected) replayed 61/62 against d70b — D70 changed candidate sense lists (new `name` entries, recovered T033 mass entries) so one rank key no longer matched. Per the protocol (experiments/parsing/README.md §3) 'a replay with misses > 0 is a different experiment, not a reproduction', so the draw was re-recorded rather than scored through.",
+    "ranker": "AnthropicReadingRanker (live draw), selections experiments/parsing/selections/2026-08-17-d70b-clean.json",
+    "reproduction": "the live run and its replay agree EXACTLY — replay 62 hits/0 misses, selection replay 40 hits/0 misses, readings 613, skeletons 170, 30/10/0 both ways.",
+    "ledger": "reading-adjudications.tsv — all 16 novel decisions adjudicated 2026-08-17; reading-unadjudicated is 0, so this is a measurement and not a partial count.",
+    "note": "THE D69 QUESTION ANSWERED. The 2026-08-11 baseline (21/31 = 68%) scored a ranker that could not SEE its options: for «MSI cancer models did not have the exonuclease activity of WRN» the prompt carried 120 candidates with 120 distinct sems as only 4 DISTINCT STRINGS. With the Expanded register, the concept legend and the injectivity guard in place — and after the sense-cap rework, the hyphen fix, the frozen-failure fix, the atom overrides and D70 — it is 30/40 = 75%. The eligible set GREW 31 -> 40 because the discourse loop now closes units that used to parse Open, so the fractions are over different populations; the comparable statement is per-decision accuracy, 68% -> 75%, with the population change named. Structure diagnostic 23/31 -> 33/40 (74% -> 83%). Blindness was therefore PART of the earlier error and not all of it: 10 decisions are still wrong with the pool fully visible, which is what slice 4 (D69-B, two-level presentation + logged truncation) addresses next."
+  },
+  "expected": {
+    "eligible": 40,
+    "chose": 40,
+    "abstained": 0,
+    "reading_correct": 30,
+    "reading_adjudicated": 40,
+    "invalid_selected": 0,
+    "structure_correct_diagnostic": 33,
+    "structure_curated_diagnostic": 40
+  },
+  "gates": {
+    "reading_correct": "GATED: below expected.reading_correct = REGRESSION (eval-parse-rate.sh).",
+    "reading_unadjudicated": "GATED: must be 0 on the tracked replay -- an unadjudicated decision makes the number a partial count, not a measurement; a new draw choosing novel readings fails until its ledger rows are adjudicated (mirrors audit-skeletons).",
+    "invalid_selected": "GATED: must be 0 (SELECTION-VALIDITY). The ranker has no kernel veto -- every candidate type-checks -- so the ledger and this validity check are its controls.",
+    "structure_correct": "diagnostic only -- reported, never gated; the pins belong to the parse baseline's faithfulness gate."
+  }
+}

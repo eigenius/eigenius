@@ -24,18 +24,15 @@
 //! **no surrounding prose is possible**. We only target Anthropic, so this is a ~one-endpoint client
 //! (no multi-provider abstraction), feature-gated behind `use-llm`.
 
+pub use super::model_config::{ModelConfig, DEFAULT_MODEL};
+
 use schemars::{schema_for, JsonSchema};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
-/// The model id used by the reasoning-layer proposers when none is given (`from_env`). Matches the
-/// model the `allms` path used, so behaviour is unchanged apart from the transport.
-pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
-
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const TOOL_NAME: &str = "emit";
-const MAX_TOKENS: u32 = 4096;
 
 /// **Temperature 0 — pinned, and load-bearing for reproducibility.**
 ///
@@ -58,7 +55,7 @@ const TEMPERATURE: f32 = 0.0;
 /// failure, so every caller can fail closed (the LLM only ever *proposes*; the kernel gates).
 pub async fn anthropic_structured<T: JsonSchema + DeserializeOwned>(
     api_key: &str,
-    model: &str,
+    cfg: &ModelConfig,
     prompt: &str,
 ) -> Result<T, String> {
     // JSON Schema of the reply type. Strip `$schema` — Anthropic's `input_schema` wants the schema
@@ -68,8 +65,8 @@ pub async fn anthropic_structured<T: JsonSchema + DeserializeOwned>(
         obj.remove("$schema");
     }
     let body = json!({
-        "model": model,
-        "max_tokens": MAX_TOKENS,
+        "model": cfg.model,
+        "max_tokens": cfg.max_tokens,
         "temperature": TEMPERATURE,
         "tools": [{
             "name": TOOL_NAME,

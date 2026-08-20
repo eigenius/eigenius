@@ -57,7 +57,19 @@ pub struct WordSenses<'a> {
 /// per word); each inner `Vec` should be a permutation of `0..candidates.len()` (callers must
 /// tolerate a malformed reply — e.g. an LLM omission — by falling back to the seed order).
 pub trait SenseRanker {
-    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>>;
+    /// One ranking per word, or `None` when this ranker DID NOT ANSWER — a transport/API failure,
+    /// a malformed reply, or a replay miss.
+    ///
+    /// The distinction is load-bearing and was missing until 2026-08-13. The failure path used to
+    /// return the identity permutation, which is indistinguishable from a real answer that keeps
+    /// every sense — so a failed call got RECORDED as a ranking and replayed forever as fact.
+    /// Measured: in `ranks/2026-07-29-demonstratives.json`, «WRN was dispensable in models of
+    /// microsatellite-stable cancers.» carries identity for all 20 senses of «models» and all 7
+    /// of «cancers». That frozen failure is why the crab genus and the astrological sign reached
+    /// the parse, and why the reading ranker was later asked to choose between them. A `None`
+    /// cannot be mistaken for an answer: the caller falls back to seed order, and the RECORDER
+    /// writes nothing, so a re-run retries instead of inheriting the failure.
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>>;
 }
 
 /// The trivial deterministic ranker: keep each word's candidates in seed order (identity
@@ -66,11 +78,18 @@ pub trait SenseRanker {
 pub struct IdentityRanker;
 
 impl SenseRanker for IdentityRanker {
-    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
-        words
-            .iter()
-            .map(|w| (0..w.candidates.len()).collect())
-            .collect()
+    fn rank(
+        &self,
+        _sentence: &str,
+        _context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<Vec<usize>>> {
+        Some(
+            words
+                .iter()
+                .map(|w| (0..w.candidates.len()).collect())
+                .collect(),
+        )
     }
 }
 
@@ -132,6 +151,26 @@ fn rank_key(sentence: &str, context: &str, words: &[WordSenses]) -> String {
     k
 }
 
+/// The same key, computed from a RECORDED exchange rather than a live one.
+///
+/// `load` used to re-derive this inline, which meant two copies of one contract with a comment
+/// asking the reader to keep them in step. It is one function now, because the D71 draw emitter
+/// needs the key too and a third copy would have been the point where they diverged.
+pub(crate) fn record_key(r: &RankRecord) -> String {
+    let mut k = r.sentence.clone();
+    k.push('\u{1d}');
+    k.push_str(&r.context);
+    for w in &r.words {
+        k.push('\u{1f}');
+        k.push_str(&w.surface.to_lowercase()); // see the note in `rank_key`
+        for s in &w.senses {
+            k.push('\u{1e}');
+            k.push_str(s);
+        }
+    }
+    k
+}
+
 /// **Record** every ranking an inner ranker produces, so the run can later be replayed exactly.
 ///
 /// The contextual reranker is an LLM: it is the one component that can return a different answer
@@ -154,20 +193,62 @@ impl<R: SenseRanker> RecordingSenseRanker<R> {
         }
     }
 
-    /// Write the recorded decisions as JSON (sorted by key — deterministic bytes).
-    pub fn write(&self, path: &std::path::Path) -> std::io::Result<usize> {
+    /// The recorded decisions as JSON (sorted by key — deterministic bytes).
+    pub fn to_json(&self) -> std::io::Result<String> {
         let log = self.log.lock().expect("rank log");
         let records: Vec<&RankRecord> = log.values().collect();
-        let json = serde_json::to_string_pretty(&records)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        serde_json::to_string_pretty(&records)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Write the recorded decisions as JSON (sorted by key — deterministic bytes).
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<usize> {
+        let json = self.to_json()?;
+        let n = self.log.lock().expect("rank log").len();
         std::fs::write(path, json)?;
-        Ok(records.len())
+        Ok(n)
+    }
+
+    /// The recorded decisions as chain-ready draws (D71 §9) — the same set `write` serialises,
+    /// each paired with the replay key it answers.
+    pub fn keyed_draws(&self) -> std::io::Result<Vec<crate::dcg::draw::KeyedDraw>> {
+        let log = self.log.lock().expect("rank log");
+        log.values()
+            .map(|r| {
+                Ok(crate::dcg::draw::KeyedDraw {
+                    key: record_key(r),
+                    record: serde_json::to_value(r)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+                })
+            })
+            .collect()
     }
 }
 
 impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
-    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
-        let order = self.inner.rank(sentence, context, words);
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+        // A NON-ANSWER IS NEVER RECORDED. Writing the fallback would freeze a failed call into the
+        // artifact, where it replays as "keep every sense" and reports a HIT — the 2026-07-29 crab
+        // bug. Nothing recorded ⇒ the next run asks again.
+        let order = self.inner.rank(sentence, context, words)?;
+        // An answer that eliminates NOTHING anywhere is either a ranker declining to work or a
+        // failure that slipped through some other impl's fallback. Say so at record time, where
+        // the run can still be repeated, rather than leaving it to be discovered in a draw months
+        // later.
+        if words.len() > 1
+            && words
+                .iter()
+                .zip(order.iter())
+                .all(|(w, o)| o.iter().copied().eq(0..w.candidates.len()))
+        {
+            eprintln!(
+                "sense-ranks: SUSPICIOUS — every word of «{}» kept every sense in seed order \
+                 ({} words, {} senses). That is the shape of a failed call, not a ranking.",
+                sentence.trim(),
+                words.len(),
+                words.iter().map(|w| w.candidates.len()).sum::<usize>()
+            );
+        }
         let rec = RankRecord {
             sentence: sentence.to_string(),
             context: context.to_string(),
@@ -186,7 +267,7 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
             .lock()
             .expect("rank log")
             .insert(rank_key(sentence, context, words), rec);
-        order
+        Some(order)
     }
 }
 
@@ -205,25 +286,20 @@ pub struct ReplaySenseRanker {
 impl ReplaySenseRanker {
     /// Load a recording written by [`RecordingSenseRanker::write`].
     pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
-        let text = std::fs::read_to_string(path)?;
-        let records: Vec<RankRecord> = serde_json::from_str(&text)
+        Self::from_json(&std::fs::read_to_string(path)?)
+    }
+
+    /// Load a recording from its JSON, wherever it came from — a draw file, or the run's
+    /// `doc-<id>` branch via [`crate::dcg::draw::draws_from_layer`] (D71 §9). One path, so a
+    /// chain-replayed run and a file-replayed run cannot key differently.
+    pub fn from_json(text: &str) -> std::io::Result<Self> {
+        let records: Vec<RankRecord> = serde_json::from_str(text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut by_key = std::collections::BTreeMap::new();
         for r in records {
-            // Rebuild the key from the recorded question, so it matches what `rank` will compute.
-            let mut k = r.sentence.clone();
-            k.push('\u{1d}');
-            k.push_str(&r.context);
-            for w in &r.words {
-                k.push('\u{1f}');
-                // Same normalisation as `rank_key` — see the note there.
-                k.push_str(&w.surface.to_lowercase());
-                for s in &w.senses {
-                    k.push('\u{1e}');
-                    k.push_str(s);
-                }
-            }
-            by_key.insert(k, r.words.iter().map(|w| w.order.clone()).collect());
+            // The key comes from the recorded question, so it matches what `rank` will compute.
+            let key = record_key(&r);
+            by_key.insert(key, r.words.iter().map(|w| w.order.clone()).collect());
         }
         Ok(Self {
             by_key,
@@ -245,16 +321,16 @@ impl ReplaySenseRanker {
 }
 
 impl SenseRanker for ReplaySenseRanker {
-    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
         match self.by_key.get(&rank_key(sentence, context, words)) {
             Some(order) => {
                 self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                order.clone()
+                Some(order.clone())
             }
             None => {
                 self.misses
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                IdentityRanker.rank(sentence, context, words)
+                None // a miss is a NON-ANSWER; the caller falls back, nothing is recorded
             }
         }
     }
@@ -282,23 +358,42 @@ mod anthropic {
     /// the caller degrades gracefully — the reranker only reorders a beam, never gates validity.
     pub struct AnthropicSenseRanker {
         api_key: String,
-        model: String,
+        model: crate::dcg::anthropic_client::ModelConfig,
     }
 
     impl AnthropicSenseRanker {
         pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+            Self::with_config(
+                api_key,
+                crate::dcg::anthropic_client::ModelConfig::with_model(model),
+            )
+        }
+
+        /// Build with an explicit [`ModelConfig`] — how a formalization run selects the model it
+        /// wants, and what a recorded draw names as the answerer (D71 §7.1 / §9).
+        pub fn with_config(
+            api_key: impl Into<String>,
+            model: crate::dcg::anthropic_client::ModelConfig,
+        ) -> Self {
             Self {
                 api_key: api_key.into(),
-                model: model.into(),
+                model,
             }
         }
 
         /// From `$ANTHROPIC_API_KEY`, defaulting to a fast model. `None` if the key is unset.
         pub fn from_env() -> Option<Self> {
+            Self::from_env_with(Default::default())
+        }
+
+        /// From `$ANTHROPIC_API_KEY` with an explicit [`ModelConfig`]. The formalization service
+        /// threads one config to every proposer in a run, so a draw's recorded model is the run's,
+        /// not a per-seam default (D71 §7.1 / §9).
+        pub fn from_env_with(cfg: crate::dcg::anthropic_client::ModelConfig) -> Option<Self> {
             std::env::var("ANTHROPIC_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
-                .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
+                .map(|k| Self::with_config(k, cfg.clone()))
         }
 
         fn ask(&self, instructions: &str) -> Option<SenseRankingReply> {
@@ -320,15 +415,14 @@ mod anthropic {
     }
 
     impl SenseRanker for AnthropicSenseRanker {
-        fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
-            let identity = || -> Vec<Vec<usize>> {
-                words
-                    .iter()
-                    .map(|w| (0..w.candidates.len()).collect())
-                    .collect()
-            };
+        fn rank(
+            &self,
+            sentence: &str,
+            context: &str,
+            words: &[WordSenses],
+        ) -> Option<Vec<Vec<usize>>> {
             if words.is_empty() {
-                return Vec::new();
+                return Some(Vec::new());
             }
             // DOCUMENT CONTEXT (D63, 2026-07-21): the neighbouring sentences. A sense that is
             // plausible for an isolated sentence is often obviously wrong in the passage — "regions"
@@ -363,14 +457,21 @@ mod anthropic {
             if std::env::var("EIGENIUS_DUMP_RANK_PROMPT").is_ok() {
                 eprintln!("\n===== SENSE-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n");
             }
-            let Some(reply) = self.ask(&prompt) else {
-                return identity();
-            };
-            // Accept only well-formed per-word permutations; fall back to seed order otherwise.
+            // A failed call and a malformed reply are NON-ANSWERS, not rankings. Returning the
+            // identity permutation here is what froze a failure into `ranks/2026-07-29-…` and put
+            // the crab genus in front of the reading ranker months later (D69 §7e).
+            let reply = self.ask(&prompt)?;
             if reply.rankings.len() != words.len() {
-                return identity();
+                eprintln!(
+                    "anthropic sense-ranker: malformed reply for «{}» ({} rankings for {} words) \
+                     — treating as NO ANSWER",
+                    sentence.trim(),
+                    reply.rankings.len(),
+                    words.len()
+                );
+                return None;
             }
-            reply
+            let ranked: Vec<Vec<usize>> = reply
                 .rankings
                 .into_iter()
                 .zip(words)
@@ -403,7 +504,8 @@ mod anthropic {
                     // elimination costs a slower parse, never a grammar gap.
                     out
                 })
-                .collect()
+                .collect();
+            Some(ranked)
         }
     }
 }
@@ -438,7 +540,10 @@ mod tests {
             surface: "w",
             candidates: &cands,
         }];
-        assert_eq!(IdentityRanker.rank("s", "", &words), vec![vec![0, 1, 2]]);
+        assert_eq!(
+            IdentityRanker.rank("s", "", &words),
+            Some(vec![vec![0, 1, 2]])
+        );
     }
 
     /// Live WSD: a real model must pick the contextual sense (JSON-Schema-constrained). Skips
@@ -471,6 +576,7 @@ mod tests {
             "",
             &words,
         );
+        let r = r.expect("the live ranker answered");
         assert_eq!(r.len(), 1, "one ranking for the one word");
         assert_eq!(r[0].len(), 2, "a permutation of both candidates");
         assert_eq!(
@@ -480,17 +586,53 @@ mod tests {
         );
     }
 
+    /// **A NON-ANSWER IS NEVER RECORDED** (D69 §7e). The regression this locks: the failure path
+    /// used to return the identity permutation, the recorder wrote it as a ranking, and the draw
+    /// replayed it forever as "keep every sense" while reporting a HIT. One such frozen failure
+    /// in `ranks/2026-07-29-demonstratives.json` put the crab genus and the astrological sign in
+    /// front of the reading ranker; re-asked, the live ranker keeps only the disease sense.
+    #[test]
+    fn a_ranker_that_does_not_answer_records_nothing() {
+        struct NoAnswer;
+        impl SenseRanker for NoAnswer {
+            fn rank(&self, _s: &str, _c: &str, _w: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+                None
+            }
+        }
+        let c = cands(3);
+        let words = vec![WordSenses {
+            surface: "cancers",
+            candidates: &c,
+        }];
+        let rec = RecordingSenseRanker::new(NoAnswer);
+        assert_eq!(
+            rec.rank("s", "", &words),
+            None,
+            "the non-answer propagates — the caller falls back to seed order itself"
+        );
+        let dir = std::env::temp_dir().join("eigenius-rank-nonanswer-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ranks.json");
+        assert_eq!(
+            rec.write(&path).unwrap(),
+            0,
+            "nothing recorded, so a re-run ASKS AGAIN instead of inheriting the failure"
+        );
+    }
+
     // ── record / replay ──────────────────────────────────────────────────────
 
     /// A ranker that reverses each word's candidates — a stand-in for the LLM: it returns a
     /// non-identity order, so a replay that silently fell back to the seed order would be caught.
     struct ReverseRanker;
     impl SenseRanker for ReverseRanker {
-        fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
-            words
-                .iter()
-                .map(|w| (0..w.candidates.len()).rev().collect())
-                .collect()
+        fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+            Some(
+                words
+                    .iter()
+                    .map(|w| (0..w.candidates.len()).rev().collect())
+                    .collect(),
+            )
         }
     }
 
@@ -516,7 +658,7 @@ mod tests {
         let live = rec.rank("we sat on the bank", "", &words);
         assert_eq!(
             live,
-            vec![vec![2, 1, 0]],
+            Some(vec![vec![2, 1, 0]]),
             "the inner ranker's answer passes through"
         );
 
@@ -553,7 +695,11 @@ mod tests {
         let replay = ReplaySenseRanker::load(&path).unwrap();
         // A DIFFERENT sentence — the recording cannot answer it.
         let got = replay.rank("sentence B", "", &words);
-        assert_eq!(got, vec![vec![0, 1]], "a miss falls back to seed order");
+        assert_eq!(
+            got, None,
+            "a miss is a NON-ANSWER — the caller falls back to seed order, and nothing about the \
+             miss can be mistaken for a recorded ranking"
+        );
         assert_eq!(
             replay.misses(),
             1,

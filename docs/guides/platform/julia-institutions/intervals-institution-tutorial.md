@@ -55,7 +55,7 @@ Loaded 9 resource(s) into branch main. Layer: <hex>
 
 ### What just happened
 
-The ontology file declares three classes:
+The ontology file declares three classes (nine resources in all — the three classes plus their six properties):
 
 | Class | Required properties | Role |
 |---|---|---|
@@ -215,7 +215,9 @@ The lifecycle declaration (`Service`) is what tells the substrate to spin up a s
 
 ## Step 7 — Install the institution
 
-Six resources go on the chain in one commit: the `Institution` itself (a name and a runtime kind), two `RuntimeMethodSignature`s (typed shapes for `validate_bounded_by` and `compute_bounds_for_request`), two `QueryClass`es (`bounded_by_validity` AutoOnLoad + `qc_compute_bounds` OnDemand), and an `ImportFormat` (`if_intv_function` — the target side of the Symbolics → IntervalArithmetic comorphism).
+Seven resources go on the chain in one commit: the `Institution` itself (a name and a runtime kind), **three** `RuntimeMethodSignature`s (typed shapes for `validate_bounded_by`, `compute_bounds_for_request` and `reify_function`), two `QueryClass`es (`bounded_by_validity` AutoOnLoad + `qc_compute_bounds` OnDemand), and an `ImportFormat` (`if_intv_function` — the target side of the Symbolics → IntervalArithmetic comorphism).
+
+`reify_function` is the third signature and is easy to overlook: it is the procedure `if_intv_function` names, and its body is `IntervalFunction(term)`. It exists so the comorphism's import step routes through the substrate uniformly rather than being special-cased kernel-side.
 
 ```bash
 eigenius --endpoint http://localhost:50051 institution install \
@@ -388,7 +390,7 @@ After running through the AutoOnLoad walkthrough (steps 1–9), the following re
 | `RuntimePackageMirror` | `urn:eigenius:runtime:mirror:julia:<hex>` | step 3 |
 | `RuntimeEnvironment` | `urn:eigenius:intervals:env:v1` | step 6 |
 | `Institution` | `urn:eigenius:institutions:intervals` | step 7 |
-| `RuntimeMethodSignature` x 2 | `urn:eigenius:intervals:signatures:{validate_bounded_by, compute_bounds_for_request}` | step 7 |
+| `RuntimeMethodSignature` x 3 | `urn:eigenius:intervals:signatures:{validate_bounded_by, compute_bounds_for_request, reify_function}` | step 7 |
 | `QueryClass` x 2 | `urn:eigenius:intervals:query_classes:{bounded_by_validity, qc_compute_bounds}` | step 7 |
 | `ImportFormat` | `urn:eigenius:intervals:formats:if_intv_function` | step 7 |
 | `BoundedBy` instance(s) | `urn:eigenius:demo:intervals:obs:*` | step 8 |

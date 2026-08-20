@@ -323,9 +323,13 @@ this is the brief recap mapped to which mechanic each cell exercises.
 | 34 | eigenql | `FIBER ... AS ?problem INTO "<iri>"` — same translation, caller-named IRI ([§5.3](05-chain-reinsertion.md#53-eigenql-surface-fiber--as-var-into-iri)) |
 | 35 | eigenql | Confirms the FIBER-INTO result resolves at the user-named IRI |
 
-Both paths go through `commit_with_validation`. The produced
-`OptimisationProblem`s are structurally identical — the *content* is the
-same; only the IRI differs (kernel-minted content-hash vs. caller-named).
+Both paths commit through `PipelineKind::WithRetroactive`, which runs no
+AutoOnLoad dispatch ([§5.3a](05-chain-reinsertion.md#5-3a-what-reinsertion-does-not-do-autoonload-is-bypassed)).
+The produced `OptimisationProblem`s are structurally identical — the
+*content* is the same; only the IRI differs (kernel-minted content-hash vs.
+caller-named). Neither fires JuMP-HiGHS's gate; the `Holds` verdict earlier
+in the notebook came from the hand-authored `OptimisesTo` commit in cell 21,
+not from these.
 
 ## 6.7. Where this notebook falls short
 

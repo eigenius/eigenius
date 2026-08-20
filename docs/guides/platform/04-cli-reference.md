@@ -15,7 +15,19 @@ Two **global flags**:
 
 In-process commands operate against an in-memory layer chain bootstrapped from the embedded core ontologies. Remote commands (`--endpoint http://localhost:50051`) talk to a running `eigenius serve` instance and operate against its persistent or in-memory state.
 
-The full source of truth for command shapes is the `Commands` enum in [`cli/src/main.rs`](../../../cli/src/main.rs) (line 27).
+The full source of truth for command shapes is the `Commands` enum in [`cli/src/main.rs`](../../../cli/src/main.rs) (line 159). It declares 23 subcommands, ten of which are groups; counting leaves, 52 distinct invocations.
+
+**`--endpoint` is not a transport detail.** The entry point matches the command twice — once for remote mode, once for local — and the two matches do not cover the same set:
+
+| Available | Commands |
+|---|---|
+| Both | `load`, `query`, `inspect`, `reflect`, `lexicon parse`, `db consolidate`, `db merge` |
+| Local only | `validate`, `program-validate`, `compile`, `decompile`, `version`, `lexicon gate`, `db stats`, `db compact`, `db export`, `serve` |
+| Remote only | `run`, `list-institutions`, `get-schema`, `capability`, `mirror`, `env`, `script`, `data`, `institution`, `tasks`, `branch` |
+
+Because `--endpoint` is global it is accepted syntactically everywhere, so the local-only row is a trap: `eigenius --endpoint <url> version` does not print a version, it exits 1 with `Remote mode not yet supported for this command`, and so do `validate`, `program-validate`, `compile` and `decompile`. `serve` gets its own message, `Cannot use --endpoint with serve`.
+
+In the other direction, local `load` and `query` accept `--branch` and `--at-layer` and then discard them: the dispatch arms destructure both fields to `_` before calling an in-process handler that has no branch parameter. No diagnostic is printed and the exit status is 0.
 
 ## 4.1. File commands (in-process)
 
@@ -30,7 +42,7 @@ eigenius validate ontologies/examples/animals.json
 eigenius validate demo/document.esl
 ```
 
-ESL files (extension `.esl`) are compiled to Eigon-JSON in memory before validation. The validator runs all 12 ontology rules ([D1](../../design/d1-eigon-serialization-format.md)) and reports failures with rule names and resource IRIs.
+ESL files (extension `.esl`) are compiled to Eigon-JSON in memory before validation. The validator runs the numbered ontology rules ([D1](../../design/d1-eigon-serialization-format.md) §5.4) — the inventory is 25 slots, Rule 0 through Rule 24, driven from `kernel/src/validation/mod.rs` (Rule 20 is retired, absorbed into Rule 21) — and reports failures with rule names and resource IRIs.
 
 ### `compile <FILE>`
 
@@ -169,7 +181,7 @@ Both program and input may be Eigon-JSON or ESL — auto-detected by extension.
 
 ## 4.4. The server command
 
-### `serve [--port <N>] [--orchestrator <URL>] [--db <PATH>]`
+### `serve [--port <N>] [--orchestrator <URL>] [--db <PATH>] [--cache-budget <ENTRIES>] [--morphy-dict <PATH>]`
 
 Start the gRPC server.
 
@@ -194,12 +206,18 @@ Default port: 50051. The orchestrator URL can also come from the `EIGENIUS_ORCHE
 | `--port` | 50051 | — |
 | `--orchestrator` | none | `EIGENIUS_ORCHESTRATOR_ENDPOINT` |
 | `--db` | in-memory | `EIGENIUS_DB` |
+| `--cache-budget` | 250,000 entries | `EIGENIUS_CACHE_BUDGET` |
+| `--morphy-dict` | `references/WordNet-3.0/dict` | `EIGENIUS_MORPHY_DICT` |
+
+`--cache-budget` caps resident resource entries (D23 §5.3), not what the kernel can serve — cold reads page from the backend on demand. `--morphy-dict` points the `ParseSentence` RPC's Morphy lemmatizer at a WordNet dict directory; when it cannot be loaded the server logs the reason and falls back to the no-op `Identity` lemmatizer rather than failing.
 
 When `--db <path>` is provided, the kernel persists layers, traces, and institution registrations to RocksDB and survives restart. See [chapter 6](06-database-management.md).
 
 ## 4.5. Database commands
 
-Operate directly on a RocksDB database directory; the kernel server should be **stopped** for `compact` and `export` (RocksDB's lock file blocks concurrent processes).
+`db stats`, `db compact` and `db export` operate directly on a RocksDB database directory and take a path. The kernel server must be **stopped** for all three: with `--db` the running kernel holds RocksDB's exclusive directory lock, and a second process cannot open it. They are local-only — passing `--endpoint` exits 1.
+
+`db consolidate` and `db merge` are the opposite: they *require* `--endpoint`, because both serialise against the running kernel's branch lock.
 
 ### `db stats <PATH>`
 
@@ -209,7 +227,7 @@ Print storage statistics for the database.
 eigenius db stats /var/lib/eigenius
 ```
 
-Reports storage statistics: total keys, total bytes, plus a list of every branch ref with its current head.
+Prints the database path, the layer count from the persisted topology, one line per layer with its resource count, the total resource count, and every branch ref with its current head. It does not report key counts or byte sizes.
 
 ### `db compact <PATH>`
 
@@ -227,7 +245,35 @@ Dump every resource in the database as Eigon-JSON files into a directory.
 eigenius db export /var/lib/eigenius /tmp/eigenius-export
 ```
 
-Useful for backup snapshots and for migrating between RocksDB versions. The output is round-trippable: `eigenius load` over the exported files reconstructs an equivalent layer set.
+Useful for backup snapshots and for migrating between RocksDB versions. The output is round-trippable: there is no `db import` and no `db restore` — restoring an export means `eigenius load` over the exported files, which reconstructs an equivalent layer set.
+
+### `db consolidate <FROM..TO> [--branch <NAME>] [--max-walk-entries <N>] [--dry-run] [--preserve-history]` (requires `--endpoint`)
+
+Collapse the inclusive layer range `[from..to]` on a branch into one resolve-equivalent layer ([D25](../../design/d25-chain-consolidation.md)). Shipped — this is not future work, and it is not a substitute for re-loading.
+
+```bash
+# What would it cost, and what layer id would come out? Nothing commits.
+eigenius --endpoint http://localhost:50051 db consolidate <from-hex>..<to-hex> --dry-run
+
+# Do it, on a feature branch, keeping the pre-consolidation history readable
+eigenius --endpoint http://localhost:50051 db consolidate <from-hex>..<to-hex> \
+    --branch feature-x --preserve-history
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--branch <NAME>` | `main` | Branch to consolidate. |
+| `--max-walk-entries <N>` | the kernel value, `5_000_000` | Override the cost cap. |
+| `--dry-run` | off | Run `EstimateConsolidation` instead of `ConsolidateChain`: reports the cost and the predicted consolidated layer id without committing. |
+| `--preserve-history` | off | Below-head consolidation only. Keeps the source range alive so time-travel reads against intermediate layers keep resolving; GC will not reclaim them. |
+
+When `to` is the branch's current head, the branch ref advances to the new layer. When `to` is strictly below the head, a resolve redirect is installed at `to` (D25 §12.8) and the branch ref stays where it was — the response's `head_advanced` is `false`, and that is a success, not a failure.
+
+### `db merge preview | resolve` (require `--endpoint`)
+
+Reconcile a diverged head with a branch ([D20](../../design/d20-layer-reconciliation.md)). `preview` computes the cascade impact without committing; `resolve` applies the resolutions and CAS-advances the branch ref. Both take `--branch` (default `main`), `--candidate <LAYER_ID>` and `--resolutions <PATH>`; `resolve` additionally requires one `--acknowledge <ITEM_ID>` for every cascade item the preview printed.
+
+Full walkthrough, the four resolution strategies, and the resolution-file schema: [chapter 16](16-merge-resolution.md).
 
 ## 4.6. Branch commands (require `--endpoint`)
 
@@ -292,9 +338,13 @@ The `mirror` subcommand group operates on `RuntimePackageMirror` resources — a
 
 Generate a mirror against a layer; commit a `RuntimePackageMirror` resource and write the source files locally.
 
+`branch show` is itself remote-only, so a command substitution that resolves the head must carry `--endpoint` too — without it the inner command exits 1 and the outer `--layer` receives an empty string:
+
 ```bash
+MAIN_HEAD=$(eigenius --endpoint http://localhost:50051 branch show main --json | jq -r .head_layer)
+
 eigenius --endpoint http://localhost:50051 mirror create \
-    --layer "$(eigenius branch show main | awk '{print "urn:eigenius:layer:"$2}')" \
+    --layer "urn:eigenius:layer:$MAIN_HEAD" \
     --filter 'MATCH "urn:eigenius:core:Class"(?iri) {
                 "urn:eigenius:core:short_name": ?name
               }
@@ -492,7 +542,9 @@ eigenius --endpoint http://localhost:50051 capability test \
     --input /tmp/doc.json
 ```
 
-For institutions, `--mode query` (default) dispatches a fiber query; `--mode discover` dispatches `discover-morphisms`.
+**Components only.** `capability test` detects institution-hood first and, for an institution, prints that institutions cannot be invoked directly and exits 1 — the per-RPC `FiberQuery` / `DiscoverMorphisms` primitives it once used were retired in Phase 12. `--mode` is accepted by the parser and discarded; it selects nothing. To exercise an institution's `QueryClasses`, write an EigenQL `FIBER` query and submit it through `query` (D2 v2 §3.5).
+
+Against a *component* the command works, by synthesising a one-expression program that applies the component to the input and running it through `RunProgram`.
 
 ## 4.11. Task commands (require `--endpoint`)
 
@@ -504,7 +556,15 @@ Inspect and control persisted tasks (D21).
 eigenius --endpoint http://localhost:50051 tasks list
 ```
 
-List every task in the session with status (`Running`, `Completed`, `Failed`, `Cancelled`).
+List every task in the session with its **kind**, status (`Running`, `Completed`, `Failed`, `Cancelled`), and that kind's own subject — the program for a `ProgramRun`, the `doc-<id>` working branch for a `Formalize` (D71 §6).
+
+```
+TASK ID                               STATUS        KIND         SUBJECT
+2ae08b30-7571-48ec-87b0-7a81215cb2b4  Completed     Formalize    wrn-first-page
+9f31c0a4-...                          Completed     ProgramRun   urn:eigenius:demo:analyze
+```
+
+Tasks used to be program-bound, and a formalization would have shown a blank PROGRAM column reading like a broken task. `TaskRecord` carries a kind instead, so each row names what it actually is.
 
 ### `tasks status <TASK_ID>`
 
@@ -512,7 +572,7 @@ List every task in the session with status (`Running`, `Completed`, `Failed`, `C
 eigenius --endpoint http://localhost:50051 tasks status <uuid>
 ```
 
-Detailed status: program IRI, input layer IDs, current checkpoint, elapsed time, last event.
+Detailed status: kind, current checkpoint, elapsed time, last event, and the fields that kind has — program + input IRIs for a `ProgramRun`, doc branch + source sha256 for a `Formalize`. Fields belonging to another kind are omitted rather than shown empty.
 
 ### `tasks cancel <TASK_ID>`
 
@@ -643,15 +703,113 @@ eigenius reflect path/to/trace.json
 
 Record a reasoning trace from a JSON or ESL file. Used during testing of the trace-recording machinery.
 
-### `version`
+### `version` (local only)
 
 ```bash
 eigenius version
 ```
 
-Print the build version and metadata.
+Print `eigenius` followed by the crate version (`CARGO_PKG_VERSION`). No build metadata, no commit hash, no build date. With `--endpoint` it exits 1 rather than printing anything.
 
-## 4.14. Output formatting
+## 4.14. Script commands (require `--endpoint`)
+
+The `script` subcommand group publishes and runs `RuntimeScript` resources — script source committed to the chain and executed by a substrate worker in a declared `RuntimeEnvironment` ([D26](../../design/d26-runtime-substrate.md) §6.2).
+
+### `script publish <FILE> --env <ENV_IRI> [--lang <LANG>] [--entry-point <NAME>] [--description <TEXT>]`
+
+Commit a script as a content-addressed `RuntimeScript`. Cheap — a graph commit, nothing executes. The language is inferred from the extension (`.r`, `.jl`, `.py`, `.lean`) unless `--lang` overrides it. Omit `--entry-point` for a top-level script (the common `RunRuntimeScript` case); set it only when the script exposes a typed entry point.
+
+```bash
+eigenius --endpoint http://localhost:50051 script publish analysis/limma.R \
+    --env urn:eigenius:runtime:env:r-bioc-3.20 \
+    --description "limma differential expression"
+```
+
+### `script list [--lang <LANG>]`
+
+List published runtime scripts, optionally filtered by language.
+
+### `script inspect <SCRIPT_IRI>`
+
+Print one script's metadata and source.
+
+### `script run <SCRIPT_IRI> --inputs <IRI>[,<IRI>...] [--branch <NAME>]`
+
+Run a published script against graph-resident input resources. The kernel resolves the script source and its environment from the graph at execution time. `--inputs` is comma-separated; v1 takes exactly one. The trace layer commits to `--branch`, default `main`.
+
+```bash
+eigenius --endpoint http://localhost:50051 script run \
+    urn:eigenius:runtime:script:9b1c... \
+    --inputs urn:project:expression_matrix
+```
+
+## 4.15. Lexicon commands
+
+The kernel-side, trusted half of the [D62](../../design/d62-encoding-engine-prose-to-trees.md) prose-to-trees engine. An untrusted tool (WordNet/VerbNet plus an LLM) drafts categorial lexical entries; these subcommands admit or reject them against the kernel, which is the felicity oracle.
+
+### `lexicon gate <FILE>...` (local only)
+
+Run the felicity gate over every `lexicon:LexicalEntry` in one or more ESL / Eigon-JSON files: for each entry, check that the interpretation of its category is convertible with its `sem_type`, and that its `sem` inhabits that type. Fail-closed — any rejection exits non-zero.
+
+All files load into one layer over the bootstrap chain, so an entry may reference a schema or domain declared in an earlier file. With `--endpoint` the command exits 1 with `'lexicon gate' is a local-only operation`.
+
+```bash
+eigenius lexicon gate domain/oncology-lexicon.esl domain/verbs.esl
+```
+
+### `lexicon parse <SENTENCE> [--scope <LEXICON_IRI>]... [--profile <PROFILE_IRI>] [--file <FILE>]...`
+
+Parse a natural-language sentence against the lexicon and print the typed parse forest. With `--endpoint` this calls the kernel's `ParseSentence` RPC over the committed chain; locally it builds the index over the bootstrap chain plus any `--file` domain layers.
+
+```bash
+# Against a running kernel
+eigenius --endpoint http://localhost:50051 lexicon parse \
+    "every Werner syndrome affects HeLa"
+
+# In process, over local domain files
+eigenius lexicon parse "every Werner syndrome affects HeLa" \
+    --file domain/oncology-lexicon.esl --file domain/verbs.esl
+```
+
+| Flag | Use |
+|---|---|
+| `--scope <LEXICON_IRI>` | Restrict the parse to these `lexicon:Lexicon` IRIs. Repeatable; order is resolution precedence, earlier ranks first. Omitted means the whole chain, unscoped. |
+| `--profile <PROFILE_IRI>` | A `lexicon:LexiconProfile` naming an ordered scope. Mutually exclusive with `--scope`. |
+| `--file <FILE>` | Local mode only. ESL / Eigon-JSON domain files to load over bootstrap before parsing. Ignored in remote mode. |
+
+### `formalize <FILE> [--doc-id <ID>] [--out <FILE>] [--format <MIME>] [--branch <NAME>] [--scope <IRI>]... [--profile <IRI>] [--ns <PREFIX>] [--source-ref <IRI>] [--model <ID>] [--strict] [--no-wait]` (requires `--endpoint`)
+
+Formalize prose into typed, kernel-checked claims (D71). The document-level sibling of `lexicon parse`.
+
+```bash
+# Wait for the run and write the artifact
+eigenius --endpoint http://localhost:50051 formalize paper-intro.txt --out claims.esl
+
+# Read it, then land it — the artifact is NOT committed by the run
+eigenius --endpoint http://localhost:50051 load claims.esl
+```
+
+The run is a **task**: a document costs minutes and several LLM round-trips. This waits by default and is the one surface that can — an MCP tool call cannot block that long, which is why the RPC is asynchronous at all. `--no-wait` prints the task id and returns; `tasks status` / `tasks cancel` take it from there.
+
+Counts go to stderr and the artifact to stdout, so `formalize x.txt > out.esl` yields the artifact and nothing else.
+
+| flag | why you would use it |
+|---|---|
+| `--doc-id` | Names the run's `doc-<id>` working branch, which holds the document glossary and this run's recorded proposer draws. **Re-using it replays those draws instead of re-asking the model** — a second run of the same prose is fast, free and deterministic. Defaults to the file stem, IRI-sanitised. |
+| `--branch` | What to parse over — this is how you say *which lexicon*. Vocabulary is not passed to this command: `load` it and name the branch. |
+| `--scope` / `--profile` | D65 §4 parse scope: ordered `lexicon:Lexicon` IRIs (array order IS resolution precedence), or a `lexicon:LexiconProfile` naming that list. Mutually exclusive, same as `lexicon parse`. |
+| `--format` | `text/x-esl` (default here — you are going to read it), `application/eigon+json`, or `application/cbor`. |
+| `--strict` | Abort on the first unit that does not encode, instead of recording it as an `enc:CutItem`. The default records: an artifact should state what did not encode rather than drop it silently. |
+| `--model` | The model this run's untrusted proposers call, and what each recorded draw names as its answerer. |
+| `--source-ref` | Cite an existing `reference:Reference` instead of minting a document-local one. It must resolve on the chain the artifact loads onto — Rule 22 verifies. |
+
+**A first run on a fresh `--doc-id` asks the model**, so it needs a kernel built `--features use-llm` and an `ANTHROPIC_API_KEY` (`just up-llm`). Without them it fails closed rather than parsing unranked — a cap-only run is a different experiment, not a quieter version of the same one.
+
+**Local mode is deliberately unsupported.** Formalization parses against the served lexicon chain. For a byte-reproducible in-process run over a snapshot — replaying draws from files rather than a branch, failing closed on anything that does not encode — use `prose-to-esl` in `crates/eigenius-encoding`, which is what the demos and the parse harness run.
+
+Other surfaces onto the same RPC: the notebook's `formalize` cell ([chapter 14](14-notebook.md)), and the MCP tools `eigenius_formalize_document` / `eigenius_get_formalization_result`.
+
+## 4.16. Output formatting
 
 The global `--json` flag switches output from human-formatted prose to a machine-readable JSON envelope, suitable for piping into `jq` or scripting:
 
@@ -661,20 +819,17 @@ eigenius --json query 'MATCH ?x {} RETURN [] { x: ?x }' | jq '.results[0]'
 
 Without `--json`, output is colourised plain text intended for terminal display.
 
-## 4.15. Exit codes
+## 4.17. Exit codes
 
-The CLI uses standard exit codes:
+The CLI does **not** distinguish failure modes by exit code. Every one of the 230 `std::process::exit` calls under `cli/src/` passes `1`.
 
 | Code | Meaning |
 |---|---|
-| 0 | Success |
-| 1 | Error (CLI-level, e.g. unknown subcommand) |
-| 2 | Validation failure |
-| 3 | Type-check failure |
-| 4 | Runtime / dispatch failure |
-| 5 | Connection failure (remote mode) |
+| 0 | Success — also `--help` and `--version`, which clap prints and exits on |
+| 1 | Every failure the CLI reports itself: validation failure, type-check failure, runtime or dispatch failure, connection failure, an unsupported local/remote mode, a missing required flag the CLI checks by hand |
+| 2 | Argument-parsing error raised by clap before the CLI's own code runs — unknown subcommand, missing positional, unrecognised flag |
 
-In CI scripts, check the exit code to distinguish success from each failure mode.
+A CI script cannot branch on the failure mode. To distinguish them, run with `--json` and read the error payload, or match on the message text on stderr.
 
 ---
 

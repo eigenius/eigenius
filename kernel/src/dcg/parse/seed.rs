@@ -268,30 +268,13 @@ impl Parser {
                 //      tests rely on their being capped, so the predicate exempts far more than the
                 //      grammatical core. A real fix needs a POSITIVE closed-class marker (or a
                 //      category-shape test), not the absence of a lexicon tag.
-                let mut eff = cap;
-                // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
-                // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
-                // grows to admit some word's deeper RANKED sense, so a sentence that widens for ONE word
-                // (e.g. `cause`/`mutations` needing its #3–4 sense) does not FLOOD every OTHER word with
-                // its rejects — the `gene` junk (`C5849123` = "Gross Extranodal Extension" re-seeding for
-                // `gene` via a "gENE" synonym) that only ever appeared because widen used to un-eliminate.
-                // The wrong-elimination SAFETY that once justified the base-cap-only cut is provided by
-                // [`Self::parse_widening`]'s PASS 2 — a ranks-`None` widen (pure frequency, no cut),
-                // reached only when Pass 1 yields nothing, i.e. exactly when a NEEDED sense was wrongly
-                // eliminated. So the cut can hold at all caps without ever costing a grammar gap.
-                if let Some(r) = ranks {
-                    let ranked = entries
-                        .iter()
-                        .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
-                        .count();
-                    if ranked > 0 {
-                        eff = eff.min(ranked);
-                    }
-                }
-                if entries.len() > eff {
-                    entries.sort_by_key(|e| sense_cap_key(e, ranks));
-                    entries.truncate(eff);
-                }
+                // ONE cap rule, in `apply_sense_cap` — counted by SENSE, keeping every category
+                // of a kept sense (D69 §7i), with the reranker's ELIMINATION cut applied at EVERY
+                // rung including widen. The rung-wide cut is what stops a sentence that widens for
+                // ONE word from flooding every OTHER word with that ranker's rejects (the `gene`
+                // /`C5849123` bug); its cost — a wrong elimination has no in-Pass-1 recovery — is
+                // paid by `recovery_ranks` (D69 §7g), not by loosening the cut here.
+                apply_sense_cap(&mut entries, ranks, cap);
             }
             // **Collapse entries that denote the SAME concept — AFTER the cap** (D63 cross-lexicon
             // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`). Structural `Exp`
@@ -434,6 +417,12 @@ impl Parser {
     /// Empty when no base resolves.
     fn derived_adjective_items(&self, surface: &str) -> Vec<Item> {
         let s = surface.trim().to_lowercase();
+        // A hyphenated surface whose SPACE form is a real entry denotes THAT — the multiword
+        // reading wins over the right-headed-head identity rule, which would drop the left half
+        // (D69 §7h). `candidate_lemmas` seeds the multiword entry for this same span.
+        if s.contains('-') && !self.lex.entries_for(&s.replace('-', " ")).is_empty() {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         // Slice 1 (identity): reuse the base adjective's own items.
         for b in adjective_bases(&s) {
@@ -1046,6 +1035,135 @@ pub(super) fn dedup_same_concept(entries: &mut FormEntries) {
         i += 1;
         keep
     });
+}
+
+/// The sense cap as the seed applies it: how many of `entries` survive, and which.
+///
+/// Exposed so the widen ladder can ask what a word is left with WITHOUT re-deriving the rule
+/// (D69 §7g). `eff = min(cap, ranked)` — the ranker's elimination cut — then a sort by
+/// [`sense_cap_key`] and a truncate.
+pub(super) fn apply_sense_cap(
+    entries: &mut Vec<LexEntry>,
+    ranks: Option<&BTreeMap<String, u32>>,
+    cap: usize,
+) {
+    // **THE CAP COUNTS SENSES, AND KEEPS EVERY CATEGORY OF A KEPT SENSE** (D69 §7i).
+    //
+    // It used to count ENTRIES. One sense legitimately owns several entries — the same meaning in
+    // different grammatical categories (`C0388246` as count and as mass; a verb sense in bse /
+    // fin-sg / fin-pl frames) — so a cap of 2 was routinely spent on two categorial variants of ONE
+    // sense, and the next sense never reached the chart. Two measured consequences, both of them
+    // wrong READINGS rather than merely lost ambiguity:
+    //
+    //   * «screens»: the top-ranked verb sense owns 4 entries, so no NOUN survived, the phrase
+    //     could not be built, and the recovery path substituted "a white or silvered surface where
+    //     pictures can be projected" for C0220908 «Screening procedure».
+    //   * «WRN»: `C0388246` owns 2 entries (count + mass) and took both slots, so `C1337007`'s
+    //     PROPER-NOUN entry — WRN the gene, the individual the pin wants — never seeded. That is
+    //     the standing "Axis B" miss.
+    //
+    // The two axes are different and the system already separates them elsewhere: sense ambiguity
+    // is Lever A (this cap — «breaks» offers 75 senses and that is what the cap is for), while one
+    // sense appearing in several categories is a SYNTACTIC axis, which the cell beam (Lever B)
+    // bounds. Counting entries silently spent Lever A's budget on Lever B's axis.
+    let mut eff = cap;
+    if let Some(r) = ranks {
+        let ranked: BTreeSet<&str> = entries
+            .iter()
+            .filter_map(|e| e.sense.as_deref())
+            .filter(|s| r.contains_key(*s))
+            .collect();
+        if !ranked.is_empty() {
+            eff = eff.min(ranked.len());
+        }
+    }
+    let distinct: BTreeSet<&str> = entries.iter().filter_map(|e| e.sense.as_deref()).collect();
+    if distinct.len() <= eff {
+        return; // already within the cap, counted by sense
+    }
+    entries.sort_by_key(|e| sense_cap_key(e, ranks));
+    // Walk the sorted entries and keep every entry whose sense is among the first `eff` DISTINCT
+    // senses. An entry with no sense label (the closed class, test fixtures) is kept: it has no
+    // sense to count and the cap has never been the right instrument for it.
+    let mut kept_senses: BTreeSet<&str> = BTreeSet::new();
+    let mut keep: Vec<bool> = Vec::with_capacity(entries.len());
+    for e in entries.iter() {
+        let k = match e.sense.as_deref() {
+            None => true,
+            Some(s) if kept_senses.contains(s) => true,
+            Some(s) if kept_senses.len() < eff => {
+                kept_senses.insert(s);
+                true
+            }
+            Some(_) => false,
+        };
+        keep.push(k);
+    }
+    let mut it = keep.into_iter();
+    entries.retain(|_| it.next().unwrap_or(false));
+}
+
+/// A category's **frame**: its head constructor plus, for a slash category, the head constructor of
+/// the ARGUMENT it takes — `fwd/cat_np`, `fwd/cat_cp`, `bwd/cat_np`.
+///
+/// [`cat_shape`] is deliberately coarse and answers "what slot could this fill". That is the wrong
+/// question for [`super::Parser::recovery_ranks`], which must answer "can this word still do what it
+/// could do". A verb wanting an object NP and a verb wanting a that-clause are BOTH `fwd`, so under
+/// `cat_shape` a word can lose its clausal frame entirely and nothing looks missing.
+///
+/// Measured (D69 §7k, `2026-08-15`): «These observations suggest that WRN dependency is not simply a
+/// result of MMR deficiency.» — the draw kept `suggest` senses `00930806` (`fwd/cat_np` only) and
+/// `00930368` (`fwd/cat_np` + `bwd/cat_np`) and ELIMINATED `00927430`, the only sense carrying
+/// `fwd/cat_cp`. Under `cat_shape` the full set `{fwd, bwd}` equals the survivors, so targeted
+/// recovery promoted nothing, the sentence failed at every cap, and Pass 2 rescued it by discarding
+/// ALL TEN words' rankings — which is how Turcot syndrome and the WRN protein-kind reached the
+/// reading. Under `cat_frame` the lost `fwd/cat_cp` is visible and only `suggest` is touched.
+///
+/// **The number index is deliberately NOT part of this key** (added `2026-08-15`, REMOVED the same day
+/// after measurement — D70 §1c). Including it looked right: «Germline mutations … cause Lynch
+/// syndrome.» has `cat_n(C4552100, num_any)` kept and `cat_n(C1333990, num_any|mass)` eliminated, so a
+/// lost `cat_n/mass` frame would let the rescue restore the bare-noun reading. It does — by restoring a
+/// DIFFERENT CONCEPT. Elimination is hard (the cap does not backfill an omitted sense), so the only way
+/// to obtain a mass variant is to resurrect the sense that carries one, and that sense denotes
+/// something else. Measured consequences on one page: «lynch syndrome» C4552100 → C1333990, which is
+/// the same disease under its former name (Hereditary Nonpolyposis Colorectal Cancer) and therefore
+/// looked like a success; «mmr deficiency» C4522088 → C0265325, «Mismatch Repair Deficiency» replaced
+/// by **Turcot syndrome**, which is simply wrong. One mechanism, and it is unsound in both: a parse must
+/// not swap in a different concept to obtain a countability variant. That a swap sometimes lands on a
+/// synonym is luck.
+///
+/// A slash's argument is a different case and stays in the key: promoting another SENSE OF THE SAME
+/// WORD to restore a lost syntactic frame changes which reading is reachable, not which entity is
+/// being denoted. The bare-standing problem the number index was reaching for is real, and belongs to
+/// countability assignment (D70 O1) rather than to sense recovery.
+///
+/// Kept SEPARATE from `cat_shape` on purpose: `cat_shape` is also the [`apply_sense_cap`] key, where
+/// a finer grain would change which categories survive the cap for every word in every sentence.
+/// Two callers, two questions, two keys.
+pub(super) fn cat_frame(cat: &Exp) -> String {
+    let head = cat_shape(cat);
+    // A SLASH's argument only. NOT the number index of a `cat_n` — see the doc-comment above.
+    match slash_parts(cat, "fwd").or_else(|| slash_parts(cat, "bwd")) {
+        Some((_m, _res, arg)) => format!("{head}/{}", cat_shape(arg)),
+        None => head,
+    }
+}
+
+/// The head constructor of a category — `cat_n`, `cat_np`, `fwd`, `bwd`, … — as a coarse
+/// "what slot could this fill" key (D69 §7g).
+pub(super) fn cat_shape(cat: &Exp) -> String {
+    let mut head = cat;
+    while let Exp::App(f, _) = head {
+        head = f;
+    }
+    match head {
+        Exp::InductiveType(d, _) => d.iri.as_str().rsplit(':').next().unwrap_or("?").to_string(),
+        Exp::InductiveCtor(_, n, _) => n.clone(),
+        Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
+            i.as_str().rsplit(':').next().unwrap_or("?").to_string()
+        }
+        other => format!("{other:?}").chars().take(16).collect(),
+    }
 }
 
 pub(super) fn sense_cap_key(

@@ -36,6 +36,27 @@ skipped at import (the concept class stays; the common word is still covered by 
 dropped surface is a WordNet lemma). Regenerate the list with `lexicon-align drops` (see
 [experiments/lexicon-align](../lexicon-align/README.md)).
 
+It also applies the **curated atom overrides** (`experiments/lexicon-align/atom-overrides.json`, via
+`--atom-overrides`): a hand-maintained `{ "drop": [...], "add": [...] }` of `(cui, form)` rows
+adjudicated from **parse evidence** — a sentence whose best reading was unreachable, traced to the
+surface→concept mapping. `drop` suppresses an atom that maps a surface onto a concept it does not
+denote; `add` injects a surface UMLS does not carry for a concept it should reach. Adds are emitted
+through the same path as native atoms, so they obey the grammatical/junk/inflection skips and get the
+same category and mass shim.
+
+This file is deliberately **separate from `drops.json`**, which `lexicon-align drops` regenerates
+wholesale from candidates + verdicts and would clobber. Two rows live there today (2026-08-14):
+dropping the `drug target` atom family from `C0085104` «Drug Delivery Systems» — the only entry for
+that span, so every reading of "WRN is a promising drug target" asserted WRN is a *delivery system* —
+and adding `synthetic lethal` to `C4280020`, without which the hyphen rule found nothing to look up
+and silently degraded "synthetic-lethal" to plain "lethal".
+
+**Changing the lexicon invalidates pins that encoded the defect.** Both fixes changed *structure* (a
+degree adjective becomes a concept compound; a single-concept head decomposes), and since pins are
+sense-erased, only a structure change can break one. Four pins broke and were re-pinned the same day;
+one of them had already recorded "NOTE the head concept is wrong … this pin records the structure."
+Expect this, and re-pin from the forest (§7c) rather than reverting.
+
 ### 2a. Layer the WordNet↔UMLS alignment on top
 
 The measured store is the base **plus** the cross-lexicon concept alignment
@@ -115,6 +136,44 @@ different experiment, not a reproduction.
 This is what lets a parser change be A/B'd against **fixed** rankings, isolating the code from the
 model.
 
+### Reading selection — the same discipline, one stage up
+
+The sweep also runs the **reading-selection** stage (`docs/notes/d63-reading-selection.md`): for
+each ambiguous unit a ranker chooses ONE reading — structure and word senses together — in
+document context (the whole page + the glosses of prior selections). Metrics come from the
+`=== SELECTION (…) ===` line **only**. The gated metric is **READING-level**:
+`reading-correct` / `reading-wrong` are the verdicts of `reading-adjudications.tsv` (one verdict
+per `(sentence, chosen sem)`, authored by adjudicating recorded draws) on the chosen readings;
+`reading-unadjudicated` must be 0 on the tracked replay. The **pins are the GRAMMAR instrument,
+not selection gold** — they appear here only as the `structure-correct`/`curated` diagnostic
+(chosen skeleton == pin) and as adjudication evidence (a chosen structure contradicting the
+verified structure is a wrong reading). `eval-parse-rate.sh` gates `reading-correct` against
+**`selection-baseline.json`** — a separate baseline from `baseline.json`, deliberately: the parse
+baseline gates the grammar+lexicon (the produced forest), the selection baseline gates the ranker
+(the choice), and they re-baseline on different triggers — plus `reading-unadjudicated == 0` and
+`invalid-selected == 0` (the ranker has **no kernel veto** — every candidate type-checks — so the
+ledger and the validity check are its controls).
+
+Arms, mirroring the ranks discipline:
+
+```bash
+scripts/measure-parse-rate.sh --selections <file>  # file EXISTS  → REPLAY it (0 misses asserted)
+                                                   # file MISSING → RECORD a live draw into it —
+                                                   #   composes with --replay <ranks>, so a reference
+                                                   #   draw is LIVE selection over the DETERMINISTIC
+                                                   #   replayed forest
+# without --selections: a live run draws live selections; a deterministic run (cap-only, or a
+# ranks replay) uses the pin-backed arm (abstains on ties and unpinned units by construction)
+```
+
+Selection runs **after** classification, so all parse metrics are identical with and without it.
+**Abstentions are recorded** as first-class decisions — a draw with abstentions must replay with 0
+misses, and an unrecorded abstention would be indistinguishable from a changed question. The
+committed reference recording is `selections/2026-08-11-reference.json` (46 decisions: 44
+selections + 2 abstentions); its drift-free replay is the baseline: **reading-correct 28/44**
+(structure diagnostic 32/44 — the 4-unit difference is sense errors inside the verified
+structure, invisible to any skeleton metric), `invalid-selected` 0.
+
 ### What is committed, and what is not
 
 `experiments/*/results/` is **gitignored** — run logs and rank recordings are large and
@@ -123,7 +182,7 @@ provenance + expected metrics, so the gate survives a clean checkout. Update it 
 
 ---
 
-## 4. The three traps — each has produced a false result
+## 4. The traps — each has produced a false result
 
 The scripts close all three. They are documented because *reading the raw log by eye reopens them.*
 
@@ -143,7 +202,23 @@ The scripts close all three. They are documented because *reading the raw log by
    that it structurally cannot support, three times.) Its `sems` field records what each sense
    *denotes*, so two senses with different labels and the same `sem` are visibly ONE concept — but
    the pre-dedup caveat still stands.
-4. **`grammar-gap`, `total-readings`, and `total-skeletons` come from the summary line, and nowhere
+4. **The reseed has NO default scope — pick one, and check the snapshot's `PROVENANCE`.** Every
+   tracked snapshot and `baseline.json` were built with `--umls-all`. On 2026-08-14 a bare
+   `reseed-lexicon-db.sh` built the 8-TUI subset instead: a **different lexicon**, not a smaller copy
+   of the same one — whole concepts are absent (`C0085104` vanished rather than being edited), and
+   the store is 994 MB against the tracked 2.8 GB. Nothing in the log said so; it was caught only
+   because a probe happened to look for a concept outside the subset, and it cost a full reseed.
+   The script now **refuses without an explicit scope** and stamps a `PROVENANCE` file (scope, git
+   rev, drops, overrides) into the snapshot. Read it before measuring against a store you did not
+   just build.
+5. **A gated SCALAR hides a swap — diff the miss SET.** On 2026-08-14 `expected-hits` moved 60 → 61
+   and that was recorded as one unit recovering. Three units had changed state: two began hitting and
+   «These observations suggest … MMR deficiency» began *missing*. The provenance note went in wrong,
+   and at *constant* count the scalar gate would have said nothing at all. `baseline.json` now carries
+   `expected_reading_misses` (the missing units by name, with `hits + misses == curated`) and
+   `eval-parse-rate.sh` regresses on a newly-missing unit even when the count holds or improves.
+   **Check which units moved, not how many.**
+6. **`grammar-gap`, `total-readings`, and `total-skeletons` come from the summary line, and nowhere
    else.** The per-unit listing enumerates only AMBIG units and **silently omits grammar gaps** —
    counting from it reports 0 gaps on a run that had many. `eval-parse-rate.sh` reads the metrics from
    the `=== WRN first page over FULL lexicon: … ===` line only. And **a run with no summary line did not complete**; its

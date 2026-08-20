@@ -18,12 +18,21 @@
 //!
 //! 1. **Entry handling.** Resolve an entry's `sem` reference to a value ([`resolve_sem`]), build a parse
 //!    [`Item`] from a committed entry ([`entry_to_item`]), and the **felicity gate** ([`gate_entry`]) —
-//!    the trusted filter every LLM- or import-produced entry must pass. An entry is admitted iff
+//!    the intended filter for every LLM- or import-produced entry. An entry is admitted iff
 //!    `⟦cat⟧ ≡ sem_type` and its `sem` actually inhabits `⟦cat⟧`. The kernel is the oracle.
+//!
+//!    **It is not on the commit path.** Every call site is an importer binary, one CLI subcommand,
+//!    or a test; nothing under `kernel/src/{validation,layer,commit}` calls it, and in the importers
+//!    it sits behind an opt-in `--validate` flag that `scripts/reseed-lexicon-db.sh` does not pass.
+//!    A production lexicon load is gated by Rule 21 alone, which checks each `eigentt:TypeExpr` slot
+//!    in isolation and never relates `cat` to `sem_type`. Committing a lexicon does not run this.
 //! 2. **The index.** [`LexicalIndex`] is a `form → entries` map over a layer's committed
 //!    `lexicon:LexicalEntry` resources, resolving each through `entry_to_item` above. Lazy (a probe of
-//!    an active `core:ValueIndex` — the production path at WordNet's 325k entries) or eager (a full
-//!    chain scan) — behaviour-identical.
+//!    an active `core:ValueIndex` — the production path at WordNet scale) or eager (a full
+//!    chain scan) — behaviour-identical. WordNet is often quoted at 325k entries; what this
+//!    importer emits is **465,554** `lexicon:LexicalEntry` resources
+//!    (`docs/notes/lexicon-load-benchmarks-2026-07-27.md`), against its own counter's 465,642 — an
+//!    88-entry disagreement that is recorded there and not explained.
 //!
 //! [`LexicalLookup`] is the trait the parser sees: **two methods, and nothing else**. That is
 //! deliberate. `LexicalIndex` began as exactly what its name says and grew a chart parser, a beam, a
@@ -598,45 +607,60 @@ mod referential_definite_tests {
     use super::{LexicalIndex, LexicalLookup};
     use std::sync::Arc;
 
-    /// The definite-referential fix (`experiments/parsing/near-encoded-bucket-analysis.md`,
-    /// `2026-07-16`): the definite / demonstrative determiners denote a REFERENTIAL definite —
-    /// `ontology:the`, the ι operator — NOT the existential CPS (`obj_exists_sem`/`exists_sem`)
-    /// they once reused as a first-cut. A definite is scopeless, so `¬require(the(A), s)` is a
-    /// single reading; the existential encoding spuriously bifurcated it into `¬∃x.P` / `∃x.¬P`
-    /// under negation (the WRN-paper "did not require the exonuclease activity of WRN" dup).
+    /// The determiner wiring, pinned **in CI, no snapshot**:
     ///
-    /// This pins the wiring **in CI, no snapshot** (the behavioural 2→1 collapse is the
-    /// snapshot-gated `definite_negation_collapses_referential` in
-    /// `crates/eigenius-wordnet/tests/db_backed_encoding.rs`). It catches a **reversion**
-    /// (a definite re-pointed at the existential drops `ontology:the`) and an **over-correction**
-    /// (a genuine existential made referential gains it).
+    /// - Plain `the` is REFERENTIAL — `ontology:the`, the ι operator, scopeless (the
+    ///   definite-referential fix, `2026-07-16`: `¬require(the(A), s)` is one reading; the
+    ///   old existential first-cut spuriously bifurcated it under negation).
+    /// - DEMONSTRATIVES (`this`/`that`/`these`/`those`) are ANAPHORIC (D64,
+    ///   `docs/notes/d64-demonstratives-as-holes.md`, slice 3): their determiner reading applies
+    ///   the polymorphic `lexicon:anaphor_of` placeholder — a restrictor-typed referent hole the
+    ///   felicity gate freshens and the resolver fills — and no longer mentions `ontology:the`.
+    /// - Genuine existentials stay quantificational (neither ι nor anaphoric).
+    ///
+    /// Catches a reversion in any direction: `the` drifting off ι, a demonstrative drifting back
+    /// to ι (the pre-D64 misparse), or an existential gaining either.
     #[test]
     fn definites_reference_ontology_the_and_existentials_do_not() {
         const THE: &str = "Iri(\"urn:eigenius:ontology:the\")";
+        const ANAPHOR_OF: &str = "Iri(\"urn:eigenius:lexicon:anaphor_of\")";
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
         let lex = LexicalIndex::build(Arc::clone(ctx.head()));
-        let mentions_the = |form: &str| -> Vec<bool> {
+        let mentions = |form: &str, needle: &str| -> Vec<bool> {
             let es = lex.entries_for(form);
             assert!(!es.is_empty(), "no lexical entries for `{form}`");
             es.iter()
-                .map(|e| format!("{:?}", e.item.sem()).contains(THE))
+                .map(|e| format!("{:?}", e.item.sem()).contains(needle))
                 .collect()
         };
-        // Definites + demonstratives: their determiner reading is referential. `any` (not `all`)
-        // because some forms are polysemous (`that` is also a complementizer, `this`/`these` also
-        // pronouns) — those extra readings are legitimately not `ontology:the`.
-        for d in ["the", "this", "that", "these", "those"] {
+        // Plain `the`: referential (ι). `any` — polysemy elsewhere is legitimate.
+        assert!(
+            mentions("the", THE).iter().any(|&b| b),
+            "`the` must have a referential-definite reading (references ontology:the)"
+        );
+        // Demonstratives: anaphoric — the determiner reading carries the restrictor-typed hole
+        // placeholder, and NO reading is ι (`that` is also a complementizer; that reading is
+        // legitimately neither).
+        for d in ["this", "that", "these", "those"] {
             assert!(
-                mentions_the(d).iter().any(|&b| b),
-                "`{d}` must have a referential-definite reading (references ontology:the)"
+                mentions(d, ANAPHOR_OF).iter().any(|&b| b),
+                "`{d}` must have an anaphoric reading (references lexicon:anaphor_of)"
+            );
+            assert!(
+                mentions(d, THE).iter().all(|&b| !b),
+                "`{d}` must NOT be ι (the pre-D64 misparse blessed a closed the(N) reading)"
             );
         }
-        // Genuine existentials + a cardinal: NEVER referential — their negation-scope split is real
-        // and must be preserved.
+        // Genuine existentials + a cardinal: NEVER referential or anaphoric — their
+        // negation-scope split is real and must be preserved.
         for q in ["a", "an", "some", "two"] {
             assert!(
-                mentions_the(q).iter().all(|&b| !b),
+                mentions(q, THE).iter().all(|&b| !b),
                 "`{q}` must stay quantificational (no ontology:the)"
+            );
+            assert!(
+                mentions(q, ANAPHOR_OF).iter().all(|&b| !b),
+                "`{q}` must stay quantificational (no anaphor_of)"
             );
         }
     }

@@ -18,7 +18,7 @@ Eigenius is a small set of cooperating processes:
                                   │  - Layer chain    addon         │
                                   │  - Type theory    Connect :8080│
                                   │  - EigenQL        └────┬───────┘
-                                  │  - WASM runtime        │
+                                  │  - Institutions        │
                                   └────┬─────────────┘     │ spawn
                                        ▲                   ▼ workers
                                        │ component   ┌──────────────┐
@@ -59,29 +59,28 @@ You'll touch the platform through one of seven interfaces depending on what you'
 
 2. **The TypeScript SDK** — for programmatic browser / Deno / Node use of the same RPC surface the notebook drives. The `Eigen` class wraps `inspect` / `query` / `load` / `runProgram` / `runProgramByIri` / `layerTopology` / `publishNotebook` and a few more. See [chapter 17](17-typescript-sdk.md).
 
-3. **The CLI** — for ad-hoc operations: load a file, run a program, query the graph, inspect a resource, install a WASM capability or substrate institution. The `eigenius` binary in [`cli/`](../../../cli/) is the everyday tool. See [chapter 4](04-cli-reference.md).
+3. **The CLI** — for ad-hoc operations: load a file, run a program, query the graph, inspect a resource, install a substrate institution, consolidate or merge the chain. The `eigenius` binary in [`cli/`](../../../cli/) is the everyday tool. See [chapter 4](04-cli-reference.md).
 
 4. **The gRPC API** — for programmatic non-TS clients. The kernel exposes a tonic-based gRPC service at `--port` (default 50051) when running under `eigenius serve`. Protobuf definitions live in [`proto/`](../../../proto/). The CLI and the orchestrator's TypeScript SDK are both clients of this API.
 
 5. **The kernel as a library** — for embedding the kernel in another Rust process. Add `eigenius_kernel` as a Cargo dependency and use the modules under [`kernel/src/`](../../../kernel/src/) directly. This is what the kernel server itself does — the gRPC layer is a thin wrapper over the in-process API.
 
-6. **WASM extensions** — for adding *sandboxed* domain-specific dispatch logic. Custom components and institutions are built as WASM binaries against the [`eigenius-component`](../../../wit/eigenius-component.wit) and `eigenius-institution-d14` WIT worlds, using the [`eigenius-wasm-sdk`](../../../sdk/wasm-sdk/) crate. Components are installed via `eigenius capability install`; D14 institutions auto-register from chain scan when their `Institution` declaration carries `runtime: wasm` + inline `wasm_binary`. See [chapter 9](09-wasm-components.md) and [chapter 10](10-wasm-institutions.md).
+6. **In-process Rust institutions** — for first-party reasoners that need the kernel's own data structures and a full Cargo dependency tree. The institution is a Rust struct compiled into the kernel binary, pre-registered at startup, then picked up by the boot-time chain scan over `Institution` declarations carrying `runtime: in_process`. `eigenius-reasoning` and `eigenius-lean` are the shipped examples. (A third path, sandboxed WASM extensions, was **removed on 2026-07-08**: `wasmtime` is no longer a dependency, `eigenius capability install` is gone, and the `wit/` and `sdk/wasm-sdk/` trees were deleted. [Chapters 9](09-wasm-components.md) and [10](10-wasm-institutions.md) are retained as a historical record of it.)
 
-7. **Runtime substrate institutions** — for institutions backed by *full language ecosystems* (Julia in v1; Python and others planned). Sibling worker containers spawned by the orchestrator's substrate addon, communicating with the kernel via Eigon-CBOR over UDS. The right path when the institution wants to use a heavy native library that doesn't compile to WASM cleanly — `Symbolics.jl`, `OrdinaryDiffEq.jl`, `JuMP+HiGHS`, etc. The chain shapes (`RuntimePackageMirror`, `RuntimeEnvironment`, `RuntimeMethodSignature`, `Institution { runtime: external }`) are committed via `eigenius mirror create` / `env build` / `env create` / `institution install`. See [chapter 11](11-runtime-substrate.md).
+7. **Runtime substrate institutions** — for institutions backed by *full language ecosystems* (Julia in v1; Python and others planned). Sibling worker containers spawned by the orchestrator's substrate addon, communicating with the kernel via Eigon-CBOR over UDS. The right path when the institution wants a heavy native library — `Symbolics.jl`, `OrdinaryDiffEq.jl`, `JuMP+HiGHS`, etc. — and the path that replaced WASM extensibility for third-party reasoners. The chain shapes (`RuntimePackageMirror`, `RuntimeEnvironment`, `RuntimeMethodSignature`, `Institution { runtime: external }`) are committed via `eigenius mirror create` / `env build` / `env create` / `institution install`. See [chapter 11](11-runtime-substrate.md).
 
-## 1.3. The five bootstrap layers
+## 1.3. The twenty bootstrap layers
 
-When the kernel starts, it loads five immutable layers in a parent-pointer chain:
+When the kernel starts, it loads twenty immutable layers in a parent-pointer chain. `BOOTSTRAP_CHAIN` in [`kernel/src/bootstrap/mod.rs`](../../../kernel/src/bootstrap/mod.rs) is the single source of truth, root-first — array order *is* the parent chain:
 
 ```
-core (root)
-  └─ program
-      └─ reflection
-          └─ institution
-              └─ notebook
+core → eigentt-type-fragment → program → reflection → obo → institution →
+runtime → formulas → lean-expressions → lean-runtime-classes →
+lean-institution → reasoning → statistics → notebook → ingest → reference →
+logic → lexicon → ontology → closed-class
 ```
 
-These are baked into the kernel binary as the **embedded ontology**. The corresponding source-of-truth JSON files live in [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) and equivalents for the other four. Every subsequent layer (loaded via `eigenius load` or `eigen.load(...)`) sits on top of these five. The notebook layer ([`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json)) defines `Notebook`, `Cell`, and `CellType` so notebooks published from the UI ([chapter 14](14-notebook.md) §14.5) validate against a live, queryable schema without having to load anything first.
+These are baked into the kernel binary as the **embedded ontology**, `include_str!`'d from [`ontologies/`](../../../ontologies/) — ten `.json`, three Lean `.eigon.json`, and seven `.esl`. Every subsequent layer (loaded via `eigenius load` or `eigen.load(...)`) sits on top of the whole chain. The notebook layer ([`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json)) defines `Notebook`, `Cell`, and `CellType` so notebooks published from the UI ([chapter 14](14-notebook.md) §14.5) validate against a live, queryable schema without having to load anything first.
 
 When running with `--db <path>`, the kernel also seeds a SHA-256 manifest of the embedded ontology on first start. Subsequent restarts verify that the embedded ontologies haven't drifted from the persisted manifest — see [chapter 6](06-database-management.md) and [D13](../../design/d13-durable-kernel-state.md).
 
@@ -92,8 +91,8 @@ The chapters in order:
 - **[Chapters 2–3](02-installation.md)** — get a development environment building.
 - **[Chapter 4](04-cli-reference.md)** — every CLI command, with what it does in process vs. against a running kernel.
 - **[Chapters 5–7](05-running-locally.md)** — running locally, persistence, the orchestrator.
-- **[Chapter 8](08-demos.md)** — three worked end-to-end demos.
-- **[Chapters 9–10](09-wasm-components.md)** — extending the kernel with WASM components and institutions.
+- **[Chapter 8](08-demos.md)** — three of the eleven `demo/` scripts, worked end to end.
+- **[Chapters 9–10](09-wasm-components.md)** — WASM components and institutions. **Removed 2026-07-08**; retained as a historical record, nothing in them runs.
 - **[Chapter 11](11-runtime-substrate.md)** — extending the kernel with runtime-substrate-hosted institutions (Julia in v1).
 - **[Chapter 12](12-deployment.md)** — Docker Compose and Azure ContainerApps deployment.
 - **[Chapters 13](13-troubleshooting.md)** — troubleshooting.

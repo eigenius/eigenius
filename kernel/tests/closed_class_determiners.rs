@@ -24,9 +24,9 @@ use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
     abbreviation_resources, apply, coordinate_np, coordinate_prop, entry_to_item,
     extract_abbreviations, glossary_resources, ground_long_form, is_ctor, pretty_term, type_raise,
-    AbbrDef, AbbreviationBinding, Candidate, DocumentPipeline, Identity, InProcessPipeline, Item,
-    LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, ProposeCtx, Proposer, SenseRanker,
-    SentenceEncoding, SentenceOutcome, WordSenses,
+    AbbrDef, AbbreviationBinding, Candidate, DiscourseRun, DocumentPipeline, Identity,
+    InProcessPipeline, Item, LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, Proposal,
+    ProposeCtx, Proposer, SenseRanker, SentenceEncoding, SentenceOutcome, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -258,7 +258,12 @@ fn widen_on_failure_overrides_a_misranking_reranker() {
 /// [`PreferSense`]).
 struct BurySense(&'static str);
 impl SenseRanker for BurySense {
-    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(
+        &self,
+        _sentence: &str,
+        _context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<Vec<usize>>> {
         words
             .iter()
             .map(|w| {
@@ -266,7 +271,8 @@ impl SenseRanker for BurySense {
                 idx.sort_by_key(|&i| w.candidates[i].sense == self.0); // target (true) sorts LAST
                 idx
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .into()
     }
 }
 
@@ -406,7 +412,12 @@ fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>
 /// (others keep seed order) — the CI stand-in for "the context prefers this sense".
 struct PreferSense(&'static str);
 impl SenseRanker for PreferSense {
-    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(
+        &self,
+        _sentence: &str,
+        _context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<Vec<usize>>> {
         words
             .iter()
             .map(|w| {
@@ -414,7 +425,8 @@ impl SenseRanker for PreferSense {
                 idx.sort_by_key(|&i| w.candidates[i].sense != self.0); // target (false) sorts first
                 idx
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .into()
     }
 }
 
@@ -678,15 +690,21 @@ fn denominal_like_routes_to_the_verb_relation_and_does_not_drop_x() {
 fn connectives_batch_parses() {
     let (_layer, index) = index_over_bootstrap();
 
-    // Plural demonstratives `these`/`those` (plural noun via PluralS; mirror `all`).
-    assert!(
-        !index.parse("these genes affect HeLa", &PluralS).is_empty(),
-        "`these` + plural noun + plural verb parses"
-    );
-    assert!(
-        !index.parse("those genes affect HeLa", &PluralS).is_empty(),
-        "`those` + plural noun + plural verb parses"
-    );
+    // Plural demonstratives `these`/`those` (plural noun via PluralS; mirror `all`). Since D64
+    // slice 3 they are ANAPHORIC — the parse is OPEN, carrying a restrictor-typed referent hole
+    // (`d64-demonstratives-as-holes.md`), not a closed ι reading.
+    for d in ["these", "those"] {
+        let (closed, open) = index.parse_open(&format!("{d} genes affect HeLa"), &PluralS);
+        assert!(
+            closed.is_empty(),
+            "`{d}` no longer yields a closed ι reading (the pre-D64 misparse)"
+        );
+        assert!(
+            open.iter()
+                .any(|o| o.holes.len() == 1 && format!("{:?}", o.holes[0].ty).contains("Gene")),
+            "`{d}` + plural noun parses OPEN with a Gene-typed referent hole"
+        );
+    }
 
     // Prepositions `between`/`within` (VP-adjunct, mirror `in`).
     assert!(
@@ -1063,6 +1081,48 @@ fn pied_piping_respects_the_lexicon_scope() {
     );
 }
 
+/// **The DOCUMENT path respects the lexicon scope too** (D65 §4 / D71 §7.1).
+///
+/// `resolve_document` called `parse_open`, which is `parse_scoped_open(.., None)` — so the document
+/// pipeline was unconditionally unscoped while the single-sentence `ParseSentence` RPC had taken a
+/// scope since D65. That gap only became visible when the formalization request grew the same
+/// `scope` / `profile` fields: accepting them and ignoring them would have been worse than not
+/// offering them.
+///
+/// Same fixture and same witness as `pied_piping_respects_the_lexicon_scope`, one level up: the
+/// tagged `beside` is in scope by default and out of scope under an empty one, so the sentence
+/// encodes in the first case and does not in the second.
+#[test]
+fn resolve_document_respects_the_lexicon_scope() {
+    let index = parser_with_pied_prep().with_packing(false);
+    let doc = PIED_BESIDE;
+    let sentences = [PIED_BESIDE];
+    let resolve = |scope: Option<&[eigenius_kernel::ontology::Iri]>| {
+        index.resolve_document(&DiscourseRun {
+            document: doc,
+            sentences: &sentences,
+            lemmatizer: &Identity,
+            proposer: &PickBySurface(""),
+            ranker: None,
+            lander: None,
+            scope,
+        })
+    };
+
+    let unscoped = resolve(None);
+    assert!(
+        !matches!(unscoped[0].outcome, SentenceOutcome::Gap),
+        "control: the document path parses when the tagged lexicon is in scope"
+    );
+
+    let scoped = resolve(Some(&[]));
+    assert!(
+        matches!(scoped[0].outcome, SentenceOutcome::Gap),
+        "the document path admitted an OUT-OF-SCOPE preposition — `resolve_document` is not \
+         threading its scope to the parse (D65 §4)"
+    );
+}
+
 /// **The pied-piping rule drops the preposition's `Cost`.** Every other rule sums the costs of all its
 /// operands; pied-piping builds its result from `noun.cost() + subj.cost() + vp.cost()` and silently
 /// omits the preposition — so its `sense_rank` (and its `lexicon_order`, the PRIMARY rank key) never
@@ -1283,7 +1343,9 @@ fn vp_adjunct_preposition_takes_quantified_and_compound_objects() {
 /// Lever-3 raise interacting with the modal's base VP). Confirms S4's `can … for <obj>` shape is
 /// grammar-complete on the clean lexicon: the modal `can` takes the base VP `affect BRCA1 to a gene`
 /// (the `to`-PP attaches to the base VP, then the modal wraps it). (S4's full-lexicon gap is beam/sense
-/// scale — uniform with S1/S3/S5 — not a grammar gap; see d63-cnl-parse-levers-plan.)
+/// scale — uniform with S1/S3/S5 — not a grammar gap; the CNL parse-levers plan recording that
+/// measurement was deleted 2026-08-19, its surviving conclusions in
+/// `docs/design/d63-dcg-engine-english-grammar.md` §11.)
 #[test]
 fn modal_clause_takes_a_vp_adjunct_pp() {
     let (_layer, index) = index_over_bootstrap();
@@ -2542,17 +2604,413 @@ fn resolve_open_substitutes_an_antecedent_and_re_gates() {
     );
 }
 
+// ── Demonstratives as RESTRICTOR-TYPED holes (D64, d64-demonstratives-as-holes.md, slice 2) ──
+//
+// The kernel mechanism only — no lexicon change: a test overlay declares the polymorphic
+// placeholder `lexicon:anaphor_of : ∀(A:Set) → A` and demonstrative-style determiner entries on
+// the NOVEL surface "yonder" (so the bootstrapped ι demonstratives don't interfere). The felicity
+// gate freshens `anaphor_of(A)` applications in the normal form — where β-reduction has made the
+// restrictor concrete — into holes typed AT the restrictor, giving the resolution re-gate a veto
+// the Entity-typed pronoun holes cannot express.
+const DEMONSTRATIVE_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace core      = "urn:eigenius:core";
+
+// A SUBCLASS level under CellLine, for the re-gate subsumption probe: does the veto accept an
+// antecedent typed by a subclass of the hole's restrictor?
+class lexicon:HeLaSubline : lexicon:CellLine {
+    description = "test subclass of CellLine (re-gate subsumption probe).";
+}
+resource lexicon:hela_s3 : lexicon:HeLaSubline {
+    core:description = "a HeLa subline (test individual of the subclass).";
+}
+
+// Test demonstrative entries on the NOVEL surface "yonder" — the bootstrapped `dem_ref_*_sem`
+// (slice 3 moved the real demonstratives to them) on singular cats, isolated from the real
+// this/that/these/those so the tests pin the MECHANISM, not the migrated lexicon.
+resource lexicon:yonder_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: test demonstrative determiner (subject, sg).";
+    lexicon:form     = "yonder";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:dem_ref_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "yonder";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:yonder_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: test demonstrative determiner (object, sg).";
+    lexicon:form     = "yonder";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:dem_ref_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "yonder";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+/// A NAMED-ENTITY reading of the SAME surface span "yonder cell line" (a multi-token proper
+/// name, like the UMLS multi-token concepts), so the span carries BOTH a closed reading and the
+/// demonstrative open reading — the §2.2 pooled-competition probe. Chained on TOP of
+/// [`DEMONSTRATIVE_FIXTURE`] only where the competition is under test (the base fixture's tests
+/// assert `closed.is_empty()`).
+const POOLED_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace core      = "urn:eigenius:core";
+resource lexicon:yonder_ne : lexicon:LexicalEntry {
+    core:description = "test: named-entity reading of the demonstrative span (pooled-competition probe).";
+    lexicon:form     = "yonder cell line";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:HeLaSubline, lexicon:sg) );
+    lexicon:sem      = lexicon:hela_s3;
+    lexicon:sem_type = type_expr( lexicon:HeLaSubline );
+    lexicon:sense    = "urn:eigenius:lexicon:hela_s3";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn index_with_pooled_fixture() -> (Arc<Layer>, Parser) {
+    let (base, _) = index_with_demonstratives();
+    let resources =
+        esl::compile_against_layer(POOLED_FIXTURE, &base).expect("pooled fixture compiles");
+    let mut b = LayerBuilder::new("pooled-fixture", Some(base));
+    for r in resources {
+        b.add_resource(r).expect("add pooled resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let index = Parser::build(Arc::clone(&layer));
+    (layer, index)
+}
+
+/// The D68 claim-kind ALIGNMENT analog for the fixture world: a kind class that subsumes into
+/// the demonstrative's restrictor (CellLine), and one that does not — so a kind-classed claim
+/// resolves via the ordinary subsumption walk, and a wrong-kinded one is vetoed.
+const CLAIM_KIND_FIXTURE: &str = r#"
+namespace lexicon = "urn:eigenius:lexicon";
+class lexicon:TestFinding : lexicon:CellLine {
+    description = "test claim-kind class ALIGNED into the restrictor lattice (D68 §3 analog).";
+}
+class lexicon:TestOther {
+    description = "test claim-kind class with NO alignment — claims kinded here are unreferable.";
+}
+"#;
+
+fn index_with_claim_kinds() -> (Arc<Layer>, Parser) {
+    let (base, _) = index_with_demonstratives();
+    let resources =
+        esl::compile_against_layer(CLAIM_KIND_FIXTURE, &base).expect("claim-kind fixture compiles");
+    let mut b = LayerBuilder::new("claim-kind-fixture", Some(base));
+    for r in resources {
+        b.add_resource(r).expect("add claim-kind resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let index = Parser::build(Arc::clone(&layer));
+    (layer, index)
+}
+
+/// A mock [`ClaimLander`]: lands every encoded sentence as a claim resource kinded by the given
+/// class local name — `is_a = [enc:EncodedClaim, lexicon:<kind>]` (the D68 two-axis shape).
+struct KindLander(&'static str);
+impl eigenius_kernel::dcg::ClaimLander for KindLander {
+    fn land(
+        &self,
+        ordinal: usize,
+        _sentence: &str,
+        _gloss: &str,
+        _item: &Item,
+    ) -> Option<(eigenius_kernel::ontology::Resource, String)> {
+        use eigenius_kernel::ontology::resource::Value;
+        let mut r = eigenius_kernel::ontology::Resource::new(
+            Iri::parse(&format!("urn:eigenius:test:claim{ordinal}")).unwrap(),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            Value::Array(vec![
+                Value::String("urn:eigenius:encoding:EncodedClaim".to_string()),
+                Value::String(format!("urn:eigenius:lexicon:{}", self.0)),
+            ]),
+        );
+        Some((r, format!("the {} claim {ordinal}", self.0)))
+    }
+}
+
+#[test]
+fn a_demonstrative_resolves_to_a_landed_claim() {
+    // D68 §2 end to end at fixture scale: sentence 1 encodes and LANDS as a claim whose is_a
+    // carries the kind class TestFinding ⊑ CellLine (the alignment analog); sentence 2's
+    // demonstrative (restrictor CellLine) resolves to the claim RESOURCE through the ordinary
+    // multi-class inhabitation walk — no new kernel rule.
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    let (_layer, index) = index_with_claim_kinds();
+    let doc = ["HeLa affects BRCA1", "yonder cell line affects BRCA1"];
+    let lander = KindLander("TestFinding");
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("the TestFinding claim 0"),
+        ranker: Some(&First),
+        lander: Some(&lander),
+        scope: None,
+    });
+    let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
+        panic!("the demonstrative resolves to the landed claim");
+    };
+    assert!(
+        pretty_term(s2.sem()).contains("claim0"),
+        "the referent is the claim RESOURCE: {}",
+        pretty_term(s2.sem())
+    );
+
+    // The WRONG kind — TestOther has no alignment into the restrictor — is vetoed, and the
+    // sentence stays honestly Open (the claim class taxonomy is doing the soundness work).
+    let other = KindLander("TestOther");
+    let vetoed = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("the TestOther claim 0"),
+        ranker: Some(&First),
+        lander: Some(&other),
+        scope: None,
+    });
+    assert!(
+        matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
+        "an unaligned claim kind cannot be the referent (fail-closed)"
+    );
+}
+
+#[test]
+fn a_plural_reference_resolves_distributively_to_a_claim_set() {
+    // D68 §5: two consecutively-landed same-kind claims form the SET candidate; resolving the
+    // demonstrative to it DISTRIBUTES — the resolved sem is the And of the per-member
+    // applications (the same term the grammar builds for the spelled-out coordination), and the
+    // binding audit records the membership.
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    let (_layer, index) = index_with_claim_kinds();
+    let doc = [
+        "HeLa affects BRCA1",
+        "BRCA1 affects HeLa",
+        "yonder cell line affects BRCA1",
+    ];
+    let lander = KindLander("TestFinding");
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("the last 2 TestFinding claims, together"),
+        ranker: Some(&First),
+        lander: Some(&lander),
+        scope: None,
+    });
+    let SentenceOutcome::Encoded(s3) = &resolved[2].outcome else {
+        panic!("the plural reference resolves to the claim SET");
+    };
+    let sem = pretty_term(s3.sem());
+    assert!(
+        sem.contains("claim0") && sem.contains("claim1"),
+        "BOTH members are predicated: {sem}"
+    );
+    assert!(sem.contains("And("), "the members conjoin: {sem}");
+    let audit = resolved[2]
+        .resolution
+        .as_ref()
+        .expect("a resolved reading carries its binding audit");
+    assert!(
+        matches!(
+            &audit.bindings[0].antecedent,
+            Candidate::ClaimSet { members, .. } if members.len() == 2
+        ),
+        "the audit records the set membership"
+    );
+}
+
+fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
+    let (base, _) = index_over_bootstrap();
+    let resources = esl::compile_against_layer(DEMONSTRATIVE_FIXTURE, &base)
+        .expect("demonstrative fixture compiles");
+    let mut b = LayerBuilder::new("dem-fixture", Some(base));
+    for r in resources {
+        b.add_resource(r).expect("add fixture resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let index = Parser::build(Arc::clone(&layer));
+    (layer, index)
+}
+
+fn entity_ante(layer: &Arc<Layer>, local: &str) -> Exp {
+    let r = layer
+        .resolve(&Iri::parse(&format!("urn:eigenius:lexicon:{local}")).unwrap())
+        .unwrap_or_else(|| panic!("{local} resolves"));
+    Exp::EigonResource(Box::new((*r).clone()))
+}
+
+#[test]
+fn yonder_demonstrative_yields_a_restrictor_typed_open_parse() {
+    let (_layer, index) = index_with_demonstratives();
+    let (closed, open) = index.parse_open("yonder cell line affects HeLa", &Identity);
+    assert!(
+        closed.is_empty(),
+        "no ι entry for the test surface ⇒ no closed reading"
+    );
+    assert!(!open.is_empty(), "the demonstrative yields an OPEN parse");
+    let holes = &open[0].holes;
+    assert_eq!(holes.len(), 1, "one referent hole");
+    // The hole is typed at the RESTRICTOR — the noun's class — not at Entity.
+    assert!(
+        format!("{:?}", holes[0].ty).contains("CellLine"),
+        "hole typed by the restrictor (CellLine), got {:?}",
+        holes[0].ty
+    );
+}
+
+#[test]
+fn demonstrative_hole_vetoes_a_type_wrong_antecedent() {
+    let (layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects BRCA1", &Identity);
+    assert!(!open.is_empty());
+    let hole = open[0].holes[0].var.clone();
+
+    // Type-correct: hela : CellLine — the re-gate closes the parse.
+    let ok = index.resolve_open(&open[0], &[(hole.clone(), entity_ante(&layer, "hela"))]);
+    assert!(ok.is_some(), "a CellLine antecedent resolves");
+
+    // Type-wrong: brca1 : Gene — THE VETO the Entity-typed pronoun holes cannot express.
+    let veto = index.resolve_open(&open[0], &[(hole, entity_ante(&layer, "brca1"))]);
+    assert!(
+        veto.is_none(),
+        "a Gene antecedent for a CellLine-typed hole is REJECTED by the kernel re-gate"
+    );
+}
+
+/// The re-gate SUBSUMPTION probe (review question, d64-demonstratives-as-holes.md §2a): an
+/// antecedent typed by a SUBCLASS of the hole's restrictor. The demo lexicon already depends on
+/// class-parent subsumption (Gene-typed resources in Entity-typed verb positions), so the same
+/// mechanism should accept `hela_s3 : HeLaSubline <: CellLine` in a CellLine-typed hole — this
+/// test RECORDS the answer either way.
+#[test]
+fn demonstrative_hole_accepts_a_subclass_antecedent() {
+    let (layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects BRCA1", &Identity);
+    assert!(!open.is_empty());
+    let hole = open[0].holes[0].var.clone();
+    let resolved = index.resolve_open(&open[0], &[(hole, entity_ante(&layer, "hela_s3"))]);
+    assert!(
+        resolved.is_some(),
+        "an antecedent typed by a SUBCLASS of the restrictor is accepted (ontology-as-types \
+         subsumption at the re-gate) — if this fails, the veto is over-strict and the proposer \
+         must bridge subclass gaps (see the design note §2a)"
+    );
+}
+
+/// The TYPED open skeleton (`d64-demonstratives-as-holes.md` §5a): the hole's restrictor lives in
+/// `HoleInfo.ty`, not the term (`Lam` binders are untyped), so the plain sem skeleton cannot
+/// discriminate readings differing only inside the demonstrative NP. `OpenParse::skeleton` prints
+/// `λ(h : ⌈T⌉). ⌈body⌉` — pins and the adjudication ledger key open readings on this form.
+#[test]
+fn open_skeleton_prints_the_hole_type() {
+    let (_layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects BRCA1", &Identity);
+    assert!(!open.is_empty());
+    let sk = open[0].skeleton();
+    assert!(
+        sk.contains(" : CellLine"),
+        "the typed skeleton shows the restrictor: {sk}"
+    );
+    assert!(
+        sk.starts_with("λ($demref$0 : "),
+        "binder name α-normalized consistently with the body: {sk}"
+    );
+    // Same-typed occurrences co-normalize: the binder's name and its body occurrence agree.
+    assert!(
+        sk.matches("$demref$0").count() >= 2,
+        "the hole var appears in both binder and body: {sk}"
+    );
+}
+
+#[test]
+fn two_demonstrative_occurrences_are_two_independent_holes() {
+    let (layer, index) = index_with_demonstratives();
+    let (_c, open) = index.parse_open("yonder cell line affects yonder cell line", &Identity);
+    assert!(!open.is_empty(), "both demonstratives yield an open parse");
+    let two: Vec<_> = open.iter().filter(|o| o.holes.len() == 2).collect();
+    assert!(
+        !two.is_empty(),
+        "a reading carries TWO distinct holes (one per occurrence)"
+    );
+    let o = two[0];
+    assert_ne!(o.holes[0].var, o.holes[1].var, "distinct referents");
+    // Both resolve independently — here to the same entity, which is a legal coreference.
+    let bindings: Vec<(String, Exp)> = o
+        .holes
+        .iter()
+        .map(|h| (h.var.clone(), entity_ante(&layer, "hela")))
+        .collect();
+    assert!(
+        index.resolve_open(o, &bindings).is_some(),
+        "both holes resolve through the re-gate"
+    );
+}
+
 /// A deterministic mock [`Proposer`]: picks the in-scope candidate whose surface form equals the
 /// target (a ranked single-element list), else proposes nothing (unresolvable). Stands in for the
 /// LLM proposer to exercise the resolve loop without an LLM.
 struct PickBySurface(&'static str);
 impl Proposer for PickBySurface {
-    fn propose(&self, ctx: &ProposeCtx) -> Vec<eigenius_kernel::ontology::Iri> {
-        ctx.candidates
-            .iter()
-            .filter(|c| c.surface == self.0)
-            .map(|c| c.iri.clone())
-            .collect()
+    fn propose(&self, ctx: &ProposeCtx) -> Proposal {
+        Proposal::ranked(
+            ctx.candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.surface() == self.0)
+                .map(|(i, _)| i)
+                .collect(),
+        )
+    }
+}
+
+/// The isolated-sentence [`DocumentContext`] for direct `resolve_with` calls: the sentence is
+/// its own document, no prior selections.
+fn solo_ctx(sentence: &str) -> eigenius_kernel::dcg::DocumentContext<'_> {
+    eigenius_kernel::dcg::DocumentContext {
+        document: sentence,
+        sentence,
+        prior_selections: &[],
+        concepts: &[],
     }
 }
 
@@ -2564,21 +3022,21 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
     let (_c, open) = index.parse_open("it affects HeLa", &Identity);
     assert_eq!(open.len(), 1, "one open parse");
     let candidates = vec![
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:brca1").unwrap(),
             surface: "BRCA1".into(),
         },
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:hela").unwrap(),
             surface: "HeLa".into(),
         },
     ];
 
     // The mock proposes BRCA1 → the loop resolves it through the kernel to a closed Prop.
-    let resolved = index
+    let (resolved, audit) = index
         .resolve_with(
             &open[0],
-            "it affects HeLa",
+            &solo_ctx("it affects HeLa"),
             &candidates,
             &PickBySurface("BRCA1"),
         )
@@ -2590,13 +3048,20 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
         Exp::Sort(0),
         "the resolved parse denotes Prop"
     );
+    // The binding AUDIT records what the kernel accepted (D67 §3).
+    assert_eq!(audit.bindings.len(), 1, "one hole, one accepted binding");
+    assert_eq!(
+        audit.bindings[0].antecedent.surface(),
+        "BRCA1",
+        "the audit names the accepted antecedent"
+    );
 
     // A proposer that suggests nothing ⇒ fail closed (no committed parse).
     assert!(
         index
             .resolve_with(
                 &open[0],
-                "it affects HeLa",
+                &solo_ctx("it affects HeLa"),
                 &candidates,
                 &PickBySurface("NONE")
             )
@@ -2615,16 +3080,24 @@ fn resolve_document_threads_discourse_across_sentences() {
     let (_layer, index) = index_over_bootstrap();
     let doc = ["HeLa affects BRCA1", "it affects HeLa"];
 
-    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"));
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     assert_eq!(resolved.len(), 2);
     assert!(
         matches!(
-            resolved[0],
+            resolved[0].outcome,
             SentenceOutcome::Encoded(_) | SentenceOutcome::Ambiguous(_)
         ),
         "sentence 1 parses closed"
     );
-    let SentenceOutcome::Encoded(s2) = &resolved[1] else {
+    let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
         panic!("sentence 2's pronoun should resolve to a single closed prop");
     };
     assert!(
@@ -2634,11 +3107,280 @@ fn resolve_document_threads_discourse_across_sentences() {
     );
 
     // Fail-closed: a proposer that finds no antecedent ⇒ the sentence stays Open, not a wrong closed parse.
-    let none = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"));
+    let none = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("nonexistent"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
     assert!(
-        matches!(none[1], SentenceOutcome::Open(_)),
+        matches!(none[1].outcome, SentenceOutcome::Open(_)),
         "an unresolvable pronoun stays Open (fail-closed)"
     );
+}
+
+#[test]
+fn a_reading_ranker_collapses_ambiguity_and_an_abstention_leaves_it() {
+    // The reading-selection stage (d63-reading-selection.md §4) inside the discourse loop. A ranker
+    // that always abstains must leave every outcome EXACTLY as the no-ranker run classifies it
+    // (fail-open); a ranker that always chooses must leave no Ambiguous sentence, and every
+    // selection must carry the audit record (skeleton, gloss, rationale, candidate count).
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+
+    struct Abstain;
+    impl ReadingRanker for Abstain {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            _c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            None
+        }
+    }
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            // The document context must carry the whole input, the target sentence, and any
+            // prior selections — assert the plumbing, not just the choice.
+            assert!(ctx.document.contains(ctx.sentence), "sentence ⊆ document");
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first candidate (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    let (_layer, index) = index_over_bootstrap();
+    let doc = ["HeLa affects BRCA1", "it affects HeLa"];
+
+    let plain = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
+    let abstained = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: Some(&Abstain),
+        lander: None,
+        scope: None,
+    });
+    for (p, a) in plain.iter().zip(&abstained) {
+        assert_eq!(
+            std::mem::discriminant(&p.outcome),
+            std::mem::discriminant(&a.outcome),
+            "an abstaining ranker changes nothing"
+        );
+        assert!(a.selection.is_none(), "an abstention records no selection");
+    }
+
+    let ranked = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The BRCA1 gene"),
+        ranker: Some(&First),
+        lander: None,
+        scope: None,
+    });
+    for (r, p) in ranked.iter().zip(&plain) {
+        match (&p.outcome, &r.outcome) {
+            // A sentence the no-ranker run left ambiguous is now Encoded, with the audit record.
+            (SentenceOutcome::Ambiguous(items), SentenceOutcome::Encoded(_)) => {
+                let sel = r
+                    .selection
+                    .as_ref()
+                    .expect("a selection carries its record");
+                assert_eq!(sel.candidates, items.len(), "all readings competed");
+                assert!(!sel.chosen_skeleton.is_empty());
+                assert_eq!(sel.rationale, "first candidate (test)");
+                assert_eq!(
+                    sel.runner_up_skeletons.len(),
+                    items.len() - 1,
+                    "every non-chosen reading appears as a runner-up"
+                );
+            }
+            // A uniquely-encoded / resolved / open sentence is untouched and carries no record.
+            _ => {
+                assert_eq!(
+                    std::mem::discriminant(&p.outcome),
+                    std::mem::discriminant(&r.outcome),
+                    "the ranker only acts on Ambiguous sentences"
+                );
+                assert!(r.selection.is_none());
+            }
+        }
+    }
+    assert!(
+        !ranked
+            .iter()
+            .any(|r| matches!(r.outcome, SentenceOutcome::Ambiguous(_))),
+        "an always-choosing ranker leaves no Ambiguous sentence"
+    );
+}
+
+#[test]
+fn a_demonstrative_resolves_to_a_kind_antecedent_from_the_discourse() {
+    // Plan §2.3 kind candidates, end to end through the discourse loop: sentence 1 makes the
+    // KIND ⟦genes⟧ discourse-referent (a bare plural — `kind_of(Gene)`); sentence 2's
+    // demonstrative ("yonder gene", hole typed at the restrictor Gene) resolves to it via the
+    // kernel's derived-kind-predication coercion (base(K) ⊑ restrictor). Candidates carry
+    // READABLE surfaces: the kind verbalizes to "Gene", the individual to its layer label.
+    let (_layer, index) = index_with_demonstratives();
+    let doc = ["HeLa affects genes", "yonder gene affects HeLa"];
+
+    // The proposer picks the kind by its verbalized surface → the re-gate closes the parse
+    // with the kind as the referent.
+    let resolved = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &PluralS,
+        proposer: &PickBySurface("Gene"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
+    let SentenceOutcome::Encoded(s2) = &resolved[1].outcome else {
+        panic!("the demonstrative resolves to the discourse kind ⟦genes⟧");
+    };
+    assert!(
+        pretty_term(s2.sem()).contains("kind_of(Gene)"),
+        "the referent is the KIND, not an invented individual: {}",
+        pretty_term(s2.sem())
+    );
+
+    // A type-wrong candidate — the CellLine individual for the Gene-typed hole — is VETOED by
+    // the re-gate, and the sentence stays honestly Open (fail-closed).
+    let vetoed = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &PluralS,
+        proposer: &PickBySurface("The HeLa cell line"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
+    assert!(
+        matches!(vetoed[1].outcome, SentenceOutcome::Open(_)),
+        "a kind-typed hole rejects a class-incompatible individual antecedent"
+    );
+}
+
+#[test]
+fn pooled_competition_lets_an_anaphoric_reading_compete_with_a_closed_one() {
+    // Plan §2.2: the reading pool is closed ∪ resolved-open. The span "yonder cell line" carries
+    // BOTH a closed named-entity reading (`hela_s3`, the POOLED_FIXTURE entry) and the
+    // demonstrative open reading; before §2.2 the closed reading silently killed the anaphoric
+    // one (`resolve_with` only ran when closed was empty).
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+
+    let (_layer, index) = index_with_pooled_fixture();
+    let doc = ["HeLa affects BRCA1", "yonder cell line affects BRCA1"];
+
+    // No ranker: BOTH readings survive as Ambiguous — the anaphoric reading (resolved to the
+    // discourse HeLa) sits in the pool beside the named-entity reading.
+    let plain = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The HeLa cell line"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
+    let SentenceOutcome::Ambiguous(pool) = &plain[1].outcome else {
+        panic!(
+            "closed + resolved-open must POOL to Ambiguous, got {}",
+            match &plain[1].outcome {
+                SentenceOutcome::Encoded(it) => format!("Encoded({})", pretty_term(it.sem())),
+                SentenceOutcome::Open(_) => "Open".to_string(),
+                SentenceOutcome::Gap => "Gap".to_string(),
+                SentenceOutcome::Ambiguous(_) => unreachable!(),
+            }
+        );
+    };
+    assert_eq!(pool.len(), 2, "exactly the two competing readings");
+    let sems: Vec<String> = pool.iter().map(|it| pretty_term(it.sem())).collect();
+    assert!(
+        sems.iter().any(|s| s.contains("hela_s3")),
+        "the closed named-entity reading is in the pool: {sems:?}"
+    );
+    assert!(
+        sems.iter()
+            .any(|s| s.contains("hela") && !s.contains("hela_s3")),
+        "the resolved anaphoric reading (discourse HeLa) is in the pool: {sems:?}"
+    );
+
+    // An unresolvable discourse (no antecedent proposed) leaves the closed reading alone — a
+    // pool of one, Encoded, never a false Open.
+    let alone = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("nonexistent"),
+        ranker: None,
+        lander: None,
+        scope: None,
+    });
+    let SentenceOutcome::Encoded(only) = &alone[1].outcome else {
+        panic!("with the anaphoric reading unresolvable, the closed reading encodes alone");
+    };
+    assert!(pretty_term(only.sem()).contains("hela_s3"));
+    assert!(
+        alone[1].selection.is_none(),
+        "a pool of one records no selection"
+    );
+
+    // A ranker collapses the pooled competition and the audit record counts BOTH readings.
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first candidate (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+    let ranked = index.resolve_document(&DiscourseRun {
+        document: &doc.join(" "),
+        sentences: &doc,
+        lemmatizer: &Identity,
+        proposer: &PickBySurface("The HeLa cell line"),
+        ranker: Some(&First),
+        lander: None,
+        scope: None,
+    });
+    let SentenceOutcome::Encoded(_) = &ranked[1].outcome else {
+        panic!("a choosing ranker collapses the pooled competition");
+    };
+    let sel = ranked[1]
+        .selection
+        .as_ref()
+        .expect("the pooled selection carries its audit record");
+    assert_eq!(sel.candidates, 2, "both pooled readings competed");
 }
 
 #[test]
@@ -2988,9 +3730,11 @@ fn in_process_pipeline_encodes_a_document_end_to_end() {
         Arc::clone(&base),
         &Identity,
         &NoAbbreviationProposer,
-        &PickBySurface("hela"),
+        &PickBySurface("The HeLa cell line"),
     );
-    let enc = pipeline.encode(doc);
+    let enc = pipeline
+        .encode(doc)
+        .expect("the in-memory pipeline arm is infallible");
 
     // Stage A — the abbreviation was harvested as a grounded binding in the document augmentation.
     assert!(
@@ -3146,17 +3890,22 @@ fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
     let (_closed, open) = index.parse_open("it affects HeLa", &Identity);
     assert_eq!(open.len(), 1, "one open parse with one referent hole");
     let candidates = vec![
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:brca1").unwrap(),
             surface: "BRCA1".into(),
         },
-        Candidate {
+        Candidate::Individual {
             iri: Iri::parse("urn:eigenius:lexicon:hela").unwrap(),
             surface: "HeLa".into(),
         },
     ];
-    let resolved = index
-        .resolve_with(&open[0], "it affects HeLa", &candidates, &proposer)
+    let (resolved, _audit) = index
+        .resolve_with(
+            &open[0],
+            &solo_ctx("it affects HeLa"),
+            &candidates,
+            &proposer,
+        )
         .expect("live LLM proposes an antecedent the kernel re-gates to a closed Prop");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");

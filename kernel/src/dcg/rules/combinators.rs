@@ -2019,6 +2019,7 @@ mod dispatch_tests {
                             | "sg"
                             | "pl"
                             | "mass"
+                            | "name"
                             | "num_any"
                     ) {
                         out.push((*n).to_string());

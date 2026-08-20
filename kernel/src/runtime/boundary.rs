@@ -217,7 +217,9 @@ fn parse_layer_iri(iri: &Iri) -> Option<LayerId> {
         return None;
     }
     let mut bytes = [0u8; 32];
-    for (i, byte_chunk) in s.as_bytes().chunks_exact(2).enumerate() {
+    // Length is checked to be 64 above, so the 2-byte windows tile it exactly and
+    // `as_chunks`' remainder is empty.
+    for (i, byte_chunk) in s.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let hi = hex_digit(byte_chunk[0])?;
         let lo = hex_digit(byte_chunk[1])?;
         bytes[i] = (hi << 4) | lo;

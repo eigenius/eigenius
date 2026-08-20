@@ -29,8 +29,10 @@
 //!
 //! Standalone `extend_layer` / `drop_layer` create their own
 //! `WriteBatch`; `extend_into_batch` / `drop_into_batch` append to a
-//! caller-supplied batch so `RocksStore::store_layer` can commit
-//! layer + index in a single atomic write (D43 §2.5).
+//! caller-supplied batch. `RocksStore::delete_layer` uses
+//! `drop_into_batch` that way; `RocksStore::store_layer` does **not**
+//! use `extend_into_batch`, so the D43 §2.5 single-atomic-write
+//! property holds on the drop path only. See GAP-05-14.
 
 use crate::{run_blocking, CF_TEXT};
 use eigenius_kernel::layer::{
@@ -263,8 +265,11 @@ impl RocksTextIndex {
 
     /// Append all four key families' updates for one `(index, layer)`
     /// pair to a caller-owned `WriteBatch`. The caller is responsible
-    /// for committing the batch — used by `RocksStore::store_layer`
-    /// to bundle layer + indexes in one atomic write per D43 §2.5.
+    /// for committing the batch. Intended to let
+    /// `RocksStore::store_layer` bundle layer + indexes in one atomic
+    /// write per D43 §2.5; `store_layer` does not call it. Its only
+    /// caller is this type's own `extend_layer`, which supplies a fresh
+    /// batch of its own. See GAP-05-14.
     pub fn extend_into_batch(
         &self,
         batch: &mut rocksdb::WriteBatch,

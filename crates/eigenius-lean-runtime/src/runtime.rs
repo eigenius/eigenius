@@ -820,7 +820,7 @@ fn path_to_posix(p: &Path) -> String {
     s
 }
 
-/// Decode a `LeanPackageMirror` (D26 §5.4) Resource's
+/// Decode a `runtime:RuntimePackageMirror` (D26 §5.4) Resource's
 /// `library_content` JSON into a substrate
 /// [`MirrorMaterialization`]. Inverse of `mirror_gen::mirror_to_resource`'s
 /// `library_content_to_json` encoding — `{"kind": "embedded",

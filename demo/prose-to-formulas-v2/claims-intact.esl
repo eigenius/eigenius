@@ -1,0 +1,167 @@
+// Decompiled from Eigon-JSON by `eigenius decompile`.
+
+namespace core = "urn:eigenius:core";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace encoding = "urn:eigenius:encoding";
+namespace ontology = "urn:eigenius:ontology";
+namespace reference = "urn:eigenius:reference";
+namespace reflection = "urn:eigenius:reflection";
+namespace umlscui = "urn:eigenius:umlscui";
+namespace v2 = "urn:eigenius:demo:v2";
+namespace wn = "urn:eigenius:wn";
+
+resource v2:source : reference:Reference {
+    core:description = "The source this encoding was derived from: demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c). Minted document-locally — the file carries no DOI or PMID; pass an existing reference:Reference IRI to cite a bibliographic record instead.";
+}
+
+resource v2:unit_1 : encoding:DiscourseUnit {
+    encoding:prose = "MSI cancer models had the exonuclease activity of WRN.";
+    encoding:source_document = "urn:eigenius:demo:v2:source";
+    encoding:span_end = 54;
+    encoding:span_start = 0;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource v2:scoped_1 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:demo:v2:unit_1";
+}
+
+resource v2:claim_1 : encoding:EncodedClaim, encoding:Observation {
+    core:description = "«MSI cancer models had the exonuclease activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))";
+    encoding:from_unit = "urn:eigenius:demo:v2:scoped_1";
+    reflection:canonical_proposition = type_expr(
+        wn:v02203362_t(
+            eigentt:fst(ontology:the(
+                            (exists x0 : umlscui:C1148824 =>
+                                ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246)))
+                        )),
+            ontology:kind_of(
+                (exists x0 : umlscui:C1516211 => ontology:compound_kind(x0, umlscui:C0920269))
+            )
+        )
+    );
+}
+
+resource v2:trace_1 : reflection:ProgramTrace {
+    reflection:resource = "urn:eigenius:demo:v2:claim_1";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 0 «MSI cancer models had the exonuclease activity of WRN.»";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+
+resource v2:decision_1 : encoding:DecisionPoint {
+    encoding:candidate_count = 4;
+    encoding:decision_unit = "urn:eigenius:demo:v2:scoped_1";
+    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))"];
+    encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
+    encoding:selected_claim = "urn:eigenius:demo:v2:claim_1";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence states that MSI cancer models \"had\" (possessed/required) the exonuclease activity of WRN, where WRN refers to the protein (which actually carries out the exonuclease activity, as described in C0388246), and \"had\" in the sense of possessing/depending on that activity (v02203362), making reading [0] the best fit.";
+}
+
+resource v2:unit_2 : encoding:DiscourseUnit {
+    encoding:prose = "MSI cancer models required the helicase activity of WRN.";
+    encoding:source_document = "urn:eigenius:demo:v2:source";
+    encoding:span_end = 111;
+    encoding:span_start = 55;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource v2:scoped_2 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:demo:v2:unit_2";
+}
+
+resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
+    core:description = "«MSI cancer models required the helicase activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))";
+    encoding:from_unit = "urn:eigenius:demo:v2:scoped_2";
+    reflection:canonical_proposition = type_expr(
+        wn:v02627934_t(
+            eigentt:fst(ontology:the(
+                            (exists x0 : umlscui:C1149627 =>
+                                ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246)))
+                        )),
+            ontology:kind_of(
+                (exists x0 : umlscui:C1516211 => ontology:compound_kind(x0, umlscui:C0920269))
+            )
+        )
+    );
+}
+
+resource v2:trace_2 : reflection:ProgramTrace {
+    reflection:resource = "urn:eigenius:demo:v2:claim_2";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 1 «MSI cancer models required the helicase activity of WRN.»";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+
+resource v2:decision_2 : encoding:DecisionPoint {
+    encoding:candidate_count = 2;
+    encoding:decision_unit = "urn:eigenius:demo:v2:scoped_2";
+    encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))"];
+    encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
+    encoding:selected_claim = "urn:eigenius:demo:v2:claim_2";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: Consistent with sentence 0 which used \"WRN protein, human\" [C0388246], and the document refers to WRN as a protein entity (exonuclease and helicase activities are properties of the WRN protein), reading [0] correctly identifies WRN as the protein rather than the gene.";
+}
+
+resource v2:unit_3 : encoding:DiscourseUnit {
+    encoding:prose = "These findings show that WRN is a vulnerability of MSI cancer models.";
+    encoding:source_document = "urn:eigenius:demo:v2:source";
+    encoding:span_end = 181;
+    encoding:span_start = 112;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource v2:scoped_3 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:demo:v2:unit_3";
+}
+
+resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
+    core:description = "«These findings show that WRN is a vulnerability of MSI cancer models.» — the reading the ranker selected: §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)";
+    encoding:from_unit = "urn:eigenius:demo:v2:scoped_3";
+    reflection:canonical_proposition = type_expr(
+        wn:v01015244_c(
+            ontology:is_a(
+                ontology:kind_of(umlscui:C0388246),
+                (exists x0 : wn:n05042871 =>
+                    ontology:prep_of(
+                        x0,
+                        ontology:kind_of(
+                            (exists x1 : umlscui:C1516211 =>
+                                ontology:compound_kind(x1, umlscui:C0920269))
+                        )
+                    ))
+            ),
+            v2:claim_2
+        )
+    );
+}
+
+resource v2:trace_3 : reflection:ProgramTrace {
+    reflection:resource = "urn:eigenius:demo:v2:claim_3";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 2 «These findings show that WRN is a vulnerability of MSI cancer models.»";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+
+resource v2:decision_3 : encoding:DecisionPoint {
+    encoding:candidate_count = 8;
+    encoding:decision_unit = "urn:eigenius:demo:v2:scoped_3";
+    encoding:runner_up_skeletons = ["§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)"];
+    encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
+    encoding:selected_claim = "urn:eigenius:demo:v2:claim_3";
+    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence uses \"show\" in the sense of \"provide evidence for\" (v01015244), consistent with the empirical findings context; \"WRN\" refers to the protein (C0388246) as established in sentences 0 and 1; and \"vulnerability\" best fits n05042871 (\"susceptibility to injury or attack\"), meaning MSI cancer models are susceptible when WRN is targeted.";
+}
+
+resource v2:binding_3_0 : encoding:AnaphorBinding {
+    encoding:antecedent_resource = "urn:eigenius:demo:v2:claim_2";
+    encoding:antecedent_surface = "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human";
+    encoding:binding_unit = "urn:eigenius:demo:v2:scoped_3";
+    encoding:bound_by = "urn:eigenius:encoding:binding_replay";
+    encoding:confidence = 0.85;
+    encoding:hole_var = "$demref$0_0";
+    reflection:rationale = "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim from sentence 1), it is the top-ranked antecedent, with the understanding that it collectively represents the set of findings established in the discourse.";
+}
+
+resource v2:structure : encoding:ReasoningStructure {
+    core:description = "The encoding of demo/prose-to-formulas-v2/paragraph.txt: 3 claim(s), 0 unit(s) recorded as not encoding.";
+    encoding:claims = ["urn:eigenius:demo:v2:claim_1", "urn:eigenius:demo:v2:claim_2", "urn:eigenius:demo:v2:claim_3"];
+    encoding:document = "urn:eigenius:demo:v2:source";
+    encoding:source_path = "demo/prose-to-formulas-v2/paragraph.txt";
+    encoding:source_sha256 = "0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c";
+}

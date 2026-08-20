@@ -47,6 +47,9 @@
 #   scripts/measure-parse-rate.sh --page /abs/or/rel/path.txt
 #   scripts/measure-parse-rate.sh --no-llm           # cap-only (no reranker) for an A/B
 #   scripts/measure-parse-rate.sh --replay <ranks.json>  # replay a recorded run: NO LLM, deterministic
+#   scripts/measure-parse-rate.sh --selections <selections.json>  # replay recorded READING SELECTIONS
+#                                                    # (without it: a live run draws live selections;
+#                                                    #  a deterministic run uses the pin-backed arm)
 #   scripts/measure-parse-rate.sh --pos-prune        # ARM: cross-POS prune (GH#97) — CHANGES the result
 #   scripts/measure-parse-rate.sh --combinatory-core # ARM: extra CCG combinators — CHANGES the grammar
 #   scripts/measure-parse-rate.sh --attribution    # + page ambiguity roll-up (read-only; see README §7)
@@ -86,12 +89,14 @@ COMB_CORE=0
 ATTRIBUTION=0
 CONTEXT_WINDOW=0
 REPLAY=""
+SEL_REPLAY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --page)             PAGE_ARG="$2"; shift 2 ;;
     --snapshot)         SNAP="$2"; shift 2 ;;
     --no-llm)           USE_LLM=0; shift ;;
     --replay)           REPLAY="$2"; shift 2 ;;
+    --selections)       SEL_REPLAY="$2"; shift 2 ;;
     --pos-prune)        POS_PRUNE=1; shift ;;
     --combinatory-core) COMB_CORE=1; shift ;;
     --attribution)      ATTRIBUTION=1; shift ;;
@@ -107,12 +112,12 @@ done
 #
 # `EIGENIUS_POS_PRUNE` is read with `.is_ok()`: ANY value, including the empty string, enables it.
 # Setting it to "0" would turn it ON. It must be UNSET to be off — hence `env -u`, not `VAR=0`.
-for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES; do
+for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT; do
   if [[ -n "${!v:-}" ]]; then
     echo "note: ignoring ambient $v=${!v} — the run declares its own config (use the flags)" >&2
   fi
 done
-ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES)
+ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT)
 [[ "$POS_PRUNE" == "1" ]] && ENV_STRIP+=(EIGENIUS_POS_PRUNE=1)
 [[ "$COMB_CORE" == "1" ]] && ENV_STRIP+=(EIGENIUS_COMBINATORY_CORE=1)
 # Read-only instrument: it observes the forest and does NOT change the parse (the four metrics are
@@ -177,6 +182,7 @@ RUN_ID="${STAMP}-${COMMIT}"
 RUN_ID+="-$(basename "$PAGE" .txt)"
 RUN_ID+="-$([[ "$USE_LLM" == "1" ]] && echo reranked || echo caponly)"
 [[ -n "$REPLAY" ]]      && RUN_ID+="-replay"
+[[ -n "$SEL_REPLAY" ]]  && RUN_ID+="-selreplay"
 [[ "$POS_PRUNE" == "1" ]] && RUN_ID+="-posprune"
 [[ "$COMB_CORE" == "1" ]] && RUN_ID+="-combcore"
 RUN_DIR="$OUT_DIR/$RUN_ID"
@@ -205,6 +211,35 @@ else
 fi
 [[ -n "$RANKS" ]] && ENV_STRIP+=(EIGENIUS_SENSE_RANKS="$RANKS")
 
+# ── Reading-selection decisions: REPLAY, LIVE-RECORD, or the pin-backed arm ──────────────────
+# `--selections <file>` has the EIGENIUS_SENSE_RANKS semantics (d63-reading-selection.md §5):
+#   file EXISTS  → REPLAY it (deterministic, no LLM; the harness asserts 0 misses)
+#   file ABSENT  → RECORD a LIVE draw into it (needs the live ranker; composes with --replay so a
+#                  reference draw runs live selection over the DETERMINISTIC replayed forest)
+# Without the flag: a LIVE run (no --replay) draws live selections into the run dir — one live run
+# records BOTH artifacts; a deterministic run (cap-only, or a ranks replay) uses the pin-backed arm.
+if [[ -n "$SEL_REPLAY" ]]; then
+  SEL_DIR="$(cd "$(dirname "$SEL_REPLAY")" 2>/dev/null && pwd)" \
+    || { echo "error: --selections parent dir not found: $(dirname "$SEL_REPLAY")" >&2; exit 1; }
+  SELECTIONS="$SEL_DIR/$(basename "$SEL_REPLAY")"
+  if [[ -f "$SELECTIONS" ]]; then
+    SELECTIONS_MODE="REPLAY $SELECTIONS (deterministic, no LLM)"
+    ENV_STRIP+=(EIGENIUS_SELECTIONS="$SELECTIONS" EIGENIUS_SELECTIONS_OUT="$RUN_DIR/selections.json")
+  else
+    [[ "$USE_LLM" == "1" ]] || { echo "error: --selections names a MISSING file (live-record mode) but --no-llm is set" >&2; exit 1; }
+    SELECTIONS_MODE="LIVE AnthropicReadingRanker → RECORD $SELECTIONS"
+    ENV_STRIP+=(EIGENIUS_SELECTIONS="$SELECTIONS")
+  fi
+elif [[ "$USE_LLM" == "1" && -z "$REPLAY" ]]; then
+  SELECTIONS="$RUN_DIR/selections.json"
+  SELECTIONS_MODE="LIVE AnthropicReadingRanker → RECORD $SELECTIONS"
+  ENV_STRIP+=(EIGENIUS_SELECTIONS="$SELECTIONS")
+else
+  SELECTIONS="$RUN_DIR/selections.json"
+  SELECTIONS_MODE="pin-backed arm → $SELECTIONS"
+  ENV_STRIP+=(EIGENIUS_SELECTIONS_OUT="$SELECTIONS")
+fi
+
 # ── Provenance header — a log without it cannot be reproduced or trusted ─────
 KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   "$ROOT/crates/eigenius-wordnet/tests/db_backed_encoding.rs" \
@@ -220,6 +255,7 @@ KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW $KNOBS"
   echo "# rust_min_stack: ${RUST_MIN_STACK:-default}"
   echo "# ranks:     $RANKS_MODE"
+  echo "# selections: $SELECTIONS_MODE"
   echo "# started:   $(date -Iseconds)"
   echo "# command:   EIGENIUS_SENSE_RANKS=$RANKS EIGENIUS_DB_SNAPSHOT=$SNAP EIGENIUS_WRN_PAGE=$PAGE cargo test --release -p eigenius-wordnet ${FEATURES[*]} --test db_backed_encoding wrn_first_page_over_full_lexicon -- --ignored --nocapture"
   echo

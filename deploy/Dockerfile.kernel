@@ -13,6 +13,18 @@ RUN apt-get update && apt-get install -y protobuf-compiler libclang-dev && rm -r
 # identical binary for e2e). Pass `--build-arg CARGO_PROFILE=ci` from the
 # workflow when building for the notebook E2E job.
 ARG CARGO_PROFILE=release
+# D71 — the untrusted proposers (sense ranker, reading ranker, anaphora,
+# discourse kind, abbreviation, POS) only exist under `use-llm`. Without them a
+# formalization run against a doc branch that carries no recorded draws fails
+# CLOSED: a run with no sense ranker is cap-only, which is a DIFFERENT
+# experiment, not a quieter version of the same one.
+#
+# Off by default, because the default image should not carry an LLM client or
+# invite one. Turn it on for a stack you intend to formalize with:
+#   docker compose build --build-arg CARGO_FEATURES=use-llm kernel
+# and give the kernel service an ANTHROPIC_API_KEY. Once a run succeeds its
+# draws live on its `doc-<id>` branch, and re-runs replay them without a key.
+ARG CARGO_FEATURES=
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
@@ -35,6 +47,7 @@ COPY patches/ patches/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --profile ${CARGO_PROFILE} -p eigenius-cli \
+        ${CARGO_FEATURES:+--features ${CARGO_FEATURES}} \
     && mkdir -p /out \
     && cp /build/target/${CARGO_PROFILE}/eigenius /out/eigenius
 
@@ -54,6 +67,24 @@ LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigeni
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/eigenius /usr/local/bin/eigenius
+
+# WordNet's Morphy dictionary is MOUNTED, not baked in — see the compose file.
+# `references/` is gitignored (only `.gitkeep` is tracked), so a `COPY` here
+# breaks every clean checkout and CI build while working fine on a developer's
+# machine that happens to have the download.
+#
+# The license would permit shipping it (WordNet 3.0 grants distribution without
+# fee, provided the copyright notice travels with it) — this is a repo-convention
+# decision, not a legal one: third-party corpora are downloaded, not vendored.
+#
+# WITHOUT IT THE SERVED PARSER DOES NOT LEMMATISE: `build_parse_config` falls
+# back to the no-op `Identity`, so `models` never reaches `model`, nothing seeds,
+# and every sentence yields zero parses — reported as `cut_grammar` ("no parse
+# with every token in vocabulary"), which reads like a grammar gap and is not
+# one. Found `2026-08-20` the first time a D71 formalization ran in the
+# container; `ParseSentence` had been silently unlemmatised there since it
+# shipped. The startup log says which lemmatizer loaded; check it.
+ENV EIGENIUS_MORPHY_DICT=/usr/share/eigenius/wordnet/dict
 
 EXPOSE 50051
 

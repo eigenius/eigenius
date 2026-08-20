@@ -152,9 +152,12 @@ pub struct Query {
     /// D43 §3.3 — ranked truncation. `TOP N` is the user-facing
     /// surface for "give me the N most relevant rows." When the
     /// query contains a similarity operator, ordering is the fused
-    /// similarity score; without `~`, `TOP N` is rejected at parse
-    /// (use `LIMIT` for un-ranked truncation). Mutually exclusive
-    /// with `LIMIT` and with `ORDER BY` in the same query.
+    /// similarity score. Without `~`, `TOP N` parses and is then
+    /// rejected at *typecheck* (`top_without_similarity`); the parser
+    /// enforces only position — `TOP` sits between `LIMIT` and
+    /// `OFFSET`. Use `LIMIT` for un-ranked truncation. Mutually
+    /// exclusive with `LIMIT` (`top_with_limit`) and with `ORDER BY`
+    /// (`top_with_order_by`) in the same query.
     pub top: Option<usize>,
 }
 

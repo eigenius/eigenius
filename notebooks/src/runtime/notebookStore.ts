@@ -50,6 +50,7 @@ import type {
   CellJson,
   CellType,
   ChartCellJson,
+  FormalizeCellJson,
   ChartKind,
   NotebookJson,
   NotebookMetaJson,
@@ -221,6 +222,26 @@ export type CellOutput =
     kind: "program-run";
     programIri: string;
     results: readonly ProgramRunResult[];
+  }
+  | {
+    /**
+     * D71 — formalization cell output. The artifact is NOT committed:
+     * generation stays decoupled from commitment, so the cell shows what
+     * was produced and landing it is an explicit ESL/JSON load.
+     */
+    kind: "formalize";
+    /** The `enc:ReasoningStructure` rooting the artifact. */
+    structureIri: string;
+    /** Units that encoded, and units recorded as `enc:CutItem`s. */
+    encoded: number;
+    cut: number;
+    /** Proposer draws this run committed to its `doc-<id>` branch. 0 = all replayed. */
+    drawsCommitted: number;
+    /** The artifact, as text (the cell always asks for ESL — it is meant to be read). */
+    artifact: string;
+    docBranch: string;
+    /** Set when the cell's `land` flag committed the artifact on this run. */
+    landed?: { layerId: string; resourceCount: number };
   }
   | {
     kind: "error";
@@ -498,6 +519,11 @@ export interface NotebookState {
     cellId: string,
     partial: Partial<Omit<ChartCellJson, "id" | "type">>,
   ) => void;
+  /** D71 — update a formalize cell's prose / doc id / parse scope. */
+  updateFormalizeCell: (
+    cellId: string,
+    partial: Partial<Omit<FormalizeCellJson, "id" | "type">>,
+  ) => void;
 }
 
 function copyMap<K, V>(map: ReadonlyMap<K, V>): Map<K, V> {
@@ -611,7 +637,7 @@ function newCellId(): string {
 }
 
 function defaultSourceFor(
-  type: Exclude<CellType, "program-run" | "chart">,
+  type: Exclude<CellType, "program-run" | "chart" | "formalize">,
 ): string {
   switch (type) {
     case "markdown":
@@ -1324,6 +1350,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         x_column: "",
         y_column: "",
       };
+    } else if (type === "formalize") {
+      // Prose, and a doc id that defaults to the cell's own id — stable across
+      // runs, which is what makes a re-run replay its recorded draws rather than
+      // re-ask the model.
+      newCell = {
+        id,
+        type,
+        source: "",
+        doc_id: id,
+      };
     } else {
       newCell = { id, type, source: defaultSourceFor(type) };
     }
@@ -1357,6 +1393,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     set((prev) => ({
       cells: prev.cells.map((c) => {
         if (c.id !== cellId || c.type !== "chart") return c;
+        return { ...c, ...partial };
+      }),
+      dirty: true,
+    }));
+  },
+
+  updateFormalizeCell(cellId, partial) {
+    set((prev) => ({
+      cells: prev.cells.map((c) => {
+        if (c.id !== cellId || c.type !== "formalize") return c;
         return { ...c, ...partial };
       }),
       dirty: true,
@@ -1418,6 +1464,21 @@ function serializeCell(c: CellJson): CellJson {
         ? { series_column: c.series_column }
         : {}),
       ...(c.title !== undefined ? { title: c.title } : {}),
+    };
+  }
+  if (c.type === "formalize") {
+    return {
+      id: c.id,
+      type: c.type,
+      source: c.source,
+      ...(c.doc_id !== undefined ? { doc_id: c.doc_id } : {}),
+      ...(c.structure_iri !== undefined
+        ? { structure_iri: c.structure_iri }
+        : {}),
+      ...(c.lexicon_profile !== undefined
+        ? { lexicon_profile: c.lexicon_profile }
+        : {}),
+      ...(c.land !== undefined ? { land: c.land } : {}),
     };
   }
   return { id: c.id, type: c.type, source: c.source };
@@ -1557,11 +1618,105 @@ async function executeCell(
       );
     case "chart":
       return executeChartCell(eigen, cell, readPinLayerId);
+    case "formalize":
+      return executeFormalizeCell(eigen, cell);
     case "markdown":
       // Should never reach here — runAll skips markdown, and the
       // per-cell Run button is hidden on markdown cells.
       return { kind: "error", message: "markdown cells do not execute" };
   }
+}
+
+/**
+ * D71 — formalization dispatch. Start the task, poll it, fetch the artifact.
+ *
+ * Polling rather than awaiting is not an implementation detail: a document costs
+ * minutes and N LLM round-trips, which is why `FormalizeDocument` returns a task
+ * id at all. The cell asks for `text/x-esl` because the artifact exists to be
+ * READ before it is loaded.
+ *
+ * Re-running a cell with the same `doc_id` replays that run's recorded proposer
+ * draws off its `doc-<id>` branch instead of re-asking the model — so the second
+ * run is fast, deterministic, and free.
+ */
+async function executeFormalizeCell(
+  eigen: Eigen,
+  cell: {
+    id: string;
+    source: string;
+    doc_id?: string;
+    lexicon_profile?: string;
+    land?: boolean;
+  },
+): Promise<CellOutput> {
+  const prose = cell.source.trim();
+  if (prose.length === 0) {
+    return { kind: "error", message: "formalize cell has no prose to encode" };
+  }
+  const docId = (cell.doc_id ?? cell.id).trim();
+  const started = await eigen.formalizeDocument(prose, docId, {
+    format: "text/x-esl",
+    profile: cell.lexicon_profile ?? "",
+  });
+
+  // Poll. The interval is generous because the work is minutes-scale; a tight
+  // loop would only add load to a kernel that is already CPU-saturated parsing.
+  const deadline = Date.now() + 30 * 60 * 1000;
+  for (;;) {
+    if (Date.now() > deadline) {
+      return {
+        kind: "error",
+        message:
+          `formalization task ${started.taskId} did not finish within 30 minutes — ` +
+          `it may still be running; check the Tasks panel`,
+      };
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+    const status = await eigen.getTaskStatus(started.taskId);
+    const state = status.task?.status ?? "";
+    if (state === "Failed" || state === "Cancelled") break;
+    if (state !== "Completed") continue;
+    break;
+  }
+
+  const result = await eigen.getFormalizationResult(started.taskId);
+  if (!result.found) {
+    return {
+      kind: "error",
+      message: `formalization task ${started.taskId} produced no result`,
+    };
+  }
+  if (result.error.length > 0) {
+    return { kind: "error", message: result.error };
+  }
+  const artifact = new TextDecoder().decode(result.artifact);
+
+  // LAND ON RUN (D71). Off by default — the artifact exists to be read first — but
+  // once the decision is recorded in the cell, `Run all` reproduces the chain state
+  // rather than stopping at "an artifact was produced". Idempotent: the artifact is
+  // content-addressed, so re-running unchanged prose does not advance the branch.
+  let landed: { layerId: string; resourceCount: number } | undefined;
+  if (cell.land) {
+    const resp = await eigen.load(artifact, {
+      contentType: "application/x-esl",
+      autoCommit: true,
+    });
+    landed = {
+      layerId: resp.layerId,
+      resourceCount: Number(resp.resourceCount ?? 0),
+    };
+  }
+
+  return {
+    kind: "formalize",
+    structureIri: result.structureIri,
+    encoded: result.encoded,
+    cut: result.cut,
+    drawsCommitted: result.drawsCommitted,
+    artifact,
+    docBranch: started.docBranch,
+    landed,
+  };
 }
 
 /**

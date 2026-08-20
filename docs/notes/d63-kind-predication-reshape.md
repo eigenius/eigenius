@@ -2,7 +2,7 @@
 
 **Status:** design spec (proposed). Reshapes the grammar's treatment of bare mass/kind subjects.
 Supersedes the deferred-quantifier / output-obligation model for the generic reading
-(`docs/notes/d62-bare-plural-quantification.md`). Sibling of the alias-emission work
+(the bare-plural quantification note, deleted `2026-08-19`). Sibling of the alias-emission work
 (`d63-document-preprocessing-scope.md` §3c), which stands unchanged — only the grammar's handling of
 the `cat_n(C, mass)` entry it emits changes here.
 
@@ -172,7 +172,8 @@ residue is Open Question 5.2.)
 - **Phase B (cleanup) — partly done:** the deferred-quant *sems* are removed (nothing produces a
   `QUANT_SENTINEL`). The quantification hole **carrier** (`freshen_quant`, the per-span registration,
   `HoleKind::Quantification`) is left INERT, its retirement gated on the corpus re-measure confirming
-  committed-only suffices (§7.2). Then update `d62-bare-plural-quantification.md`.
+  committed-only suffices (§7.2). (The superseded bare-plural note was updated, then deleted
+  `2026-08-19`.)
 - **Phase C (grade attachment) — DONE (Declared floor):** parsed props enter the reasoning layer as
   `Declared`, built by `eigenius-reasoning::grade` (`ClaimGrader` + `DeclaredClaimGrader`). A closed
   `Prop` → a **3-resource claim cluster** (declaring `reflection:DeclaredResource` with

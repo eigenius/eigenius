@@ -562,7 +562,7 @@ A `program` declares a typed function from one resource type to another. The bod
 
 The body resource is an embedded resource whose `is_a` reflects the top-level expression form (`Let`, `Apply`, `CoRecord`, `Construct`, `NativeDecide`, etc.). Each sub-expression is itself an embedded resource, recursively. This is the program AST encoded as Eigon resources — see [`program/expr.rs`](../../../kernel/src/program/expr.rs) for the parser that recovers the kernel `Exp` from this resource shape.
 
-**Kernel mapping.** The body is parsed by [`parse_program`](../../../kernel/src/program/expr.rs) into a kernel `Exp`. The wrapping `Lam(input, body)` plus an outer `Pi(input_type → output_type)` produces a closed term that the type-checker can verify via [`check_infer`](../../../kernel/src/nbe/check.rs).
+**Kernel mapping.** The body is parsed by [`parse_program`](../../../kernel/src/program/expr.rs) into a kernel `Exp`. The wrapping `Lam(input, body)` plus an outer `Pi(input_type → output_type)` produces a closed term that the type-checker can verify via [`check_infer`](../../../kernel/src/nbe/check/mod.rs).
 
 Attributes (currently only `description = "..."`) appear before the body and are stored as resource properties for documentation purposes.
 

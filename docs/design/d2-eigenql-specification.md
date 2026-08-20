@@ -40,7 +40,7 @@ substantive shape changes:
 
 EigenQL is a typed semantic query language for pattern matching and retrieval over the Eigon knowledge graph. It operates within an execution context and sees exactly the resources visible within that context's layer chain.
 
-EigenQL is a **typed Datalog** — it supports conjunctive queries with recursive rule definitions, aggregation, and typed result shaping. Non-recursive queries evaluate in a single pass. Recursive queries use bottom-up seminaive fixpoint evaluation. Negation in MATCH patterns is supported with stratification checking to prevent paradoxes.
+EigenQL is a **typed Datalog** — it supports conjunctive queries with recursive rule definitions, aggregation, and typed result shaping. Non-recursive queries evaluate in a single pass. Recursive queries use bottom-up fixpoint evaluation (see §6.7 for what the implementation actually runs). Negation in MATCH patterns is supported with stratification checking to prevent paradoxes.
 
 ### 1.1 Program structure
 
@@ -1099,6 +1099,8 @@ After RETURN shaping, result modifiers are applied in this order:
 
 Seminaive optimization: in each iteration, only process combinations involving at least one fact derived in the previous iteration, avoiding redundant recomputation.
 
+**Implementation status (2026-08-20): the seminaive optimization is not implemented.** `kernel/src/query/evaluate/mod.rs` runs strata in dependency order but iterates *naively* within a stratum — every round re-evaluates each rule's full body against the whole accumulated derived map, with no delta relation, and discards duplicates on insertion. The result is the same relation; the cost is not.
+
 **Termination.** Fixpoint evaluation terminates because:
 - The set of possible derived facts is bounded (finite resources, finite property values)
 - Each iteration adds at least one new fact or terminates
@@ -1616,7 +1618,7 @@ can be projected with `?check HOLDS` (§3.8) or matched directly:
 | Aggregation | COUNT, SUM, AVG, MIN, MAX with GROUP BY in v1 | Essential for analytics queries |
 | String concatenation `\|\|` | Added at additive precedence level | Consistent with SQL convention |
 | `AS` keyword | Reserved but unused in grammar | Available for future aliasing syntax |
-| Recursive rules | DEFINE with self-reference, seminaive fixpoint evaluation | Standard Datalog; enables transitive closure and derived relations |
+| Recursive rules | DEFINE with self-reference, fixpoint evaluation (naive within a stratum — §6.7) | Standard Datalog; enables transitive closure and derived relations |
 | Negated patterns | `NOT ClassName(...)` in MATCH, with stratification checking | Stratified negation prevents paradoxes; well-understood theory |
 | Monotonicity tracking | Queries with negation flagged as non-monotonic | Enables correct cache invalidation on layer changes |
 | FIBER clause placement | Top-level query only; not in DEFINE bodies | Keeps derived relations pure and stratifiable; institution dispatch is an orchestration concern, not a fixpoint participant |

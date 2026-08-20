@@ -4,7 +4,8 @@
 trait (§1a). Stage A (document glossary) + Stage B (parse) + the Stage C discourse loop are built and
 tested in Rust (`InProcessPipeline`); remaining are the graded-proposition output (reshape Phase C), the
 full-lexicon run, the served impl, and the reference-structure family (figures/tables/citations).
-Motivated by `d63-cnl-v2-parsing-diagnosis.md`: the #1 CNL-v2 parsing lever (~8 of 19 grammar-gaps) is
+Motivated by the CNL-v2 parsing diagnosis (deleted `2026-08-19`): the #1 CNL-v2 parsing lever
+(~8 of 19 grammar-gaps) was
 **bare domain abbreviations used as argument NPs** (`MSI` as subject/object), which is a *document-local
 abbreviation-definition* problem, not grammar.
 

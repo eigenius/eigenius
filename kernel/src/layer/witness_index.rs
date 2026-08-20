@@ -425,7 +425,8 @@ fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
 ///
 /// `proposition` is the EigenTT `Exp` extracted from the constructor's
 /// `P` argument at the call site. The key's `prop_hash` is computed via
-/// D47 encoding + SHA-256 to match what `build_witness_index` produced.
+/// D47 encoding + SHA-256 to match what the emit side of
+/// [`layer_admits_witness`] produces.
 ///
 /// Crate-internal `crate::witness::Val::ChainWitness` is returned wrapped
 /// in `Ok`; callers can pass it directly to where the constructor

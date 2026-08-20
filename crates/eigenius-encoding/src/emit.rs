@@ -25,24 +25,82 @@
 //!   enc:DecisionPoint    which reading was taken, out of how many, and on whose authority
 //! ```
 //!
+//! and once per document:
+//!
+//! ```text
+//!   reference:Reference       the source work every unit hangs off (minted, or cited by IRI)
+//!   enc:ReasoningStructure    the artifact ROOT — the claims, the source, the bytes parsed
+//! ```
+//!
+//! The root exists so the artifact has a HANDLE: a service returns it, a notebook cell re-opens it,
+//! and a later run has something to supersede (D71 §4.1). Without it the artifact is a bag of
+//! resources whose only membership test is "was in the same file".
+//!
 //! The `ProgramTrace` is what makes this **Derived**: a program (the parser) produced the claim from
 //! a hashed input span. A certificate that cites `derived(claim_iri, P)` therefore breaks the moment
 //! the prose changes and the parser derives a different `P` — which is the whole point.
 
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
+use eigenius_kernel::dcg::{Candidate, ResolvedBinding, SelectionOutcome};
 use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
+use eigenius_reasoning::DerivedClaimGrader;
 
 use crate::select::Pin;
 
 const CORE: &str = "urn:eigenius:core";
 const REFL: &str = "urn:eigenius:reflection";
 const ENC: &str = "urn:eigenius:encoding";
+const REF: &str = "urn:eigenius:reference";
 
-/// One sentence that parsed and whose pinned reading was selected.
+/// On whose authority a sentence's reading was taken — the emitted `DecisionPoint` records it.
+pub enum SentenceSelection<'a> {
+    /// A human-verified skeleton pin (the declared gate arm). Emits exactly the historical
+    /// record shape — the committed demo artifacts regenerate byte-identically under this arm.
+    Pinned(&'a Pin),
+    /// The reading ranker's choice (live or replayed) — the computed-choice record
+    /// (`d63-reading-selection.md` slice 5): authority individual, the ranker's rationale
+    /// verbatim, and the runner-up skeletons it ranked the choice against.
+    Ranked(&'a SelectionOutcome),
+    /// The forest offered a single reading — no choice existed to make.
+    Sole,
+}
+
+/// Document-level inputs to [`emit_document`] — what is being encoded, from which bytes, under
+/// which IRI prefix.
+pub struct DocumentMeta<'a> {
+    /// IRI prefix the emitted resources live under (e.g. `urn:eigenius:demo:prose`).
+    pub ns: &'a str,
+    /// Where the parsed bytes came from — recorded once, on the root.
+    pub source_path: &'a str,
+    /// SHA-256 of the parsed bytes. A prose edit is then visible on the chain, not only in the
+    /// propositions it changed.
+    pub source_sha256: &'a str,
+    /// The `reflection:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
+    pub timestamp: &'a str,
+    /// The `reference:Reference` for the source work.
+    ///
+    /// `None` MINTS a document-local one at `<ns>:source` and emits it into the artifact — the
+    /// honest record for a plain text file with no bibliographic identity. `Some(iri)` cites an
+    /// existing Reference and emits nothing, so Rule 22's closed-world check does the verifying:
+    /// an IRI that names no chain-resident Reference fails the load rather than conjuring one.
+    pub source_ref: Option<&'a str>,
+}
+
+impl DocumentMeta<'_> {
+    /// The Reference IRI every `enc:source_document` points at — minted or cited.
+    fn reference_iri(&self) -> String {
+        match self.source_ref {
+            Some(r) => r.to_string(),
+            None => format!("{}:source", self.ns),
+        }
+    }
+}
+
+/// One sentence that parsed and whose reading was selected.
 pub struct ParsedSentence<'a> {
     /// 1-based position in the document — the local-name key for every resource emitted for it.
     pub ordinal: usize,
@@ -53,8 +111,49 @@ pub struct ParsedSentence<'a> {
     pub item: &'a Item,
     /// How many closed readings the forest offered (`1` = the unit encoded on its own).
     pub candidates: usize,
-    /// The pin the selection was made against.
-    pub pin: &'a Pin,
+    /// How the reading was selected — recorded on the chain via the `DecisionPoint`.
+    pub selection: SentenceSelection<'a>,
+    /// The accepted anaphora bindings when the reading is a RESOLVED open parse (D67 §3) —
+    /// emitted as one `enc:AnaphorBinding` per hole. Empty for closed readings, so the pin-arm
+    /// artifacts regenerate byte-identically.
+    pub bindings: Vec<ResolvedBinding>,
+    /// The `enc:BindingAuthority` local name (`binding_recency` / `binding_proposer` /
+    /// `binding_replay`) behind [`Self::bindings`]. `None` omits `enc:bound_by`.
+    pub binding_authority: Option<&'a str>,
+    /// The claim cluster the CLAIM LANDER built for this sentence in-loop, when one is installed
+    /// (`claim`, `trace`).
+    ///
+    /// Emitting the lander's resources rather than rebuilding them is not an optimization: the
+    /// landed claim carries its DISCOURSE KIND as a second `is_a` class, and a later sentence's
+    /// proposition may USE that claim as a term (an anaphor resolved to it). A rebuilt cluster
+    /// has no kind, so the claim no longer inhabits the lexicon class the kind aligns to, and
+    /// the artifact fails to load — `TypeExprIllTyped: … does not inhabit lexicon:Entity`,
+    /// witnessed 2026-08-12. One claim, one resource.
+    pub cluster: Option<(Resource, Resource)>,
+}
+
+/// Why a sentence did not encode — mapped to the committed `enc:CutKind` individuals. The
+/// artifact records every unit; a non-encoding is stated, never dropped (D67 §5).
+pub enum CutReason {
+    /// Multiple readings survived and the run's selection authority did not choose.
+    Ambiguous { readings: usize },
+    /// Every surviving reading carries a referent hole no antecedent resolved.
+    Unresolved { holes: usize },
+    /// No parse. `oov` lists the sentence's residual out-of-vocabulary surfaces (from the
+    /// Stage-A augmentation) — non-empty classifies the cut as a vocabulary gap, empty as a
+    /// grammar gap.
+    NoParse { oov: Vec<String> },
+}
+
+/// One sentence that did NOT encode — emitted as its `enc:DiscourseUnit` plus an `enc:CutItem`
+/// carrying the reason (fail-closed provenance; D62 §3).
+pub struct CutSentence {
+    /// 1-based position in the document — shares the numbering space with [`ParsedSentence`].
+    pub ordinal: usize,
+    pub text: String,
+    /// Character offsets of `text` in the source file.
+    pub span: (usize, usize),
+    pub reason: CutReason,
 }
 
 #[derive(Debug)]
@@ -79,40 +178,73 @@ impl std::fmt::Display for EmitError {
 ///
 /// `ns` is the IRI prefix the emitted resources live under (e.g. `urn:eigenius:demo:prose`);
 /// `source_sha256` and `source_path` pin *which bytes* were parsed, so a prose edit is visible on
-/// the chain and not only in the propositions.
+/// the chain and not only in the propositions. `glossary` is the Stage-A lexicon augmentation
+/// (`LexiconAugmentation::resources()`) — the entries that grounded the parse belong in the
+/// artifact, which is otherwise not self-contained (a claim's proposition may reference a
+/// doc-glossary-only concept). `cuts` are the sentences that did not encode, each landed as its
+/// `DiscourseUnit` + an `enc:CutItem` — the artifact states what did not encode; it never
+/// silently drops a unit (D67 §5).
 pub fn emit_document(
-    ns: &str,
-    source_path: &str,
-    source_sha256: &str,
-    timestamp: &str,
+    meta: &DocumentMeta<'_>,
+    glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
+    cuts: &[CutSentence],
 ) -> Result<String, EmitError> {
+    Ok(
+        serde_json::to_string_pretty(&serialize_document(&emit_resources(
+            meta, glossary, sentences, cuts,
+        )?))
+        .expect("serialize Eigon-JSON"),
+    )
+}
+
+/// The artifact as RESOURCES, before any encoding is chosen.
+///
+/// [`emit_document`] is the Eigon-JSON rendering of this; the served path renders whichever format
+/// the request asked for (`render_artifact`). One builder, three encodings — the alternative is a
+/// format decision living in every caller, which is how a served run ends up emitting a shape the
+/// committed fixtures never compared against.
+pub fn emit_resources(
+    meta: &DocumentMeta<'_>,
+    glossary: &[Resource],
+    sentences: &[ParsedSentence<'_>],
+    cuts: &[CutSentence],
+) -> Result<Vec<Resource>, EmitError> {
+    let DocumentMeta {
+        ns,
+        source_path,
+        source_sha256,
+        timestamp,
+        ..
+    } = *meta;
+    let doc_iri = meta.reference_iri();
+
     let mut out: Vec<Resource> = Vec::new();
+    // A minted Reference leads the artifact; a CITED one is already on the chain and must not be
+    // re-emitted here — a second definition of an existing IRI is a redefinition, not a reference.
+    if meta.source_ref.is_none() {
+        let mut r = res(&doc_iri, &[&format!("{REF}:Reference")]);
+        r.set(
+            iri(&format!("{CORE}:description")),
+            Value::String(format!(
+                "The source this encoding was derived from: {source_path} \
+                 (sha256 {source_sha256}). Minted document-locally — the file carries no DOI or \
+                 PMID; pass an existing reference:Reference IRI to cite a bibliographic record \
+                 instead."
+            )),
+        );
+        out.push(r);
+    }
+    out.extend_from_slice(glossary);
+
+    let mut claim_iris: Vec<Value> = Vec::new();
     for s in sentences {
         let n = s.ordinal;
         let unit_iri = format!("{ns}:unit_{n}");
         let scoped_iri = format!("{ns}:scoped_{n}");
         let claim_iri = format!("{ns}:claim_{n}");
 
-        let mut unit = res(&unit_iri, &[&format!("{ENC}:DiscourseUnit")]);
-        unit.set(iri(&format!("{ENC}:prose")), Value::String(s.text.clone()));
-        unit.set(
-            iri(&format!("{ENC}:unit_kind")),
-            Value::ResourceRef(iri(&format!("{ENC}:kind_prose"))),
-        );
-        unit.set(
-            iri(&format!("{ENC}:span_start")),
-            Value::Integer(s.span.0 as i64),
-        );
-        unit.set(
-            iri(&format!("{ENC}:span_end")),
-            Value::Integer(s.span.1 as i64),
-        );
-        unit.set(
-            iri(&format!("{ENC}:section")),
-            Value::String(format!("{source_path} (sha256 {source_sha256})")),
-        );
-        out.push(unit);
+        out.push(discourse_unit(ns, n, &s.text, s.span, &doc_iri));
 
         let mut scoped = res(&scoped_iri, &[&format!("{ENC}:ScopedUnit")]);
         scoped.set(
@@ -121,51 +253,63 @@ pub fn emit_document(
         );
         out.push(scoped);
 
-        let prop = encode_type(s.item.sem()).map_err(|e| EmitError::Encode {
-            ordinal: n,
-            detail: format!("{e:?}"),
-        })?;
-        let mut claim = res(&claim_iri, &[&format!("{ENC}:EncodedClaim")]);
-        claim.set(iri(&format!("{REFL}:canonical_proposition")), prop);
+        // The Derived claim cluster — claim + ProgramTrace — comes from the ONE construction
+        // (`DerivedClaimGrader::cluster`, D67 §1); this emitter keeps its historical
+        // `claim_{n}` / `trace_{n}` naming (committed artifacts regenerate byte-identically)
+        // and adds only the document-structural fields the grader does not know about.
+        let provenance = format!(
+            "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
+             chars {}..{} (source sha256 {source_sha256})",
+            s.span.0, s.span.1
+        );
+        let (mut claim, trace) = match &s.cluster {
+            Some((claim, trace)) => (claim.clone(), trace.clone()),
+            None => DerivedClaimGrader::cluster(
+                &claim_iri,
+                &format!("{ns}:trace_{n}"),
+                s.item.sem(),
+                &provenance,
+                timestamp,
+                &[],
+            )
+            .map_err(|e| EmitError::Encode {
+                ordinal: n,
+                detail: e.to_string(),
+            })?,
+        };
         claim.set(
             iri(&format!("{ENC}:from_unit")),
             Value::ResourceRef(iri(&scoped_iri)),
         );
+        let claim_desc = match &s.selection {
+            SentenceSelection::Pinned(pin) => format!(
+                "«{}» — the reading pinned as correct: {}",
+                s.text, pin.skeleton
+            ),
+            SentenceSelection::Ranked(sel) => format!(
+                "«{}» — the reading the ranker selected: {}",
+                s.text, sel.chosen_skeleton
+            ),
+            SentenceSelection::Sole => format!(
+                "«{}» — the sole surviving reading: {}",
+                s.text,
+                skeleton_of(s.item.sem())
+            ),
+        };
         claim.set(
             iri(&format!("{CORE}:description")),
-            Value::String(format!(
-                "«{}» — the reading pinned as correct: {}",
-                s.text, s.pin.skeleton
-            )),
+            Value::String(claim_desc),
         );
+        claim_iris.push(Value::ResourceRef(iri(&claim_iri)));
         out.push(claim);
-
-        // The witness. `reflection:resource` → the claim, so the emitter mints
-        // `IsDerivedAs claim_iri P` where P is the claim's canonical_proposition.
-        let mut trace = res(
-            &format!("{ns}:trace_{n}"),
-            &[&format!("{REFL}:ProgramTrace")],
-        );
-        trace.set(
-            iri(&format!("{REFL}:resource")),
-            Value::ResourceRef(iri(&claim_iri)),
-        );
-        trace.set(
-            iri(&format!("{REFL}:source")),
-            Value::String(format!(
-                "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
-                 chars {}..{} (source sha256 {source_sha256})",
-                s.span.0, s.span.1
-            )),
-        );
-        trace.set(
-            iri(&format!("{REFL}:timestamp")),
-            Value::String(timestamp.to_string()),
-        );
         out.push(trace);
 
         // Selection is recorded even when the unit was unambiguous, so the chain always says on
-        // whose authority the reading was taken — the pin, not the pipeline.
+        // whose authority the reading was taken. The PIN arm emits the exact historical shape
+        // (no `selected_by`; its authority is stated in the rationale text) so the committed demo
+        // artifacts regenerate byte-identically; the ranker and sole arms carry the
+        // `SelectionAuthority` individual, and the ranker arm additionally the runner-up
+        // skeletons — the choice's audit trail (there is no kernel veto on selection).
         let mut dp = res(
             &format!("{ns}:decision_{n}"),
             &[&format!("{ENC}:DecisionPoint")],
@@ -182,23 +326,255 @@ pub fn emit_document(
             iri(&format!("{ENC}:candidate_count")),
             Value::Integer(s.candidates as i64),
         );
-        dp.set(
-            iri(&format!("{REFL}:rationale")),
-            Value::String(format!(
-                "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose \
-                 sense-erased skeleton equals the human-verified pin. Structural disambiguation \
-                 (D62 S4) is open work — this is declared selection, and it fails closed if the pin \
-                 matches zero or several readings. Pin note: {}",
-                if s.pin.note.is_empty() {
-                    "(none)"
-                } else {
-                    &s.pin.note
+        match &s.selection {
+            SentenceSelection::Pinned(pin) => {
+                dp.set(
+                    iri(&format!("{REFL}:rationale")),
+                    Value::String(format!(
+                        "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose \
+                         sense-erased skeleton equals the human-verified pin. Structural disambiguation \
+                         (D62 S4) is open work — this is declared selection, and it fails closed if the pin \
+                         matches zero or several readings. Pin note: {}",
+                        if pin.note.is_empty() { "(none)" } else { &pin.note }
+                    )),
+                );
+            }
+            SentenceSelection::Ranked(sel) => {
+                dp.set(
+                    iri(&format!("{ENC}:selected_by")),
+                    Value::ResourceRef(iri(&format!("{ENC}:authority_ranker"))),
+                );
+                if !sel.runner_up_skeletons.is_empty() {
+                    dp.set(
+                        iri(&format!("{ENC}:runner_up_skeletons")),
+                        Value::Array(
+                            sel.runner_up_skeletons
+                                .iter()
+                                .map(|s| Value::String(s.clone()))
+                                .collect(),
+                        ),
+                    );
                 }
-            )),
-        );
+                dp.set(
+                    iri(&format!("{REFL}:rationale")),
+                    Value::String(format!(
+                        "Reading selected by the READING RANKER (d63-reading-selection): an \
+                         untrusted choice in document context, recorded for audit — every \
+                         candidate type-checks, so no kernel veto exists; the reading-adjudication \
+                         ledger and this record are the controls. Ranker rationale: {}",
+                        sel.rationale
+                    )),
+                );
+            }
+            SentenceSelection::Sole => {
+                dp.set(
+                    iri(&format!("{ENC}:selected_by")),
+                    Value::ResourceRef(iri(&format!("{ENC}:authority_sole"))),
+                );
+                dp.set(
+                    iri(&format!("{REFL}:rationale")),
+                    Value::String(
+                        "Sole surviving reading — the forest offered exactly one felicitous \
+                         parse; no selection existed to make."
+                            .to_string(),
+                    ),
+                );
+            }
+        }
         out.push(dp);
+
+        // Anaphora bindings (D67 §3) — one `enc:AnaphorBinding` per resolved hole: the accepted
+        // antecedent, machine-readable (a ResourceRef for individuals/claims, the D47 encoding
+        // for kind terms), plus the proposing authority and the proposer's audit fields.
+        for (k, b) in s.bindings.iter().enumerate() {
+            let mut ab = res(
+                &format!("{ns}:binding_{n}_{k}"),
+                &[&format!("{ENC}:AnaphorBinding")],
+            );
+            ab.set(
+                iri(&format!("{ENC}:binding_unit")),
+                Value::ResourceRef(iri(&scoped_iri)),
+            );
+            ab.set(
+                iri(&format!("{ENC}:hole_var")),
+                Value::String(b.hole.clone()),
+            );
+            ab.set(
+                iri(&format!("{ENC}:antecedent_surface")),
+                Value::String(b.antecedent.surface().to_string()),
+            );
+            match &b.antecedent {
+                Candidate::Individual { iri: ante, .. } => {
+                    ab.set(
+                        iri(&format!("{ENC}:antecedent_resource")),
+                        Value::ResourceRef(ante.clone()),
+                    );
+                }
+                Candidate::Kind { term, .. } => {
+                    let encoded = encode_type(term).map_err(|e| EmitError::Encode {
+                        ordinal: n,
+                        detail: format!("kind antecedent: {e:?}"),
+                    })?;
+                    ab.set(iri(&format!("{ENC}:antecedent_term")), encoded);
+                }
+                Candidate::Claim { resource, .. } => {
+                    if let Some(id) = resource.id() {
+                        ab.set(
+                            iri(&format!("{ENC}:antecedent_resource")),
+                            Value::ResourceRef(id.clone()),
+                        );
+                    }
+                }
+                // A SET antecedent (D68 §5): one resource ref per member, in run order.
+                Candidate::ClaimSet { members, .. } => {
+                    let refs: Vec<Value> = members
+                        .iter()
+                        .filter_map(|r| r.id())
+                        .map(|id| Value::ResourceRef(id.clone()))
+                        .collect();
+                    ab.set(
+                        iri(&format!("{ENC}:antecedent_resources")),
+                        Value::Array(refs),
+                    );
+                }
+            }
+            if let Some(a) = s.binding_authority {
+                ab.set(
+                    iri(&format!("{ENC}:bound_by")),
+                    Value::ResourceRef(iri(&format!("{ENC}:{a}"))),
+                );
+            }
+            if let Some(r) = &b.rationale {
+                ab.set(iri(&format!("{REFL}:rationale")), Value::String(r.clone()));
+            }
+            if let Some(c) = b.confidence {
+                ab.set(iri(&format!("{ENC}:confidence")), Value::Float(c));
+            }
+            out.push(ab);
+        }
     }
-    Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize Eigon-JSON"))
+
+    // Non-encoded units: the DiscourseUnit (same shape as an encoded unit's) + the CutItem
+    // stating why. `cut_unit` references the unit; no ScopedUnit/claim exists to reference.
+    for c in cuts {
+        let n = c.ordinal;
+        let unit_iri = format!("{ns}:unit_{n}");
+        out.push(discourse_unit(ns, n, &c.text, c.span, &doc_iri));
+        let (kind, rationale) = match &c.reason {
+            CutReason::Ambiguous { readings } => (
+                "cut_ambiguous",
+                format!(
+                    "{readings} readings survived and the run's selection authority did not \
+                     choose among them — a selection gap, recorded fail-closed."
+                ),
+            ),
+            CutReason::Unresolved { holes } => (
+                "cut_unresolved",
+                format!(
+                    "{holes} referent hole(s) no discourse antecedent resolved — an open parse, \
+                     recorded fail-closed."
+                ),
+            ),
+            CutReason::NoParse { oov } if !oov.is_empty() => (
+                "cut_vocabulary",
+                format!(
+                    "no parse; residual out-of-vocabulary surfaces (Stage A): {}",
+                    oov.join(", ")
+                ),
+            ),
+            CutReason::NoParse { .. } => (
+                "cut_grammar",
+                "no parse with every token in vocabulary — the grammar could not compose the \
+                 construction."
+                    .to_string(),
+            ),
+        };
+        let mut cut = res(&format!("{ns}:cut_{n}"), &[&format!("{ENC}:CutItem")]);
+        cut.set(
+            iri(&format!("{ENC}:cut_unit")),
+            Value::ResourceRef(iri(&unit_iri)),
+        );
+        cut.set(
+            iri(&format!("{ENC}:cut_kind")),
+            Value::ResourceRef(iri(&format!("{ENC}:{kind}"))),
+        );
+        cut.set(iri(&format!("{REFL}:rationale")), Value::String(rationale));
+        out.push(cut);
+    }
+
+    // The ROOT, last: it lists the claims, so every IRI it names is defined above it in the same
+    // document. `enc:claims` is `requires`d, so a document that encoded NOTHING still emits the
+    // root with an empty array — the artifact then states "this source yielded no claims", which
+    // is a result, not an absence.
+    let mut structure = res(
+        &format!("{ns}:structure"),
+        &[&format!("{ENC}:ReasoningStructure")],
+    );
+    structure.set(iri(&format!("{ENC}:claims")), Value::Array(claim_iris));
+    structure.set(
+        iri(&format!("{ENC}:document")),
+        Value::ResourceRef(iri(&doc_iri)),
+    );
+    structure.set(
+        iri(&format!("{ENC}:source_path")),
+        Value::String(source_path.to_string()),
+    );
+    structure.set(
+        iri(&format!("{ENC}:source_sha256")),
+        Value::String(source_sha256.to_string()),
+    );
+    structure.set(
+        iri(&format!("{CORE}:description")),
+        Value::String(format!(
+            "The encoding of {source_path}: {} claim(s), {} unit(s) recorded as not encoding.",
+            sentences.len(),
+            cuts.len()
+        )),
+    );
+    out.push(structure);
+
+    Ok(out)
+}
+
+/// The `enc:DiscourseUnit` record — identical for encoded and cut sentences.
+///
+/// `doc_iri` is the `reference:Reference` for the source work. It replaces the former
+/// `enc:section = "<path> (sha256 <hex>)"` string, which put run provenance in a field meant for a
+/// human-readable location within the document ("Results §2.1"). The bytes are now pinned once, on
+/// the root; `enc:section` is left for what it is for and is emitted only when known — which, for a
+/// plain text file, is never.
+fn discourse_unit(
+    ns: &str,
+    ordinal: usize,
+    text: &str,
+    span: (usize, usize),
+    doc_iri: &str,
+) -> Resource {
+    let mut unit = res(
+        &format!("{ns}:unit_{ordinal}"),
+        &[&format!("{ENC}:DiscourseUnit")],
+    );
+    unit.set(
+        iri(&format!("{ENC}:prose")),
+        Value::String(text.to_string()),
+    );
+    unit.set(
+        iri(&format!("{ENC}:unit_kind")),
+        Value::ResourceRef(iri(&format!("{ENC}:kind_prose"))),
+    );
+    unit.set(
+        iri(&format!("{ENC}:span_start")),
+        Value::Integer(span.0 as i64),
+    );
+    unit.set(
+        iri(&format!("{ENC}:span_end")),
+        Value::Integer(span.1 as i64),
+    );
+    unit.set(
+        iri(&format!("{ENC}:source_document")),
+        Value::ResourceRef(iri(doc_iri)),
+    );
+    unit
 }
 
 /// The skeleton the parser actually produced for a reading — used by the driver's report.
@@ -217,4 +593,268 @@ fn res(id: &str, classes: &[&str]) -> Resource {
         Value::Array(classes.iter().map(|c| Value::ResourceRef(iri(c))).collect()),
     );
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eigenius_kernel::dcg::{Combinator, Cost};
+    use eigenius_kernel::nbe::term::Exp;
+
+    /// A minimal encodable Item — an `EigonClass` sem is inside the D47 fragment, and the cat is
+    /// never consulted by emission.
+    fn item() -> Item {
+        let cls = Exp::EigonClass(iri("urn:eigenius:demo:Thing"));
+        Item::from_parts(cls.clone(), cls, Combinator::Other, Cost::ZERO)
+    }
+
+    fn sentence<'a>(item: &'a Item, selection: SentenceSelection<'a>) -> ParsedSentence<'a> {
+        ParsedSentence {
+            ordinal: 1,
+            text: "A thing.".to_string(),
+            span: (0, 8),
+            item,
+            candidates: 3,
+            selection,
+            bindings: Vec::new(),
+            binding_authority: None,
+            cluster: None,
+        }
+    }
+
+    fn emit(s: &[ParsedSentence<'_>]) -> String {
+        emit_full(&[], s, &[])
+    }
+
+    fn emit_full(glossary: &[Resource], s: &[ParsedSentence<'_>], cuts: &[CutSentence]) -> String {
+        emit_document(
+            &DocumentMeta {
+                ns: "urn:eigenius:test:doc",
+                source_path: "test.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-08-11T00:00:00Z",
+                source_ref: None,
+            },
+            glossary,
+            s,
+            cuts,
+        )
+        .expect("emits")
+    }
+
+    #[test]
+    fn ranked_selection_emits_the_computed_choice_record() {
+        let it = item();
+        let sel = SelectionOutcome {
+            chosen_skeleton: "skel-chosen".to_string(),
+            chosen_sem: "sem-chosen".to_string(),
+            chosen_gloss: "a thing".to_string(),
+            rationale: "the document is about things".to_string(),
+            runner_up_skeletons: vec!["skel-b".to_string(), "skel-c".to_string()],
+            candidates: 3,
+        };
+        let json = emit(&[sentence(&it, SentenceSelection::Ranked(&sel))]);
+        assert!(json.contains("urn:eigenius:encoding:authority_ranker"));
+        assert!(json.contains("urn:eigenius:encoding:runner_up_skeletons"));
+        assert!(json.contains("skel-b") && json.contains("skel-c"));
+        assert!(json.contains("the document is about things"));
+        assert!(json.contains("READING RANKER"));
+        assert!(
+            json.contains("the reading the ranker selected: skel-chosen"),
+            "the claim description names the chosen skeleton"
+        );
+    }
+
+    #[test]
+    fn sole_selection_emits_the_sole_authority_and_no_runners_up() {
+        let it = item();
+        let json = emit(&[sentence(&it, SentenceSelection::Sole)]);
+        assert!(json.contains("urn:eigenius:encoding:authority_sole"));
+        assert!(!json.contains("runner_up_skeletons"));
+        assert!(json.contains("Sole surviving reading"));
+    }
+
+    /// D71 §4.1 — the artifact has a ROOT. Without it a service has nothing to return, a notebook
+    /// cell nothing to re-open, and a superseding run nothing to point at.
+    #[test]
+    fn the_artifact_is_rooted_at_a_reasoning_structure_listing_its_claims() {
+        let it = item();
+        let json = emit(&[sentence(&it, SentenceSelection::Sole)]);
+        let doc: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let root = doc
+            .as_array()
+            .expect("document is an array")
+            .iter()
+            .find(|r| r["@id"] == "urn:eigenius:test:doc:structure")
+            .expect("the root is emitted");
+        assert_eq!(
+            root["urn:eigenius:encoding:claims"],
+            serde_json::json!(["urn:eigenius:test:doc:claim_1"]),
+            "the root lists the claims it assembled"
+        );
+        assert_eq!(
+            root["urn:eigenius:encoding:document"],
+            serde_json::json!("urn:eigenius:test:doc:source")
+        );
+        assert_eq!(
+            root["urn:eigenius:encoding:source_sha256"],
+            serde_json::json!("deadbeef"),
+            "the bytes are pinned once, on the root"
+        );
+    }
+
+    /// A document that encoded NOTHING still emits the root: "this source yielded no claims" is a
+    /// result, and a caller that got an artifact back must not have to guess whether it ran.
+    #[test]
+    fn a_document_that_encodes_nothing_still_emits_the_root() {
+        let json = emit_full(
+            &[],
+            &[],
+            &[CutSentence {
+                ordinal: 1,
+                text: "Zorblax.".to_string(),
+                span: (0, 8),
+                reason: CutReason::NoParse { oov: vec![] },
+            }],
+        );
+        let doc: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let root = doc
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["@id"] == "urn:eigenius:test:doc:structure")
+            .expect("the root is emitted even with zero claims");
+        assert_eq!(
+            root["urn:eigenius:encoding:claims"],
+            serde_json::json!([]),
+            "an empty claim list, not an absent root"
+        );
+    }
+
+    /// Every unit cites the source WORK by reference, rather than carrying the run's path+sha in
+    /// `enc:section` — a field for a human-readable location inside the document.
+    #[test]
+    fn units_cite_the_source_reference_and_leave_section_alone() {
+        let it = item();
+        let json = emit(&[sentence(&it, SentenceSelection::Sole)]);
+        assert!(json.contains(
+            r#""urn:eigenius:encoding:source_document": "urn:eigenius:test:doc:source""#
+        ));
+        assert!(
+            !json.contains("urn:eigenius:encoding:section"),
+            "section is emitted only when a real section label is known"
+        );
+    }
+
+    /// A CITED reference is not re-emitted: a second definition of a chain-resident IRI is a
+    /// redefinition. Rule 22 then does the verifying — an IRI naming no Reference fails the load.
+    #[test]
+    fn a_cited_reference_is_pointed_at_never_minted() {
+        let it = item();
+        let s = [sentence(&it, SentenceSelection::Sole)];
+        let json = emit_document(
+            &DocumentMeta {
+                ns: "urn:eigenius:test:doc",
+                source_path: "test.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-08-11T00:00:00Z",
+                source_ref: Some("urn:eigenius:reference:lit:chan_2019"),
+            },
+            &[],
+            &s,
+            &[],
+        )
+        .expect("emits");
+        assert!(json.contains(
+            r#""urn:eigenius:encoding:source_document": "urn:eigenius:reference:lit:chan_2019""#
+        ));
+        assert!(
+            !json.contains("urn:eigenius:reference:Reference"),
+            "no Reference resource is emitted when one is cited"
+        );
+        assert!(!json.contains("urn:eigenius:test:doc:source"));
+    }
+
+    /// A cut sentence lands as its DiscourseUnit + a CutItem naming the reason — never dropped.
+    #[test]
+    fn cut_sentences_land_as_units_with_cut_items() {
+        let cuts = [
+            CutSentence {
+                ordinal: 1,
+                text: "Ambiguous prose.".to_string(),
+                span: (0, 16),
+                reason: CutReason::Ambiguous { readings: 7 },
+            },
+            CutSentence {
+                ordinal: 2,
+                text: "These findings dangle.".to_string(),
+                span: (17, 39),
+                reason: CutReason::Unresolved { holes: 1 },
+            },
+            CutSentence {
+                ordinal: 3,
+                text: "Zorblax fixination.".to_string(),
+                span: (40, 59),
+                reason: CutReason::NoParse {
+                    oov: vec!["zorblax".to_string(), "fixination".to_string()],
+                },
+            },
+            CutSentence {
+                ordinal: 4,
+                text: "Known words, no parse.".to_string(),
+                span: (60, 82),
+                reason: CutReason::NoParse { oov: vec![] },
+            },
+        ];
+        let json = emit_full(&[], &[], &cuts);
+        for n in 1..=4 {
+            assert!(json.contains(&format!("urn:eigenius:test:doc:unit_{n}")));
+            assert!(json.contains(&format!("urn:eigenius:test:doc:cut_{n}")));
+        }
+        assert!(json.contains("urn:eigenius:encoding:cut_ambiguous"));
+        assert!(json.contains("7 readings survived"));
+        assert!(json.contains("urn:eigenius:encoding:cut_unresolved"));
+        assert!(json.contains("1 referent hole(s)"));
+        assert!(json.contains("urn:eigenius:encoding:cut_vocabulary"));
+        assert!(json.contains("zorblax, fixination"));
+        assert!(json.contains("urn:eigenius:encoding:cut_grammar"));
+        assert!(
+            !json.contains("claim_") && !json.contains("scoped_"),
+            "a cut unit carries no claim cluster and no ScopedUnit"
+        );
+    }
+
+    /// Stage-A glossary resources pass through into the artifact verbatim.
+    #[test]
+    fn glossary_resources_are_emitted() {
+        let mut g = Resource::new(iri("urn:eigenius:test:doc:lex:msi"));
+        g.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("MSI".to_string()),
+        );
+        let it = item();
+        let json = emit_full(&[g], &[sentence(&it, SentenceSelection::Sole)], &[]);
+        assert!(json.contains("urn:eigenius:test:doc:lex:msi"));
+        assert!(json.contains("urn:eigenius:test:doc:unit_1"));
+    }
+
+    /// The PIN arm's record is BYTE-STABLE: no `selected_by`, the historical rationale text —
+    /// the committed demo artifacts regenerate identically under it.
+    #[test]
+    fn pinned_selection_emits_the_historical_shape() {
+        let it = item();
+        let pin = crate::select::Pin {
+            sentence: "A thing.".to_string(),
+            skeleton: "skel-pinned".to_string(),
+            note: "verified".to_string(),
+        };
+        let json = emit(&[sentence(&it, SentenceSelection::Pinned(&pin))]);
+        assert!(json.contains("Reading selected by SKELETON PIN"));
+        assert!(json.contains("Pin note: verified"));
+        assert!(json.contains("the reading pinned as correct: skel-pinned"));
+        assert!(
+            !json.contains("selected_by") && !json.contains("authority_"),
+            "the pin arm emits no SelectionAuthority — byte-stability of committed artifacts"
+        );
+    }
 }

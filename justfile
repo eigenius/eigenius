@@ -49,6 +49,56 @@ up-mock:
 up:
     docker compose up --build -d
 
+# Start the stack with a kernel whose untrusted proposers can call a model.
+# Needed for a D71 formalization run on a doc branch that carries no recorded
+# draws yet — the default image is built without `use-llm`, so such a run fails
+# closed rather than parsing unranked. Needs ANTHROPIC_API_KEY in the env.
+up-llm:
+    CARGO_FEATURES=use-llm docker compose up --build -d
+
+# Copy a lexicon snapshot into the kernel's volume. `up` does NOT do this: it
+# starts the stack against whatever the volume already holds, which after any
+# other run is not necessarily what you think.
+#
+# Defaults to the NEWEST aligned snapshot rather than a pinned name — a pinned
+# one goes stale at the next reseed and stages the wrong lexicon silently, which
+# is the failure this recipe exists to prevent. Same `ls -1dt` autodetect
+# scripts/measure-parse-rate.sh uses. Pass a path to override.
+stage-snapshot snapshot="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="${SNAPSHOT_ROOT:-../db-snapshot}"
+    snap="{{snapshot}}"
+    if [[ -z "$snap" ]]; then
+        snap="$(ls -1dt "$root"/wordnet-umls-aligned-* 2>/dev/null | head -1 || true)"
+        [[ -n "$snap" ]] || {
+            echo "no aligned snapshot under $root (run scripts/reseed-lexicon-db.sh --umls-all," >&2
+            echo "then scripts/build-alignment-snapshot.sh)" >&2
+            exit 1
+        }
+    fi
+    [[ -f "$snap/CURRENT" ]] || { echo "not a RocksDB store: $snap" >&2; exit 1; }
+    snap="$(cd "$snap" && pwd)"
+    # DESTRUCTIVE, and not obviously so from the name: this wipes the volume,
+    # taking every branch with it — doc-<id> working branches, their glossary
+    # layers, and their recorded proposer draws. Doing it under a LIVE kernel
+    # also pulls RocksDB's store out from under the process. Stop it first.
+    if docker compose ps --status running --services 2>/dev/null | grep -qx kernel; then
+        echo "kernel is running — stopping it first (staging deletes the store it has open)"
+        docker compose stop kernel >/dev/null
+        restart=1
+    fi
+    docker run --rm -v "$snap":/src:ro -v eigenius_eigenius_db:/dst alpine \
+        sh -c 'rm -rf /dst/* && cp -a /src/. /dst/'
+    echo "staged $(basename "$snap") into eigenius_eigenius_db (all previous branches are gone)"
+    [[ -n "${restart:-}" ]] && { docker compose start kernel >/dev/null; echo "kernel restarted"; }
+    true
+
+# Which snapshot is currently staged (the reseed stamps a PROVENANCE file).
+which-snapshot:
+    @docker run --rm -v eigenius_eigenius_db:/db alpine \
+        sh -c 'cat /db/PROVENANCE 2>/dev/null || echo "no PROVENANCE — volume was not staged from a snapshot"'
+
 # Stop the stack
 down:
     docker compose down

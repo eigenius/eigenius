@@ -142,9 +142,13 @@ beside it.
 **Provenance is uniform.** Every recomputed datum (and now every wrapped-R
 program input) traces to a pinned slice via a re-runnable recipe in
 [extract/extract_samplesets.py](../extract/extract_samplesets.py); `--check`
-re-derives all 17 SampleSets + both program-input tables and fails loudly on
-drift. The R-program inputs were the last unpinned data in the encoding; they now
-carry the same `bench:extracted_from_*` pins as the SampleSets.
+re-derives all 21 SampleSets, plus both inlined columns (`viab_value`,
+`viab_guide`) of the one program-input table
+(`wrn:viab_KM12_competition_table` →
+[programs/invivo/km12-competition-input.json](../programs/invivo/km12-competition-input.json)),
+and fails loudly on drift. The R-program inputs were the last unpinned data in
+the encoding; they now carry the same `bench:extracted_from_*` pins as the
+SampleSets.
 
 **Live result.** On a clean database the full chain loads, all twelve wrapped-R
 programs run in spawned containers, and **55/55 verdicts Hold** — including the
@@ -157,18 +161,31 @@ DSB-mechanism conclusions now closed (`concl_dsb_gh2ax`, `concl_dsb_gh2ax_foci`,
 
 ## 4. What we found
 
-Recomputing rather than restating surfaced four discrepancies between the paper's
-prose and its data — the point of the exercise. Full detail in
+Recomputing rather than restating surfaced **one numerical discrepancy between the
+paper's prose and its data (F1) and one methodological finding (F4)** — the point of
+the exercise. The other two entries below are graded differently in the findings log
+and are listed here because they are what made F1 reproducible and what pinned down
+the ED Fig 10c model: F2 is a re-derivation hazard, not a paper discrepancy, and F3 is
+an exact reproduction of the paper. Full detail in
 [recompute-findings.md](03-recompute-findings.md); in brief:
 
-- **F1 — Spearman n.** The correlation reports n=54; the pinned data yields **51**
-  real pairs (3 dropped as `NA`/`NaN`). The kernel recomputes P from 51.
-- **F2 — `NA` vs `NaN`.** The curated table mixes R's `NA` and computed `NaN`;
-  treating both as missing is what makes F1's count reproducible.
-- **F3 — MMR-restoration model.** The ED Fig 10c model was *identified from the
-  authors' code* (a crossed `value ~ CL + guide`) and reproduced exactly from
-  public data.
-- **F4 — competition-assay pseudoreplication.** The published competition ANOVA
+- **F1 — Spearman n** *(the numerical discrepancy)*. The correlation reports n=54;
+  the pinned data yields **51** real pairs. The `MSI` flag selects **99** cell lines,
+  of which 51 carry an `avg_WRN_dep` value and **48** are `NA` because they appear in
+  neither screen; the union of the raw Achilles (32) and DRIVE (34) MSI lines is the
+  same 51, with nothing lost in curation. The missing **3** is the gap between the
+  paper's reported 54 and the reproducible 51 — no published artifact yields 54 — and
+  is not a count of dropped rows. The kernel recomputes P from 51; rho = −0.74
+  reproduces exactly, so the conclusion is unaffected.
+- **F2 — `NA` vs `NaN`** *(re-derivation hazard, not a paper discrepancy: the
+  paper's biomarker numbers reproduce exactly)*. The curated table mixes R's `NA` and
+  computed `NaN`; treating both as missing is what makes F1's count reproducible.
+- **F3 — MMR-restoration model** *(exact reproduction)*. The ED Fig 10c model was
+  *identified from the authors' code* (a crossed `value ~ CL + guide`) and reproduced
+  exactly from public data — 5.74e-20, 3.26e-12 and 1.56e-16 against the paper's
+  5.7e-20, 3.3e-12 and 1.6e-16.
+- **F4 — competition-assay pseudoreplication** *(the methodological finding)*. The
+  published competition ANOVA
   tests `is_WRN` against the **technical** within-guide residual (KM12: 25 df,
   P=2.74e-19). The biological unit is the **guide** (~2–3 df); tested correctly
   (mixed model, guide as random effect) the honest P is **≈2.15e-6**. The
@@ -179,6 +196,16 @@ prose and its data — the point of the exercise. Full detail in
   machine-checkable, queryable fact on the model rather than a prose footnote.
   (The paper is itself internally inconsistent here: its in-vivo arm already uses
   the mixed-effects approach.)
+
+> *Correction, 2026-08-20.* This section previously headed itself "surfaced four
+> discrepancies" and glossed F1 as "3 dropped as `NA`/`NaN`". Both were wrong and are
+> corrected above, against
+> [recompute-findings.md](03-recompute-findings.md)'s own forensics: the memo's detail
+> already graded F2 a data-hygiene hazard and F3 an exact reproduction, so the count of
+> discrepancies was never four; and the 48 `NA` rows, not 3, are what the 99 → 51 filter
+> drops. §3's `--check` count of "17 SampleSets" was corrected to 21 in the same pass —
+> the chain declares 21 `stats:SampleSetResource`s and `RECIPES` implements 21 recipes,
+> keyed by the same 21 names. No chain file, program or extractor behaviour was changed.
 
 ## 5. What we left out — and why
 

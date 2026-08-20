@@ -16,8 +16,14 @@
 //!
 //! Each expression evaluation returns `(Resource, Option<Trace>)`.
 //! The trace tree mirrors the expression tree (D6b §2).
-//! Only ComponentTraces participate in memoization — they are the
-//! atomic unit of IO computation with content-addressed keys.
+//!
+//! Only `ComponentTrace`s participate in memoization, but not for the
+//! reason D6b §8 gives. Cache routing is determinism-gated (D21 §3.3),
+//! and the split is the opposite of "only IO needs caching": an IO
+//! component uses the positional per-task replay slot in `TaskContext`
+//! and never consults this content-addressed store, while a
+//! deterministic (non-IO) component is the only kind that reads and
+//! writes it. See `institution::eval_hooks::dispatch_component`.
 
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -209,8 +215,18 @@ impl ProgramMetrics {
 
 /// Trait for trace memoization storage.
 ///
-/// Only ComponentTraces are stored — they are the IO boundary.
-/// The key is SHA-256(component_iri || CBOR(input) || CBOR(argument)).
+/// Only `ComponentTrace`s are stored. They are *not* the IO boundary:
+/// `dispatch_component` routes IO components to the positional per-task
+/// replay slot and only deterministic components to this store (D21
+/// §3.3). Nothing else is memoized here.
+///
+/// The key is specified as SHA-256(component_iri || CBOR(input) ||
+/// CBOR(argument)). `compute_trace_key` implements only the first two
+/// factors, and both construction sites set `argument_hash: None`, so
+/// two calls to one component with the same input and different
+/// arguments collide. That divergence is a defect against this
+/// specification, not a stale specification; the spec is left as
+/// written.
 pub trait TraceStore: Send + Sync {
     /// Look up a cached ComponentTrace by content-addressed key.
     fn get_component_trace(&self, key: &[u8; 32]) -> Option<ComponentTrace>;

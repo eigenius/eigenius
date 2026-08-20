@@ -26,7 +26,7 @@ The single most important chapter for understanding *how Eigenius differs from a
 
 7. **[Type theory primer](07-type-theory-primer.md)** — universes, Π/Σ-types, inductive types, coinductive types, sized types, identity types, normalization-by-evaluation. Brief and pragmatic; cross-linked to chapter 6.
 
-8. **[Capability modes](08-capability-modes.md)** — `Pure` / `Read` / `Check` / `IO` and how they gate which kernel AST nodes can produce values vs. stay neutral. Covers the `EigonClass` resolution rule, component dispatch, and institution constraint firing.
+8. **[Capability modes](08-capability-modes.md)** — `EvalCtx::Pure` vs `EvalCtx::Effectful`, the check / IO hook tiers, and how they gate which kernel AST nodes produce values and which stay neutral. Covers component dispatch, institution constraint firing, and comorphism invocation.
 
 9. **[Institutions in ESL](09-institutions.md)** — the institution surface from a program-author perspective under D14: declarations (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`), how `cap:predicate(args)` dispatches as `Exp::NativeDecide` returning a `Verdict`, why comorphisms aren't expression-level, and the life-science motivating example.
 

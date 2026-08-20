@@ -3,8 +3,9 @@
 **Status:** plan / pre-implementation. Targets the 3 residual reranked gaps (#3 passive, #4 V-as-Y +
 compared-to, #7 comparative + PP) that survive after lexicalize + build-then-subsume + reranker +
 count-veto. Grounded in the re-assessment (`diagnose_residual_gaps`, `db_backed_encoding.rs`) that
-**refuted PP-attachment as the lever** ([d63-pp-attachment-control-scoping.md](d63-pp-attachment-control-scoping.md),
-shelved) and located the driver in **domain-term ambiguity — sense-product × N-N compound bracketing**.
+**refuted PP-attachment as the lever** (the shelved PP-attachment scoping note, deleted
+`2026-08-19`) and located the driver in **domain-term ambiguity — sense-product × N-N compound
+bracketing**.
 
 ## 1. What we know (grounded)
 
@@ -18,7 +19,7 @@ shelved) and located the driver in **domain-term ambiguity — sense-product × 
   `analyze_chart_cells`: the saturating cells are `kept=432 shapes=6`, `kept=184 shapes=6`). So there are a
   handful of distinct `cat_shape`s (structural), each holding a large sense-product (same-shape).
 - **The two collapse mechanisms already built hit different halves.** Packing
-  ([packed-forest blueprint](d63-packed-forest-parsing-blueprint.md), default on) collapses the
+  (the packed-forest blueprint, deleted `2026-08-19`; default on) collapses the
   *same-shape* sense-product to O(nodes) (~8× measured) but **not** the distinct shapes. Build-then-subsume
   (D3) drops definitionally-equal readings post-felicity. Neither collapses distinct *structural* shapes.
 - **The explosion is the CKY cross-product across the compound spans** (items²-per-split), amplified by the
@@ -34,7 +35,7 @@ residual sentences and their generic bases.** So it is **not** the comparative/p
 **on the full lexicon the packed path is never taken at all.**
 
 **This is the headline finding, and it reshapes the plan.** The measured ~8× packing win
-([blueprint §10b](d63-packed-forest-parsing-blueprint.md)) was validated on *small-lexicon demo*
+(blueprint §10b) was validated on *small-lexicon demo*
 sentences; on the real corpus the dense lexicon means some sense of some common word always carries a
 concrete selectional slot, and the router's **whole-sentence** rule unpacks everything on that single hit.
 So the sense-product piles are **never** collapsed by packing — which is why even the generic bases run at

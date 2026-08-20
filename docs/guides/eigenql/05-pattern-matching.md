@@ -2,7 +2,7 @@
 
 Patterns are how EigenQL binds variables to resources. Every `MATCH` clause contains one or more patterns, and each pattern unifies with candidate resources in the layer (or in a `DEFINE`-derived relation, or in the `FIBER` overlay) to extend the current set of bindings.
 
-The core unification function is [`try_match_resource`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`, driven by [`apply_pattern`](../../../kernel/src/query/evaluate.rs) / [`apply_negated_pattern`](../../../kernel/src/query/evaluate.rs).
+The core unification function is [`try_match_resource`](../../../kernel/src/query/evaluate/pattern.rs) in `evaluate/pattern.rs`, driven by [`apply_pattern`](../../../kernel/src/query/evaluate/pattern.rs) / [`apply_negated_pattern`](../../../kernel/src/query/evaluate/pattern.rs).
 
 ## 5.1. Pattern anatomy
 
@@ -35,7 +35,7 @@ or untyped:
 The three parts:
 
 1. **Subject** — always a variable. The resource being described.
-2. **Class predicate** — optional; if present, the resource's `is_a` must include the named class (subclass chain walked via [`is_subclass_instance`](../../../kernel/src/query/evaluate.rs)).
+2. **Class predicate** — optional; if present, the resource's `is_a` must include the named class (subclass chain walked via [`is_subclass_instance`](../../../kernel/src/query/evaluate/pattern.rs)).
 3. **Property patterns** — pairs of `property: target` where the target is either a literal (the resource's property value must equal it) or a variable (bound to the value).
 
 ## 5.2. Subject variable semantics
@@ -54,7 +54,7 @@ MATCH Animal(?d) { diet: ?diet }
 
 the second pattern restricts `?d` (already bound to a specific dog) to those dogs that also happen to be `Animal` instances with a `diet` property. The binding set narrows.
 
-Conflict detection is implemented in [`try_match_resource`](../../../kernel/src/query/evaluate.rs): when a variable is already bound and the candidate resource disagrees (via `values_equal`), the match fails and that candidate is discarded.
+Conflict detection is implemented in [`try_match_resource`](../../../kernel/src/query/evaluate/pattern.rs): when a variable is already bound and the candidate resource disagrees (via `values_equal`), the match fails and that candidate is discarded.
 
 ## 5.3. Class predicates
 
@@ -69,7 +69,7 @@ pub enum Name {
 
 `ShortName`s are resolved against classes imported by `USING` (chapter 4 §4.2). `FullIri`s are used directly.
 
-**Subclass matching** is enabled: a pattern `Animal(?x)` matches any resource whose `is_a` chain leads to `Animal` through the `subclass_of` property. See [`is_subclass_instance`](../../../kernel/src/query/evaluate.rs).
+**Subclass matching** is enabled: a pattern `Animal(?x)` matches any resource whose `is_a` chain leads to `Animal` through the `subclass_of` property. See [`is_subclass_instance`](../../../kernel/src/query/evaluate/pattern.rs).
 
 Without a class predicate (`?x { ... }`), the pattern matches any resource regardless of class; only the property patterns constrain it.
 
@@ -88,7 +88,7 @@ where `property` is a `Name` and `target` is a literal value or a variable.
 At the point a property pattern is evaluated, the target resource's properties are a `BTreeMap<Iri, Value>`. The property `Name` is resolved in one of two ways:
 
 1. **`FullIri(iri)`** — used directly: the resource must have that exact IRI key.
-2. **`ShortName(s)`** — the evaluator scans the resource's property keys and finds the IRI whose local name equals `s`. See [`find_property_by_shortname`](../../../kernel/src/query/evaluate.rs). If multiple keys could match, the first wins (the map is `BTreeMap`-ordered, i.e. sorted by full IRI).
+2. **`ShortName(s)`** — the evaluator scans the resource's property keys and finds the IRI whose local name equals `s`. See [`find_property_by_shortname`](../../../kernel/src/query/evaluate/pattern.rs). If multiple keys could match, the first wins (the map is `BTreeMap`-ordered, i.e. sorted by full IRI).
 
 A property pattern that references a property the resource doesn't carry causes the match to fail — the pattern drops that resource from the candidate set.
 
@@ -116,11 +116,11 @@ Variables may be free or bound:
 A property whose value is an array (`resource_array` / `value_array`) can be matched with an **array pattern** in the target position, instead of binding the array as a whole:
 
 ```eigenql
-MATCH ?team { members: [] }                 -- exactly empty
-MATCH ?team { members: [?only] }            -- exactly one element, bound to ?only
-MATCH ?team { members: [?a, ?b] }           -- exactly two, bound positionally
-MATCH ?team { members: [?a, ?b, ...] }      -- at least two; ?a,?b = the first two
-MATCH ?team { members: [... ?m ...] }       -- iterate: one binding per element
+MATCH ?team { members: [] }                 // exactly empty
+MATCH ?team { members: [?only] }            // exactly one element, bound to ?only
+MATCH ?team { members: [?a, ?b] }           // exactly two, bound positionally
+MATCH ?team { members: [?a, ?b, ...] }      // at least two; ?a,?b = the first two
+MATCH ?team { members: [... ?m ...] }       // iterate: one binding per element
 ```
 
 - `[v0, v1, …]` — **exact arity**: matches only when the array has exactly that many elements; binds each variable positionally (ordered arrays, so positions are well-defined). `[]` matches the empty array.
@@ -128,7 +128,7 @@ MATCH ?team { members: [... ?m ...] }       -- iterate: one binding per element
 - `[... ?e ...]` — **iterate**: produces *one binding per element* (an unnest). This turns an array property into a relation, so it composes with recursion for graph traversal:
 
 ```eigenql
--- reachability over an array-valued `depends_on` edge
+// reachability over an array-valued `depends_on` edge
 DEFINE Reach(?n) FROM MATCH "...:Objective"(?o) { thesis: ?n }
 DEFINE Reach(?n) FROM MATCH Reach(?m) { depends_on: [... ?n ...] }
 ```
@@ -157,7 +157,7 @@ MATCH NOT ?x { retired: true }
 
 Reads as "for every resource `?x`, require that no property `retired: true` exists on it". Equivalent to: `?x` is not retired.
 
-Implementation: [`apply_negated_pattern`](../../../kernel/src/query/evaluate.rs). For each existing binding, the evaluator checks whether any candidate resource matches the inner pattern (against current bindings). If none match, the binding survives; if at least one matches, the binding is dropped.
+Implementation: [`apply_negated_pattern`](../../../kernel/src/query/evaluate/pattern.rs). For each existing binding, the evaluator checks whether any candidate resource matches the inner pattern (against current bindings). If none match, the binding survives; if at least one matches, the binding is dropped.
 
 ### The `NOT EXISTS` expression (distinct from pattern negation)
 
@@ -192,9 +192,12 @@ WHERE ?x = "urn:eigenius:test:alice"
 
 ## 5.10. A concrete example
 
-Given the test layer (core ontology + `animals.json`):
+Given the test layer (core ontology + `animals.json`). Note the `USING NAMESPACE` line: it is
+what puts the bare names `Dog` and `Person` in scope. The `USING` line below it only asserts
+that the two IRIs name classes — see [chapter 4 §4.2](04-program-structure.md#42-using--class-imports-and-using-namespace--short-name-scope).
 
 ```eigenql
+USING NAMESPACE "urn:eigenius:example:"
 USING "urn:eigenius:example:Dog", "urn:eigenius:example:Person"
 
 MATCH Dog(?d) {

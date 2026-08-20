@@ -13,17 +13,22 @@
 // limitations under the License.
 
 //! `JuliaLanguageRuntime` — the production `LanguageRuntime` impl for
-//! Julia. Phase 19a.1 ships the per-invocation Docker spawner path
-//! (inherited from the 18d capstone fixture); 19a.2 introduces the
-//! `ServiceSpawner` warm-pool path; 19a.3 lights up the mirror
-//! generator and 19a.4 wires `CallRuntimeMethod` against typed mirror
-//! struct dispatch.
+//! Julia. Dispatches over a `ServiceSpawner`: one long-lived container
+//! per image digest, reached over a CBOR-framed Unix domain socket in
+//! the shared depot. The historical per-invocation `DockerSpawner`
+//! path is no longer used — `CallRuntimeMethod` needs sub-second
+//! latency that per-invocation spawns can't deliver for Julia.
+//!
+//! `build_worker_spec` deliberately emits an empty `command`, leaving
+//! the image's `CMD` as PID 1. That makes the Docker service spawner
+//! the only usable backend here: `LocalServiceSpawner` rejects an
+//! empty command.
 //!
 //! This module is intentionally thin Rust over the substrate's
 //! existing image-build + spawn machinery. The Julia-specific work is
-//! the worker (`JuliaWorker.jl` in `julia/runtime-worker/`) and, in
-//! 19a.3, the generated mirror packages. From the substrate's view,
-//! this crate just composes Dockerfile fragments and routes RPC.
+//! the worker (`JuliaWorker.jl` in `julia/runtime-worker/`) and the
+//! generated mirror packages. From the substrate's view, this crate
+//! just composes Dockerfile fragments and routes RPC.
 
 use crate::conventions::{
     LANGUAGE, PROP_IMAGE_DIGEST, PROP_LANGUAGE, PROP_METHOD_NAME, PROP_PACKAGE_MANIFEST,
@@ -69,12 +74,13 @@ type DispatchTypedMethodOutput = (Vec<u8>, Vec<Vec<u8>>, Option<String>);
 /// through the language registry whenever a `RuntimeScript` /
 /// `RuntimeMethodSignature` resource declares `language = "julia"`.
 ///
-/// Phase 19a.3.e wires this against [`ServiceSpawner`] so a single
-/// long-lived worker per env amortises Julia's cold-start across many
-/// dispatches. The previous per-invocation `DockerSpawner` path
-/// (19a.1) shipped before the warm-pool design and is no longer used —
-/// `CallRuntimeMethod` (19a.4) needs sub-second latency that
-/// per-invocation spawns can't deliver for Julia.
+/// Wired against [`ServiceSpawner`] so a single long-lived worker per
+/// env amortises Julia's cold-start across many dispatches. The
+/// previous per-invocation `DockerSpawner` path is no longer used —
+/// `CallRuntimeMethod` needs sub-second latency that per-invocation
+/// spawns can't deliver for Julia. In practice the spawner is always
+/// the Docker sibling-container one: the `WorkerSpec` this type builds
+/// carries an empty `command`, which `LocalServiceSpawner` refuses.
 pub struct JuliaLanguageRuntime {
     spawner: Arc<dyn ServiceSpawner>,
     /// Path to `julia/runtime-worker/` — the directory containing

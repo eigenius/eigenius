@@ -23,15 +23,23 @@
 //! `crate::layer::cache`), backed by the persistent store. This module is
 //! purely topology — no resource content passes through it.
 //!
-//! The kernel does not track "current state" beyond the DAG itself. There is
-//! no `head`, no `tip`, no notion of a "current branch." Tasks carry their own
-//! pin in `TaskRecord.layer_head` (D21); other clients carry their pin in
-//! their own session state. The only kernel write operation is "append a
-//! layer with these parents" — branches, named refs, current-head conventions
-//! all belong above the kernel.
+//! **This module** tracks no current state beyond the DAG itself: a
+//! `LayerTopology` is handles and parent edges, with no `head` and no `tip`,
+//! and the only write operation it models is "append a layer with these
+//! parents".
 //!
-//! Phase 14a-i ships these types as pure additions; they are not yet wired
-//! into `Layer` or the persistent backend (those are 14a-ii and 14a-iii).
+//! That is a statement about this module, not about the kernel. Named refs
+//! are *not* above the kernel — Phase 14g moved them in. The persistent
+//! backend stores `branch:<name>` and `tag:<name>` keys;
+//! `crate::lattice::update_branch` is the sanctioned CAS write path for
+//! branch refs, every commit lands on a branch with `main` as the default,
+//! tags are GC roots alongside branches, and `bootstrap_persistent` uses the
+//! presence of `branch:main` as its seed-versus-resume discriminator. The
+//! pre-14g single-`head` pointer is what is gone, replaced by per-branch
+//! refs — not the notion of a named ref itself.
+//!
+//! Tasks still carry their own pin in `TaskRecord.layer_head` (D21); other
+//! clients carry their pin in their own session state.
 
 use crate::layer::{ContentHash, LayerId};
 use crate::ontology::iri::Iri;

@@ -102,6 +102,11 @@ import {
   type ReflectResponse,
   RunGcRequestSchema,
   type RunGcResponse,
+  FormalizationOptionsSchema,
+  FormalizeDocumentRequestSchema,
+  type FormalizeDocumentResponse,
+  GetFormalizationResultRequestSchema,
+  type GetFormalizationResultResponse,
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
@@ -413,6 +418,28 @@ export interface ConsolidateOptions {
   preserveHistory?: boolean;
 }
 
+/** Options for {@link Eigen.formalizeDocument} (D71 §7.1). */
+export interface FormalizeOptions {
+  /** Branch to parse over — this is how a caller says WHICH LEXICON. */
+  branch?: string;
+  atLayer?: string;
+  /** Ordered `lexicon:Lexicon` IRIs; array order IS resolution precedence. */
+  scope?: string[];
+  /** A `lexicon:LexiconProfile` IRI naming that list. Mutually exclusive with `scope`. */
+  profile?: string;
+  sourcePath?: string;
+  sourceRef?: string;
+  ns?: string;
+  /** Model for this run's proposers; also what each recorded draw names as its answerer. */
+  model?: string;
+  senseCap?: number;
+  cellBeam?: number;
+  /** Abort on the first non-encoding unit instead of recording an `enc:CutItem`. */
+  strict?: boolean;
+  /** `application/cbor` (default), `application/eigon+json`, or `text/x-esl`. */
+  format?: string;
+}
+
 export class Eigen {
   private readonly endpoint: string;
   private readonly transport: Transport;
@@ -675,6 +702,63 @@ export class Eigen {
         atLayer,
         branch: this.resolveBranch(options.branch, atLayer),
       }),
+    );
+  }
+
+  /**
+   * Formalize prose into typed, kernel-checked claims (D71).
+   *
+   * ASYNCHRONOUS BY NECESSITY: a document costs minutes and N LLM
+   * round-trips, so this returns a TASK ID. Poll `getTaskStatus` until
+   * the task is `Completed`, then call `getFormalizationResult`.
+   *
+   * `docId` names the run's `doc-<id>` working branch, which holds the
+   * document glossary and the run's recorded proposer draws — re-using
+   * it replays those draws instead of re-asking the model, which is what
+   * makes a second run of the same prose fast and deterministic.
+   *
+   * The artifact is NOT committed: generation stays decoupled from
+   * commitment (D71 §4), so landing it is an explicit `load`.
+   */
+  async formalizeDocument(
+    sourceText: string,
+    docId: string,
+    options: FormalizeOptions = {},
+  ): Promise<FormalizeDocumentResponse> {
+    const atLayer = options.atLayer ?? "";
+    return await this.kernel.formalizeDocument(
+      create(FormalizeDocumentRequestSchema, {
+        sourceText,
+        docId,
+        sourcePath: options.sourcePath ?? "",
+        sourceRef: options.sourceRef ?? "",
+        ns: options.ns ?? "",
+        atLayer,
+        branch: this.resolveBranch(options.branch, atLayer),
+        scope: options.scope ?? [],
+        profile: options.profile ?? "",
+        format: options.format ?? "",
+        options: create(FormalizationOptionsSchema, {
+          model: options.model ?? "",
+          senseCap: options.senseCap ?? 0,
+          cellBeam: options.cellBeam ?? 0,
+          strict: options.strict ?? false,
+        }),
+      }),
+    );
+  }
+
+  /**
+   * The artifact a completed formalization task produced.
+   *
+   * `found: false` means the task has not finished — that is a state, not
+   * a failure; poll `getTaskStatus` first.
+   */
+  async getFormalizationResult(
+    taskId: string,
+  ): Promise<GetFormalizationResultResponse> {
+    return await this.kernel.getFormalizationResult(
+      create(GetFormalizationResultRequestSchema, { taskId }),
     );
   }
 

@@ -11,15 +11,25 @@ actually pays off.
 The v1 platform ships five Julia-backed institutions
 ([platform §11](../platform/11-runtime-substrate.md), tutorials under
 [`platform/julia-institutions/`](../platform/julia-institutions/)). Each
-declares chain shapes that carry FormulaTerm-typed properties:
+**Four of the five** declare a FormulaTerm-typed chain property — five such
+properties between them:
 
-| Institution | Class with a FormulaTerm field | Field name |
+| Institution | Property | Declared on |
 |---|---|---|
-| Symbolics | `SymbolicExpression` | `term` |
-| IntervalArithmetic | `IntervalFunction` | `term` |
-| Catalyst | (network compiles to) `OdeProblem.rhs[i]` | `term` (per `RhsComponent`) |
-| DiffEq | `OdeProblem.rhs[i]` | `term` (per `RhsComponent`) |
-| JuMP-HiGHS | `OptimisationProblem.objective`, `Constraint.lhs` | direct FormulaTerm |
+| Symbolics | `symbolics:term` | `SymbolicExpression` |
+| IntervalArithmetic | `intervals:term` | `IntervalFunction` |
+| DiffEq | `diffeq:term` | `RhsComponent` (one per element of `OdeProblem.rhs`) |
+| JuMP-HiGHS | `jump:objective` | `OptimisationProblem` |
+| JuMP-HiGHS | `jump:lhs` | `Constraint` |
+| Catalyst | *(none)* | — |
+
+Catalyst is the exception. It declares no FormulaTerm-typed property at all;
+`OdeProblem.rhs` is **DiffEq's** declaration, not Catalyst's. Catalyst's
+`ReactionNetwork` carries the network as a `@reaction_network` source string,
+and it reaches the shared shape only inside its own Julia handler, through a
+bespoke `Symbolics.Num`-to-`FormulaTerm` walker with an explicit failure path
+for operators it cannot encode. It *produces* FormulaTerm-typed
+`RhsComponent`s; it does not *declare* a slot for one.
 
 The key thing is that **none** of those classes own the FormulaTerm
 shape. They all reference it as `core:inductive` typed by
@@ -32,9 +42,11 @@ catalog from [chapter 4](04-operator-catalog.md).
 
 ## 6.2. Identity comorphisms
 
-When two institutions share a payload language, the comorphism between
-them collapses to the **identity function on the payload**. The chain
-shape of a comorphism has three pieces (D14 §4):
+When two institutions agree on a payload type, the comorphism's declared
+`transformation` is the **identity function at that type**. Note the
+scope: this is a statement about the *declared middle*. It does not mean the
+translation went away — see [§6.4](#6-4-the-kinase-notebooks-three-comorphisms).
+The chain shape of a comorphism has three pieces (D14 §4):
 
 - An `ExportFormat` on the source side that extracts a typed payload
   from a source-class instance.
@@ -42,12 +54,13 @@ shape of a comorphism has three pieces (D14 §4):
 - An `ImportFormat` on the target side that constructs a target-class
   instance from a typed payload.
 
-For two FormulaTerm-speaking institutions, the `transformation` is
-literally `Lam(t: FormulaTerm. Var(t))` — the identity. The
-ExportFormat unwraps a `SymbolicExpression`'s `term` field; the
-ImportFormat wraps the same FormulaTerm as an `IntervalFunction.term`
-(or similar). No translation work, because both endpoints already
-agree on the bytes.
+For two FormulaTerm-speaking institutions, the `transformation` is a
+`program:Lambda` whose body is a `program:Var` on its own binder — the
+identity, `λ t : FormulaTerm . t`. The ExportFormat unwraps a
+`SymbolicExpression`'s `term` field; the ImportFormat wraps the same
+FormulaTerm as an `IntervalFunction.term`. No translation work, because both
+endpoints already agree on the bytes. On the present chain exactly one
+shipped comorphism is of this shape: `symbolics_to_intervals`.
 
 The comorphism declaration (from
 [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../julia/comorphisms/symbolics-to-intervals.eigon.json)):
@@ -104,12 +117,27 @@ Three comorphisms register in the kinase-institutions setup:
 | `catalyst_to_diffeq` | `CatalystToOdeInput` | `OdeProblem` | identity on `OdeProblem` | ✗ (mass-action ODE compilation faithful only to the deterministic limit) |
 | `symbolics_to_jump` | `SymbolicsToJuMPInput` | `OptimisationProblem` | identity on `OptimisationProblem` | ✗ (the framing imposes structure not in the source SymbolicExpression) |
 
-Two of three are identity-on-FormulaTerm directly. The third
-(`catalyst_to_diffeq`) involves more structural work — Catalyst's reaction
-network compiles into multiple FormulaTerm RHS components — but each
-RHS is itself a FormulaTerm, so the *FormulaTerm-shaped portions* of
-the work are still identity transforms; only the surrounding structure
-differs.
+**All three declare an identity middle, but only one of them is identity on
+`FormulaTerm`.** The other two are identities on institution-owned composite
+classes that *carry* FormulaTerms — `diffeq:OdeProblem` and
+`jump:OptimisationProblem`. That distinction matters, because in those two
+cases the translation has not disappeared; it has moved into the source
+institution's `ExportFormat` procedure.
+
+For `catalyst_to_diffeq` the work is `compile_to_ode` on the Catalyst side:
+it parses the `@reaction_network` source, computes the symbolic right-hand
+side, and walks each resulting `Symbolics.Num` into a `FormulaTerm`. The
+declaration says so — "the actual compilation work happens inside the
+ExportFormat's `procedure`". For `symbolics_to_jump` it is
+`frame_as_optimisation_problem`, which packages the objective with the
+JuMP-side variables, bounds, sense and constraints. `symbolics_to_intervals`
+is the one where the export, the middle *and* the import are each a single
+statement.
+
+The shared formula language is doing real work in all three — it is what the
+composites are built out of, and what lets the target read the result without
+a decoder of its own — but "the comorphism collapses to identity" describes
+the declared middle, not the total amount of code written.
 
 `exact` flags the satisfaction-condition fidelity (D14 §4.5): an exact
 comorphism preserves truth of sentences across the translation; an

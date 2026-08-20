@@ -234,11 +234,14 @@ impl Embedder for DummyEmbedder {
             hasher.update(text.as_bytes());
             hasher.update(counter.to_le_bytes());
             let digest = hasher.finalize();
-            for chunk in digest.chunks_exact(4) {
+            // `as_chunks` over `chunks_exact`: the window size is a constant, so the
+            // chunk arrives as `&[u8; 4]` and feeds `from_le_bytes` without re-indexing.
+            // The digest is 32 bytes = exactly 8 windows, so the remainder is empty.
+            for chunk in digest.as_slice().as_chunks::<4>().0 {
                 if out.len() == dim {
                     break;
                 }
-                let u = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let u = u32::from_le_bytes(*chunk);
                 let scaled = (u as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 out.push(scaled);
             }

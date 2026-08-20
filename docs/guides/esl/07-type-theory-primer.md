@@ -211,7 +211,7 @@ Two key concepts you'll see in error messages:
 
 **Closures** (`Val::Lam(closure)`, `Val::Sig(...)`) are `Val`s that capture an environment. They're how lambdas and Σ-types stay lazy — the body isn't evaluated until applied/projected.
 
-The kernel's evaluator is in [`nbe/eval.rs`](../../../kernel/src/nbe/eval.rs); the type-checker in [`nbe/check.rs`](../../../kernel/src/nbe/check.rs); readback in [`nbe/readback.rs`](../../../kernel/src/nbe/readback.rs).
+The kernel's evaluator is in [`nbe/eval/mod.rs`](../../../kernel/src/nbe/eval/mod.rs); the type-checker in [`nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs); readback in [`nbe/readback.rs`](../../../kernel/src/nbe/readback.rs).
 
 ## 7.9. The `EigonClass` and `EigonPrimitive` bridges
 

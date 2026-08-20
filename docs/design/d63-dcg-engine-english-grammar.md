@@ -1593,3 +1593,95 @@ Local + license-cleared (the Path B shelf):
   D28/D30); wide multimodal coverage; mining the closed class via the D62 proposer harness (LLM
   proposes in our notation → the §7 ladder disposes) as a *scale* accelerator once the formalism is
   fixed.
+
+## 11. Measured and rejected — do not re-try without repeating the A/B
+
+Harvested `2026-08-19` from the D63/D62 working notes before those notes were deleted. Every entry
+below is a design that was *tried and measured*, not merely considered — which is exactly the kind of
+result that gets re-proposed once the note recording it is gone. Each states the measurement that
+killed it, so a future attempt starts by reproducing that measurement rather than by re-deriving the
+idea.
+
+**Pooled sense cap (per-span rather than per-lemma) — reverted.** Pooling the cap across a span's
+candidate lemmas does make the reranker's drop-verdict bite: a rank-dropped sense hiding in a sub-cap
+lemma bucket (`DOE` in the 2-entry `doe` bucket) otherwise slips the per-lemma cap. But it regressed
+`grammar-gap 0 → 1` on unit 52 ("The MSI relationship compared favourably…") by over-pruning a
+multi-lemma span. It is also unnecessary now that post-nominal `alone` has a rule: the faithful reading
+is reachable at the tight cap, so widen-on-failure never fires and the junk is never admitted.
+Isolated by reverting *only* the seeding code (now `dcg/parse/seed.rs`) against the same store — repeat
+that A/B before re-landing. Kept from the same session: the UMLS grammatical-surface filter
+(17 surfaces incl. `does not` / `alone` / `lead`) in `crates/eigenius-umls/src/convert.rs`.
+
+**Un-elision rewrite for right-node raising — invalidated by probe.** The tempting reduction is to
+rewrite "M₁, M₂, … and Mₙ Head" to the head-repeated "M₁ Head, M₂ Head, …" and let existing
+coordination handle it. Even the head-repeated form fails: "Colon cancer and endometrial cancer are
+common." gives 32 readings / 6 skeletons with reading[0] junk (`cancer`-as-verb `v02604760`, zodiac
+`n08686658`); the three-way version gives 80 / 4 with the same junk; and "Colon cancers and ovarian
+cancers are common." mis-parses as a nested compound rather than a union. Two facts fall out:
+multiword-preference does not survive coordination (the coordination context re-opens bare-noun senses
+that the standalone sentence suppresses), and coordinating compound NPs is itself broken (the `and` is
+absorbed into a compound). RNR must build the union directly from re-looked-up atomic concepts.
+
+**Naive coordinated-modifier fix — prototyped, over-reached, reverted.** A pre-nominal modifier has no
+standalone category, so a bare noun cannot coordinate with an adjective as a modifier and the grammar
+routes it through a raised-form path, producing a malformed reading. The direct fix over-generated. The
+specified repair is a `cat_mod` category that is coordinable but never carries an abstract head type
+`C`, preserving the concrete-Σ invariant while letting modifiers meet each other before they meet the
+head noun. Unbuilt.
+
+**Adjective-outside-compound normal form — a no-op on this corpus.** The collapse rule targets
+intersective-adjective-over-compound stacks. Witnessed on the four distinct S5 readings: the adjective
+stack `And(gt, gt)` is identical across all four, and the residual variation is copula predication
+(`kind_of` vs `subclass_of`) × object-compound bracketing plus one VP-shaped artifact — none of it what
+the rule targets, and the four are definitionally distinct so subsumption keeps them all. The residual
+was genuine ambiguity, reduced by the sense reranker and object-compound handling instead. The rule
+stays valid for a corpus that has such stacks; this one does not.
+
+**One-directional apposition gate — rejected every real apposition.** Gating an appositive group on
+`members ≤ head` in one direction admitted nothing. The gate has to be bidirectional
+(concept↔semantic-type felicity), which is what `appose_group` implements.
+
+**Lexicalization beats a general adjective rule — but the lexicon is the real fix.** `synthetic lethal`
+is a lexicalized domain term (attributive form of *synthetic lethality*, C4280020), and unhyphenated it
+masqueraded as a two-adjective stack, driving a 3× fork (144 → 48 classify candidates when hyphenated).
+The CNL style-guide hyphenation was the zero-code lever at the time; it has since been superseded by
+the honest fix, a multiword lexicon entry added through `experiments/lexicon-align/atom-overrides.json`
+under D70. The general lesson survives both: an apparent grammar fork over a domain term is usually a
+missing multiword entry.
+
+**Two-level reading presentation (D69-B) — implemented, measured, rejected.** Rendering the structure
+frame once with varying positions as slots scored 24/40 correct and 29/40 structure, against the flat
+listing's 30/40 and 33/40 on the same forest and the same ranks with both draws fully adjudicated. Flat
+remains the default; the two-level renderer survives behind `EIGENIUS_SELECT_TWO_LEVEL=1` because §5's
+preferred realisation was a two-CALL ranker and this was the cheap proxy for it. Logged truncation
+(`MAX_STRUCTURES_SHOWN`) was kept unconditionally — a silent cap would let the model report the best of
+what it saw as the best reading (the D62 no-silent-caps rule).
+
+**Bare-plural NPs as deferred-quantification holes — superseded by kind predication.** The earlier
+design carried bare plurals as quantification holes to be resolved later. Replaced by treating bare
+mass/kind subjects as closed propositions via `kind_of`, which removed the carrier entirely.
+
+**Deterministic "closed-class-wins" sense preference — tried and reverted.** The cheap alternative to
+the contextual LLM reranker is to let a closed-class reading beat an open-class one categorically. It
+is harmful: it cannot distinguish the `be`-verb from beryllium, and it wrongly drops open-class senses
+the parse needs. The reranker is what actually recovers the affected units (S1: GAP → open×80 at the
+page beam). Any future determinism lever here has to be narrower than a blanket rule.
+
+**Deleting glue-word content senses — tried and reverted.** Cutting the metadata noun senses that
+function words carry regressed coverage 1 → 5. The apparent PP "explosions" those senses produce are a
+CAP-ONLY artifact: replayed with reranker ranks, the affected units give 2 clean readings each, every
+one carrying a real `prep_for` / `prep_with`. Nothing to do — the reranker already handles it, and the
+residual PP ambiguity that survives reranking is genuine (`cancers with MSI` vs `dependencies with
+MSI`, both well-formed), reachable only by selectional typing or underspecification, never by an NF or
+a rule change.
+
+**Depth-bounding the compound pile — reverted.** Bounding recursion depth does not touch the cost,
+because the cost is the sense product *within one shape*: with the cap live at 4 the pile still reached
+30,128 items. The levers that did work were a shape-aware cell beam (the type-narrowing lever) and the
+sense cap itself. A depth bound is the wrong axis.
+
+**`pos_prune` is untested, not rejected.** The categorical drop of function-word-as-noun readings
+(`EIGENIUS_POS_PRUNE`, default-off) is *the* lever against the `does→DOE` noun-pile junk. It previously
+made unit 3 unparseable — but only because post-nominal `alone` had no rule, and that blocker is gone.
+It is newly viable and has not been re-measured. Gate any attempt on the deterministic sweep with
+`grammar-gap` staying 0.

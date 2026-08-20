@@ -34,6 +34,16 @@
 //! Centralising this logic here keeps both Decidable paths in lockstep
 //! — adding a new marshaling rule (e.g. `core:resource_array` element
 //! deref) lands in one place rather than two.
+//!
+//! **Scope caveat.** "Both paths" means the two *Decidable* paths only.
+//! The FIBER *clause* path does not route through this module: it builds
+//! its input resource from a property-shaped param block rather than from
+//! positional args, and carries its own copy of step 4's deref logic as
+//! `embed_typed_resource_param` in
+//! `kernel::query::evaluate::fiber`. A new marshaling rule therefore has
+//! to land in two places, not one — here, and there. Unifying the two is
+//! open work; until it happens, treat the pair as a known duplicate and
+//! change both together.
 
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;

@@ -262,9 +262,11 @@ mod tests {
             "urn:eigenius:logic:Will",
             "urn:eigenius:logic:Would",
             "urn:eigenius:logic:Should",
-            // D64 referent-hole placeholder + the deictic speaker + possession relation
-            // (open-parse carrier / possessive determiners, `closed-class.esl`)
+            // D64 referent-hole placeholders + the deictic speaker + possession relation
+            // (open-parse carrier / possessive determiners / demonstratives, `closed-class.esl`;
+            // `anaphor_of` is the POLYMORPHIC restrictor-typed sibling — d64-demonstratives-as-holes.md)
             "urn:eigenius:lexicon:anaphor",
+            "urn:eigenius:lexicon:anaphor_of",
             "urn:eigenius:lexicon:speaker",
             "urn:eigenius:lexicon:poss_of",
         ];

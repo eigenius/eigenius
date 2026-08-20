@@ -202,8 +202,29 @@ async fn resume_one_task(
         }
     };
 
+    // Resume is a PROGRAM-RUN operation. A formalization task pins no program to re-resolve, and
+    // D71 §6 defers its resume deliberately: the pipeline's live state is the discourse candidate
+    // set plus the ranker's prior-selection context, which is recovered by replaying the prefix
+    // (deterministic once the run's draws are on its branch), not by restoring a serialized state.
+    // Marking it Failed with a stated reason beats silently reporting "program not found".
+    let (program_iri, input_iri) = match (&record.kind.program_iri(), &record.kind.input_iri()) {
+        (Some(p), Some(i)) => ((*p).to_string(), (*i).to_string()),
+        _ => {
+            tracing::info!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::TASK_ID } = ?record.task_id,
+                kind = record.kind.label(),
+                "task kind does not resume; marking Failed — re-run it instead"
+            );
+            record.status = TaskStatus::Failed;
+            record.updated_at = now_millis();
+            let _ = task_store.put_task(&record);
+            return;
+        }
+    };
+
     // Resolve program and input resources from the pinned layer.
-    let program = match Iri::parse(&record.program_iri)
+    let program = match Iri::parse(&program_iri)
         .ok()
         .and_then(|i| layer.resolve(&i).map(|arc| (*arc).clone()))
     {
@@ -213,7 +234,7 @@ async fn resume_one_task(
                 { field::OPERATION } = operation::TASK_RESUME,
                 { field::ERROR_KIND } = "program_missing",
                 { field::TASK_ID } = ?record.task_id,
-                { field::PROGRAM_IRI } = %record.program_iri,
+                { field::PROGRAM_IRI } = %program_iri,
                 "task program not found at pinned head"
             );
             record.status = TaskStatus::Failed;
@@ -222,7 +243,7 @@ async fn resume_one_task(
             return;
         }
     };
-    let input = match Iri::parse(&record.input_iri)
+    let input = match Iri::parse(&input_iri)
         .ok()
         .and_then(|i| layer.resolve(&i).map(|arc| (*arc).clone()))
     {
@@ -339,6 +360,25 @@ impl Default for EmbedderStartupConfig {
 /// `embedders` carries the registered Embedder Components (D43 §5.2);
 /// pass [`EmbedderStartupConfig::default`] (empty) when vector
 /// retrieval isn't wanted.
+///
+/// # Security: this server is unauthenticated and unencrypted
+///
+/// It binds `0.0.0.0:<port>` — every interface — and serves plaintext
+/// gRPC and gRPC-Web. There is no `ServerTlsConfig`, no server identity,
+/// no authentication interceptor, no bearer-token or API-key check, and
+/// no authorization check on any RPC. `crate::capability` is institution
+/// registration, not access control. Anything that can reach the port can
+/// read the whole chain and commit to any branch.
+///
+/// The same holds for the orchestrator's HTTP listener and its `/mcp`
+/// handler, and the compose stack publishes both ports on every host
+/// interface while mounting the host Docker socket into the orchestrator
+/// container.
+///
+/// **The deployment assumption is a trusted network**: run this only where
+/// the port is reachable solely by trusted callers — loopback, a private
+/// network segment, or behind a reverse proxy that terminates TLS and
+/// authenticates before forwarding. Do not expose it to the internet.
 pub async fn start_server(
     port: u16,
     orchestrator_endpoint: Option<&str>,
@@ -346,6 +386,10 @@ pub async fn start_server(
     in_process_institutions: Vec<Arc<dyn crate::institution::runtime::Institution>>,
     embedders: EmbedderStartupConfig,
     parse_config: super::ParseConfig,
+    // D71 §7.1 — the `FormalizeDocument` implementation. `None` serves a kernel whose
+    // `FormalizeDocument` returns `unimplemented`, the honest answer for a build without the
+    // crates that can emit an artifact.
+    formalizer: Option<Arc<dyn crate::dcg::formalizer::DocumentFormalizer>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -425,6 +469,9 @@ pub async fn start_server(
     // D63/GH#97 Lever 1 — install the ParseSentence parse config (lemmatizer + cap/beam + opt-in
     // reranker). The binary injects a real lemmatizer here (the kernel can't depend on WordNet).
     service = service.with_parse_config(parse_config);
+    if let Some(f) = formalizer {
+        service = service.with_formalizer(f);
+    }
 
     // Phase 20a.1+: pre-register every in-process institution the
     // binary links (Lean today, future verification institutions

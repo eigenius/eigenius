@@ -1,7 +1,9 @@
 [
   {
     "@id": "urn:eigenius:notebook:Notebook",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
     "urn:eigenius:core:description": "An Eigenius notebook — an ordered sequence of Cell resources with metadata. Notebook IRIs are content-addressed (sha-256 over the canonical structural form): identical content yields an identical IRI.",
     "urn:eigenius:core:short_name": "Notebook",
     "urn:eigenius:core:requires": [
@@ -20,8 +22,10 @@
   },
   {
     "@id": "urn:eigenius:notebook:Cell",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris`; chart cells carry `chart_query` + `chart_kind` + `chart_x_column` + `chart_y_column` (+ optional `chart_series_column` / `chart_title`).",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris`; formalize cells carry PROSE in `source` plus `doc_id` (+ optional `structure_iri` / `lexicon_profile` / `land`); chart cells carry `chart_query` + `chart_kind` + `chart_x_column` + `chart_y_column` (+ optional `chart_series_column` / `chart_title`).",
     "urn:eigenius:core:short_name": "Cell",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
@@ -43,7 +47,9 @@
   },
   {
     "@id": "urn:eigenius:notebook:CellType",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
     "urn:eigenius:core:description": "The type of a notebook Cell. The instances (markdown, esl, eigenql, typescript, program-run, chart) form the closed set permitted by the cell_type property's allows_only constraint.",
     "urn:eigenius:core:short_name": "CellType",
     "urn:eigenius:core:requires": [
@@ -52,193 +58,330 @@
       "urn:eigenius:core:short_name"
     ]
   },
-
   {
     "@id": "urn:eigenius:notebook:format_version",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Notebook file format version (currently 1). Bumped on breaking changes to the notebook structure.",
     "urn:eigenius:core:short_name": "format_version",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:title",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Human-readable notebook title. Queryable for search/index UIs.",
     "urn:eigenius:core:short_name": "title",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:description",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Short description of what the notebook does. Queryable for search/index UIs.",
     "urn:eigenius:core:short_name": "description",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:created",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "ISO 8601 creation timestamp. Excluded from the content-addressed Notebook IRI hash so that re-saving identical content does not change identity.",
     "urn:eigenius:core:short_name": "created",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:modified",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "ISO 8601 last-modified timestamp. Excluded from the content-addressed Notebook IRI hash.",
     "urn:eigenius:core:short_name": "modified",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:eigenius_version",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Eigenius platform version when the notebook was last saved. Excluded from the content-addressed Notebook IRI hash.",
     "urn:eigenius:core:short_name": "eigenius_version",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:cells",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Ordered list of Cell resources composing the notebook. Order is preserved by array position.",
     "urn:eigenius:core:short_name": "cells",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:notebook:Cell"],
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Notebook"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:notebook:Cell"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Notebook"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:cell_type",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The type of this Cell — one of the four CellType resources. Restricted by allows_only to ensure new cell types require an explicit ontology update.",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The type of this Cell — one of the CellType resources. Restricted by allows_only to ensure new cell types require an explicit ontology update (and, because this file is in BOOTSTRAP_CHAIN, a reseed — which is the cost that keeps the enumeration honest).",
     "urn:eigenius:core:short_name": "cell_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:allows_only": [
       "urn:eigenius:notebook:markdown",
       "urn:eigenius:notebook:esl",
       "urn:eigenius:notebook:eigenql",
       "urn:eigenius:notebook:typescript",
       "urn:eigenius:notebook:program-run",
-      "urn:eigenius:notebook:chart"
+      "urn:eigenius:notebook:chart",
+      "urn:eigenius:notebook:formalize"
     ],
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:source",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Source text of the cell. The cell's content-addressed IRI hashes (cell_type, source) — so changing the source mints a new Cell resource.",
     "urn:eigenius:core:short_name": "source",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
-
   {
     "@id": "urn:eigenius:notebook:markdown",
-    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:description": "Markdown render-only cell. Renders as Github-flavoured Markdown; does not execute.",
     "urn:eigenius:core:short_name": "markdown"
   },
   {
     "@id": "urn:eigenius:notebook:esl",
-    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:description": "ESL declaration / program cell. Run via eigen.load() — the kernel compiles ESL and commits a new layer.",
     "urn:eigenius:core:short_name": "esl"
   },
   {
     "@id": "urn:eigenius:notebook:eigenql",
-    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:description": "EigenQL query cell. Run via eigen.query() against the active layer chain; output renders in a Fluent DataGrid.",
     "urn:eigenius:core:short_name": "eigenql"
   },
   {
     "@id": "urn:eigenius:notebook:typescript",
-    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:description": "TypeScript orchestration cell. Executes in the browser sandbox with the SDK in scope (Phase 4).",
     "urn:eigenius:core:short_name": "typescript"
   },
   {
     "@id": "urn:eigenius:notebook:program-run",
-    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:description": "Program-run cell. Invokes a program (program_iri) against one or more inputs (input_iris) via runProgramByIri; renders typed output + trace tree per input.",
     "urn:eigenius:core:short_name": "program-run"
   },
   {
+    "@id": "urn:eigenius:notebook:formalize",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
+    "urn:eigenius:core:description": "Formalization cell (D71). Its `source` is PROSE, not code: the cell runs FormalizeDocument over it and renders the per-unit outcome table, the claims, the DecisionPoints with their runners-up, the AnaphorBindings, and the CutItem/LexicalGap stream. `doc_id` names the run's doc-<id> working branch, which holds the document glossary and the run's recorded LLM draws — re-running the cell replays those instead of re-asking the model. `structure_iri` is the enc:ReasoningStructure the last run produced; the artifact itself is NOT committed by the cell (D71 §4 keeps generation decoupled from commitment), so landing it is an explicit load.",
+    "urn:eigenius:core:short_name": "formalize"
+  },
+  {
     "@id": "urn:eigenius:notebook:chart",
-    "urn:eigenius:core:is_a": ["urn:eigenius:notebook:CellType"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:notebook:CellType"
+    ],
     "urn:eigenius:core:description": "Chart cell (Phase 5d). Form-based: runs an EigenQL query (chart_query) and renders the ResultSet as a Fluent chart of the configured kind (chart_kind) using chart_x_column / chart_y_column (and optional chart_series_column) to pivot rows.",
     "urn:eigenius:core:short_name": "chart"
   },
-
   {
     "@id": "urn:eigenius:notebook:program_iri",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "IRI of the program a program-run cell invokes.",
     "urn:eigenius:core:short_name": "program_iri",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:input_iris",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Ordered list of input IRIs a program-run cell invokes its program against. One result row per input.",
     "urn:eigenius:core:short_name": "input_iris",
     "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
     "urn:eigenius:core:element_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
-
+  {
+    "@id": "urn:eigenius:notebook:doc_id",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "Names a formalize cell's `doc-<id>` working branch: the document glossary and the run's recorded proposer draws (D71 §9). Re-using it across runs is what makes a re-run LLM-free.",
+    "urn:eigenius:core:short_name": "doc_id",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:notebook:structure_iri",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The enc:ReasoningStructure the cell's last formalization run produced — the artifact's root, and the handle a later run supersedes. Absent until the cell has run.",
+    "urn:eigenius:core:short_name": "structure_iri",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:notebook:lexicon_profile",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "Optional lexicon:LexiconProfile IRI naming the ordered parse scope for a formalize cell (D65 §4). Absent = the whole chain.",
+    "urn:eigenius:core:short_name": "lexicon_profile",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:notebook:land",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "A formalize cell's LAND-ON-RUN flag (D71). Off by default: generation stays decoupled from commitment, so the first thing a run gives you is an artifact to read, not a committed layer. Turning it on records the decision IN THE CELL, so `Run all` reproduces the chain state instead of stopping at 'an artifact was produced'. Loading is idempotent — the artifact is content-addressed, so re-running unchanged prose does not advance the branch.",
+    "urn:eigenius:core:short_name": "land",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
+  },
   {
     "@id": "urn:eigenius:notebook:chart_query",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "EigenQL query a chart cell evaluates; the ResultSet is decoded and pivoted according to chart_kind / chart_x_column / chart_y_column / chart_series_column.",
     "urn:eigenius:core:short_name": "chart_query",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:chart_kind",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "The Fluent chart kind to render. One of: grouped-bar, vertical-bar, horizontal-bar, donut, line, area.",
     "urn:eigenius:core:short_name": "chart_kind",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:chart_x_column",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Short-name of the RETURN column to use as the chart x-axis (or, for donut charts, the slice label).",
     "urn:eigenius:core:short_name": "chart_x_column",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:chart_y_column",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Short-name of the RETURN column to use as the chart y-axis (or, for donut charts, the slice value).",
     "urn:eigenius:core:short_name": "chart_y_column",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:chart_series_column",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Optional short-name of the RETURN column to pivot rows into one series per distinct value. Required for grouped-bar; supported by line/area; ignored by donut and single-series bar charts.",
     "urn:eigenius:core:short_name": "chart_series_column",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   },
   {
     "@id": "urn:eigenius:notebook:chart_title",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Optional human-readable title displayed above the rendered chart.",
     "urn:eigenius:core:short_name": "chart_title",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:notebook:Cell"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
   }
 ]

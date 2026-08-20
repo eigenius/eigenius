@@ -222,6 +222,18 @@ service EigeniusKernel {
   // typed parse forest. An optional per-parse scope (a set of lexicon:Lexicon
   // IRIs, or a lexicon:LexiconProfile IRI) restricts which lexica are in play.
   rpc ParseSentence(ParseSentenceRequest) returns (ParseSentenceResponse);
+
+  // Formalize a whole document (D71). ASYNCHRONOUS: returns a task id, because a
+  // document costs minutes and N LLM round-trips and the MCP surface has no
+  // long-call idiom. Poll with GetTaskStatus (the task's `kind` is "Formalize");
+  // fetch the artifact with GetFormalizationResult once it completes.
+  rpc FormalizeDocument(FormalizeDocumentRequest) returns (FormalizeDocumentResponse);
+
+  // The artifact a completed formalization task produced. Separate from
+  // GetTaskStatus because an artifact is a document-sized payload and task
+  // status is polled.
+  rpc GetFormalizationResult(GetFormalizationResultRequest)
+      returns (GetFormalizationResultResponse);
 }
 
 // --- Load ---
@@ -468,6 +480,97 @@ message Parse {
 message ParseSentenceResponse {
   // The parse forest, in rank order (the engine sorts + caps it).
   repeated Parse parses = 1;
+}
+
+// --- FormalizeDocument (D71) ---
+
+// Per-run knobs. Every field is optional; an unset field takes the server's
+// configured value. One message rather than N loose fields so adding a knob
+// later does not reshape the request.
+message FormalizationOptions {
+  // Anthropic model id for this run's untrusted proposers. Also what each
+  // recorded draw names as its answerer (`enc:draw_model`). Empty = server default.
+  string model = 1;
+  // Reply cap for those calls. 0 = default.
+  uint32 max_tokens = 2;
+  // Adaptive-supertagging per-lemma sense cap (Lever A). 0 = server default.
+  uint32 sense_cap = 3;
+  // Per-cell beam (Lever B). 0 = server default.
+  uint32 cell_beam = 4;
+  // Abort on the first unit that does not encode, instead of recording it as an
+  // `enc:CutItem`. Default false: an interactive surface wants the failing units
+  // NAMED, not an aborted run (D71 §8).
+  bool strict = 5;
+  // NOTE: temperature is deliberately absent. It is pinned at 0 because every
+  // call here ranks or classifies rather than writing prose, and sampling made
+  // the canonical parse-rate measurement irreproducible between runs of
+  // identical code against an identical store.
+}
+
+// One seam's recorded draws, supplied with the request instead of read off the
+// run's branch. The shape the deterministic harnesses use.
+message InlineDraws {
+  string sense_rank = 1;         // JSON array of RankRecord
+  string reading_selection = 2;  // JSON array of SelectionRecord
+  string anaphora = 3;           // JSON array of ProposalRecord
+  string discourse_kind = 4;     // JSON array of KindRecord
+}
+
+message FormalizeDocumentRequest {
+  // The prose. (Vocabulary is NOT supplied here: commit it with Load and name
+  // the resulting branch below — `branch` is how a caller says which lexicon.)
+  string source_text = 1;
+  // Where the bytes came from, recorded on the artifact root. Free text; the
+  // sha256 is what pins them.
+  string source_path = 2;
+  // An existing reference:Reference to cite. Empty mints a document-local one
+  // into the artifact; a named one must resolve on the chain the artifact loads
+  // onto (Rule 22 verifies).
+  string source_ref = 3;
+  // Names the run's `doc-<id>` working branch: glossary layer + proposer draws.
+  string doc_id = 4;
+  // IRI prefix for the emitted resources.
+  string ns = 5;
+  // reflection:timestamp on each ProgramTrace. Caller-fixed so emission is
+  // byte-reproducible. Empty = the server's clock.
+  string timestamp = 6;
+  // What to parse over. Same conventions as ParseSentence.
+  string branch = 7;      // empty = "main"
+  string at_layer = 8;    // hex LayerId; mutually exclusive with branch
+  // D65 §4 lexicon scope: ordered lexicon:Lexicon IRIs (array order IS
+  // resolution precedence), or a lexicon:LexiconProfile naming that list.
+  // Mutually exclusive, exactly as on ParseSentence.
+  repeated string scope = 9;
+  string profile = 10;
+  FormalizationOptions options = 11;
+  // Draws: inline if `inline_draws` is set, else read off the doc-<id> branch a
+  // previous run left. With neither, every seam asks live (needs a key).
+  InlineDraws inline_draws = 12;
+  bool live_draws = 13;
+  // Artifact encoding: "application/cbor" (default), "application/eigon+json",
+  // or "text/x-esl".
+  string format = 14;
+}
+
+message FormalizeDocumentResponse {
+  string task_id = 1;             // UUID; poll GetTaskStatus
+  string doc_branch = 2;          // the `doc-<id>` branch this run works on
+}
+
+message GetFormalizationResultRequest {
+  string task_id = 1;
+}
+
+message GetFormalizationResultResponse {
+  bool found = 1;
+  // Empty until the task completes; check GetTaskStatus first.
+  bytes artifact = 2;
+  string content_type = 3;        // echoes the request's format
+  string structure_iri = 4;       // the enc:ReasoningStructure rooting the artifact
+  uint32 encoded = 5;
+  uint32 cut = 6;
+  uint32 draws_committed = 7;
+  string error = 8;               // set when the run failed
 }
 
 // --- Query ---
@@ -860,6 +963,16 @@ message TaskInfo {
   int64 created_at_ms = 11;
   int64 updated_at_ms = 12;
   bool retain_forever = 13;
+  // D71 §6 — what this task IS: "ProgramRun" | "Formalize". Tasks were program-bound; a document
+  // formalization is a task operationally (minutes, N LLM round-trips, wants progress and cancel)
+  // and program-bound by nothing. `program_iri` / `input_iri` are populated for ProgramRun and
+  // EMPTY otherwise, so a reader that only understands programs sees nothing rather than a
+  // synthetic IRI it would then have to special-case.
+  string kind = 14;
+  // Formalize only: the run's `doc-<id>` working branch (glossary layer + proposer draws), and the
+  // sha256 of the bytes formalized. Empty for other kinds.
+  string doc_id = 15;
+  string source_sha256 = 16;
 }
 
 message ListTasksRequest {}
@@ -1521,7 +1634,15 @@ message ConsolidateChainResponse {
   string consolidated_layer = 2;
   // Number of layers in the original range that were collapsed.
   uint64 collapsed_layer_count = 3;
-  // True when the branch's head moved (always true on success in v1).
+  // True when the branch ref moved to the consolidated layer.
+  //
+  // Not implied by `success`. An at-head consolidation (`to_layer` ==
+  // the branch's current head) CAS-advances the branch and sets this
+  // true. A below-head consolidation succeeds by installing a resolve
+  // redirect at `to_layer` (D25 §12.8) and leaves the branch ref where
+  // it was, so it returns `success = true` with `head_advanced =
+  // false`. Callers must not treat `head_advanced == false` as a
+  // failure; read `success` and `error_kind` for that.
   bool head_advanced = 4;
   // Typed error kind. CONSOLIDATE_ERROR_NONE on success.
   ConsolidateErrorKind error_kind = 5;

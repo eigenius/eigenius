@@ -58,7 +58,7 @@ impl Parser {
         text: &str,
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
-    ) -> (Vec<Item>, Vec<OpenParse>) {
+    ) -> (Vec<Item>, Vec<OpenParse>, super::WidenTrace) {
         self.parse_widening(text, lemmatizer, scope, None, |cap, _beam, ranks| {
             self.parse_packed_at_cap(text, lemmatizer, scope, cap, ranks)
         })
@@ -234,7 +234,7 @@ impl Parser {
         text: &str,
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
-    ) -> (Vec<Item>, Vec<OpenParse>) {
+    ) -> (Vec<Item>, Vec<OpenParse>, super::WidenTrace) {
         self.parse_widening(
             text,
             lemmatizer,

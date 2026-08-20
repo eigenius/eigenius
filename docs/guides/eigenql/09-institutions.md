@@ -10,7 +10,7 @@ Five resource shapes carry an institution's declared surface (D14 §4):
 
 | Shape | What it declares |
 |---|---|
-| `Institution` | Identity (`institution_iri`, `name`) and `runtime` kind (`wasm`, `external`, `in_process`). |
+| `Institution` | Identity (`institution_iri`, `name`) and `runtime` kind. `RuntimeKind` has exactly two variants — `external` and `in_process`. The institution ontology still *admits* `runtimes:wasm` as a legal value, but `parse_runtime_kind` has no arm for it: such a declaration commits cleanly, is dropped from the index with a log warning, and every later dispatch reports the institution as unregistered. |
 | `ExportFormat` | A typed *outbound* view: extracts a EigenTT-typed payload (`payload_type`) from a source resource of a given `from_class`, via a procedure handled by the institution. |
 | `ImportFormat` | The dual: constructs a target-class resource from a typed payload, via a procedure handled by the institution. |
 | `QueryClass` | A typed function in the institution's fibre. Carries `query_class` (input class), `result_class`, a `dispatch_role` set (`OnDemand` ∪ `AutoOnLoad` ∪ `Decidable`), a `query_handler` procedure IRI, and an `institution_ref`. |
@@ -21,7 +21,7 @@ EigenQL's parser, type checker, and evaluator consult two derived structures bui
 - [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) — by-IRI lookups for the five shapes above. Built by `InstitutionIndex::from_layer` on the active layer chain. EigenQL's compile-time classifier (§9.5) uses it to decide what kind of call a qualified-name IRI is.
 - [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) — `BTreeMap<Iri, Box<dyn Institution>>` keyed by the institution's IRI. Used to dispatch `extract_typed` / `reify` / `query` calls (D14 §8) when an EigenQL evaluator step needs runtime-side reasoning.
 
-The runtime is rebuilt on every commit by the kernel's [`build_wasm_institution_runtime`](../../../kernel/src/capability/registration.rs) — every `Institution` resource on the chain whose `runtime` is `wasm` produces a `WasmInstitution` registered against its IRI. **Substrate-hosted institutions** (`runtime: external`, where the worker lives in a sibling container managed by the orchestrator's substrate addon — Julia v1, Python and others tracked in [issue #41](https://github.com/eigenius/eigenius/issues/41)) are registered through a parallel mechanism that resolves `Institution.requires_environment` to a `RuntimeEnvironment` resource and dispatches via the substrate's `LanguageRuntime` trait. From EigenQL's perspective there's no difference: both kinds answer `Institution::query` against the same trait surface, with the same `extract_typed` / `reify` four-step pipeline. See [platform §10](../platform/10-wasm-institutions.md) for the WASM-hosted path and [platform §11](../platform/11-runtime-substrate.md) for the substrate path. **In-process** runtimes (`runtime: in_process`, kernel-embedded Rust) are caller-registered.
+The index is rebuilt on every commit. **Substrate-hosted institutions** (`runtime: external`, where the worker lives in a sibling container managed by the orchestrator's substrate addon — Julia v1, Python and others tracked in [issue #41](https://github.com/eigenius/eigenius/issues/41)) are registered by a pass that resolves `Institution.requires_environment` to a `RuntimeEnvironment` resource and dispatches via the substrate's `LanguageRuntime` trait; an institution whose environment it cannot reach is refused registration. **In-process** runtimes (`runtime: in_process`, kernel-embedded Rust — Lean, reasoning, statistics) are caller-registered against their chain declarations. From EigenQL's perspective there's no difference: both kinds answer `Institution::query` against the same trait surface, with the same `extract_typed` / `reify` four-step pipeline. See [platform §11](../platform/11-runtime-substrate.md) for the substrate path. WASM hosting was a third kind until July 2026 and was removed; [platform §10](../platform/10-wasm-institutions.md) is retained as historical record only.
 
 ## 9.2. The classification at parse time
 
@@ -50,7 +50,7 @@ inst:predicate(arg1, arg2, ...)
 
 Result type: `Verdict` — an inductive value with three constructors: `Holds`, `Fails`, `Undecidable` (D14 §7.1).
 
-Evaluation, from [`eval_ctx`'s `NativeDecide` arm](../../../kernel/src/nbe/eval.rs):
+Evaluation, from [`eval_ctx`'s `NativeDecide` arm](../../../kernel/src/nbe/eval/mod.rs):
 
 1. Look up the constraint IRI in the `InstitutionIndex` as a `Decidable` `QueryClass`. The index returns the declaring institution, the `query_handler` procedure, and the input-class IRI.
 2. Marshal the positional `args` into a synthetic input resource. The kernel attaches the args as the special property `urn:eigenius:institution:decide_args` so the institution's handler can read them positionally — alongside any property-shaped marshalling driven by the input class.
@@ -64,10 +64,10 @@ A bare Verdict-typed expression in Boolean position is a type error (`bare_verdi
 A postfix predicate projects a `Verdict` to a Boolean:
 
 ```eigenql
-WHERE qc:check(?x) HOLDS                -- Decidable QC: include if Holds
-WHERE NOT qc:check(?x) HOLDS            -- "Fails or Undecidable"
-WHERE qc:a(?x) HOLDS AND qc:b(?y) FAILS -- Verdicts in conjunction
-RETURN [] { ok: qc:check(?x) HOLDS }    -- Boolean projection in RETURN
+WHERE qc:check(?x) HOLDS                // Decidable QC: include if Holds
+WHERE NOT qc:check(?x) HOLDS            // "Fails or Undecidable"
+WHERE qc:a(?x) HOLDS AND qc:b(?y) FAILS // Verdicts in conjunction
+RETURN [] { ok: qc:check(?x) HOLDS }    // Boolean projection in RETURN
 ```
 
 The predicate binds tighter than `NOT` and looser than primary-expression construction. It is non-associative: `?v HOLDS FAILS` is a syntax error.
@@ -117,15 +117,17 @@ The coerced resource is set on the input as the property whose short name is `ca
 
 **v1 restriction** (D2 §3.5): the comorphism's `transformation` Component must have `capability_level` `Pure` or `Read`. A Component requiring `IO` is rejected at parse time with `comorphism_io_not_supported_in_v1`. This lets the EigenQL evaluator run the coercion inline without standing up an IO backing for the FIBER path.
 
-Comorphisms are not first-class in expression position inside an EigenQL query — there is no `RETURN [...] { x: cap:translate(?d) }`. EigenQL surfaces comorphisms only as FIBER param coercions, and (by way of `INTO`, see [§8.6](08-fiber-clauses.md#76-into--pinning-the-response-iri)) lets the caller pin the reified output at a named chain IRI. ESL programs *do* invoke comorphisms in expression position; see [ESL §10.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
+Comorphisms are not first-class in expression position inside an EigenQL query — there is no `RETURN [...] { x: cap:translate(?d) }`. EigenQL surfaces comorphisms only as FIBER param coercions, and (by way of `INTO`, see [§8.6](08-fiber-clauses.md#8-6-into--pinning-the-response-iri)) lets the caller pin the reified output at a named chain IRI. ESL programs *do* invoke comorphisms in expression position; see [ESL §10.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
 
-**Chain reinsertion (D14 §10.3).** Whichever surface invokes the comorphism, the reified output commits to the chain. With `FIBER ... AS ?var` (no `INTO`), the response lives in the transient overlay only — the v0 behaviour, kept for queries that don't want side effects. With `FIBER ... AS ?var INTO "<iri>"`, the response commits to the regular chain at the caller-named IRI. With ESL `comorphisms:foo(input)` from a program body, the response commits at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (kernel-minted). All three paths share the same `commit_with_validation` machinery — AutoOnLoad gates bound to the produced class fire on commit; the audit closure (Verdict + RuntimeInvocation) is the standard one.
+**Chain reinsertion (D14 §10.3).** Whichever surface invokes the comorphism, the reified output commits to the chain. With `FIBER ... AS ?var` (no `INTO`), the response lives in the transient overlay only — the v0 behaviour, kept for queries that don't want side effects. With `FIBER ... AS ?var INTO "<iri>"`, the response commits to the regular chain at the caller-named IRI. With ESL `comorphisms:foo(input)` from a program body, the response commits at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (kernel-minted).
+
+Both committing paths run through `PipelineKind::WithRetroactive`, whose phase list is `build → structural_validate → retroactive_with_cascade → persist`. It has **no `autoonload_dispatch` phase**, so **AutoOnLoad gates bound to the produced class do not fire on these commits**. The bypass is deliberate: the `FIBER … INTO` path drops the institution index and runtime before committing, with a comment recording that "the commit path deliberately bypasses AutoOnLoad until INTO opts back in" ([`kernel/src/server/query.rs`](../../../kernel/src/server/query.rs)). Structural validation still runs and the resource is a first-class chain resident afterwards; what it does not get is institutional gating.
 
 ## 9.7. A complete worked example
 
-Drawn from [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs) (the M8 in-process demo): two institutions — `dock` (extracts ΔG from a `DockingResult`) and `assay` (reifies an `AssayPrediction` from an IC₅₀, plus three QueryClasses) — and one Comorphism (`dock_to_assay`, the Arrhenius approximation `IC₅₀ ≈ exp(-ΔG/RT)`).
+Drawn from [`kernel/tests/dock_assay_demo.rs`](../../../kernel/tests/dock_assay_demo.rs) (the M8 in-process demo): two institutions — `dock` (extracts ΔG from a `DockingResult`) and `assay` (reifies an `AssayPrediction` from an IC₅₀, plus three QueryClasses) — and one Comorphism (`dock_to_assay`, the Arrhenius approximation `IC₅₀ ≈ exp(-ΔG/RT)`).
 
-The chain carries `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, and `Comorphism` resources from [`ontologies/examples/d14-dock-assay/dock-assay.json`](../../../ontologies/examples/d14-dock-assay/dock-assay.json). With an `InstitutionIndex` and an `InstitutionRuntime` populated from those declarations, this query returns rows whose docking results survive the assay's validity check after Arrhenius coercion:
+The chain carries `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, and `Comorphism` resources from [`ontologies/examples/d14-dock-assay/dock-assay.json`](../../../ontologies/examples/dock-assay/dock-assay.json). With an `InstitutionIndex` and an `InstitutionRuntime` populated from those declarations, this query returns rows whose docking results survive the assay's validity check after Arrhenius coercion:
 
 ```eigenql
 USING "urn:eigenius:demo:d14:DockingResult"
@@ -165,12 +167,19 @@ let fiber_runtime = FiberRuntime {
     components: Some(&components),
     ctx: Some(&exec_ctx),
     overlay: None,
+    // The remaining fields are unrelated to institution dispatch and are
+    // `None` for this example: `similarity`, `embedders`,
+    // `embedding_cache`, `vector_segment_cache` (all D43 vector-search
+    // plumbing). `FiberRuntime` has nine fields in total, so a literal
+    // that names only the five above will not compile — use
+    // `..Default::default()` or list them.
+    ..Default::default()
 };
 
 let results = eigenius_kernel::query::execute_with(query_text, &layer, fiber_runtime)?;
 ```
 
-When the kernel hosts the institutions as WASM (D14 §13), the wiring is even shorter — the `InstitutionRuntime` is auto-built by `build_wasm_institution_runtime` from the `runtime: wasm` declarations on the chain (see [platform §10](../platform/10-wasm-institutions.md) and [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs)).
+WASM-hosted institutions were removed from the platform in July 2026; there is no `build_wasm_institution_runtime` and no WASM variant of this test. The two remaining hosting kinds are `external` (via the runtime substrate) and `in_process`.
 
 ## 9.8. Comparison with FIBER
 
@@ -201,16 +210,16 @@ Both surface languages share `InstitutionIndex` so the same IRI dispatches ident
 If the kernel's `InstitutionIndex` is empty (no chain scan has happened, or no institutions are declared) and your query references a qualified-name IRI:
 
 - A bare `qc:check(?x)` falls through to "unknown function".
-- A `FIBER alias:Q { … }` errors with `undeclared_institution_alias` if no `USING INSTITUTION` is in scope, or `unknown_query_class` if the declared QC is missing from the index.
-- A FIBER param comorphism coercion errors with `unknown_comorphism` if the IRI isn't in the index.
+- A `FIBER alias:Q { … }` errors at type-check with `undeclared_institution_alias` if no `USING INSTITUTION` is in scope, or with `fiber_query_class_not_query_class` ("FIBER query class '<name>' does not resolve to an indexed QueryClass declaration") if the declared QC is missing from the index. If the QueryClass is indexed but carries no `OnDemand` role, the code is `fiber_query_class_not_on_demand`.
+- A FIBER param comorphism coercion errors at evaluation with the untagged message `comorphism \`<iri>\` not registered in InstitutionIndex` if the IRI isn't in the index.
 
-If the IRI *is* indexed but the runtime can't reach the institution (no `WasmInstitution` registered, no in-process `Institution` registered for an IRI of `runtime: in_process`), evaluation surfaces `institution_not_in_runtime: <iri>` at the dispatch site.
+If the IRI *is* indexed but the runtime can't reach the institution (no `Institution` registered for the institution IRI), evaluation surfaces the untagged message `institution '<iri>' not registered in runtime` at the dispatch site; the comorphism path has its own variants naming the source or target institution. There are no `unknown_query_class`, `unknown_comorphism` or `institution_not_in_runtime` error codes.
 
 To debug:
 
 1. Confirm the declarations are present in the chain you query against — `eigenius inspect <iri>` for each declared resource.
 2. Confirm `InstitutionIndex::from_layer` returned no errors — the kernel logs them at startup with `operation: institution_register`.
-3. For WASM-runtime institutions, confirm `build_wasm_institution_runtime`'s report is clean (the `EigeniusService` logs each registered institution at info level).
+3. For external-runtime institutions, confirm the registration pass could reach the declared `RuntimeEnvironment` — it refuses to register an institution whose environment it cannot resolve to an image digest, and logs the refusal (the `EigeniusService` logs each registered institution at info level).
 
 ---
 

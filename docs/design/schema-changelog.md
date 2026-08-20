@@ -28,3 +28,20 @@ Versions are monotonic `u32`. No gaps; no number ever reused. Each entry records
 | `meta:seed_manifest_v1` | 9a | D13 §8 |
 
 Pre-14 DBs (single-head, no topology, no blooms, no branches, no triple index) are not supported. Operators upgrading from a pre-14 kernel run a fresh `eigenius serve --db <new-path>` to seed at v1; data in the pre-14 DB is reproduced from source.
+
+## Prefixes added after v1, with no version bump
+
+`SCHEMA_VERSION` is still `1`, and the following key prefixes and column families have entered the on-disk shape since the v1 table above was written. None of them appears in a changelog entry, so this table is a record of the drift rather than a bump:
+
+| Prefix / CF | Purpose | Design |
+|---|---|---|
+| `tag:<name>` | Immutable named refs; GC roots | D34 §G.2 |
+| `content:<content_hash>:<position_hash>` | Content-hash dedup index | D25 §11.0 / D33 §6 |
+| `anchored:<content>:<supporting_content>` | Anchored-commit cache | D33 §6 |
+| `redirect:<source_layer>` | Below-head consolidation redirects | D25 §12.8 |
+| `vidx_pos:`, `vidx_layer:` | Exact value index | D65 |
+| `cf_text` (`text_term:`, `text_docs:`, `text_stats:`, `text_terms_layer:`) | Text index | D43 §2.3 |
+| `cf_vec` (`vec_seg:`, `vec_layer:`) | Vector segments | D43 §2.4 |
+| `cf_embed_cache` | Embedding cache — column family opened, never written | D43 §5.3 |
+
+Also gone since v1: the `head` key, and `layer:<id>:meta`. Per [D24's "When to bump"](d24-schema-versioning.md#when-to-bump), a new persistent prefix the kernel reads on the hot path is a bump; several of the above qualify. **Whether to bump and what the migration would be is an open decision, not a scheduled one.** Until it is made, the live keyspace list is the module header of `storage/rocksdb/src/lib.rs`, not this file.

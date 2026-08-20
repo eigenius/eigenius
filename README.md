@@ -153,7 +153,7 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Layer System** — immutable layers with parent pointers (`Arc<Layer>`), forming a chain. Four bootstrap layers: core → program → reflection → institution. Resolution walks the chain top-down.
 - **Eigon-JSON / CBOR** — the canonical serialization formats. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types. CBOR for storage and gRPC wire format.
 - **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties. Epistemic base classes enforce provenance requirements.
-- **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
+- **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with a naive stratum-ordered fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
 - **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to EigenTT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
 - **Epistemic Model** — four categories (declared, observed, derived, verified) enforced via base classes in the reflection ontology. Reasoning traces mirror the expression tree and serve as memoization cache.
 - **Grothendieck Institutions (D14)** — domain-specific reasoning systems contribute structured fibres to the knowledge graph. Each institution is *declared* as ontology resources (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) committed to the layer chain, and *implemented* via the three-method `Institution` trait (`extract_typed` / `reify` / `query`). Comorphisms are triadic — source-side export + cross-institution EigenTT transformation + target-side import — with optional `exact: bool` Satisfaction-Condition annotation. The category-theoretic Grothendieck construction emerges from declared comorphisms; the kernel provides the dispatch and well-typedness machinery.
@@ -525,6 +525,59 @@ scripts/provision-umls.sh --all               # all semantic types (large)
 
 See [Installation §2.6](docs/guides/platform/02-installation.md) for the full
 list of flags, env overrides, and the UMLS licensing constraints.
+
+### Building the lexicon image
+
+The importers above load a corpus into a *running* kernel. For everyday work you
+want the other thing: a **snapshot** — a prebuilt RocksDB store carrying the whole
+lexicon, that a kernel can be started against directly. The demos, the parse
+harness and the D71 formalization service all expect one.
+
+It is built in three steps, and each exists for a reason worth knowing:
+
+```bash
+# 1. RESEED — build a store from scratch against the CURRENT bootstrap.
+#    `--umls-all` is not optional for a snapshot you intend to parse with: the
+#    bare form loads an 8-TUI subset, which silently changes every measurement.
+#    ~20 min, ~2.8 GiB out.
+scripts/reseed-lexicon-db.sh --umls-all
+
+# 2. ALIGN — layer the curated alignments on top of a copy of that store:
+#    the wordnet↔umls concept merges, and the D68 claim-kind alignment that
+#    lets «These findings» resolve to a landed claim.
+scripts/build-alignment-snapshot.sh \
+    --base ../db-snapshot/wordnet-umls-<date> \
+    --out  ../db-snapshot/wordnet-umls-aligned-<date>
+
+# 3. STAGE — copy it into the kernel's docker volume. `just up` does NOT do
+#    this; it starts against whatever the volume already holds.
+just stage-snapshot           # newest aligned snapshot, autodetected
+just which-snapshot           # what is staged right now (reads its PROVENANCE)
+```
+
+**A reseed is only needed when the BOOTSTRAP changes** — the ontologies compiled
+into the kernel. `kernel/tests/bootstrap_manifest_pinned.rs` fails the moment one
+does, names the layer that moved, and lists the follow-through; an existing store
+would otherwise refuse to resume with `ManifestDrift`. Importing a corpus does
+not require one.
+
+**Two things the snapshot carries so you do not have to load them.** The D62
+encoding contract (`encoding.esl`) is in the kernel's bootstrap chain, because
+the kernel names its IRIs. The claim-kind alignment is layered by step 2, because
+it references `wn:` / `umlscui:` concepts that exist only after a lexicon import.
+Both used to be `--chain-load` steps that five separate callers each remembered.
+
+**For formalization specifically** the kernel needs the live proposers and the
+WordNet Morphy dictionary, neither of which is in the default image:
+
+```bash
+scripts/provision-wordnet.sh download   # compose bind-mounts references/WordNet-3.0/dict
+ANTHROPIC_API_KEY=sk-... just up-llm    # builds the kernel with --features use-llm
+```
+
+Without the dict the served parser falls back to a no-op lemmatizer and *every*
+sentence comes back as a grammar cut; the startup log line `Parse lemmatizer: …`
+says which one loaded.
 
 **Note for WSL 2 users:** all of the above installs into the WSL
 distribution (Ubuntu or similar), not Windows itself. VS Code's WSL

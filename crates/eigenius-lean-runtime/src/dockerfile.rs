@@ -54,7 +54,7 @@ const PACKAGES_IN_IMAGE: &str = "/opt/eigenius/packages";
 /// EigonFFI library.
 #[derive(Debug, Clone, Default)]
 pub struct LeanImagePlan {
-    /// `true` when a `LeanPackageMirror` archive has been
+    /// `true` when a `runtime:RuntimePackageMirror` archive has been
     /// materialised under `/opt/eigenius/mirror/`. Reserved — 20a.5a
     /// always sets this to `false`; 20a.6 lights it up.
     pub include_mirror: bool,

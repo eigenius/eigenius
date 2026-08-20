@@ -232,7 +232,7 @@ Both shapes are first-class. Which one applies depends on whether the downstream
 
 ## 7.6. Inspecting the audit chain from EigenQL
 
-The verdict + witness chain is queryable from EigenQL. A typical inspection sequence after the fixture commits successfully:
+The verdict + witness chain is queryable from EigenQL. A typical inspection sequence after the fixture commits successfully. Note that **EigenQL has no `@id` property pattern**: a pattern's property name resolves as a short name or a full IRI and is looked up in the resource's property map, so a resource cannot be pinned to a given IRI that way. The subject variable itself binds to the IRI, so pin it in a `WHERE` clause ([§5.8](../eigenql/05-pattern-matching.md#5-8-empty-property-lists)). This section used `"@id"` patterns, which do not run, until they were corrected on 2026-08-20.
 
 ```eigenql
 USING "urn:eigenius:reasoning"
@@ -250,9 +250,9 @@ RETURN [] { verdict: ?c }
 ```eigenql
 // Walk back to the claim the sentence's DerivedEvidence cited
 MATCH "urn:eigenius:reasoning:ReasoningSentence"(?s) {
-    "@id": "urn:eigenius:demo:screen:concl_eig0291_strong",
     "urn:eigenius:reasoning:justification": ?j
 }
+WHERE ?s = "urn:eigenius:demo:screen:concl_eig0291_strong"
 RETURN [] { justification: ?j }
 ```
 
@@ -274,9 +274,9 @@ RETURN [] { verdict: ?c, t: ?t, p: ?p }
 ```eigenql
 // Walk back to the raw IC50 readings
 MATCH "urn:eigenius:measurements:StatisticalAnalysisPlan"(?c) {
-    "@id": "urn:eigenius:demo:screen:claim_eig0291_lowic50",
     "urn:eigenius:measurements:sample_set": ?ss
 }
+WHERE ?c = "urn:eigenius:demo:screen:claim_eig0291_lowic50"
 RETURN [] { sample_set: ?ss }
 ```
 
@@ -285,9 +285,9 @@ RETURN [] { sample_set: ?ss }
 ```eigenql
 // Read the raw observations off the SampleSet
 MATCH "urn:eigenius:measurements:SampleSetResource"(?ss) {
-    "@id": "urn:eigenius:demo:screen:m_eig0291_sampleset",
     "urn:eigenius:measurements:sample_set_value": ?bundle
 }
+WHERE ?ss = "urn:eigenius:demo:screen:m_eig0291_sampleset"
 RETURN [] { bundle: ?bundle }
 ```
 

@@ -55,6 +55,7 @@ pub mod proto {
 
 mod branches;
 mod consolidate;
+mod formalize;
 mod gc;
 mod helpers;
 mod hooks;
@@ -232,6 +233,10 @@ pub struct EigeniusService {
     /// Defaults to [`ParseConfig::default`] (cap+beam on, `Identity` lemmatizer, ranker off); a
     /// binary swaps in a real lemmatizer (and turns the ranker on) via [`Self::with_parse_config`].
     pub(crate) parse_config: ParseConfig,
+    /// D71 §7.1 — the document formalizer, injected by the top-level binary. `None` makes
+    /// `FormalizeDocument` return `unimplemented`, which is the honest answer for a kernel built
+    /// without the crates that can emit an artifact.
+    pub(crate) formalizer: Option<Arc<dyn crate::dcg::formalizer::DocumentFormalizer>>,
 }
 
 impl EigeniusService {
@@ -240,6 +245,18 @@ impl EigeniusService {
     /// to enable the contextual reranker. Builder-style; default is [`ParseConfig::default`].
     pub fn with_parse_config(mut self, config: ParseConfig) -> Self {
         self.parse_config = config;
+        self
+    }
+
+    /// Install the `FormalizeDocument` implementation (D71 §7.1). The kernel declares the trait and
+    /// cannot implement it — the artifact emitter lives in crates that depend on this one — so the
+    /// binary that links them constructs the impl and hands it over, exactly as it does the
+    /// lemmatizer.
+    pub fn with_formalizer(
+        mut self,
+        f: Arc<dyn crate::dcg::formalizer::DocumentFormalizer>,
+    ) -> Self {
+        self.formalizer = Some(f);
         self
     }
     /// Create a new service by bootstrapping the kernel.
@@ -276,6 +293,7 @@ impl EigeniusService {
             embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
             sweep_coordinator: None,
             parse_config: ParseConfig::default(),
+            formalizer: None,
         })
     }
 
@@ -330,6 +348,7 @@ impl EigeniusService {
             embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
             sweep_coordinator: None,
             parse_config: ParseConfig::default(),
+            formalizer: None,
         })
     }
 
@@ -423,6 +442,7 @@ impl EigeniusService {
             embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
             sweep_coordinator: None,
             parse_config: ParseConfig::default(),
+            formalizer: None,
         })
     }
 
@@ -858,6 +878,21 @@ impl EigeniusKernel for EigeniusService {
         request: Request<ParseSentenceRequest>,
     ) -> Result<Response<ParseSentenceResponse>, Status> {
         self.handle_parse_sentence(request.into_inner()).await
+    }
+
+    async fn formalize_document(
+        &self,
+        request: Request<FormalizeDocumentRequest>,
+    ) -> Result<Response<FormalizeDocumentResponse>, Status> {
+        self.handle_formalize_document(request.into_inner()).await
+    }
+
+    async fn get_formalization_result(
+        &self,
+        request: Request<GetFormalizationResultRequest>,
+    ) -> Result<Response<GetFormalizationResultResponse>, Status> {
+        self.handle_get_formalization_result(request.into_inner())
+            .await
     }
 }
 

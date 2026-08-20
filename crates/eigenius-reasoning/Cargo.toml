@@ -16,4 +16,11 @@ description = "Justification Logic institution for Eigenius (D39). Type-checks R
 eigenius-kernel = { path = "../../kernel" }
 
 thiserror.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+schemars = { version = "0.8.12", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
+
+[features]
+# The live LLM kind classifier (D68 §4) — forwards the kernel's gate; default builds stay LLM-free.
+use-llm = ["eigenius-kernel/use-llm", "dep:schemars", "dep:tokio"]

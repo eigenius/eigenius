@@ -47,29 +47,30 @@ Both have health checks:
 
 The kernel waits for the orchestrator's health check to pass before its own command runs (`depends_on.condition: service_healthy`).
 
-### Adding persistence
+### Persistence
 
-By default, the compose file runs the kernel in-memory. To persist across container restarts, mount a volume and add `--db` to the kernel's command:
+**The committed compose file already persists.** No edit is needed. The kernel service's command is:
 
 ```yaml
-services:
-  kernel:
-    # ...
-    volumes:
-      - ./data:/var/lib/eigenius
-    command:
-      - "serve"
-      - "--port"
-      - "50051"
-      - "--orchestrator"
-      - "http://orchestrator:8080"
-      - "--db"
-      - "/var/lib/eigenius"
+command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db"]
+volumes:
+  - eigenius_db:/var/lib/eigenius/db
 ```
 
-The `./data` host directory is created on first start. On subsequent `docker compose up`, the kernel rehydrates layers, traces, and capabilities from the persisted RocksDB.
+`eigenius_db` is a named Docker volume, not a bind mount, so the data lives under Docker's volume root rather than in the working tree. On each `docker compose up` the kernel rehydrates layers, traces and institution registrations from it. `docker volume rm eigenius_db` (with the stack down) is how you start clean.
 
-For backups and restoration, use `docker compose exec kernel eigenius db export /var/lib/eigenius /tmp/export` followed by a `docker cp`. See [chapter 6](06-database-management.md).
+To keep the database in a host directory instead, replace the named volume with a bind mount and keep the container-side path `/var/lib/eigenius/db` — the `--db` argument must match the mount point.
+
+**Exporting cannot be done against the running stack.** `eigenius db export` opens RocksDB directly and the running kernel holds the exclusive directory lock, so `docker compose exec kernel eigenius db export ...` fails while the kernel is up. Stop the kernel first, then run the export in a throwaway container over the same volume:
+
+```bash
+docker compose stop kernel
+docker run --rm -v eigenius_db:/var/lib/eigenius/db -v "$PWD/export:/export" \
+    eigenius-kernel:local db export /var/lib/eigenius/db /export
+docker compose start kernel
+```
+
+There is no `db import`; restoring an export is `eigenius load` over the exported files. See [chapter 6](06-database-management.md).
 
 ### Rebuilding after code changes
 
@@ -84,7 +85,7 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-Build time is significant (full Rust workspace + WASM examples). For iterative development, prefer the three-terminal model from [chapter 5](05-running-locally.md).
+Build time is significant (the full Rust workspace). For iterative development, prefer the three-terminal model from [chapter 5](05-running-locally.md).
 
 ## 12.2. Azure ContainerApps via Bicep
 
@@ -117,7 +118,7 @@ What gets provisioned by `main.bicep`:
 | Resource | Purpose |
 |---|---|
 | Container Registry | Holds the kernel and orchestrator images |
-| Key Vault | Stores `ANTHROPIC_API_KEY` and other secrets |
+| Key Vault | Created, but orphaned — nothing writes secrets to it and nothing reads them. See "Secret handling" below. |
 | ContainerApps managed environment | The host environment for both services |
 | Kernel ContainerApp | Runs `eigenius serve` |
 | Orchestration ContainerApp | Runs the Deno orchestrator |
@@ -143,7 +144,7 @@ az deployment group create \
     --parameters imageTag=<tag>
 ```
 
-The `staging.bicepparam` and `production.bicepparam` files in `parameters/` carry environment-specific defaults (region, tier sizing, etc.). Customise these for your subscription before the first deploy.
+The `staging.bicepparam` and `production.bicepparam` files in `parameters/` carry three parameters each — `environment`, `imageTag` and `acrLoginServer`. No region, no tier sizing: location comes from the resource group and CPU/memory are hardcoded in the modules. Set `acrLoginServer` to your own registry before the first deploy.
 
 ### Updating
 
@@ -168,21 +169,23 @@ ContainerApps performs a rolling update — old replicas drain while new ones co
 
 ContainerApps doesn't ship native persistent volumes for the `ContainerApp` workload type. Two options:
 
-1. **Azure Files volume mount** — declare a `Microsoft.App/managedEnvironments/storages` resource backed by an Azure Files share, then mount it into the kernel container at `/var/lib/eigenius`. The `kernel.bicep` module includes a hook for this; configure the storage account in your bicepparam.
+1. **Azure Files volume mount** — declare a `Microsoft.App/managedEnvironments/storages` resource backed by an Azure Files share, then mount it into the kernel container at `/var/lib/eigenius`. You will have to write this yourself: `kernel.bicep` declares no volume, no volume mount and no storage resource, and its container has no `command`, so the kernel runs the image default — no `--db`, and therefore in-memory. Adding persistence means adding the storage resource, the mount, *and* a `command` that passes `--db`.
 2. **External managed RocksDB** — out of scope for the shipped templates. Run the kernel in stateless mode and persist to a side-car service.
 
 For staging/dev environments, option (1) is the simplest path.
 
 ### Secret handling
 
-`ANTHROPIC_API_KEY` (and any other secrets) is stored in Key Vault and exposed to the orchestrator container via a `secret` reference:
+**Not wired up.** `keyvault.bicep` creates an RBAC-authorized vault and outputs `vaultUri`; `main.bicep` passes that output to nothing. `orchestration.bicep` declares no `secrets:` block and no `secretRef`, and no role-assignment resource exists anywhere under `deploy/bicep/`. Nothing puts `ANTHROPIC_API_KEY` into the vault and nothing reads it out — the orchestrator app gets the key only from whatever plain `env` value you set.
+
+Wiring it up means adding all three pieces yourself. The shape:
 
 ```bicep
-// orchestration.bicep
+// orchestration.bicep — none of this is in the committed template
 secrets: [
   {
     name: 'anthropic-api-key'
-    keyVaultUrl: '${keyvault.outputs.vaultUri}secrets/anthropic-api-key'
+    keyVaultUrl: '${vaultUri}secrets/anthropic-api-key'
     identity: 'system'
   }
 ]
@@ -194,7 +197,7 @@ env: [
 ]
 ```
 
-The container app's managed identity must be granted `Key Vault Secrets User` on the vault — wired up in `keyvault.bicep`.
+plus a `Microsoft.Authorization/roleAssignments` granting the app's system-assigned identity `Key Vault Secrets User` on the vault, plus a `vaultUri` parameter threaded from `main.bicep`.
 
 ### Cost considerations
 
@@ -222,11 +225,13 @@ use eigenius_kernel::ontology::{eigon_json, Iri};
 use eigenius_kernel::query;
 use std::sync::Arc;
 
-// Bootstrap the four embedded ontology layers
-let bootstrap_chain = bootstrap::bootstrap_layers()?;
+// Bootstrap the twenty embedded ontology layers; the returned
+// ExecutionContext is headed at the tip of that chain.
+let ctx = bootstrap::bootstrap()?;
+let head = ctx.head().clone();
 
 // Add a custom layer
-let mut builder = LayerBuilder::new("my-layer", Some(bootstrap_chain.clone()));
+let mut builder = LayerBuilder::new("my-layer", Some(head));
 let resources = eigon_json::parse_document(my_json_str)?;
 for r in resources {
     builder.add_resource(r)?;
@@ -239,6 +244,8 @@ let result = query::execute(
     &layer
 )?;
 ```
+
+This sketch is illustrative, not compiled as a doctest — check the current signatures in `kernel/src/bootstrap/mod.rs` and `kernel/src/query/` before copying it.
 
 The CLI binary itself is a thin user of this API ([`cli/src/main.rs`](../../../cli/src/main.rs)). Embedding gives you direct in-process access at the cost of accepting Rust as your application language.
 
@@ -258,17 +265,34 @@ This deployment shape is suitable for read-heavy workloads (pure-data services),
 
 The kernel's gRPC service (defined in [`proto/`](../../../proto/)) is consumable by any tonic-compatible Rust client or any standard gRPC client (Python, Go, TypeScript, etc.) generated from the protobuf definitions.
 
-For ad-hoc exploration:
+**`grpcurl` needs the `.proto` files.** The kernel registers no server-reflection service — `tonic-reflection` is not a workspace dependency — so `grpcurl -plaintext localhost:50051 list` fails with an "server does not support the reflection API" error. Pass the protos explicitly instead. The package is `eigenius.v1` and the service is `EigeniusKernel`, so the fully-qualified method is `eigenius.v1.EigeniusKernel/Inspect`:
 
 ```bash
-grpcurl -plaintext localhost:50051 list
-grpcurl -plaintext -d '{"iri":"urn:eigenius:core:Class"}' \
-    localhost:50051 eigenius.kernel.EigeniusKernel/Inspect
+grpcurl -plaintext -import-path proto -proto eigenius.proto \
+    localhost:50051 list
+
+grpcurl -plaintext -import-path proto -proto eigenius.proto \
+    -d '{"iri":"urn:eigenius:core:Class"}' \
+    localhost:50051 eigenius.v1.EigeniusKernel/Inspect
 ```
 
 For production clients, generate stubs from the `.proto` files and call them via your language's standard gRPC client library.
 
-## 12.6. Deployment checklist
+## 12.6. Security: nothing in this stack is secured
+
+Read this before exposing any of it.
+
+- **No TLS.** The kernel's tonic server is built with `accept_http1(true)`, a gRPC-Web layer and raised message-size limits, and nothing else — no `ServerTlsConfig`, no identity. The orchestrator's `Deno.serve` call takes a port and a handler.
+- **No authentication.** There is no interceptor, bearer-token check or API-key check on either listener. The TypeScript SDK accepts a `bearerToken` option whose own doc comment says it is unused, and the constructor never reads it.
+- **No authorization.** `kernel/src/capability/` validates and registers chain-declared institutions. It grants nothing to nobody. Every RPC is available to every caller.
+- **Both ports reach every interface.** Kernel and orchestrator both bind `0.0.0.0`, and the compose file publishes both with the short `"PORT:PORT"` form. No `127.0.0.1` binding appears anywhere in the tree.
+- **The orchestrator container mounts the host Docker socket**, so the runtime substrate can spawn sibling worker containers. Combined with the four points above, an unauthenticated request to port 8080 is a path to root-equivalent control of the host Docker daemon.
+
+The Azure templates change none of this: the orchestration app declares external ingress on 8080 over plain HTTP with no IP restrictions, no client-certificate mode and no auth configuration, and the kernel app declares internal ingress on 50051, unauthenticated to anything else inside the environment. Container Apps terminates TLS at its own edge FQDN as a platform default — that is the only TLS in the story, no committed file configures it, and it authenticates nobody.
+
+**The deployment assumption is a trusted network.** Run the stack where the ports are reachable only by trusted callers: loopback, a private segment, or behind a reverse proxy that terminates TLS and authenticates before forwarding. Do not publish either port to the internet.
+
+## 12.7. Deployment checklist
 
 If you're deploying to Azure ContainerApps, *also* see the §12.2 caveat — the templates are a starting point that hasn't been validated end-to-end. Plan for iteration on the first deploy.
 
@@ -277,7 +301,8 @@ Before going live with a deployment:
 - [ ] Set `--db <path>` and verify backup/restore works (export, restore, query)
 - [ ] Configure the orchestrator with a real `ANTHROPIC_API_KEY` (or alternative LLM provider)
 - [ ] Set CPU/memory limits sized for your workload (defaults are dev-sized)
-- [ ] Set `minReplicas` if you don't want cold starts (Azure)
+- [ ] Check `minReplicas` for your workload. The templates set 1 for the orchestrator and 1 (staging) or 2 (production) for the kernel — there is no scale-to-zero configuration to undo, and no cold-start problem to fix
+- [ ] **Put the deployment behind something that authenticates.** See §12.6
 - [ ] Configure logging — both kernel and orchestrator log to stdout
 - [ ] Verify the demo scripts run successfully against the deployed endpoints
 - [ ] Set up monitoring on `http://<orchestrator>/health`

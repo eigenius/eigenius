@@ -1,3 +1,42 @@
+> # ⚠️ RETIRED `2026-08-17` — superseded by [`demo/prose-to-formulas-v2`](../prose-to-formulas-v2/)
+>
+> **The files are gone.** Only this README remains, as the record of what the demo was and why it was
+> retired. The runnable demo, and the artifacts the acceptance test reads, are v2's.
+>
+> **Why it was retired.** Selection here was by SKELETON PIN (`pins.tsv`), and a pin is sense-erased,
+> so it cannot break a tie between readings that differ only in sense — `PinReadingRanker` abstains
+> (`kernel/src/dcg/reading_ranker.rs`: *"no match, or ≥2 readings share the pinned skeleton — abstain"*)
+> and the run fails closed. That made the demo INVENTORY-DEPENDENT: any lexicon change adding a sense
+> to a word in its paragraph could defeat it, and twice did.
+>
+> * On the d67 inventory the EDITED variant's pin matched 3 readings; it was moved to a recorded
+>   selections draw.
+> * On `2026-08-15` (D70) `C0043119` «Werner Syndrome» — a T047 disease — gained a bare-standing
+>   `name` entry, so «the exonuclease activity of **WRN**» acquired a second kind reading (the
+>   syndrome beside `C0388246` «WRN protein, human»). The INTACT variant's pin then matched 2
+>   readings and abstained. Note the sense ranker had ALREADY eliminated the syndrome and put the
+>   protein at rank 0 — the pin simply cannot act on that, being sense-erased.
+>
+> Fixing it would have meant giving the intact variant a selections draw too, leaving `pins.tsv`
+> unused and the demo differing from v2 only in prose and in lacking the anaphora and claim-kind
+> stages. v2 selects with the reading ranker, which survives inventory changes.
+>
+> **Where its role went.** `crates/eigenius-encoding/tests/acceptance.rs` — the in-process D67 §3.5
+> acceptance — read this demo's artifacts and now reads v2's (paths AND the IRI namespace: v1 used
+> `urn:eigenius:demo:formulas:`, v2 uses `urn:eigenius:demo:v2:`). It passes: intact `Holds`, edited
+> `Fails` with the missing-witness diagnostic.
+>
+> **What was NOT lost.** The pin MECHANISM is alive and covered. `PinReadingRanker` / `load_pins` /
+> `prose-to-esl --pins` remain a first-class selection arm, and the parse-rate sweep uses it as its
+> DEFAULT: with no `EIGENIUS_SELECTIONS` the harness reports *"reading ranker: pin-backed
+> (expected-readings corpus)"* and selects from `experiments/parsing/expected-readings.tsv` — a
+> different file from this demo's, and the one behind the tracked 62/62. The abstain-on-tie behaviour
+> that retired this demo is the same code path, exercised there on every deterministic run.
+>
+> What went with the deletion is only this demo's WORKED EXAMPLE of a pins file — there is now no
+> committed `pins.tsv` anywhere. Anyone adding one should also add a test, since a shell script was
+> the only thing exercising this one.
+
 # prose-to-formulas
 
 A paragraph of the WRN paper, parsed into typed propositions, committed to a chain — and then edited
@@ -230,9 +269,10 @@ change does not fail at all.
 |---|---|---|
 | `paragraph.txt` | — | the two sentences, verbatim from CNL-v3 |
 | `paragraph-edited.txt` | — | the same, with the measurement negated («had» → «did not have») |
-| `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon — `Set -> Set -> Set -> Prop`, model explicit |
-| `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) |
+| `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon — `Set -> Set -> Prop`, model explicit. The activity concept is fixed IN each definition (C1148824 exonuclease / C1149627 helicase): abstracting it as a third parameter makes the body untypable, since `fst(the(Σ x0:a. …))` has type `a` and an abstract `a : Set` has no subsumption path to the verb axiom's `Entity` slot. |
+| `pins.tsv` | — | the human-verified reading per sentence (see *Reading selection*) — the INTACT variant's authority |
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
+| `selections-edited.json` | recorded once | the reading-selection draw for the EDITED variant, replayed. It selects by draw, not by pin, because the negated sentence's pinned skeleton matches three readings differing only in sense — a tie a sense-erased pin cannot break, so the pin arm fails closed there (correctly). |
 | `literature-rules.esl` | — | the pinned `∀m. A → B`, cited — the ONLY DeclarationTrace on the branch |
 | `claims-intact.esl` | `prose-to-esl` | units + encoded claims + ProgramTraces + decision points |
 | `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
@@ -310,8 +350,10 @@ pipeline's call). Every selection is recorded on chain as an `enc:DecisionPoint`
 rationale. Both sentences here reach a single reading.
 
 A third sentence — *"We found that WRN was selectively essential in MSI models"* — was dropped for
-exactly this reason: on this snapshot it yields two readings sharing the pinned skeleton, and
-`select_pinned` refused to choose. That refusal is the design working.
+exactly this reason: on this snapshot it yields two readings sharing the pinned skeleton, and the
+pin arm refused to choose. That refusal is the design working — and the edited variant now hits the
+same wall (three sense-variant readings under one skeleton), which is why it selects by the recorded
+draw in `selections-edited.json` instead. The two arms are the same seam: a `ReadingRanker`.
 
 **The literature rule is Declared, and has to be.** Definitions make the parse and the domain
 formula one term, so the lift Declares nothing — but a rule relating two propositions is a claim

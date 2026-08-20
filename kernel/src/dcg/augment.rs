@@ -470,7 +470,9 @@ pub fn augment_lexicon_backed(
         };
         // Mint by the concept's KIND (fail-closed if it can't): a predicate `eigentt:Axiom` → clone a
         // committed sibling's verb/adjective cat; a class/instance → the nominal `cat_n`/`cat_np` alias
-        // model. The kernel felicity gate re-checks at `add_resource`.
+        // model. Nothing re-checks the minted entry afterwards: `LayerBuilder::add_resource`
+        // performs no validation, and the felicity gate is not called on the commit path. The
+        // fail-closed mint below is the whole check.
         let is_axiom = base
             .resolve(&concept)
             .map(|r| r.is_instance_of(&axiom_class))
@@ -530,23 +532,42 @@ mod category_llm {
     /// resolver falls back to its nominal default.
     pub struct AnthropicCategoryProposer {
         api_key: String,
-        model: String,
+        model: crate::dcg::anthropic_client::ModelConfig,
     }
 
     impl AnthropicCategoryProposer {
         pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+            Self::with_config(
+                api_key,
+                crate::dcg::anthropic_client::ModelConfig::with_model(model),
+            )
+        }
+
+        /// Build with an explicit [`ModelConfig`] — how a formalization run selects the model it
+        /// wants, and what a recorded draw names as the answerer (D71 §7.1 / §9).
+        pub fn with_config(
+            api_key: impl Into<String>,
+            model: crate::dcg::anthropic_client::ModelConfig,
+        ) -> Self {
             Self {
                 api_key: api_key.into(),
-                model: model.into(),
+                model,
             }
         }
 
         /// From `$ANTHROPIC_API_KEY`, defaulting to a fast model. `None` if the key is unset.
         pub fn from_env() -> Option<Self> {
+            Self::from_env_with(Default::default())
+        }
+
+        /// From `$ANTHROPIC_API_KEY` with an explicit [`ModelConfig`]. The formalization service
+        /// threads one config to every proposer in a run, so a draw's recorded model is the run's,
+        /// not a per-seam default (D71 §7.1 / §9).
+        pub fn from_env_with(cfg: crate::dcg::anthropic_client::ModelConfig) -> Option<Self> {
             std::env::var("ANTHROPIC_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
-                .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
+                .map(|k| Self::with_config(k, cfg.clone()))
         }
 
         fn ask(&self, instructions: &str) -> Option<PosReply> {

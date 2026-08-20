@@ -1,0 +1,82 @@
+[
+  {
+    "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",
+    "document_sha256": "4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a",
+    "prior_selections": [
+      {
+        "ordinal": 0,
+        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
+      },
+      {
+        "ordinal": 1,
+        "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      }
+    ],
+    "hole_var": "$demref$0_0",
+    "hole_ty": "C2825141",
+    "hole_kind": "EntityRef",
+    "candidates": [
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_2",
+        "surface": "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      },
+      {
+        "key": "s:urn:eigenius:encoding:Finding:urn:eigenius:demo:v2:claim_1,urn:eigenius:demo:v2:claim_2",
+        "surface": "the last 2 Finding claims, together"
+      },
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_1",
+        "surface": "claim 1: not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
+      }
+    ],
+    "proposal": {
+      "ranked": [
+        1,
+        0,
+        2
+      ],
+      "rationale": "\"These findings\" is a plural demonstrative that collectively refers to both preceding claims (sentences 0 and 1 together), making candidate [1] \"the last 2 Finding claims, together\" the best antecedent.",
+      "confidence": 0.95
+    }
+  },
+  {
+    "sentence": "These findings show that WRN is a vulnerability of MSI cancer models.",
+    "document_sha256": "4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a",
+    "prior_selections": [
+      {
+        "ordinal": 0,
+        "gloss": "not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
+      },
+      {
+        "ordinal": 1,
+        "gloss": "a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      }
+    ],
+    "hole_var": "$demref$0_0",
+    "hole_ty": "n09279458",
+    "hole_kind": "EntityRef",
+    "candidates": [
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_2",
+        "surface": "claim 2: a Microsatellite Instability Cancer Model require the helicase activity of WRN protein, human"
+      },
+      {
+        "key": "s:urn:eigenius:encoding:Finding:urn:eigenius:demo:v2:claim_1,urn:eigenius:demo:v2:claim_2",
+        "surface": "the last 2 Finding claims, together"
+      },
+      {
+        "key": "c:urn:eigenius:demo:v2:claim_1",
+        "surface": "claim 1: not (a Microsatellite Instability Cancer Model have the exonuclease activity of WRN protein, human)"
+      }
+    ],
+    "proposal": {
+      "ranked": [
+        1,
+        0,
+        2
+      ],
+      "rationale": "\"These findings\" is a plural demonstrative that collectively refers to both preceding findings (sentences 0 and 1 together), making candidate [1] \"the last 2 Finding claims, together\" the best antecedent.",
+      "confidence": 0.95
+    }
+  }
+]

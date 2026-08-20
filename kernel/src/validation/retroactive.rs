@@ -43,8 +43,14 @@
 //!    carrying property `i` is a dependent (Rules 3–10 may now reject
 //!    the value under a tightened `data_type`, `pattern`, `min_value`,
 //!    `class_types`, etc.). Enumerated via a chain walk in
-//!    [`scan_chain_for_property_carriers`]; the triple index doesn't
-//!    cover literal-typed values, so a walk is the v1 answer.
+//!    [`scan_chain_for_property_carriers`], which streams the chain
+//!    layer by layer rather than materialising it. The triple index
+//!    cannot replace the walk: it stores only IRI-valued triples, so
+//!    it holds nothing at all for a literal-typed property, and it
+//!    answers `(predicate, object)` rather than `predicate` alone.
+//!    An indexed answer needs a value-independent predicate → subject
+//!    index; the walk is cheap enough in practice because it runs
+//!    only for a *changed* definition (see `redefines_ancestor`).
 //!
 //! 3. **`i` referenced as an IRI value by any property** — every
 //!    lower-layer resource whose property value points at `i` is a
@@ -195,7 +201,31 @@ fn enumerate_dependents(
 /// Under reference integrity (Rule 22), only a redefinition can have lower instances or
 /// referrers, so this gates the expensive case-(1)/(3) scans.
 fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Iri) -> bool {
-    new_layer.parents().iter().any(|p| p.resolve(iri).is_some())
+    // A *shadowing* definition is not automatically a *changed* one. Re-loading an
+    // ontology that is already resident (the bootstrap chain, or an idempotent
+    // re-import) shadows every IRI it declares with a byte-identical definition. If
+    // the definition did not change, no rule whose input is this IRI's definition can
+    // change its verdict on a lower resource — the validator resolves the same
+    // resource before and after — so there are provably no new dependents and the
+    // O(chain) scans below are pure waste. IRIs that *did* change in the same layer
+    // are caught by their own iteration of the caller's loop, so the per-IRI test
+    // stays sound: dependent enumeration is a union over changed IRIs.
+    //
+    // The comparison is on canonical Eigon-CBOR, not `PartialEq`: that encoding is
+    // what content-addressing already uses, and it collapses `ResourceRef` into a
+    // plain string. An ancestor read back from storage therefore compares equal to
+    // the freshly parsed resource it re-declares, which is exactly the case that has
+    // to be cheap.
+    let Some(own) = new_layer.resolve(iri) else {
+        return false;
+    };
+    // The shadowed definition is the one `resolve` would have found below: first
+    // parent that defines it, in parent order.
+    let Some(ancestor) = new_layer.parents().iter().find_map(|p| p.resolve(iri)) else {
+        return false;
+    };
+    crate::ontology::eigon_cbor::canonicalize(ancestor.as_ref())
+        != crate::ontology::eigon_cbor::canonicalize(own.as_ref())
 }
 
 /// Drain `ws.pending`; for each IRI not already revalidated, look up
@@ -239,10 +269,45 @@ fn scan_chain_for_property_carriers(
     property: &Iri,
     ws: &mut CommitWorkingSet,
 ) -> Result<(), WorkingSetExhausted> {
-    for (iri, resource) in new_layer.iter_all_resources() {
-        if resource.has(property) {
-            ws.pending.push(iri)?;
+    // STREAMS the chain; does NOT call `iter_all_resources`.
+    //
+    // `iter_all_resources` buffers a `BTreeMap<Iri, Arc<Resource>>` of the WHOLE CHAIN before it
+    // yields anything. On the 7.6M-resource lexicon chain that reached ~27 GB and the host OOM
+    // killer took the kernel — twice on `2026-08-20`, with `commit.retroactive.start` the last log
+    // line both times. Any load redefining a property triggered it: re-loading a bootstrapped
+    // ontology, or the claim-kind alignment, which redeclares classes BY DESIGN.
+    //
+    // This walk holds one resource at a time. The answer is identical because it resolves through
+    // the HEAD exactly as the buffered view does — shadowing, tombstones and redirects included —
+    // and `ws.pending` dedups internally, so re-encountering a shadowed IRI from a lower layer is a
+    // no-op rather than a double push.
+    //
+    // Still O(chain) in TIME. That is a separate problem: a value-independent "which subjects carry
+    // predicate P" index would make it O(carriers), but the triple index holds only IRI-VALUED
+    // triples and answers only `(predicate, object)`, so a string-valued property has nothing to
+    // look up. Turning an OOM into a slow scan is the fix that was available without a new index.
+    let mut layer: Option<&Layer> = Some(new_layer.as_ref());
+    let mut visited: std::collections::BTreeSet<crate::layer::LayerId> =
+        std::collections::BTreeSet::new();
+    while let Some(l) = layer {
+        if !visited.insert(l.id().clone()) {
+            break;
         }
+        // Redirects short-circuit to their target, matching `iter_all_resources` (D25 §12.8).
+        if let Some(target) = l.redirect_target() {
+            layer = Some(target.as_ref());
+            continue;
+        }
+        for iri in l.defined_iris() {
+            // Resolve through the HEAD, not this layer: a lower definition may be shadowed above,
+            // and the carrier question is about the merged view.
+            if let Some(resource) = new_layer.resolve(iri) {
+                if resource.has(property) {
+                    ws.pending.push(iri.clone())?;
+                }
+            }
+        }
+        layer = l.parent().map(|p| p.as_ref());
     }
     Ok(())
 }
@@ -1080,6 +1145,85 @@ mod tests {
     /// Resources carrying that property are dependents — the pass
     /// must walk the chain (literal-presence scan, since the triple
     /// index doesn't cover this) and surface the violation.
+    /// An *identical* redeclaration is not a redefinition, so it enumerates no
+    /// dependents. This is the common case that used to be ruinous: re-loading an
+    /// ontology already resident in the chain (the bootstrap layers, or an idempotent
+    /// re-import) shadows every IRI it declares, and each one used to pay a full
+    /// O(chain) carrier scan to discover that nothing had changed.
+    ///
+    /// The second arm pins *why* the comparison is on canonical Eigon-CBOR rather
+    /// than `PartialEq`: persistence collapses `ResourceRef` into a plain string, so
+    /// an ancestor read back from storage carries the string shape while the freshly
+    /// parsed layer carries the ref shape. Those are the same definition, and the
+    /// gate has to say so — otherwise every reload of a persisted ontology scans.
+    #[test]
+    fn identical_redeclaration_is_not_a_redefinition() {
+        let (root, storage, _backend) = build_chain_with_class_instances();
+        let color = iri("urn:eigenius:demo:color");
+
+        // `refs`: build demo:color with `class_types` in the given value shape.
+        let color_prop = |class_types: Value| {
+            let mut p = Resource::new(color.clone());
+            p.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            );
+            p.set(iri(wk::DESCRIPTION), Value::String("color".into()));
+            p.set(iri(wk::SHORT_NAME), Value::String("color".into()));
+            p.set(
+                iri(wk::DATA_TYPE_PROP),
+                Value::ResourceRef(iri(wk::RESOURCE)),
+            );
+            p.set(iri(wk::CLASS_TYPES), class_types);
+            p
+        };
+        let ref_shape = || Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]);
+        let string_shape = || Value::Array(vec![Value::String(wk::CLASS.into())]);
+
+        let mid = {
+            let mut b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
+            b.add_resource(color_prop(ref_shape())).unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+
+        // Byte-identical redeclaration → not a redefinition.
+        let same = {
+            let mut b = LayerBuilder::new("same", Some(Arc::clone(&mid)));
+            b.add_resource(color_prop(ref_shape())).unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        assert!(
+            !redefines_ancestor(&same, &color),
+            "identical redeclaration must not enumerate dependents"
+        );
+
+        // Same definition in the post-persistence value shape → still not a
+        // redefinition, because canonical CBOR does not distinguish the two.
+        let persisted_shape = {
+            let mut b = LayerBuilder::new("persisted", Some(Arc::clone(&mid)));
+            b.add_resource(color_prop(string_shape())).unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        assert!(
+            !redefines_ancestor(&persisted_shape, &color),
+            "ResourceRef/String is a persistence artifact, not a definition change"
+        );
+
+        // A real change → still a redefinition.
+        let changed = {
+            let mut b = LayerBuilder::new("changed", Some(Arc::clone(&mid)));
+            b.add_resource(color_prop(Value::Array(vec![Value::ResourceRef(iri(
+                wk::PROPERTY,
+            ))])))
+            .unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        assert!(
+            redefines_ancestor(&changed, &color),
+            "a changed class_types must still enumerate dependents"
+        );
+    }
+
     #[test]
     fn property_allows_only_narrowing_invalidates_carriers() {
         let (root, storage, _backend) = build_chain_with_class_instances();

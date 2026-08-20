@@ -38,21 +38,27 @@ pub mod augment;
 pub mod category;
 pub(crate) mod chart;
 pub mod closed_class;
+pub mod draw;
+pub mod formalizer;
 pub mod glossary;
 mod grammar;
 mod holes;
 pub mod item;
 pub mod lemmatizer;
 pub mod lexicon;
+pub mod model_config;
 pub mod named_entity;
 pub mod parse;
 pub mod pipeline;
 pub mod pretty;
+pub mod proposer_record;
+pub mod reading_ranker;
 mod reserved;
 mod rules;
 pub mod segment;
 pub mod sense_ranker;
 pub mod skeleton;
+pub mod verbalize;
 
 /// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
 /// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
@@ -98,11 +104,23 @@ pub use lexicon::{
 };
 pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
-    Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, ProposeCtx, Proposer,
-    SentenceOutcome, DEFAULT_FOREST_CAP,
+    Candidate, ClaimLander, DiscourseRun, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser,
+    Proposal, ProposeCtx, Proposer, ResolutionOutcome, ResolvedBinding, SelectionOutcome,
+    SentenceOutcome, SentenceResolution, DEFAULT_FOREST_CAP,
 };
-pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
+pub use pipeline::{
+    DocumentEncoding, DocumentPipeline, InProcessPipeline, PipelineError, SentenceEncoding,
+};
 pub use pretty::pretty_term;
+pub use proposer_record::{
+    ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,
+};
+#[cfg(feature = "use-llm")]
+pub use reading_ranker::AnthropicReadingRanker;
+pub use reading_ranker::{
+    DocumentContext, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
+    ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+};
 pub use rules::combinators::apply;
 pub use rules::constructions::{
     appose_group, cats_coordinate, complete_coord, coordinate_np, coordinate_prop, distribute,
@@ -116,3 +134,4 @@ pub use sense_ranker::{
     IdentityRanker, RankRecord, RankedWord, RecordingSenseRanker, ReplaySenseRanker,
     SenseCandidate, SenseRanker, WordSenses,
 };
+pub use verbalize::{resource_label, unit_sense_names, verbalize, Vb};

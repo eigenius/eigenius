@@ -18,21 +18,33 @@
 //! `RuntimeMethodSignature` resources whose `language = "julia"` to a
 //! Julia worker baked into a deterministic OCI image.
 //!
-//! ## Phase 19a status
+//! ## What ships
 //!
-//! - **19a.1 (this milestone)**: ports the 18d capstone fixture
-//!   (`TestLanguageRuntimeJulia`) into a real production crate.
-//!   Per-invocation `DockerSpawner` path; `RunRuntimeScript` works;
-//!   `CallRuntimeMethod` returns `Err(NotImplemented)`.
-//! - **19a.2**: `ServiceSpawner` warm-pool path replaces per-invocation
-//!   spawn; `LocalServiceSpawner` joins as a sibling backend.
-//! - **19a.3**: mirror generator (substrate Rust code) walks the
-//!   ontology layer, emits Julia struct source, commits
-//!   `JuliaPackageMirror`, bakes precompiled mirror packages into the
-//!   env image. `JuliaWorker.jl` boots with the mirror modules
-//!   `using`-imported; method-IRI registry walks their exports.
-//! - **19a.4**: `CallRuntimeMethod` lights up against typed mirror
-//!   struct dispatch.
+//! - **One dispatch path.** Every Julia dispatch runs in a Docker
+//!   *sibling* container that the orchestrator starts over a
+//!   bind-mounted socket. There is no host-Julia path and no
+//!   per-invocation spawner path in production: `build_worker_spec`
+//!   emits an **empty** `command` so the image's `CMD` is PID 1, and
+//!   `LocalServiceSpawner` rejects an empty command outright
+//!   ("`WorkerSpec.command` must be non-empty for
+//!   `LocalServiceSpawner`"). `LocalServiceSpawner` is therefore not a
+//!   usable backend for this crate; it exists for the substrate's own
+//!   bash test worker.
+//! - **Service, not pool.** `JuliaLanguageRuntime` holds an
+//!   `Arc<dyn ServiceSpawner>` and reuses one container per image
+//!   digest via `ensure_service`. That is a cache, not the warm pool
+//!   D26 specifies: there is no idle timeout, no maximum size and no
+//!   health-check eviction. `max_wall_time_ms` and `max_memory_bytes`
+//!   are both zero and no seccomp profile is passed.
+//! - **Mirror generator.** Substrate-side Rust walks the ontology
+//!   layer, emits Julia struct source and commits a
+//!   `RuntimePackageMirror`; precompiled mirror packages are baked
+//!   into the env image at build time. `JuliaWorker.jl` boots with the
+//!   mirror modules `using`-imported and resolves handlers through the
+//!   `_eigenius_decoders` / `_eigenius_encoders` registries their
+//!   exports carry.
+//! - **`RunRuntimeScript` and `CallRuntimeMethod` both dispatch**
+//!   against typed mirror structs over the CBOR-over-UDS wire.
 //!
 //! [`LanguageRuntime`]: eigenius_runtime_substrate::language_runtime::LanguageRuntime
 

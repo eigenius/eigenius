@@ -39,7 +39,11 @@
 
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { create } from "@bufbuild/protobuf";
-import { HealthResponseSchema } from "../src/gen/eigenius_pb.ts";
+import {
+  FormalizeDocumentResponseSchema,
+  GetFormalizationResultResponseSchema,
+  HealthResponseSchema,
+} from "../src/gen/eigenius_pb.ts";
 import { createMcpServer } from "../src/mcp/server.ts";
 import { createMcpHttpHandler } from "../src/mcp/http.ts";
 import type { KernelClient } from "../src/client/kernel_client.ts";
@@ -107,6 +111,8 @@ const EXPECTED_TOOLS = [
   "eigenius_health",
   "eigenius_list_tasks",
   "eigenius_get_task_status",
+  "eigenius_formalize_document",
+  "eigenius_get_formalization_result",
 ].sort();
 
 // ===========================================================================
@@ -181,6 +187,17 @@ Deno.test("HTTP handler: tools carrying required arguments declare them", async 
   assertEquals(byName.eigenius_get_task_status.inputSchema.required, [
     "taskId",
   ]);
+  // D71: the prose and the working-branch id are the two things a run cannot
+  // default. Everything else — scope, model, format, strictness — has a server
+  // default, and making any of them required would push policy onto the caller.
+  assertEquals(byName.eigenius_formalize_document.inputSchema.required, [
+    "sourceText",
+    "docId",
+  ]);
+  assertEquals(
+    byName.eigenius_get_formalization_result.inputSchema.required,
+    ["taskId"],
+  );
 
   // No-args tools should not declare a required array (or it should be empty).
   for (
@@ -226,6 +243,123 @@ Deno.test("HTTP handler: tools/call eigenius_health surfaces the kernel response
   // uint64 fields come through `toJson` as decimal strings.
   assertEquals(parsed.layerCount, "7");
   assertEquals(parsed.resourceCount, "42");
+});
+
+// ===========================================================================
+// tools/call — the D71 formalization walk: start -> poll -> artifact
+// ===========================================================================
+
+Deno.test("HTTP handler: formalize_document returns a task id, not a result", async () => {
+  const client = makeStubClient({
+    formalizeDocument: () =>
+      Promise.resolve(create(FormalizeDocumentResponseSchema, {
+        taskId: "11111111-2222-3333-4444-555555555555",
+        docBranch: "doc-wrn-first-page",
+      })),
+  });
+  const handler = createMcpHttpHandler(() => createMcpServer(client));
+  const { status, body } = await rpcCall(handler, {
+    jsonrpc: "2.0",
+    id: 10,
+    method: "tools/call",
+    params: {
+      name: "eigenius_formalize_document",
+      arguments: {
+        sourceText: "MSI cancer models required the helicase activity of WRN.",
+        docId: "wrn-first-page",
+        format: "text/x-esl",
+      },
+    },
+  });
+  assertEquals(status, 200);
+  const parsed = JSON.parse(body.result.content[0].text);
+  // A document costs minutes; the tool hands back a handle, and the caller
+  // polls. An MCP tool that blocked for that long would simply time out.
+  assertEquals(parsed.taskId, "11111111-2222-3333-4444-555555555555");
+  assertEquals(parsed.docBranch, "doc-wrn-first-page");
+  assertEquals(parsed.artifact, undefined);
+});
+
+Deno.test("HTTP handler: an unfinished formalization reports found:false, not an error", async () => {
+  const client = makeStubClient({
+    getFormalizationResult: () =>
+      Promise.resolve(create(GetFormalizationResultResponseSchema, {
+        found: false,
+      })),
+  });
+  const handler = createMcpHttpHandler(() => createMcpServer(client));
+  const { status, body } = await rpcCall(handler, {
+    jsonrpc: "2.0",
+    id: 11,
+    method: "tools/call",
+    params: {
+      name: "eigenius_get_formalization_result",
+      arguments: { taskId: "11111111-2222-3333-4444-555555555555" },
+    },
+  });
+  assertEquals(status, 200);
+  // Still running is a STATE, not a failure — an isError here would make a
+  // polling caller treat "not yet" as "broken".
+  assertEquals(body.result.isError, undefined);
+  assertEquals(JSON.parse(body.result.content[0].text).found, false);
+});
+
+Deno.test("HTTP handler: a text artifact comes back readable, not base64", async () => {
+  const esl = "resource v2:claim_1 : encoding:EncodedClaim {\n}\n";
+  const client = makeStubClient({
+    getFormalizationResult: () =>
+      Promise.resolve(create(GetFormalizationResultResponseSchema, {
+        found: true,
+        artifact: new TextEncoder().encode(esl),
+        contentType: "text/x-esl",
+        structureIri: "urn:eigenius:demo:v2:structure",
+        encoded: 3,
+        cut: 0,
+        drawsCommitted: 0,
+      })),
+  });
+  const handler = createMcpHttpHandler(() => createMcpServer(client));
+  const { body } = await rpcCall(handler, {
+    jsonrpc: "2.0",
+    id: 12,
+    method: "tools/call",
+    params: {
+      name: "eigenius_get_formalization_result",
+      arguments: { taskId: "11111111-2222-3333-4444-555555555555" },
+    },
+  });
+  const parsed = JSON.parse(body.result.content[0].text);
+  assertEquals(parsed.found, true);
+  // protobuf-es renders `bytes` as base64. Asking for ESL in order to READ it
+  // and getting base64 back would defeat the request; the tool decodes the text
+  // encodings in place and leaves CBOR as bytes.
+  assertEquals(parsed.artifact, esl);
+  assertEquals(parsed.structureIri, "urn:eigenius:demo:v2:structure");
+  assertEquals(parsed.encoded, 3);
+});
+
+Deno.test("HTTP handler: a CBOR artifact stays base64", async () => {
+  const bytes = new Uint8Array([0x81, 0xa0]);
+  const client = makeStubClient({
+    getFormalizationResult: () =>
+      Promise.resolve(create(GetFormalizationResultResponseSchema, {
+        found: true,
+        artifact: bytes,
+        contentType: "application/cbor",
+      })),
+  });
+  const handler = createMcpHttpHandler(() => createMcpServer(client));
+  const { body } = await rpcCall(handler, {
+    jsonrpc: "2.0",
+    id: 13,
+    method: "tools/call",
+    params: {
+      name: "eigenius_get_formalization_result",
+      arguments: { taskId: "11111111-2222-3333-4444-555555555555" },
+    },
+  });
+  const parsed = JSON.parse(body.result.content[0].text);
+  assertEquals(parsed.artifact, btoa(String.fromCharCode(...bytes)));
 });
 
 // ===========================================================================

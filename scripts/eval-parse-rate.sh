@@ -39,9 +39,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# The committed reference. Run LOGS are gitignored (experiments/*/results/), so the baseline is a
-# small distilled JSON that travels with the repo — the gate must survive a clean checkout.
+# The committed references. Run LOGS are gitignored (experiments/*/results/), so each baseline is
+# a small distilled JSON that travels with the repo — the gates must survive a clean checkout.
+# TWO baselines, deliberately separate: baseline.json gates the GRAMMAR + lexicon (the produced
+# forest); selection-baseline.json gates the RANKER (which reading gets chosen). They re-baseline
+# on different triggers.
 BASELINE_JSON="$ROOT/experiments/parsing/baseline.json"
+SELECTION_BASELINE_JSON="$ROOT/experiments/parsing/selection-baseline.json"
 
 # Args in any order. An unrecognized argument is an ERROR, never silently ignored — a flag that is
 # quietly dropped is how a comparison silently does not happen.
@@ -132,6 +136,36 @@ if grep -qE '^  histogram:' "$LOG"; then
   echo
 fi
 
+# ── Reading selection (d63-reading-selection.md §5) — from the `=== SELECTION` line only ─────
+# eligible = units with ≥2 closed readings; chose/abstained = the ranker's decisions.
+# READING-level (the gated metric): reading-correct / reading-wrong = the reading-adjudications
+# ledger's verdict on the chosen (sentence, sem); reading-unadjudicated = no verdict (must be 0 on
+# the tracked replay, else the number is not a measurement). STRUCTURE diagnostic (reported, not
+# gated): structure-correct = chosen skeleton == the grammar pin, over `curated` chosen units.
+# invalid-selected = chosen skeleton is `invalid`-adjudicated (must be 0 — gated below).
+SELSUM="$(grep -m1 -E '^=== SELECTION' "$LOG" || true)"
+SEL_RANKER=""; SEL_ELIG=""; SEL_CHOSE=""; SEL_ABST=""; SEL_INV=""
+SEL_RC=""; SEL_RW=""; SEL_RU=""; SEL_SC=""; SEL_CUR=""
+if [[ -n "$SELSUM" ]]; then
+  SEL_RANKER="$(sed -E 's/^=== SELECTION \(([^)]*)\).*/\1/' <<<"$SELSUM")"
+  SEL_ELIG=$(field 'eligible'  "$SELSUM"); [[ "$SEL_ELIG" =~ ^[0-9]+$ ]] || SEL_ELIG=""
+  SEL_CHOSE=$(field 'chose'    "$SELSUM"); [[ "$SEL_CHOSE" =~ ^[0-9]+$ ]] || SEL_CHOSE=""
+  SEL_ABST=$(field 'abstained' "$SELSUM"); [[ "$SEL_ABST" =~ ^[0-9]+$ ]] || SEL_ABST=""
+  SEL_RC=$(field 'reading-correct' "$SELSUM");        [[ "$SEL_RC" =~ ^[0-9]+$ ]] || SEL_RC=""
+  SEL_RW=$(field 'reading-wrong' "$SELSUM");          [[ "$SEL_RW" =~ ^[0-9]+$ ]] || SEL_RW=""
+  SEL_RU=$(field 'reading-unadjudicated' "$SELSUM");  [[ "$SEL_RU" =~ ^[0-9]+$ ]] || SEL_RU=""
+  SEL_SC=$(field 'structure-correct' "$SELSUM");      [[ "$SEL_SC" =~ ^[0-9]+$ ]] || SEL_SC=""
+  SEL_CUR=$(field 'curated'    "$SELSUM"); [[ "$SEL_CUR" =~ ^[0-9]+$ ]] || SEL_CUR=""
+  SEL_INV=$(field 'invalid-selected' "$SELSUM"); [[ "$SEL_INV" =~ ^[0-9]+$ ]] || SEL_INV=""
+  echo "  SELECTION ($SEL_RANKER): chose $SEL_CHOSE of $SEL_ELIG eligible (abstained $SEL_ABST)"
+  if [[ -n "$SEL_RC" ]]; then
+    echo "    reading-level:  $SEL_RC correct, $SEL_RW wrong, $SEL_RU unadjudicated (the gated metric)"
+  fi
+  [[ -n "$SEL_SC" ]] && echo "    structure:      $SEL_SC/$SEL_CUR in the pinned bracketing (diagnostic)"
+  echo "    invalid-selected $SEL_INV"
+  echo
+fi
+
 RC=0
 if [[ "$PROFILE" == "debug" ]]; then
   echo "  UNTRUSTWORTHY: DEBUG build. Debug stack frames overflow in NbE readback, killing parses"
@@ -149,6 +183,19 @@ fi
 
 # ── Faithfulness: the open goal — how many resolve to ONE reading ────────────
 echo "  RESOLUTION: $ENC/$U encoded (single reading); $AMB ambiguous, $OPN open."
+
+# ── Selection gate: an invalid-adjudicated skeleton must never be SELECTED ───
+# The reading ranker has no kernel veto (every candidate type-checks), so this is one of its two
+# controls (the other is selection accuracy vs the pins, gated against the baseline below once a
+# live-ranker baseline is set — slice 4).
+if [[ -n "$SEL_INV" ]]; then
+  if [[ "$SEL_INV" -eq 0 ]]; then
+    echo "  SELECTION-VALIDITY: PASS — no invalid-adjudicated skeleton was selected."
+  else
+    echo "  SELECTION-VALIDITY: FAIL — $SEL_INV selection(s) chose an invalid-adjudicated skeleton."
+    RC=2
+  fi
+fi
 
 # ── Baseline comparison against the COMMITTED reference ──────────────────────
 if [[ "$USE_JSON" == "1" ]]; then
@@ -186,6 +233,43 @@ if [[ "$USE_JSON" == "1" ]]; then
     echo "    expected-hits    (not in this log — predates the faithfulness gate; re-measure)"
   fi
 
+  # ── Faithfulness gate, part 2: the miss SET, not just the count ──────────────────────────────────
+  # A scalar hides a SWAP. On 2026-08-14 hits moved 60 → 61 and that was recorded as one unit
+  # recovering; in fact THREE units changed state (the Depletion and draw-variance units began
+  # hitting, «These observations suggest … MMR deficiency» began missing) and the provenance note
+  # went in wrong. At CONSTANT count the scalar gate is silent altogether. Diffing the recorded miss
+  # set makes a swap visible and regresses on it — a newly-missing unit is a regression even when the
+  # count holds or improves.
+  if [[ -n "$EH" ]]; then
+    MISS_DIFF=$(python3 - "$LOG" "$BASELINE_JSON" <<'PY'
+import json, re, sys
+log, base = sys.argv[1], sys.argv[2]
+now = {m.group(1) for m in
+       re.finditer(r'FAITHFULNESS MISS: «([^»]*)»', open(log, encoding='utf-8').read())}
+exp = json.load(open(base))['expected']
+if 'expected_reading_misses' not in exp:
+    print('UNRECORDED\tbaseline has no expected_reading_misses — record it to enable this gate')
+else:
+    want = set(exp['expected_reading_misses'])
+    for s in sorted(now - want):
+        print('NEW-MISS\t' + s)
+    for s in sorted(want - now):
+        print('RECOVERED\t' + s)
+PY
+)
+    if [[ -z "$MISS_DIFF" ]]; then
+      echo "    miss-set         (unchanged — the same units miss as the baseline records)"
+    else
+      while IFS=$'\t' read -r kind sentence; do
+        case "$kind" in
+          NEW-MISS)   printf '    %-16s NEWLY MISSING: «%s»   REGRESSION\n' "miss-set" "$sentence"; RC=2 ;;
+          RECOVERED)  printf '    %-16s recovered: «%s»\n' "miss-set" "$sentence" ;;
+          UNRECORDED) printf '    %-16s %s\n' "miss-set" "$sentence" ;;
+        esac
+      done <<<"$MISS_DIFF"
+    fi
+  fi
+
   # ── Multiplicity gate: total_readings must not exceed the ceiling (over-generation must not grow) ─
   BCEIL=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings_ceiling',0))")
   BTR=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings',0))")
@@ -217,6 +301,35 @@ if [[ "$USE_JSON" == "1" ]]; then
     fi
   elif [[ -z "$TS" ]]; then
     echo "    total-skeletons  (not in this log — harness predates the metric; re-measure to gate it)"
+  fi
+
+  # ── Selection gates — against the SEPARATE selection baseline (selection-baseline.json):
+  #    READING-level correct must not drop, and the tracked replay must be fully adjudicated (an
+  #    unadjudicated decision makes the number a partial count, not a measurement). Structure
+  #    agreement is a diagnostic, not a gate — the pins belong to the parse baseline above.
+  if [[ -n "$SEL_RC" ]]; then
+    if [[ -f "$SELECTION_BASELINE_JSON" ]]; then
+      BSELC=$(python3 -c "import json;print(json.load(open('$SELECTION_BASELINE_JSON'))['expected'].get('reading_correct',''))")
+      BSELN=$(python3 -c "import json;print(json.load(open('$SELECTION_BASELINE_JSON'))['expected'].get('reading_adjudicated',''))")
+    else
+      BSELC=""; BSELN=""
+    fi
+    echo
+    echo "  vs selection baseline (experiments/parsing/selection-baseline.json):"
+    if [[ "$BSELC" =~ ^[0-9]+$ ]]; then
+      if [[ "$SEL_RU" -gt 0 ]]; then
+        printf '    %-16s %s decision(s) UNADJUDICATED — adjudicate reading-adjudications.tsv, then re-score\n' \
+          "reading-correct" "$SEL_RU"; RC=2
+      elif [[ "$SEL_RC" -lt "$BSELC" ]]; then
+        printf '    %-16s %s/%s → %s/%s   REGRESSION (reading-correct dropped)\n' \
+          "reading-correct" "$BSELC" "$BSELN" "$SEL_RC" "$((SEL_RC + SEL_RW))"; RC=2
+      else
+        printf '    %-16s %s/%s → %s/%s%s\n' "reading-correct" "$BSELC" "$BSELN" "$SEL_RC" "$((SEL_RC + SEL_RW))" \
+          "$([[ "$SEL_RC" -gt "$BSELC" ]] && echo '   more correct' || echo '   (holds)')"
+      fi
+    else
+      echo "    reading-correct  $SEL_RC correct / $SEL_RW wrong / $SEL_RU unadjudicated (no selection-baseline.json — report only)"
+    fi
   fi
 fi
 

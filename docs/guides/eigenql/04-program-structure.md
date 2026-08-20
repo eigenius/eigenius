@@ -25,31 +25,38 @@ pub struct Query {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub distinct: bool,
+    pub top: Option<usize>,          // D43 §3.3 — ranked truncation
 }
 ```
 
-The query's evaluation order is: `body` → `group_by` → `result` → `distinct` → `order_by` → `offset` → `limit`. Each stage consumes the output of the previous one.
+The query's evaluation order is: `body` → `group_by` → `top` → `result` → `distinct` → `order_by` → `offset` → `limit`. Each stage consumes the output of the previous one. `TOP` ranks and truncates *before* RETURN shaping, because shaping projects away the subject binding the similarity score is keyed by.
 
-## 4.2. `USING` — class imports
+## 4.2. `USING` — class imports, and `USING NAMESPACE` — short-name scope
 
 ```
-UsingClause ::= 'USING' StringLit ( ',' StringLit )*
+UsingClause    ::= 'USING' StringLit ( ',' StringLit )*
+UsingNamespace ::= 'USING' 'NAMESPACE' StringLit ( ',' StringLit )*
 ```
 
-A `USING` clause imports one or more class IRIs. Inside the `MATCH` block, those classes can be referred to by their **short name** (the `short_name` property value) instead of the full IRI.
+These two do different jobs, and it is the second one that makes short names work.
+
+A **`USING` clause asserts that an IRI names a class.** It is checked and otherwise does nothing: every `USING` IRI must resolve in the layer chain and the resolved resource must have `is_a: Class`, or the typechecker raises `using_unresolved` / `using_not_class` ([type_check.rs](../../../kernel/src/query/type_check.rs)). It does **not** bring a short name into scope.
+
+A **`USING NAMESPACE` clause imports an IRI-string prefix.** A bare short name in a pattern (`MATCH Dog(?d)`) resolves against the resources whose IRI starts with the **core namespace** — always implicitly in scope, it is the platform prelude — or with any prefix imported here, filtered to the right metaclass (`core:Class` for a pattern class, `core:Property` for a property, `institution:QueryClass` for a FIBER query class), and matched on `short_name`. Resolution lives in [`kernel/src/query/resolve.rs`](../../../kernel/src/query/resolve.rs).
 
 ```eigenql
-USING "urn:eigenius:core:Class", "urn:eigenius:example:Dog"
+USING NAMESPACE "urn:eigenius:example:"
 
-MATCH Class(?c) { ... }
-MATCH Dog(?d) { ... }
+MATCH Class(?c) { ... }     // core:Class — core is always in scope
+MATCH Dog(?d) { ... }       // urn:eigenius:example:Dog, via the import above
 ```
 
-Without the `USING`, you'd have to write `MATCH "urn:eigenius:core:Class"(?c) { ... }` explicitly.
+Without the `USING NAMESPACE`, `MATCH Dog(?d)` fails with `pattern class 'Dog' does not resolve to a Class in the core namespace or any USING NAMESPACE`; write the full IRI as a quoted string instead — `MATCH "urn:eigenius:example:Dog"(?d) { ... }`.
 
-**Type-check rule** ([type_check.rs](../../../kernel/src/query/type_check.rs)):
+Two consequences worth knowing:
 
-- Every `USING` IRI must resolve in the layer chain, and the resolved resource must have `is_a: Class`. Violations raise `using_unresolved` or `using_not_class`.
+- **Ambiguity is an error, not a first-wins pick.** A short name matching resources in two imported namespaces raises `ambiguous_short_name` and names the candidates.
+- **Resolution cost is proportional to the imported vocabulary**, not to chain size: candidates are filtered by prefix before any body is resolved.
 
 ## 4.3. `USING INSTITUTION` — fiber aliases
 
@@ -103,7 +110,7 @@ Multiple rules may define the same relation. Their bindings union. The ancestor 
 
 **Recursion** is allowed through positive dependencies only. If a `DEFINE` body negates a relation that transitively depends on the rule's head, **stratification fails**. See [chapter 10](10-stratification.md).
 
-**Fiber restriction**: `DEFINE` bodies **cannot** contain `FIBER` clauses. The rule-fixpoint evaluator has no overlay context, so institution dispatch is disallowed by both the parser (`parse_match_part(allow_fiber=false)`) and the evaluator (defensive check in [`evaluate_match_part`](../../../kernel/src/query/evaluate.rs)).
+**Fiber restriction**: `DEFINE` bodies **cannot** contain `FIBER` clauses. The rule-fixpoint evaluator has no overlay context, so institution dispatch is disallowed by both the parser (`parse_match_part(allow_fiber=false)`) and the evaluator (defensive check in [`evaluate_match_part`](../../../kernel/src/query/evaluate/fiber.rs)).
 
 ## 4.5. `MATCH` — structural patterns
 
@@ -260,25 +267,25 @@ Evaluation order: `RETURN` shape → `DISTINCT` → `ORDER BY` → `OFFSET` → 
 ## 4.11. Typical clause order
 
 ```eigenql
--- DEFINE rules (0+)
+// DEFINE rules (0+)
 DEFINE ...
 
--- Query
+// Query
 USING ...
 USING INSTITUTION ... AS ...
 
-MATCH ...      -- one or more clauses, interleaved with FIBER
+MATCH ...      // one or more clauses, interleaved with FIBER
 FIBER ...
 MATCH ...
 
-WHERE ...      -- optional, may contain `~` similarity operators (chapter 13)
+WHERE ...      // optional, may contain `~` similarity operators (chapter 13)
 
-GROUP BY ...   -- optional
+GROUP BY ...   // optional
 RETURN [...] { ... }
 
-ORDER BY ...   -- mutually exclusive with TOP
-LIMIT n        -- mutually exclusive with TOP
-TOP n          -- mutually exclusive with LIMIT + ORDER BY; requires ~ in WHERE
+ORDER BY ...   // mutually exclusive with TOP
+LIMIT n        // mutually exclusive with TOP
+TOP n          // mutually exclusive with LIMIT + ORDER BY; requires ~ in WHERE
 OFFSET m
 DISTINCT
 ```

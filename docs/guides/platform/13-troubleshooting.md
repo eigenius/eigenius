@@ -24,23 +24,15 @@ Common issues organised by symptom. For each, the diagnosis and the fix.
 
 ### `error[E0658]: ...` referencing a Rust feature
 
-**Cause:** `rustc` older than the workspace MSRV (1.97).
+**Cause:** `rustc` older than 1.97, the version `deploy/Dockerfile.kernel` builds with. Nothing enforces it locally — there is no `rust-version` key in `Cargo.toml` and no `rust-toolchain` file — so an older toolchain shows up as a dependency compile error rather than an MSRV message.
 
 **Fix:** `rustup update` to get the latest stable.
 
-### `cargo component: command not found`
+### `cannot locate Lean's include directory` from `eigenius-lean-worker`'s build script
 
-**Cause:** WASM example builds need `cargo-component`.
+**Cause:** No Lean toolchain on the host. `crates/eigenius-lean-worker/build.rs` compiles a C bridge against Lean's `lean.h` and panics when it cannot find it. This fails the whole `cargo build --workspace`, not just the Lean crate.
 
-**Fix:** `cargo install cargo-component`. If you're not building WASM examples, run `cargo build --workspace` directly to skip them.
-
-### WASM target not installed
-
-```
-error: the 'wasm32-unknown-unknown' target may not be installed
-```
-
-**Fix:** `rustup target add wasm32-unknown-unknown`.
+**Fix:** Install elan and the pinned toolchain (see [chapter 2 §2.1](02-installation.md#21-required-toolchain)), or point `EIGENIUS_LEAN_INCLUDE_DIR` at a directory containing `lean/lean.h`.
 
 ### Deno `Specifier "..." was not found`
 
@@ -91,11 +83,13 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** `cd orchestration && deno cache src/main.ts`.
 
-### `ANTHROPIC_API_KEY required for non-mock LLM mode`
+### A provider auth error partway through a run, not at startup
 
 **Cause:** Started without `EIGENIUS_MOCK_LLM=true` and without `ANTHROPIC_API_KEY` set.
 
-**Fix:** Either export `ANTHROPIC_API_KEY=sk-ant-...` or start with `EIGENIUS_MOCK_LLM=true`.
+There is **no startup check**. No orchestrator source file reads `ANTHROPIC_API_KEY` — its only occurrence under `orchestration/src/` is a doc comment; the Anthropic SDK picks the variable out of the environment itself, at the first dispatch. So a missing key starts cleanly, passes `/health`, and then fails inside the first `CompleteText` or `CompleteJson` call with whatever the provider returns. Earlier versions of this guide documented a startup error reading `ANTHROPIC_API_KEY required for non-mock LLM mode`; no such message exists anywhere in the tree.
+
+**Fix:** Either export `ANTHROPIC_API_KEY=sk-ant-...` or start with `EIGENIUS_MOCK_LLM=true`. `EIGENIUS_MOCK_LLM` is compared strictly against the string `true` — `1` or `TRUE` do not enable mock mode.
 
 ### Orchestrator port already in use (8080)
 
@@ -129,33 +123,29 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Fix:** Either use `--endpoint <url>` with a running kernel (load and query against the same chain), or use the `--file` option of `query` to load and query in one invocation.
 
-## 13.5. Capability install
+## 13.5. Capabilities
 
-### `Error: WIT mismatch: expected 'eigenius-component', got '...'`
+### `capability install` / `--capability` / `--kind` are not recognised
 
-**Cause:** The WASM binary was built against a different WIT world than the kind/level you're installing. Common causes:
-- Installing a `eigenius-component-io` binary as `--capability pure`.
-- Installing a `eigenius-institution` binary as `--kind component`.
+**Cause:** They were removed with the WASM extensibility path (2026-07-08). `CapabilityCommands` has three variants — `list`, `inspect`, `test` — and no `install`; there is no `--capability` flag and no `--kind` flag anywhere in the CLI. `wasmtime` is not a workspace dependency, so there is no fuel budget, no linear-memory limit and no WIT-world check to hit either. See [chapter 9](09-wasm-components.md) for the historical record.
 
-**Fix:** Match `--kind` and `--capability` to the WIT world the binary was built against. See the binary's source `Cargo.toml` `[package.metadata.component.target] world = "..."`.
+**Fix:** Components and institutions are declared as ontology resources and committed with `eigenius load`; execution goes through the runtime substrate ([chapter 11](11-runtime-substrate.md)). See [chapter 4 §4.10](04-cli-reference.md#410-capability-commands).
 
-### `Error: out of fuel`
+### `capability list` doesn't show a component you committed
 
-**Cause:** Component execution exceeded the default 100M-instruction fuel budget.
+**Cause:** The declaration did not commit, or it committed to a branch the kernel is not serving from, or the component IRI is unregistered — an unregistered component IRI is not an error at dispatch, it returns its input unchanged.
 
-**Fix:** For legitimate heavy computation, request a higher fuel limit in the capability's full-mode definition (see [chapter 9](09-wasm-components.md) §9.9). For unintentional infinite loops, fix the component code.
+**Fix:** `eigenius --endpoint <url> inspect <iri>` to confirm the resource is in the chain the kernel resolves against, and check the branch you loaded onto.
 
-### `Error: memory limit exceeded`
+### The orchestrator cannot reach the kernel
 
-**Cause:** Linear memory allocation over 64 MiB.
+**Fix:** From the orchestrator container, check the *kernel's* port with a gRPC call, not an HTTP one. **The kernel serves no HTTP endpoint** — `curl http://kernel:50051/health` cannot work; the port speaks gRPC and gRPC-Web only. The working probe is the one the compose file's healthcheck uses:
 
-**Fix:** Process in smaller chunks, or request a higher memory limit.
+```bash
+eigenius --endpoint http://kernel:50051 inspect "urn:eigenius:core:Class"
+```
 
-### Install succeeds but `capability list` doesn't show the new IRI
-
-**Cause:** The install went to the wrong host. IO-capability components install to the orchestrator; pure/read components install to the kernel. If the kernel and orchestrator are out of sync (e.g., the orchestrator's `EIGENIUS_KERNEL_ENDPOINT` is wrong), the registration may not propagate.
-
-**Fix:** Verify the orchestrator can reach the kernel: from the orchestrator's container, `curl http://kernel:50051/health` (or whatever endpoint is configured). Restart both services with consistent endpoints.
+`/health` exists on the *orchestrator* (port 8080), not the kernel.
 
 ## 13.6. Layer / data issues
 
@@ -183,7 +173,7 @@ Error: embedded ontology 'urn:eigenius:core' hash differs from persisted manifes
 
 **Cause:** RocksDB needs compaction (with persistent mode), or the layer chain has grown deep.
 
-**Fix:** Run `eigenius db compact <path>` on your database. If query time is dominated by deep layer-chain walks, consider periodically consolidating layers (planned for Phase 14; for now, the workaround is to re-load the consolidated state into a fresh database).
+**Fix:** Run `eigenius db compact <path>` on your database, with the kernel stopped. If query time is dominated by deep layer-chain walks, consolidate the chain: `eigenius --endpoint <url> db consolidate <from-hex>..<to-hex>` collapses an inclusive layer range into one resolve-equivalent layer. It ships — re-loading into a fresh database is no longer the workaround. Run it with `--dry-run` first to see the cost and the predicted layer id. See [chapter 4 §4.5](04-cli-reference.md#45-database-commands) and [D25](../../design/d25-chain-consolidation.md).
 
 ### `eigenius run` is slow on programs with many IO calls
 
@@ -207,11 +197,11 @@ Conventionally, version through the URI: `urn:my-org:ontology:v1`, `urn:my-org:o
 
 ### How do I delete a resource?
 
-You don't, directly. Layers are immutable. The recommended pattern: load a new layer that supersedes the resource (Phase 14 will formalise this with explicit overlay/redaction semantics).
+Layers are immutable, so nothing is deleted in place. Two shapes exist. Load a new layer that supersedes the resource — later layers shadow earlier ones on resolve. Or tombstone it: `eigenius load <file> --explicit-tombstone <iri>` commits a tombstone alongside the new layer, and `--commit-policy cascade` additionally tombstones lower-layer resources that the new layer's class redefinitions retroactively invalidate (D41 §3.3, §10.1).
 
 ### Can I run multiple kernels against the same database?
 
-No. RocksDB takes an exclusive directory lock; only one kernel process at a time can open `--db <path>`. For horizontal scaling, run multiple kernel instances each with its own database (and consider Phase 14's reconciliation work for keeping them consistent).
+No. RocksDB takes an exclusive directory lock; only one process at a time can open `--db <path>`. This is also why `db stats`, `db compact` and `db export` need the kernel stopped. For horizontal scaling, run multiple kernel instances each with its own database.
 
 ### Does the kernel auto-restart on crash?
 
@@ -226,11 +216,11 @@ In container environments, update the env var (or the Key Vault secret) and rest
 
 ### Where do reasoning traces live?
 
-When `--db` is set, in the database under the `traces` column family. The trace shape is specified in [D6b — Reasoning trace schema](../../design/d6b-reasoning-trace-schema.md). Without `--db`, traces are in-memory and discarded on kernel exit.
+When `--db` is set, in the **default** column family under the key prefix `trace:<key_hex>`. There is no `traces` column family: the only column families the store opens are `cf_text`, `cf_vec` and `cf_embed_cache`. The trace shape is specified in [D6b — Reasoning trace schema](../../design/d6b-reasoning-trace-schema.md). Without `--db`, traces are in-memory and discarded on kernel exit.
 
 ### How do I clean out old traces?
 
-There's currently no built-in trace eviction policy. For now: `eigenius db export` to capture what you want, drop the database, restart fresh. Trace lifecycle management is filed for Phase 14.
+There is no trace eviction policy and no CLI surface for garbage collection. For now: `eigenius db export` to capture what you want, drop the database, restart fresh.
 
 ### Why does my `--endpoint` URL say `localhost` work locally but not from a container?
 

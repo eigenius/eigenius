@@ -44,27 +44,65 @@ use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
-    is_nonprose, pretty_term, segment_sentences, tokenize, AbbreviationBinding, Identity,
-    Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation, Parser, Pos,
+    is_nonprose, pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize,
+    AbbreviationBinding, DiscourseRun, Identity, InProcessPipeline, Lemmatizer, LexicalIndex,
+    LexicalLookup, LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx,
+    Proposer, SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::readback::readback_val;
-use eigenius_kernel::nbe::term::{Exp, Patt};
+use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::storage::PersistentBackend;
 use eigenius_storage_rocksdb::RocksStore;
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
-/// Default snapshot location — the out-of-tree `db-snapshot/` sibling of the repo (where
-/// `scripts/reseed-lexicon-db.sh` / the native reseed write, `SNAPSHOT_ROOT = <repo>/../db-snapshot`),
-/// resolved from `CARGO_MANIFEST_DIR` (portable, CWD-independent) rather than a hardcoded home path —
-/// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
-const DEFAULT_SNAPSHOT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../db-snapshot/wordnet-umls-aligned-v3-2026-07-16-quant"
-);
+/// Where snapshots live — the out-of-tree `db-snapshot/` sibling of the repo (where
+/// `scripts/reseed-lexicon-db.sh` / the native reseed write), resolved from `CARGO_MANIFEST_DIR`
+/// (portable, CWD-independent) rather than a hardcoded home path — same convention as `DICT` below.
+const SNAPSHOT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../db-snapshot");
+
+/// The newest snapshot under [`SNAPSHOT_ROOT`], or `None` when there is none.
+///
+/// This used to name one snapshot directory as a `const`, which rots: every bootstrap edit
+/// retires the current snapshot and the reseed writes a new one under a new date-stamped name.
+/// The pin outlived its directory by five weeks, and because a missing store SKIPs (see
+/// [`snapshot_path`] — CI has no snapshots at all, so it must), every run without an explicit
+/// `EIGENIUS_DB_SNAPSHOT` reported green having executed nothing.
+///
+/// The selection rule is `scripts/measure-parse-rate.sh`'s, verbatim: newest by mtime among
+/// `wordnet-umls-*`, which is `ls -1dt "$SNAPSHOT_ROOT"/wordnet-umls-* | head -1`. Keeping one
+/// rule for both callers is the point — a default that picks a *different* snapshot than the
+/// gated measurement is how a test and its gate end up disagreeing about which experiment ran.
+fn newest_snapshot() -> Option<PathBuf> {
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(SNAPSHOT_ROOT).ok()?.flatten() {
+        let path = entry.path();
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("wordnet-umls-")
+        {
+            continue;
+        }
+        // A directory without `CURRENT` is not a RocksDB store (a partial reseed, an unpacked
+        // archive). Filtering here rather than in `snapshot_path` means a half-written snapshot
+        // does not mask the newest usable one just by being newer.
+        if !path.join("CURRENT").exists() {
+            continue;
+        }
+        let mtime = match entry.metadata().and_then(|m| m.modified()) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
+            best = Some((mtime, path));
+        }
+    }
+    best.map(|(_, p)| p)
+}
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
 const DICT: &str = concat!(
@@ -76,6 +114,16 @@ const DICT: &str = concat!(
 const WRN_PAGE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../references/publications/WRN-Helicase-Nature-OCR/first-page-cleaned.txt"
+);
+
+/// The controlled-English rewrite of the same page (D62 CNL experiment) — 62 units, grammar-gap
+/// 0. Every TRACKED measurement is against this page (`scripts/measure-parse-rate.sh` defaults
+/// to it), so a test whose assertions are calibrated on the tracked numbers defaults HERE, not
+/// to [`WRN_PAGE`]: the raw page has 18 known grammar gaps and would fail a gap-free assert
+/// before the run said anything about the change under test.
+const WRN_PAGE_CNL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt"
 );
 
 /// Adaptive-supertagging sense cap (Lever A, GH #97): keep the top-N senses per lemma so
@@ -99,17 +147,32 @@ const PARSE_BUDGET: usize = 60;
 /// The snapshot store path, or `None` (→ skip) when neither the env override nor the default
 /// exists (a valid RocksDB store has a `CURRENT` file).
 fn snapshot_path() -> Option<PathBuf> {
-    let p = std::env::var("EIGENIUS_DB_SNAPSHOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SNAPSHOT));
-    if p.join("CURRENT").exists() {
-        Some(p)
-    } else {
+    if let Ok(explicit) = std::env::var("EIGENIUS_DB_SNAPSHOT") {
+        let p = PathBuf::from(explicit);
+        if p.join("CURRENT").exists() {
+            return Some(p);
+        }
+        // An explicit override that does not resolve is an operator error, not a CI environment
+        // without snapshots — say so precisely instead of reporting the generic autodetect miss.
         eprintln!(
-            "SKIP db_backed_encoding: no RocksDB store at {} (set EIGENIUS_DB_SNAPSHOT)",
+            "SKIP db_backed_encoding: EIGENIUS_DB_SNAPSHOT={} is not a RocksDB store (no CURRENT)",
             p.display()
         );
-        None
+        return None;
+    }
+    match newest_snapshot() {
+        Some(p) => {
+            eprintln!("db_backed_encoding: autodetected snapshot {}", p.display());
+            Some(p)
+        }
+        None => {
+            eprintln!(
+                "SKIP db_backed_encoding: no wordnet-umls-* RocksDB store under {} \
+                 (run scripts/reseed-lexicon-db.sh, or set EIGENIUS_DB_SNAPSHOT)",
+                SNAPSHOT_ROOT
+            );
+            None
+        }
     }
 }
 
@@ -208,12 +271,20 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
 }
 
 fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
+    open_head_and_backend(path).map(|(head, _)| head)
+}
+
+/// Like [`open_head`], but also hands back the backend — for tests that WRITE to the working
+/// copy (doc branches, D67 §2). The working copy is disposable, so branch writes are safe.
+fn open_head_and_backend(
+    path: &std::path::Path,
+) -> Option<(Arc<Layer>, Arc<dyn PersistentBackend>)> {
     // Never open the caller's snapshot directly — see [`working_copy`]. RocksDB would rewrite it.
     let work = working_copy(path);
     let store = Arc::new(RocksStore::open(&work).expect("open RocksStore snapshot"));
     let backend: Arc<dyn PersistentBackend> = store;
     match bootstrap_persistent(Arc::clone(&backend)) {
-        Ok(ctx) => Some(Arc::clone(ctx.head())),
+        Ok(ctx) => Some((Arc::clone(ctx.head()), backend)),
         Err(e) => {
             eprintln!(
                 "SKIP db_backed_encoding: cannot resume the snapshot — {e:?}.\n  The store's \
@@ -236,7 +307,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Vec<Vec<usize>> {
+    ) -> Option<Vec<Vec<usize>>> {
         self.0.rank(sentence, context, words)
     }
 }
@@ -390,6 +461,87 @@ fn morphy() -> MorphyLemmatizer {
     MorphyLemmatizer::load(std::path::Path::new(DICT)).expect("load Morphy from dict")
 }
 
+/// Stage A — the page's document augmentation, ONE assembly shared by the isolated-sentence sweep
+/// and the discourse close-out (the two must parse over the SAME overlay or their forests are not
+/// comparable): OOV groundings against the form/description text indexes (D63
+/// lexicon-augmentation §6a), the named-entity appositions ("Project Achilles"/"project DRIVE",
+/// `d63-named-entity-glossary-source.md`), and the abbreviation glossary extracted from the SOURCE
+/// document (Defect 2b — definitions live in the original page even when a CNL rewrite is what is
+/// parsed; `EIGENIUS_WRN_SOURCE` overrides). Deterministic proposers by default; the live LLM
+/// abbreviation proposer is drop-in under `--features use-llm`.
+fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> LexiconAugmentation {
+    let mut aug = {
+        use eigenius_kernel::dcg::{
+            augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
+        };
+        augment_lexicon_backed(
+            head,
+            page,
+            &NoAbbreviationProposer,
+            &NominalCategoryProposer,
+            lem,
+        )
+    };
+    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, page);
+    let n_names = ne_aug.added.len();
+    eprintln!(
+        "named entities: {:?}",
+        ne_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(ne_aug.added);
+    aug.supporting.extend(ne_aug.supporting);
+    let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
+    let abbr_aug = {
+        #[cfg(feature = "use-llm")]
+        {
+            match eigenius_kernel::dcg::AnthropicAbbreviationProposer::from_env() {
+                Some(p) => {
+                    eprintln!(
+                        "abbreviation proposer: AnthropicAbbreviationProposer (live) on source"
+                    );
+                    eigenius_kernel::dcg::augment_document_only(head, &source_text, &p, lem)
+                }
+                None => eigenius_kernel::dcg::augment_document_only(
+                    head,
+                    &source_text,
+                    &eigenius_kernel::dcg::NoAbbreviationProposer,
+                    lem,
+                ),
+            }
+        }
+        #[cfg(not(feature = "use-llm"))]
+        {
+            eigenius_kernel::dcg::augment_document_only(
+                head,
+                &source_text,
+                &eigenius_kernel::dcg::NoAbbreviationProposer,
+                lem,
+            )
+        }
+    };
+    eprintln!(
+        "abbreviations: {:?}",
+        abbr_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(abbr_aug.added);
+    aug.supporting.extend(abbr_aug.supporting);
+    eprintln!(
+        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
+        aug.added.len() - n_names,
+        aug.missing_oov.len()
+    );
+    aug
+}
+
 /// Does this sem kernel-gate to a `Prop`? (the felicity confirmation)
 fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(layer));
@@ -398,7 +550,6 @@ fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
 
 /// The four-way outcome taxonomy the pipeline routes on (D62 §4). Mirrors `encoding_prototype.rs`
 /// (duplicated — these are prototype drivers, not library code).
-#[derive(Debug)]
 enum Outcome {
     Encoded {
         is_prop: bool,
@@ -406,6 +557,9 @@ enum Outcome {
         /// an encoded unit by construction. Held as the SET (not a count) so the faithfulness gate can
         /// ask "does this unit still CONTAIN its expected reading" (see `expected-readings.jsonl`).
         skeletons: Vec<String>,
+        /// The single closed reading — retained so the selection pass can gloss it into the reading
+        /// ranker's prior-selection context without re-parsing the unit.
+        reading: Item,
     },
     Ambiguous {
         count: usize,
@@ -413,6 +567,9 @@ enum Outcome {
         /// The distinct STRUCTURAL skeletons among the `count` closed readings — the sense-independent
         /// (drift-free) bracketing set. `count / skeletons.len()` is the sense× multiplicity.
         skeletons: Vec<String>,
+        /// The surviving closed readings — retained so the selection pass (d63-reading-selection.md
+        /// §5) can present them to the reading ranker without re-parsing the unit.
+        readings: Vec<Item>,
     },
     MissingLexeme {
         unknown: Vec<String>,
@@ -551,7 +708,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Vec<Vec<usize>> {
+    ) -> Option<Vec<Vec<usize>>> {
         self.0.rank(sentence, context, words)
     }
 }
@@ -590,603 +747,6 @@ fn skeleton_set(closed: &[Item]) -> Vec<String> {
         .collect::<BTreeSet<String>>()
         .into_iter()
         .collect()
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
-// Verbalizer — render a reading's `sem` back to approximate English, for HUMAN VERIFICATION of the
-// expected-reading corpus (a skeleton is hard to check by eye; "every nucleotide-repeat region is a
-// microsatellite" is easy). FAIL-HONEST: any construct it does not understand is emitted as `⟦raw⟧`,
-// never smoothed into fluent-but-wrong English — a partial gloss must LOOK partial.
-//
-// Sense NAMING uses the LOADED lexicon, not the WordNet data files: each entry's `sense` key is
-// `wn:{lemma}.{tag}.{offset}`, so the unit's own tokens yield `{tag}{offset} → lemma` from the seeded
-// data (and the actual surface lemma, not just a synonym); UMLS names come from the layer description.
-// Two limits remain: a sem atom not contributed by any single token falls back to the layer/local, and
-// generalized-quantifier (Π-CPS) sems are bracketed, not verbalized. Enable `EIGENIUS_GLOSS_READINGS=1`.
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
-
-/// `{tag}{offset} → lemma` (WordNet) and `C… → preferred name` (UMLS) for every sense reachable from a
-/// unit's tokens — read off the LOADED lexicon's entry `sense` keys, so it is the seeded data.
-fn unit_sense_names(
-    text: &str,
-    index: &Parser,
-    lem: &dyn Lemmatizer,
-    layer: &Arc<Layer>,
-) -> std::collections::BTreeMap<String, String> {
-    let mut m = std::collections::BTreeMap::new();
-    for tok in tokenize(text) {
-        let tok = tok.trim_matches(|c: char| !c.is_alphanumeric()); // shed attached commas/periods
-        for (_closed, _cat, sense) in index.debug_form_entries(tok, lem) {
-            // `wn:{lemma}.{tag}.{offset}` — split from the RIGHT: offset, tag, then the lemma (which
-            // may itself contain '.').
-            if let Some(rest) = sense.strip_prefix("wn:") {
-                let parts: Vec<&str> = rest.rsplitn(3, '.').collect(); // [offset, tag, lemma]
-                if let [offset, tag, lemma] = parts.as_slice() {
-                    m.entry(format!("{tag}{offset}"))
-                        .or_insert_with(|| lemma.replace('_', " "));
-                }
-            } else if let Some(cui) = sense.strip_prefix("umls:") {
-                if let Some(name) = umls_name(cui, layer) {
-                    m.entry(cui.to_string()).or_insert(name);
-                }
-            }
-        }
-    }
-    m
-}
-
-/// The UMLS preferred name = the concept description up to its first ` - ` / `. ` (the loaded resource).
-fn umls_name(cui: &str, layer: &Arc<Layer>) -> Option<String> {
-    let iri = Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).ok()?;
-    let res = layer.resolve(&iri)?;
-    let d = res.get(&Iri::parse("urn:eigenius:core:description").ok()?)?;
-    let eigenius_kernel::ontology::resource::Value::String(d) = d else {
-        return None;
-    };
-    // Descriptions are "Preferred Name — Definition [SOURCE] UMLS CUI C…". Split at the em-dash to
-    // keep just the name. (The dash renders as the mojibake `â…` — a separate importer encoding bug —
-    // so split on either form.)
-    let name = d.split('—').next().unwrap_or(d);
-    let name = name.split('â').next().unwrap_or(name);
-    let name = name.split(" - ").next().unwrap_or(name);
-    // A concept with NO definition has no em-dash at all — its description is just
-    // `"Depletion. UMLS CUI C0333668."` — so the splits above leave the provenance suffix attached
-    // and every reading mentioning it verbalises as "a Depletion. UMLS CUI C0333668. of WRN gene".
-    // Cut at the suffix directly, then drop the sentence period the label is left with.
-    let name = name.split(" UMLS CUI ").next().unwrap_or(name);
-    Some(name.trim().trim_end_matches('.').trim().to_string())
-}
-
-/// Naming + layer context threaded through the walk.
-struct Vb<'a> {
-    names: &'a std::collections::BTreeMap<String, String>,
-    layer: &'a Arc<Layer>,
-}
-
-fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
-    let mut args = Vec::new();
-    let mut cur = e;
-    while let Exp::App(f, x) = cur {
-        args.push(x.as_ref());
-        cur = f;
-    }
-    args.reverse();
-    (cur, args)
-}
-
-/// The local name of a sense ATOM — an axiom, a class, or a named INDIVIDUAL.
-///
-/// The individual arm was missing until 2026-07-27, and it mattered: the UMLS importer declares a
-/// concept as a `resource` (not a `class`) when it is an individual — `C0879389` "MLH1 gene",
-/// `C1337007` "WRN gene" — and those reach the sem as [`Exp::EigonResource`]. Without this arm
-/// `axiom_local` returned `None`, so [`name_atom`] was never consulted and every
-/// `compound(x, <individual>)` reading verbalised as the raw `⟦C0879389⟧` bracket.
-///
-/// That blinded the verbaliser on exactly the readings under review when adjudicating the
-/// `compound` / `compound_kind` split, since `compound` (`Entity -> Entity`) is the INDIVIDUAL
-/// relation and `compound_kind` (`Entity -> Set`) the kind one — so the individual side of every
-/// such pair was unreadable. `umls_name` resolves these fine (the resource carries a
-/// `core:description`); only the extractor was refusing to hand it the key.
-fn axiom_local(e: &Exp) -> Option<&str> {
-    match e {
-        Exp::EigonAxiom(i) | Exp::EigonClass(i) => {
-            Some(i.as_str().rsplit(':').next().unwrap_or(""))
-        }
-        Exp::EigonResource(r) => r.id().map(|i| i.as_str().rsplit(':').next().unwrap_or("")),
-        _ => None,
-    }
-}
-
-/// `logic:False` — the negation codomain. It is built as `Exp::InductiveType(logic:False, [])`
-/// (`constructions::negate_prop`), NOT as an axiom or class, so `axiom_local` never matched it and
-/// the verbaliser's negation arms were dead: every negated proposition reached the ⟦…⟧ bracket.
-fn is_false(e: &Exp) -> bool {
-    match e {
-        Exp::InductiveType(d, args) => args.is_empty() && d.iri.as_str().ends_with("logic:False"),
-        _ => axiom_local(e) == Some("False"),
-    }
-}
-
-/// The word for a sense atom: the unit's own lemma map first, then the UMLS layer name, else the local.
-fn name_atom(local: &str, vb: &Vb) -> String {
-    // Normalise: strip the `deg_`/`std_` adjective wrappers and any verb frame suffix (`_t`/`_i`/…).
-    let core = local
-        .strip_prefix("deg_")
-        .or_else(|| local.strip_prefix("std_"))
-        .unwrap_or(local);
-    let key = core.split('_').next().unwrap_or(core);
-    if let Some(w) = vb.names.get(key) {
-        return w.clone();
-    }
-    if key.starts_with('C') && key[1..].chars().all(|c| c.is_ascii_digit()) {
-        if let Some(w) = umls_name(key, vb.layer) {
-            return w;
-        }
-    }
-    key.to_string()
-}
-
-fn verbalize(sem: &Exp, vb: &Vb) -> String {
-    match sem {
-        Exp::Ann(inner, _) | Exp::Fst(inner) | Exp::Snd(inner) => return verbalize(inner, vb),
-        Exp::Lam(_, body) => return verbalize(body, vb),
-        Exp::Var(_) => return String::new(), // a bound restrictor variable — carries no surface
-        _ => {}
-    }
-    if let Exp::InductiveType(decl, args) = sem {
-        let d = decl.iri.as_str();
-        if args.len() == 2 && (d.ends_with("logic:And") || d.ends_with("logic:Or")) {
-            // Verb + shared-subject PP is ONE clause, not a conjunction: `And(V(subj), prep(subj, o))`
-            // → "subj V prep o" (e.g. "MSI arises from Lynch syndrome"), the dominant sentence shape.
-            if d.ends_with("And") {
-                if let Some(merged) = verb_pp(&args[0], &args[1], vb) {
-                    return merged;
-                }
-            }
-            let op = if d.ends_with("And") { "and" } else { "or" };
-            return format!(
-                "{} {op} {}",
-                verbalize(&args[0], vb),
-                verbalize(&args[1], vb)
-            );
-        }
-    }
-    // Negation `A → False`. The Pi branch below catches the `Pi(_, A, False)` readback, but a
-    // non-dependent arrow can also read back as `Exp::Arrow`, which that branch never sees — so a
-    // negated coordination (`And(respond(x), prep_to(x, …)) → False`) stayed bracketed.
-    if let Some((a, f)) = as_arrow(sem) {
-        if is_false(f) {
-            return format!("not ({})", verbalize(a, vb));
-        }
-    }
-    if let Exp::Pi(binder, dom, cod) = sem {
-        if is_false(cod) {
-            return format!("not ({})", verbalize(dom, vb));
-        }
-        // Existential GQ (`exists_sem`/`obj_exists_sem`, closed-class.esl): `∀C:Prop. (∀x:A. body(x) →
-        // C) → C`, readback `Pi(C, Prop, (Pi(x, A=Σ, body → C)) → C)`. Non-dependent `→` reads back as
-        // `Pi(Patt::Unit, …)`, so match via `as_arrow`. → "some {A} {body}".
-        if let Some((Exp::Pi(xb, a, arr), _c)) = as_arrow(cod) {
-            // The restrictor may be a Σ-REFINED noun ("some MSI cell lines") or a PLAIN class
-            // ("many cancers", "some cancers") — the quantifier encoding is identical either way,
-            // and `quant_clause` goes through `bare_np`, which handles both. Requiring `Σ` here left
-            // every unrefined-subject GQ bracketed: 46 of the residual ⟦…⟧ on the audited units.
-            if matches!(a.as_ref(), Exp::Sig(..) | Exp::EigonClass(..)) {
-                let parts = cps_body_parts(arr);
-                if !parts.is_empty() {
-                    let preds: Vec<String> = parts
-                        .iter()
-                        .map(|p| quant_clause_pred(xb, p, vb))
-                        .filter(|x| !x.is_empty())
-                        .collect();
-                    let np = bare_np(a, vb);
-                    return if preds.is_empty() {
-                        format!("some {np}")
-                    } else {
-                        format!("some {np}, {}", preds.join(" and "))
-                    };
-                }
-            }
-        }
-        // Universal / negative GQ over a Σ noun (`forall_sem`: `∀x:A. body`; `no_sem`: `∀x:A. body →
-        // False`). Object variants (`obj_*`) fill the subject in, so the readback shape matches.
-        if matches!(dom.as_ref(), Exp::Sig(..) | Exp::EigonClass(..)) {
-            if let Some((body, f)) = as_arrow(cod) {
-                if is_false(f) {
-                    return format!("no {}", quant_clause(dom, binder, body, vb));
-                }
-            }
-            return format!("every {}", quant_clause(dom, binder, cod, vb));
-        }
-        return format!("⟦{}⟧", pretty_term(sem)); // other Π — not verbalizable yet
-    }
-    if let Exp::Sig(_, base, restr) = sem {
-        let np = noun_phrase(base, restr, vb);
-        return format!("{} {np}", article(&np));
-    }
-    let (head, args) = app_spine(sem);
-    // An application headed by a BOUND VARIABLE. The predicate slot of a clausal complement
-    // ("These findings show that WRN is …", "We found that WRN was …") holds the abstracted
-    // variable, so the embedded clause reads back as `G#0(C1337007)`. A bare `Var` already
-    // verbalises to the empty string — it carries no surface — and its application should too;
-    // render just the arguments. Without this the whole embedded clause fell to the ⟦…⟧ bracket,
-    // which made every `that`-complement unit unauditable.
-    if matches!(head, Exp::Var(_)) && !args.is_empty() {
-        let parts: Vec<String> = args
-            .iter()
-            .map(|a| verbalize(a, vb))
-            .filter(|s| !s.is_empty())
-            .collect();
-        return parts.join(" ");
-    }
-    if let Some(local) = axiom_local(head) {
-        match (local, args.len()) {
-            ("subclass_of", 2) => {
-                return format!(
-                    "every {} is {}",
-                    bare_np(args[0], vb),
-                    indefinite(args[1], vb)
-                );
-            }
-            ("is_a", 2) => {
-                return format!("{} is {}", verbalize(args[0], vb), indefinite(args[1], vb));
-            }
-            // Top-level gradable-adjective predication: `gt(deg_X(subj), std_X)` → "subj is X".
-            // Two shapes share `gt` and only the ADJECTIVE one renders. A plain gradable
-            // predication compares against the STANDARD — `gt(deg_X(subj), std_X)` -> "subj is X".
-            // A COMPARATIVE compares against a real target, `gt(deg_X_rel(subj), <target>)`, and its
-            // `than`-clause is currently DROPPED: "MSI cell lines showed greater dependence on WRN
-            // than their MSS counterparts." renders as "WRN protein, human is a00725772".
-            //
-            // TRACED 2026-07-29, and the fix is NOT this arm alone. The discriminator is `args[1]`
-            // (standard vs target), not a `deg_` prefix on `args[0]` — that prefix is present in
-            // BOTH shapes (`deg_a00725772_rel`). But rendering the target requires an arm for
-            // `deg_X_rel(a, b)` as well, which has none: adding the "more … than …" branch WITHOUT
-            // it took bracketed glosses from 31 to 1833 of 2871, because that shape is pervasive.
-            // Measured and reverted. The comparative stays mis-rendered until `deg_*_rel` renders.
-            // Two shapes share `gt`.
-            //
-            //   PLAIN GRADABLE     gt(deg_X(subj), std_X)                     -> "subj is X"
-            //   RELATIONAL COMPARATIVE
-            //                      gt(deg_X_rel(g, s0), deg_X_rel(g, s1))     -> "s0 is more X on g than s1"
-            //
-            // `deg_{loc}_rel : Entity(ground) -> Entity(subject) -> float` (`convert.rs`), so a
-            // comparative is TWO relational degrees over the SAME ground with different subjects.
-            // "MSI cell lines … showed greater dependence on WRN than their MSS counterparts."
-            //
-            // TWO EARLIER ATTEMPTS FAILED HERE, both measured:
-            //  - discriminating on a `deg_` prefix in `args[0]` did nothing, because BOTH shapes
-            //    carry it (`deg_a00725772_rel`);
-            //  - discriminating on `args[1]` and then verbalising that argument took bracketed
-            //    glosses from 31 to 1833 of 2871, because a bare `deg_X_rel(a, b)` has no arm of its
-            //    own and the shape is pervasive.
-            // Destructuring BOTH arguments here avoids that: `verbalize` is never called on a
-            // relational degree, only on its operands.
-            ("gt" | "lt", 2) => {
-                let (h0, a0) = app_spine(args[0]);
-                let (h1, a1) = app_spine(args[1]);
-                let l0 = axiom_local(h0);
-                if let (Some(d0), Some(d1)) = (l0, axiom_local(h1)) {
-                    if d0.ends_with("_rel") && d0 == d1 && a0.len() == 2 && a1.len() == 2 {
-                        let word = if local == "gt" { "more" } else { "less" };
-                        return format!(
-                            "{} is {word} {} on {} than {}",
-                            verbalize(a0[1], vb),
-                            name_atom(d0, vb),
-                            verbalize(a0[0], vb),
-                            verbalize(a1[1], vb)
-                        );
-                    }
-                }
-                if let (Some(dl), Some(subj)) = (l0, a0.first()) {
-                    return format!("{} is {}", verbalize(subj, vb), name_atom(dl, vb));
-                }
-            }
-            ("kind_of", 1) => return verbalize(args[0], vb),
-            ("the", 1) => return format!("the {}", bare_np(args[0], vb)),
-            // Referential predication (D63 Defect 3): `the(subject-class, restrictor, x)` = "x is the
-            // {subject-class} that is {restrictor}" — the copula's referential distribution over a
-            // coordinated predicate nominal ("These groups are MSI lines, microsatellite-stable lines
-            // and indeterminate lines"). Each And-conjunct is one of these; without this case the
-            // 3-arg `the` fell through to the ⟦…⟧ bracket. `x` is usually a bound restrictor var (so
-            // `verbalize` returns ""), giving "the {class} that is {restrictor}".
-            ("the", 3) => {
-                let subj = verbalize(args[2], vb);
-                let cls = bare_np(args[0], vb);
-                let restr = verbalize(args[1], vb);
-                return if subj.is_empty() {
-                    format!("the {cls} that is {restr}")
-                } else {
-                    format!("{subj} is the {cls} that is {restr}")
-                };
-            }
-            // `poss_of` is POLYMORPHIC — `forall (A:Set) => A -> Entity -> Prop` — so it reads back
-            // with the Set as a leading argument and the pair (possessed, possessor) after it.
-            // Accept both arities; without this "their MSS counterparts" bracketed.
-            ("poss_of", 2 | 3) => {
-                let (owned, owner) = if args.len() == 3 {
-                    (args[1], args[2])
-                } else {
-                    (args[0], args[1])
-                };
-                let o = verbalize(owner, vb);
-                let n = verbalize(owned, vb);
-                return if o.is_empty() {
-                    format!("its {n}")
-                } else {
-                    format!("{o}'s {n}")
-                };
-            }
-            ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
-            ("speaker", _) => return "we".to_string(),
-            ("anaphor", _) => return "it".to_string(),
-            _ => {}
-        }
-        // A PP predication standing ALONE — `prep_in(subj, obj)`. `verb_pp` merges the common
-        // `And(V(subj), prep(subj, obj))` shape into a single clause, but a PP conjunct it cannot
-        // merge — a distributed coordination, or a clausal complement — reached the ⟦…⟧ bracket.
-        // The subject is usually a bound restrictor variable (verbalising to ""), giving "in X".
-        if let Some(p) = local.strip_prefix("prep_") {
-            if args.len() == 2 {
-                let subj = verbalize(args[0], vb);
-                let obj = verbalize(args[1], vb);
-                return if subj.is_empty() {
-                    format!("{p} {obj}")
-                } else {
-                    format!("{subj} {p} {obj}")
-                };
-            }
-        }
-        // Verb: `v{offset}_{frame}(obj, subj)` transitive / `(subj)` intransitive (category
-        // `(S\NP)/NP` — object first; convert.rs:225).
-        if local.starts_with('v') && local.contains('_') {
-            let verb = name_atom(local, vb);
-            // The frame tag is the suffix after the last `_` (`convert.rs`: `_i` intransitive,
-            // `_t` transitive, `_p` PP-oblique, `_as` ESSIVE, `_d` ditransitive). A 3-argument
-            // frame had no arm at all, so every essive clause — "identified WRN AS the top
-            // dependency", "evaluated MSI AS a biomarker" — bracketed in full.
-            let tag = local.rsplit('_').next().unwrap_or("");
-            return match args.as_slice() {
-                [subj] => format!("{} {verb}", verbalize(subj, vb)),
-                [obj, subj] => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
-                [obj, comp, subj] if tag == "as" => format!(
-                    "{} {verb} {} as {}",
-                    verbalize(subj, vb),
-                    verbalize(obj, vb),
-                    verbalize(comp, vb)
-                ),
-                [a, b, subj] => format!(
-                    "{} {verb} {} {}",
-                    verbalize(subj, vb),
-                    verbalize(a, vb),
-                    verbalize(b, vb)
-                ),
-                _ => format!("⟦{}⟧", pretty_term(sem)),
-            };
-        }
-    }
-    if let Some(local) = axiom_local(sem) {
-        return name_atom(local, vb);
-    }
-    format!("⟦{}⟧", pretty_term(sem))
-}
-
-/// `And(V(subj), prep_X(subj, obj))` → "subj V prep obj" when the two share a subject; else `None`.
-fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
-    let (lh, la) = app_spine(left);
-    let (rh, ra) = app_spine(right);
-    let ll = axiom_local(lh)?;
-    let rl = axiom_local(rh)?;
-    if !(ll.starts_with('v') && ll.contains('_') && rl.starts_with("prep_") && ra.len() == 2) {
-        return None;
-    }
-    // Intransitive/PP verb: its sole arg is the subject; it must match the PP's first arg.
-    let subj = match la.as_slice() {
-        [s] => s,
-        _ => return None,
-    };
-    if pretty_term(subj) != pretty_term(ra[0]) {
-        return None;
-    }
-    Some(format!(
-        "{} {} {} {}",
-        verbalize(subj, vb),
-        name_atom(ll, vb),
-        &rl[5..],
-        verbalize(ra[1], vb)
-    ))
-}
-
-/// A quantifier's body over the bound entity: "{NP}, {predicate}" with the bound variable (already
-/// named by the NP) rendered as "it", so the coreference is legible — "some group of cell lines, we
-/// identified it". Fail-honest: an empty predicate degrades to just the NP.
-/// One conjunct of a quantifier body, with the bound variable replaced by the anaphor placeholder —
-/// the per-part half of [`quant_clause`], so a CPS body with SEVERAL conjuncts can render each.
-fn quant_clause_pred(xbinder: &Patt, body: &Exp, vb: &Vb) -> String {
-    let body = match xbinder {
-        Patt::Var(x) => subst_var(body, x, &anaphor_atom()),
-        _ => body.clone(),
-    };
-    verbalize(&body, vb).trim().to_string()
-}
-
-fn quant_clause(np_sig: &Exp, xbinder: &Patt, body: &Exp, vb: &Vb) -> String {
-    let np = bare_np(np_sig, vb);
-    let body = match xbinder {
-        Patt::Var(x) => subst_var(body, x, &anaphor_atom()),
-        _ => body.clone(),
-    };
-    let pred = verbalize(&body, vb);
-    if pred.trim().is_empty() {
-        np
-    } else {
-        format!("{np}, {pred}")
-    }
-}
-
-/// The BODY of a CPS-encoded quantifier: peel the whole arrow chain `A → B → … → C → C` and drop the
-/// trailing continuation variables, leaving `[A, B, …]` — the conjuncts the quantifier asserts.
-///
-/// Taking only the FIRST antecedent silently DROPS the rest, and on this corpus that lost an entire
-/// comparative: "MSI cell lines … showed greater dependence on WRN than their MSS counterparts."
-/// reads back as `poss_of(…) → gt(…) → G#0 → G#0`, and rendering just `poss_of` gave the stub
-/// "some SIL1 gene counterpart, its it" — the `gt` comparison, which is the whole claim, vanished.
-fn cps_body_parts(e: &Exp) -> Vec<&Exp> {
-    let mut parts = Vec::new();
-    let mut cur = e;
-    while let Some((a, b)) = as_arrow(cur) {
-        parts.push(a);
-        cur = b;
-    }
-    while matches!(parts.last(), Some(Exp::Var(_))) {
-        parts.pop();
-    }
-    parts
-}
-
-/// A function type `A → B`, however it reads back — the explicit `Exp::Arrow` or the non-dependent
-/// `Pi(Patt::Unit, A, B)` (readback uses the latter for `→`).
-fn as_arrow(e: &Exp) -> Option<(&Exp, &Exp)> {
-    match e {
-        Exp::Arrow(a, b) => Some((a.as_ref(), b.as_ref())),
-        Exp::Pi(Patt::Unit, a, b) => Some((a.as_ref(), b.as_ref())),
-        _ => None,
-    }
-}
-
-/// The `lexicon:anaphor` placeholder — verbalizes as "it" (the entity the NP already names).
-fn anaphor_atom() -> Exp {
-    Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:anaphor").expect("anaphor iri"))
-}
-
-/// Replace the free variable `name` with `to` throughout `e` (glossing the bound quantifier entity).
-fn subst_var(e: &Exp, name: &str, to: &Exp) -> Exp {
-    let go = |x: &Exp| subst_var(x, name, to);
-    match e {
-        Exp::Var(v) if v == name => to.clone(),
-        Exp::App(f, x) => Exp::App(Box::new(go(f)), Box::new(go(x))),
-        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(go(b))),
-        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), Box::new(go(a)), Box::new(go(b))),
-        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), Box::new(go(a)), Box::new(go(b))),
-        Exp::Arrow(a, b) => Exp::Arrow(Box::new(go(a)), Box::new(go(b))),
-        Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
-        Exp::Fst(x) => Exp::Fst(Box::new(go(x))),
-        Exp::Snd(x) => Exp::Snd(Box::new(go(x))),
-        Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
-        Exp::Ann(x, t) => Exp::Ann(Box::new(go(x)), Box::new(go(t))),
-        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
-        Exp::InductiveCtor(d, n, args) => {
-            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
-        }
-        other => other.clone(),
-    }
-}
-
-/// "a" / "an" for the following word (vowel-initial → "an").
-fn article(word: &str) -> &'static str {
-    match word.chars().next() {
-        Some(c) if "aeiou".contains(c.to_ascii_lowercase()) => "an",
-        _ => "a",
-    }
-}
-
-/// "a NP" / "an NP" for a bare kind / class argument (a Σ already supplies its own article).
-fn indefinite(e: &Exp, vb: &Vb) -> String {
-    match e {
-        Exp::Sig(..) => verbalize(e, vb),
-        _ => {
-            let w = verbalize(e, vb);
-            format!("{} {w}", article(&w))
-        }
-    }
-}
-
-/// The NP text without a leading article (for `the …`).
-fn bare_np(e: &Exp, vb: &Vb) -> String {
-    if let Exp::Sig(_, base, restr) = e {
-        return noun_phrase(base, restr, vb);
-    }
-    verbalize(e, vb)
-}
-
-/// "adjs compound-mods HEAD pps" from a Σ's base type and restrictor conjuncts.
-fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
-    let head = verbalize(base, vb);
-    let (mut pre, mut post): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
-    let mut conj = Vec::new();
-    flatten_and_exp(restr, &mut conj);
-    for c in conj {
-        let (h, a) = app_spine(c);
-        match axiom_local(h) {
-            // A compound modifier is a bare noun ("nucleotide-repeat"), not "a nucleotide-repeat".
-            Some("compound_kind" | "compound") if a.len() == 2 => pre.push(bare_np(a[1], vb)),
-            Some("gt" | "lt") => {
-                if let Some(first) = a.first() {
-                    let (dh, _) = app_spine(first);
-                    if let Some(dl) = axiom_local(dh) {
-                        pre.push(name_atom(dl, vb));
-                    }
-                }
-            }
-            Some(p) if p.starts_with("prep_") => {
-                if let Some(x) = a.get(1) {
-                    post.push(format!("{} {}", &p[5..], verbalize(x, vb)));
-                }
-            }
-            Some("is_a") if a.len() == 2 => post.push(format!("that is {}", indefinite(a[1], vb))),
-            Some("named") if a.len() == 2 => post.push(format!("named {}", verbalize(a[1], vb))),
-            // A possessive restrictor — `Σx:N. poss_of(N, x, owner)`, "their MSS counterparts".
-            Some("poss_of") if a.len() == 2 || a.len() == 3 => {
-                let owner = verbalize(a[a.len() - 1], vb);
-                pre.push(if owner.is_empty() {
-                    "its".to_string()
-                } else {
-                    format!("{owner}'s")
-                });
-            }
-            // A restrictor headed by the Σ's OWN BOUND VARIABLE — `G#0(C1337007)`. This is the
-            // clausal complement's predicate slot ("the finding that … WRN"): the abstracted
-            // predicate applied to its argument. A bare `Var` carries no surface, so render the
-            // ARGUMENTS. `about` is a gloss for the predication, in the same spirit as the `that
-            // is` / `named` arms above — it names the participant without claiming the relation.
-            // Without this every `that`-complement unit bracketed its entire embedded clause.
-            None if matches!(h, Exp::Var(_)) && !a.is_empty() => {
-                let inner: Vec<String> = a
-                    .iter()
-                    .map(|x| verbalize(x, vb))
-                    .filter(|x| !x.is_empty())
-                    .collect();
-                post.push(format!("about {}", inner.join(" ")));
-            }
-            // Anything else: hand it to `verbalize` rather than bracketing it here. An embedded GQ
-            // restrictor (`Π… prep_of …`, "of a DNA repair pathway") is perfectly renderable by the
-            // quantifier arms — bracketing it at this level threw that away. `verbalize` still
-            // brackets what IT cannot render, so the "never silently dropped" property is kept.
-            _ => post.push(verbalize(c, vb)),
-        }
-    }
-    let mut s = String::new();
-    for m in pre.iter().filter(|m| !m.is_empty()) {
-        s.push_str(m);
-        s.push(' ');
-    }
-    s.push_str(&head);
-    for m in post.iter().filter(|m| !m.is_empty()) {
-        s.push(' ');
-        s.push_str(m);
-    }
-    s.trim().to_string()
-}
-
-fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
-    if let Exp::InductiveType(decl, args) = e {
-        if decl.iri.as_str().ends_with("logic:And") && args.len() == 2 {
-            flatten_and_exp(&args[0], out);
-            flatten_and_exp(&args[1], out);
-            return;
-        }
-    }
-    out.push(e);
 }
 
 /// A classified unit's distinct-skeleton set — the closed readings for Encoded/Ambiguous, the
@@ -1242,6 +802,57 @@ fn load_expected_readings() -> Vec<Expected> {
     out
 }
 
+/// The adjudication ledger — same directory as the pins. The selection pass reads only its
+/// `invalid` rows: a skeleton the grammar should not produce, which a reading ranker must
+/// therefore never SELECT. `invalid-selected` is gated to 0 by eval-parse-rate.sh.
+const ADJUDICATIONS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../experiments/parsing/adjudications.tsv"
+);
+
+/// The READING-level gold ledger (`d63-reading-selection.md` §5): one verdict per
+/// `(sentence, chosen reading's sem)` — `correct` / `wrong` / `uncertain`, with evidence —
+/// authored by adjudicating recorded selection draws. This is the ledger the gated
+/// `reading-correct` scores against; a chosen reading with no row (or an `uncertain` row) counts
+/// UNADJUDICATED, which must be 0 on the tracked replay. TAB-separated:
+/// `sentence <TAB> sem <TAB> verdict <TAB> evidence`. Missing file ⇒ empty.
+const READING_ADJUDICATIONS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../experiments/parsing/reading-adjudications.tsv"
+);
+
+fn load_reading_adjudications() -> std::collections::BTreeMap<(String, String), String> {
+    let Ok(text) = std::fs::read_to_string(READING_ADJUDICATIONS) else {
+        return std::collections::BTreeMap::new();
+    };
+    text.lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (s, sem, v) = (f.next()?, f.next()?, f.next()?);
+            Some((
+                (s.trim().to_string(), sem.trim().to_string()),
+                v.trim().to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// The `(sentence, skeleton)` pairs adjudicated `invalid`. Missing file ⇒ empty (check inactive).
+fn load_invalid_adjudications() -> BTreeSet<(String, String)> {
+    let Ok(text) = std::fs::read_to_string(ADJUDICATIONS) else {
+        return BTreeSet::new();
+    };
+    text.lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (s, sk, v) = (f.next()?, f.next()?, f.next()?);
+            (v.trim() == "invalid").then(|| (s.trim().to_string(), sk.trim().to_string()))
+        })
+        .collect()
+}
+
 /// The distinct-skeleton COUNT of a classified unit — Encoded/Ambiguous (closed) and Open (parametric)
 /// carry structural skeletons; GrammarGap/MissingLexeme/ScaleBound produce none (0).
 fn unit_skeletons(o: &Outcome) -> usize {
@@ -1292,27 +903,66 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
     // Parse to distinguish the fully-known outcomes. Use the open-parse carrier so a unit that only
     // yields an OPEN parse (referent holes from `we`/`its`/pronouns, D64) is NOT misfiled as a
     // grammar gap — it parses, awaiting reference resolution.
-    let (closed, open) = index.parse_open(text, lem);
+    let (closed, open, trace) = index.parse_scoped_open_traced(text, lem, None);
+    // WIDEN LADDER — report any unit whose forest did NOT come from the first attempt under the
+    // contextual ranking. Silence here means "ranked order, base cap and beam, one attempt"; anything
+    // printed is a unit whose readings must NOT be read as the ranker's judgment without checking how
+    // it got here. `StaticFallback` in particular DISCARDS the ranking for every word, so a sense the
+    // ranker explicitly rejected can win on static frequency — indistinguishable from the readings
+    // alone, which is exactly what made the WRN / MMR-deficiency anomalies unfalsifiable until now.
+    if !trace.is_base_rung() {
+        println!(
+            "  WIDEN [{:?}] attempts={} cap={:?} beam={:?} ranking={} recovery={} — {:?}",
+            trace.pass,
+            trace.attempts,
+            trace.cap,
+            trace.beam,
+            if trace.ranking_survived() {
+                "IN FORCE"
+            } else {
+                "DISCARDED"
+            },
+            // Pass 1b's status, which separates two different failures on the same fallback: NOT-RUN
+            // means no word had lost a category shape, so the narrow rescue never applied; promoted=n
+            // means it applied, promoted n senses, and the parse still failed.
+            match trace.recovery_promoted {
+                None => "NOT-RUN".to_string(),
+                Some(n) => format!("promoted={n}"),
+            },
+            text
+        );
+    }
     match closed.len() {
         0 => {
             if open.is_empty() {
                 Outcome::GrammarGap
             } else {
-                let open_items: Vec<Item> = open.iter().map(|o| o.item.clone()).collect();
+                // TYPED open skeletons (`OpenParse::skeleton`, d64-demonstratives-as-holes.md
+                // §5a): the hole's restrictor lives in its TYPE, so the untyped sem skeleton
+                // cannot discriminate readings differing inside a demonstrative NP. Pins and the
+                // ledger key open readings on the typed form.
+                let skels: Vec<String> = open
+                    .iter()
+                    .map(|o| o.skeleton())
+                    .collect::<BTreeSet<String>>()
+                    .into_iter()
+                    .collect();
                 Outcome::Open {
                     holes: open.iter().map(|o| o.holes.len()).max().unwrap_or(0),
-                    skeletons: skeleton_set(&open_items),
+                    skeletons: skels,
                 }
             }
         }
         1 => Outcome::Encoded {
             is_prop: gates_to_prop(layer, closed[0].sem()),
             skeletons: skeleton_set(&closed),
+            reading: closed.into_iter().next().expect("len==1"),
         },
         n => Outcome::Ambiguous {
             count: n,
             is_prop: gates_to_prop(layer, closed[0].sem()),
             skeletons: skeleton_set(&closed),
+            readings: closed,
         },
     }
 }
@@ -3429,91 +3079,7 @@ fn wrn_first_page_over_full_lexicon() {
 
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
-    // Stage A — the document augmentation (D63 lexicon-augmentation §6a, this session): ground OOV atoms
-    // against the form/description text indexes and OVERLAY the groundings onto the index, so the parser
-    // SEES them (uncommitted, doc-scoped — the §7-2 in-memory-overlay path) instead of gapping on them.
-    // Deterministic proposers here (reproducible A/B); the live LLM abbreviation/POS proposers are
-    // drop-in behind the traits (exercised by the `--features use-llm` smoke tests).
-    let mut aug = {
-        use eigenius_kernel::dcg::{
-            augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
-        };
-        augment_lexicon_backed(
-            &head,
-            &page,
-            &NoAbbreviationProposer,
-            &NominalCategoryProposer,
-            &lem,
-        )
-    };
-    // Named-entity source (D63 `d63-named-entity-glossary-source.md`): recognize `<common-noun-head>
-    // <Name>` appositions ("Project Achilles", "project DRIVE") and OVERLAY them as doc-local named
-    // individuals (`cat_np`) via the SAME in-memory augmentation — closes the "project"(N/V)-crowding
-    // grammar gap without a persistent doc layer.
-    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &page);
-    let n_names = ne_aug.added.len();
-    eprintln!(
-        "named entities: {:?}",
-        ne_aug
-            .added
-            .iter()
-            .map(|b| b.provenance.surface.clone())
-            .collect::<Vec<_>>()
-    );
-    aug.added.extend(ne_aug.added);
-    aug.supporting.extend(ne_aug.supporting);
-    // Abbreviation glossary (D63 Defect 2b): the CNL uses acronyms (MSI/MSS) whose DEFINITIONS live in
-    // the ORIGINAL page ("microsatellite instability (MSI)", "microsatellite stable (MSS)") — not the
-    // parsed CNL. Run the abbreviation extraction on the SOURCE document (Schwartz-Hearst, plus the live
-    // LLM proposer under `use-llm` for non-parenthetical introductions) so `MSS` grounds to
-    // microsatellite-stable rather than the `C0024814` Marinesco-Sjogren acronym collision. Merged into
-    // the same doc-scoped overlay; source = WRN_PAGE (the cleaned original) by default, `page` is the
-    // parsed CNL, so the definitions come from the source and bind the CNL's acronym surfaces.
-    let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
-    let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.clone());
-    let abbr_aug = {
-        #[cfg(feature = "use-llm")]
-        {
-            match eigenius_kernel::dcg::AnthropicAbbreviationProposer::from_env() {
-                Some(p) => {
-                    eprintln!(
-                        "abbreviation proposer: AnthropicAbbreviationProposer (live) on source"
-                    );
-                    eigenius_kernel::dcg::augment_document_only(&head, &source_text, &p, &lem)
-                }
-                None => eigenius_kernel::dcg::augment_document_only(
-                    &head,
-                    &source_text,
-                    &eigenius_kernel::dcg::NoAbbreviationProposer,
-                    &lem,
-                ),
-            }
-        }
-        #[cfg(not(feature = "use-llm"))]
-        {
-            eigenius_kernel::dcg::augment_document_only(
-                &head,
-                &source_text,
-                &eigenius_kernel::dcg::NoAbbreviationProposer,
-                &lem,
-            )
-        }
-    };
-    eprintln!(
-        "abbreviations: {:?}",
-        abbr_aug
-            .added
-            .iter()
-            .map(|b| b.provenance.surface.clone())
-            .collect::<Vec<_>>()
-    );
-    aug.added.extend(abbr_aug.added);
-    aug.supporting.extend(abbr_aug.supporting);
-    eprintln!(
-        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
-        aug.added.len() - n_names,
-        aug.missing_oov.len()
-    );
+    let aug = page_augmentation(&head, &page, &lem);
     // Reranker CONTEXT WINDOW — OFF by default, opt-in via `EIGENIUS_CONTEXT_SENTENCES` (the
     // `--context-window` arm). When on, the ranker sees `window` sentences on each side, so a sense
     // plausible in isolation but wrong in context (UMLS "Geographic Locations" for "regions" in a
@@ -3556,6 +3122,92 @@ fn wrn_first_page_over_full_lexicon() {
         eigenius_kernel::dcg::attribution::begin();
     }
 
+    // ── Reading selection (d63-reading-selection.md §5–6): choose one reading per ambiguous
+    // unit, in document order. Selection runs AFTER classification and changes NO parse metric —
+    // the summary line is identical with and without it. Arm choice mirrors the
+    // `EIGENIUS_SENSE_RANKS` discipline:
+    //   EIGENIUS_SELECTIONS file EXISTS → REPLAY it (deterministic, no LLM; a miss ABSTAINS and
+    //                                     is asserted 0 after the run — see the tail assert)
+    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   env unset                       → the deterministic PIN-BACKED arm (abstains on unpinned
+    //                                     sentences and skeleton ties, so correct == curated by
+    //                                     construction; recorded to EIGENIUS_SELECTIONS_OUT)
+    // Whatever the arm, `correct` scores the chosen skeleton against the pins.
+    let pins: std::collections::BTreeMap<String, String> = load_expected_readings()
+        .into_iter()
+        .map(|e| (e.sentence, e.skeleton))
+        .collect();
+    let invalid_adjudicated = load_invalid_adjudications();
+    let selections_path = std::env::var("EIGENIUS_SELECTIONS").ok().map(PathBuf::from);
+    let mut selection_arm = "pin-backed";
+    let mut selection_replay: Option<Arc<eigenius_kernel::dcg::ReplayReadingRanker>> = None;
+    let inner_ranker: Box<dyn eigenius_kernel::dcg::ReadingRanker> = match &selections_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_kernel::dcg::ReplayReadingRanker::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_SELECTIONS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "reading ranker: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            selection_arm = "replay";
+            let r = Arc::new(r);
+            selection_replay = Some(Arc::clone(&r));
+            Box::new(r)
+        }
+        Some(p) => {
+            // RECORD mode: the path names where the live draw will be written. Without a live
+            // ranker the run would silently measure the pin arm while claiming a live draw —
+            // fatal, mirroring the EIGENIUS_SENSE_RANKS rule (the path must be ABSOLUTE: the
+            // test binary's CWD is the crate dir, not the repo root).
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                    panic!(
+                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live selection draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    p.display()
+                );
+                selection_arm = "live";
+                Box::new(r)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_SELECTIONS={} does not exist, and this binary has no live reading \
+                 ranker (built without --features use-llm) — to replay, point at an existing \
+                 selections.json; to record, rebuild with the feature",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("reading ranker: pin-backed (expected-readings corpus)");
+            Box::new(eigenius_kernel::dcg::PinReadingRanker::new(pins.clone()))
+        }
+    };
+    let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(inner_ranker);
+    // Where the recorded decisions land: the live arm writes to its EIGENIUS_SELECTIONS path;
+    // the other arms to EIGENIUS_SELECTIONS_OUT (per-run artifact).
+    let selections_out: Option<PathBuf> = if selection_arm == "live" {
+        selections_path.clone()
+    } else {
+        std::env::var("EIGENIUS_SELECTIONS_OUT")
+            .ok()
+            .map(PathBuf::from)
+    };
+    let reading_gold = load_reading_adjudications();
+    let mut prior: Vec<eigenius_kernel::dcg::PriorSelection> = Vec::new();
+    let (mut sel_eligible, mut sel_chose, mut sel_abstained) = (0usize, 0usize, 0usize);
+    let (mut sel_read_correct, mut sel_read_wrong, mut sel_read_unadj) = (0usize, 0usize, 0usize);
+    let (mut sel_struct_correct, mut sel_curated, mut sel_invalid) = (0usize, 0usize, 0usize);
+
     let mut report: Vec<UnitReport> = Vec::new();
     for (i, text) in segment_sentences(&page).into_iter().enumerate() {
         let ntok = tokenize(&text).len();
@@ -3566,6 +3218,76 @@ fn wrn_first_page_over_full_lexicon() {
             t.elapsed().as_secs_f64(),
             tag(&outcome)
         );
+        // Reading selection, in document order (prior selections accumulate into the ranker's
+        // context). An Encoded unit contributes its single reading's gloss; an Ambiguous unit is
+        // put to the ranker via the SAME `select_reading` the pipeline's discourse loop runs.
+        match &outcome {
+            Outcome::Encoded { reading, .. } => {
+                let vnames = unit_sense_names(&text, &index, &lem, &head);
+                let vb = Vb::surface(&vnames, &head);
+                prior.push(eigenius_kernel::dcg::PriorSelection {
+                    ordinal: i,
+                    gloss: verbalize(reading.sem(), &vb),
+                });
+            }
+            Outcome::Ambiguous { readings, .. } => {
+                sel_eligible += 1;
+                match index.select_reading(&selection_ranker, &page, &text, &lem, &prior, readings)
+                {
+                    Some((_idx, sel)) => {
+                        sel_chose += 1;
+                        // READING-level scoring — the gated metric (d63-reading-selection.md §5):
+                        // the ledger verdict for this exact (sentence, sem). No row / `uncertain`
+                        // ⇒ UNADJUDICATED (must be 0 on the tracked replay).
+                        match reading_gold
+                            .get(&(text.trim().to_string(), sel.chosen_sem.clone()))
+                            .map(String::as_str)
+                        {
+                            Some("correct") => sel_read_correct += 1,
+                            Some("wrong") => sel_read_wrong += 1,
+                            _ => {
+                                sel_read_unadj += 1;
+                                eprintln!(
+                                    "  READING-UNADJUDICATED: «{}» chose a reading with no \
+                                     ledger verdict (adjudicate it in reading-adjudications.tsv)",
+                                    text.trim()
+                                );
+                            }
+                        }
+                        // STRUCTURE diagnostic (reported, not gated): does the chosen reading sit
+                        // in the pin's human-verified structure? The pins are the GRAMMAR
+                        // instrument; here they are only evidence.
+                        let pinned = pins.get(text.trim());
+                        if pinned.is_some() {
+                            sel_curated += 1;
+                        }
+                        if pinned == Some(&sel.chosen_skeleton) {
+                            sel_struct_correct += 1;
+                        }
+                        if invalid_adjudicated
+                            .contains(&(text.trim().to_string(), sel.chosen_skeleton.clone()))
+                        {
+                            sel_invalid += 1;
+                            eprintln!(
+                                "  INVALID-SELECTED: «{}» chose an invalid-adjudicated skeleton: {}",
+                                text.trim(),
+                                sel.chosen_skeleton
+                            );
+                        }
+                        eprintln!(
+                            "  selected 1 of {}: {}",
+                            sel.candidates, sel.chosen_skeleton
+                        );
+                        prior.push(eigenius_kernel::dcg::PriorSelection {
+                            ordinal: i,
+                            gloss: sel.chosen_gloss.clone(),
+                        });
+                    }
+                    None => sel_abstained += 1,
+                }
+            }
+            _ => {}
+        }
         // Page-wide English gloss (`EIGENIUS_GLOSS_READINGS=1`) — verbalize each reading for authoring
         // / verifying the expected-reading corpus without reading raw λ-terms.
         //
@@ -3577,10 +3299,7 @@ fn wrn_first_page_over_full_lexicon() {
         // `EIGENIUS_DUMP_SKELETONS` block, which prints the same set in the same (sorted) order.
         if std::env::var("EIGENIUS_GLOSS_READINGS").is_ok() {
             let vnames = unit_sense_names(&text, &index, &lem, &head);
-            let vb = Vb {
-                names: &vnames,
-                layer: &head,
-            };
+            let vb = Vb::surface(&vnames, &head);
             eprintln!("  «{}»", text.trim());
             let mut by_skel: std::collections::BTreeMap<String, String> =
                 std::collections::BTreeMap::new();
@@ -3625,10 +3344,7 @@ fn wrn_first_page_over_full_lexicon() {
             // a different reading set — "These data sets are project Achilles and project DRIVE."
             // has 0 readings there and 1 here. The adjudication ledger is keyed on THIS sweep.
             let vnames = unit_sense_names(&text, &index, &lem, &head);
-            let vb = Vb {
-                names: &vnames,
-                layer: &head,
-            };
+            let vb = Vb::surface(&vnames, &head);
             // Use `parse_open`, not `parse`: the latter returns CLOSED readings only, so the two
             // units with an unresolved referent hole ("MSI cell lines from these four lineages …",
             // "The lines from rare lineages …") dumped nothing at all — 48 and 4 skeletons with no
@@ -3678,11 +3394,961 @@ fn wrn_first_page_over_full_lexicon() {
     }
 
     summarize(&report);
+
+    // Persist the selection decisions and print the SELECTION summary line BEFORE the replay
+    // asserts (same discipline as `flush_sense_ranks`: a run that produced a number always leaves
+    // its artifacts, even when an assert then fails the run). `eval-parse-rate.sh` reads these
+    // metrics from THIS line only (trap 4 applies to selection too) and gates
+    // `invalid-selected == 0`.
+    if let Some(p) = &selections_out {
+        match selection_ranker.write(p) {
+            Ok(n) => eprintln!("selections: RECORDED {n} decision(s) → {}", p.display()),
+            Err(e) => eprintln!("selections: FAILED to write {}: {e}", p.display()),
+        }
+    }
+    eprintln!(
+        "=== SELECTION ({selection_arm}): eligible {sel_eligible}, chose {sel_chose}, \
+         abstained {sel_abstained}, reading-correct {sel_read_correct}, \
+         reading-wrong {sel_read_wrong}, reading-unadjudicated {sel_read_unadj}, \
+         structure-correct {sel_struct_correct}, curated {sel_curated}, \
+         invalid-selected {sel_invalid} ==="
+    );
+
     assert_replay_faithful();
+    // A selection replay with misses is not the recorded experiment: each miss ABSTAINS, so the
+    // selection numbers silently sag instead of failing. Asserted AFTER the ranks assert — a
+    // ranks-replay infidelity changes the forest, which makes every selection key miss too, so
+    // ranks report first as the root cause.
+    if let Some(r) = &selection_replay {
+        eprintln!(
+            "  selection replay: {} hits, {} misses",
+            r.hits(),
+            r.misses()
+        );
+        assert_eq!(
+            r.misses(),
+            0,
+            "SELECTION REPLAY had {} key MISSES — each abstains, so this run's selection numbers \
+             are not the recorded experiment's (the document, forest, glosses, or an upstream \
+             selection changed under the recording).",
+            r.misses()
+        );
+    }
 
     if rollup {
         if let Some(s) = eigenius_kernel::dcg::attribution::take() {
             eprint!("{s}");
+        }
+    }
+}
+
+/// D64 slice 4 — the DISCOURSE CLOSE-OUT (plan §2.2/§2.3): the corpus page through DB-backed
+/// `resolve_document`, with the pooled closed∪resolved-open competition and entity/kind
+/// antecedent candidates. Deterministic: the RECENCY proposer proposes every in-scope candidate
+/// in most-recent-first order and the kernel re-gate does ALL the filtering (the per-hole
+/// restrictor veto, then the closed re-gate); no reading ranker, so multi-reading pools stay
+/// `Ambiguous` (fail-open). The measured signal is the OUTCOME TRANSITION of the
+/// isolated-sentence `Open` units (20 on the dem baseline): a demonstrative unit whose referent
+/// is representable — a named individual or a kind, into a PLAIN-CLASS-typed hole — leaves
+/// `Open`; claim-referent units (pending §2.3 claim candidates) and Σ-restrictored holes
+/// (pending the restrictor-accommodation decision) stay honestly `Open`. Parses over the SAME
+/// overlay + rank replay as the sweep, so the forests are comparable.
+///
+/// Every path in the environment must be ABSOLUTE — the test binary's CWD is the crate dir.
+/// The page defaults to the CNL rewrite ([`WRN_PAGE_CNL`]), which is what the tracked numbers
+/// and the gap-free assert are measured on.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/path/ranks.json \
+///   EIGENIUS_KINDS=/abs/experiments/parsing/kinds/2026-08-12-reference.json \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     resolve_document_discourse_close_out -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed discourse close-out; needs snapshot + ranks replay; --ignored --nocapture"]
+fn resolve_document_discourse_close_out() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    // The CNL page by default — the pinned outcome tally and the gap-free assert below are the
+    // TRACKED numbers, which are measured on it (§WRN_PAGE_CNL).
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE_CNL.to_string());
+    let page = match std::fs::read_to_string(&page_path) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("SKIP: {page_path} not found");
+            return;
+        }
+    };
+    eprintln!("discourse close-out over: {page_path}");
+    let Some((base_head, backend)) = open_head_and_backend(&path) else {
+        return;
+    };
+    // D68: chain-load the encoding vocabulary + the curated claim-kind alignment onto the
+    // working copy's main branch (classes only — NO lexical entries, so the forest and every
+    // rank/selection replay key are untouched). Committed persistently (§7-2: an in-memory
+    // layer over the DB base OOMs); the working copy is disposable.
+    let head = {
+        let persister = eigenius_kernel::commit::BackendPersister::new(Some(Arc::clone(&backend)));
+        let mut head = base_head;
+        for (name, src) in [
+            (
+                "encoding",
+                include_str!("../../../ontologies/encoding/encoding.esl"),
+            ),
+            (
+                "claim-kind-alignment",
+                include_str!("../../../ontologies/encoding/claim-kind-alignment.esl"),
+            ),
+        ] {
+            let resources = eigenius_kernel::esl::compile_against_layer(src, &head)
+                .unwrap_or_else(|e| panic!("{name} compiles against the chain: {e:?}"));
+            let mut b = eigenius_kernel::layer::LayerBuilder::new(name, Some(Arc::clone(&head)));
+            for r in resources {
+                b.add_resource(r)
+                    .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            }
+            let layer = Arc::new(
+                b.build(eigenius_kernel::layer::LayerStorage::with_persistent(
+                    Arc::clone(&backend),
+                )),
+            );
+            use eigenius_kernel::commit::LayerPersister;
+            let info = persister.persist("main", &layer).expect("persist layer");
+            assert!(info.branch_advanced, "{name} layer advances main");
+            eprintln!("chain-loaded {name} → {}", layer.id());
+            head = layer;
+        }
+        head
+    };
+    let lem = morphy();
+    let aug = page_augmentation(&head, &page, &lem);
+    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+
+    // The recency proposer: every in-scope candidate, most-recent-first (the order
+    // `resolve_document` assembles). The kernel's restrictor veto is the whole filter — this is
+    // the deterministic floor; the LLM proposer (§2.4) replaces the ORDER, not the veto.
+    struct Recency;
+    impl Proposer for Recency {
+        fn propose(&self, ctx: &ProposeCtx) -> Proposal {
+            Proposal::ranked((0..ctx.candidates.len()).collect())
+        }
+    }
+
+    // ── Proposer arm (plan §2.4) — the EIGENIUS_SENSE_RANKS / EIGENIUS_SELECTIONS discipline:
+    //   EIGENIUS_PROPOSALS file EXISTS → REPLAY it (deterministic, no LLM; misses asserted 0)
+    //   file ABSENT + live proposer    → LIVE AnthropicProposer, RECORDED to that path
+    //   env unset                      → the deterministic RECENCY arm (the pinned baseline)
+    // Whatever the arm, the RecordingProposer wraps it (memoizing repeat questions) and the
+    // draw lands at EIGENIUS_PROPOSALS (live) or EIGENIUS_PROPOSALS_OUT (per-run artifact).
+    let proposals_path = std::env::var("EIGENIUS_PROPOSALS").ok().map(PathBuf::from);
+    let mut proposer_arm = "recency";
+    let mut proposal_replay: Option<Arc<eigenius_kernel::dcg::ReplayProposer>> = None;
+    let inner_proposer: Box<dyn Proposer> = match &proposals_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_kernel::dcg::ReplayProposer::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_PROPOSALS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "anaphora proposer: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            proposer_arm = "replay";
+            let r = Arc::new(r);
+            proposal_replay = Some(Arc::clone(&r));
+            Box::new(r)
+        }
+        Some(p) => {
+            // RECORD mode — without a live proposer the run would silently measure the recency
+            // arm while claiming a live draw; fatal (the path must be ABSOLUTE: the test
+            // binary's CWD is the crate dir, not the repo root).
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(r) = eigenius_kernel::dcg::resolver_llm::AnthropicProposer::from_env()
+                else {
+                    panic!(
+                        "EIGENIUS_PROPOSALS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live proposal draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "anaphora proposer: AnthropicProposer (live) — RECORDING to {}",
+                    p.display()
+                );
+                proposer_arm = "live";
+                Box::new(r)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_PROPOSALS={} does not exist, and this binary has no live proposer \
+                 (built without --features use-llm) — to replay, point at an existing \
+                 proposals.json; to record, rebuild with the feature",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("anaphora proposer: recency (deterministic floor)");
+            Box::new(Recency)
+        }
+    };
+    let proposer = eigenius_kernel::dcg::RecordingProposer::new(inner_proposer);
+
+    // ── Kind-classifier arm (D68 §4) — the ranks/selections/proposals discipline:
+    //   EIGENIUS_KINDS file EXISTS → REPLAY it (deterministic; misses asserted 0)
+    //   file ABSENT + live         → LIVE AnthropicKindClassifier, RECORDED to that path
+    //   env unset                  → none (frame table only; unmarked claims land Assertion,
+    //                                unreferable — the deterministic floor)
+    let kinds_path = std::env::var("EIGENIUS_KINDS").ok().map(PathBuf::from);
+    let mut kinds_arm = "none";
+    let mut kinds_replay: Option<Arc<eigenius_reasoning::ReplayKindClassifier>> = None;
+    let inner_kinds: Box<dyn eigenius_reasoning::KindClassifier> = match &kinds_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_reasoning::ReplayKindClassifier::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_KINDS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "kind classifier: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            kinds_arm = "replay";
+            let r = Arc::new(r);
+            kinds_replay = Some(Arc::clone(&r));
+            Box::new(r)
+        }
+        Some(p) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&page) else {
+                    panic!(
+                        "EIGENIUS_KINDS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live kind draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "kind classifier: AnthropicKindClassifier (live) — RECORDING to {}",
+                    p.display()
+                );
+                kinds_arm = "live";
+                Box::new(c)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_KINDS={} does not exist, and this binary has no live classifier \
+                 (built without --features use-llm)",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("kind classifier: none (frame table only — unmarked claims land Assertion)");
+            Box::new(eigenius_reasoning::NoKindClassifier)
+        }
+    };
+    let kinds = eigenius_reasoning::RecordingKindClassifier::new(inner_kinds);
+    let lander = eigenius_reasoning::DerivedClaimLander::new("wrn-first-page", &kinds);
+
+    // ── Reading-ranker arm — the COMPOSED configuration (plan §1.3 + §2.2: selection lives
+    // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).
+    // Same three-arm discipline as every other recorded stage:
+    //   EIGENIUS_SELECTIONS file EXISTS → REPLAY (deterministic, no LLM; misses ABSTAIN)
+    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   env unset                       → NO ranker: multi-reading pools stay Ambiguous. This is
+    //                                     the arm the pinned tallies below are measured on — it
+    //                                     isolates the RESOLVER, which is what those pins gate.
+    // The sweep (`wrn_first_page_over_full_lexicon`) measures selection ACCURACY against the
+    // pins on isolated sentences; this measures what selection does to the document's OUTCOMES
+    // once anaphora resolution is in the loop with it. Neither substitutes for the other.
+    let selections_path = std::env::var("EIGENIUS_SELECTIONS").ok().map(PathBuf::from);
+    let mut selection_arm = "none";
+    let mut selection_replay: Option<Arc<eigenius_kernel::dcg::ReplayReadingRanker>> = None;
+    let ranker: Option<Box<dyn eigenius_kernel::dcg::ReadingRanker>> = match &selections_path {
+        Some(p) if p.exists() => {
+            let r = eigenius_kernel::dcg::ReplayReadingRanker::load(p).unwrap_or_else(|e| {
+                panic!(
+                    "EIGENIUS_SELECTIONS={} exists but could not be read: {e}",
+                    p.display()
+                )
+            });
+            eprintln!(
+                "reading ranker: REPLAY from {} (deterministic, no LLM)",
+                p.display()
+            );
+            selection_arm = "replay";
+            let r = Arc::new(r);
+            selection_replay = Some(Arc::clone(&r));
+            Some(Box::new(r) as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
+        }
+        Some(p) => {
+            #[cfg(feature = "use-llm")]
+            {
+                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                    panic!(
+                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                         cannot record a live selection draw",
+                        p.display()
+                    );
+                };
+                eprintln!(
+                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    p.display()
+                );
+                selection_arm = "live";
+                Some(Box::new(r) as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
+            }
+            #[cfg(not(feature = "use-llm"))]
+            panic!(
+                "EIGENIUS_SELECTIONS={} does not exist, and this binary has no live reading \
+                 ranker (built without --features use-llm)",
+                p.display()
+            );
+        }
+        None => {
+            eprintln!("reading ranker: none (multi-reading pools stay Ambiguous)");
+            None
+        }
+    };
+
+    // Whatever the arm, the recorder wraps it, so a run that produced a number always leaves the
+    // draw that reproduces it (same discipline as the kinds/proposal arms). The live arm's draw
+    // lands at EIGENIUS_SELECTIONS; the others at EIGENIUS_SELECTIONS_OUT.
+    let selection_recorder = ranker.map(eigenius_kernel::dcg::RecordingReadingRanker::new);
+
+    let sentences: Vec<String> = segment_sentences(&page)
+        .into_iter()
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    let refs: Vec<&str> = sentences.iter().map(String::as_str).collect();
+    let t = std::time::Instant::now();
+    let resolutions = index.resolve_document(&DiscourseRun {
+        document: &page,
+        sentences: &refs,
+        lemmatizer: &lem,
+        proposer: &proposer,
+        ranker: selection_recorder
+            .as_ref()
+            .map(|r| r as &dyn eigenius_kernel::dcg::ReadingRanker),
+        lander: Some(&lander),
+        scope: None,
+    });
+    assert_eq!(resolutions.len(), sentences.len());
+
+    // Flush the selection draw BEFORE any assert.
+    if let Some(rec) = &selection_recorder {
+        let out: Option<PathBuf> = if selection_arm == "live" {
+            selections_path.clone()
+        } else {
+            std::env::var("EIGENIUS_SELECTIONS_OUT")
+                .ok()
+                .map(PathBuf::from)
+        };
+        if let Some(p) = &out {
+            match rec.write(p) {
+                Ok(n) => eprintln!("selections: RECORDED {n} decision(s) → {}", p.display()),
+                Err(e) => eprintln!("selections: FAILED to write {}: {e}", p.display()),
+            }
+        }
+    }
+
+    // Persist the kind draw BEFORE any assert (flush-before-asserts).
+    let kinds_out: Option<PathBuf> = if kinds_arm == "live" {
+        kinds_path.clone()
+    } else {
+        std::env::var("EIGENIUS_KINDS_OUT").ok().map(PathBuf::from)
+    };
+    if let Some(p) = &kinds_out {
+        match kinds.write(p) {
+            Ok(n) => eprintln!("kinds: RECORDED {n} verdict(s) → {}", p.display()),
+            Err(e) => eprintln!("kinds: FAILED to write {}: {e}", p.display()),
+        }
+    }
+    // The landed-claim tally, by discourse kind (the two-axis is_a — D68 §2).
+    let landed = lander.take_landed();
+    let mut kind_tally: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for c in &landed {
+        let kind = c
+            .resources
+            .iter()
+            .find(|r| r.id() == Some(&c.claim_iri))
+            .and_then(|r| {
+                r.is_a()
+                    .iter()
+                    .find(|k| k.as_str() != "urn:eigenius:encoding:EncodedClaim")
+                    .map(|k| k.as_str().rsplit(':').next().unwrap_or("?").to_string())
+            })
+            .unwrap_or_else(|| "?".to_string());
+        *kind_tally.entry(kind).or_default() += 1;
+    }
+    eprintln!(
+        "landed {} claim(s) ({kinds_arm} kinds): {kind_tally:?}",
+        landed.len()
+    );
+
+    // Persist the proposal draw BEFORE any assert (the flush-before-asserts discipline).
+    let proposals_out: Option<PathBuf> = if proposer_arm == "live" {
+        proposals_path.clone()
+    } else {
+        std::env::var("EIGENIUS_PROPOSALS_OUT")
+            .ok()
+            .map(PathBuf::from)
+    };
+    if let Some(p) = &proposals_out {
+        match proposer.write(p) {
+            Ok(n) => eprintln!("proposals: RECORDED {n} question(s) → {}", p.display()),
+            Err(e) => eprintln!("proposals: FAILED to write {}: {e}", p.display()),
+        }
+    }
+
+    // Cosmetic log marker only. `that` is deliberately absent — its every occurrence on this
+    // page is the complementizer/relativizer homograph, so matching it would mark
+    // clause-embedding units as demonstrative.
+    let is_dem = |t: &str| {
+        let lt = format!(" {}", t.to_lowercase());
+        [" this ", " these ", " those "]
+            .iter()
+            .any(|d| lt.contains(d))
+    };
+    let (mut enc, mut amb, mut open_n, mut gap) = (0usize, 0usize, 0usize, 0usize);
+    for (i, (s, r)) in sentences.iter().zip(&resolutions).enumerate() {
+        let mark = if is_dem(s) { " [dem]" } else { "" };
+        match &r.outcome {
+            SentenceOutcome::Encoded(item) => {
+                enc += 1;
+                eprintln!("[unit {i:>2}] ENCODED{mark} «{}»", s.trim());
+                if is_dem(s) {
+                    eprintln!("           sk={}", erase_senses(&pretty_term(item.sem())));
+                }
+            }
+            SentenceOutcome::Ambiguous(pool) => {
+                amb += 1;
+                eprintln!("[unit {i:>2}] AMBIG({}){mark} «{}»", pool.len(), s.trim());
+            }
+            SentenceOutcome::Open(o) => {
+                open_n += 1;
+                eprintln!(
+                    "[unit {i:>2}] OPEN({} hole(s)){mark} «{}»",
+                    o.holes.len(),
+                    s.trim()
+                );
+            }
+            SentenceOutcome::Gap => {
+                gap += 1;
+                eprintln!("[unit {i:>2}] GAP{mark} «{}»", s.trim());
+            }
+        }
+    }
+    eprintln!(
+        "=== DISCOURSE ({proposer_arm} proposer, {selection_arm} ranker, {:.0}s): encoded {enc}, ambiguous \
+         {amb}, open {open_n}, gap {gap} over {} units ===",
+        t.elapsed().as_secs_f64(),
+        sentences.len()
+    );
+    eprintln!("    (isolated-sentence dem baseline: encoded 11, ambiguous 31, open 20, gap 0)");
+
+    // Fail-closed invariant — run-independent: pooling only ADDS resolved readings to a
+    // sentence's pool, so coverage cannot regress.
+    assert_eq!(gap, 0, "pooling must not create grammar gaps");
+    // The PINNED close-out baseline — RECENCY ARM ONLY (a live/replayed proposal draw is its own
+    // experiment with its own numbers): 2026-08-11, dem snapshot + ranks
+    // 2026-07-29-demonstratives replay, no ranker — deterministic up to the live-abbreviation
+    // overlay, which has been stable at PARP-1/MSI/MMR/MSS. 5 of the 20 isolated-Open units
+    // close: «These data sets are project Achilles and project DRIVE» → ENCODED (resolved to
+    // the harvested kind ⟦data from large-scale silencing screens⟧), and 4 more → Ambiguous
+    // (fail-open pools for the Stage-1 ranker, incl. the pre-migration comparative-hole unit
+    // «The lines from rare lineages…», all 48 readings resolved). The 15 residual Opens are the
+    // DOCUMENTED deferrals: claim referents ("These findings/observations", plan §2.3 landed
+    // claims), plural/group sets ("these two events", "These libraries"), quantifier-introduced
+    // witnesses ("This impairment"), and Σ-restrictored holes ("…these data sets for genes
+    // that…"). A change here is a re-baseline event — update the numbers WITH provenance, don't
+    // loosen to inequalities.
+    // Every pinned tally below is a NO-RANKER measurement (it gates the resolver). With a ranker
+    // in the loop the ambiguous pools collapse into Encoded by design, so the tuple necessarily
+    // differs — asserting it there would be asserting the ranker's draw, which the sweep's
+    // selection-accuracy gate is what measures.
+    if proposer_arm == "recency" && kinds_arm == "none" && selection_arm == "none" {
+        // The deterministic floor (no kind classifier: unmarked claims land Assertion,
+        // unreferable — claim antecedents contribute nothing here, so the pre-D68 numbers
+        // must HOLD exactly).
+        assert_eq!(
+            (enc, amb, open_n),
+            (12, 35, 15),
+            "discourse close-out drifted from the pinned 2026-08-11 baseline (encoded 12, \
+             ambiguous 35, open 15)"
+        );
+    }
+    if proposer_arm == "recency" && kinds_arm == "replay" && selection_arm == "none" {
+        // The D68 close-out baseline (2026-08-12, kinds draw
+        // experiments/parsing/kinds/2026-08-12-reference.json): ALL FIVE claim-referent units
+        // close — 19/20 «These findings show…», 45 «These classifications…», 49 «These
+        // findings remained true…», 60 «These observations suggest…» — each a fail-open
+        // Ambiguous pool awaiting the Stage-1 ranker. The draw landed 2 Finding + 4
+        // Observation + 3 Classification + 1 Suggestion + 2 Assertion over the 12 encoded
+        // sentences. A change here is a re-baseline event (update WITH provenance).
+        assert_eq!(
+            (enc, amb, open_n),
+            (12, 40, 10),
+            "discourse close-out drifted from the pinned 2026-08-12 D68 baseline (encoded 12, \
+             ambiguous 40, open 10)"
+        );
+    }
+    assert_replay_faithful();
+    // A selection replay with misses is not the recorded experiment: each miss ABSTAINS, so the
+    // pool stays Ambiguous and the encoded count silently sags instead of failing.
+    if let Some(r) = &selection_replay {
+        eprintln!(
+            "  selection replay: {} hits, {} misses",
+            r.hits(),
+            r.misses()
+        );
+        assert_eq!(
+            r.misses(),
+            0,
+            "SELECTION REPLAY had {} MISSES — the document, forest, or an upstream selection \
+             changed under the recording.",
+            r.misses()
+        );
+    }
+    // A kind replay with misses is not the recorded experiment: each miss lands Assertion, so
+    // claim-referent units silently sag back to Open.
+    if let Some(r) = &kinds_replay {
+        eprintln!("  kind replay: {} hits, {} misses", r.hits(), r.misses());
+        assert_eq!(
+            r.misses(),
+            0,
+            "KIND REPLAY had {} MISSES — the sentence set or the chosen readings' glosses \
+             changed under the recording.",
+            r.misses()
+        );
+    }
+    // A proposal replay with misses is not the recorded experiment: each miss answers EMPTY, so
+    // units silently sag back to Open instead of failing. Asserted AFTER the ranks assert —
+    // a ranks infidelity changes the forest, which makes proposal keys miss too.
+    if let Some(r) = &proposal_replay {
+        eprintln!(
+            "  proposal replay: {} hits, {} misses",
+            r.hits(),
+            r.misses()
+        );
+        assert_eq!(
+            r.misses(),
+            0,
+            "PROPOSAL REPLAY had {} key MISSES — each answers empty (fail-closed), so this \
+             run's outcomes are not the recorded draw's (the document, forest, candidates, or \
+             an upstream selection changed under the recording).",
+            r.misses()
+        );
+    }
+}
+
+/// D67 §2 (slice 3) — the PERSISTENT doc layer: over a DB-backed base the pipeline builds the
+/// doc-glossary layer ON the store and commits it to a `doc-<id>` branch (an in-memory overlay
+/// OOMs, §7-2; derived indexes populate in `store_layer`, so the layer must be built on the
+/// storage it is persisted to). STRUCTURAL gates, not parse pins: the pipeline's Stage A is its
+/// own augmentation (here `DocumentOnly`), a different overlay from the sweep's, so its forest
+/// is not comparable — the sweep numbers stay pinned by the close-out test above.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/ranks.json \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     pipeline_with_storage_commits_doc_branch -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed persistent doc layer (D67 §2); --ignored --nocapture"]
+fn pipeline_with_storage_commits_doc_branch() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let Ok(page) = std::fs::read_to_string(&page_path) else {
+        eprintln!("SKIP: {page_path} not found");
+        return;
+    };
+    let Some((head, backend)) = open_head_and_backend(&path) else {
+        return;
+    };
+    let lem = morphy();
+
+    struct NoProp;
+    impl Proposer for NoProp {
+        fn propose(&self, _c: &ProposeCtx) -> Proposal {
+            Proposal::default()
+        }
+    }
+
+    // The harness's parse config (caps + optional rank replay) applied through the pipeline's
+    // parser hook — the same knobs `build_index_over` sets, minus its record arms.
+    let setup = |p: Parser| {
+        let p = p.with_sense_cap(SENSE_CAP).with_cell_beam(CELL_BEAM);
+        match std::env::var("EIGENIUS_SENSE_RANKS")
+            .ok()
+            .map(PathBuf::from)
+        {
+            Some(rp) if rp.exists() => {
+                let r = eigenius_kernel::dcg::ReplaySenseRanker::load(&rp).expect("read ranks");
+                eprintln!("pipeline reranker: REPLAY from {}", rp.display());
+                p.with_sense_ranker(Box::new(r))
+            }
+            _ => {
+                eprintln!("pipeline reranker: none (cap-only)");
+                p
+            }
+        }
+    };
+    let pipeline =
+        InProcessPipeline::new(Arc::clone(&head), &lem, &NoAbbreviationProposer, &NoProp)
+            .with_storage(Arc::clone(&backend), "wrn-first-page")
+            .with_parser_setup(&setup);
+
+    let t = std::time::Instant::now();
+    let (encoding, doc_layer) = pipeline
+        .encode_with_layer(&page)
+        .expect("doc layer commits");
+    // The branch exists and points AT the returned layer, which chains on the base head.
+    let branch_head = backend
+        .get_branch("doc-wrn-first-page")
+        .expect("branch read")
+        .expect("doc branch exists");
+    assert_eq!(
+        &branch_head,
+        doc_layer.id(),
+        "the doc branch points at the committed doc layer"
+    );
+    assert_eq!(
+        doc_layer.parent().map(|p| p.id()),
+        Some(head.id()),
+        "the doc layer chains on the base head"
+    );
+
+    let (mut enc, mut amb, mut open_n, mut gap) = (0usize, 0usize, 0usize, 0usize);
+    for s in &encoding.sentences {
+        match &s.outcome {
+            SentenceOutcome::Encoded(_) => enc += 1,
+            SentenceOutcome::Ambiguous(_) => amb += 1,
+            SentenceOutcome::Open(_) => open_n += 1,
+            SentenceOutcome::Gap => gap += 1,
+        }
+    }
+    eprintln!(
+        "=== PERSISTENT PIPELINE ({:.0}s): encoded {enc}, ambiguous {amb}, open {open_n}, \
+         gap {gap} over {} units; doc-wrn-first-page @ {} ===",
+        t.elapsed().as_secs_f64(),
+        encoding.sentences.len(),
+        doc_layer.id()
+    );
+    assert!(
+        enc + amb > 0,
+        "the page parses over the persisted doc branch"
+    );
+
+    // Drop-and-recreate: a rerun of the same doc_id REPLACES the branch and lands pointing at
+    // its (re-)committed layer.
+    let (_, doc_layer2) = pipeline.encode_with_layer(&page).expect("rerun commits");
+    let branch_head2 = backend
+        .get_branch("doc-wrn-first-page")
+        .expect("branch read")
+        .expect("doc branch exists after rerun");
+    assert_eq!(
+        &branch_head2,
+        doc_layer2.id(),
+        "the rerun re-points the branch (drop-and-recreate lifecycle)"
+    );
+}
+
+/// D68 alignment probe: the CONCRETE restrictor classes of the claim-referent demonstrative
+/// units — the `subclass_of` targets `claim-kind-alignment.esl` must name. Prints each open
+/// parse's holes with their UN-ERASED types (`pretty_term(hole.ty)`), per unit.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_SENSE_RANKS=/abs/ranks.json \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_claim_unit_restrictors -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed alignment probe (D68); --ignored --nocapture"]
+fn probe_claim_unit_restrictors() {
+    let Some(path) = snapshot_path() else { return };
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let Ok(page) = std::fs::read_to_string(&page_path) else {
+        eprintln!("SKIP: {page_path} not found");
+        return;
+    };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let aug = page_augmentation(&head, &page, &lem);
+    let index = build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), 0);
+    let needles = [
+        "These findings show that WRN is a synthetic-lethal",
+        "These findings show that WRN is a promising drug",
+        "These classifications were highly concordant",
+        "These findings remained true",
+        "These observations suggest",
+    ];
+    for text in segment_sentences(&page) {
+        if !needles.iter().any(|n| text.contains(n)) {
+            continue;
+        }
+        let (closed, open) = index.parse_open(&text, &lem);
+        eprintln!(
+            "«{}»  ({} closed, {} open)",
+            text.trim(),
+            closed.len(),
+            open.len()
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for o in &open {
+            for h in &o.holes {
+                let ty = pretty_term(&h.ty);
+                if seen.insert(ty.clone()) {
+                    eprintln!("    hole {} : {ty}", h.var);
+                }
+            }
+        }
+    }
+}
+
+/// D68 alignment probe (companion of `probe_claim_unit_restrictors`): labels for the UMLS
+/// restrictor classes, so the curated alignment facts are written against known concepts.
+/// `EIGENIUS_PROBE_CUIS=C1148824,C1149627` probes any other concepts — e.g. the ones a
+/// generated formula or a hand-authored definition names, when reading the term back.
+/// Prints each concept's label and its `is_a` parents (with labels), which is what says
+/// where in the lattice it sits.
+#[test]
+#[ignore = "DB-backed label probe (D68); --ignored --nocapture"]
+fn probe_restrictor_class_labels() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let cuis = std::env::var("EIGENIUS_PROBE_CUIS")
+        .unwrap_or_else(|_| "C2825141,C0037088,C0302523,C0700325,C5890437".to_string());
+    for cui in cuis.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        // Bare `C…` is a UMLS CUI; anything namespace-qualified (`wn:n00029677`) is taken as
+        // given, so a WordNet synset can be probed with the same instrument.
+        let iri = match cui.split_once(':') {
+            Some((ns, local)) => Iri::parse(&format!("urn:eigenius:{ns}:{local}")).unwrap(),
+            None => Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).unwrap(),
+        };
+        eprintln!(
+            "{cui}: {}",
+            eigenius_kernel::dcg::resource_label(&iri, &head)
+                .unwrap_or_else(|| "<no label>".to_string())
+        );
+        let Some(r) = head.resolve(&iri) else {
+            eprintln!("    <not on the chain>");
+            continue;
+        };
+        for (prop, value) in r.properties() {
+            let name = prop.as_str().rsplit(':').next().unwrap_or_default();
+            let rendered = match value {
+                eigenius_kernel::ontology::resource::Value::Array(a) => a
+                    .iter()
+                    .map(|v| describe_probe_value(v, &head))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                v => describe_probe_value(v, &head),
+            };
+            eprintln!("    {name} = {rendered}");
+        }
+    }
+}
+
+/// One property value for the label probe: a resource reference also gets its label, since an
+/// IRI alone does not say what the parent concept IS.
+fn describe_probe_value(
+    value: &eigenius_kernel::ontology::resource::Value,
+    head: &Arc<eigenius_kernel::layer::Layer>,
+) -> String {
+    use eigenius_kernel::ontology::resource::Value;
+    match value {
+        Value::ResourceRef(iri) => match eigenius_kernel::dcg::resource_label(iri, head) {
+            Some(l) => format!("{iri} «{l}»"),
+            None => iri.to_string(),
+        },
+        Value::String(s) => format!("{s:?}"),
+        other => format!("{other:?}"),
+    }
+}
+
+/// **Which word's ranking blocks the parse?** — leave-one-out over the recorded sense draw.
+///
+/// `EIGENIUS_PROBE_BLOCKER="<sentence>"` (default: the MMR unit) re-parses the sentence once per
+/// ranked word, each time BLANKING that one word's ranking and keeping every other word's. A blanked
+/// word's senses leave the rank map, so `sense_cap_key` scores them `(true, 0, static_rank)` — sorted
+/// after every ranked sense and ordered among themselves by static frequency. That is exactly what
+/// Pass 2 does to the whole sentence, applied to one word.
+///
+/// WHY: three of the page's 62 units resolve only on `WidenPass::StaticFallback` — the ranking
+/// discarded for every word — even though targeted recovery (Pass 1b) ran first and promoted senses.
+/// «These observations suggest … MMR deficiency» is the sharpest: it fails under the ranking at caps
+/// 2, 4, 8 and 16, then parses on the FIRST Pass-2 attempt at the base cap of 2. So widening was never
+/// the issue and the ranking itself blocks composition. Pass 1b cannot see this class, because it only
+/// promotes senses of a LOST CATEGORY SHAPE — when the shape is present and merely the wrong sense of
+/// it wins, there is nothing for it to target.
+///
+/// A word that RESCUES the sentence when blanked is a blocker. If several do, the blockage is joint.
+/// If none does, no single word is responsible and the narrow fix does not exist for that sentence.
+#[test]
+#[ignore = "DB-backed; needs snapshot + a recorded ranks draw; --ignored --nocapture"]
+fn probe_blocking_word() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let Ok(ranks_path) = std::env::var("EIGENIUS_SENSE_RANKS") else {
+        eprintln!("SKIP: set EIGENIUS_SENSE_RANKS to a recorded draw");
+        return;
+    };
+    let sentence = std::env::var("EIGENIUS_PROBE_BLOCKER").unwrap_or_else(|_| {
+        "These observations suggest that WRN dependency is not simply a result of MMR deficiency."
+            .to_string()
+    });
+    let lem = morphy();
+    // The parser MUST be built exactly as the sweep builds it. `rank_key` covers the candidate sense
+    // lists, so the page augmentation (OOV grounding injects entries) and the document window both
+    // feed the key — omitting either turns every replay lookup into a miss, which is how the first
+    // run of this probe reported all ten words as blockers when there was no ranking at all.
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let Ok(page) = std::fs::read_to_string(&page_path) else {
+        eprintln!("SKIP: {page_path} not found");
+        return;
+    };
+    let aug = page_augmentation(&head, &page, &lem);
+    let ctx_window: usize = std::env::var("EIGENIUS_CONTEXT_SENTENCES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let draw: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&ranks_path).expect("read ranks"))
+            .expect("parse ranks");
+    let entry = draw
+        .as_array()
+        .expect("ranks is an array")
+        .iter()
+        .find(|e| e["sentence"].as_str() == Some(sentence.as_str()))
+        .unwrap_or_else(|| panic!("sentence not in the draw: {sentence}"));
+    let surfaces: Vec<String> = entry["words"]
+        .as_array()
+        .expect("words")
+        .iter()
+        .map(|w| w["surface"].as_str().unwrap_or("?").to_string())
+        .collect();
+
+    let replay = std::sync::Arc::new(
+        eigenius_kernel::dcg::ReplaySenseRanker::load(std::path::Path::new(&ranks_path))
+            .expect("load ranks"),
+    );
+
+    /// Wraps a recorded draw and blanks ONE word's ranking, leaving the rest exactly as recorded.
+    struct LeaveOneOut {
+        inner: std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>,
+        blank: usize,
+    }
+    impl eigenius_kernel::dcg::SenseRanker for LeaveOneOut {
+        fn rank(
+            &self,
+            sentence: &str,
+            context: &str,
+            words: &[eigenius_kernel::dcg::WordSenses],
+        ) -> Option<Vec<Vec<usize>>> {
+            let mut r = self.inner.rank(sentence, context, words)?;
+            if let Some(v) = r.get_mut(self.blank) {
+                v.clear(); // this word only: out of the map ⇒ static frequency, as Pass 2 does
+            }
+            Some(r)
+        }
+    }
+
+    eprintln!("\n«{sentence}»\n  {} ranked words\n", surfaces.len());
+    // Control: the recorded ranking, untouched.
+    let base = build_index_over(&head, Some(&aug))
+        .with_document(segment_sentences(&page), ctx_window)
+        .with_sense_ranker(Box::new(ArcReplay(std::sync::Arc::clone(&replay))));
+    let (c, o, t) = base.parse_scoped_open_traced(&sentence, &lem, None);
+    eprintln!(
+        "  CONTROL (ranking as recorded): closed={} open={} pass={:?} attempts={} replay hits={} misses={}",
+        c.len(),
+        o.len(),
+        t.pass,
+        t.attempts,
+        replay.hits(),
+        replay.misses()
+    );
+    // GUARD: a replay MISS means the ranker did not answer, so there is no ranking to leave one word
+    // out OF — every arm below would be identical and the probe would report every word as a blocker.
+    // The key covers the candidate sense lists, so a lexicon/augmentation difference from the sweep
+    // silently produces this. Fail loudly rather than print ten meaningless rescues.
+    assert_eq!(
+        replay.misses(),
+        0,
+        "replay MISS on the control — this probe is not reproducing the sweep's ranking; \
+         the leave-one-out arms would all be no-ops"
+    );
+
+    let mut blockers: Vec<String> = Vec::new();
+    for (k, surface) in surfaces.iter().enumerate() {
+        let idx = build_index_over(&head, Some(&aug))
+            .with_document(segment_sentences(&page), ctx_window)
+            .with_sense_ranker(Box::new(LeaveOneOut {
+                inner: std::sync::Arc::clone(&replay),
+                blank: k,
+            }));
+        let (c, o, t) = idx.parse_scoped_open_traced(&sentence, &lem, None);
+        // A rescue means: with ONLY this word unranked, the ranking-respecting passes now succeed.
+        let rescued = (!c.is_empty() || !o.is_empty()) && t.ranking_survived();
+        if rescued {
+            blockers.push(surface.clone());
+        }
+        eprintln!(
+            "  [{k:>2}] blank «{surface}» → closed={} open={} pass={:?} attempts={} {}",
+            c.len(),
+            o.len(),
+            t.pass,
+            t.attempts,
+            if rescued { "  <-- RESCUES" } else { "" }
+        );
+    }
+    eprintln!(
+        "\n  BLOCKERS: {}",
+        if blockers.is_empty() {
+            "none — no single word's ranking is responsible".to_string()
+        } else {
+            blockers.join(", ")
+        }
+    );
+}
+
+/// D69 §7f — every lexical entry a SURFACE resolves to, with its grammatical category.
+///
+/// Answers "the sense ranker kept concept X, so why is X not in the parse?" — which is a
+/// different question from "is X in the lexicon". Found this way (2026-08-13): «screens» offers
+/// C0220908 (the screening-procedure concept), the ranker KEEPS it, and the parse still uses only
+/// the projection-surface and CRT-display nouns.
+///
+///   EIGENIUS_DB_SNAPSHOT=/path EIGENIUS_PROBE_FORM=screens \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_form_entries -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed lexical-entry probe (D69); --ignored --nocapture"]
+fn probe_form_entries() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    for form in std::env::var("EIGENIUS_PROBE_FORM")
+        .unwrap_or_else(|_| "screens".to_string())
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let rows = index.debug_form_entries(form, &lem);
+        eprintln!("\n«{form}» — {} entries", rows.len());
+        for (closed, cat, sense) in rows {
+            eprintln!(
+                "   {:<34} {:<8} {cat}",
+                sense,
+                if closed { "closed" } else { "open" }
+            );
         }
     }
 }
@@ -4916,10 +5582,7 @@ fn trace_one_sentence() {
         }
     } else {
         let vnames = unit_sense_names(&text, &index, &lem, &head);
-        let vb = Vb {
-            names: &vnames,
-            layer: &head,
-        };
+        let vb = Vb::surface(&vnames, &head);
         for (i, it) in f.iter().enumerate().take(20) {
             println!("  reading[{i}]: {}", pretty_term(it.sem()));
             println!("      ≈ \"{}\"", verbalize(it.sem(), &vb));

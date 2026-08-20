@@ -2,7 +2,7 @@
 
 Expressions appear in `WHERE` conditions, `RETURN` values, `GROUP BY` keys, `ORDER BY` sort keys, and `FIBER` param bindings. They produce a `Value` — the same resource-value type used by Eigon resources: string, integer, float, boolean, array, or embedded resource.
 
-The expression AST is the `Expression` enum in [kernel/src/query/ast.rs](../../../kernel/src/query/ast.rs); the evaluator is [`eval_expression`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`. The evaluator threads through the [`FiberRuntime`](../../../kernel/src/query/evaluate.rs) so that institution-dispatched calls and postfix Verdict predicates can resolve against the `InstitutionIndex` + `InstitutionRuntime` and the FIBER overlay.
+The expression AST is the `Expression` enum in [kernel/src/query/ast.rs](../../../kernel/src/query/ast.rs); the evaluator is [`eval_expression`](../../../kernel/src/query/evaluate/expression.rs) in `evaluate/expression.rs`. The evaluator threads through the [`FiberRuntime`](../../../kernel/src/query/evaluate/fiber.rs) so that institution-dispatched calls and postfix Verdict predicates can resolve against the `InstitutionIndex` + `InstitutionRuntime` and the FIBER overlay.
 
 A binding is a `BTreeMap<String, Value>` — the current variable environment from the surrounding `MATCH` / `FIBER` clauses.
 
@@ -12,7 +12,7 @@ A binding is a `BTreeMap<String, Value>` — the current variable environment fr
 Expression::Literal(Literal)
 ```
 
-Literals convert directly to `Value` via [`literal_to_value`](../../../kernel/src/query/evaluate.rs):
+Literals convert directly to `Value` via [`literal_to_value`](../../../kernel/src/query/evaluate/pattern.rs):
 
 - `Literal::String(s)` → `Value::String(s)`
 - `Literal::Integer(n)` → `Value::Integer(n)`
@@ -138,8 +138,8 @@ A function call has three dispatch paths, tried in order:
 When the function name is a qualified name like `cap:within_tolerance` and resolves to a `Decidable` `QueryClass`, the call evaluates to a `Verdict` value (D14 §7.1) — not a Boolean. To use the result as a Boolean, apply a postfix Verdict predicate:
 
 ```eigenql
-WHERE docking:within_tolerance(?delta, 2.0) HOLDS       -- Boolean true iff Holds
-WHERE NOT docking:within_tolerance(?delta, 2.0) HOLDS   -- "Fails or Undecidable"
+WHERE docking:within_tolerance(?delta, 2.0) HOLDS       // Boolean true iff Holds
+WHERE NOT docking:within_tolerance(?delta, 2.0) HOLDS   // "Fails or Undecidable"
 RETURN [] {
     is_valid: docking:within_tolerance(?delta, 2.0) HOLDS
 }
@@ -194,7 +194,7 @@ Expression::Aggregate { op: AggregateOp, arg: Box<Expression> }
 - **Yes**: in `RETURN` expressions, provided `GROUP BY` covers all non-aggregate return items (or the entire query is a single-group aggregation).
 - **No**: in `WHERE` (rejected at type-check with `aggregate_in_where`).
 
-Implementation: [`eval_aggregate`](../../../kernel/src/query/evaluate.rs) runs after `apply_group_by` partitions bindings. For each group, the aggregate expression is evaluated across all bindings in the group to produce a single value. The value is stored under a synthetic key (`__agg_<Op>`) in a representative binding and looked up by [`shape_result`](../../../kernel/src/query/evaluate.rs) when constructing the output row.
+Implementation: [`eval_aggregate`](../../../kernel/src/query/evaluate/expression.rs) runs after `apply_group_by` partitions bindings. For each group, the aggregate expression is evaluated across all bindings in the group to produce a single value. The value is stored under a synthetic key (`__agg_<Op>`) in a representative binding and looked up by [`shape_result`](../../../kernel/src/query/evaluate/mod.rs) when constructing the output row.
 
 Attempting to evaluate an `Aggregate` expression outside a `GROUP BY` context produces `"aggregate function outside GROUP BY context"`.
 
@@ -216,7 +216,7 @@ RETURN [] {
 
 1. Resolve `?dog` to an IRI.
 2. Look up the resource in the layer.
-3. Find the property matching `owner` by short name (same lookup as pattern matching — [`find_property_by_shortname`](../../../kernel/src/query/evaluate.rs)).
+3. Find the property matching `owner` by short name (same lookup as pattern matching — [`find_property_by_shortname`](../../../kernel/src/query/evaluate/pattern.rs)).
 4. The value must be a resource reference (IRI string). Repeat step 2 with the new IRI.
 5. After the final segment, return the raw value — may be a literal or another IRI string.
 

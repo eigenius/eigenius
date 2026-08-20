@@ -37,10 +37,16 @@ pub enum TokenKind {
     /// shadowed by user-defined identifiers.
     For,
     /// D43 §3.1 — `text_index <iri> { target_property = ...; text_analyzer = "..."; }`.
-    /// Sugar over a `core:TextIndex` Resource declaration.
+    /// Intended as sugar over a `core:TextIndex` Resource declaration;
+    /// that lowering is not implemented. The form lexes and parses,
+    /// and `compile_declaration` then returns "text_index lowering not
+    /// yet implemented (D43 M2)" — write the `core:TextIndex` resource
+    /// declaration directly instead.
     TextIndex,
     /// D43 §3.1 — `vector_index <iri> { target_property = ...; vec_model = ...; ... }`.
-    /// Sugar over a `core:VectorIndex` Resource declaration.
+    /// Intended as sugar over a `core:VectorIndex` Resource
+    /// declaration; that lowering is not implemented, exactly as for
+    /// [`TokenKind::TextIndex`].
     VectorIndex,
 
     // Expression keywords
@@ -497,8 +503,10 @@ impl<'a> Lexer<'a> {
             "merge_comorphism" => TokenKind::MergeComorphism,
             "for" => TokenKind::For,
             // D43 §3.1 — index Resource declarations as top-level keywords.
-            // Sugar over `resource <iri> : core:TextIndex { ... }` /
-            // `resource <iri> : core:VectorIndex { ... }`.
+            // Intended as sugar over `resource <iri> : core:TextIndex { ... }` /
+            // `resource <iri> : core:VectorIndex { ... }`, but the lowering is
+            // unimplemented: both lex and parse, and `compile_declaration`
+            // then returns "lowering not yet implemented (D43 M2)".
             "text_index" => TokenKind::TextIndex,
             "vector_index" => TokenKind::VectorIndex,
             // Expression keywords

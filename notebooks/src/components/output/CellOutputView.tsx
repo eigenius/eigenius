@@ -18,6 +18,7 @@ import {
   AccordionItem,
   AccordionPanel,
   Body1,
+  Button,
   Caption1,
   makeStyles,
   MessageBar,
@@ -25,6 +26,8 @@ import {
   MessageBarTitle,
   tokens,
 } from "@fluentui/react-components";
+import { useState } from "react";
+import { useEigen } from "../../runtime/EigenProvider";
 import type { CellOutput } from "../../runtime/notebookStore";
 import { CommitStatusBadge } from "./CommitStatusBadge";
 import { LayerStackPanel } from "./LayerStackPanel";
@@ -196,6 +199,9 @@ function renderBody(
         />
       );
 
+    case "formalize":
+      return <FormalizeOutputView output={output} styles={styles} />;
+
     case "error":
       return (
         <MessageBar intent="error">
@@ -212,4 +218,91 @@ function renderBody(
         </MessageBar>
       );
   }
+}
+
+/**
+ * Formalization output (D71): the counts, then the artifact, then the one action
+ * the run deliberately did NOT take.
+ *
+ * The artifact is not committed by a run — generation stays decoupled from
+ * commitment so a person reads it first (§4). This button is that read-then-land
+ * step made one click instead of a copy-paste, and it loads WHAT IS ON SCREEN,
+ * so it cannot go stale the way a generated ESL cell would. To have `Run all`
+ * reproduce the landing too, turn on the cell's "Land the artifact on run".
+ */
+function FormalizeOutputView(
+  { output, styles }: {
+    output: Extract<CellOutput, { kind: "formalize" }>;
+    styles: Record<string, string>;
+  },
+) {
+  const eigen = useEigen();
+  const [landing, setLanding] = useState(false);
+  const [landed, setLanded] = useState<string | null>(
+    output.landed ? `landed as layer ${output.landed.layerId.slice(0, 12)}` : null,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setLanding(true);
+    setError(null);
+    try {
+      const resp = await eigen.load(output.artifact, {
+        contentType: "application/x-esl",
+        autoCommit: true,
+      });
+      setLanded(`landed as layer ${resp.layerId.slice(0, 12)}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLanding(false);
+    }
+  };
+
+  return (
+    <div data-testid="formalize-output">
+      <MessageBar intent={output.cut > 0 ? "warning" : "success"}>
+        <MessageBarBody>
+          <MessageBarTitle>
+            {output.encoded} claim{output.encoded === 1 ? "" : "s"}
+            {output.cut > 0 ? `, ${output.cut} unit(s) not encoded` : ""}
+          </MessageBarTitle>
+          <div>
+            {landed
+              ? landed
+              : "Not committed — read it, then Load to land it."}{" "}
+            Working branch <code>{output.docBranch}</code>
+            {output.drawsCommitted > 0
+              ? `, ${output.drawsCommitted} new draw(s) recorded`
+              : ", draws replayed"}.
+          </div>
+          <div>
+            <code data-testid="formalize-structure">{output.structureIri}</code>
+          </div>
+          {!landed && (
+            <Button
+              appearance="primary"
+              size="small"
+              disabled={landing}
+              data-testid="formalize-load"
+              onClick={load}
+            >
+              {landing ? "Loading…" : "Load this artifact"}
+            </Button>
+          )}
+        </MessageBarBody>
+      </MessageBar>
+      {error && (
+        <MessageBar intent="error">
+          <MessageBarBody>
+            <MessageBarTitle>Load failed</MessageBarTitle>
+            <pre className={styles.errorPre}>{error}</pre>
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      <pre className={styles.errorPre} data-testid="formalize-artifact">
+        {output.artifact}
+      </pre>
+    </div>
+  );
 }

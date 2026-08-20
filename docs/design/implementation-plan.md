@@ -157,7 +157,7 @@ The following decisions have been made and documented in **design doc D1** (`doc
 - EigenQL type checker: variable type inference from class constraints, expression type checking, aggregate/GROUP BY validation, stratification checking for negated DEFINE rules. Queries that fail type checking are rejected before evaluation.
 - EigenQL evaluator:
   - Single-pass evaluation for non-recursive queries (conjunctive pattern matching against the layer chain, variable binding, WHERE filtering, aggregation, result shaping, result modifiers)
-  - Bottom-up seminaive fixpoint evaluation for recursive DEFINE rules
+  - Bottom-up fixpoint evaluation for recursive DEFINE rules (naive iteration within a stratum)
   - Stratified evaluation ordering for negated patterns
 - Built-in functions: DATE, TIMESTAMP, REGEX, LENGTH, CONTAINS, CONCAT
 - Aggregate functions: COUNT, SUM, AVG, MIN, MAX
@@ -173,7 +173,7 @@ The following decisions have been made and documented in **design doc D2** (`doc
 - **Name resolution:** USING imports enable shortname references; full IRI as quoted string always available without USING. Property shortnames resolve against the matched class's property set.
 - **Absence testing:** `NOT EXISTS(?var)` instead of `undefined` literal. Eigon-JSON has no null; absence is tested explicitly.
 - **Dot-path navigation:** Shortname-only sugar over multi-pattern joins. Full IRI paths use decomposed multi-pattern queries.
-- **Recursion:** DEFINE with self-reference, seminaive fixpoint evaluation. Multiple DEFINEs with the same name provide union semantics.
+- **Recursion:** DEFINE with self-reference, fixpoint evaluation — naive iteration within a stratum, strata run in dependency order. Multiple DEFINEs with the same name provide union semantics.
 - **Negation:** Negated patterns (`NOT ClassName(...)`) in MATCH, with stratification checking to prevent negation cycles.
 - **Aggregation:** COUNT, SUM, AVG, MIN, MAX with GROUP BY. Non-aggregated RETURN expressions must appear in GROUP BY.
 - **Result modifiers:** DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET.
@@ -811,7 +811,7 @@ D14 sequences eight milestones M1–M8 covering the redesign. All eight have lan
 
 **Status:** Complete.
 
-- `kernel/src/institution/runtime.rs` — `Institution` trait with three methods: `extract_typed(procedure, source, ctx) → Val`, `reify(procedure, val, ctx) → Resource`, `query(procedure, input, ctx) → Resource`. `InstitutionRuntime` keys `Box<dyn Institution>` by institution IRI.
+- `kernel/src/institution/runtime.rs` — `Institution` trait with four methods: `institution_iri() → &Iri`, `extract_typed(procedure, source, ctx) → Val`, `reify(procedure, val, ctx) → Resource`, and `query(procedure, input, ctx) → QueryOutcome` (the only one with a default impl). `InstitutionRuntime` keys `Box<dyn Institution>` by institution IRI.
 - Comorphism well-formedness validation (validation Rule 15): every Comorphism resource's `export_format`, `transformation`, and `import_format` references must resolve in the chain. Surfaces as a structural validation error.
 - Dead `kernel/src/institution/comorphism.rs` deleted; the Comorphism shape now lives entirely as ontology data + the dispatch path in `nbe/eval.rs`.
 
@@ -2498,7 +2498,7 @@ Commands:
 
 The following capabilities are described in the architecture but are deliberately excluded from the initial six-phase plan. They become relevant once the platform is stable and has real domain ontology usage.
 
-**EigenQL recursive Datalog extension (§5.6).** ✓ Implemented in Phase 1. DEFINE rules with union semantics, seminaive fixpoint evaluation, and stratified negation.
+**EigenQL recursive Datalog extension (§5.6).** ✓ Implemented in Phase 1. DEFINE rules with union semantics, naive fixpoint evaluation, and stratified negation.
 
 **Constructive type theories as capabilities (§9.7).** Registering Lean 4, Coq/Rocq, or Agda proof kernels as capabilities — enabling the system to dispatch proof obligations to external theorem provers. This requires the WASM sandbox (Phase 5) plus a well-defined proof term interchange format.
 

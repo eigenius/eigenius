@@ -12,31 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `ingest` — the document → graded-claims path end to end (D63).
+//! `ingest` — the document → graded-claims path end to end (D63/D67).
 //!
-//! The "layer up": [`InProcessIngestion`] composes the DCG pipeline with the [`DeclaredClaimGrader`] and
-//! proves the full algorithm in one call — prose → parse → grade → committed, `Holds`-validated claim.
-//! This is the first-class form of what was an inline test-code harness.
+//! The "layer up": [`InProcessIngestion`] composes the DCG pipeline with the
+//! [`DerivedClaimGrader`] (D67 §1 — parsed sentences land Derived) and proves the full algorithm
+//! in one call — prose → parse → grade → committed claim whose `ProgramTrace` mints the
+//! `IsDerivedAs` witness. This is the first-class form of what was an inline test-code harness.
 
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
-    pretty_term, Identity, NoAbbreviationProposer, ProposeCtx, Proposer, SentenceOutcome,
+    pretty_term, Identity, NoAbbreviationProposer, Proposal, ProposeCtx, Proposer, SentenceOutcome,
 };
 use eigenius_kernel::esl;
-use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-use eigenius_kernel::ontology::Iri;
-use eigenius_reasoning::{
-    ClaimVerdict, DeclaredClaimGrader, DocumentIngestion, Grade, InProcessIngestion,
-    IngestedSentence,
-};
+use eigenius_kernel::layer::{layer_admits_witness, Layer, LayerBuilder, LayerStorage};
+use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+use eigenius_reasoning::{DerivedClaimGrader, DocumentIngestion, Grade, InProcessIngestion};
 
 /// A no-op anaphora proposer — the demo document has no pronouns, so the resolver never consults it.
 struct NoProposer;
 impl Proposer for NoProposer {
-    fn propose(&self, _ctx: &ProposeCtx) -> Vec<Iri> {
-        Vec::new()
+    fn propose(&self, _ctx: &ProposeCtx) -> Proposal {
+        Proposal::default()
     }
 }
 
@@ -65,10 +63,14 @@ fn outcome_kind(o: &SentenceOutcome) -> &'static str {
 }
 
 #[test]
-fn ingest_produces_a_validated_graded_claim() {
-    // Prose → parse → grade → committed, Holds-validated claim, in one `ingest()`.
+fn ingest_produces_a_derived_witnessed_claim() {
+    // Prose → parse → grade → committed DERIVED cluster (D67 §1): the trust story is the
+    // ProgramTrace minting `IsDerivedAs(claim, P)` on the chain — no ReasoningSentence, no gate
+    // verdict. This replaces the pre-D67 Declared landing for parsed sentences
+    // (`DeclaredClaimGrader` remains for curator-pinned rules; its cluster is covered by
+    // `tests/grade.rs`).
     let base = demo_base();
-    let grader = DeclaredClaimGrader;
+    let grader = DerivedClaimGrader;
     let ingestion = InProcessIngestion::new(
         base,
         &Identity,
@@ -78,37 +80,56 @@ fn ingest_produces_a_validated_graded_claim() {
     );
     let doc = ingestion.ingest("demo", "instability affects HeLa.");
 
-    let holds: Vec<&IngestedSentence> = doc.encoded_holds().collect();
-    if holds.is_empty() {
+    let Some(s) = doc
+        .sentences
+        .iter()
+        .find(|s| matches!(s.outcome, SentenceOutcome::Encoded(_)))
+    else {
         let trace: Vec<String> = doc
             .sentences
             .iter()
             .map(|s| format!("{}={:?}", outcome_kind(&s.outcome), s.verdict))
             .collect();
-        panic!("no sentence closed and validated Holds; per-sentence: {trace:?}");
-    }
-
-    let s = holds[0];
-    // The claim commits at the honest floor — Declared.
+        panic!("no sentence closed; per-sentence: {trace:?}");
+    };
+    let claim = s.claim.as_ref().expect("an Encoded sentence grades");
     assert!(
-        matches!(s.claim.as_ref().map(|c| c.grade), Some(Grade::Declared)),
-        "the graded claim commits at Declared"
+        matches!(claim.grade, Grade::Derived),
+        "parsed sentences land DERIVED (D67 §1)"
     );
-    // …and it is a 3-resource cluster (declaring + trace + sentence).
     assert_eq!(
-        s.claim.as_ref().expect("holds ⇒ claim").resources.len(),
-        3,
-        "the cluster is declaring + trace + sentence"
+        claim.resources.len(),
+        2,
+        "the cluster is EncodedClaim + ProgramTrace"
     );
-    // Witness: the graded claim carries the *real parsed proposition* — the closed kind-predication,
-    // not an empty or placeholder term.
-    if let SentenceOutcome::Encoded(item) = &s.outcome {
-        let pretty = pretty_term(item.sem());
-        assert!(
-            pretty.contains("kind_of"),
-            "the graded proposition is the parsed kind-predication sem: {pretty}"
-        );
-    }
-    // Verdict is specifically Holds (redundant with encoded_holds, but explicit).
-    assert!(matches!(s.verdict, Some(ClaimVerdict::Holds)));
+    assert!(
+        claim.gate_sentence.is_none(),
+        "no ReasoningSentence — the trace is the warrant, nothing for the D39 gate"
+    );
+    assert!(
+        s.verdict.is_none(),
+        "a Derived cluster gets no gate verdict"
+    );
+
+    let SentenceOutcome::Encoded(item) = &s.outcome else {
+        unreachable!()
+    };
+    // The graded claim carries the *real parsed proposition* — the closed kind-predication.
+    let pretty = pretty_term(item.sem());
+    assert!(
+        pretty.contains("kind_of"),
+        "the graded proposition is the parsed kind-predication sem: {pretty}"
+    );
+    // The trace MINTS the witness: `IsDerivedAs(claim_iri, P)` is admitted on the committed
+    // chain — this is what downstream `derived(claim_iri, P, _)` certificates resolve against.
+    let key = WitnessKey::from_exp(
+        WitnessCategory::Derived,
+        claim.claim_iri.clone(),
+        item.sem(),
+    )
+    .expect("the proposition hashes");
+    assert!(
+        layer_admits_witness(&doc.layer, &key),
+        "the ProgramTrace mints IsDerivedAs(claim, P) into the chain witness index"
+    );
 }

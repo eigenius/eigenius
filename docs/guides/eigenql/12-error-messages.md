@@ -172,7 +172,7 @@ A `DEFINE` rule depends on its own negation, directly or transitively. See [chap
 
 ## 12.5. Evaluation errors
 
-Thrown during [`evaluate`](../../../kernel/src/query/evaluate.rs). These are the runtime errors that survive type-check — structurally valid queries that fail at data access.
+Thrown during [`evaluate`](../../../kernel/src/query/evaluate/mod.rs). These are the runtime errors that survive type-check — structurally valid queries that fail at data access.
 
 **Unbound variable** (shouldn't happen if type-check passed)
 

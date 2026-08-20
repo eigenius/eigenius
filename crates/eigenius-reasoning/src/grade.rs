@@ -52,6 +52,11 @@ const JUSTIFIED_BY: &str = "urn:eigenius:reasoning:JustifiedBy";
 const JUSTIFICATION_TERM: &str = "urn:eigenius:reasoning:JustificationTerm";
 const REFLECTION_DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 const REFLECTION_TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
+const REFLECTION_SOURCE: &str = "urn:eigenius:reflection:source";
+/// `urn:eigenius:encoding:EncodedClaim` — the Derived cluster's claim class (D67 §1).
+const ENCODED_CLAIM_CLASS: &str = "urn:eigenius:encoding:EncodedClaim";
+/// `urn:eigenius:reflection:ProgramTrace` — the trace that mints `IsDerivedAs` (D56).
+const PROGRAM_TRACE_CLASS: &str = wk::PROGRAM_TRACE;
 
 /// The epistemic grade of a claim. A **structural projection** of the `JustificationTerm` constructor
 /// (D39) — not a stored field. `Declared` is the honest floor a parsed proposition enters at; it climbs
@@ -66,22 +71,27 @@ pub enum Grade {
 
 /// What warrants a claim's assertion — the axis along which the grade climbs.
 ///
-/// The initial [`DeclaredClaimGrader`] supports only the floor. `#[non_exhaustive]` marks the growth
-/// axis: the literature-warrant climb (reshape §4 row 2 — a `reference:Citation`, itself a
-/// `DeclaredResource`, keeps the grade at Declared-but-attested) and the `Observed`/`Derived`/`Verified`
-/// climbs are the next increments.
+/// `#[non_exhaustive]` marks the growth axis: the literature-warrant climb (reshape §4 row 2 — a
+/// `reference:Citation`, itself a `DeclaredResource`, keeps the grade at Declared-but-attested)
+/// and the `Observed`/`Verified` climbs are the next increments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Warrant {
     /// The honest floor (reshape §4 row 1): the source document asserts the proposition.
     Declared,
+    /// A PROGRAM derived the claim from hashed input (the parser over a source span) — the
+    /// `reflection:ProgramTrace` warrant (D67 §1; the Derived-landing decision 2026-08-10).
+    Derived,
 }
 
 impl Warrant {
-    /// The grade this warrant projects to.
-    fn grade(self) -> Grade {
+    /// The grade this warrant projects to. Public because a caller that builds a cluster through
+    /// [`DerivedClaimGrader::cluster`] directly (to control the IRIs) still has to state the
+    /// grade, and it must be THIS projection, not a second hand-written mapping.
+    pub fn grade(self) -> Grade {
         match self {
             Warrant::Declared => Grade::Declared,
+            Warrant::Derived => Grade::Derived,
         }
     }
 }
@@ -100,15 +110,30 @@ pub struct ClaimSource<'a> {
     /// does (found 2026-08-03).
     pub declared_by: &'a str,
     pub timestamp: &'a str,
+    /// The program-provenance line the Derived cluster's `ProgramTrace` records as
+    /// `reflection:source` — *which program derived the claim from which bytes* (e.g.
+    /// "DCG parse (D63) of <path> chars a..b (source sha256 …)"). Ignored by the Declared
+    /// grader (`declared_by` answers a different question: *who* asserts, not *what computed*).
+    pub provenance: &'a str,
+    /// The discourse-KIND classes the claim carries beside its record class (D68 §2 — the
+    /// two-axis claim: `is_a = [enc:EncodedClaim, <kinds…>]`, what makes it referable by a
+    /// demonstrative's restrictor). Consumed by the Derived grader; ignored by Declared.
+    pub kind_classes: &'a [Iri],
 }
 
-/// A graded claim, ready to commit: the 3-resource cluster (see the module doc), the IRI of the
-/// `ReasoningSentence` within it, and the grade it commits at.
+/// A graded claim, ready to commit: the cluster's resources, the claim's chain identity, the
+/// gate-validatable sentence when one exists, and the grade it commits at.
 pub struct GradedClaim {
-    /// The declaring resource, its declaration trace, and the reasoning sentence — commit all three.
+    /// The cluster — commit all of them together.
     pub resources: Vec<Resource>,
-    /// The IRI of the `ReasoningSentence` in [`Self::resources`] (the one the D39 gate validates).
-    pub sentence_iri: Iri,
+    /// The resource carrying the proposition — the claim's chain identity, what downstream
+    /// certificates and discourse candidates cite: the DECLARING resource (Declared cluster),
+    /// the `enc:EncodedClaim` (Derived cluster), the `ReasoningSentence` (inference clusters).
+    pub claim_iri: Iri,
+    /// The `ReasoningSentence` the D39 gate validates at commit, when the cluster carries one.
+    /// `None` for the Derived cluster — its trust story is the `ProgramTrace` minting
+    /// `IsDerivedAs`, with no certificate to check.
+    pub gate_sentence: Option<Iri>,
     /// The grade the claim commits at (projected from the [`Warrant`]).
     pub grade: Grade,
 }
@@ -232,7 +257,88 @@ impl ClaimGrader for DeclaredClaimGrader {
 
         Ok(GradedClaim {
             resources: vec![declaring, trace, sentence],
-            sentence_iri,
+            claim_iri: declaring_iri,
+            gate_sentence: Some(sentence_iri),
+            grade: source.warrant.grade(),
+        })
+    }
+}
+
+/// The **Derived** grader (D67 §1 — the settled landing shape for parsed sentences): the
+/// 2-resource cluster
+///
+/// 1. the **`enc:EncodedClaim`** — carries `reflection:canonical_proposition = P`;
+/// 2. its **`reflection:ProgramTrace`** — `reflection:resource → claim` plus the program
+///    provenance ([`ClaimSource::provenance`]) and timestamp — which mints
+///    `IsDerivedAs(claim_iri, P)` into the witness index at commit.
+///
+/// Downstream certificates cite `derived(claim_iri, P, _)`. There is no `ReasoningSentence` and
+/// no certificate: the trust story is the trace (a program produced the claim from hashed
+/// input), so [`GradedClaim::gate_sentence`] is `None` and the D39 gate has nothing to check at
+/// commit — a certificate citing the claim breaks the moment the prose changes and the parser
+/// derives a different `P`, which is the point.
+pub struct DerivedClaimGrader;
+
+impl DerivedClaimGrader {
+    /// The Derived cluster construction — the ONE source of its shape, shared by the trait path
+    /// (stem-derived IRIs) and the artifact emitter (`eigenius-encoding`), which keeps its
+    /// historical `{ns}:claim_{n}` / `{ns}:trace_{n}` naming for byte-stable regeneration of
+    /// committed artifacts. The emitter adds its document-structural fields (`enc:from_unit`,
+    /// `core:description`) to the returned claim; the epistemics live here.
+    pub fn cluster(
+        claim_iri: &str,
+        trace_iri: &str,
+        proposition: &Exp,
+        provenance: &str,
+        timestamp: &str,
+        kind_classes: &[Iri],
+    ) -> Result<(Resource, Resource), GradeError> {
+        let prop_value =
+            encode_type(proposition).map_err(|e| GradeError::Encode(format!("{e:?}")))?;
+        let iri = |s: &str| Iri::parse(s).map_err(|e| GradeError::Iri(format!("{s}: {e:?}")));
+
+        let claim_id = iri(claim_iri)?;
+        let mut claim = Resource::new(claim_id.clone());
+        let mut classes = vec![Value::ResourceRef(iri(ENCODED_CLAIM_CLASS)?)];
+        classes.extend(kind_classes.iter().map(|k| Value::ResourceRef(k.clone())));
+        claim.set(iri(wk::IS_A)?, Value::Array(classes));
+        claim.set(iri(wk::CANONICAL_PROPOSITION)?, prop_value);
+
+        let mut trace = Resource::new(iri(trace_iri)?);
+        trace.set(
+            iri(wk::IS_A)?,
+            Value::Array(vec![Value::ResourceRef(iri(PROGRAM_TRACE_CLASS)?)]),
+        );
+        trace.set(iri(wk::REFLECTION_RESOURCE)?, Value::ResourceRef(claim_id));
+        trace.set(
+            iri(REFLECTION_SOURCE)?,
+            Value::String(provenance.to_string()),
+        );
+        trace.set(
+            iri(REFLECTION_TIMESTAMP)?,
+            Value::String(timestamp.to_string()),
+        );
+        Ok((claim, trace))
+    }
+}
+
+impl ClaimGrader for DerivedClaimGrader {
+    fn grade(&self, proposition: &Exp, source: &ClaimSource) -> Result<GradedClaim, GradeError> {
+        let claim_iri = format!("{}:claim", source.stem);
+        let trace_iri = format!("{}:trace", source.stem);
+        let (claim, trace) = Self::cluster(
+            &claim_iri,
+            &trace_iri,
+            proposition,
+            source.provenance,
+            source.timestamp,
+            source.kind_classes,
+        )?;
+        let claim_iri = claim.id().expect("cluster sets the claim id").clone();
+        Ok(GradedClaim {
+            resources: vec![claim, trace],
+            claim_iri,
+            gate_sentence: None,
             grade: source.warrant.grade(),
         })
     }
@@ -370,7 +476,8 @@ impl ProseModusPonens<'_> {
         sentence.set(iri(iris::PROP_CERTIFICATE)?, Value::Json(certificate));
         Ok(GradedClaim {
             resources: vec![sentence],
-            sentence_iri,
+            claim_iri: sentence_iri.clone(),
+            gate_sentence: Some(sentence_iri),
             // BOTH premises are parser outputs, so unlike a bridged claim nothing here is Declared.
             grade: Grade::Derived,
         })
@@ -453,7 +560,8 @@ impl ChainRuleApplication<'_> {
         s.set(iri(iris::PROP_CERTIFICATE)?, Value::Json(certificate));
         Ok(GradedClaim {
             resources: vec![s],
-            sentence_iri,
+            claim_iri: sentence_iri.clone(),
+            gate_sentence: Some(sentence_iri),
             // The rule is Declared (literature), so the conclusion is no stronger.
             grade: Grade::Declared,
         })
