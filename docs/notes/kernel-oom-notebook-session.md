@@ -158,8 +158,9 @@ triples (nothing at all for `enc:prose`, `enc:span_start`, `enc:confidence`) and
 `(predicate, object)`, not `predicate` alone. For the IRI-valued half a `scan_predicate(p)` beside
 `scan_predicate_object(p, o)` would suffice — RocksDB keys are already `(p, o, s)`-ordered, so it
 is a prefix scan and needs no new persisted structure. Not built: after the gate, this path runs
-only on a deliberate ontology edit. The trigger to build it is a workflow change, not a code
-condition — if editing property definitions against the full lexicon chain becomes something done
+only on a deliberate ontology edit. Tracked as
+[#117](https://github.com/eigenius/eigenius/issues/117). The trigger to build it is a workflow
+change, not a code condition — if editing property definitions against the full lexicon chain becomes something done
 interactively rather than at reseed time, 4 minutes per edit stops being acceptable.
 
 The uncapped `LayerStackView` resource fetch noted above is still uncapped. It did not cause this,

@@ -321,11 +321,12 @@ done.
   - `LayerTopology`'s `include_resources: true` emits a node per resource **with no cap**, so
     drilling into a lexicon layer is unbounded. Found on the way, did not cause the kill, still
     uncapped. Wants a bounded page with an explicit `truncated` marker — never a silent cap.
-  - The carrier scan is still O(chain) in time for a *genuinely changed* property definition. An
-    indexed answer needs a value-independent **predicate → subject** index; the triple index holds
-    only IRI-valued triples and answers `(predicate, object)`. For the IRI-valued half a
-    `scan_predicate(p)` is a prefix scan on the existing `(p, o, s)` key order and needs no new
-    persisted structure.
+  - The carrier scan is still O(chain) in time for a *genuinely changed* property definition —
+    MEASURED 3m55s for one changed property on the aligned snapshot, kernel responsive throughout.
+    Filed as [#117](https://github.com/eigenius/eigenius/issues/117): a value-independent
+    **predicate → subject** index. The IRI-valued half needs no new persisted structure
+    (`scan_predicate(p)` is a prefix scan on the existing `(p, o, s)` key order); only the
+    literal-valued half does.
 
 ## Parked tracks (real, but off this stack)
 Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
