@@ -9,8 +9,9 @@ half, which satisfies the D14 criteria that the generation half does not.*
 
 *Depends on: [D14](d14-institution-realisation.md) (institutions), [D21](d21-task-traces-and-checkpointing.md)
 (tasks), [D62](d62-encoding-engine-prose-to-trees.md) (the pipeline's stages), D63/D64/D66/D67/D68/D70
-(the stages as built). This is the Stage-4 deliverable of
-[parser-pipeline-plan.md](../notes/parser-pipeline-plan.md).*
+(the stages as built). This is the fourth and last stage of the parser-pipeline build map
+(approved `2026-08-11`, retired `2026-08-19` — Stages 1–3 are built, their design notes stand, and
+their as-built record is work-stack entry 0). D71 is the surviving spine document for this work.*
 
 ---
 
@@ -481,7 +482,10 @@ reading belongs to D61. Also §10 item 6 ("S8 institution wrapper"), §11.3's "i
 `BOOTSTRAP_CHAIN`" note (the declarations are being deleted, not bootstrapped), and §11.5's
 "`FormalizeDocument` pipeline institution" phrasing.
 
-**Rewrite** [parser-pipeline-plan.md](../notes/parser-pipeline-plan.md) Stage 4 to this shape.
+**Done `2026-08-19`:** `docs/notes/parser-pipeline-plan.md` deleted rather than rewritten — Stages
+1–3 are built and recorded (per-stage notes + work-stack entry 0), and this note is Stage 4, so the
+map had one live section and it was the wrong one. Its inbound references were re-pointed at the
+per-stage notes and here.
 
 **Add**: `ReasoningStructure` + `reference:Reference` emission; `enc:ProposalDraw` + its seam
 enumeration (§9.2, `encoding.esl`, no reseed) and the draws-from-chain reader beside the file arms;
@@ -536,5 +540,8 @@ design question — prefix replay covers it — leaving a measurement, listed be
 - [D21](d21-task-traces-and-checkpointing.md) (task records, suspension, cancellation)
 - [D62](d62-encoding-engine-prose-to-trees.md) §8 (superseded), §9 (the gap stream as a product)
 - [D64](d64-llm-anaphora-resolution.md) (S3 as a pipeline step, not an institution)
-- [parser-pipeline-plan.md](../notes/parser-pipeline-plan.md) (Stages 1–3 as built)
+- Stages 1–3 as built: [d63-reading-selection.md](../notes/d63-reading-selection.md),
+  [d64-demonstratives-as-holes.md](../notes/d64-demonstratives-as-holes.md),
+  [d67-pipeline-unification.md](../notes/d67-pipeline-unification.md),
+  [d68-claim-kinds.md](../notes/d68-claim-kinds.md), and work-stack entry 0
 - [d63-next-steps.md](../notes/d63-next-steps.md) Phase 2 (the seam test)

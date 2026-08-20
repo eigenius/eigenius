@@ -1,7 +1,8 @@
 # D67 — Stage 3: pipeline unification + Derived landing (parser-pipeline plan §3.1–3.5)
 
-**Status: design note for review — precedes any code.** Parent map:
-[parser-pipeline-plan.md](parser-pipeline-plan.md) Stage 3. Settled inputs: parsed sentences land
+**Status: design note for review — precedes any code.** Stage 3 of the four-stage build map
+(retired `2026-08-19`; the as-built record is work-stack entry 0, and Stage 4 became
+[D71](../design/d71-document-formalization-service.md)). Settled inputs: parsed sentences land
 **Derived** (user decision 2026-08-10; the Declared cluster is reserved for curator-pinned rules);
 selection lives inside the discourse loop (Stage 1); anaphora resolves inside it (Stage 2, exit
 gate met 2026-08-11 — open 20→15 on the page, residuals = claims / plural sets / quantifier

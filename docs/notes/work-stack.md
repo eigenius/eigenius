@@ -9,11 +9,13 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 ACTIVE (D71 written, no code)**
-The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
-→ unified landing (Derived, artifact-first) → the formalization service** (Stage 4 was written as
-"the FormalizeDocument institution"; D71 reassigned it — see the Stage-4 record at the end of this
-entry). It is the successor
+### 0. ▲ ACTIVE — [d71-document-formalization-service.md](../design/d71-document-formalization-service.md) — **the last stage of the parser-pipeline map; written, no code**
+The four-stage build map (`2026-08-11`) — **reading selection → anaphora completion (D64) → unified
+landing (Derived, artifact-first) → the formalization service** — is retired as a file
+(`parser-pipeline-plan.md`, deleted `2026-08-19`): Stages 1–3 are built, each has its own design
+note, and this entry is their as-built record; Stage 4 is D71, which is now the spine document.
+Stage 4 was written as "the FormalizeDocument institution"; D71 reassigned it — see the Stage-4
+record at the end of this entry. The map was the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
 *selection* stage (LLM `ReadingRanker` in document context, recorded + gated against the 62-pin
 gold set) rather than further multiplicity reduction; Stages 3–4 subsume (3)'s Phase-1-harness and

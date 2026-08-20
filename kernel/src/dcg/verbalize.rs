@@ -38,7 +38,7 @@
 //! following none of these the verbaliser still runs and degrades honestly: names fall back to
 //! the IRI local name, structure to the ⟦…⟧ bracket. The structural replacement — importers emit
 //! a first-class preferred-label property, read generically here — is folded into the
-//! candidate-label work (`docs/notes/parser-pipeline-plan.md` Stage 2.3).
+//! candidate-label work (`docs/notes/d64-demonstratives-as-holes.md` §4 slice 4) and is NOT built.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -213,7 +213,7 @@ fn child_exps(e: &Exp) -> Vec<&Exp> {
 /// stripped core of a `deg_C…_rel` wrapper). The `urn:eigenius:umlscui:` reconstruction exists
 /// because derived atoms carry only the sense key, not a link to the concept resource; it goes
 /// away when importers emit the label/link first-class
-/// (`docs/notes/parser-pipeline-plan.md` Stage 2.3).
+/// (`docs/notes/d64-demonstratives-as-holes.md` §4 slice 4 — deferred, not built).
 fn cui_label(cui: &str, layer: &Arc<Layer>) -> Option<String> {
     let iri = Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).ok()?;
     resource_label(&iri, layer)

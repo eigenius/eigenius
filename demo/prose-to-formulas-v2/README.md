@@ -7,8 +7,8 @@
 > record. The in-process D67 §3.5 acceptance test (`crates/eigenius-encoding/tests/acceptance.rs`)
 > now reads THIS demo's artifacts.
 
-Same argument as [v1](../prose-to-formulas/) (retired, README only), produced end to end by the pipeline the
-[parser-pipeline plan](../../docs/notes/parser-pipeline-plan.md) specifies: **glossary → parse →
+Same argument as [v1](../prose-to-formulas/) (retired, README only), produced end to end by the pipeline
+[D71](../../docs/design/d71-document-formalization-service.md) §3 contracts: **glossary → parse →
 sense rank → reading selection → anaphora resolution → claim landing → artifact → commit**. v1
 stops after selection-by-human-pin; this runs the whole thing.
 

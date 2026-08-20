@@ -1,7 +1,9 @@
 # D63 — reading selection (Stage 1 of the parser-pipeline plan)
 
 **Status: design settled 2026-08-11; implementation in progress.**
-Parent map: [parser-pipeline-plan.md](parser-pipeline-plan.md). Baseline this stage moves:
+Stage 1 of the four-stage build map (approved `2026-08-11`, retired `2026-08-19` once its Stages
+1–3 were built and Stage 4 became [D71](../design/d71-document-formalization-service.md); the
+as-built record is work-stack entry 0). Baseline this stage moves:
 46/62 corpus units Ambiguous, 14 Encoded (`experiments/parsing/baseline.json`, 2026-08-02).
 
 ## 0. Problem

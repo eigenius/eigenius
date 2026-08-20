@@ -1,7 +1,8 @@
 # D64 — demonstratives as referent holes (Stage 2 of the parser-pipeline plan, §2.1)
 
-**Status: design note for review — precedes any code.** Parent map:
-[parser-pipeline-plan.md](parser-pipeline-plan.md) Stage 2; the resolver machinery this feeds is
+**Status: design note for review — precedes any code.** Stage 2 of the four-stage build map
+(retired `2026-08-19`; the as-built record is work-stack entry 0, and Stage 4 became
+[D71](../design/d71-document-formalization-service.md)). The resolver machinery this feeds is
 built (`kernel/src/dcg/parse/resolve.rs`, the Π-carrier in `felicity.rs`).
 
 ## 0. Problem

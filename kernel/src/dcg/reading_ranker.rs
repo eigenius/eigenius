@@ -54,6 +54,7 @@ use crate::dcg::verbalize::ConceptNote;
 /// complete, since a half-shown structure would make the sense table lie. Dropping is logged and
 /// stated in the prompt; a silent cap would let the model pick "the best of what it saw" and report it
 /// as the best reading (the D62 no-silent-caps rule).
+#[cfg(feature = "use-llm")]
 const MAX_STRUCTURES_SHOWN: usize = 12;
 
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
@@ -417,6 +418,7 @@ impl ReadingRanker for ReplayReadingRanker {
 ///
 /// Returns `(frame, atoms)`: `frame` is the gloss with each atom replaced by `{}` — the part that is
 /// INVARIANT across readings of one structure — and `atoms` are the `(label, id)` pairs in order.
+#[cfg(any(feature = "use-llm", test))]
 fn split_atoms(gloss: &str) -> (String, Vec<(String, String)>) {
     let mut frame = String::new();
     let mut atoms = Vec::new();
@@ -451,6 +453,7 @@ fn split_atoms(gloss: &str) -> (String, Vec<(String, String)>) {
 /// per reading is what made the prompt 13 KB of near-duplicates (§1). Here the invariant frame is
 /// stated once and only the positions that actually differ are enumerated. Falls back to the flat
 /// listing when the group's glosses do not align (different atom counts ⇒ no positional slots).
+#[cfg(any(feature = "use-llm", test))]
 fn render_structure_group(n: usize, group: &[(usize, &ReadingCandidate)]) -> String {
     let mut out = format!("Structure {n}:\n");
     let parsed: Vec<(String, Vec<(String, String)>)> =
