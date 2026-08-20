@@ -3419,22 +3419,57 @@ fn compute_witness_lambda_iri(resource: &Resource) -> Iri {
     Iri::parse(&format!("urn:eigenius:auto:lambda:{hex}")).expect("synthesised IRI must be valid")
 }
 
-/// Append `DeclaredResource` to `is_a` and set `declared_by` on a
+/// Placeholder `declared_by` for an ESL declaration whose source
+/// names no declarer.
+///
+/// `reflection:declared_by` answers "who declared this resource"
+/// (reflection ontology), and `reflection:DeclaredResource` — which
+/// [`stamp_declared`] puts on every compiled resource — `requires`
+/// it, so the property cannot simply be left off: an unattributed
+/// declaration would fail `MissingRequired` at commit. This value is
+/// the *absence* of an author attribution, not an answer to the
+/// question; it names the channel the declaration arrived through.
+/// A `declared_by` written in the ESL source is the real attribution
+/// and always wins over it.
+const UNATTRIBUTED_DECLARER: &str = "esl-compiler";
+
+/// Append `DeclaredResource` to `is_a` and default `declared_by` on a
 /// compiled resource (D6b epistemic stamping, Phase 10b Step 3).
+///
+/// Both halves are additive, never overwriting:
+/// - `DeclaredResource` is appended only when `is_a` does not already
+///   carry it, so a decompile/recompile round trip is idempotent.
+/// - `declared_by` is set only when the source supplied none. The
+///   author's attribution is the accountability record the Declared
+///   category exists to carry (eigenius#141, eigenius#167); the
+///   compiler has no standing to replace it.
 fn stamp_declared(resource: &mut Resource) {
     let is_a_iri = iri("urn:eigenius:core:is_a");
+    let declared_resource = crate::ontology::well_known::DECLARED_RESOURCE;
     let mut types = match resource.get(&is_a_iri) {
         Some(Value::Array(arr)) => arr.clone(),
+        // A single (non-array) is_a value is still a type assertion:
+        // keep it rather than dropping it on the floor.
+        Some(v @ (Value::String(_) | Value::ResourceRef(_))) => vec![v.clone()],
         _ => Vec::new(),
     };
-    types.push(Value::String(
-        crate::ontology::well_known::DECLARED_RESOURCE.to_string(),
-    ));
+    let already_declared = types.iter().any(|v| match v {
+        Value::String(s) => s == declared_resource,
+        Value::ResourceRef(i) => i.as_str() == declared_resource,
+        _ => false,
+    });
+    if !already_declared {
+        types.push(Value::String(declared_resource.to_string()));
+    }
     resource.set(is_a_iri, Value::Array(types));
-    resource.set(
-        iri(crate::ontology::well_known::DECLARED_BY),
-        Value::String("esl-compiler".to_string()),
-    );
+
+    let declared_by_iri = iri(crate::ontology::well_known::DECLARED_BY);
+    if resource.get(&declared_by_iri).is_none() {
+        resource.set(
+            declared_by_iri,
+            Value::String(UNATTRIBUTED_DECLARER.to_string()),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4381,6 +4416,78 @@ mod tests {
             "ESL codata should have DeclaredResource in is_a"
         );
         assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+    }
+
+    /// eigenius#141 / #167 — a `declared_by` written in the source is
+    /// the resource's accountability record and must survive
+    /// compilation. Mirrors the WRN chain's bridge shape
+    /// (`experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl`).
+    #[test]
+    fn author_declared_by_survives_compilation() {
+        let resources = compile_esl(
+            r#"
+            namespace ref = "urn:eigenius:reflection";
+            namespace wrn = "urn:eigenius:pub:wrn";
+
+            resource wrn:bridge_msi_selective : ref:DeclaredResource {
+                ref:declared_by = "wrn-paper:selective-essentiality-criterion";
+                ref:rationale   = "Independent-platform replication is the warrant.";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        assert_eq!(
+            declared_by(r),
+            Some("wrn-paper:selective-essentiality-criterion".to_string()),
+            "author-supplied declared_by must not be replaced by the compiler"
+        );
+        assert!(has_declared_resource(r));
+    }
+
+    /// The placeholder still applies where the source states nothing.
+    /// (Only the `resource` form has a body that can carry an
+    /// arbitrary property; `class` / `property` / `data` / `program`
+    /// bodies are fixed grammars with no slot for `declared_by`, so
+    /// the placeholder is the only value they can get.)
+    #[test]
+    fn unattributed_resource_gets_placeholder_declarer() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            resource ex:rex : ex:Dog {
+                ex:name = "Rex";
+            }
+        "#,
+        );
+        assert_eq!(
+            declared_by(&resources[0]),
+            Some(UNATTRIBUTED_DECLARER.to_string())
+        );
+    }
+
+    /// eigenius#141 / #167, `is_a` half — stamping is idempotent, so a
+    /// decompile/recompile round trip does not accumulate
+    /// `DeclaredResource` entries.
+    #[test]
+    fn declared_resource_tag_not_duplicated() {
+        let resources = compile_esl(
+            r#"
+            namespace ref = "urn:eigenius:reflection";
+            namespace ex = "urn:eigenius:example";
+
+            resource ex:rex : ref:DeclaredResource {
+                ref:declared_by = "someone";
+            }
+        "#,
+        );
+        let r = &resources[0];
+        let tags = r
+            .is_a()
+            .iter()
+            .filter(|i| i.as_str() == crate::ontology::well_known::DECLARED_RESOURCE)
+            .count();
+        assert_eq!(tags, 1, "DeclaredResource appended twice: {:?}", r.is_a());
     }
 
     // --- `data` declaration compilation (Phase 11b step 8) ---
