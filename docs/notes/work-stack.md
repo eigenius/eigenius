@@ -272,6 +272,15 @@ done.
   becomes the top entry when phase 4 is active. The reranker (`--features use-llm`) is the phase-3
   AMBIG→ENCODED metric.
 
+## On deck (pushed onto the stack when its step becomes active)
+
+- **Kernel OOM during a notebook session** ([kernel-oom-notebook-session.md](kernel-oom-notebook-session.md)).
+  27.8 GB RSS, host OOM killer, one observation `2026-08-20`. Query / formalize / topology-depth /
+  taxonomy-count paths all MEASURED out (2.4-2.6 GiB peaks); cause unknown. Next action is the
+  jemalloc heap profile, same instrument the reseed-OOM note is stuck on. One real unbounded path
+  found on the way and worth capping independently: `LayerTopology`'s `include_resources: true`
+  emits a node per resource with no cap, so drilling into a lexicon layer is unbounded.
+
 ## Parked tracks (real, but off this stack)
 Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
 - **GH#104 — NbE readback panic** (`readback.rs:38`): surface `cell` resolves to UMLS **gene** concepts
