@@ -15,209 +15,28 @@ any detour.
 > largely implemented-or-obsolete, so promoting one by position would be wrong. The live candidates,
 > none of them started:
 >
-> - ~~**The kernel OOM**~~ — FIXED `2026-08-20` (commit `e10c9e6`); no longer a candidate.
 > - **D71 residue** — §14's four open questions (source transport, draw commit granularity, pruning
 >   policy, the prefix-replay measurement) and §11's human-override loop, which the §9 draws-on-branch
 >   decision shrank from a design problem to a measurement.
 > - **D61 faithfulness** — the half that D71 §10 reserved the institution shape for, and the only
 >   thing in the tree that still earns it.
 
-### 0. ✔ [d71-document-formalization-service.md](../design/d71-document-formalization-service.md) — **BUILT `2026-08-20`; all seven slices in, verified end to end in the container**
-The four-stage build map (`2026-08-11`) — **reading selection → anaphora completion (D64) → unified
-landing (Derived, artifact-first) → the formalization service** — is retired as a file
-(`parser-pipeline-plan.md`, deleted `2026-08-19`): Stages 1–3 are built, each has its own design
-note, and this entry is their as-built record; Stage 4 is D71, which is now the spine document.
-Stage 4 was written as "the FormalizeDocument institution"; D71 reassigned it — see the Stage-4
-record at the end of this entry. The map was the successor
-spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
-*selection* stage (LLM `ReadingRanker` in document context, recorded + gated against the 62-pin
-gold set) rather than further multiplicity reduction; Stages 3–4 subsume (3)'s Phase-1-harness and
-Phase-2 items. Settled: Derived landing shape; selection inside the discourse loop; document
-context for both LLM stages. Design note `d63-reading-selection.md` written; slices 1–3 DONE `2026-08-11` (verbaliser promoted
-to the kernel with a generic `resource_label`; `ReadingRanker` seam + record/replay +
-`resolve_document` integration; harness selection pass + `selections.json` + SELECTION summary
-line + `eval-parse-rate.sh` SELECTION-VALIDITY gate). Verified on a fresh consolidated reseed
-(`wordnet-umls-aligned-2026-08-11-consolidated`, the tracked ranks replay 62/0): every baseline
-metric EXACT (gap 0, encoded 14, readings 761, skeletons 144, hits 60/62); pin arm chose 10/46,
-correct 10/10, invalid-selected 0. Slice 4 DONE `2026-08-11`: live `AnthropicReadingRanker`
-(abstain-capable, prompt = document + prior selections + structure-grouped glosses), reference
-draw recorded to `experiments/parsing/selections/2026-08-11-reference.json` (46 decisions incl. 2
-abstentions — abstentions are recorded, the draw-1 lesson), selection replay 46/0. **Metric
-corrected same day to READING-level** (pins = grammar instrument, not selection gold): the draw's
-44 chosen readings adjudicated in `reading-adjudications.tsv` → gated baseline **reading-correct
-28/44 (64%), invalid-selected 0** in `selection-baseline.json` — its OWN file, separate from the
-parse baseline: parse gates the grammar/forest, selection gates the ranker/choice (structure
-diagnostic 32/44; the 4-unit gap = sense errors inside the verified structure, invisible to
-skeleton metrics). Gate verified holding. Slice 5 DONE `2026-08-11`: `enc:SelectionAuthority`
-enumeration (closed via `allows_only`) + `enc:runner_up_skeletons` in encoding.esl (new
-`encoding_validates.rs` kernel test — first validation coverage for that file);
-`SentenceSelection::{Pinned,Ranked,Sole}` emission arms (pin arm byte-stable — demo
-`claims-intact.esl` regenerates identically); CLI `--pins` XOR `--selections` (replay-only
-computed arm). **STAGE 1 COMPLETE** (committed). Stage 2 active: the demonstratives-as-holes design note is
-WRITTEN — [d64-demonstratives-as-holes.md](d64-demonstratives-as-holes.md) — decision (A):
-demonstratives become RESTRICTOR-TYPED holes via a polymorphic `lexicon:anaphor_of` placeholder
-freshened at the felicity gate (full kernel veto: "these findings" resolves only to findings);
-plain `the` stays ι; dual-entry and post-parse-substitution alternatives rejected; §5 plans the
-reseed + migration (re-pin, ledger, fresh selection draw, both baselines re-derived). Slice 2 (kernel mechanism) DONE `2026-08-11`: `freshen_anaphor_of` at the felicity gate,
-restrictor-typed holes, and the **hole-type veto in `resolve_open`** — the slice-2 tests exposed
-that β-reduction erases the Π-binder annotation, so the restrictor veto had to be enforced
-per-antecedent before application (note §2a; subclass antecedents accepted via
-`Layer::is_subclass_of`; two occurrences = two independent holes). Four `yonder`-fixture tests
-green. Slice 3 (lexicon swap + reseed + migration) DONE `2026-08-11`: 8 entries swapped, reseed →
-`wordnet-umls-aligned-2026-08-11-dem`; ranks replayed 62/0; open 2→20, readings 761→226; 19 pins
-re-migrated (hits 60/62 HOLDS); selection re-drawn (21/31 reading-correct, invalid 0); both
-baselines re-derived. Typed-skeleton instrument LANDED same day (note §5a: `OpenParse::skeleton` prints hole
-types; skeletons 139→144 = recovered structure; ledger + pins cover all 144 — no wave). Slice 4
-(discourse close-out) DONE `2026-08-11`: §2.2 pooled closed∪resolved-open competition in
-`resolve_document`; §2.3 `Candidate` enum (Individual/Kind, readable labels, proposer selects
-by index); the derived-kind-predication coercion in the CHECKER (`kind_of(K) : C` iff
-`base(K) ⊑ C`, check-mode-only — note §2b) and the resolution search pre-filtered + bounded
-(`MAX_REGATE_ATTEMPTS`, note §2c — first run spent 50 min in the unbounded cross-product, now
-25 s/page). DB-backed close-out PINNED (`resolve_document_discourse_close_out`): open 20→**15**
-(encoded 12, ambiguous 35, gap 0); the 5 closures include «These data sets…» ENCODED to the
-semantically-correct harvested kind. Isolated sweep UNTOUCHED — full replay holds every
-baseline exactly (readings 226, skeletons 144, hits 60/62, selection 21/31, eval exit 0).
-Residual 15 Opens = named deferrals (claims / plural sets / quantifier witnesses / Σ-restrictor
-accommodation — note slice-4 record). §2.4 + §2.5 DONE `2026-08-11` (note slice 5): `ProposeCtx`
-carries the ranker's `DocumentContext` + hole type; `Proposal { ranked, rationale, confidence }`;
-`RecordingProposer`/`ReplayProposer` (memoizing; refusals replay as hits, misses fail closed);
-`AnthropicProposer` context prompt; harness `EIGENIUS_PROPOSALS` three-arm; design doc §3/§4
-synced to the as-built Π-carrier. Recency pin (12/35/15/0) holds throughout; 171 suites, clippy
-both configs. **STAGE 2 EXIT GATE MET** (corpus page resolves through DB-backed
-`resolve_document`, fail-closed preserved; residuals are named deferrals). Stage 3 —
-[d67-pipeline-unification.md](d67-pipeline-unification.md) — slices 2–4 DONE `2026-08-12` (note
-§7 records): `DerivedClaimGrader` + `GradedClaim` reshape (claim_iri / gate_sentence), emit via
-the ONE `cluster()` ctor (byte-identity proven old-vs-new via HEAD-worktree probe), ingest lands
-Derived with the `IsDerivedAs` witness asserted; `with_storage` doc branches (+
-`with_parser_setup` seam; §7-2 OOM confirmed live) with the DB-backed pipeline test; CLI
-re-driven over `DocumentPipeline` (--proposals arm; `select_pinned`/`select_ranked` deleted);
-`resolve_document` takes the RAW document (joined-sentences sha would have missed every replay
-key); `ResolutionOutcome` binding audit → `enc:AnaphorBinding` (closed BindingAuthority enum,
-machine-readable antecedents). Close-out pin (12/35/15/0) + all isolated baselines hold EXACT
-(eval exit 0); 171 suites, clippy both configs. Slice 5 (claim antecedents) DONE
-`2026-08-12` per [d68-claim-kinds.md](d68-claim-kinds.md) §7: kind = a second `is_a` class
-(multi-class inhabitation, no new kernel rule); `enc:Claim` + closed kinds in encoding.esl;
-curated alignment layer (`claim-kind-alignment.esl`, probe-derived targets, unaligned senses =
-sense discrimination); frame table + recorded `KindClassifier` + Assertion default;
-`Candidate::Claim`/`ClaimSet` + the DISTRIBUTIVE set arm (per-member veto, And-fold, one set
-per parse) + `ClaimLander` seam + same-kind-run assembly. **Measured: with the tracked kind
-draw (`experiments/parsing/kinds/2026-08-12-reference.json`, replay 12/0) ALL FIVE
-claim-referent units close — open 15→10 (12/40/10/0, pinned beside the deterministic-floor pin
-12/35/15/0 which HOLDS)**; isolated baselines untouched; 171 suites, clippy both configs. Kind
-verdicts model-adjudicated pending sign-off. The `2026-08-12-d67` snapshot is canonical (page
-replay exact; reseed+alignment proven deterministic). Slice 6 (3.4 artifact + 3.5 acceptance)
-DONE `2026-08-12` (note §7-6): demo refreshed on d67 (pins RESTORED to the page-verified
-`expected-readings.tsv` shapes; ranks re-recorded; `selections-edited.json` recorded through
-the CLI's own new RECORD arm; run.sh's EDITED variant selects by that draw — its pinned
-skeleton matches 3 sense-variant readings, a tie a skeleton pin cannot break);
-`onco-typed.esl` re-derived to the d67 concepts, and the SERVED load caught a real type error
-the in-process build path does not run (`exists x0 : a` with an abstract Σ domain →
-`DefinitionMalformed Var(TC#2) ≠ Entity`; the activity concept is now fixed in the definition
-body); acceptance passes both ways (in-process Holds/Fails with the diagnostic surfaced —
-the run.sh:222 gap; served `run.sh` exit 0, intact COMMITTED / edited REJECTED), both demo
-artifacts regenerate BYTE-IDENTICALLY; artifact completeness landed (Stage-A glossary
-resources + one `DiscourseUnit`+`CutItem` per non-encoded unit, `enc:cut_ambiguous` /
-`enc:cut_unresolved` added, token-bounded OOV attribution, CLI `--partial`), proven to LOAD
-through the kernel by `artifact_completeness.rs`. **The COMPOSED configuration is measured for
-the first time (review catch: every prior number was a no-ranker floor) — discourse loop + reading
-ranker = encoded 50 / ambiguous 1 / open 11 / gap 0 over 62 units, replay-verified (selections
-39/0, kinds 47/0, ranks 62/0), vs the 12/40/10/0 floor. Its 39 decisions score 23 pinned-correct
-/ 6 wrong / 1 abstained / 9 UNSCORABLE — the pins are isolated-sentence skeletons, so gating the
-composed pipeline needs pins for discourse-resolved readings (named, not closed). The sweep's
-selection accuracy on d67 reproduces the tracked baseline exactly (21/31).** **STAGE 3 EXIT GATE
-MET.**
-
-**Stage 4 — ACTIVE. Design note written `2026-08-17/18`:
-[d71-document-formalization-service.md](../design/d71-document-formalization-service.md). No code yet.**
-The note's finding is that the plan's premise was wrong: prose formalization is **not** an
-institution. Tested against D14 §1.2's own four criteria it satisfies one (it registers declarations);
-it has no satisfaction relation of its own (it borrows the kernel validator + the felicity re-gate,
-both excluded by D14 §1.1), no fibre (`enc:EncodedClaim` is a `reflection:DerivedResource`, graded in
-the reasoning fibre), and answers no queries about its results. The precedent agrees: every
-`institution:Institution` in the tree decides something (5 Julia solvers, Lean, statistics, reasoning),
-while five importers doing source→resource-set→Load are none of them. D62 §8's four reasons each trace
-back to a property supplied elsewhere — the Derived cluster by `DerivedClaimGrader`, felicity by
-structural validation — except the fourth, faithfulness, which is D61 and does earn the shape.
-**Instead:** a service operation over the existing `DocumentPipeline`, emitting the resource-set
-artifact, run as a D21 **task**, behind four thin surfaces — CLI (`prose-to-esl`, already one),
-gRPC (`FormalizeDocument`, sibling of `ParseSentence`), MCP (one tool per RPC + the existing task
-polling), notebook (a `formalize` cell — bootstrap edit ⇒ batch the reseed). Async is forced, not
-preferred: MCP has no long-call idiom. Decided `2026-08-18`: the `doc-<id>` branch is the run's
-**working record** — glossary + LLM draws — survives the run and is prunable via `DeleteBranch`;
-draws land there as `enc:ProposalDraw` (one class, four seams, `encoding.esl`, no reseed), so a re-run
-replays from the chain alone and the pool/draw consistency the replay key enforces becomes structural
-(the `2026-08-12` cross-glossary draw failure is not expressible). That also shrank two deferrals:
-resume (§6) and per-unit override (§11a) become *replay the prefix deterministically*, not a
-discourse-state format — what is left is a measurement. **Build order (§13):** 1 artifact root
-(`enc:ReasoningStructure` + `reference:Reference` — both declared today and never emitted) · 2 delete
-the dead `enc:FormalizeDocument`/`qc_formalize_unit` declarations + amend D62 §8/§10/§11.3/§11.5 and
-plan §4 · 3 `ProposalDraw` + branch commit + reader · 4 `TaskKind` · 5 RPC · 6 MCP · 7 notebook cell.
-Slices 1–2 unblock everything and are independent. **Slices 1–2 DONE `2026-08-19`** (D71 §13
-record): artifact root + `reference:Reference` emitting and loading through the real chain, the dead
-declarations deleted, D62 §8/§10/§11.3/§11.5 + D64's layering note + two implementation notes
-amended; demo v2 regenerated (`run.sh --reparse` exit 0, intact COMMITTED / edited REJECTED), §3.5
-acceptance `Holds`/`Fails`, workspace tests + `-D warnings` clippy clean. Caught in passing: the old
-`enc:section` carried the INVOKER'S ABSOLUTE PATH, so the committed demo artifact had never been
-reproducible off this machine — the demo now passes a repo-relative `--source`. **Open (§14):** source transport; draw commit
-granularity (per-unit layer count vs chain-length cost); pruning policy (manual vs a D44 hint); the
-prefix-replay measurement. **Human-override loop: separate effort** (§11) — the crude form already
-works via `--pins` + whole-document re-run.
-
-**ALL SEVEN SLICES DONE `2026-08-20`.** 6: two MCP tools (`eigenius_formalize_document` +
-`eigenius_get_formalization_result`); task polling needed nothing new. 7: `notebook:formalize` in the
-cell-type enumeration — a bootstrap edit, so the manifest pin fired as designed and the reseed was
-paid knowingly (`wordnet-umls-aligned-2026-08-20`); the whole follow-through verified, with both demo
-artifacts regenerating with NO diff, which is the evidence the reseed reproduced the lexicon exactly.
-**Playwright e2e DESCOPED** (user decision): the SDK round-trip tests cover the publish mapping, the
-served path was exercised by hand in the container, and what stays untested is the rendering path,
-where a regression is visible rather than silent.
-
-**Verified in the container `2026-08-20`:** `FormalizeDocument` → `TaskKind::Formalize` → live
-proposers → `doc-<id>` branch with 11 recorded draws → artifact, over the demo's three-sentence
-paragraph: all three ENCODED, «These findings» resolved, peak RSS 2.43 GiB. Getting there fixed four
-defects the slices had left: the orchestrator's kernel passthrough is a CURATED LIST and did not
-route the two new methods (now pinned by a test, the way the MCP tool inventory already was);
-`cli`'s `use-llm` did not forward to `eigenius-encoding`, so live proposers existed in a binary whose
-formalizer reported it had none; the kernel image had no WordNet dict, so the served parser silently
-used the no-op lemmatizer and EVERY sentence came back `cut_grammar`; and `build-alignment-snapshot.sh`
-copied the base store's PROVENANCE verbatim, so an aligned snapshot could not be told from a raw one.
-
-**Notebook verified `2026-08-20`** in the browser, both landing modes (the artifact-load button and
-the `land`-on-run flag) — which closes the rendering path slice 7's descoped e2e had left uncovered.
-D71 is DONE.
-
-**Kernel OOM: FIXED `2026-08-20`** (commit `e10c9e6`). Retroactive validation's carrier scan now
-streams the chain instead of materialising it (27.8 GB → 3.9 GB), and `redefines_ancestor` compares
-the new definition against the shadowed one in canonical Eigon-CBOR, so an identical redeclaration
-enumerates no dependents at all. The load that killed the kernel twice now takes 30 ms.
-
-Remaining deferrals live in D68 §5/§5a (collective/group term +
-star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
-cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
-
-### 1. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
+### 1. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
-**OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
+**OOV ✓ → parsing gaps ✓ → ambiguity ✓ → performance (HERE).** Phase 3 closed by selection rather
+than by the multiplicity reduction this note planned for it — see STATUS. The performance work
+itself is on deck, not in this note.
 
-#### STATUS — measured `2026-07-15`, `main`@`29930e4` (post `dcg-cleanup` merge), snapshot `wordnet-umls-aligned-v3-2026-07-15`
-| config | units | GAP | MISSING | AMBIG | OPEN | ENCODED |
-|---|---|---|---|---|---|---|
-| **reranked** (`--features use-llm`) — *canonical* | 62 | **0** | **0** | 58 | 1 | **3** |
-| deterministic (cap-only) — *the no-regression gate* | 62 | — | — | — | — | — |
+#### STATUS
+Phases 1 and 2 are CLOSED — `grammar-gap 0`, `missing-lexeme 0`. Phase 3 (ambiguity) was met by
+**selection**, not by multiplicity reduction: the composed configuration (discourse loop + reading
+ranker) reaches encoded 51 / ambiguous 0 / open 11 over the 62 units, against an isolated no-ranker
+floor of 2 / 40 / 20. The forest is still ambiguous; the pipeline no longer is.
 
-> **Every sentence PARSES — `grammar-gap 0` and `missing-lexeme 0` (reranked). 3 of 62 resolve to a single
-> reading.** The gap/OOV problem is **solved**; the ambiguity problem is **not**. `ENCODED 3/62` is the open front.
-> *Deterministic (cap-only) row not re-measured since the alignment-v3 + sense-elimination work — re-run
-> `scripts/measure-parse-rate.sh --no-llm` to refresh (last cap-only figure, `07-10` pre-alignment, was ENCODED 0).*
-
-`ENCODED` climbed 1 → 3 (`2026-07-10` → `07-12`, now on `main`). The mover was **sense elimination** — the reranker
-may now OMIT an impossible sense (the cap no longer backfills from rejects) and 132 closed-class entries carry a real
-`core:description` instead of blank prompt lines; that alone took ENCODED 1 → 3–4 (baseline floor set at 3).
-Cross-lexicon alignment (12,450 → 38,389 WordNet↔UMLS merges, v1→v3) cut reading *multiplicity* a few % but did
-**not** by itself raise ENCODED — standing verdict, confirmed three times: alignment never reaches a single reading,
-**the residual is structural** (readings ≈ skeletons × senses; both axes live, skeletons median 6). Treat ±1 ENCODED
-as temp-0 reranker drift, not signal; gap/missing are the load-bearing columns. Full record:
-`experiments/parsing/baseline.json`.
+Live numbers live in `experiments/parsing/baseline.json` (grammar/forest) and
+`selection-baseline.json` (ranker/choice) — two files, two gates, both enforced by
+`scripts/eval-parse-rate.sh`. This entry does not restate them: a hand-copied table competes with
+the gated truth and loses.
 
 #### DONE
 - **Phase 1 — OOV: CLOSED.** `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
@@ -232,18 +51,16 @@ as temp-0 reranker drift, not signal; gap/missing are the load-bearing columns. 
   `RefineKind::PpMod` rule with **zero new parser code**, closed-class ⇒ cap-exempt. Now:
   `∀x:(Σy:event. sole(y)). ¬(x causatively-leads-to cell_death)` — 50/50 readings, **0** noun-pile.
 
-#### NEXT — the exit gate: `AMBIG → ENCODED`
-Two concrete levers, cheapest first:
-1. **Re-test `pos_prune`** (categorical drop of function-word-as-noun readings; `EIGENIUS_POS_PRUNE`, currently
-   default-off). It is *the* lever against the `does→DOE`/`doe`/`DO` noun-pile junk that inflates ambiguity.
-   It previously made sentence 3 **unparseable — but only because post-nominal `alone` had no rule. That
-   blocker is now gone**, so it is newly viable and untested. Gate on the deterministic sweep (`GAP` must stay 0).
-2. **Mass-shim precision fixes** (§6 of the parse-gap note): strictly-uncountable-head test +
-   acronym↔domain-word collision filter — kill the spurious `mass` readings that inflate *both* reading count
-   and parse time.
+#### The two levers that outlived the gate
+`pos_prune` (categorical drop of function-word-as-noun readings, `EIGENIUS_POS_PRUNE`, default-off,
+never tested since post-nominal `alone` unblocked it) and the **mass-shim precision fixes** (§6 of
+the parse-gap note — strictly-uncountable-head test + acronym↔domain-word collision filter) were
+planned as the AMBIG→ENCODED levers. That gate closed by other means. Both still bear on **parse
+time**, so they belong to phase 4 / [#97](https://github.com/eigenius/eigenius/issues/97) — see the
+performance entry under On deck. Gate either on the deterministic sweep with `GAP` staying 0.
 
-Levers already applied (hyphenation, build-then-subsume D3, sense cap/reranker) and the ones ruled out for this
-corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
+Levers already applied (hyphenation, build-then-subsume D3, sense cap/reranker) and the ones ruled
+out for this corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 [d63-parsing-scale-and-pruning.md §4c](d63-parsing-scale-and-pruning.md).
 
 #### DO NOT RE-TRY
@@ -262,16 +79,14 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 - **Counting.** `summarize()`'s per-unit listing enumerates **only AMBIG units**; grammar-gaps print in a
   different format, so grepping `[AMBIG` **silently misses every gap**. Count from the
   `=== WRN first page over FULL lexicon: … grammar-gap N …===` summary line (or the `[unit N] … TAG` lines).
-- **Snapshot drift.** A bootstrap-ontology edit changes its content hash, so older snapshots **ManifestDrift** —
-  and the harness **SKIPs fail-closed while reporting `ok`**: every `db_backed_encoding` test goes green doing
-  nothing. Latest drift: the `dcg-cleanup` merge declared `conn_list` on `lexicon:Conn` (`2026-07-15`), retiring
-  the 07-12 snapshots. Two `2026-07-16` bootstrap edits invalidated the chain in turn: the
-  definite-referential fix (axiom `ontology:the`) and then the quantifier-determiner fix
-  (`several`/`many`/`few`/`most`/`both`). **Current resumable snapshot:
-  `wordnet-umls-aligned-v3-2026-07-16-quant`** (reseed `--umls-all` + v3-align, 2.7 GB). Always drive the
-  measurement through `scripts/measure-parse-rate.sh` (it sets `EIGENIUS_DB_SNAPSHOT` to the newest
-  snapshot); the harness fallback `DEFAULT_SNAPSHOT`
-  (`crates/eigenius-wordnet/tests/db_backed_encoding.rs:64`) now points at it.
+- **Snapshot drift.** A bootstrap-ontology edit changes its content hash, so older snapshots
+  **ManifestDrift** — and the harness **SKIPs fail-closed while reporting `ok`**: every
+  `db_backed_encoding` test goes green doing nothing. `kernel/tests/bootstrap_manifest_pinned.rs`
+  (`0c33667`) now fails in `cargo test` when the bootstrap moves, so the *edit* is caught at source.
+  The harness picks the newest `wordnet-umls-*` store under `../db-snapshot` automatically
+  (`a46c107`; same rule as `scripts/measure-parse-rate.sh`) and prints which one it chose — no
+  snapshot name is pinned in code any more. Note the rule is newest-by-mtime, so a *raw* reseed
+  finishing after an aligned one wins; the printed path is how you notice.
 
 #### Follow-up spun out of the faithfulness work (not started)
 **Pre-nominal `only` / `just`.** Same `ontology:sole` operator (already in the ontology), but they attach
@@ -280,53 +95,35 @@ refine (an NP-level rule must reach into the generalized quantifier's restrictor
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
 ### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
-The overall sequence that (2) is a detour from — now largely folded into (1)'s Stages 3–4.
-Remaining once (2) pops, in order:
-**address ambiguity** (0 encoded → clean single parses) + long-sentence perf → **grading-phase gaps**
-(Citation grade-climb; graded-props run over the full lexicon, persistent doc layer) → **Phase 2**
-(orchestrator / served path). The Phase-1 machinery (reshape, pipeline, grader, ingestion, D47 codec) is
-done.
+Phase 1 is done (reshape, pipeline, grader, ingestion, D47 codec). Of **Phase 2** — "refactor the
+LLM parts out into the orchestrator; the served gRPC path" — two of three parts landed via D71, and
+not in the shape this note predicts:
+
+- ✔ **Served path.** Built as a service operation (`FormalizeDocument` + task + four surfaces), not
+  as the "second `impl DocumentPipeline`" the note anticipates. D71 §1 argues the shape.
+- ✔ **Doc-layer home → committed branch.** `with_storage` doc branches.
+- ☐ **Proposer impls → orchestrator RPCs.** NOT done. `kernel/src/dcg/resolver_llm.rs` and
+  `sense_ranker.rs` still call Anthropic directly from the kernel (`use-llm`), which is why the
+  kernel image needs `CARGO_FEATURES=use-llm` and an API key to formalize.
+
+Also remaining: **grading-phase gaps** (Citation grade-climb; graded-props over the full lexicon).
 
 ---
 
 ## On deck (pushed onto the stack when its step becomes active)
 
-- **Reseed OOM — memory profiling follow-up** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md)).
-  **⚠ POSSIBLY STALE — verify before picking up.** A full `scripts/reseed-lexicon-db.sh --umls-all` ran to
-  **completion on `2026-07-10`** (exit 0, 2.9 GB snapshot `wordnet-umls-all-alone-2026-07-10`), i.e. the claim
-  below that it "blocks any fresh full reseed" no longer reproduces — likely superseded by the `--out-dir`
-  chained-load path. Re-confirm the OOM still happens before investing in the profile.
-  *Original:* Full WordNet+UMLS reseed OOMs (~20 GiB) deep into the UMLS load; blocks the at-scale
-  re-verification of C3-precision (and any fresh full reseed). Static analysis is exhausted (named resident
-  terms sum to ~5–7 GiB vs the 20 GiB OOM; the note's §3 lists what is measured-out — text index, RocksDB
-  config, in-memory backend, bounded cache — do not re-tread). **Next action: the jemalloc heap profile in §6**
-  (feature-gated `tikv-jemallocator` on `eigenius-cli`, bounded native `serve` + ~10 UMLS chunks + `jeprof`
-  flame graph) to name the ~15 GiB owner. Diagnostic already in tree:
-  `storage/rocksdb/tests/snapshot_memory_probe.rs`.
+- **Phase 4 — performance.** The CKY chart explosion:
+  [d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md) /
+  [#97](https://github.com/eigenius/eigenius/issues/97) — adaptive supertagging + intermediate-cell
+  felicity pruning. Cheapest first lever is the **mass-shim precision fixes**
+  (d63-parse-gap-closure.md §6): spurious `mass` readings inflate BOTH reading count (median
+  105/unit, capped at 256) AND parse time (up to 930 s/unit). `pos_prune` is the other untested
+  lever (see entry 1).
 
-- **Phases 3 (ambiguity) + 4 (performance)** — one root cause, worked together once phase 2 pops.
-  Concrete first lever: the **mass-shim precision fixes** (d63-parse-gap-closure.md §6 — strictly-
-  uncountable-head test + acronym↔domain-word collision filter) to kill the spurious `mass` readings that
-  inflate BOTH the reading count (median 105/unit, capped at 256) AND parse time (up to 930 s/unit).
-  Backstop = [d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md) — the CKY
-  chart-explosion sub-project (adaptive supertagging + **intermediate-cell** felicity pruning; GH#97) —
-  becomes the top entry when phase 4 is active. The reranker (`--features use-llm`) is the phase-3
-  AMBIG→ENCODED metric.
-
-## On deck (pushed onto the stack when its step becomes active)
-
-- ~~**Kernel OOM during a notebook session**~~ — RESOLVED `2026-08-20`, commit `e10c9e6`
-  ([kernel-oom-notebook-session.md](kernel-oom-notebook-session.md) carries the full account).
-  Two residues, neither blocking and neither a defect on its own:
-  - `LayerTopology`'s `include_resources: true` emits a node per resource **with no cap**, so
-    drilling into a lexicon layer is unbounded. Found on the way, did not cause the kill, still
-    uncapped. Wants a bounded page with an explicit `truncated` marker — never a silent cap.
-  - The carrier scan is still O(chain) in time for a *genuinely changed* property definition —
-    MEASURED 3m55s for one changed property on the aligned snapshot, kernel responsive throughout.
-    Filed as [#117](https://github.com/eigenius/eigenius/issues/117): a value-independent
-    **predicate → subject** index. The IRI-valued half needs no new persisted structure
-    (`scan_predicate(p)` is a prefix scan on the existing `(p, o, s)` key order); only the
-    literal-valued half does.
+- **`LayerTopology` resource fetch is uncapped.** `include_resources: true` emits one proto node per
+  resource in the layer with no bound, so drilling into a lexicon layer is unbounded. Found during
+  the kernel-OOM investigation; did not cause it. Wants a bounded page with an explicit `truncated`
+  marker — never a silent cap (D62's rule). Not filed as an issue.
 
 ## Parked tracks (real, but off this stack)
 Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
@@ -364,6 +161,36 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   ([[gene_family_lexicon_gap]]) + a lexicon/ontology index.
 
 ## Completed (record, not work)
+- [d71-document-formalization-service.md](../design/d71-document-formalization-service.md) —
+  **COMPLETED `2026-08-20`.** Prose formalization is **not** an institution: tested against D14
+  §1.2's own four criteria it satisfies one, and every `institution:Institution` in the tree
+  *decides* something while five importers doing source→resource-set→Load are none. Built instead as
+  a service operation over `DocumentPipeline` emitting a resource-set artifact, run as a D21 task,
+  behind four surfaces (CLI / gRPC / MCP / notebook). All seven slices in; verified in the container
+  end to end (three sentences ENCODED, «These findings» resolved, 11 draws recorded on the `doc-<id>`
+  branch, peak RSS 2.43 GiB) and in the browser for both landing modes. Playwright e2e descoped by
+  user decision. Getting there fixed four defects the slices had left: the orchestrator's kernel
+  passthrough is a curated list that did not route the two new methods (now pinned by a test); `cli`'s
+  `use-llm` did not forward to `eigenius-encoding`; the kernel image had no WordNet dict, so the
+  served parser silently used the no-op lemmatizer and every sentence came back `cut_grammar`; and
+  `build-alignment-snapshot.sh` copied PROVENANCE verbatim, so an aligned snapshot could not be told
+  from a raw one. **Open (§14):** source transport; draw commit granularity; pruning policy; the
+  prefix-replay measurement. **§11 human-override loop: separate effort** — the crude form works via
+  `--pins` + whole-document re-run. Remaining deferrals: D68 §5/§5a, D67 §8; kind verdicts, the
+  selections-edited draw, and the demo re-pins await human sign-off.
+- **Kernel OOM during a notebook session** — **FIXED `2026-08-20`** (`e10c9e6`), full account in
+  [kernel-oom-notebook-session.md](kernel-oom-notebook-session.md). Retroactive validation's carrier
+  scan materialised the whole 7.6M-resource chain per redefined property; it now streams (27.8 GB →
+  3.9 GB), and `redefines_ancestor` compares against the shadowed definition in canonical Eigon-CBOR,
+  so an identical redeclaration enumerates no dependents. The load that killed the kernel twice takes
+  30 ms. Residue: the scan is still O(chain) for a *genuinely changed* definition — measured 3m55s
+  for one property, kernel responsive throughout — filed as
+  [#117](https://github.com/eigenius/eigenius/issues/117).
+- **Reseed OOM** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md)) —
+  **CLOSED `2026-08-20`, not reproducible.** The claim was that it "blocks any fresh full reseed";
+  full reseeds have since run to completion routinely (four snapshots dated `2026-08-20` alone),
+  starting with `2026-07-10` and most likely fixed by the `--out-dir` chained-load path. The note
+  survives as the record of what was measured out. Do not re-open without a fresh reproduction.
 - [d69-reading-presentation.md](d69-reading-presentation.md) — **COMPLETED `2026-08-17`.** The ranker's
   question was unanswerable as posed: for «MSI cancer models did not have the exonuclease activity of
   WRN» the prompt carried 120 candidates with 120 distinct sems as only **4 distinct strings**, so the
@@ -400,8 +227,7 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   the same string) unimplemented; abbreviations still reach bare standing via the glossary's `mass`
   inheritance rather than `name`; deep-binder round-trip coverage lost with v1's `rule-general.esl`;
   a lexicon-content change still moves no manifest, so that staleness class has no guard.
-- **Phase-2 constructions, Step 5/5b/5c — COMPLETED `2026-07-06`** (uncommitted on `13c5bbe` + the
-  refactor on top). RC-6 apposition (`appose_group`, bidirectional concept↔semantic-type felicity),
+- **Phase-2 constructions, Step 5/5b/5c — COMPLETED `2026-07-06`.** RC-6 apposition (`appose_group`, bidirectional concept↔semantic-type felicity),
   comma-list connective inheritance (neutral comma finalized by the trailing `and`/`or`), and the
   **coordination refactor** to core-en's list-with-operator shape (`cat_coord` + `coordinate_prop` +
   `complete_coord`, retiring the eager `coordinate_sem` + the Step-5b n-ary workaround). Together −8
