@@ -139,7 +139,13 @@ discourse-state format — what is left is a measurement. **Build order (§13):*
 (`enc:ReasoningStructure` + `reference:Reference` — both declared today and never emitted) · 2 delete
 the dead `enc:FormalizeDocument`/`qc_formalize_unit` declarations + amend D62 §8/§10/§11.3/§11.5 and
 plan §4 · 3 `ProposalDraw` + branch commit + reader · 4 `TaskKind` · 5 RPC · 6 MCP · 7 notebook cell.
-Slices 1–2 unblock everything and are independent. **Open (§14):** source transport; draw commit
+Slices 1–2 unblock everything and are independent. **Slices 1–2 DONE `2026-08-19`** (D71 §13
+record): artifact root + `reference:Reference` emitting and loading through the real chain, the dead
+declarations deleted, D62 §8/§10/§11.3/§11.5 + D64's layering note + two implementation notes
+amended; demo v2 regenerated (`run.sh --reparse` exit 0, intact COMMITTED / edited REJECTED), §3.5
+acceptance `Holds`/`Fails`, workspace tests + `-D warnings` clippy clean. Caught in passing: the old
+`enc:section` carried the INVOKER'S ABSOLUTE PATH, so the committed demo artifact had never been
+reproducible off this machine — the demo now passes a repo-relative `--source`. **Open (§14):** source transport; draw commit
 granularity (per-unit layer count vs chain-length cost); pruning policy (manual vs a D44 hint); the
 prefix-replay measurement. **Human-override loop: separate effort** (§11) — the crude form already
 works via `--pins` + whole-document re-run.

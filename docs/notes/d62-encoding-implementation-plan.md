@@ -185,9 +185,10 @@ encoded-unit count rises toward the parseable fraction.
 
 **Goal.** Complete the driver once real prose parses: **D64** reference resolution (open
 parses → bound), **S5a** lexical recovery (search/inject for any residual OOV), **S5b**
-reformulation (grammar-gap paraphrase + back-translation), **S6** assembly, and the
-`FormalizeDocument` institution wrapper (`ontologies/encoding/encoding.esl`, wired into
-`BOOTSTRAP_CHAIN`; resolve the env/handler stubs). Faithfulness (S7) stays deferred to D61.
+reformulation (grammar-gap paraphrase + back-translation), **S6** assembly, and the service
+wrapper ([D71](../design/d71-document-formalization-service.md) — four surfaces over one contract;
+the institution wrapper this line called for was deleted `2026-08-19`, and `encoding.esl` stays out
+of `BOOTSTRAP_CHAIN`). Faithfulness (S7) stays deferred to D61.
 
 **Verify:** end-to-end — the cleaned WRN page produces committed `EncodedClaim`s with
 provenance + grade + the gap stream; the litmus claims (e.g. *"WRN is a synthetic lethal

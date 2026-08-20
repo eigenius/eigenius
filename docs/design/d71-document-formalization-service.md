@@ -498,8 +498,8 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 
 | # | Slice | Exit gate |
 |---|---|---|
-| 1 | Artifact root + provenance (`ReasoningStructure`, `enc:source_document` → `reference:Reference`) | `artifact_completeness` + `acceptance` green; demo v2 regenerates and still justifies twice / `Fails` on the edited variant |
-| 2 | Declaration cleanup + doc amendments (§12) | `encoding_validates.rs` green; no dangling `enc_sig:` reference in the tree |
+| 1 ✅ | Artifact root + provenance (`ReasoningStructure`, `enc:source_document` → `reference:Reference`) | `artifact_completeness` + `acceptance` green; demo v2 regenerates and still justifies twice / `Fails` on the edited variant |
+| 2 ✅ | Declaration cleanup + doc amendments (§12) | `encoding_validates.rs` green; no dangling `enc_sig:` reference in the tree |
 | 3 | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
 | 4 | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
 | 5 | `FormalizeDocument` RPC | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
@@ -508,6 +508,23 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 
 Slices 1–2 are independent of the rest and unblock everything. Slice 3 is independent of the surfaces
 and is what makes slice 5's byte-identity gate cheap to run repeatedly.
+
+**Slices 1–2 DONE `2026-08-19`.** The emitter takes a `DocumentMeta` (ns, path, sha256, timestamp,
+optional `source_ref`) and emits the `reference:Reference` first and the `enc:ReasoningStructure` last
+— last so every claim IRI it lists is already defined above it. A cited `source_ref` is pointed at,
+never re-minted, so Rule 22 does the verifying. `enc:section` no longer carries `"<path> (sha256
+<hex>)"`; the pair moved to `enc:source_path` / `enc:source_sha256` on the root, and the CLI gained
+`--source-ref`. Gates: `artifact_completeness` loads the root and the Reference through the real
+chain; the §3.5 `acceptance` run is `Holds` / `Fails` with the diagnostic; `run.sh --reparse` exits 0,
+intact COMMITTED and edited REJECTED; workspace tests and `RUSTFLAGS="-D warnings" cargo clippy` are
+clean.
+
+One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
+INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been
+reproducible off this machine — §5's byte-identity claim was false in a way no test looked at. The
+demo now runs `prose-to-esl` from the repo root with a repo-relative `--source`. The emitter cannot
+fix this itself (it has no repo root); `enc:source_sha256` is what actually pins the bytes, and
+`enc:source_path` is caller-supplied text.
 
 ---
 

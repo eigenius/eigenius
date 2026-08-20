@@ -5,14 +5,19 @@ namespace eigentt = "urn:eigenius:eigentt";
 namespace encoding = "urn:eigenius:encoding";
 namespace logic = "urn:eigenius:logic";
 namespace ontology = "urn:eigenius:ontology";
+namespace reference = "urn:eigenius:reference";
 namespace reflection = "urn:eigenius:reflection";
 namespace umlscui = "urn:eigenius:umlscui";
 namespace v2 = "urn:eigenius:demo:v2";
 namespace wn = "urn:eigenius:wn";
 
+resource v2:source : reference:Reference {
+    core:description = "The source this encoding was derived from: demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a). Minted document-locally — the file carries no DOI or PMID; pass an existing reference:Reference IRI to cite a bibliographic record instead.";
+}
+
 resource v2:unit_1 : encoding:DiscourseUnit {
     encoding:prose = "MSI cancer models did not have the exonuclease activity of WRN.";
-    encoding:section = "/home/hm/src/eigenius/eigenius/demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a)";
+    encoding:source_document = "urn:eigenius:demo:v2:source";
     encoding:span_end = 63;
     encoding:span_start = 0;
     encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
@@ -56,7 +61,7 @@ resource v2:decision_1 : encoding:DecisionPoint {
 
 resource v2:unit_2 : encoding:DiscourseUnit {
     encoding:prose = "MSI cancer models required the helicase activity of WRN.";
-    encoding:section = "/home/hm/src/eigenius/eigenius/demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a)";
+    encoding:source_document = "urn:eigenius:demo:v2:source";
     encoding:span_end = 120;
     encoding:span_start = 64;
     encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
@@ -99,7 +104,7 @@ resource v2:decision_2 : encoding:DecisionPoint {
 
 resource v2:unit_3 : encoding:DiscourseUnit {
     encoding:prose = "These findings show that WRN is a vulnerability of MSI cancer models.";
-    encoding:section = "/home/hm/src/eigenius/eigenius/demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a)";
+    encoding:source_document = "urn:eigenius:demo:v2:source";
     encoding:span_end = 190;
     encoding:span_start = 121;
     encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
@@ -169,4 +174,12 @@ resource v2:binding_3_0 : encoding:AnaphorBinding {
     encoding:confidence = 0.95;
     encoding:hole_var = "$demref$0_0";
     reflection:rationale = "\"These findings\" is a plural demonstrative that collectively refers to both preceding claims (sentences 0 and 1 together), making candidate [1] \"the last 2 Finding claims, together\" the best antecedent.";
+}
+
+resource v2:structure : encoding:ReasoningStructure {
+    core:description = "The encoding of demo/prose-to-formulas-v2/paragraph-edited.txt: 3 claim(s), 0 unit(s) recorded as not encoding.";
+    encoding:claims = ["urn:eigenius:demo:v2:claim_1", "urn:eigenius:demo:v2:claim_2", "urn:eigenius:demo:v2:claim_3"];
+    encoding:document = "urn:eigenius:demo:v2:source";
+    encoding:source_path = "demo/prose-to-formulas-v2/paragraph-edited.txt";
+    encoding:source_sha256 = "4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a";
 }

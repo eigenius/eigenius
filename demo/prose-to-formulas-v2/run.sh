@@ -106,8 +106,12 @@ if [[ $REPARSE == 1 ]]; then
     # claim-kind-alignment.esl and is not part of the lexicon snapshot.
     for variant in "paragraph:claims-intact:" "paragraph-edited:claims-edited:-edited"; do
         IFS=: read -r src out suffix <<<"$variant"
-        "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
-            --source "$HERE/$src.txt" \
+        # The source path is passed REPO-RELATIVE and the command runs from $REPO: it lands in the
+        # artifact verbatim as `enc:source_path`, so an absolute path would commit this machine's
+        # home directory and the artifact would stop regenerating identically anywhere else.
+        # (`enc:source_sha256` pins the bytes; the path is caller-supplied text.)
+        ( cd "$REPO" && "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
+            --source "demo/prose-to-formulas-v2/$src.txt" \
             --chain-load "$REPO/ontologies/encoding/encoding.esl" \
             --chain-load "$REPO/ontologies/encoding/claim-kind-alignment.esl" \
             --ranks      "$HERE/ranks$suffix.json" \
@@ -115,7 +119,7 @@ if [[ $REPARSE == 1 ]]; then
             --proposals  "$HERE/proposals$suffix.json" \
             --kinds      "$HERE/kinds$suffix.json" \
             --ns   "urn:eigenius:demo:v2" \
-            --out  "$HERE/$out.esl"
+            --out  "$HERE/$out.esl" )
     done
     echo "NOTE: inference.esl is NOT regenerated — it is the RECORDED derivation."
 fi

@@ -25,6 +25,17 @@
 //!   enc:DecisionPoint    which reading was taken, out of how many, and on whose authority
 //! ```
 //!
+//! and once per document:
+//!
+//! ```text
+//!   reference:Reference       the source work every unit hangs off (minted, or cited by IRI)
+//!   enc:ReasoningStructure    the artifact ROOT — the claims, the source, the bytes parsed
+//! ```
+//!
+//! The root exists so the artifact has a HANDLE: a service returns it, a notebook cell re-opens it,
+//! and a later run has something to supersede (D71 §4.1). Without it the artifact is a bag of
+//! resources whose only membership test is "was in the same file".
+//!
 //! The `ProgramTrace` is what makes this **Derived**: a program (the parser) produced the claim from
 //! a hashed input span. A certificate that cites `derived(claim_iri, P)` therefore breaks the moment
 //! the prose changes and the parser derives a different `P` — which is the whole point.
@@ -43,6 +54,7 @@ use crate::select::Pin;
 const CORE: &str = "urn:eigenius:core";
 const REFL: &str = "urn:eigenius:reflection";
 const ENC: &str = "urn:eigenius:encoding";
+const REF: &str = "urn:eigenius:reference";
 
 /// On whose authority a sentence's reading was taken — the emitted `DecisionPoint` records it.
 pub enum SentenceSelection<'a> {
@@ -55,6 +67,37 @@ pub enum SentenceSelection<'a> {
     Ranked(&'a SelectionOutcome),
     /// The forest offered a single reading — no choice existed to make.
     Sole,
+}
+
+/// Document-level inputs to [`emit_document`] — what is being encoded, from which bytes, under
+/// which IRI prefix.
+pub struct DocumentMeta<'a> {
+    /// IRI prefix the emitted resources live under (e.g. `urn:eigenius:demo:prose`).
+    pub ns: &'a str,
+    /// Where the parsed bytes came from — recorded once, on the root.
+    pub source_path: &'a str,
+    /// SHA-256 of the parsed bytes. A prose edit is then visible on the chain, not only in the
+    /// propositions it changed.
+    pub source_sha256: &'a str,
+    /// The `reflection:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
+    pub timestamp: &'a str,
+    /// The `reference:Reference` for the source work.
+    ///
+    /// `None` MINTS a document-local one at `<ns>:source` and emits it into the artifact — the
+    /// honest record for a plain text file with no bibliographic identity. `Some(iri)` cites an
+    /// existing Reference and emits nothing, so Rule 22's closed-world check does the verifying:
+    /// an IRI that names no chain-resident Reference fails the load rather than conjuring one.
+    pub source_ref: Option<&'a str>,
+}
+
+impl DocumentMeta<'_> {
+    /// The Reference IRI every `enc:source_document` points at — minted or cited.
+    fn reference_iri(&self) -> String {
+        match self.source_ref {
+            Some(r) => r.to_string(),
+            None => format!("{}:source", self.ns),
+        }
+    }
 }
 
 /// One sentence that parsed and whose reading was selected.
@@ -142,29 +185,46 @@ impl std::fmt::Display for EmitError {
 /// `DiscourseUnit` + an `enc:CutItem` — the artifact states what did not encode; it never
 /// silently drops a unit (D67 §5).
 pub fn emit_document(
-    ns: &str,
-    source_path: &str,
-    source_sha256: &str,
-    timestamp: &str,
+    meta: &DocumentMeta<'_>,
     glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
     cuts: &[CutSentence],
 ) -> Result<String, EmitError> {
-    let mut out: Vec<Resource> = glossary.to_vec();
+    let DocumentMeta {
+        ns,
+        source_path,
+        source_sha256,
+        timestamp,
+        ..
+    } = *meta;
+    let doc_iri = meta.reference_iri();
+
+    let mut out: Vec<Resource> = Vec::new();
+    // A minted Reference leads the artifact; a CITED one is already on the chain and must not be
+    // re-emitted here — a second definition of an existing IRI is a redefinition, not a reference.
+    if meta.source_ref.is_none() {
+        let mut r = res(&doc_iri, &[&format!("{REF}:Reference")]);
+        r.set(
+            iri(&format!("{CORE}:description")),
+            Value::String(format!(
+                "The source this encoding was derived from: {source_path} \
+                 (sha256 {source_sha256}). Minted document-locally — the file carries no DOI or \
+                 PMID; pass an existing reference:Reference IRI to cite a bibliographic record \
+                 instead."
+            )),
+        );
+        out.push(r);
+    }
+    out.extend_from_slice(glossary);
+
+    let mut claim_iris: Vec<Value> = Vec::new();
     for s in sentences {
         let n = s.ordinal;
         let unit_iri = format!("{ns}:unit_{n}");
         let scoped_iri = format!("{ns}:scoped_{n}");
         let claim_iri = format!("{ns}:claim_{n}");
 
-        out.push(discourse_unit(
-            ns,
-            n,
-            &s.text,
-            s.span,
-            source_path,
-            source_sha256,
-        ));
+        out.push(discourse_unit(ns, n, &s.text, s.span, &doc_iri));
 
         let mut scoped = res(&scoped_iri, &[&format!("{ENC}:ScopedUnit")]);
         scoped.set(
@@ -220,6 +280,7 @@ pub fn emit_document(
             iri(&format!("{CORE}:description")),
             Value::String(claim_desc),
         );
+        claim_iris.push(Value::ResourceRef(iri(&claim_iri)));
         out.push(claim);
         out.push(trace);
 
@@ -378,14 +439,7 @@ pub fn emit_document(
     for c in cuts {
         let n = c.ordinal;
         let unit_iri = format!("{ns}:unit_{n}");
-        out.push(discourse_unit(
-            ns,
-            n,
-            &c.text,
-            c.span,
-            source_path,
-            source_sha256,
-        ));
+        out.push(discourse_unit(ns, n, &c.text, c.span, &doc_iri));
         let (kind, rationale) = match &c.reason {
             CutReason::Ambiguous { readings } => (
                 "cut_ambiguous",
@@ -427,17 +481,54 @@ pub fn emit_document(
         cut.set(iri(&format!("{REFL}:rationale")), Value::String(rationale));
         out.push(cut);
     }
+
+    // The ROOT, last: it lists the claims, so every IRI it names is defined above it in the same
+    // document. `enc:claims` is `requires`d, so a document that encoded NOTHING still emits the
+    // root with an empty array — the artifact then states "this source yielded no claims", which
+    // is a result, not an absence.
+    let mut structure = res(
+        &format!("{ns}:structure"),
+        &[&format!("{ENC}:ReasoningStructure")],
+    );
+    structure.set(iri(&format!("{ENC}:claims")), Value::Array(claim_iris));
+    structure.set(
+        iri(&format!("{ENC}:document")),
+        Value::ResourceRef(iri(&doc_iri)),
+    );
+    structure.set(
+        iri(&format!("{ENC}:source_path")),
+        Value::String(source_path.to_string()),
+    );
+    structure.set(
+        iri(&format!("{ENC}:source_sha256")),
+        Value::String(source_sha256.to_string()),
+    );
+    structure.set(
+        iri(&format!("{CORE}:description")),
+        Value::String(format!(
+            "The encoding of {source_path}: {} claim(s), {} unit(s) recorded as not encoding.",
+            sentences.len(),
+            cuts.len()
+        )),
+    );
+    out.push(structure);
+
     Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize Eigon-JSON"))
 }
 
 /// The `enc:DiscourseUnit` record — identical for encoded and cut sentences.
+///
+/// `doc_iri` is the `reference:Reference` for the source work. It replaces the former
+/// `enc:section = "<path> (sha256 <hex>)"` string, which put run provenance in a field meant for a
+/// human-readable location within the document ("Results §2.1"). The bytes are now pinned once, on
+/// the root; `enc:section` is left for what it is for and is emitted only when known — which, for a
+/// plain text file, is never.
 fn discourse_unit(
     ns: &str,
     ordinal: usize,
     text: &str,
     span: (usize, usize),
-    source_path: &str,
-    source_sha256: &str,
+    doc_iri: &str,
 ) -> Resource {
     let mut unit = res(
         &format!("{ns}:unit_{ordinal}"),
@@ -460,8 +551,8 @@ fn discourse_unit(
         Value::Integer(span.1 as i64),
     );
     unit.set(
-        iri(&format!("{ENC}:section")),
-        Value::String(format!("{source_path} (sha256 {source_sha256})")),
+        iri(&format!("{ENC}:source_document")),
+        Value::ResourceRef(iri(doc_iri)),
     );
     unit
 }
@@ -517,10 +608,13 @@ mod tests {
 
     fn emit_full(glossary: &[Resource], s: &[ParsedSentence<'_>], cuts: &[CutSentence]) -> String {
         emit_document(
-            "urn:eigenius:test:doc",
-            "test.txt",
-            "deadbeef",
-            "2026-08-11T00:00:00Z",
+            &DocumentMeta {
+                ns: "urn:eigenius:test:doc",
+                source_path: "test.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-08-11T00:00:00Z",
+                source_ref: None,
+            },
             glossary,
             s,
             cuts,
@@ -558,6 +652,107 @@ mod tests {
         assert!(json.contains("urn:eigenius:encoding:authority_sole"));
         assert!(!json.contains("runner_up_skeletons"));
         assert!(json.contains("Sole surviving reading"));
+    }
+
+    /// D71 §4.1 — the artifact has a ROOT. Without it a service has nothing to return, a notebook
+    /// cell nothing to re-open, and a superseding run nothing to point at.
+    #[test]
+    fn the_artifact_is_rooted_at_a_reasoning_structure_listing_its_claims() {
+        let it = item();
+        let json = emit(&[sentence(&it, SentenceSelection::Sole)]);
+        let doc: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let root = doc
+            .as_array()
+            .expect("document is an array")
+            .iter()
+            .find(|r| r["@id"] == "urn:eigenius:test:doc:structure")
+            .expect("the root is emitted");
+        assert_eq!(
+            root["urn:eigenius:encoding:claims"],
+            serde_json::json!(["urn:eigenius:test:doc:claim_1"]),
+            "the root lists the claims it assembled"
+        );
+        assert_eq!(
+            root["urn:eigenius:encoding:document"],
+            serde_json::json!("urn:eigenius:test:doc:source")
+        );
+        assert_eq!(
+            root["urn:eigenius:encoding:source_sha256"],
+            serde_json::json!("deadbeef"),
+            "the bytes are pinned once, on the root"
+        );
+    }
+
+    /// A document that encoded NOTHING still emits the root: "this source yielded no claims" is a
+    /// result, and a caller that got an artifact back must not have to guess whether it ran.
+    #[test]
+    fn a_document_that_encodes_nothing_still_emits_the_root() {
+        let json = emit_full(
+            &[],
+            &[],
+            &[CutSentence {
+                ordinal: 1,
+                text: "Zorblax.".to_string(),
+                span: (0, 8),
+                reason: CutReason::NoParse { oov: vec![] },
+            }],
+        );
+        let doc: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let root = doc
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["@id"] == "urn:eigenius:test:doc:structure")
+            .expect("the root is emitted even with zero claims");
+        assert_eq!(
+            root["urn:eigenius:encoding:claims"],
+            serde_json::json!([]),
+            "an empty claim list, not an absent root"
+        );
+    }
+
+    /// Every unit cites the source WORK by reference, rather than carrying the run's path+sha in
+    /// `enc:section` — a field for a human-readable location inside the document.
+    #[test]
+    fn units_cite_the_source_reference_and_leave_section_alone() {
+        let it = item();
+        let json = emit(&[sentence(&it, SentenceSelection::Sole)]);
+        assert!(json.contains(
+            r#""urn:eigenius:encoding:source_document": "urn:eigenius:test:doc:source""#
+        ));
+        assert!(
+            !json.contains("urn:eigenius:encoding:section"),
+            "section is emitted only when a real section label is known"
+        );
+    }
+
+    /// A CITED reference is not re-emitted: a second definition of a chain-resident IRI is a
+    /// redefinition. Rule 22 then does the verifying — an IRI naming no Reference fails the load.
+    #[test]
+    fn a_cited_reference_is_pointed_at_never_minted() {
+        let it = item();
+        let s = [sentence(&it, SentenceSelection::Sole)];
+        let json = emit_document(
+            &DocumentMeta {
+                ns: "urn:eigenius:test:doc",
+                source_path: "test.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-08-11T00:00:00Z",
+                source_ref: Some("urn:eigenius:reference:lit:chan_2019"),
+            },
+            &[],
+            &s,
+            &[],
+        )
+        .expect("emits");
+        assert!(json.contains(
+            r#""urn:eigenius:encoding:source_document": "urn:eigenius:reference:lit:chan_2019""#
+        ));
+        assert!(
+            !json.contains("urn:eigenius:reference:Reference"),
+            "no Reference resource is emitted when one is cited"
+        );
+        assert!(!json.contains("urn:eigenius:test:doc:source"));
     }
 
     /// A cut sentence lands as its DiscourseUnit + a CutItem naming the reason — never dropped.

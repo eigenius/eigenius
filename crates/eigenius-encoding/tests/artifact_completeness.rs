@@ -28,7 +28,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use eigenius_encoding::{emit_document, CutReason, CutSentence};
+use eigenius_encoding::{emit_document, CutReason, CutSentence, DocumentMeta};
 use eigenius_kernel::dcg::{augment_document_only, NoAbbreviationProposer};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -125,10 +125,13 @@ fn glossary_and_cut_records_load_through_the_kernel() {
     ];
 
     let json = emit_document(
-        "urn:eigenius:test:artifact",
-        "first-page-cleaned.txt",
-        "0000",
-        "2026-08-12T00:00:00Z",
+        &DocumentMeta {
+            ns: "urn:eigenius:test:artifact",
+            source_path: "first-page-cleaned.txt",
+            source_sha256: "0000",
+            timestamp: "2026-08-12T00:00:00Z",
+            source_ref: None,
+        },
         &glossary,
         &[],
         &cuts,
@@ -160,6 +163,21 @@ fn glossary_and_cut_records_load_through_the_kernel() {
         assert!(
             layer.resolve(id).is_some(),
             "glossary resource {id} is on the loaded layer"
+        );
+    }
+    // D71 §4.1 — the root and the minted source Reference load like everything else. The root is
+    // what a service returns and a notebook re-opens, so "it validates" is the load-bearing claim,
+    // not merely "it serialises": `enc:claims` is class-typed and `enc:source_document` is
+    // reference-typed, and both are checked here against the real chain.
+    for id in [
+        "urn:eigenius:test:artifact:structure",
+        "urn:eigenius:test:artifact:source",
+    ] {
+        assert!(
+            layer
+                .resolve(&eigenius_kernel::ontology::Iri::parse(id).unwrap())
+                .is_some(),
+            "{id} is on the loaded layer"
         );
     }
     eprintln!(

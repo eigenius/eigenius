@@ -3,16 +3,20 @@
 *Status: design (not yet implemented). The decision — anaphora is resolved by an **LLM proposer behind
 the kernel felicity oracle**, not a core engine dependency nor a compositional-dynamic-semantics rewrite.
 This doc specifies the three-layer subsystem: the grammar's referent **holes** (D63), the **resolver
-component** — a *step in the D62 `FormalizeDocument` pipeline institution* (§8 of D62), **not its own
-institution** — and the kernel **re-gate** + faithfulness verdict (D61). Builds directly on D63 §5.3
+component** — a *step in the D62 pipeline* (D71 §3), **not its own institution** — and the kernel
+**re-gate** + faithfulness verdict (D61). Builds directly on D63 §5.3
 (anaphora → committed-resource IRI references; the donkey-anaphora Σ-truncation escape hatch) and is the
 first concrete consumer of the D61 faithfulness machinery.*
 
-> **Layering note.** The *dispatched-institution* property (untrusted LLM proposer behind the kernel
-> felicity boundary, like Lean/R/Julia) belongs to the **whole encoding pipeline** — the single D62
-> `FormalizeDocument` institution wraps all of S0–S7. The reference resolver is **one component/step
-> (S3)** inside that pipeline, not a separate institution. Earlier wording in this doc that calls the
-> resolver itself "a dispatched institution" is superseded by this note.
+> **Layering note** (revised `2026-08-19`). The property this doc cares about — an untrusted LLM
+> proposer behind the kernel felicity boundary — belongs to the **whole encoding pipeline**, which
+> wraps all of S0–S7. The reference resolver is **one step (S3)** inside it, never its own
+> institution; that has not changed. What changed is the pipeline's own shape: D62 §8 called it a
+> dispatched institution, and [D71](d71-document-formalization-service.md) §1 replaced that with a
+> **service** over the kernel's `DocumentPipeline`. The trust boundary this doc is built on is
+> unaffected — it was always the kernel re-gate, which is a kernel service and never was
+> institution-provided. Earlier wording calling the resolver itself "a dispatched institution" is
+> superseded.
 
 ## 1. The problem, and the decision
 
@@ -25,8 +29,8 @@ different:
   has relied on — that meaning is **sentence-level and context-free** (lookup → CKY → felicity yields a
   closed `Prop` per sentence, no cross-sentence state). Anaphora is inherently discourse-level.
 
-**Decision (this doc): resolve anaphora with LLM-based machinery, as a post-parse component of the D62
-`FormalizeDocument` pipeline institution (not a separate institution — see the layering note above).**
+**Decision (this doc): resolve anaphora with LLM-based machinery, as a post-parse step of the D62
+pipeline (not a separate institution — see the layering note above).**
 The two rejected alternatives:
 - *Compositional dynamic semantics* (DRT / dynamic predicate logic): thread a discourse context through
   composition, changing the sem type of **everything** to context-passing. Powerful (handles donkey
@@ -191,8 +195,8 @@ faithful*). Therefore:
 ## 7. Decisions — resolved and open
 
 *Resolved:*
-- LLM resolver as a **post-parse component of the D62 `FormalizeDocument` pipeline institution** (not
-  its own institution; not dynamic semantics, not symbolic).
+- LLM resolver as a **post-parse step of the D62 pipeline** (not its own institution; not dynamic
+  semantics, not symbolic).
 - Hole = a **fresh free variable + engine-side context** (`id`/`ty`/`features`), **kernel hole-free** —
   *revised from the original `Exp::Anaphor` kernel node* per the carrier note (`nanoda_lib`/Lean: no
   kernel metavariable). See `docs/notes/d62-d64-open-parse-carrier.md`.

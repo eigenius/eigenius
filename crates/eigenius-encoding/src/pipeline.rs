@@ -55,7 +55,9 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use crate::emit::{emit_document, CutReason, CutSentence, ParsedSentence, SentenceSelection};
+use crate::emit::{
+    emit_document, CutReason, CutSentence, DocumentMeta, ParsedSentence, SentenceSelection,
+};
 use crate::select::load_pins;
 use crate::snapshot::{build_sense_ranker, open_head_and_backend, CELL_BEAM, SENSE_CAP};
 use clap::Parser as ClapParser;
@@ -127,6 +129,12 @@ pub struct Args {
     /// IRI prefix for the emitted resources.
     #[arg(long, default_value = "urn:eigenius:demo:prose")]
     ns: String,
+    /// An existing `reference:Reference` IRI for the source work — every emitted `DiscourseUnit`
+    /// cites it, and the artifact emits no Reference of its own. It must already resolve on the
+    /// chain the artifact loads onto, or Rule 22 rejects the load. Omit to mint a document-local
+    /// `<ns>:source` Reference into the artifact (the right default for a plain text file).
+    #[arg(long)]
+    source_ref: Option<String>,
     /// Where to write the claims layer (units, encoded claims, ProgramTraces, decision points).
     /// Regenerated on every run — this is the layer the prose determines.
     #[arg(long)]
@@ -646,10 +654,13 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         eprintln!("glossary: {} Stage-A resource(s) emitted", glossary.len());
     }
     let json = emit_document(
-        &args.ns,
-        &args.source.display().to_string(),
-        &sha,
-        &args.timestamp,
+        &DocumentMeta {
+            ns: &args.ns,
+            source_path: &args.source.display().to_string(),
+            source_sha256: &sha,
+            timestamp: &args.timestamp,
+            source_ref: args.source_ref.as_deref(),
+        },
         &glossary,
         &parsed,
         &cuts,

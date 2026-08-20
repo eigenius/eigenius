@@ -1,9 +1,10 @@
 // encoding — the D62 encoding-pipeline contract layer.
 //
-// DRAFT (D62 §6 / §11.3). NOT yet wired into kernel/src/bootstrap BOOTSTRAP_CHAIN —
-// add it AFTER `lexicon` (it references lexicon:, reference:, reflection:, eigentt:,
-// institution:) once the pipeline build begins. Subject to compile + felicity-gate
-// validation at that point.
+// NOT in kernel/src/bootstrap BOOTSTRAP_CHAIN, and no longer planned for it (D62 §11.3 said to
+// insert it after `lexicon`). It is loaded as a user layer — by the demo, by the artifact tests,
+// and by any run that emits these classes — which keeps a vocabulary change off the bootstrap
+// manifest and therefore out of the reseed path. Validated by `kernel/tests/encoding_validates.rs`.
+// It references lexicon:, reference:, reflection:, and eigentt:.
 //
 // PURPOSE. The encoding pipeline (D62) turns a document into typed, witnessed reasoning
 // by moving each unit through a per-unit state machine (segment → parse → resolve /
@@ -22,16 +23,8 @@ namespace reflection  = "urn:eigenius:reflection";
 namespace eigentt     = "urn:eigenius:eigentt";
 namespace reference   = "urn:eigenius:reference";
 namespace lexicon     = "urn:eigenius:lexicon";
-namespace institution = "urn:eigenius:institution";
 namespace formats     = "urn:eigenius:core:formats";
 namespace enc         = "urn:eigenius:encoding";
-// Sub-namespaces. ESL has no nested-colon reference syntax, so `runtimes:external`
-// parses as a stray colon — each sub-namespace must be declared and used as its own prefix
-// (the convention `ontologies/reasoning/reasoning.esl` already follows).
-namespace runtimes    = "urn:eigenius:institution:runtimes";
-namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
-namespace enc_env     = "urn:eigenius:encoding:env";
-namespace enc_sig     = "urn:eigenius:encoding:signatures";
 
 // ════════════════════════════════════════════════════════════════════
 // S0 — DiscourseUnit: the parsing unit + provenance
@@ -411,9 +404,9 @@ property enc:confidence : core:float {
 // ════════════════════════════════════════════════════════════════════
 
 class enc:ReasoningStructure {
-    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The chain-resident handle the FormalizeDocument institution returns.";
+    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing.";
     requires enc:claims;
-    recommends enc:document;
+    recommends enc:document, enc:source_path, enc:source_sha256;
 }
 
 property enc:claims : core:resource_array {
@@ -428,33 +421,30 @@ property enc:document : core:resource {
     domain enc:ReasoningStructure;
 }
 
+property enc:source_path : core:string {
+    description = "Where the parsed bytes came from — the run's input location, stated once per document. Run provenance, not bibliography: the WORK is enc:document, and the same work re-parsed from a different file is the same Reference with a different source_path.";
+    domain enc:ReasoningStructure;
+}
+
+property enc:source_sha256 : core:string {
+    description = "SHA-256 of the exact bytes this structure was derived from, so a prose edit is visible on the chain and not only in whichever propositions it happened to change. Previously smuggled into enc:section on every unit, a field meant for a human-readable location within the document; stated once here instead.";
+    domain enc:ReasoningStructure;
+}
+
 // ════════════════════════════════════════════════════════════════════
-// The engine as an institution (D62 §8)
+// NOT an institution (D71)
 // ════════════════════════════════════════════════════════════════════
 //
-// FormalizeDocument is an external (orchestration-hosted) institution: its reasoner runs
-// the S0–S6 pipeline as orchestration components (D31/D56/D60), proposing trees the
-// kernel re-gates. Generation is OnDemand (invoked via FIBER … INTO); output is Derived
-// by construction. The requires_environment IRI is a STUB pending the runtime-env build.
-
-resource enc:FormalizeDocument : institution:Institution {
-    core:short_name = "FormalizeDocument";
-    core:description = "The encoding-engine institution (D62): turns prose units into typed, witnessed EncodedClaims by orchestrating the DCG parser + LLM proposers behind the kernel felicity oracle. Generation institution (Derived); the separate faithfulness/verification half is D61 (deferred).";
-    institution:institution_iri = enc:FormalizeDocument;
-    institution:institution_name = "FormalizeDocument";
-    institution:runtime = runtimes:external;
-    // `institution:requires_environment` is deliberately ABSENT (it is only `recommends`d). It
-    // previously pointed at a stub `enc_env:v1` that no resource defines, so the layer failed to
-    // load at all — a dangling reference is not a placeholder, it is an invalid layer. Add it back
-    // when the runtime environment actually exists.
-}
-
-resource enc:qc_formalize_unit : institution:QueryClass {
-    core:short_name = "qc_formalize_unit";
-    core:description = "OnDemand QueryClass: given a ScopedUnit, run the encoding pipeline (parse → resolve/disambiguate/recover/reformulate) and return an EncodedClaim. Dispatched explicitly via EigenQL FIBER … INTO (D2 §3.5); the result commits to the chain. Failures surface as LexicalGap / CutItem records, never a forced encoding.";
-    institution:query_class = enc:ScopedUnit;
-    institution:result_class = enc:EncodedClaim;
-    institution:dispatch_role = [dispatch:on_demand];
-    institution:query_handler = enc_sig:formalize_unit;
-    institution:institution_ref = enc:FormalizeDocument;
-}
+// This file used to declare `enc:FormalizeDocument` (an institution:Institution) and
+// `enc:qc_formalize_unit` (an OnDemand QueryClass over enc:ScopedUnit), per D62 §8. Both were
+// DELETED on `2026-08-19`: nothing ever implemented `enc_sig:formalize_unit`, and D71 concluded the
+// shape was wrong, not merely unbuilt. Prose formalization has no satisfaction relation of its own
+// (it borrows the kernel validator and the felicity re-gate, which D14 §1.1 excludes from the
+// protocol), no fibre (enc:EncodedClaim is a reflection:DerivedResource, graded in the reasoning
+// fibre), and answers no queries about its results — one of D14 §1.2's four criteria. It is a
+// SERVICE over the kernel's DocumentPipeline, emitting the artifact these classes describe.
+//
+// The institution shape is reserved for D61 faithfulness verification, which does satisfy all four:
+// it declares its own Institution, an AutoOnLoad QueryClass bound to enc:EncodedClaim returning
+// institution:Verdict, and it promotes Derived -> Verified. It gates the vocabulary above without
+// this file declaring anything institution-shaped.
