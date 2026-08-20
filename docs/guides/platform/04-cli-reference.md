@@ -152,7 +152,9 @@ EigenQL syntax: see the [EigenQL guide](../eigenql/README.md).
 
 ### `program-validate <PROGRAM_FILE> [--ontology <FILE>]` (in-process)
 
-Type-check a program. The optional `--ontology` loads supporting class/property declarations before checking.
+Run a program's static checks: the body decodes to a EigenTT term with every referenced class resolved, and the D8 §4 output schemas are bijective. The optional `--ontology` loads supporting class/property declarations first.
+
+This is not a type-check. The kernel runs no EigenTT check on a `program:Program` — the checker has no typing rule for `program:Component` references ([#143](https://github.com/eigenius/eigenius/issues/143)) — so the printed `Declared type` is read off `input_type`/`output_type` and is not verified against the body.
 
 ```bash
 eigenius program-validate ontologies/examples/simple-program.json \

@@ -65,6 +65,7 @@ mod load;
 mod parse;
 pub use parse::ParseConfig;
 mod programs;
+pub use programs::{CHECK_COMPONENT_TEMPLATE, CHECK_OUTPUT_SCHEMA, CHECK_PARSE};
 mod query;
 mod reflect;
 mod tags;

@@ -343,9 +343,13 @@ export function createMcpServer(client: KernelClient): McpServer {
 
   server.tool(
     "eigenius_validate_program",
-    "Type-check a program (Eigon-JSON) against the active layer chain " +
-      "without executing it. Returns the inferred program type and any " +
-      "validation errors.",
+    "Run a program's static checks (Eigon-JSON) against the active layer " +
+      "chain without executing it: body decodes to a EigenTT term, " +
+      "referenced classes resolve, component templates match the input " +
+      "type, output schemas are bijective. Returns which checks ran " +
+      "(checksPerformed), the program's DECLARED type, and any validation " +
+      "errors. This is not a type-check — the kernel runs no EigenTT " +
+      "check on a program, so `valid` does not mean well-typed.",
     {
       json: z.string().describe(
         "Program resource as Eigon-JSON (single object or document).",

@@ -231,7 +231,8 @@ enum Commands {
         explicit_tombstones: Vec<String>,
     },
 
-    /// Type-check a program
+    /// Run a program's static checks (parse + output schemas). Not a
+    /// type-check — see #143.
     ProgramValidate {
         /// Path to program Eigon-JSON file
         #[arg(value_name = "PROGRAM_FILE")]
@@ -1601,7 +1602,10 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
         }
     };
 
-    // Parse and type-check
+    // Static checks only. No EigenTT type-check runs here or anywhere
+    // else for a `program:Program` (#143) — the names below match
+    // `ValidateProgramResponse::checks_performed` so the CLI and the
+    // RPC make the same claim in the same vocabulary.
     match eigenius_kernel::program::expr::parse_program(&program, ctx.head()) {
         Ok((_term, typ)) => {
             // Validate output schemas (bijectivity check, D8 §4)
@@ -1614,12 +1618,28 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
                 }
                 std::process::exit(1);
             }
+            let checks = [
+                eigenius_kernel::server::CHECK_PARSE,
+                eigenius_kernel::server::CHECK_OUTPUT_SCHEMA,
+            ];
 
             if json_output {
-                println!("{{\"status\":\"ok\",\"type\":\"{typ:?}\"}}");
+                let list = checks
+                    .iter()
+                    .map(|c| format!("\"{c}\""))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                println!(
+                    "{{\"status\":\"ok\",\"checks_performed\":[{list}],\"type\":\"{typ:?}\"}}"
+                );
             } else {
-                println!("Program type-checks successfully.");
-                println!("Type: {typ:?}");
+                println!("Static checks passed: {}.", checks.join(", "));
+                println!("Declared type: {typ:?}");
+                println!(
+                    "No EigenTT type-check ran: the checker has no typing rule for \
+                     program:Component references (#143), so this is not a \
+                     well-typedness result."
+                );
             }
         }
         Err(e) => {

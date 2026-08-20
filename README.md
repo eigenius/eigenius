@@ -649,7 +649,7 @@ cargo run -p eigenius-cli -- query 'USING "urn:eigenius:core:Class" MATCH Class(
 # Query with a loaded file
 cargo run -p eigenius-cli -- query --file ontologies/examples/animals.json 'MATCH "urn:eigenius:example:Dog"(?d) { "urn:eigenius:example:name": ?name } RETURN [] { "urn:eigenius:example:name": ?name }'
 
-# Type-check a program
+# Run a program's static checks (parse + output schemas; not a type-check — see #143)
 cargo run -p eigenius-cli -- program-validate ontologies/examples/simple-program.json --ontology ontologies/examples/animals.json
 
 # Execute a program with input data

@@ -244,7 +244,11 @@ export class KernelClient {
   }
 
   /**
-   * Type-check a program against the kernel's layer chain.
+   * Run a program's static checks against the kernel's layer chain.
+   *
+   * `valid` covers exactly the checks listed in `checksPerformed`; no
+   * EigenTT type-check runs on a program (issue #143), so that list
+   * never contains `"type_check"`.
    */
   async validateProgram(
     programJson: string,

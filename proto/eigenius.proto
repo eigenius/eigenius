@@ -34,7 +34,9 @@ service EigeniusKernel {
   // D2 Appendix A for the document shape.
   rpc Query(QueryRequest) returns (QueryResponse);
 
-  // Type-check a program against the context's layer chain.
+  // Run a program's static checks against the context's layer chain
+  // and report which ones ran. This is NOT a type-check: see
+  // `ValidateProgramResponse.checks_performed`.
   rpc ValidateProgram(ValidateProgramRequest) returns (ValidateProgramResponse);
 
   // Execute a program with input data.
@@ -620,9 +622,26 @@ message ValidateProgramRequest {
 }
 
 message ValidateProgramResponse {
+  // True when every check named in `checks_performed` reported no
+  // errors. NOT a well-typedness claim on its own — read
+  // `checks_performed` to learn which checks that verdict covers.
   bool valid = 1;
   repeated ValidationError errors = 2;
-  string program_type = 3;      // Human-readable type
+  // The program's DECLARED type, formatted from `program:input_type`
+  // and `program:output_type`. The kernel derives it from those two
+  // slots; it does not verify that the body inhabits it unless
+  // `checks_performed` contains "type_check".
+  string program_type = 3;
+  // Which checks the kernel actually ran to produce `valid`. Current
+  // names: "parse" (body decodes to a EigenTT term and every
+  // referenced class resolves), "component_template" (D8 template
+  // references against the input type), "output_schema" (D8 §4
+  // bijectivity). "type_check" — EigenTT checking of the body against
+  // `program_type` — is NOT in this list: the checker has no typing
+  // rule for `program:Component` references, so no program that calls
+  // a component can be checked (issue #143). A caller gating on
+  // well-typedness must require "type_check" here, not `valid` alone.
+  repeated string checks_performed = 4;
 }
 
 // --- RunProgram ---

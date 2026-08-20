@@ -187,7 +187,9 @@ if (!validateResp.valid) {
   );
 }
 ok(
-  `program validated as ${validateResp.programType || "(no type returned)"}`,
+  `static checks passed [${
+    validateResp.checksPerformed.join(", ")
+  }]; declared type ${validateResp.programType || "(none returned)"}`,
 );
 console.log();
 

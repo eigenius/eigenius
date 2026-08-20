@@ -16,7 +16,7 @@ The table below covers the eleven the notebook MVP drives. The rest are grouped 
 | `eigen.inspect(iri, options?)` | Resolve a resource by IRI from the active layer | `EigeniusKernel.Inspect` |
 | `eigen.query(eigenql, options?)` | Run an EigenQL query, get an Eigon-CBOR ResultSet document | `EigeniusKernel.Query` |
 | `eigen.load(source, options?)` | Compile + commit a layer (ESL source or Eigon-JSON document) | `EigeniusKernel.Load` |
-| `eigen.validateProgram(program, options?)` | Type-check a program against the active layer chain | `EigeniusKernel.ValidateProgram` |
+| `eigen.validateProgram(program, options?)` | Run a program's static checks against the active layer chain; `checksPerformed` names which ran (no EigenTT type-check — issue #143) | `EigeniusKernel.ValidateProgram` |
 | `eigen.runProgram(program, input, options?)` | Run a program inline against an inline input | `EigeniusKernel.RunProgram` |
 | `eigen.runProgramByIri(programIri, inputIri, options?)` | Run a program already loaded into the chain by IRI against an input also by IRI — the natural "one program × N inputs" shape | `EigeniusKernel.RunProgramByIri` |
 | `eigen.listInstitutions()` | List registered institutions and their declared fiber structure | `EigeniusKernel.ListInstitutions` |

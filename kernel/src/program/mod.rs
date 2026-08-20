@@ -81,7 +81,7 @@ mod tests {
         layer
     }
 
-    /// End-to-end: load a program from JSON, parse to EigenTT, type-check, execute via NbE.
+    /// End-to-end: load a program from JSON, parse to EigenTT, execute via NbE.
     #[test]
     fn end_to_end_identity_program() -> Result<(), Box<dyn std::error::Error>> {
         let (mut ctx, backend) = bootstrap_with_memory_backend()?;
@@ -96,17 +96,11 @@ mod tests {
         let program_json = include_str!("../../../ontologies/examples/simple-program.json");
         let program = eigon_json::parse_document(program_json).unwrap().remove(0);
 
-        // Parse to EigenTT terms
-        let (term, typ) = parse_program(&program, ctx.head()).unwrap();
-
-        // Type-check
-        let typ_val = eval::eval(&typ, &Rho::Nil)?;
-        let mut check_ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(ctx.head()));
-        let result = check::check(&mut check_ctx, &term, &typ_val);
-        assert!(
-            result.is_ok() || result.is_err(),
-            "type check should complete without panic"
-        );
+        // Parse to EigenTT terms. No type-check follows — see
+        // `identity_program_does_not_type_check` for what
+        // `check::check` returns on this program.
+        let (term, _typ) = parse_program(&program, ctx.head()).unwrap();
+        assert!(matches!(term, crate::nbe::term::Exp::Lam(_, _)));
 
         // Execute via NbE
         let mut input = crate::ontology::resource::Resource::new_embedded();
@@ -130,6 +124,48 @@ mod tests {
         assert_eq!(
             result.output.get(&breed_iri).unwrap().as_str(),
             Some("German Shepherd")
+        );
+        Ok(())
+    }
+
+    /// The checker cannot type a program that calls a component, and
+    /// this pins what it does instead.
+    ///
+    /// `parse_apply` encodes `program:function: <component IRI>` as
+    /// `Exp::Var(<iri>)`, and `check_infer`'s `Var` arm resolves names
+    /// in `Gamma` only — there is no path from a component IRI to the
+    /// `component:input_type` / `component:output_type` slots the
+    /// ontology declares. So the identity example, which runs
+    /// correctly (`end_to_end_identity_program`), fails to check.
+    ///
+    /// This is why `ValidateProgram` reports `checks_performed`
+    /// without `"type_check"` (issue #143). If this test starts
+    /// failing because the checker learned to type components, the
+    /// handler in `server/programs.rs` must be wired to
+    /// `check::check` and must add `"type_check"` to the list.
+    #[test]
+    fn identity_program_does_not_type_check() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut ctx, backend) = bootstrap_with_memory_backend()?;
+
+        let animals_json = include_str!("../../../ontologies/examples/animals.json");
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            ctx.add_resource(r).unwrap();
+        }
+        commit_and_advance(&mut ctx, &backend, "animals");
+
+        let program_json = include_str!("../../../ontologies/examples/simple-program.json");
+        let program = eigon_json::parse_document(program_json).unwrap().remove(0);
+        let (term, typ) = parse_program(&program, ctx.head()).unwrap();
+
+        let typ_val = eval::eval(&typ, &Rho::Nil)?;
+        let mut check_ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(ctx.head()));
+        let err = check::check(&mut check_ctx, &term, &typ_val)
+            .expect_err("a component reference has no type in Gamma");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("unbound variable in type context")
+                && msg.contains("urn:eigenius:program:components:Identity"),
+            "expected the component IRI to be the unbound name, got {msg}"
         );
         Ok(())
     }
