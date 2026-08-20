@@ -43,9 +43,12 @@ function languageExtension(cellType: CellType): Extension[] {
       return [javascript({ jsx: false, typescript: true })];
     case "program-run":
     case "chart":
-      // The CodeMirror editor isn't used for program-run / chart
-      // cells (they render via their own form-based editors) — but
-      // to keep this switch exhaustive, return an empty extension list.
+    case "formalize":
+      // The CodeMirror editor isn't used for program-run / chart /
+      // formalize cells (they render via their own editors — formalize
+      // uses a plain textarea, because its source is PROSE and there is
+      // no syntax to highlight) — but to keep this switch exhaustive,
+      // return an empty extension list.
       return [];
   }
 }

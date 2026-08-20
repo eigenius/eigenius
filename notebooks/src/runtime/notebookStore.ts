@@ -637,7 +637,7 @@ function newCellId(): string {
 }
 
 function defaultSourceFor(
-  type: Exclude<CellType, "program-run" | "chart">,
+  type: Exclude<CellType, "program-run" | "chart" | "formalize">,
 ): string {
   switch (type) {
     case "markdown":
@@ -1349,6 +1349,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
         chart_kind: "vertical-bar",
         x_column: "",
         y_column: "",
+      };
+    } else if (type === "formalize") {
+      // Prose, and a doc id that defaults to the cell's own id — stable across
+      // runs, which is what makes a re-run replay its recorded draws rather than
+      // re-ask the model.
+      newCell = {
+        id,
+        type,
+        source: "",
+        doc_id: id,
       };
     } else {
       newCell = { id, type, source: defaultSourceFor(type) };
