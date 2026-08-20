@@ -403,7 +403,9 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // ONE claim identity: the lander names claims exactly as the emitter will, so the
     // `enc:AnaphorBinding` this run records points at resources this run's artifact contains.
     let lander = kind_recorder.as_ref().map(|k| {
-        eigenius_reasoning::DerivedClaimLander::new(&doc_id, k).with_emission_namespace(&args.ns)
+        eigenius_reasoning::DerivedClaimLander::new(&doc_id, k)
+            .with_emission_namespace(&args.ns)
+            .with_source(&format!("{} (sha256 {sha})", args.source.display()))
     });
 
     let mut pipeline = InProcessPipeline::new(head, &lem, &NoAbbreviationProposer, &proposer)

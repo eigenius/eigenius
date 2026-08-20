@@ -44,7 +44,7 @@ resource v2:claim_1 : encoding:EncodedClaim, encoding:Observation {
 
 resource v2:trace_1 : reflection:ProgramTrace {
     reflection:resource = "urn:eigenius:demo:v2:claim_1";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of document paragraph, sentence 0 «MSI cancer models had the exonuclease activity of WRN.»";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 0 «MSI cancer models had the exonuclease activity of WRN.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -87,7 +87,7 @@ resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
 
 resource v2:trace_2 : reflection:ProgramTrace {
     reflection:resource = "urn:eigenius:demo:v2:claim_2";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of document paragraph, sentence 1 «MSI cancer models required the helicase activity of WRN.»";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 1 «MSI cancer models required the helicase activity of WRN.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -135,7 +135,7 @@ resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
 
 resource v2:trace_3 : reflection:ProgramTrace {
     reflection:resource = "urn:eigenius:demo:v2:claim_3";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of document paragraph, sentence 2 «These findings show that WRN is a vulnerability of MSI cancer models.»";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 2 «These findings show that WRN is a vulnerability of MSI cancer models.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 

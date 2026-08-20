@@ -515,7 +515,7 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 | 3 ✅ | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
 | 4 ✅ | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
 | 5a ✅ | Shared emission core (`formalize::emit_from_encoding`) | The demo artifacts regenerate **byte-identically** through the refactored path |
-| 5b | `FormalizeDocument` RPC over that core | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
+| 5b ✅ | `FormalizeDocument` RPC over that core | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
 | 6 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
 | 7 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
 
@@ -589,6 +589,24 @@ emitters that agree until they do not, and since the CLI's artifacts are the dem
 byte-compared fixtures, a served run emitting a slightly different shape would be caught by nothing.
 Gate met — `claims-intact.esl` regenerates **byte-identical** to the committed file through the
 refactored path.
+
+**Slice 5b DONE `2026-08-19`**, in four steps: (i) the lexicon scope threaded through the document
+pipeline — `ParseSentence` had taken one since D65 and `resolve_document` passed `None`
+unconditionally, so accepting `scope`/`profile` on the request and ignoring them would have been a
+lie; (ii) a per-run `ModelConfig` for all SIX untrusted proposers (not four — `augment` and
+`glossary` are proposers too), which also gave `enc:draw_model` its first source; (iii) the
+`DocumentFormalizer` seam plus `EncodingFormalizer`; (iv) the artifact as bytes + content type. Then
+the proto, the handler, the `TaskKind::Formalize` spawn on `spawn_blocking`, `GetFormalizationResult`
+over a CBOR meta blob, and the CLI injection beside the lemmatizer.
+
+**The E2E gate found a real defect on its first run,** which is the argument for writing it at all:
+the served artifact differed from the CLI's in exactly one field per claim. `DerivedClaimLander`
+named the `doc_id` in each `ProgramTrace`'s `reflection:source` — and `doc_id` is the WORKING BRANCH.
+So a durable trace named a prunable branch (§5), and the artifact was not a function of its source:
+the same prose under two doc ids produced two different artifacts, falsifying §5's byte-identity
+claim. Fixed by `with_source("<path> (sha256 <hex>)")` on both drivers — what the claim was actually
+derived from. The demo artifacts regenerate with the corrected provenance; the witness key hashes
+the PROPOSITION, not the provenance, so no justification moved.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been

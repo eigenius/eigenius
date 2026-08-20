@@ -378,6 +378,7 @@ impl DocumentFormalizer for EncodingFormalizer {
             kind_json.as_deref(),
             req,
         )?;
+        arms.source_label = format!("{} (sha256 {sha})", req.source_path);
         // Order matters: `lander` borrows `arms.kinds` for the whole run, so everything that is
         // MOVED out of `arms` has to come out before that borrow starts.
         let proposer = arms.proposer.take().unwrap_or_else(|| Box::new(NoProposer));
@@ -505,6 +506,8 @@ struct Arms {
     /// Live recorders, held so their draws can be harvested after the run.
     #[cfg(feature = "use-llm")]
     rec: LiveRecorders,
+    /// What each trace names as the derivation's source — path + sha, never the branch id.
+    source_label: String,
 }
 
 #[cfg(feature = "use-llm")]
@@ -633,6 +636,7 @@ impl Arms {
             kinds,
             #[cfg(feature = "use-llm")]
             rec,
+            source_label: String::new(),
         })
     }
 
@@ -642,6 +646,7 @@ impl Arms {
         self.kinds.as_ref().map(|k| {
             eigenius_reasoning::DerivedClaimLander::new(&req.doc_id, &**k)
                 .with_emission_namespace(&req.ns)
+                .with_source(&self.source_label)
         })
     }
 

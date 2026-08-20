@@ -39,6 +39,7 @@ eigenius-lean = { path = "../crates/eigenius-lean" }
 # alongside Lean so AutoOnLoad ValidateJustification on every
 # ReasoningSentence commit dispatches as a direct function call.
 eigenius-reasoning = { path = "../crates/eigenius-reasoning" }
+eigenius-encoding = { path = "../crates/eigenius-encoding" }
 # D52: the measurement-statistics institution's validator runs
 # in-process — deterministic IEEE-754 numerics (ndarray + statrs); no
 # IPC, no orchestrator round-trip. Linked in alongside Reasoning so

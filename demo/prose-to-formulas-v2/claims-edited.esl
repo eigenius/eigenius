@@ -46,7 +46,7 @@ resource v2:claim_1 : encoding:EncodedClaim, encoding:Finding {
 
 resource v2:trace_1 : reflection:ProgramTrace {
     reflection:resource = "urn:eigenius:demo:v2:claim_1";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of document paragraph-edited, sentence 0 «MSI cancer models did not have the exonuclease activity of WRN.»";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a), sentence 0 «MSI cancer models did not have the exonuclease activity of WRN.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -89,7 +89,7 @@ resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
 
 resource v2:trace_2 : reflection:ProgramTrace {
     reflection:resource = "urn:eigenius:demo:v2:claim_2";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of document paragraph-edited, sentence 1 «MSI cancer models required the helicase activity of WRN.»";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a), sentence 1 «MSI cancer models required the helicase activity of WRN.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -153,7 +153,7 @@ resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
 
 resource v2:trace_3 : reflection:ProgramTrace {
     reflection:resource = "urn:eigenius:demo:v2:claim_3";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of document paragraph-edited, sentence 2 «These findings show that WRN is a vulnerability of MSI cancer models.»";
+    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph-edited.txt (sha256 4fdc8011b2d4fcc566ba0a0efbcee3b23733e544f297ff5bd8902119b0dc412a), sentence 2 «These findings show that WRN is a vulnerability of MSI cancer models.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 

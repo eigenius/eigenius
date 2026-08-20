@@ -1010,6 +1010,7 @@ dependencies = [
  "clap",
  "eigenius-config",
  "eigenius-embedder-candle",
+ "eigenius-encoding",
  "eigenius-julia",
  "eigenius-kernel",
  "eigenius-lean",

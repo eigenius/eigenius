@@ -2356,6 +2356,14 @@ async fn cmd_serve(
     });
 
     let parse_config = build_parse_config(morphy_dict);
+    // D71 §7.1 — the kernel declares `DocumentFormalizer` and cannot implement it (the artifact
+    // emitter lives in crates that depend on it), so this binary, which links both, constructs the
+    // impl. Same injection as the lemmatizer just above, for the same cycle reason. It reuses that
+    // lemmatizer: one Morphy load serves both the single-sentence parse path and formalization.
+    let formalizer: std::sync::Arc<dyn eigenius_kernel::dcg::formalizer::DocumentFormalizer> =
+        std::sync::Arc::new(eigenius_encoding::formalize::EncodingFormalizer::new(
+            std::sync::Arc::clone(&parse_config.lemmatizer),
+        ));
 
     if let Err(e) = eigenius_kernel::server::start_server(
         port,
@@ -2364,6 +2372,7 @@ async fn cmd_serve(
         in_process_institutions,
         embedder_cfg,
         parse_config,
+        Some(formalizer),
     )
     .await
     {

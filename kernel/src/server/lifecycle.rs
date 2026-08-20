@@ -367,6 +367,10 @@ pub async fn start_server(
     in_process_institutions: Vec<Arc<dyn crate::institution::runtime::Institution>>,
     embedders: EmbedderStartupConfig,
     parse_config: super::ParseConfig,
+    // D71 §7.1 — the `FormalizeDocument` implementation. `None` serves a kernel whose
+    // `FormalizeDocument` returns `unimplemented`, the honest answer for a build without the
+    // crates that can emit an artifact.
+    formalizer: Option<Arc<dyn crate::dcg::formalizer::DocumentFormalizer>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -446,6 +450,9 @@ pub async fn start_server(
     // D63/GH#97 Lever 1 — install the ParseSentence parse config (lemmatizer + cap/beam + opt-in
     // reranker). The binary injects a real lemmatizer here (the kernel can't depend on WordNet).
     service = service.with_parse_config(parse_config);
+    if let Some(f) = formalizer {
+        service = service.with_formalizer(f);
+    }
 
     // Phase 20a.1+: pre-register every in-process institution the
     // binary links (Lean today, future verification institutions
