@@ -2,10 +2,10 @@
 
 **Status:** Declared design anchors from an external expert consultation in categorial /
 type-theoretic semantics, plus our synthesis. Supersedes the tentative "uniform opaque
-binary" plan in [d62-encoding-implementation-plan.md](d62-encoding-implementation-plan.md)
-§2d. The question that prompted this is in
-[d62-subordinator-expert-question.md](d62-subordinator-expert-question.md). Not yet
-implemented — the two forks in §4 are the user's calls.
+binary" plan that the D62 implementation plan carried in its §2d (that plan and the three-round
+expert correspondence that prompted this note were deleted `2026-08-19`; this note is the surviving
+record of their conclusions). Not yet implemented — the two forks in §4 are the user's calls, and
+`because`/`although`/`while` remain absent from the closed-class lexicon.
 
 ## 1. What the expert confirmed
 

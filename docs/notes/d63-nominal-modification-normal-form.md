@@ -274,7 +274,7 @@ lexicon" failure (Constant et al. 2017).
 
 **Resolution — hyphenate in the CNL, NOT inject an alias (corrected `2026-07-09`).** The cleaner fix, since
 the CNL is authored input we control, is to **hyphenate the term: `synthetic-lethal`** — a style-guide rule
-([d62-controlled-language-style-guide.md](d62-controlled-language-style-guide.md), "Hyphenate lexicalized
+([controlled-english-style-guide.md](../method/controlled-english-style-guide.md), "Hyphenate lexicalized
 compound modifiers"). The D63 hyphen morphology then reads it as **one predicative compound adjective**
 (head `lethal`, like `double-stranded`), so the two-adjective masquerade never arises. **Zero parser code,
 no lexicon injection.** Measured (Derived, v3 `first-page-cnl-v3.txt`, merged kernel + Rust 1.97): S5 drops

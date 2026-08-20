@@ -259,7 +259,7 @@ post-fix.
 `synthetic lethal` is not `synthetic` ∧ `lethal`; it is a lexicalized domain term (the attributive form of
 *synthetic lethality*, C4280020). Unhyphenated it masqueraded as a two-adjective stack — `synthetic` and
 `lethal` each seeded with adjective *and* noun senses — which is what drove S5's fork. **Fix: hyphenate it
-in the CNL** (`synthetic-lethal`, a style-guide rule — [d62-controlled-language-style-guide.md](d62-controlled-language-style-guide.md)),
+in the CNL** (`synthetic-lethal`, a style-guide rule — [controlled-english-style-guide.md](../method/controlled-english-style-guide.md)),
 so the D63 hyphen morphology reads it as one compound adjective. **Zero parser code.** Measured on the v3
 page (`first-page-cnl-v3.txt`; re-confirmed on the merged kernel + Rust 1.97, #101 parse-neutral):
 

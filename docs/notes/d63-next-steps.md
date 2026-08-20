@@ -37,7 +37,7 @@ grouped by the Method (run) phasing — this section is the lens to read them th
 - **Reshape Phase A** — `kind_of` axiom + unified `kind_raised_nps` (bare mass + plural, incl.
   compounds). Committed `04bab3d`; validated over full-UMLS re-measure (**OPEN 35 → 0**, any-parse ~61%).
 - **Reshape Phase B** — retired the `Quantification` hole carrier; `EntityRef`/anaphora untouched;
-  `d62-bare-plural-quantification.md` marked superseded. Green. *(uncommitted)*
+  the bare-plural quantification note marked superseded (and deleted `2026-08-19`). Green.
 
 ## Phase 1 — the Rust algorithm (in order)
 - [x] **Stage A · preprocess** — extract (Schwartz-Hearst) / ground / emit glossary aliases;

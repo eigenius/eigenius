@@ -1301,7 +1301,9 @@ fn vp_adjunct_preposition_takes_quantified_and_compound_objects() {
 /// Lever-3 raise interacting with the modal's base VP). Confirms S4's `can … for <obj>` shape is
 /// grammar-complete on the clean lexicon: the modal `can` takes the base VP `affect BRCA1 to a gene`
 /// (the `to`-PP attaches to the base VP, then the modal wraps it). (S4's full-lexicon gap is beam/sense
-/// scale — uniform with S1/S3/S5 — not a grammar gap; see d63-cnl-parse-levers-plan.)
+/// scale — uniform with S1/S3/S5 — not a grammar gap; the CNL parse-levers plan recording that
+/// measurement was deleted 2026-08-19, its surviving conclusions in
+/// `docs/design/d63-dcg-engine-english-grammar.md` §11.)
 #[test]
 fn modal_clause_takes_a_vp_adjunct_pp() {
     let (_layer, index) = index_over_bootstrap();
