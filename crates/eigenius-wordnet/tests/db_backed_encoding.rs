@@ -59,14 +59,50 @@ use eigenius_kernel::storage::PersistentBackend;
 use eigenius_storage_rocksdb::RocksStore;
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
-/// Default snapshot location — the out-of-tree `db-snapshot/` sibling of the repo (where
-/// `scripts/reseed-lexicon-db.sh` / the native reseed write, `SNAPSHOT_ROOT = <repo>/../db-snapshot`),
-/// resolved from `CARGO_MANIFEST_DIR` (portable, CWD-independent) rather than a hardcoded home path —
-/// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
-const DEFAULT_SNAPSHOT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../db-snapshot/wordnet-umls-aligned-v3-2026-07-16-quant"
-);
+/// Where snapshots live — the out-of-tree `db-snapshot/` sibling of the repo (where
+/// `scripts/reseed-lexicon-db.sh` / the native reseed write), resolved from `CARGO_MANIFEST_DIR`
+/// (portable, CWD-independent) rather than a hardcoded home path — same convention as `DICT` below.
+const SNAPSHOT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../db-snapshot");
+
+/// The newest snapshot under [`SNAPSHOT_ROOT`], or `None` when there is none.
+///
+/// This used to name one snapshot directory as a `const`, which rots: every bootstrap edit
+/// retires the current snapshot and the reseed writes a new one under a new date-stamped name.
+/// The pin outlived its directory by five weeks, and because a missing store SKIPs (see
+/// [`snapshot_path`] — CI has no snapshots at all, so it must), every run without an explicit
+/// `EIGENIUS_DB_SNAPSHOT` reported green having executed nothing.
+///
+/// The selection rule is `scripts/measure-parse-rate.sh`'s, verbatim: newest by mtime among
+/// `wordnet-umls-*`, which is `ls -1dt "$SNAPSHOT_ROOT"/wordnet-umls-* | head -1`. Keeping one
+/// rule for both callers is the point — a default that picks a *different* snapshot than the
+/// gated measurement is how a test and its gate end up disagreeing about which experiment ran.
+fn newest_snapshot() -> Option<PathBuf> {
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(SNAPSHOT_ROOT).ok()?.flatten() {
+        let path = entry.path();
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("wordnet-umls-")
+        {
+            continue;
+        }
+        // A directory without `CURRENT` is not a RocksDB store (a partial reseed, an unpacked
+        // archive). Filtering here rather than in `snapshot_path` means a half-written snapshot
+        // does not mask the newest usable one just by being newer.
+        if !path.join("CURRENT").exists() {
+            continue;
+        }
+        let mtime = match entry.metadata().and_then(|m| m.modified()) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
+            best = Some((mtime, path));
+        }
+    }
+    best.map(|(_, p)| p)
+}
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
 const DICT: &str = concat!(
@@ -111,17 +147,32 @@ const PARSE_BUDGET: usize = 60;
 /// The snapshot store path, or `None` (→ skip) when neither the env override nor the default
 /// exists (a valid RocksDB store has a `CURRENT` file).
 fn snapshot_path() -> Option<PathBuf> {
-    let p = std::env::var("EIGENIUS_DB_SNAPSHOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SNAPSHOT));
-    if p.join("CURRENT").exists() {
-        Some(p)
-    } else {
+    if let Ok(explicit) = std::env::var("EIGENIUS_DB_SNAPSHOT") {
+        let p = PathBuf::from(explicit);
+        if p.join("CURRENT").exists() {
+            return Some(p);
+        }
+        // An explicit override that does not resolve is an operator error, not a CI environment
+        // without snapshots — say so precisely instead of reporting the generic autodetect miss.
         eprintln!(
-            "SKIP db_backed_encoding: no RocksDB store at {} (set EIGENIUS_DB_SNAPSHOT)",
+            "SKIP db_backed_encoding: EIGENIUS_DB_SNAPSHOT={} is not a RocksDB store (no CURRENT)",
             p.display()
         );
-        None
+        return None;
+    }
+    match newest_snapshot() {
+        Some(p) => {
+            eprintln!("db_backed_encoding: autodetected snapshot {}", p.display());
+            Some(p)
+        }
+        None => {
+            eprintln!(
+                "SKIP db_backed_encoding: no wordnet-umls-* RocksDB store under {} \
+                 (run scripts/reseed-lexicon-db.sh, or set EIGENIUS_DB_SNAPSHOT)",
+                SNAPSHOT_ROOT
+            );
+            None
+        }
     }
 }
 
