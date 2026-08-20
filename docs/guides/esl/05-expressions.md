@@ -61,7 +61,7 @@ The optional trailing `{ ... }` config block becomes a `component_argument` reso
 
 **Type-check.** The component's declared input/output type informs the check.
 
-**Evaluation.** In `IO` capability mode, the component dispatcher invokes the registered handler. In `Pure`/`Read` mode, the application stays neutral — the program type-checks but doesn't run.
+**Evaluation.** Under an `EvalCtx::Effectful` whose hooks carry a component registry (`InstitutionEngine::for_io`), the dispatcher invokes the registered handler. Under `EvalCtx::Pure`, or an effectful context with no registry, the application stays neutral — the program type-checks but doesn't run.
 
 See [chapter 8](08-capability-modes.md) for the per-mode behaviour.
 
@@ -84,7 +84,7 @@ A trailing config block on a decide call is a compile error.
 Under D14 a `Comorphism` is a typed ontology resource (not a callable function). ESL has no expression-position syntax for comorphism dispatch — `cap:dock_to_assay(input)` is *not* a valid call form. Three ways to use a comorphism from ESL:
 
 1. **Apply the transformation Component directly** — the comorphism's `transformation` is an ordinary EigenTT Component. If your program already has the typed payload, call it: `let ic50 : core:float = cm_arrhenius(delta_g);`.
-2. **Translate inside an EigenQL `FIBER`** — comorphism coercion in FIBER param values runs the four-step extract → transform → reify pipeline (see [EigenQL §7.5](../eigenql/07-fiber-clauses.md) and [§8.6](../eigenql/08-institutions.md)).
+2. **Translate inside an EigenQL `FIBER`** — comorphism coercion in FIBER param values runs the four-step extract → transform → reify pipeline (see [EigenQL §7.5](../eigenql/08-fiber-clauses.md) and [§8.6](../eigenql/09-institutions.md)).
 3. **Wrap as a Component-implemented OnDemand QueryClass and dispatch via FIBER.** A QueryClass whose `implementation` is a Component IRI runs `extract → component → reify` automatically; EigenQL FIBER is the surface that reaches it.
 
 See [chapter 9](09-institutions.md) for the rationale.

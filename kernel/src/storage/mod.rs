@@ -267,8 +267,8 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     ///
     /// Phase 14b: `store_layer` writes the bloom atomically alongside
     /// the layer's other entries; `BloomCache::get_or_load` reads it
-    /// here on cache miss. Sync surface to match `get_head` /
-    /// `set_head` and the rest of the hot-path read API.
+    /// here on cache miss. Sync surface, like the rest of the hot-path
+    /// read API.
     fn load_bloom(
         &self,
         layer: &LayerId,
@@ -288,9 +288,9 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     //
     // Branches are named pointers into the layer DAG. The kernel never
     // tracks "the head" beyond per-branch refs — `crate::lattice::update_branch`
-    // is the only sanctioned write path. The `head` key set by `set_head`
-    // remains for the legacy single-head boot path; future migration folds
-    // it into `branch:main`.
+    // is the only sanctioned write path. `get_head` / `set_head` and the
+    // `head` key they used are gone — the persistent backends write no
+    // such key, and `branch:main` is the boot discriminator.
 
     /// Read the current head of `branch`. Returns `None` if the branch
     /// doesn't exist; callers wanting to create a new branch pass
@@ -437,10 +437,14 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
         layer_id: &LayerId,
     ) -> Result<(), StorageError>;
 
-    /// Remove a single cache entry. Used by future cache-management
-    /// surfaces; v1 doesn't expose this on the CLI but the primitive
-    /// is needed by tests and by GC paths that prune entries pointing
-    /// at swept layers.
+    /// Remove a single cache entry. Not exposed on the CLI.
+    ///
+    /// The only non-test caller is `layer::consolidate`, which prunes
+    /// the entries whose `layer_id` falls inside a consolidated range.
+    /// **No GC path calls it**: `gc::collect` sweeps layers without
+    /// touching this cache, so an anchored-commit entry can outlive the
+    /// layer it names and the probe will hand back an id that no longer
+    /// resolves. Tracked as GAP-05-07 in `books/tutorial`.
     fn delete_anchored_commit(
         &self,
         content_hash: &crate::layer::ContentHash,

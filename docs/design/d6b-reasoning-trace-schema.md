@@ -39,6 +39,23 @@ The trace type system mirrors the expression language (D3). Each expression form
 | `Var` | (no trace) | Variable lookup, no computation |
 | `Literal` | (no trace) | Constant, no computation |
 
+> **As built (verified 2026-08-20 at `b251c9e`).** Three corrections to this table, from
+> `kernel/src/program/trace.rs`'s `Trace` enum and `trace_to_resource`:
+>
+> - **`ComorphismTrace` is missing from the table.** The evaluator emits one:
+>   `Trace::Comorphism { comorphism_iri, source_trace, target_iri, target_class }`, built in
+>   `nbe/eval/tracer.rs` for a D14 §9.3 comorphism dispatch and rendered under
+>   `reflection:ComorphismTrace`. It records which comorphism ran, the source expression's
+>   trace, and the chain IRI and class the kernel committed the produced target resource at.
+> - **`PureTrace` is dead.** `Trace::Pure` has a rendering arm and an accumulator arm, and
+>   no production constructor — the only site that builds one is a unit test. A pure
+>   (deterministic, non-IO) `Apply` produces a **`ComponentTrace`**, the same node kind as an
+>   IO `Apply`; `dispatch_component` returns `Some(ComponentTrace)` on both branches. The
+>   `Apply (pure)` row above therefore does not describe any node the evaluator emits.
+> - **`EmptyTrace` and `FieldTrace` are missing.** `trace_to_resource` renders a typed
+>   `reflection:EmptyTrace` for a positional slot whose evaluation was pure, and an array of
+>   typed `reflection:FieldTrace` entries for a `Construct`'s fields.
+
 `SeqTrace` is the generic structural join: any expression form without a
 dedicated trace type (`Pair`, `Id`, constructor arguments, the two curried
 applications of one `Reduce` step, …) contributes its children's traces
@@ -174,6 +191,13 @@ The atomic unit of traced IO computation. This is the cache identity for memoiza
 ```
 
 ComponentTraces get `@id` (content-addressed) because they are the memoization cache entries. Other trace types are embedded (no `@id`) — they exist only as part of the trace tree.
+
+> **As built (verified 2026-08-20 at `b251c9e`).** No trace node carries an `@id`,
+> `ComponentTrace` included. Every arm of `trace_to_resource`
+> (`kernel/src/program/trace.rs`) builds its node with `Resource::new_embedded()`. The
+> content-addressed key exists — `compute_trace_key` — but it is the `TraceStore` map key,
+> not a chain identity on the rendered node. The same correction applies to §9's "Which
+> traces get `@id`" row.
 
 ### 3.3 PureTrace
 
@@ -495,6 +519,24 @@ The resource's *effective* epistemic status is the strongest in its `is_a`:
 ## 8. Trace-Based Memoization (connection to D6)
 
 Only **ComponentTraces** participate in memoization. They are the only traces with `@id` (content-addressed) because they represent actual computation with external effects.
+
+> **As built (verified 2026-08-20 at `b251c9e`).** The first sentence holds; the reason
+> given for it is inverted, and so is §9's "Memoization scope" row ("only IO needs
+> caching"). Cache routing is **determinism-gated** per D21 §3.3, not IO-gated, and the two
+> kinds of component take opposite paths in
+> `institution::eval_hooks::dispatch_component`:
+>
+> - an **IO** component uses the D21 §3.2 positional per-task replay slot, keyed by
+>   `(session_id, task_id, step_seq)` through `TaskContext`, and **never consults the
+>   content-addressed `TraceStore`** — it neither reads nor writes it;
+> - a **deterministic (non-IO)** component is the only kind that reads and writes the
+>   `TraceStore`, because a content address is sound only when the component is a function
+>   of its input.
+>
+> So the store this section describes serves precisely the components the section says do
+> not need it. The "Changed prompt" row is also unreachable as written: `compute_trace_key`
+> hashes the component IRI and the input only, and `argument_hash` is `None` at both
+> construction sites, so changing the argument does not miss the key — it collides.
 
 | Scenario | Behavior |
 |----------|----------|

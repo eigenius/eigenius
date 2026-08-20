@@ -57,7 +57,9 @@ The full dispatch table is at [D52 §5.4](../../../design/d52-measurement-statis
 
 ## The four-step `validate_analysis_plan` check
 
-AutoOnLoad fires `validate_analysis_plan` on every `StatisticalAnalysisPlan` commit. The kernel rejects the commit if any step fails.
+AutoOnLoad fires `validate_analysis_plan` on a `StatisticalAnalysisPlan` **that arrives through the Load RPC**. The kernel rejects the commit if any step fails.
+
+The qualifier is load-bearing. The institution's three `QueryClass` resources declare `dispatch_role = [dispatch:auto_on_load]` and nothing else, and the `autoonload_dispatch` phase appears in exactly one canned commit pipeline, `PipelineKind::WithInstitutions`, which only `Load` selects (`kernel/src/server/load.rs`). A plan committed by any other route — `FIBER INTO`, the output of a program run, a reflection commit — goes through `PipelineKind::WithRetroactive`, which has no `autoonload_dispatch` phase. Such a plan is stored, is never recomputed, and carries no `Verdict` and no `StatisticalAnalysisResult`. Nothing later notices: there is no sweep that revisits ungated plans, and no query distinguishes a gated plan from an ungated one.
 
 1. **Resolve + decode the SampleSet.** Read the claim's `sample_set` IRI, resolve to a `SampleSetResource` on the chain, read its `sample_set_value` (a chain-mirrored `Bundle(...)` inductive), decode the 9 args into a typed `DecodedBundle` Rust struct (randomization, blocking, factor, replication, repeated_measures, units, columns, sample_map, observations). Malformed bundles produce structured diagnostics naming the offending slot.
 
@@ -65,9 +67,11 @@ AutoOnLoad fires `validate_analysis_plan` on every `StatisticalAnalysisPlan` com
 
 3. **Dispatch on the product position.** Match on the bundle's `(randomization, blocking, factor, repeated_measures)` ctor names, pick one of the seven dispatch arms (or fall through to `MethodComparisonAnalysisPlan` if the claim's `is_a` carries that marker). Each arm decodes the observations payload per its expected shape, runs the matching numerics routine, and returns a `(statistic, p_value, diagnostic_note)` tuple.
 
-4. **Check the §7.4 epistemic-scope and emit the verdict.** Walk the claim's `canonical_proposition`'s head predicate, look up its `is_a` markers (`PopulationLevel` / `MeasurementLevel`), and confirm the SampleSet's replication kind admits propositions of that scope ([§7.4](#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions)). Compare the test's p-value against `alpha` (halved if OneSidedWitnessed). Emit a `Verdict::Holds` resource if `p < alpha`, else `Verdict::Fails` with a structured `AlphaNotCrossed` diagnostic.
+4. **Check the §7.4 epistemic-scope and emit the verdict.** Walk the claim's `canonical_proposition`'s head predicate, look up its `is_a` markers (`PopulationLevel` / `MeasurementLevel`), and confirm the SampleSet's replication kind admits propositions of that scope ([§7.4](#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions)). Compare the test's p-value against `alpha` (halved if OneSidedWitnessed), and emit the outcome as **two** resources.
 
-All four must pass for `Verdict::Holds`. Any failure produces `Verdict::Fails` with a typed diagnostic; the commit is rejected. The Holds verdict's resource carries the computed statistic + p-value in the standard `(stats:computed_statistic, stats:computed_p_value)` slots, plus any per-dispatch diagnostic note (e.g., the SplitPlot omnibus diagnostic naming which of three F-tests produced the reported p-value, or the dual-verdict note from §7.2 enumerating both with-exclusion and without-exclusion numerics).
+**The gate verdict and the statistical decision are different things.** The `Verdict` the gate emits attests only that the plan was structurally runnable: parameters well formed, dispatch matched, test executed. It is `Holds` for a test that did not reject, too. The per-effect statistical decision rides on a separate `stats:StatisticalAnalysisResult` derivation at `{plan_iri}:result:{effect_name}`, in its `stats:verdict_ctor` property — `Holds` when that effect rejected under the plan's alpha, `Fails` with an `AlphaNotCrossed: computed p = …, threshold alpha = …` note when it did not. A non-rejecting result is a first-class chain artifact rather than a failed commit; the chain attests the negative result. Only a per-effect `Holds` carries a `canonical_proposition`, which is what keeps a non-rejecting result from admitting an `IsDerivedAs` witness.
+
+A step that fails before the test runs is different again: it produces a gate `Verdict::Fails` carrying a diagnostic string and no `StatisticalAnalysisResult` at all, and the commit is rejected. Both resources carry the computed statistic and p-value in the standard `(stats:computed_statistic, stats:computed_p_value)` slots, plus any per-dispatch note — the SplitPlot omnibus diagnostic naming which of three F-tests produced the reported p-value, say, or the §7.2 dual-verdict note enumerating both with-exclusion and without-exclusion numerics.
 
 ## The four opinionated stances (§7 hardenings)
 
@@ -77,7 +81,7 @@ The prior-art survey identified four field-wide conflicts where competing standa
 
 `directionality` defaults to `TwoSided()`. To assert `OneSidedWitnessed(witness_iri)`, the claim must reference a chain resource carrying `is_a stats:ImpossibilityWitness` — a marker class declaring "the inverse direction of this hypothesis is physically or mathematically impossible within the system under study" (e.g., a half-life cannot be negative; a probability cannot exceed 1).
 
-The verifier admits the one-sided p-value path (halve the two-sided p for the alpha comparison) only when the witness IRI resolves to such a resource. The witness's structural existence on chain — *not* the test statistic's sign — is what authorizes the halving. If the witness IRI doesn't resolve, or resolves to a resource without the `ImpossibilityWitness` marker, the claim is rejected with a structured `MissingImpossibilityWitness` diagnostic.
+The verifier admits the one-sided p-value path (halve the two-sided p for the alpha comparison) only when the witness IRI resolves to such a resource. The witness's structural existence on chain — *not* the test statistic's sign — is what authorizes the halving. If the witness IRI doesn't resolve, or resolves to a resource without the `ImpossibilityWitness` marker, the claim is rejected with a diagnostic naming the witness IRI and the §7.1 requirement.
 
 F-based dispatches (Factorial, RCBD, SplitPlot, RepeatedMeasures) reject `OneSidedWitnessed` outright: F-statistics are intrinsically non-negative, so the one-sided / two-sided distinction doesn't refine them.
 
@@ -224,7 +228,7 @@ The high-level shape, modeled on the IC50 fixture:
    }
    ```
 
-4. **Commit.** Load the fixture (`eigenius load <doc>`). The statistics institution's `validate_analysis_plan` AutoOnLoad gate fires automatically on every `StatisticalAnalysisPlan` commit; the verdict is admitted as a new `Verdict` resource on chain. Failed claims are rejected at commit with a structured diagnostic.
+4. **Commit.** Load the fixture with `eigenius load <doc>` — and note that `load` is the only route that runs the gate at all (see [the four-step check](#the-four-step-validate_analysis_plan-check)). The gate emits a `Verdict` resource plus one `StatisticalAnalysisResult` per effect. A claim that cannot be run is rejected at commit with a diagnostic string on the `Verdict`.
 
 ## Phase-completeness matrix
 
@@ -274,11 +278,13 @@ Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-s
 
 - **`Verdict::Fails` with `AlphaNotCrossed`** — the computed p-value didn't cross `alpha`. The diagnostic names the actual p; check (a) whether the SampleSet has enough replicates to power the test, (b) whether the variance assumption matches the data shape (try `WelchUnequal` for heteroscedastic-looking samples), (c) whether the effect size you asserted is realistic.
 - **`Verdict::Fails` with `EpistemicScopeViolation`** — your SampleSet's replication is `TechnicalWithinRun` but the claim's `canonical_proposition`'s head predicate isn't marked `is_a stats:MeasurementLevel`. Either gather biological replicates and recommit the SampleSet, or assert against a measurement-scope predicate (`HasLowIC50_OnThisBatch` rather than `HasLowIC50`).
-- **`Verdict::Fails` with `MissingImpossibilityWitness`** — you used `OneSidedWitnessed(witness_iri)` but the IRI doesn't resolve to a chain resource, or it resolves to a resource without `is_a stats:ImpossibilityWitness`. Either commit the witness resource with the marker, or use `TwoSided()`.
+- **A `Verdict::Fails` naming an `OneSidedWitnessed` witness** — the IRI doesn't resolve to a chain resource, or it resolves to a resource without `is_a stats:ImpossibilityWitness`. Either commit the witness resource with the marker, or use `TwoSided()`.
 - **`Verdict::Fails` with `WrongTestForDesign`** — the bundle's product position has no dispatch arm. Either the SampleSet smart constructor produces a position the verifier doesn't yet support (check the [phase-completeness matrix](#phase-completeness-matrix)), or the macro is being misused (e.g., a `Bundle(...)` literal with the wrong axis ctors). The diagnostic prints the actual position tuple.
-- **`Verdict::Fails` with `MalformedSampleSet`** — the SampleSet's `sample_set_value` couldn't be decoded as a `Bundle(...)`. Usually means a smart constructor was used incorrectly (wrong number of args, wrong axis ctor names). Compare against the smart-constructor signatures in [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
+- **A `Verdict::Fails` naming the SampleSet or an axis slot** — the SampleSet's `sample_set_value` couldn't be decoded as a `Bundle(...)`. Usually means a smart constructor was used incorrectly (wrong number of args, wrong axis ctor names). Compare against the smart-constructor signatures in [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 - **`Verdict::Fails` with `OutlierExclusion not yet wired for {dispatch}`** — you asserted a non-`Identity` exclusion functor on a dispatch position that doesn't yet support it. Either use `Identity()` for now, or follow the GitHub issue link in the diagnostic to track the extension.
-- **Claim accepted but downstream D39 sentence fails with `NoAdmittedChainWitness`** — the `StatisticalAnalysisPlan` commit succeeded but the witness index doesn't have the expected `IsDerivedAs` entry. Check that the claim's `ProgramTrace` companion was committed in the same layer (D49 requires both the resource and the trace for witness admission).
+- **Claim accepted but a downstream D39 sentence fails with `no admitted IsDerivedAs witness`** — the plan committed but the cited IRI admits no witness. Three things to check, in order. Is the sentence citing the *plan*? It should cite the per-effect `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`: the plan carries no `canonical_proposition`, and the result is the artifact the kernel stamps `reflection:InstitutionEmittedDerivation`, which is what makes it self-attest a witness with no companion trace. Did the effect actually reject? A per-effect `Fails` carries no `canonical_proposition` by design, so it admits no witness. Did the plan go through `load`? A plan committed by `FIBER INTO` or as program output was never gated, so no result exists at all.
+
+**Diagnostics are strings, not variants.** `AlphaNotCrossed`, `WrongTestForDesign` and `EpistemicScopeViolation` are conventional prefixes the handler writes into the one `urn:eigenius:institution:diagnostic` slot. Most other rejections carry a prose sentence with no prefix. Match on text, not on a type.
 
 ## Cross-references
 

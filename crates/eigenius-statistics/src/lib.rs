@@ -41,15 +41,20 @@
 //!   the DerivedResource shape into a typed value for downstream
 //!   reasoning composition) land in later phases.
 //!
-//! ## Phase 1 dispatch coverage
+//! ## Dispatch coverage
 //!
-//! Only the `(CompleteRandom, Unblocked, NoFactor, _, CrossSectional)`
-//! product position (`SingleSampleEstimate`) is implemented in Phase 1.
-//! All other positions return `Verdict::Fails(WrongTestForDesign)`
-//! until their verifier procedures land. The `IID` two-sample case is
-//! the natural Phase 1.b addition (same code path with `SingleFactor`
-//! instead of `NoFactor`); the Tier 2 mixed-effects cases land in
-//! Phase 4.
+//! `dispatch_product_position` wires **seven** product positions:
+//! `SingleSampleEstimate`, `IID`, `Paired`, `Factorial`, `RCBD`,
+//! `SplitPlot` and `RepeatedMeasures`. Any other tuple of
+//! `(randomization, blocking, factor, repeated_measures)` yields a gate
+//! `Verdict::Fails` whose diagnostic string is prefixed
+//! `WrongTestForDesign:` and names the position.
+//!
+//! Four further procedures are reached before that table is consulted,
+//! so they are not product positions at all: `MethodComparisonAnalysisPlan`
+//! and `ClassificationAnalysisPlan` dispatch on the plan's own class, and
+//! nested and crossed two-way ANOVA dispatch on the SampleSet's blocking
+//! constructor.
 //!
 //! ## What this crate is *not*
 //!

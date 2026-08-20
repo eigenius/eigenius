@@ -341,7 +341,9 @@ Fields:
 - `quotient`: `"keep_both"`, `"keep_one"`, or `"keep_neither"` (`winner` only consulted for `keep_one`).
 - For `restructure`: omit `new_parent_def` when `new_parent` already exists in the chain; supply it inline when introducing a fresh class.
 
-Both `preview` and `resolve` accept `--witness-search-branch <name>` (repeatable) — the CLI equivalent of the notebook's search-branches disclosure for off-span witnesses.
+**Where `conflict_id` comes from.** The ids are minted by the `PrepareMerge` RPC, which is the only surface that returns them — and **there is no `eigenius` subcommand for it.** `db merge preview` takes a resolutions file, it does not produce one. To author `resolutions.json` from a CLI-driven workflow you must get the conflict ids elsewhere: the notebook's merge-resolution panel (§16.6), the TypeScript SDK's `prepareMerge` ([chapter 17](17-typescript-sdk.md)), or a direct gRPC call to `PrepareMerge`.
+
+**No `--witness-search-branch` flag exists.** The CLI hardcodes `witness_search_branches` to empty at both the preview and resolve call sites, so off-span witness search across branches is available through the notebook and the RPC, not through `db merge`.
 
 ## 16.8. Worked examples
 

@@ -205,6 +205,20 @@ When the synthesis algorithm returns, the kernel needs a concrete `Val` that rep
 
 **Decision: a new `Val::ChainWitness` variant.** It clarifies the value's provenance for both kernel-internal code and debug introspection. The variant has no eliminator (witnesses are opaque); definitional equality treats two `ChainWitness` values as equal iff their keys match (proof irrelevance reduces this further: two witnesses of the same `Prop`-typed type are equal regardless of key, but the per-key equality is useful for the rare cases where the kernel inspects two witness values outside the proof-irrelevance fast path).
 
+> **As built (verified 2026-08-20 at `b251c9e`).** The variant landed as specified, but the
+> relationship between the two equalities is the reverse of what this paragraph and §2
+> describe. Key comparison is not a fast path used in rare cases — it is the only path a
+> witness comparison ever takes. `eq_nf` (`kernel/src/nbe/check/conv.rs`) matches
+> `Val::ChainWitness` pairs first and decides them by key equality, raising a
+> `TypeMismatch` when the keys differ. The proof-irrelevance route runs through
+> `def_eq_at_type`, whose only two production call sites are both inside the
+> `(Exp::Refl(a), Val::Id(..))` arm of `check` (`kernel/src/nbe/check/mod.rs`); `eq_nf`
+> takes no type argument and has no propositional short-circuit. So two witnesses of the
+> same `Prop`-typed predicate with *different* keys — which D46 makes definitionally equal,
+> and which §2 and §10 rely on for the soundness of opaque witnesses — are rejected
+> everywhere outside a `refl` check. Wiring proof irrelevance into the conversion algorithm
+> is D46 §5.1 and is not done.
+
 `Exp` does not need a corresponding constructor — `ChainWitness` values are never readback into surface syntax because they are never authored by the user. Type-level uses of the predicate (`ChainWitness.IsDeclaredAs iri P`) appear in `JustifiedBy` constructor signatures as ordinary inductive-type references, but the *inhabitants* of those types appear only as kernel-internal `Val::ChainWitness` values.
 
 ## 9. Open questions

@@ -274,20 +274,21 @@ impl std::error::Error for ConsolidateError {}
 /// 6. CAS the branch ref to the new layer under the process-wide
 ///    branch lock (consistent with `lattice::update_branch`).
 ///
-/// **17a limitations.**
-/// - Range validation against merge nodes and trace pins is deferred
-///   to 17b. 17a will consolidate across a merge node if you feed it
-///   one — the produced layer is still resolve-equivalent for
-///   head-rooted reads but loses the merge's resolution decisions.
-///   This is safe for 17a's hand-constructed test ranges (no merges
-///   in them) but not safe to expose to operators yet.
-/// - Bloom cache eviction lands in 17c.
-/// - Cost cap lands in 17d.
-/// - The audit `consolidation_record` property on the consolidated
-///   layer (D25 §6 last paragraph) is deliberately omitted: it would
-///   embed a non-deterministic timestamp and break the determinism
-///   property the milestone explicitly tests. It lands when 17e adds
-///   the `db consolidate-summary` surface.
+/// **What is and is not enforced.** Range validation against merge
+/// nodes and trace pins (17b), bloom-cache eviction (17c) and the cost
+/// cap (17d) are all implemented — see the milestone list in the module
+/// documentation above, where each is marked done. An earlier version of
+/// this comment listed all three as deferred; they are not.
+///
+/// The one genuine omission is the audit `consolidation_record` property
+/// on the consolidated layer (D25 §6, last paragraph). It is deliberately
+/// not written: the record carries a timestamp, which would enter the
+/// content hash and break the estimate/actual determinism the RPC test
+/// pins. A consolidated chain therefore cannot say when it was
+/// consolidated. Resolving this needs a storage shape outside the layer's
+/// own content — a dedicated column family keyed by consolidated layer id
+/// is the natural candidate — and that is an open decision, not a
+/// scheduled milestone.
 pub fn consolidate_chain(
     branch: &str,
     from: LayerId,

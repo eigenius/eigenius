@@ -43,11 +43,20 @@
 #   - `urn:eigenius:institutions:diffeq`      — OrdinaryDiffEq.jl (D27 §4.5)
 #   - `urn:eigenius:institutions:jump_highs`  — JuMP+HiGHS (D27 §4.2; LP/QP)
 #
-# Three comorphisms over the shared `formulas:FormulaTerm` payload:
+# Three comorphisms. Each declares an identity middle, but at three
+# different payload types -- only the first is identity on
+# `formulas:FormulaTerm` itself; the other two are identities on composite
+# classes that carry FormulaTerms, with the translation living in the
+# source institution's ExportFormat procedure:
 #
 #   - `urn:eigenius:comorphisms:symbolics_to_intervals`  (Phase 19d.2 / D32 §6.2)
+#         middle: identity on formulas:FormulaTerm         exact: true
 #   - `urn:eigenius:comorphisms:catalyst_to_diffeq`      (Phase 19h.1 / D27 §4.4.4)
+#         middle: identity on diffeq:OdeProblem            exact: false
+#         work:   catalyst's compile_to_ode export procedure
 #   - `urn:eigenius:comorphisms:symbolics_to_jump`       (Phase 19f.1 / D27 §4.2)
+#         middle: identity on jump:OptimisationProblem     exact: false
+#         work:   symbolics' frame_as_optimisation_problem export procedure
 #
 # Idempotence
 # -----------

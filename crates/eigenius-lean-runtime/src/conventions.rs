@@ -204,7 +204,7 @@ pub const WORKER_LIB_DIR: &str = "/opt/eigenius/lib";
 pub const LEAN_COMMON_IN_IMAGE: &str = "/opt/eigenius/lean-common/EigeniusLeanCommon";
 
 /// In-image directory the substrate composer materialises a staged
-/// `LeanPackageMirror` archive into (D26 §9.2 — `COPY mirror/
+/// `runtime:RuntimePackageMirror` archive into (D26 §9.2 — `COPY mirror/
 /// /opt/eigenius/mirror/`). The install_mirror step `cd`s here to
 /// rewrite the lakefile and run `lake build`.
 pub const MIRROR_IN_IMAGE: &str = "/opt/eigenius/mirror";

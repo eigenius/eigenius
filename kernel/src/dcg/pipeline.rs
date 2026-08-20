@@ -218,8 +218,12 @@ impl<'a> InProcessPipeline<'a> {
         // Stage A — the lexicon augmentation: harvest the document's abbreviation definitions (and, under
         // `LexiconBacked`, ground residual OOV atoms against the form text index) as grounded proposals (+
         // the residual OOV gaps), and commit its resources as a doc-scoped lexicon layer on `base`.
-        // Fail-closed: a proposal the felicity gate rejects at `add_resource` is skipped, so a
-        // mis-extraction never enters the lexicon.
+        // Note what does NOT happen here: `LayerBuilder::add_resource` runs no validation. It
+        // checks for a missing `@id`, rejects a core-namespace write, and inserts. The felicity
+        // gate (`dcg::lexicon::gate_entry`) is not on this path and is not called anywhere under
+        // `kernel/src/{validation,layer,commit}` — its ten call sites are the importer binaries,
+        // one CLI subcommand and tests. What filters a mis-extraction here is the proposer's own
+        // fail-closed minting above, not a kernel gate.
         let augmentation = match self.augment_options {
             AugmentOptions::LexiconBacked(_) => augment_lexicon_backed(
                 &self.base,

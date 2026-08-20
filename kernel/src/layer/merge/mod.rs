@@ -37,8 +37,12 @@
 //!   vocabulary motivates the design; it does not dictate an API.
 //!
 //! - **Open-world semantics narrows the conflict taxonomy.** D20 §5
-//!   listed nine `SchemaConflict`/`EquationConflict`/`InstanceConflict`
-//!   variants. Under Eigon's open-world reading, most of those
+//!   lists ten `SchemaConflict`/`EquationConflict`/`InstanceConflict`
+//!   variants — five schema (`PropertyDataType`, `PropertyClassTypes`,
+//!   `Subclass`, `RequiredProperty`, `ValueConstraint`), three equation
+//!   (`InheritanceCycle`, `DisjointnessViolation`,
+//!   `PathEquationContradiction`), two instance (`IriCollision`,
+//!   `DeletionConflict`). Under Eigon's open-world reading, most of those
 //!   collapse: `is_a` / `subclass_of` / `class_types` / `requires` /
 //!   `recommends` additions are monotonically safe (the merged
 //!   ontology stays valid; existing instances either keep satisfying

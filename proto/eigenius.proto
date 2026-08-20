@@ -1521,7 +1521,15 @@ message ConsolidateChainResponse {
   string consolidated_layer = 2;
   // Number of layers in the original range that were collapsed.
   uint64 collapsed_layer_count = 3;
-  // True when the branch's head moved (always true on success in v1).
+  // True when the branch ref moved to the consolidated layer.
+  //
+  // Not implied by `success`. An at-head consolidation (`to_layer` ==
+  // the branch's current head) CAS-advances the branch and sets this
+  // true. A below-head consolidation succeeds by installing a resolve
+  // redirect at `to_layer` (D25 §12.8) and leaves the branch ref where
+  // it was, so it returns `success = true` with `head_advanced =
+  // false`. Callers must not treat `head_advanced == false` as a
+  // failure; read `success` and `error_kind` for that.
   bool head_advanced = 4;
   // Typed error kind. CONSOLIDATE_ERROR_NONE on success.
   ConsolidateErrorKind error_kind = 5;

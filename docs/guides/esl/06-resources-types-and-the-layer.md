@@ -63,11 +63,11 @@ The takeaway: **every ESL declaration produces a resource shape that the kernel 
 
 Layer access happens at three moments:
 
-1. **Type-check** ([`kernel/src/nbe/check.rs`](../../../kernel/src/nbe/check.rs)). When `check_infer` encounters an `Exp::EigonClass(iri)`, it calls `resolve_class_type(iri, layer)`. The returned `Val` becomes the inferred type. Any check rule that compares an expected type against an `EigonClass`-mentioned type forces this resolution.
+1. **Type-check** ([`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs)). When `check_infer` encounters an `Exp::EigonClass(iri)`, it calls `resolve_class_type(iri, layer)`. The returned `Val` becomes the inferred type. Any check rule that compares an expected type against an `EigonClass`-mentioned type forces this resolution.
 
-2. **Evaluation** ([`kernel/src/nbe/eval.rs`](../../../kernel/src/nbe/eval.rs)). The `EigonClass` arm of `eval` does the same lookup. Reduction can require the layer too — projections on resource values reach into the layer to fetch the underlying resource's properties.
+2. **Evaluation** ([`kernel/src/nbe/eval/mod.rs`](../../../kernel/src/nbe/eval/mod.rs)). The `EigonClass` arm of `eval` does the same lookup. Reduction can require the layer too — projections on resource values reach into the layer to fetch the underlying resource's properties.
 
-3. **Constraint firing** ([`kernel/src/nbe/check.rs`](../../../kernel/src/nbe/check.rs) `NativeDecide` arm). When a property's declared constraint (e.g., `min_value`, regex pattern, or institution-decided predicate) needs to fire during type-check, the kernel reaches through the property IRI to the layer to find the constraint, then dispatches.
+3. **Constraint firing** ([`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) `NativeDecide` arm). When a property's declared constraint (e.g., `min_value`, regex pattern, or institution-decided predicate) needs to fire during type-check, the kernel reaches through the property IRI to the layer to find the constraint, then dispatches.
 
 4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `JustifiedBy.declared` / `.observed` / `.derived` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsDerivedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
 
@@ -115,7 +115,7 @@ When the kernel can't find an admitted witness for a justification's grounding c
 
 Witnesses are derived state — they live in the layer's in-memory index, recomputed at construction time from the layer's trace resources. Voiding a layer removes the trace resources from any chain resolution that excludes the voided layer; the witness derived from those traces becomes unadmissible in that resolution. Downstream reasoning sentences whose grounding constructors cite the voided witness fail to type-check through that resolution but remain admissible through resolutions that include the layer. This is the same provenance discipline `class` and `property` resources follow — there's no special witness-only voiding mechanism.
 
-Source: [`Layer::chain_witness_index`](../../../kernel/src/layer/), [`synthesise_chain_witness`](../../../kernel/src/nbe/check.rs).
+Source: [`Layer::chain_witness_index`](../../../kernel/src/layer/), [`synthesise_chain_witness`](../../../kernel/src/nbe/check/mod.rs).
 
 ## 6.5. Why this matters in practice
 
@@ -145,7 +145,7 @@ This is one of the things that makes the layered immutable-resource model attrac
 
 ### 6.5.3. Constraints attached to properties fire at the use site
 
-A property declared with `min_value = 0` or `pattern = "^[a-z]+$"` carries the constraint as a kernel-recognised structure. Wherever that property's value is computed in a program body, the type-checker (in `Check` capability mode) verifies the constraint by calling the appropriate decide procedure.
+A property declared with `min_value = 0` or `pattern = "^[a-z]+$"` carries the constraint as a kernel-recognised structure. Wherever that property's value is computed in a program body, the type-checker verifies the constraint by calling the appropriate decide procedure. Structural constraints of this kind are handled in the pure core; only `Constraint::Institution` needs an effectful context.
 
 For institution-registered decide procedures (Phase 11c — see [chapter 9](09-institutions.md)), this means a program that produces a value satisfying a registered domain predicate is *automatically verified* against that predicate at type-check time, with no explicit `assert` or call needed in the program text.
 
@@ -242,7 +242,7 @@ The general rule for constraint firing during type-check:
 - Built-in constraints (`min_value`, `max_length`, regex patterns) have built-in decide procedures.
 - **Institution-registered Decidable QueryClasses** ([chapter 9](09-institutions.md)) are called the same way — the kernel sees a `Constraint::Institution { iri, args }`, resolves the QueryClass in the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs), and dispatches `Institution::query(query_handler, synthetic_input, ctx)` on the registered runtime.
 
-The capability mode required is **`Check`** — `Read` plus institution-index + institution-runtime access. In `Pure` mode, constraints can't fire (no layer); in `Read`, they can fire only for the built-in ones; in `Check`, the institution-registered ones fire too.
+The context required is an **`EvalCtx::Effectful`** carrying an `InstitutionEngine` with an institution index and runtime attached (`InstitutionEngine::for_check` is enough — no component registry is needed). Under `EvalCtx::Pure` an institution-backed constraint stays neutral; structural constraints fire in either context.
 
 This chapter has been the *what* and *why* of the bridge. The capability-mode chapter ([chapter 8](08-capability-modes.md)) covers the *when* in operational terms.
 

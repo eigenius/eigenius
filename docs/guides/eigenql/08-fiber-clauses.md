@@ -1,6 +1,6 @@
 # 7. FIBER clauses
 
-`FIBER` clauses extend a query with reasoning delegated to a registered institution. The specification is in [D2 §3.5 + §5.8 + §7.12](../../design/d2-eigenql-specification.md); the underlying institution model is [D14](../../design/d14-institution-realisation.md). The implementation is [`apply_fiber_clause`](../../../kernel/src/query/evaluate.rs) in `evaluate.rs`.
+`FIBER` clauses extend a query with reasoning delegated to a registered institution. The specification is in [D2 §3.5 + §5.8 + §7.12](../../design/d2-eigenql-specification.md); the underlying institution model is [D14](../../design/d14-institution-realisation.md). The implementation is [`apply_fiber_clause`](../../../kernel/src/query/evaluate/fiber.rs) in `evaluate/fiber.rs`.
 
 The pattern: you declare an institution alias, name an `OnDemand` `QueryClass`, supply property-shaped param bindings (with optional comorphism coercion in param values), and bind the response resource to a variable that subsequent clauses can match against.
 
@@ -61,7 +61,7 @@ The `WHERE` clause uses a postfix Verdict predicate (§9.4) to project the bound
 
 ## 8.3. Requirements on the runtime
 
-`FIBER` clauses require the [`FiberRuntime`](../../../kernel/src/query/evaluate.rs) to carry the D14 dispatch handles:
+`FIBER` clauses require the [`FiberRuntime`](../../../kernel/src/query/evaluate/fiber.rs) to carry the D14 dispatch handles:
 
 ```rust
 pub struct FiberRuntime<'a> {
@@ -113,7 +113,7 @@ Here `dock_to_assay` is a `Comorphism` resource (D14 §4.5). At evaluation:
 
 The reified resource is set as the property's value on the FIBER's input resource.
 
-Under D14 §10.3, the reified resource also commits to the chain at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (SHA-256 over canonical Eigon-CBOR with `@id` cleared). Re-running the same input dedupes to the same IRI. AutoOnLoad gates bound to the produced class fire on the resulting commit exactly as if the resource had been authored by hand.
+Under D14 §10.3, the reified resource also commits to the chain at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (SHA-256 over canonical Eigon-CBOR with `@id` cleared). Re-running the same input dedupes to the same IRI. **AutoOnLoad gates bound to the produced class do not fire on that commit** — see [§8.6](#8-6-into--pinning-the-response-iri).
 
 The type checker validates that the cited comorphism's import-side `to_class` matches (or is a subclass of) the QueryClass's expected class type for that property (`comorphism_coercion_class_mismatch` if not), and that the transformation Component is `Pure` or `Read` (`comorphism_io_not_supported_in_v1` if `IO` — D2 v1 restriction).
 
@@ -135,7 +135,24 @@ FIBER symb:"urn:eigenius:symbolics:query_classes:qc_symb_to_jump" {
 RETURN [] { iri: ?problem }
 ```
 
-The dispatch is identical to a plain `FIBER ... AS ?var` clause; the difference is **chain reinsertion**: the response resource commits to the regular chain at the named IRI, rather than living in a transient overlay. Both surfaces share the same `commit_with_validation` machinery — AutoOnLoad gates bound to the response's class fire on commit, the response is reachable by every subsequent query, and the audit trail (Verdict + RuntimeInvocation) is the standard one.
+The dispatch is identical to a plain `FIBER ... AS ?var` clause; the difference is **chain reinsertion**: the response resource commits to the regular chain at the named IRI, rather than living in a transient overlay.
+
+The commit runs through `PipelineKind::WithRetroactive`, whose phase list is
+`build → structural_validate → retroactive_with_cascade → persist`. It has
+**no `autoonload_dispatch` phase**: AutoOnLoad gates do **not** fire on a
+comorphism output or a `FIBER … INTO` response. This is deliberate, not an
+oversight — the kernel drops the institution index and runtime before the
+`FIBER … INTO` commit with a comment saying so
+([`kernel/src/server/query.rs`](../../../kernel/src/server/query.rs)): "the
+commit path deliberately bypasses AutoOnLoad until INTO opts back in".
+Structural validation still runs, and the resource is a first-class chain
+resident afterwards — reachable by every subsequent query — but nothing
+gates it.
+
+Two further restrictions on `INTO`, neither of which the grammar hints at:
+
+- **`INTO` names the FIBER *response*, not a comorphism output.** Without it the response is stamped with a query-scope transient IRI and disappears when the query ends; with it the response is stamped with the caller's IRI and pushed to a chain-commit collector. The bound variable resolves to whichever IRI was used.
+- **A multi-row FIBER with `INTO` is rejected.** One `INTO` IRI cannot name two distinct chain resources, so the second arrival errors rather than overwriting the first.
 
 The `INTO` IRI is mandatory if you want chain reinsertion; without it, the response stays overlay-only (the v0 behaviour). Pinning at a caller-named IRI is the contrast with the comorphism program-invoke form (§8.5 above), where the kernel mints a *content-hash* IRI for you.
 
@@ -148,7 +165,7 @@ FiberClause ::= 'FIBER' institution_ref ':' QueryClass
                 ('INTO' StringLiteral)?
 ```
 
-The string after `INTO` must be a syntactically-valid IRI; the type checker validates it (`fiber_into_iri_invalid` if not).
+The string after `INTO` must be a syntactically-valid IRI. This is checked by the **parser**, not the type checker: a non-string token yields `expected quoted IRI string after FIBER \`INTO\`, got …`, and a string that `Iri::parse` rejects yields `FIBER INTO target \`<s>\` is not a valid IRI: …`. Both are parse errors with a source position; there is no `fiber_into_iri_invalid` code.
 
 ## 8.7. FIBER vs. Decidable vs. comorphism coercion
 
@@ -193,7 +210,7 @@ The response IRI format is `urn:eigenius:query:gen:<8-hex>:fiber:<clause>:<bindi
 
 ## 8.10. Example: comorphism coercion + Verdict postfix
 
-Drawn from the M8 worked example ([`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs)) — chains a comorphism coercion through a FIBER `OnDemand` QueryClass and projects the resulting Verdict to a Boolean filter:
+Drawn from the M8 worked example ([`kernel/tests/dock_assay_demo.rs`](../../../kernel/tests/dock_assay_demo.rs)) — chains a comorphism coercion through a FIBER `OnDemand` QueryClass and projects the resulting Verdict to a Boolean filter:
 
 ```eigenql
 USING "urn:eigenius:demo:d14:DockingResult"

@@ -8,6 +8,27 @@
 > the runtime substrate (`runtime: external`, D31). This chapter is retained
 > as historical record only. Background:
 > [D12](../../design/d12-wasm-extensibility.md).
+>
+> **How to read the rest of this chapter.** The body below is preserved
+> unedited from before the removal and is written throughout in the present
+> tense. Every present-tense statement in it describes the system as it stood
+> on 2026-07-07, not as it stands now. In particular: the `wit/` directory
+> does not exist, `examples/wasm-*` contains no tracked files, `just
+> build-wasm` is gone, `kernel/tests/d14_dock_assay_demo_wasm.rs` is gone,
+> and the kernel carries no `wasmtime` dependency. Relative links to any of
+> those paths are dead by design; they are kept so the historical text still
+> reads as it was written.
+>
+> One live consequence the body does not state: the shipped institution
+> ontology still admits `runtimes:wasm` as a legal value of the `runtime`
+> property, and the `Institution` class still *recommends* five Wasm-era
+> properties (`implementation`, `wasm_binary`, `wasm_binary_ref`,
+> `fuel_limit`, `memory_limit_pages`). A chain declaring `runtime:
+> runtimes:wasm` therefore commits cleanly — structural validation admits
+> the value — and is then dropped from the institution index with a log
+> warning, because `parse_runtime_kind` has no arm for it. Every subsequent
+> dispatch reports the institution as unregistered, at a call site with no
+> connection to the declaration that caused it. Do not declare it.
 
 Institutions are domain-specific reasoning systems — typed reasoners that contribute structured fibres to the knowledge graph. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md)) they are *declared* as ontology resources committed to the layer chain (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) and *implemented* as a runtime that handles boundary translations and any opaque reasoning. The same WASM hosting machinery that runs components also hosts institutions, but against the dedicated `eigenius-institution-d14` WIT world (D14 §13).
 
@@ -253,7 +274,7 @@ Trade-offs vs. WASM:
 | Hot-installable | Yes (auto-registration on commit) | No (compiled into the kernel binary) |
 | Best for | Untrusted / 3rd-party reasoners | First-party reasoners with heavy dependencies |
 
-For most use cases, WASM is the right path. Native institutions are appropriate when the institution's reasoning code is already a kernel-internal Rust crate and the sandboxing / fuel discipline isn't worth the marshalling overhead.
+**This section is the one below that is still current, but its comparison is not.** With the WASM backend removed, the live choice is between an in-process Rust institution and an external one on the runtime substrate ([chapter 11](11-runtime-substrate.md)). In-process is right when the reasoning code is already a kernel-internal Rust crate. The substrate is what now serves the "sandboxed / hot-installable / untrusted third party" column of the table above — at container granularity rather than WASM's, and with a full language ecosystem rather than a `no_std`-ish dependency tree.
 
 ## 10.8. Cross-references
 

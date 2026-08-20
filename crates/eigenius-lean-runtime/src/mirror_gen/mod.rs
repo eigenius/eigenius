@@ -16,7 +16,7 @@
 //! ontology layer and emits a Lean Lake package (`EigeniusFFI/`)
 //! whose source faithfully translates each Eigon class into a Lean
 //! `structure`. Output is committed back to the chain as a
-//! `LeanPackageMirror` resource and baked into the `LeanEnvironment`
+//! `runtime:RuntimePackageMirror` resource and baked into the `LeanEnvironment`
 //! image.
 //!
 //! Spec: [D30 — Eigon → Lean Faithful Translation](../../../../../docs/design/d30-eigon-to-lean-faithful-translation.md).
@@ -73,7 +73,7 @@ use eigenius_runtime_substrate::mirror_generator::{
 use std::sync::OnceLock;
 
 /// Stable identifier the mirror generator stamps on every emitted
-/// `LeanPackageMirror` resource (D30 §10.2). Pinned across versions —
+/// `runtime:RuntimePackageMirror` resource (D30 §10.2). Pinned across versions —
 /// the identifier names the generator, not its release.
 const GENERATOR_ID: &str = "eigon-ffi-gen";
 
@@ -184,7 +184,7 @@ pub use module_assembler::{derive_mirror_iri, library_content_hash, AssembledFil
 // Chain commit — `mirror_to_resource`
 // ---------------------------------------------------------------------------
 
-/// Built-in name the generator stamps on every `LeanPackageMirror`
+/// Built-in name the generator stamps on every `runtime:RuntimePackageMirror`
 /// resource's `short_name` property. Pinned because v1's package
 /// layout (D30 §2) emits a fixed-name Lake package.
 const TARGET_PACKAGE_NAME: &str = "EigeniusFFI";
@@ -212,7 +212,9 @@ const PROP_MIRROR_LIB_CONTENT: &str = "urn:eigenius:runtime:library_content";
 const PROP_MIRRORED_CLASSES: &str = "urn:eigenius:runtime:mirrored_classes";
 const PROP_MIRROR_GENERATED_AT: &str = "urn:eigenius:runtime:generated_at";
 
-/// Commit a generated mirror output as a `LeanPackageMirror`
+/// Commit a generated mirror output as a `runtime:RuntimePackageMirror`
+/// (D28 and D30 call the class `LeanPackageMirror`; no such class or
+/// Rust type exists)
 /// Resource ready for chain insertion. Pins the D30 §10.2
 /// integrity chain (`generator_identifier`, `generator_version`,
 /// `generator_content_hash`, `library_content_hash`) plus the
@@ -1900,7 +1902,7 @@ mod tests {
 
     #[test]
     fn mirror_to_resource_carries_integrity_chain_properties() {
-        // The chain-committed `LeanPackageMirror` must carry every
+        // The chain-committed `runtime:RuntimePackageMirror` must carry every
         // property the substrate's mirror-materialisation expects:
         // language tag, generator identity triple, library content
         // hash + archive, mirrored classes (D30 §10.2).

@@ -17,13 +17,43 @@
 //! Implements `LayerStore` and `ResourceStore` using RocksDB as the
 //! persistent ordered key-value store. Key encoding follows D4.
 //!
-//! Key scheme:
-//!   layer:<layer_id_hex>:res:<iri>    → Resource (CBOR)
-//!   chain:<layer_id_hex>              → Parent layer ID hex (or empty)
-//!   head                              → Current head layer ID hex
-//!   topo:<layer_id_hex>               → LayerHandle (CBOR, Phase 14a-ii)
-//!   trace:<key_hex>                   → ComponentTrace (CBOR)
-//!   meta:<key>                        → Generic metadata KV
+//! # Key scheme
+//!
+//! Fifteen prefixes on the **default column family**. This list is the
+//! live one; `docs/design/schema-changelog.md` records only the v1
+//! (Phase 14) subset, and the `D43_COLUMN_FAMILIES` comment below
+//! abbreviates.
+//!
+//!   layer:<layer_id_hex>:res:<iri>       → Resource (CBOR)
+//!   chain:<layer_id_hex>                 → canonical parent layer id hex
+//!                                          (empty string for a root layer)
+//!   topo:<layer_id_hex>                  → LayerHandle (CBOR, Phase 14a-ii)
+//!   bloom:<layer_id_hex>                 → BloomFilter (CBOR, Phase 14b)
+//!   branch:<name>                        → branch head layer id hex (14g)
+//!   tag:<name>                           → tagged layer id hex (D34 §G.2)
+//!   content:<content_hex>:<position_hex>  → empty (dedup index, D25 §11.0)
+//!   anchored:<content_hex>:<supporting_hex> → 32-byte position hash (D33 §6)
+//!   redirect:<source_layer_hex>          → RedirectEntry (CBOR, D25 §12.8)
+//!   trace:<key_hex>                      → ComponentTrace (CBOR)
+//!   meta:<key>                           → generic metadata KV (schema
+//!                                          version, seed manifest, task
+//!                                          records)
+//!   idx_pos:<p>:<o>:<s>:<layer>          → empty (triple index, D23 §5.9)
+//!   idx_layer:<layer>:<p>:<o>:<s>        → empty (triple index reverse)
+//!   vidx_pos:…                           → exact value index (D65)
+//!   vidx_layer:…                         → exact value index reverse
+//!
+//! There is no `head` key. The pre-Phase-14 single-head pointer
+//! (`get_head` / `set_head`) is gone; branch refs replaced it.
+//! `sentinel:<cf_name>` appears in this crate's tests only.
+//!
+//! Three further keyspaces live on their own column families
+//! (see `D43_COLUMN_FAMILIES`):
+//!
+//!   cf_text         text_term:, text_docs:, text_stats:, text_terms_layer:
+//!   cf_vec          vec_seg:, vec_layer:
+//!   cf_embed_cache  declared at open; nothing writes it yet
+//!                   (see `kernel/src/program/embedding_cache.rs`)
 
 mod text_index;
 mod triple_index;
@@ -139,11 +169,11 @@ pub const CF_VEC: &str = "cf_vec";
 /// restarts and layer GC; evicted by LRU under a configurable budget.
 pub const CF_EMBED_CACHE: &str = "cf_embed_cache";
 
-/// All non-default column families opened by `RocksStore::open`. The
-/// existing single-CF data (`layer:`, `chain:`, `topo:`, `bloom:`,
-/// `branch:`, `idx_pos:`, `idx_layer:`, `meta:`, `trace:`, …) stays
-/// on the default CF; D43 populates the dedicated CFs declared here
-/// once M2 lands.
+/// All non-default column families opened by `RocksStore::open`.
+/// Everything else stays on the default CF — see the module header for
+/// the full fifteen-prefix list. `cf_text` and `cf_vec` are populated;
+/// `cf_embed_cache` is opened but never written (D43 §5.3 is not wired
+/// up).
 const D43_COLUMN_FAMILIES: &[&str] = &[CF_TEXT, CF_VEC, CF_EMBED_CACHE];
 
 // `now_millis` removed — `LayerHandle.created_at` is now sourced from
@@ -155,28 +185,32 @@ pub struct RocksStore {
     db: Arc<rocksdb::DB>,
     /// RocksDB-backed `TripleIndex` (Phase 14h / D23 §5.9). Shares the
     /// same `Arc<rocksdb::DB>` as `db` so commit + index-update writes
-    /// land in the same physical store. The index's atomic-batch
-    /// methods (`extend_into_batch` / `drop_into_batch`) participate in
-    /// `store_layer` / `delete_layer`'s `WriteBatch` so layer + index
-    /// commits stay atomic per D23 §6.3.
+    /// land in the same physical store.
+    ///
+    /// **Atomicity is one-sided.** `drop_into_batch` is passed
+    /// `delete_layer`'s `WriteBatch`, so a layer drop and its index
+    /// cleanup are one atomic write. `extend_into_batch` exists but is
+    /// **never** passed `store_layer`'s batch: `store_layer` calls
+    /// `populate_layer_indexes` before it opens the batch, and each index
+    /// writes its own non-sync batch. So on the commit path the index
+    /// entries land *before*, and separately from, the sync layer batch —
+    /// D23 §6.3's atomicity does not hold for writes. Tracked as
+    /// GAP-05-14 in `books/tutorial`.
     triple_index: Arc<RocksTripleIndex>,
     /// D43 §2.3 text index (M2.4). RocksDB-backed; shares the same
-    /// `Arc<rocksdb::DB>` as `db` and `triple_index` so commits land
-    /// in the same physical store. Its `extend_into_batch` /
-    /// `drop_into_batch` participate in `store_layer` /
-    /// `delete_layer`'s `WriteBatch` for atomic-with-layer-commit
-    /// semantics (D43 §2.5).
+    /// `Arc<rocksdb::DB>` as `db` and `triple_index` so writes land in
+    /// the same physical store. Same one-sided atomicity as
+    /// `triple_index`: `drop_into_batch` joins `delete_layer`'s batch;
+    /// `extend_into_batch` is not called from `store_layer`.
     text_index: Arc<RocksTextIndex>,
     /// D43 §2.4 vector index (M2.5). RocksDB-backed; shares the same
     /// `Arc<rocksdb::DB>` as `db`. Segments are stored as CBOR blobs
     /// in `cf_vec` with the §2.4 layout (concatenated `vectors`
-    /// bstr). Its `extend_into_batch` / `drop_into_batch` participate
-    /// in `store_layer` / `delete_layer`'s `WriteBatch` (D43 §2.5).
+    /// bstr). Same one-sided atomicity as `triple_index`.
     vector_index: Arc<RocksVectorIndex>,
     /// D65 exact value index. RocksDB-backed; shares the same
-    /// `Arc<rocksdb::DB>` as `db`. Its `extend_into_batch` /
-    /// `drop_into_batch` participate in `store_layer` / `delete_layer`'s
-    /// `WriteBatch` for atomic-with-layer-commit semantics.
+    /// `Arc<rocksdb::DB>` as `db`. Same one-sided atomicity as
+    /// `triple_index`.
     value_index: Arc<RocksValueIndex>,
 }
 
@@ -643,11 +677,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             );
             batch.put(content_key.as_bytes(), []);
 
-            // Phase 14h: index entries are populated by `LayerBuilder::build`
-            // (same precomputation pattern as the bloom). The persistent
-            // index is shared (`RocksStore.triple_index` ↔ `LayerStorage.triple_index`)
-            // so the build-time `extend_layer` already wrote them to RocksDB.
-            // No duplicate population here.
+            // Index entries are NOT in this batch. `populate_layer_indexes`
+            // ran at the top of `store_layer`, before the batch was opened,
+            // and each index wrote its own non-sync batch — so index writes
+            // precede this one and are not atomic with it. (An earlier
+            // comment here claimed population happened in
+            // `LayerBuilder::build`; it does not, and has not since the
+            // D65 index lifecycle moved it to this function.) Passing
+            // `extend_into_batch` this batch is the fix — see GAP-05-14.
 
             // Sync write: layer commits are durability-critical. The kernel
             // writes the layer + branch CAS sequentially, and a verdict

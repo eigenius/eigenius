@@ -17,6 +17,8 @@ The hand-authored shared package the generated source imports lives at `lean/com
 
 The mirror generator is **substrate Rust code** that runs inside `LeanLanguageRuntime::build_environment_image` (D26 §9.2) and implements the `MirrorGenerator` trait ([crates/runtime-substrate/src/mirror_generator.rs:78](../../crates/runtime-substrate/src/mirror_generator.rs#L78)). It walks the chain's ontology layer and emits a Lean *package* the EigonFFI consumers import — every Eigon class in the closure becomes a Lean `structure` with coercion instances, decoders, and validating constructors. The generator's output is committed back to the chain as a `LeanPackageMirror` resource (D26 §5.4 + D28 §3.1) and baked into the `LeanEnvironment` image.
 
+> **Implementation status (2026-08-20).** No `LeanPackageMirror` class was ever created. `mirror_gen` stamps `urn:eigenius:runtime:RuntimePackageMirror` — the substrate's generic mirror class, shared with the Julia institutions — and the Lean institution reads that IRI. Every `LeanPackageMirror` in this document names that class.
+
 Auditability of the mirror does **not** rely on the generator being a separate binary or on inspecting its Rust source. It relies on this specification: given the spec, the layer chain, and the substrate's pinned `generator_content_hash`, an auditor MUST be able to re-derive the same Lean source byte-for-byte. This document is the load-bearing TCB artifact alongside nanoda_lib and the generator binary's content hash.
 
 When the spec and the implementation disagree, the implementation is wrong. When the spec underspecifies a behavior, both this doc and the generator are wrong — the spec is the source of truth.

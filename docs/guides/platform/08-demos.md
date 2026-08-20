@@ -31,13 +31,25 @@ The ESL summarization program ([`demo/summarize.esl`](../../../demo/summarize.es
 
 ```esl
 namespace core = "urn:eigenius:core";
-namespace ex   = "urn:eigenius:demo";
+namespace demo = "urn:eigenius:demo";
+namespace completion = "urn:eigenius:program:components:completion";
+namespace request = "urn:eigenius:program:request";
 
-program ex:summarize : ex:Document -> ex:Document {
-    let summary : core:string = CompleteText(input);
-    Construct ex:Document { ex:text = summary }
+program demo:summarize : demo:Document -> demo:Document {
+    let summary : core:string = CompleteText(input) {
+        completion:user_prompt = "Summarize the following document in 2-3 sentences:\n\n{{urn:eigenius:demo:text}}";
+        completion:system_prompt = "You are a concise technical summarizer.";
+        completion:request_parameters = {
+            request:model = "claude-sonnet-4-20250514";
+            request:temperature = 0.3;
+            request:max_tokens = 200;
+        };
+    };
+    Construct demo:Document { demo:text = summary }
 }
 ```
+
+That is the file complete, including the component-parameter block on the `CompleteText` call — which is where all of the configuration lives: the prompt template with its `{{...}}` slot reference, the system prompt, and the model request parameters.
 
 The demo finishes by printing each output for visual inspection. In mock LLM mode, the summary is a placeholder string; with a real API key, it's an actual model completion.
 
@@ -116,7 +128,7 @@ The per-institution slow-walks under [`platform/julia-institutions/`](julia-inst
 
 Source: [`notebooks/examples/lean-verification-setup.sh`](../../../notebooks/examples/lean-verification-setup.sh) and [`notebooks/examples/lean-verification.json`](../../../notebooks/examples/lean-verification.json).
 
-The end-to-end demo for the platform's first verification institution ([chapter 11](11-runtime-substrate.md) + the Lean institution tutorial under [`platform/lean-institution/`](lean-institution/)). Loads a chain layer carrying a [`LeanProofTerm`](../../design/d28-lean-4-as-institution.md#63-the-leanproofterm-resource--verbatim-bytes--chain-mirrored-proposition) backed by a real `lean4export` payload — the proven theorem is `∀ p : EigeniusFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10`, proved by `omega` against `Float`'s ordering. AutoOnLoad fires the three-part correspondence check at commit time and produces a `Verdict::Holds` resource. The notebook then walks the closed audit chain D28 §5.7 promises.
+The end-to-end demo for the platform's first verification institution ([chapter 11](11-runtime-substrate.md) + the Lean institution tutorial under [`platform/lean-institution/`](lean-institution/)). Loads a chain layer carrying a [`LeanProofTerm`](../../design/d28-lean-4-as-institution.md#63-the-leanproofterm-resource--verbatim-bytes--chain-mirrored-proposition) backed by a real `lean4export` payload — the proven theorem is `∀ p : EigeniusFFI.Patient, 0.0 ≤ p.weight.val`, proved by the `Subtype.property` projection on the refinement-typed `weight` field. AutoOnLoad fires the three-part correspondence check at commit time and produces a `Verdict::Holds` resource. The notebook then walks the closed audit chain D28 §5.7 promises.
 
 ```bash
 EIGENIUS_MOCK_LLM=true docker compose up -d
@@ -146,13 +158,13 @@ Regeneration: when the Lean toolchain or the capstone proof changes, regenerate 
 
 ## 8.5. `prose-to-formulas` — the same conclusion justified two ways
 
-Source: [`demo/prose-to-formulas/run.sh`](../../../demo/prose-to-formulas/run.sh) and [`demo/prose-to-formulas/README.md`](../../../demo/prose-to-formulas/README.md).
+Source: [`demo/prose-to-formulas-v2/run.sh`](../../../demo/prose-to-formulas-v2/run.sh) and [`demo/prose-to-formulas-v2/README.md`](../../../demo/prose-to-formulas-v2/README.md). (There is no `demo/prose-to-formulas/` — the `-v2` directory is the demo.)
 
 Two sentences of controlled prose from the WRN paper — a measurement (*"MSI cancer models had the exonuclease activity of WRN"*) and an activity claim (*"…required the helicase activity of WRN"*) — go through the DCG parser (D63), which turns each into a closed, felicity-gated `Prop`, committed as an `enc:EncodedClaim` under a `reflection:ProgramTrace` that mints the witness `IsDerivedAs claim_i P_i`. Plus one rule **pinned from the literature**, not from the document: `∀m. HasActivity(m, WRN, exonuclease) → RequiresActivity(m, WRN, helicase)`.
 
 ```bash
-./demo/prose-to-formulas/run.sh
-./demo/prose-to-formulas/run.sh --reparse
+./demo/prose-to-formulas-v2/run.sh
+./demo/prose-to-formulas-v2/run.sh --reparse
 ```
 
 Under D66 there is **no lift step**: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon (`def`), so a parsed sentence and its domain formula are the same term by definitional equality. The result is `RequiresActivity(MSI, WRN, helicase)` justified twice — once because sentence 2 asserts it (its own parse witness, nothing Declared), once because it *follows* from sentence 1 plus the published rule specialized at the model with [`spec_poly`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate). The derived route carries strictly more assumptions and commits at `Declared`; the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's claim still commits, the derivation that cited sentence 1's parse has nothing left to stand on and is rejected.
@@ -166,7 +178,27 @@ Two ways a claim gets justified here, both exercised by [`crates/eigenius-reason
 
 The second is the only one that Declares nothing: `"S₁ if S₂"` parses to a genuine top-level implication whose antecedent is verbatim the premise sentence's own parse, so `app` composes them with no human assertion in between. (A third way — generated **shape rules**, one Declared rule per parse shape — was retired by D66's definitional lift.)
 
-**Prerequisite: an aligned lexicon snapshot** (`…/db-snapshot/wordnet-umls-aligned-d66`, ~993 MB). The propositions are built from lexicon axioms (`wn:v02627934_t` is the verb sense of *require*), so the chain must be the one that *defines* those axioms; a bare core+domain chain fails at the D47 decode with `ConstRef references unresolved IRI`. And it must be the **aligned** chain — on a raw reseed, duplicate WordNet/UMLS senses make `--reparse` fail closed. `run.sh` stages the snapshot into the kernel's docker volume read-only. Override the location with `EIGENIUS_DB_SNAPSHOT`; build one with [`scripts/reseed-lexicon-db.sh`](../../../scripts/reseed-lexicon-db.sh) then `scripts/build-alignment-snapshot.sh`.
+**Prerequisite: an aligned lexicon snapshot** (`…/db-snapshot/wordnet-umls-aligned-d66`, ~993 MB). The propositions are built from lexicon axioms (`wn:v02627934_t` is the verb sense of *require*), so the chain must be the one that *defines* those axioms; a bare core+domain chain fails at the D47 decode with `ConstRef references unresolved IRI`. And it must be the **aligned** chain — on a raw reseed, duplicate WordNet/UMLS senses make `--reparse` fail closed. `run.sh` stages the snapshot into the kernel's docker volume read-only. Override the location with `EIGENIUS_DB_SNAPSHOT`; build one with [`scripts/reseed-lexicon-db.sh`](../../../scripts/reseed-lexicon-db.sh) then `scripts/build-alignment-snapshot.sh`. This is the **only** demo that needs a snapshot — in particular the WRN chain (`demo/wrn-helicase/run.sh`) does not name `EIGENIUS_DB_SNAPSHOT` anywhere.
+
+## 8.5a. The demos this chapter does not cover
+
+Eleven `run.sh` scripts live under `demo/`, and the sections above document three of them. The full set:
+
+| Script | Covered here |
+|---|---|
+| `demo/run.sh` | §8.1 |
+| `demo/patent/run.sh` | §8.2 |
+| `demo/prose-to-formulas-v2/run.sh` | §8.5 |
+| `demo/intervals/run.sh` | no — `just demo-intervals` |
+| `demo/symbolics/run.sh` | no — `just demo-symbolics` |
+| `demo/catalyst/run.sh` | no — `just demo-catalyst` |
+| `demo/diffeq/run.sh` | no — `just demo-diffeq` |
+| `demo/jump-highs/run.sh` | no — `just demo-jump-highs` |
+| `demo/d41-commit-pipeline/run.sh` | no |
+| `demo/d57-schema-org/run.sh` | no |
+| `demo/wrn-helicase/run.sh` | no |
+
+The five Julia institution demos each build a Julia environment image on a cold run and need `buildah` plus a reachable Docker daemon; see [chapter 11](11-runtime-substrate.md). `demo/wrn-helicase/run.sh` needs the compose stack plus a Docker daemon the substrate can reach to spawn the R worker as a sibling container, and its ten large-input steps print `SKIPPED` when the data slices are not vended, so it completes on a checkout without them.
 
 ## 8.6. Running the demos as smoke tests
 

@@ -19,7 +19,7 @@ Where the intervals institution gates a flat numerical resource and Symbolics ga
 The institutional value is what this gives downstream consumers:
 
 - **Chain-typed conservation laws** become indexable. EigenQL queries can ask "which conservation laws hold in network N?" or "across all networks committed to layer L, which share a conservation law with coefficient pattern P?".
-- **Reaction networks become first-class chain resources**, available as inputs to comorphisms. The `Catalyst → DiffEq` comorphism (D27 §4.4.4, still ahead) takes a `ReactionNetwork` and produces an `OdeProblem` for time-course simulation. The `Catalyst → Symbolics` comorphism (via ModelingToolkit) takes the same network and produces an `ODESystem` for symbolic manipulation. Both depend on `ReactionNetwork` being a typed chain shape — which is what this v1 lands.
+- **Reaction networks become first-class chain resources**, available as inputs to comorphisms. The `Catalyst → DiffEq` comorphism (D27 §4.4.4) is **shipped**: it takes a `CatalystToOdeInput` wrapping a `ReactionNetwork` and produces an `OdeProblem` for time-course simulation, with the compilation in Catalyst's `compile_to_ode` export procedure and an identity middle on `OdeProblem`. A `Catalyst → Symbolics` comorphism (via ModelingToolkit), which would take the same network and produce an `ODESystem` for symbolic manipulation, is **not** built. Both depend on `ReactionNetwork` being a typed chain shape — which is what this v1 lands.
 - **The kinase assay's IC₅₀ measurements gain a mechanistic anchor.** The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](../../../../notebooks/examples/kinase-institutions.json)) is currently flat — IC₅₀ values for each (compound, target, protocol) row, no model behind them. With Catalyst on the chain, the *enzyme-kinetic mechanism* underneath each measurement can be a chain-committed network that downstream comorphisms can solve, fit, or compare. v1 doesn't wire that pipeline end-to-end (DiffEq isn't here yet), but it lays the network-and-conservation-law foundation that makes it possible.
 
 ## The kinase mechanism
@@ -75,12 +75,18 @@ eigenius --endpoint http://localhost:50051 \
 
 ### What just happened
 
-The ontology declares two classes:
+The ontology declares three classes and nine properties — twelve resources:
 
 | Class | Required properties | Role |
 |---|---|---|
 | `ReactionNetwork` | `network_source`, `species_declared`, `parameters_declared` | Chain carrier for a Catalyst.jl `ReactionSystem`. |
 | `ConservationLaw` | `network`, `coefficients` | Claim: the coefficient vector is a left-nullspace row of the network. |
+| `CatalystToOdeInput` | `network`, `initial_conditions`, `parameter_values`, `time_span_start`, `time_span_end` | Composite input to `qc_cat_to_ode` and the source side of the Catalyst → DiffEq comorphism. |
+
+None of the three declares a `FormulaTerm`-typed property. Catalyst reaches
+the shared formula language only inside its Julia handler, where
+`num_to_formula` translates a `Symbolics.Num` into chain-typed `FormulaTerm`
+constructors — see [formula guide §6.1](../../formula/06-sharing-across-institutions.md).
 
 The ones worth pausing on:
 
@@ -113,9 +119,18 @@ Closure walking pulls in the property definitions transitively. The mirror gener
 
 Cold runs take ~10 minutes — Catalyst.jl pulls ModelingToolkit + SymbolicUtils + DiffEqBase + RuntimeGeneratedFunctions + a long SciML dep tail, all of which `Pkg.precompile` runs against. The image gets cached by buildah on subsequent builds. If you're iterating on the handler code, the rebuild is fast because only the `EigeniusCatalyst` layer changes.
 
-### The institution declares one QueryClass
+### The institution declares two QueryClasses
 
-Where Symbolics declared six QueryClasses across three dispatch roles, Catalyst v1 declares one — `conservation_law_validity`, AutoOnLoad. Future expansion (D27 §4.4): `qc_cat_check_deficiency` (Decidable), `qc_cat_compute_steady_states` (OnDemand), the `Catalyst → DiffEq` comorphism's QueryClasses.
+Where Symbolics declares seven QueryClasses across three dispatch roles, Catalyst declares two:
+
+| QueryClass | Dispatch role | Input | Output |
+|---|---|---|---|
+| `conservation_law_validity` | AutoOnLoad | `ConservationLaw` | `Verdict` |
+| `qc_cat_to_ode` | OnDemand | `CatalystToOdeInput` | `diffeq:OdeProblem` |
+
+`qc_cat_to_ode` is **shipped**, not planned: it is the operational backing of the Catalyst → DiffEq comorphism, its handler is `compile_to_ode`, and [`crates/eigenius-julia/tests/catalyst_chain_validation.rs`](../../../../crates/eigenius-julia/tests/catalyst_chain_validation.rs) asserts it resolves on the chain. See [the Catalyst → DiffEq section](#the-catalyst--diffeq-comorphism-shipped-phase-19h1) for the full triple.
+
+Still future expansion (D27 §4.4): `qc_cat_check_deficiency` (Decidable), `qc_cat_compute_steady_states` (OnDemand).
 
 ## Step 4 — Read the handler
 
@@ -190,7 +205,7 @@ The intervals institution returns `Undecidable` when interval arithmetic can't d
 
 ## Step 7 — Install the institution
 
-Three resources go on the chain in one commit: the `Institution` itself, the `RuntimeMethodSignature` for `validate_conservation_law`, and the AutoOnLoad `QueryClass` `conservation_law_validity`.
+Six resources go on the chain in one commit: the `Institution` itself; two `RuntimeMethodSignature`s (`validate_conservation_law` and `compile_to_ode`); two `QueryClass`es (`conservation_law_validity` AutoOnLoad and `qc_cat_to_ode` OnDemand); and one `ExportFormat` (`ef_cat_to_ode_input`, the source side of the Catalyst → DiffEq comorphism).
 
 ```bash
 eigenius institution install \
@@ -298,8 +313,9 @@ After running the demo, the chain carries:
 | `RuntimePackageMirror` | `urn:eigenius:runtime:mirror:julia:<hex>` | step 3 |
 | `RuntimeEnvironment` | `urn:eigenius:catalyst:env:v1` | step 6 |
 | `Institution` | `urn:eigenius:institutions:catalyst` | step 7 |
-| `RuntimeMethodSignature` | `urn:eigenius:catalyst:signatures:validate_conservation_law` | step 7 |
-| `QueryClass` | `urn:eigenius:catalyst:query_classes:conservation_law_validity` | step 7 |
+| `RuntimeMethodSignature` x 2 | `urn:eigenius:catalyst:signatures:{validate_conservation_law, compile_to_ode}` | step 7 |
+| `QueryClass` x 2 | `urn:eigenius:catalyst:query_classes:{conservation_law_validity, qc_cat_to_ode}` | step 7 |
+| `ExportFormat` | `urn:eigenius:catalyst:formats:ef_cat_to_ode_input` | step 7 |
 | Kinase `ReactionNetwork` | `urn:eigenius:demo:catalyst:network:kinase` | step 8 |
 | 3 `ConservationLaw` claims | `urn:eigenius:demo:catalyst:law:*` | step 9 |
 | 3 `Verdict`s | `urn:eigenius:invocation:<uuid>:verdict` | step 9 |
@@ -309,7 +325,7 @@ The kinase mechanism is now a chain-committed citizen: queryable, comorphism-add
 
 ## Where this is heading
 
-Catalyst v1's `ReactionNetwork` + `ConservationLaw` is the foundation. The downstream story stacks on top:
+Catalyst's `ReactionNetwork` + `ConservationLaw` is the foundation. One item below has shipped and is marked as such; the rest are not built.
 
 ### The `Catalyst → DiffEq` comorphism (shipped, Phase 19h.1)
 

@@ -101,8 +101,12 @@ pub fn evaluate(
 
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
-    // 1. Evaluate DEFINE rules, stratum by stratum, with a seminaive fixpoint
-    //    per stratum.
+    // 1. Evaluate DEFINE rules, stratum by stratum, with a naive
+    //    fixpoint per stratum. Naive, not seminaive: there is no delta
+    //    relation, so each round re-evaluates every rule body in full
+    //    against the whole accumulated `derived` map and discards the
+    //    duplicates on insertion (D2 §6.7 specifies the seminaive
+    //    optimisation; it is not implemented).
     //
     // Strata MUST be evaluated in order: a relation that negates another
     // (`NOT Reach(?x)`) sits in a strictly higher stratum, and its negated
@@ -131,9 +135,12 @@ pub fn evaluate(
                 .filter(|d| in_stratum.contains(d.name.as_str()))
                 .collect();
 
-            // Seminaive fixpoint over this stratum only; lower strata are fixed.
+            // Fixpoint over this stratum only; lower strata are fixed.
             // The first iteration is the initial pass; stop when a full pass
-            // adds no new facts.
+            // adds no new facts. Every iteration re-derives every fact this
+            // stratum already holds -- the `entry.contains` scan below is the
+            // only duplicate control -- so the cost per round is quadratic in
+            // the size of the relation.
             for _ in 0..=max_iterations {
                 let mut new_facts = false;
                 for def in &rules {

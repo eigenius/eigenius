@@ -208,8 +208,8 @@ For queries with `RETURN` items, the Property resources preceding the ResultSet 
 
 The result vector is serializable through the standard Eigon pipelines:
 
-- [`eigon_json::emit_document`](../../../kernel/src/ontology/eigon_json/mod.rs) — JSON output
-- [`eigon_cbor::serialize_document`](../../../kernel/src/ontology/eigon_cbor/mod.rs) — binary (wire format for gRPC)
+- [`eigon_json::emit_document`](../../../kernel/src/ontology/eigon_json.rs) — JSON output
+- [`eigon_cbor::serialize_document`](../../../kernel/src/ontology/eigon_cbor.rs) — binary (wire format for gRPC)
 
 Both preserve the synthesized IRIs and the embedded row structure.
 

@@ -26,9 +26,12 @@
 //!
 //! - `query(proof_check, LeanProofTerm)` — extracts the
 //!   referenced `LeanProofPayload`'s `payload_bytes`, reads the
-//!   `target_name`, runs the v1 `check_proof` (axiom allowlist empty —
-//!   `LeanEnvironment` integration arrives in 20a.5), and returns a
-//!   `Verdict::Holds | Fails { diagnostic }` resource.
+//!   `target_name`, runs `check_proof` against the hard-coded
+//!   [`DEFAULT_LEAN_AXIOMS`] allowlist, and returns a
+//!   `Verdict::Holds | Fails { diagnostic }` resource. Nothing on this
+//!   path reads a `LeanEnvironment`: `lean:lean_permitted_axioms` is
+//!   read only by the authoring runtime, so a per-environment override
+//!   has no effect on a verdict.
 //! - `query(which_axioms, …)` — `NotImplemented` (the QueryClass is
 //!   declared on chain so the procedure IRI is bound, but the v1
 //!   institution doesn't compute the axiom list yet).
@@ -46,7 +49,9 @@
 //!
 //! 1. **Proof validity** — nanoda's `check_proof`. Same as 20a.4.
 //! 2. **Mirror correspondence** — resolve `mirror_iri` to a
-//!    `LeanPackageMirror`, verify its `source_layer` is reachable
+//!    `runtime:RuntimePackageMirror` (the design documents call it a
+//!    `LeanPackageMirror`; no such class or type exists), verify its
+//!    `source_layer` is reachable
 //!    from `head` (proof anchored to an ancestor-or-equal of the
 //!    layer the check runs against), and confirm the mirror covers
 //!    the claim's class via `mirrored_classes`. Lacking either
@@ -120,7 +125,8 @@ pub mod iris {
     pub const PROP_TARGET_NAME: &str = "urn:eigenius:lean:target_name";
 
     /// Property: `LeanProofTerm.mirror_iri` — IRI of the
-    /// `LeanPackageMirror` the proof's proposition is anchored to.
+    /// `runtime:RuntimePackageMirror` the proof's proposition is
+    /// anchored to.
     /// Recommended on chain (20a.7+); absent means "verify under
     /// nanoda alone, no chain-claim correspondence".
     pub const PROP_MIRROR_IRI: &str = "urn:eigenius:lean:mirror_iri";
@@ -143,7 +149,7 @@ pub mod iris {
     /// human-readable refusal reason (D31 §6.3 / institution ontology).
     pub const PROP_DIAGNOSTIC: &str = "urn:eigenius:institution:diagnostic";
 
-    // ── LeanPackageMirror properties (D26 §5.4) — read by the
+    // ── RuntimePackageMirror properties (D26 §5.4) — read by the
     // correspondence check. Constants mirror the substrate-side
     // properties that `mirror_to_resource` in `eigenius-lean-runtime`
     // stamps onto each generated mirror.
@@ -362,7 +368,7 @@ fn do_correspondence_check(
     ctx: &ExecutionContext,
 ) -> Result<Option<String>, InstitutionError> {
     // The `mirror_iri` property carries the IRI of the
-    // `LeanPackageMirror` resource the proof's proposition is
+    // `runtime:RuntimePackageMirror` resource the proof's proposition is
     // anchored to. Absent → unanchored proof → skip (return None).
     let mirror_iri_str = match proof_term
         .get(&Iri::parse(iris::PROP_MIRROR_IRI).expect("static IRI"))

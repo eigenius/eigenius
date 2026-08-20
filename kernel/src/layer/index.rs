@@ -274,9 +274,13 @@ impl OwnedTriple {
 /// values that aren't valid IRI strings (or that can't be parsed) are
 /// silently skipped — the index is best-effort, never blocks a commit.
 ///
-/// Called from the storage layer's `store_layer` path so the resulting
-/// triples join the same atomic batch as the layer's resource bytes,
-/// blooms, and topology entries (D23 §6.3). The function takes a
+/// Called from the storage layer's `store_layer` path, via
+/// `populate_layer_indexes`, *before* `store_layer` opens its
+/// `WriteBatch`. The resulting triples therefore do **not** join the
+/// same batch as the layer's resource bytes, blooms and topology
+/// entries: they are written first, in the index's own non-sync batch.
+/// D23 §6.3 specifies one atomic write; the drop path delivers it, the
+/// commit path does not (GAP-05-14). The function takes a
 /// `&Layer` (not just a list of resources) because the indexability
 /// rule consults the predicate's `Property.data_type` definition,
 /// which may live in a parent layer.

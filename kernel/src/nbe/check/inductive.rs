@@ -38,16 +38,19 @@ use std::sync::Arc;
 /// inhabitant exists to smuggle information across the Prop/Type boundary).
 /// Examples: `False`, `Asserts(iri)`.
 ///
-/// **Case B** — exactly one constructor, *each* of whose non-parameter
-/// arguments is itself propositional. This restriction prevents Hurkens-
-/// style information leakage. EigenTT lacks indexed inductive families
-/// (issue #22), so the variant of case B that admits "arg appears in the
-/// conclusion" does not apply here — every non-Prop ctor argument fails
-/// the test.
+/// **Case B** — exactly one constructor, each of whose non-parameter
+/// arguments is either itself propositional *or* is one of the
+/// conclusion's index expressions. This restriction prevents Hurkens-
+/// style information leakage. Both clauses are live: EigenTT gained
+/// indexed inductive families under D48, and D48 Phase H implemented the
+/// conclusion-membership clause in [`ctor_args_pass_singleton_b`] below.
+/// An argument the eliminator can recover from the type's indices leaks
+/// nothing, which is why `Eq A x y` — whose `refl(a) : Eq A a a` puts
+/// the non-Prop arg `a` in both index positions — is admitted.
 ///
 /// Any other shape (≥ 2 ctors, or 1 ctor with a non-Prop argument that
-/// doesn't appear in the conclusion) returns false, restricting motives
-/// of the corresponding recursor / match to Prop.
+/// is not a conclusion index) returns false, restricting motives of the
+/// corresponding recursor / match to Prop.
 pub fn large_elim_admitted(decl: &InductiveDecl) -> bool {
     if decl.ctors.is_empty() {
         return true;

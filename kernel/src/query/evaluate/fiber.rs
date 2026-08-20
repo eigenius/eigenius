@@ -679,6 +679,15 @@ fn resolve_query_class_iri(name: &Name, layer: &Layer) -> Result<Iri, QueryError
 /// bindings hold resource subjects as IRI strings) and the
 /// institution-runtime boundary (where the mirror's typed decoders
 /// for class-typed fields require the embedded shape).
+///
+/// **Duplicate.** This is a second implementation of the deref step
+/// that [`crate::institution::marshal`] performs for the two Decidable
+/// paths; that module's doc comment describes itself as centralising
+/// the logic, which it does for those two callers but not for this one.
+/// The FIBER clause path takes a property-shaped param block rather
+/// than positional args, so it does not reuse
+/// `marshal_decidable_input`. Any change to the deref rules must land
+/// in both places.
 fn embed_typed_resource_param(
     param_iri: &Iri,
     value: Value,

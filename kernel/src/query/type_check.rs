@@ -93,10 +93,12 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
         check_verdict_in_expression(&item.expression, &verdict_vars, &index, &mut errors);
     }
 
-    // Collect all bound variables from MATCH / FIBER / BIND across
+    // Collect all bound variables from MATCH and FIBER clauses across
     // the whole program. This is the "everything bound" set used by
-    // the RETURN / ORDER BY / TOP K BY / GROUP BY check, where
-    // textual order within the WHERE list doesn't matter.
+    // the RETURN / ORDER BY / TOP / GROUP BY check, where textual
+    // order within the WHERE list doesn't matter. (D45 would have
+    // added a third binding form, `BIND`; it is withdrawn and no BIND
+    // token, AST node or parse rule exists.)
     let bound_vars = collect_bound_variables(program);
 
     // Check variables used in WHERE are bound.
@@ -297,11 +299,11 @@ fn check_match_part(
     }
 }
 
-/// Collect every variable name bound by MATCH patterns, FIBER
-/// clauses, and `BIND` items across the program. The result is the
-/// universe of bindings visible to RETURN / ORDER BY / TOP K BY /
-/// GROUP BY positions.
-///
+/// Collect every variable name bound by MATCH patterns and FIBER
+/// clauses across the program, plus each DEFINE rule's head
+/// variables. The result is the universe of bindings visible to
+/// RETURN / ORDER BY / GROUP BY positions. There is no third binding
+/// form: D45's `BIND` clause is withdrawn and unimplemented.
 fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
     let mut vars = BTreeSet::new();
 

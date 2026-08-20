@@ -6,6 +6,17 @@ exercises the install flow described in
 real Julia library, wires up the institution's chain shapes, and runs at
 least one verdict end-to-end.
 
+> **Two sets of declarations exist; only one is live.** The live
+> declarations these tutorials describe are under
+> `julia/institutions/<name>/declarations/`, with IRIs shaped
+> `urn:eigenius:catalyst:ReactionNetwork`. A second, superseded set
+> survives under `ontologies/julia/` with the prefix
+> `urn:eigenius:julia:catalyst:…`. It is loaded by no Rust source, no
+> shell script and no test, it mentions `FormulaTerm` nowhere in its
+> sixteen files, and it is referenced only by one paragraph of D27.
+> A reader grepping the `ontologies/` tree for `ReactionNetwork` or
+> `OptimisationProblem` will find the wrong one. Check the IRI prefix.
+
 Read in order if this is your first substrate institution. The intervals
 tutorial covers the substrate plumbing (mirror generator, env image,
 worker container, AutoOnLoad gate) at a slow pace; the others assume that
@@ -15,9 +26,16 @@ plumbing knowledge and focus on what's domain-specific to each institution.
 |---|---|---|
 | [Intervals](intervals-institution-tutorial.md) | [`IntervalArithmetic.jl`](https://juliaintervals.github.io/) | The simplest possible external-runtime institution — one class, one AutoOnLoad gate, one handler. The recommended first read. |
 | [Symbolics](symbolics-institution-tutorial.md) | [`Symbolics.jl`](https://juliasymbolics.org/) | Three dispatch roles in one institution (AutoOnLoad / OnDemand / Decidable); the FormulaTerm-as-EigenTT-fragment story end-to-end. |
-| [Catalyst](catalyst-institution-tutorial.md) | [`Catalyst.jl`](https://docs.sciml.ai/Catalyst/stable/) | Chemical reaction networks; companion to the DiffEq tutorial via the Catalyst → DiffEq comorphism. |
+| [Catalyst](catalyst-institution-tutorial.md) | [`Catalyst.jl`](https://docs.sciml.ai/Catalyst/stable/) | Chemical reaction networks; companion to the DiffEq tutorial via the Catalyst → DiffEq comorphism. The one institution that declares **no** FormulaTerm-typed property — it reaches the shared payload through handler code instead. |
 | [DiffEq](diffeq-institution-tutorial.md) | [`OrdinaryDiffEq.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) | ODE integration; the gate re-integrates the FormulaTerm RHS to verify a claimed solution. |
 | [JuMP-HiGHS](jump-highs-institution-tutorial.md) | [`JuMP`](https://jump.dev/) + [`HiGHS`](https://highs.dev) | LP/QP optimisation; the smart-pow walker rule that keeps quadratic objectives in `QuadExpr` rather than `NonlinearExpr`. |
+
+All three shipped comorphisms declare an identity middle, but at three
+different types — `formulas:FormulaTerm` for Symbolics → IntervalArithmetic,
+`diffeq:OdeProblem` for Catalyst → DiffEq, `jump:OptimisationProblem` for
+Symbolics → JuMP. In the latter two the translation lives in the source
+institution's `ExportFormat` procedure, not in the middle. See
+[composition §2.4](../../composition/02-shared-payload-languages.md#2-4-what-the-shared-payload-buys-interpreters-not-translators).
 
 The end-to-end "everything together" demo notebook that exercises all five
 institutions plus three cross-institution comorphisms lives at

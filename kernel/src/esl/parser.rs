@@ -255,7 +255,10 @@ impl<'a> Parser<'a> {
     /// `class ex:HybridCell : ex:Cell, ex:Visualisable { ... }`
     /// (eigenius#29). The colon + class list is optional; an empty
     /// list means the class has no superclasses authored at the
-    /// header. Body-level `subclass_of` items extend the same set.
+    /// header. The header list is the only way to author a
+    /// superclass: [`Self::parse_class_item`] accepts `description`,
+    /// `requires` and `recommends` only, and a body-level
+    /// `subclass_of` item is rejected as an unknown class item.
     fn parse_class(&mut self) -> Result<ClassDecl, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Class)?;
@@ -968,9 +971,10 @@ impl<'a> Parser<'a> {
             return self.parse_pi_type();
         }
 
-        // `exists x : T, y : U . B` — the Sigma binder, dual of `forall`. Terminated by `.`
-        // rather than `=>` so it reads like the pair it builds; the DCG's own pretty-printer
-        // uses the same shape (`SG#0:C. body`).
+        // `exists x : T, y : U => B` — the Sigma binder, dual of `forall`, and
+        // terminated by `=>` exactly as `forall` is. (An earlier draft used `.`
+        // "so it reads like the pair it builds"; the code never did. See
+        // `parse_sigma_type` for why `.` stayed free.)
         if self.at(&TokenKind::Exists) {
             return self.parse_sigma_type();
         }
@@ -1228,9 +1232,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `exists x_1 : T_1, ..., x_N : T_N . B` — nested `TypeExpr::Sigma`.
+    /// `exists x_1 : T_1, ..., x_N : T_N => B` — nested `TypeExpr::Sigma`.
     ///
-    /// Mirrors [`Self::parse_pi_type`], with `.` closing the binder list instead of `=>`.
+    /// Mirrors [`Self::parse_pi_type`] exactly, `=>` closing the binder list included.
     fn parse_sigma_type(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Exists)?;

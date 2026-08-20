@@ -2235,10 +2235,12 @@ impl Compiler {
             Value::String(class.name.name.clone()),
         );
 
-        // subclass_of — accumulate from BOTH the header form
-        // (`class X : A, B { … }`) AND any in-body `subclass_of A, B;`
-        // items. Both authoring styles compose into one array
-        // (eigenius#29).
+        // subclass_of — from the header form (`class X : A, B { … }`),
+        // which is the only authoring style the parser accepts: there
+        // is no `ClassItem::SubclassOf` variant and `parse_class_item`
+        // rejects a body-level `subclass_of` as an unknown class item.
+        // The loop below therefore contributes nothing to this vector
+        // (eigenius#29 landed the multi-parent header list only).
         let mut subclass_of: Vec<Value> = Vec::new();
         for parent in &class.parents {
             subclass_of.push(Value::String(self.resolve(parent)?));

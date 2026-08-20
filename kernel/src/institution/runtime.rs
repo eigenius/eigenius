@@ -100,8 +100,10 @@ impl QueryOutcome {
     }
 }
 
-/// The interface an institution implements at runtime. Three methods,
-/// of which only the two boundary methods are mandatory.
+/// The interface an institution implements at runtime. Four methods, of
+/// which three have no default implementation and must be provided:
+/// `institution_iri`, `extract_typed` and `reify`. Only `query` has a
+/// default.
 ///
 /// **Boundary methods** (`extract_typed`, `reify`) translate between
 /// the institution's resource form and the typed EigenTT `Val` form

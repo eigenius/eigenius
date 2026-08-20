@@ -17,11 +17,15 @@ A notebook is an ordered sequence of typed cells. Six cell types are supported:
 | `markdown` | Render-only prose (Github-flavoured Markdown). Click the eye/edit toggle to switch to source view. | None — it just renders. |
 | `esl` | Eigenius Surface Language. Compiles + commits a layer on Run; output shows resource count + the new layer ID, with an expandable "View layer stack" accordion. | `eigen.load(source, "application/x-esl")` |
 | `eigenql` | EigenQL query against the active layer chain. Output renders in a Fluent `DataGrid` with column types from the synthesized Property metadata. | `eigen.query(source)` |
-| `typescript` | Sandboxed TS that runs in the browser with the SDK in scope. The cell's `return` value is auto-rendered (Resource → inspector, ResultSet → table, Topology → layer stack, plain object → JSON tree). | `new Function("eigen", "previousOutputs", source)` |
+| `typescript` | Sandboxed TS that runs in the browser with the SDK in scope. The cell's `return` value is auto-rendered (Resource → inspector, ResultSet → table, Topology → layer stack, plain object → JSON tree). | `new Function("eigen", "previousOutputs", "console", "React", "h", "charts", "nb", source)` — seven injected names, not two: the SDK client, the previous cells' outputs, a captured `console`, `React` and its `createElement` as `h`, the chart components, and `nb` notebook helpers (`nb.rows(document)` decodes a ResultSet). A cell may return a React element and the auto-renderer mounts it. |
 | `program-run` | Form-based program invocation: program IRI + one or more input IRIs. Single input renders as inspector + trace; multiple inputs render as a results table. | `eigen.runProgramByIri(programIri, inputIri)` per input |
 | `chart` | Form-based chart: pick a chart kind (`grouped-bar` / `vertical-bar` / `horizontal-bar` / `donut` / `line` / `area`), write an EigenQL query, bind axis columns by `RETURN` short-name. Output is the corresponding Fluent `@fluentui/react-charts` component. | `eigen.query(query)` then pivot rows into the kind's data shape |
 
-Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete). Notebook-level toolbar (top): editable title · cell count · `Open…` (file picker) · `Save` (browser download) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §14.5) · `Run all` (top-to-bottom, halts on first error).
+Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete).
+
+Notebook-level toolbar (top), left to right: editable title (required — `Export…` and `Publish` are disabled while it is empty) · an edit-metadata pencil · cell count and last-modified · `New` (empty notebook) · `Open…` (**opens the published-notebook dialog**, listing notebooks in the chain — not a file picker) · `Import…` (the file picker, `<input type="file">`) · `Export…` (browser download) · `Collapse all` / `Expand all` (one button, label follows state) · `Reset` (clear outputs) · `Publish` (commit notebook to a layer; see §14.5) · `Run all` (top-to-bottom, halts on first error).
+
+Note the split: **`Open…` is the chain, `Import…` is the filesystem.** An older version of this guide described `Open…` as the file picker and `Save` as the download button; those are now `Import…` and `Export…`.
 
 Source: [`notebooks/`](../../../notebooks/).
 
@@ -117,11 +121,13 @@ Notebooks are versioned JSON with a discriminated cell-type union. Schema in [`n
 }
 ```
 
-`Save` from the toolbar serialises the current store state to this JSON (with `meta.modified` updated to the save time) and triggers a browser download. `Open…` reads a file via `<input type="file">`, validates the shape, and replaces the store contents. Cell outputs are NOT persisted — they're re-derived by re-running the cells.
+`meta.title` is **required** and must be non-empty — `parseNotebook` rejects a document without it, and the toolbar disables `Export…` and `Publish` until one is set. The other `meta` fields are optional.
+
+`Export…` from the toolbar serialises the current store state to this JSON (with `meta.modified` updated to the export time) and triggers a browser download. `Import…` reads a file via `<input type="file">`, validates the shape, and replaces the store contents. Cell outputs are NOT persisted — they're re-derived by re-running the cells.
 
 ## 14.5. Publish to layer
 
-Beyond the on-disk file, a notebook can be published as resources in the kernel's knowledge graph. Click **Publish** in the toolbar; the SDK translates the notebook into a `notebook:Notebook` resource referencing one `notebook:Cell` resource per cell, then loads them into a new layer. The accompanying ontology — [`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json) — is part of the kernel's boot chain (5th layer, after core / program / reflection / institution), so publish succeeds without first registering anything.
+Beyond the on-disk file, a notebook can be published as resources in the kernel's knowledge graph. Click **Publish** in the toolbar; the SDK translates the notebook into a `notebook:Notebook` resource referencing one `notebook:Cell` resource per cell, then loads them into a new layer. The accompanying ontology — [`ontologies/notebook/notebook-ontology.json`](../../../ontologies/notebook/notebook-ontology.json) — is part of the kernel's twenty-layer boot chain (14th, after `statistics`), so publish succeeds without first registering anything.
 
 IRIs are content-addressed:
 
@@ -151,8 +157,9 @@ Chart cells handle one Fluent quirk worth knowing about: `LineChart` and `AreaCh
 ```
 notebooks/
 ├── src/
-│   ├── App.tsx                  # FluentProvider + EigenProvider + Notebook
+│   ├── App.tsx                  # FluentProvider + EigenProvider + WorkspaceShell
 │   ├── components/
+│   │   ├── workspace/WorkspaceShell.tsx  # App root: chrome + panels, renders Notebook
 │   │   ├── Notebook.tsx          # Toolbar + cell list
 │   │   ├── Cell.tsx              # Per-cell shell (toolbar + body + output)
 │   │   ├── CellInsertGap.tsx     # Hover-revealed "+" between cells

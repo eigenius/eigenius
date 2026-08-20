@@ -470,7 +470,9 @@ pub fn augment_lexicon_backed(
         };
         // Mint by the concept's KIND (fail-closed if it can't): a predicate `eigentt:Axiom` → clone a
         // committed sibling's verb/adjective cat; a class/instance → the nominal `cat_n`/`cat_np` alias
-        // model. The kernel felicity gate re-checks at `add_resource`.
+        // model. Nothing re-checks the minted entry afterwards: `LayerBuilder::add_resource`
+        // performs no validation, and the felicity gate is not called on the commit path. The
+        // fail-closed mint below is the whole check.
         let is_axiom = base
             .resolve(&concept)
             .map(|r| r.is_instance_of(&axiom_class))

@@ -10,7 +10,13 @@ The orchestrator listens on port 8080. With a real LLM:
 
 ```bash
 cd orchestration
-ANTHROPIC_API_KEY=sk-ant-... deno run --allow-net --allow-env src/main.ts
+ANTHROPIC_API_KEY=sk-ant-... deno run --allow-net --allow-env --allow-sys=hostname src/main.ts
+```
+
+That is what the `just` recipes run, and it is the minimum for the LLM components. It is **not** what the container runs: `deno.json`'s `start` task adds `--allow-read`, `--allow-ffi`, an unscoped `--allow-sys`, and `--unstable-node-globals --unstable-detect-cjs`. Without `--allow-read` and `--allow-ffi` the native substrate addon fails to load and the notebook static route cannot read its files, so use the task rather than the bare command when you need either:
+
+```bash
+cd orchestration && deno task start
 ```
 
 Or using the `just` recipe:
@@ -122,7 +128,7 @@ Depends on how you started the kernel.
 
 **In-memory mode** (default) — *nothing*. The kernel boots from the embedded ontologies on each start. Loaded files, registered capabilities, recorded traces, completed tasks: all gone.
 
-**Persistent mode** (`--db <path>`) — layers, traces, registered WASM capabilities, and the embedded-ontology manifest all survive. The kernel rehydrates everything on restart. Details in [chapter 6](06-database-management.md).
+**Persistent mode** (`--db <path>`) — layers, traces, institution registrations, branch and tag refs, and the embedded-ontology manifest all survive. The kernel rehydrates everything on restart. Details in [chapter 6](06-database-management.md).
 
 **Docker Compose** — by default, no volume is mounted, so the container's RocksDB lives in the container's filesystem and is lost on `down`. To persist across container restarts, add a volume to the kernel service:
 
@@ -135,24 +141,20 @@ services:
     command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius"]
 ```
 
-## 5.4. The four bootstrap layers, on every start
+## 5.4. The twenty bootstrap layers, on every start
 
-Whether in-memory or persistent, the kernel always boots with four embedded immutable layers in a parent-pointer chain:
+Whether in-memory or persistent, the kernel always boots the same embedded immutable chain. `BOOTSTRAP_CHAIN` in [`kernel/src/bootstrap/mod.rs`](../../../kernel/src/bootstrap/mod.rs) holds twenty entries, root-first — array order *is* the parent chain, each layer built on the one before it:
 
 ```
-core (root, no parent)
-  └─ program
-      └─ reflection
-          └─ institution
+core → eigentt-type-fragment → program → reflection → obo → institution →
+runtime → formulas → lean-expressions → lean-runtime-classes →
+lean-institution → reasoning → statistics → notebook → ingest → reference →
+logic → lexicon → ontology → closed-class
 ```
 
-These define `Class`, `Property`, `Program`, the `Let`/`Apply`/`Lambda` expression classes, the four epistemic categories (`DeclaredResource`, `ObservedResource`, `DerivedResource`, `VerifiedResource`), the `Institution` and `Comorphism` classes, and so on. Every loaded file or program references these via IRI.
+`core` defines `Class`, `Property` and the primitive data types; `program` the `Let` / `Apply` / `Lambda` expression classes; `reflection` the four epistemic categories (`DeclaredResource`, `ObservedResource`, `DerivedResource`, `VerifiedResource`); `institution` the `Institution` and `Comorphism` classes; and so on up the chain. Every loaded file or program references these via IRI.
 
-The source-of-truth JSON files are under [`ontologies/`](../../../ontologies/):
-
-- [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) — the core
-- [`ontologies/program/program-ontology.json`](../../../ontologies/program/program-ontology.json) — program model
-- And similarly for reflection and institution
+The source files are under [`ontologies/`](../../../ontologies/) and are `include_str!`'d into the binary — ten `.json`, three Lean `.eigon.json`, and seven `.esl`. The same `BOOTSTRAP_CHAIN` array feeds both the chain build and the D13 manifest hash the persistent boot path compares, so a layer can never be in one and not the other.
 
 The bootstrap loader is [`kernel/src/bootstrap/`](../../../kernel/src/bootstrap/).
 

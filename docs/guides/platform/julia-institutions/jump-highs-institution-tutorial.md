@@ -97,9 +97,13 @@ julia/institutions/jump/
 │   ├── jump-ontology.eigon.json              # OptimisationProblem + Constraint
 │   │                                         # + VariableBound + ConstraintRelation
 │   │                                         # + OptimisesTo
-│   └── jump-highs-institution.eigon.json     # Institution + 2 RuntimeMethodSignatures
+│   └── jump-highs-institution.eigon.json     # Institution + 3 RuntimeMethodSignatures
+│                                             # (validate_optimum, solve_problem,
+│                                             #  reify_problem)
 │                                             # + 2 QueryClasses (AutoOnLoad +
-│                                             # OnDemand qc_jump_solve)
+│                                             #  OnDemand qc_jump_solve)
+│                                             # + ImportFormat
+│                                             #  if_jump_optimisation_problem
 └── EigeniusJuMPHiGHS/
     ├── Project.toml                          # JuMP + HiGHS + MathOptInterface
     │                                         # + EigeniusMirror
@@ -136,6 +140,7 @@ Loading the problem doesn't fire any AutoOnLoad gate — `OptimisationProblem` i
 {
   "@id": "urn:eigenius:demo:jump:optimum:lp",
   "urn:eigenius:core:is_a": ["urn:eigenius:jump:OptimisesTo"],
+  "urn:eigenius:core:short_name": "lp_demo_optimum",
   "urn:eigenius:jump:problem": "urn:eigenius:demo:jump:problem:lp",
   "urn:eigenius:jump:termination_status": "OPTIMAL",
   "urn:eigenius:jump:objective_value": 0.0,
@@ -195,8 +200,21 @@ Note that `OptimisesTo.variable_values` is **recorded but not validated**. LP de
 
 ## Where this is heading
 
+### Already shipped: the `Symbolics → JuMP` comorphism
+
+This one is not future work. It is on the chain at [`julia/comorphisms/symbolics-to-jump.eigon.json`](../../../../julia/comorphisms/symbolics-to-jump.eigon.json), and it is not shaped the way a "reify the objective directly" sketch would be:
+
+- The triple is `Comorphism(ef_symb_to_jump_input, m_id_optimisation_problem, if_jump_optimisation_problem)`.
+- The middle is an identity `program:Lambda` on **`jump:OptimisationProblem`**, not on `FormulaTerm`. The whole problem — objective, variable names, bounds, sense, constraints — is assembled on the *Symbolics* side by the ExportFormat procedure `frame_as_optimisation_problem`, from a composite `symbolics:SymbolicsToJuMPInput`. By the time the middle runs there is nothing left to translate.
+- The JuMP-HiGHS side is `if_jump_optimisation_problem`, whose `to_class` and `payload_type` are both `jump:OptimisationProblem` and whose procedure `reify_problem` is `return problem`.
+- It is `exact: false`: the framing imposes structure (which variables are decision variables, which sense, which constraints) that is not present in the source `SymbolicExpression`. The wrapped FormulaTerm content is bit-for-bit preserved; the comorphism as a whole picks one of many valid framings.
+- Coverage: [`symbolics_to_jump_chain_validation.rs`](../../../../crates/eigenius-julia/tests/symbolics_to_jump_chain_validation.rs) asserts the triple commits and resolves; [`symbolics_to_jump_e2e.rs`](../../../../crates/eigenius-julia/tests/symbolics_to_jump_e2e.rs) runs it end to end, fitting a competitive-inhibition constant and landing an `OptimisesTo` with a `Holds` verdict.
+
+The generalisable point: when the target institution needs *context* the source expression does not carry, the shared payload does not remove the packaging work — it relocates it to the source institution's export procedure and lets the middle stay an identity at the composite type.
+
+### Planned, not built
+
 - **Sibling institutions per solver.** The next planned drop is `urn:eigenius:institutions:jump_ipopt` for general nonlinear programming. The handler reuses the same `formula_to_jump` walker (just `smart_pow=false` since Ipopt accepts `NonlinearExpr` directly), the same ontology, only the `Project.toml` swaps `HiGHS` for `Ipopt`. Beyond that: `jump_glpk` (LP/MILP), `jump_gurobi` (commercial, advanced features) — all reusing the same `OptimisationProblem` shape.
 
 - **Parameter-fitting flows.** The kinase-IC50 modelling story (Phase 21) wants to fit kinetic parameters from dose-response measurements. That's an optimisation problem: `min ‖predicted(p) − measured‖²` where `predicted(p)` is the output of a Catalyst → DiffEq simulation at parameter vector `p`. The objective lives as a FormulaTerm whose free variables are the parameters; constraints encode prior bounds. The optimum is committed as an `OptimisesTo` whose AutoOnLoad gate re-solves and confirms — i.e., the chain records both *what the optimal parameters are* and *that the institution can independently reproduce them*. The kinase case keeps things in LP/QP territory (linear least-squares with bounds) and stays inside HiGHS's wheelhouse; nonlinear fits (logistic dose-response) move to `jump_ipopt`.
 
-- **`Symbolics → JuMP` comorphism (sketch).** A `SymbolicExpression` carrying a polynomial in the chain's variable names can be reified directly as an `OptimisationProblem.objective` — both are FormulaTerm. The natural pairing is "user authors a model symbolically, dispatches optimisation through JuMP" without re-typing the expression. The Comorphism resource declaration is straightforward (identity Lambda on FormulaTerm, source/target the relevant institutions); landing it is an afternoon's work once the second user shows up.

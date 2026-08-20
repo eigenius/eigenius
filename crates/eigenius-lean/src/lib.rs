@@ -14,18 +14,23 @@
 
 //! `eigenius-lean` — Lean 4 verification institution for Eigenius.
 //!
-//! Wraps [`nanoda_lib`](nanoda_lib) (a vendored Lean 4 term checker)
-//! behind a small [`check_proof`] surface. The crate's role per
+//! Wraps [`nanoda_lib`](nanoda_lib), a Lean 4 term checker, behind a
+//! small [`check_proof`] surface. **nanoda is a Cargo git dependency,
+//! not vendored in-tree**: `crates/eigenius-lean/Cargo.toml` pins
+//! `git = "https://github.com/ammkrn/nanoda_lib", rev = "6d2f037"`,
+//! which resolves to version 0.4.8-beta. Documentation that points at
+//! `references/nanoda_lib/` is pointing at a git-ignored local clone
+//! kept for reading — pinned at a *different* revision, `f58f2f6` —
+//! and not at anything the build consumes. The crate's role per
 //! [D28](../../docs/design/d28-lean-4-as-institution.md):
 //!
 //! - Verification side. The kernel binary links this crate and
 //!   dispatches `urn:eigenius:lean:proof_check` through it. Verdicts
 //!   are an in-process function call — no IPC, no orchestrator hop —
 //!   so the verification TCB stays bounded by what nanoda accepts.
-//! - 20a.3 (this milestone) ships the `check_proof` skeleton only.
-//!   The `Institution` trait impl, the bytes → `lean:LeanExpr`
-//!   chain-mirror translator, and the registration hook into
-//!   `EigeniusService` land in 20a.4.
+//! - Shipped: [`checker::check_proof`], the [`Institution`] impl in
+//!   [`institution`], and the bytes → `lean:LeanExpr` chain-mirror
+//!   translator in [`chain_mirror`].
 //!
 //! Authoring side (`lean_export`, env images, mirror generator) lives
 //! in [`eigenius-lean-runtime`](../eigenius-lean-runtime/) (Phase

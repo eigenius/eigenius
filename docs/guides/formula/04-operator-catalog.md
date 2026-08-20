@@ -4,39 +4,68 @@ Every `OpRef` in a `FormulaTerm` value points at a chain-committed
 `formulas:Operator` resource. The catalog of operators is itself
 chain-resident — declared in
 [`ontologies/formulas/formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json)
-as a set of `Operator` instances, each carrying its symbol and a typed
-`operator_signature` that the validator rank-checks against.
+as a set of `Operator` instances, each carrying a typed
+`operator_signature` and an integer `operator_arity`.
+
+Read [§4.3](#4-3-the-app-spine-arity-check) before relying on the
+signature: the validator's rank check reads `operator_arity` only. The
+signature is declared, dogfooded and inspectable, but v1 does not check
+anything against it.
 
 This chapter covers the v1 catalog, the signature shape, the App-spine
 arity check, and how to author a new operator.
 
 ## 4.1. The v1 catalog
 
-The bootstrap layer ships with seventeen operators covering most
-arithmetic and a few comparison/calculus operations:
+The bootstrap layer ships with **twenty** `formulas:Operator` instances:
+three nullary *type* operators under `urn:eigenius:formulas:types:` —
+`Real`, `Int`, `Bool` — and seventeen *function* operators under
+`urn:eigenius:formulas:ops:`. This chapter's "seventeen" always means the
+function group; the type group exists to be named inside signatures.
 
-| IRI tail | Symbol | Arity | Signature |
-|---|---|---|---|
-| `add` | `+` | 2 | `Real → Real → Real` |
-| `sub` | `-` (binary) | 2 | `Real → Real → Real` |
-| `mul` | `*` | 2 | `Real → Real → Real` |
-| `div` | `/` | 2 | `Real → Real → Real` |
-| `pow` | `^` | 2 | `Real → Real → Real` |
-| `neg` | `-` (unary) | 1 | `Real → Real` |
-| `abs` | `abs` | 1 | `Real → Real` |
-| `exp` | `exp` | 1 | `Real → Real` |
-| `log` | `log` | 1 | `Real → Real` |
-| `sin` | `sin` | 1 | `Real → Real` |
-| `cos` | `cos` | 1 | `Real → Real` |
-| `tan` | `tan` | 1 | `Real → Real` |
-| `sqrt` | `sqrt` | 1 | `Real → Real` |
-| `eq` | `=` (boolean) | 2 | `Real → Real → Bool` |
-| `lt` | `<` | 2 | `Real → Real → Bool` |
-| `le` | `≤` | 2 | `Real → Real → Bool` |
-| `derivative` | `d/dx` | 2 | `Real → Real → Real` |
+| IRI tail | Arity | Assoc. | Comm. | Signature |
+|---|---|---|---|---|
+| `add` | 2 | `n_ary` | true | `Real → Real → Real` |
+| `sub` | 2 | `left` | false | `Real → Real → Real` |
+| `mul` | 2 | `n_ary` | true | `Real → Real → Real` |
+| `div` | 2 | `left` | false | `Real → Real → Real` |
+| `pow` | 2 | `right` | false | `Real → Real → Real` |
+| `neg` | 1 | — | — | `Real → Real` |
+| `abs` | 1 | — | — | `Real → Real` |
+| `exp` | 1 | — | — | `Real → Real` |
+| `log` | 1 | — | — | `Real → Real` |
+| `sin` | 1 | — | — | `Real → Real` |
+| `cos` | 1 | — | — | `Real → Real` |
+| `tan` | 1 | — | — | `Real → Real` |
+| `sqrt` | 1 | — | — | `Real → Real` |
+| `eq` | 2 | — | true | `Real → Real → Bool` |
+| `lt` | 2 | — | false | `Real → Real → Bool` |
+| `le` | 2 | — | false | `Real → Real → Bool` |
+| `derivative` | 2 | — | — | `(Real → Real) → Real → Real` |
+
+**There is no `formulas:operator_symbol` property.** Operators carry
+`core:short_name`, `formulas:operator_arity`,
+`formulas:operator_signature`, and optionally
+`formulas:operator_associativity` (`n_ary` / `left` / `right`) and
+`formulas:operator_commutativity`. Surface spelling is not a chain
+property: the five infix spellings `+ - * / ^` and prefix `-` are
+hard-coded in the ESL Pratt parser
+([§4.4](#4-4-authoring-a-new-operator)), and everything else is spelled as
+a function call.
+
+Note `derivative`'s signature: its first argument is itself a function
+`Real → Real`, so the Pi spine is nested rather than flat. Its
+`operator_arity` is still 2, and 2 is what the validator reads.
 
 Full IRIs all live under `urn:eigenius:formulas:ops:` — e.g.
 `urn:eigenius:formulas:ops:add`. Use those in `OpRef` constructors.
+
+**Four of the seventeen are declared but uninterpreted.** `eq`, `lt`, `le`
+and `derivative` appear in no Julia institution's operator map. A term using
+one commits cleanly — the arity is declared and correct — and fails at
+dispatch with a per-institution message naming the map that needs extending.
+The catalog and the interpreters are separately maintained and nothing checks
+that they agree.
 
 ## 4.2. The signature shape
 
@@ -47,24 +76,33 @@ as:
 ```json
 {
   "@id": "urn:eigenius:formulas:ops:add",
-  "core:is_a": ["urn:eigenius:formulas:Operator"],
-  "core:short_name": "add",
-  "formulas:operator_symbol": "+",
-  "formulas:operator_signature": {
+  "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
+  "urn:eigenius:core:short_name": "add",
+  "urn:eigenius:formulas:operator_arity": 2,
+  "urn:eigenius:formulas:operator_associativity": "n_ary",
+  "urn:eigenius:formulas:operator_commutativity": true,
+  "urn:eigenius:formulas:operator_signature": {
     "ctor": "Pi",
     "args": [
       "_",
-      {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:Real"]},
+      {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
       {"ctor": "Pi",
        "args": [
          "_",
-         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:Real"]},
-         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:Real"]}
+         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
+         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
        ]}
     ]
   }
 }
 ```
+
+Two spellings to get right. The type reference is
+`urn:eigenius:formulas:**types**:Real`, not `…:ops:Real` — the type
+operators live in their own IRI segment. And `operator_arity` sits
+alongside the signature as a redundant integer; it is redundant in
+principle and load-bearing in practice, because it is the only thing
+[§4.3](#4-3-the-app-spine-arity-check) reads.
 
 Read the spine right-to-left for the function-type form: the innermost
 `Real` is the return type; each enclosing `Pi(_, Real, …)` adds an
@@ -75,44 +113,77 @@ in the same chain shape they describe. The `Pi` constructor is on the
 chain because operator signatures need it; once it's there, the rest
 of EigenTT-style typing comes along for free.
 
-(The `Real` reference is itself an `OpRef` for now — a built-in
-typed-as-an-operator-reference. The chain-resident type system for
+(The `Real` reference is itself an `OpRef` naming a nullary `Operator`
+under `urn:eigenius:formulas:types:`. The chain-resident type system for
 *types* of arithmetic values is intentionally minimal in v1.)
 
 ## 4.3. The App-spine arity check
 
 Every `App` spine in a chain-committed `FormulaTerm` value gets
-**rank-checked** against the operator's `Pi`-spine signature at commit
-time (D32 §5.4):
+**rank-checked** at commit time by validation Rule 17
+([`kernel/src/validation/rules/inductive.rs`](../../../kernel/src/validation/rules/inductive.rs),
+`check_formula_term_arity`). What it actually does:
 
-1. The validator walks the leftmost `App` chain down to the bottom.
-2. The bottom must be an `OpRef` resolving to a chain-committed
-   `formulas:Operator`. If it's not, reject with `unknown operator IRI`.
-3. Read the operator's `operator_signature`. Count the `Pi` binders
-   along the leftmost spine.
-4. Count the arguments along the original `App` spine.
-5. The two counts must match. If you have *more* args than `Pi`
-   binders, reject with `OperatorArityMismatch: <op>: expected N args,
-   got M` (where `N` is the binder count). If *fewer*, the value is
-   partially applied — valid as a value but won't type-check in
-   contexts expecting a result of the operator's return type.
+1. The rule fires only on a property whose declaration carries
+   `core:data_type: core:inductive` *and* whose `core:class_types` is
+   exactly the one-element list `[urn:eigenius:formulas:FormulaTerm]` — a
+   literal string comparison against a pinned IRI constant.
+2. It walks the value tree. Entering an `App` node it collects the whole
+   left spine down to its head.
+3. If the head is an `OpRef`, it resolves the named IRI in the layer and
+   reads `formulas:operator_arity` off whatever it finds.
+4. It compares that integer to the number of spine arguments with `!=`.
+5. On a mismatch it emits `ValidationRule::OperatorArityMismatch` with the
+   message `<path>: operator \`<iri>\` declares arity N; App spine supplies
+   M arg(s)`, where `<path>` accumulates `.args[i]` segments from the
+   property root.
 
-So `App(App(OpRef(add), x), y)` is a 2-arg App-spine, matches `add`'s
-2-arg signature: accepted. `App(App(App(OpRef(add), x), y), z)` has a
-3-arg spine against `add`'s 2-arg signature: rejected.
+So `App(App(OpRef(add), x), y)` is a 2-arg spine against `add`'s declared
+arity 2: accepted. `App(App(App(OpRef(add), x), y), z)` is a 3-arg spine:
+rejected.
+
+**`operator_signature` is not read, and no `Pi` binder is ever counted.**
+The code says so in as many words — "v1 ships arity-only". The `Operator`
+class compounds this: it *requires* `operator_signature`, which the rule
+ignores, and only *recommends* `operator_arity`, which is the sole property
+it reads, so a spec-compliant operator declaration can be invisible to the
+rule.
+
+**Under-application is rejected too, not accepted as a partial
+application.** The comparison is `!=`, in both directions, and a unit test
+pins it: `App(OpRef(add), x)` against binary `add` is one error. What *is*
+invisible is under-application nested inside a longer spine — intermediate
+`App` nodes within a spine are deliberately not re-checked, because within
+a spine they are partial applications rather than complete invocations.
+
+**Three ways for the check to silently not fire.** The resolution is a
+nested `if let` cascade with no `else` arms:
+
+- an `OpRef` naming an IRI the layer cannot resolve produces no error —
+  there is no `unknown operator IRI` diagnostic anywhere in the kernel;
+- an operator resource without `operator_arity` produces no error;
+- a non-integer `operator_arity` produces no error.
+
+The rule also never checks that what it resolved `is_a formulas:Operator`.
+Any resource carrying an integer `formulas:operator_arity` will satisfy it.
+
+Everything the rule does not recognise it traverses: the non-`App` arm walks
+into whatever `args` array it finds, whatever the constructor is called.
 
 ## 4.4. Authoring a new operator
 
 To add an operator (say, `min: Real → Real → Real`), commit a new
-`Operator` resource on a layer. ESL form:
+`Operator` resource on a layer. `operator_arity` is the property that makes
+the operator visible to Rule 17; declare it even though the ontology only
+*recommends* it. ESL form:
 
 ```esl
 namespace formulas = "urn:eigenius:formulas";
 namespace ops      = "urn:eigenius:formulas:ops";
 
 resource ops:min : formulas:Operator {
-    core:short_name           = "min";
-    formulas:operator_symbol  = "min";
+    core:short_name             = "min";
+    formulas:operator_arity     = 2;
     formulas:operator_signature = formula(
         Real -> Real -> Real
     );
@@ -144,12 +215,13 @@ when an institution tries to interpret them.
 
 Two reasons.
 
-**Validation rigour.** Without a typed signature the validator could
-only check that an `OpRef` resolves to *something*; it couldn't catch
-arity mismatches at commit time. With it, an `App` spine carrying the
-wrong number of arguments is rejected before the runtime ever sees the
-value. That's the difference between "handler error at dispatch" (slow,
-unclear) and "validation error at commit" (fast, locality of blame).
+**Validation rigour.** An `App` spine carrying the wrong number of
+arguments is rejected before the runtime ever sees the value — the
+difference between "handler error at dispatch" (slow, unclear) and
+"validation error at commit" (fast, locality of blame). In v1 the *arity*
+does that work and the signature is carried alongside it; per-argument type
+checking against the `Pi` spine is the follow-on the signature is already
+in place for.
 
 **Cross-institution agreement.** If Symbolics' handler thinks `add` is
 binary and DiffEq's thinks it's variadic, their views of the same chain
@@ -158,8 +230,8 @@ walking the same canonical encoding — they stay in agreement by
 construction. The chain is the source of truth.
 
 A third reason worth flagging for the medium term: **calculus and
-beyond.** `derivative: Real → Real → Real` is in the v1 catalog as a
-placeholder; its signature is honest about its arity even if no v1
+beyond.** `derivative: (Real → Real) → Real → Real` is in the v1 catalog as
+a placeholder; its signature is honest about its shape even though no v1
 institution evaluates it. Adding richer dependent-typed operators —
 indexed sums, parameterised quantifiers — slots into the same shape.
 

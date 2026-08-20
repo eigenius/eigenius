@@ -5,10 +5,16 @@
 > with a `DatasetSchema` (§4) where it's tabular. This validates the D53 abstractions
 > against a real, varied corpus and serves as the implementation reference.
 >
-> *Caveat:* today the WRN PoC **inlines** small `SampleSet`s and extracts them with the
-> Tier-1 `extract_samplesets.py` recipe; D53 is not yet built. This memo is the *Tier-2
-> shape* — what attaching these files would look like once D53 exists. Syntax below is
-> illustrative pseudo-ESL; the exact vocabulary routes through [D57](../design/d57-schema-org-vocabulary-mapping.md).
+> *Status (corrected 2026-08-20):* D53 **is** built. The `ingest:` vocabulary is committed at
+> [`ontologies/ingest/ingest-ontology.json`](../../ontologies/ingest/ingest-ontology.json), the
+> schema resolver is `crates/runtime-substrate/src/dataset_schema.rs`, the kernel reads pinned
+> content arrays, and the CLI carries `eigenius data attach / list / show / verify / validate /
+> provision`. What remains true is the *other* half of the original caveat: the WRN PoC still
+> **inlines** its small `SampleSet`s and extracts them with the Tier-1 `extract_samplesets.py`
+> recipe, and **no committed node in this repository uses any of the profiles below**. So read
+> this memo as a design reference for a Tier-2 attachment that has not been performed, not as a
+> description of the WRN chain as it stands. The syntax is illustrative pseudo-ESL; the exact
+> vocabulary routes through [D57](../design/d57-schema-org-vocabulary-mapping.md).
 
 ## Backend choice (§3.1)
 
@@ -67,7 +73,7 @@ DRIVE is the *same cube*, physically transposed: rows = genes, columns = `CCLE_n
 layout { row_key = column(gene-symbol) -> gene;  columns = header(CCLE_name) -> cell_line via depmap_bridge;  cell = demeter2_dep }
 ```
 
-→ confirms the semantic/layout separation does real work: orientation is a *layout* fact, not a schema fact.
+→ confirms the semantic/layout separation does real work: orientation is a *layout* fact, not a schema fact. And it is carried by which dimension the row key binds, not by a distinct layout kind — the `LayoutKind` enum has three members, and a transposed wide matrix is a `WideMatrix` whose `row_key_binds` names the gene dimension.
 
 ### C. Long, multi-measure — `wrn_supplementary_table_1.csv`
 
@@ -259,10 +265,18 @@ resource wrn:drive_matrix_schema : ingest:DatasetSchema {
     ];
     ingest:measure = [ ingest:Measure { ingest:name = "demeter2_dep"; ingest:property = onco:dependency_score; ingest:data_type = core:float; } ];
     ingest:layout = ingest:Layout {
-        ingest:kind            = "Transposed";       // rows = gene, columns = cell_line — Achilles, flipped
+        ingest:kind            = "WideMatrix";       // rows = gene, columns = cell_line — Achilles, flipped.
+                                                     // Orientation is carried by the bindings below, not by the
+                                                     // kind: `LayoutKind` has exactly three members (WideMatrix,
+                                                     // LongTable, Collection) and parses anything else into
+                                                     // `Other(_)`, which validation reports as
+                                                     // "unrecognized layout kind".
         ingest:row_key         = "<gene-symbol>";    ingest:row_key_binds = "gene";
         ingest:column_dimension = "cell_line";
-        ingest:header_key      = "CCLE_name";        // columns resolve via the code-list's CCLE_name, not the primary DepMap_ID
+        ingest:header_parse    = "CCLE_name";        // columns resolve via the code-list's CCLE_name, not the primary DepMap_ID.
+                                                     // Note the property name: the resolver reads `ingest:header_parse`.
+                                                     // Nothing yet consumes the parsed value — it is carried into the
+                                                     // typed `Layout` and read by no caller.
         ingest:cell_measure    = "demeter2_dep";
     };
 }
@@ -294,7 +308,7 @@ resource wrn:gse126464_counts_schema : ingest:DatasetSchema {
     ingest:layout = ingest:Layout {
         ingest:kind            = "WideMatrix";
         ingest:row_key         = "<gene-id>";   ingest:row_key_binds = "gene";
-        ingest:column_dimension = "sample";     ingest:header_key = "sample_id";
+        ingest:column_dimension = "sample";     ingest:header_parse = "sample_id";
         ingest:cell_measure    = "read_count";
     };
 }

@@ -22,7 +22,9 @@ just build      # equivalent to: cargo build --workspace
 ```
 
 This compiles the full Rust workspace (kernel, storage backends, CLI, and
-the institution crates). No extra toolchain is required beyond stable Rust.
+the institution crates).
+
+**A Lean toolchain is required for the workspace build**, not only for the Lean institution's tests. `crates/eigenius-lean-worker`'s `build.rs` compiles a C bridge against Lean's `lean.h`, which it locates from `EIGENIUS_LEAN_INCLUDE_DIR`, then `LEAN_SYSROOT`, then `lean --print-prefix` — and panics when none of the three resolves. On a host without Lean, `cargo build --workspace` fails in that build script. Install elan and the pinned toolchain (`lean/runtime-worker/lean-toolchain`, today `leanprover/lean4:v4.29.1`) before the first build; see [chapter 2 §2.1](02-installation.md#21-required-toolchain).
 
 ## 3.3. `just test` in detail
 

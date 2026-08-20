@@ -14,8 +14,12 @@
 
 //! Per-layer shadowing bloom filter (D23 §5.2).
 //!
-//! Each persisted layer carries one `BloomFilter` over the IRIs it defines
-//! directly. `Layer::resolve` (Phase 14b-iii) consults each ancestor's bloom
+//! Each persisted layer carries one `BloomFilter` over the union of the IRIs
+//! it defines directly and the IRIs it tombstones (`for_layer` inserts both).
+//! Tombstones must be in the filter: a tombstone is a visibility-modifying
+//! change, so a chain walk that skipped the layer would resolve straight
+//! past it to a shadowed definition. `Layer::resolve` (Phase 14b-iii)
+//! consults each ancestor's bloom
 //! to skip layers without a matching definition, only probing the cache /
 //! backend at layers the bloom flags as "maybe present". Walking the chain
 //! head→root with the blooms produces shadowing semantics without the
@@ -32,8 +36,17 @@
 //! - `m ≈ -n * ln(p) / (ln(2)^2)`
 //! - `k ≈ (m / n) * ln(2)`
 //!
-//! Default `p = 0.01` (1%, per D23 §5.2.6). For `n = 10_000`, `p = 0.01`:
-//! `m ≈ 95851 → 131072 bits = 16 KiB`, `k ≈ 7`.
+//! Default `p = 0.01` (1%, per D23 §5.2.6). `size_params` computes `k` from
+//! the *rounded* `m`, not from `m_ideal`, so `k` runs higher than the
+//! textbook figure. For `n = 10_000`, `p = 0.01`: `m ≈ 95851 → 131072 bits
+//! = 16 KiB`, and `k = round((131072 / 10000) * ln 2) = 9` — not the 7 that
+//! `m_ideal` would give.
+//!
+//! The `MIN_BIT_COUNT` floor makes this pronounced for tiny layers: a layer
+//! with one IRI gets `m = 64` from the floor and therefore
+//! `k = round((64 / 1) * ln 2) = 44` probes over a 64-bit filter. Correct
+//! (no false negatives) and cheap in absolute terms, but far from the
+//! optimum for its `m`; `k` is capped at 64.
 //!
 //! **Persistence.** Serializes via `serde` + `ciborium` to the same CBOR
 //! byte stream as other kernel storage (D23 §6.2: `bloom:<layer_id>` keys).

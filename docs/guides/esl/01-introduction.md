@@ -15,7 +15,24 @@ These two decisions meet at chapter 6: the resource graph and the type theory ar
 
 ESL has two structurally distinct surfaces:
 
-**Declarative (HCL-style).** Top-level forms — `namespace`, `class`, `property`, `resource`, `data`, `codata`, `program` — declare named entities. Each becomes one or more resources in the output. Order doesn't matter at the file level; declarations are independent until something references another by IRI.
+**Declarative (HCL-style).** Top-level forms declare named entities; each becomes one or more resources in the output. Order doesn't matter at the file level, and the file-level `namespace` alias may be interleaved with declarations rather than confined to a prologue. The parser accepts twelve declaration forms plus that alias:
+
+| Form | Emits | Chapter |
+|---|---|---|
+| `class` | `core:Class` | [4](04-declarations.md) |
+| `property` | `core:Property` | [4](04-declarations.md) |
+| `resource` | a resource of the named class | [4](04-declarations.md) |
+| `data` | `core:InductiveType` | [4](04-declarations.md) |
+| `codata` | `core:CodataType` | [4](04-declarations.md) |
+| `program` | `program:Program` | [4](04-declarations.md) |
+| `axiom` | `core:Axiom` (D46 §10) | [4](04-declarations.md) |
+| `def` | `eigentt:Definition` (D66) | [4](04-declarations.md) |
+| `macro` | compile-time smart constructor (D52 §12), plus a chain resource for cross-file visibility | [4](04-declarations.md) |
+| `merge_comorphism` | `MergeComorphism` (D37 §3.3) | [4](04-declarations.md) |
+| `text_index` | **nothing — the lowering is unimplemented**; the compiler returns `text_index lowering not yet implemented (D43 M2)`. Write the `core:TextIndex` resource declaration directly. | — |
+| `vector_index` | **nothing — unimplemented**, exactly as `text_index`. | — |
+
+`namespace ns = "urn:…";` is the file-level alias form and emits no resource.
 
 **Expression (ML-style).** Inside `program` bodies you write ML-style expressions: `let`, lambdas (`\x -> e` or `λx -> e`), application, pattern match, constructor calls, projections. These compile to a kernel `Exp` that the type-checker sees and the evaluator runs.
 
@@ -43,11 +60,11 @@ compile::compile_file  ─►  Vec<Resource>   (Eigon-JSON, ready for layer load
 
 The end product is a `Vec<Resource>`. Loading those resources into a layer makes them visible to:
 
-- **The type-checker** ([`kernel/src/nbe/check.rs`](../../../kernel/src/nbe/check.rs)) — when a `program`'s body type-checks, the kernel walks the layer to resolve types referenced by IRI ([D18](../../design/d18-ontology-as-types-resolution.md)).
-- **The evaluator** ([`kernel/src/nbe/eval.rs`](../../../kernel/src/nbe/eval.rs)) — when the program runs, the kernel may resolve resources, dispatch to components and institutions, and produce a result value.
+- **The type-checker** ([`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs)) — when a `program`'s body type-checks, the kernel walks the layer to resolve types referenced by IRI ([D18](../../design/d18-ontology-as-types-resolution.md)).
+- **The evaluator** ([`kernel/src/nbe/eval/mod.rs`](../../../kernel/src/nbe/eval/mod.rs)) — when the program runs, the kernel may resolve resources, dispatch to components and institutions, and produce a result value.
 - **EigenQL** — once loaded, every class, property, and resource declared in ESL is queryable via [the EigenQL surface](../eigenql/README.md).
 
-The two compile entry points live in [`kernel/src/esl/mod.rs`](../../../kernel/src/esl/mod.rs):
+The four compile entry points live in [`kernel/src/esl/mod.rs`](../../../kernel/src/esl/mod.rs):
 
 ```rust
 pub fn compile(source: &str) -> Result<Vec<Resource>, Vec<EslError>>;
@@ -56,9 +73,29 @@ pub fn compile_with_institutions(
     source: &str,
     index: Arc<InstitutionIndex>,
 ) -> Result<Vec<Resource>, Vec<EslError>>;
+
+pub fn compile_against_layer(
+    source: &str,
+    layer: &Layer,
+) -> Result<Vec<Resource>, Vec<EslError>>;
+
+pub fn compile_full(
+    source: &str,
+    institutions: Arc<InstitutionIndex>,
+    layer: &Layer,
+) -> Result<Vec<Resource>, Vec<EslError>>;
 ```
 
-Use the basic `compile` for ontologies and resources that don't reference institution capabilities. Use `compile_with_institutions` when a `program` body invokes qualified-name function calls referencing a `Decidable` `QueryClass` — the chain-derived [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) classifies the IRI at compile time. See chapter 9 (and note that under D14 comorphisms are not callable from ESL expression position — they surface inside EigenQL FIBER param coercion).
+They differ in what context the compiler can consult:
+
+| Entry point | Institution index | Chain ctors + macros |
+|---|---|---|
+| `compile` | — | — |
+| `compile_with_institutions` | yes | — |
+| `compile_against_layer` | — | yes |
+| `compile_full` | yes | yes |
+
+Use `compile` for ontologies and resources that reference neither institution capabilities nor declarations from a parent layer. `compile_with_institutions` adds the chain-derived [`InstitutionIndex`](../../../kernel/src/institution/registry.rs), which classifies a qualified-name function call as a `Decidable` `QueryClass` or a `Comorphism` at compile time (chapter 9). `compile_against_layer` adds `collect_ctors_from_layer` + `collect_macros_from_layer`, so a bare-name constructor or a `macro` declared in a parent layer resolves. **`compile_full` is the one the running server uses** — `eigenius load` and notebook-cell ESL both need the institution index *and* cross-file ctor/macro resolution.
 
 ## 1.3. What this guide covers
 
@@ -70,7 +107,7 @@ The rest of the guide proceeds bottom-up:
 - **[Chapter 5](05-expressions.md)** — every expression form, with its kernel `Exp` representation, type-check rule, and evaluation rule.
 - **[Chapter 6](06-resources-types-and-the-layer.md)** — *the bridge*. Read this before chapters 7–9; it makes everything that follows sit naturally.
 - **[Chapter 7](07-type-theory-primer.md)** — the underlying type theory, in the language of users not theorists.
-- **[Chapter 8](08-capability-modes.md)** — `Pure` / `Read` / `Check` / `IO` and what kernel nodes can or can't do in each.
+- **[Chapter 8](08-capability-modes.md)** — `EvalCtx::Pure` vs `EvalCtx::Effectful`, and what the three effectful kernel forms can or can't do in each.
 - **[Chapter 9](09-institutions.md)** — how programs reach into institutions for domain reasoning.
 - **[Chapter 10](10-error-messages.md)** — common errors and fixes.
 - **[Chapter 12](11-appendix.md)** — grammar reference and source index.

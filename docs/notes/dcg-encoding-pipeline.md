@@ -57,8 +57,16 @@ surface→lemma step runs on.
 **UMLS** (`crates/eigenius-umls`) — the biomedical domain. Parses the Rich Release Format and renders a
 faithful typed *mirror* plus a *derived* domain lexicon ("mirror-then-derive").
 
-**Every entry passes the felicity gate at import** (`lexicon.rs::gate_entry`): an entry is admitted iff
-`⟦cat⟧ ≡ sem_type` and its `sem` actually inhabits `⟦cat⟧`. A malformed entry never reaches the parser.
+**The felicity gate is opt-in, and production ingest does not opt in.** The gate
+(`lexicon.rs::gate_entry`) admits an entry iff `⟦cat⟧ ≡ sem_type` and its `sem` actually inhabits
+`⟦cat⟧`. Every call site is an importer binary, one CLI subcommand, or a test — none is under
+`kernel/src/validation`, `kernel/src/layer` or `kernel/src/commit`, so committing a lexicon through
+the kernel's load path never runs it. In the importers the call sits behind `--validate`, documented
+as single-file, in-memory mode only; `scripts/reseed-lexicon-db.sh` runs both large importers in
+`--out-dir` mode without that flag. At the 6.6M-entry production scale the gate therefore runs on
+nothing, and a malformed entry does reach the parser. What the commit path does check is each
+`eigentt:TypeExpr` slot in isolation, under Rule 21 — not the cross-field felicity obligation, which
+is the whole content of the gate.
 
 > `⟦·⟧ : Cat → Type` is the categorial-to-type homomorphism (`category.rs::denote_cat`), a recursor over
 > the `lexicon:Cat` inductive: `⟦S⟧ = Prop`, `⟦N(T)⟧ = Set`, `⟦NP(T)⟧ = T`, `⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧`.
