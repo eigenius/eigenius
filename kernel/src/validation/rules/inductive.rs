@@ -34,6 +34,11 @@ const FORMULA_TERM_IRI: &str = "urn:eigenius:formulas:FormulaTerm";
 /// operator_signature walk (deferred to a follow-on landing).
 const OPERATOR_ARITY_IRI: &str = "urn:eigenius:formulas:operator_arity";
 
+/// `formulas:Operator` class IRI. An `OpRef` head must resolve to an
+/// instance of this class (or of a subclass of it) before its
+/// `operator_arity` is read.
+const OPERATOR_IRI: &str = "urn:eigenius:formulas:Operator";
+
 /// EigenTTType InductiveType IRI (D47 §3). Pinned here so the
 /// `ConstRef` resolution check (D47 §5) can short-circuit when
 /// the inductive being walked isn't `eigentt:TypeExpr`.
@@ -395,11 +400,13 @@ impl Validator {
     ///
     /// When a property's value is a FormulaTerm whose outer ctor is
     /// `App`, walk the left spine to find the head. If the head is an
-    /// `OpRef(iri)` whose target resolves to an `Operator` resource
-    /// with a declared `operator_arity`, confirm the App spine
-    /// supplies exactly that many arguments. This catches typos like
-    /// `App(OpRef("add"), x)` (one arg short) at commit time rather
-    /// than at dispatch.
+    /// `OpRef(iri)`, resolve `iri` to a `formulas:Operator` and confirm
+    /// the App spine supplies exactly its declared `operator_arity`
+    /// arguments. This catches typos like `App(OpRef("add"), x)` (one
+    /// arg short) at commit time rather than at dispatch. Every way the
+    /// resolution itself can fail is a diagnostic too — see
+    /// [`Self::check_op_ref_head`], which owns the stage-by-stage
+    /// contract.
     ///
     /// Type-of-each-arg checking against the operator's full
     /// `operator_signature` (a Pi chain over FormulaTerm) is a
@@ -475,33 +482,7 @@ impl Validator {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("");
                 if head_ctor == "OpRef" {
-                    let op_iri_s = head_obj
-                        .get("args")
-                        .and_then(serde_json::Value::as_array)
-                        .and_then(|a| a.first())
-                        .and_then(serde_json::Value::as_str);
-                    if let Some(op_iri_s) = op_iri_s {
-                        if let Ok(op_iri) = Iri::parse(op_iri_s) {
-                            if let Some(op_resource) = self.layer.resolve(&op_iri) {
-                                if let Some(arity_value) = op_resource.get(&iri(OPERATOR_ARITY_IRI))
-                                {
-                                    if let Some(arity) = arity_value.as_integer() {
-                                        if (arity as usize) != spine_args.len() {
-                                            out.push(ValidationError {
-                                                resource_id: res_id.clone(),
-                                                property: None,
-                                                rule: ValidationRule::OperatorArityMismatch,
-                                                message: format!(
-                                                    "{path}: operator `{op_iri_s}` declares arity {arity}; App spine supplies {} arg(s)",
-                                                    spine_args.len(),
-                                                ),
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    self.check_op_ref_head(head_obj, spine_args.len(), &path, res_id, out);
                 }
             }
             // Recurse only into spine args (NOT into intermediate
@@ -528,6 +509,114 @@ impl Validator {
         for (i, arg) in args.iter().enumerate() {
             let child_path = format!("{path}.args[{i}]");
             self.walk_formula_term_app_arity(arg, child_path, res_id, out);
+        }
+    }
+
+    /// Rank-check one `App` spine against the operator its `OpRef`
+    /// head names, diagnosing every way that resolution can fail.
+    ///
+    /// Stages, in order: the operand must parse as an IRI, resolve in
+    /// the layer chain, and be a `formulas:Operator`
+    /// ([`ValidationRule::UnknownOperator`] otherwise); its
+    /// `operator_arity` must be a non-negative integer
+    /// ([`ValidationRule::OperatorDeclarationMalformed`] otherwise);
+    /// and that arity must equal the spine length
+    /// ([`ValidationRule::OperatorArityMismatch`] otherwise).
+    ///
+    /// Two shapes deliberately produce nothing here:
+    ///
+    /// - **A missing or non-string `OpRef` operand.** Rule 16
+    ///   (`walk_inductive_value`) already walks every `OpRef` node in
+    ///   the same value against the ctor's declared `arg_types`
+    ///   (`iri: core:string`) and raises `InductiveValueMismatch` for
+    ///   both the wrong arg count and the wrong arg type. Re-reporting
+    ///   it would double-diagnose one defect.
+    /// - **An operator carrying no `operator_arity` at all.** The
+    ///   property is only `recommends` on `formulas:Operator`, which
+    ///   `requires` `operator_signature` instead, so an operator
+    ///   declaring just the signature is schema-conformant and this
+    ///   rule has nothing to read. Which of the two is authoritative —
+    ///   and hence whether the absence is an error or a cue to walk
+    ///   the signature's Pi binders — is eigenius#163, a maintainer
+    ///   decision this rule does not pre-empt.
+    fn check_op_ref_head(
+        &self,
+        head_obj: &serde_json::Map<String, serde_json::Value>,
+        spine_len: usize,
+        path: &str,
+        res_id: &Option<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        let unknown = |message: String| ValidationError {
+            resource_id: res_id.clone(),
+            property: None,
+            rule: ValidationRule::UnknownOperator,
+            message,
+        };
+
+        // Arg shape is Rule 16's; see the doc comment.
+        let Some(op_iri_s) = head_obj
+            .get("args")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+
+        let op_iri = match Iri::parse(op_iri_s) {
+            Ok(i) => i,
+            Err(e) => {
+                out.push(unknown(format!(
+                    "{path}: `OpRef` operand `{op_iri_s}` is not a well-formed IRI ({e})"
+                )));
+                return;
+            }
+        };
+
+        let Some(op_resource) = self.layer.resolve(&op_iri) else {
+            out.push(unknown(format!(
+                "{path}: operator `{op_iri_s}` does not resolve in the layer chain"
+            )));
+            return;
+        };
+
+        if !self.is_instance_of_any(&op_resource, &[&iri(OPERATOR_IRI)]) {
+            out.push(unknown(format!(
+                "{path}: `{op_iri_s}` resolves to a resource that is not a `formulas:Operator`"
+            )));
+            return;
+        }
+
+        // Absent `operator_arity` is schema-conformant; see the doc comment.
+        let Some(arity_value) = op_resource.get(&iri(OPERATOR_ARITY_IRI)) else {
+            return;
+        };
+
+        let Some(arity) = arity_value
+            .as_integer()
+            .and_then(|a| usize::try_from(a).ok())
+        else {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::OperatorDeclarationMalformed,
+                message: format!(
+                    "{path}: operator `{op_iri_s}` declares an `operator_arity` that is not a non-negative integer ({arity_value:?}); the App spine cannot be rank-checked"
+                ),
+            });
+            return;
+        };
+
+        if arity != spine_len {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::OperatorArityMismatch,
+                message: format!(
+                    "{path}: operator `{op_iri_s}` declares arity {arity}; App spine supplies {spine_len} arg(s)"
+                ),
+            });
         }
     }
 }
@@ -902,6 +991,241 @@ mod tests {
         assert!(
             !arity_errors.is_empty(),
             "expected an OperatorArityMismatch for over-applied `neg`; got {errors:?}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Rule 17 operator-resolution diagnostics — eigenius#162
+    //
+    // Before this landed, every one of the shapes below fell through
+    // the `if let` cascade and committed with no diagnostic at all.
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Commit `term` under `test:formula_value` on a layer above the
+    /// bootstrap formulas layer and return the whole error list.
+    fn validate_formula_term(term: serde_json::Value) -> Vec<super::super::super::ValidationError> {
+        let layer = build_formula_layer();
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:op_ref_holder",
+            vec![("urn:eigenius:test:formula_value", Value::Json(term))],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        Validator::new(layer).validate()
+    }
+
+    /// `App(OpRef(<iri>), Var("x"))` — a unary application whose head
+    /// names `iri`.
+    fn app_of(op_iri: &str) -> serde_json::Value {
+        serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "OpRef", "args": [op_iri]},
+                {"ctor": "Var", "args": ["x"]}
+            ]
+        })
+    }
+
+    #[test]
+    fn op_ref_rejects_unparseable_iri() {
+        // Bare `neg` has no scheme, so it is not an IRI at all.
+        let errors = validate_formula_term(app_of("neg"));
+        let unknown: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UnknownOperator)
+            .collect();
+        assert_eq!(
+            unknown.len(),
+            1,
+            "expected one UnknownOperator for a scheme-less OpRef operand; got {errors:?}"
+        );
+        assert!(
+            unknown[0].message.contains("not a well-formed IRI"),
+            "error must say the operand isn't an IRI: {}",
+            unknown[0].message
+        );
+    }
+
+    #[test]
+    fn op_ref_rejects_unresolved_iri() {
+        // `ops:ad` is one character short of the catalogued `ops:add`
+        // — the typo the rule exists to catch.
+        let errors = validate_formula_term(app_of("urn:eigenius:formulas:ops:ad"));
+        let unknown: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UnknownOperator)
+            .collect();
+        assert_eq!(
+            unknown.len(),
+            1,
+            "expected one UnknownOperator for an unresolvable operator IRI; got {errors:?}"
+        );
+        assert!(
+            unknown[0].message.contains("urn:eigenius:formulas:ops:ad")
+                && unknown[0].message.contains("does not resolve"),
+            "error must name the unresolved IRI: {}",
+            unknown[0].message
+        );
+    }
+
+    #[test]
+    fn op_ref_rejects_non_operator_target() {
+        // Resolves fine, but `core:Class` is not a `formulas:Operator`.
+        let errors = validate_formula_term(app_of("urn:eigenius:core:Class"));
+        let unknown: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::UnknownOperator)
+            .collect();
+        assert_eq!(
+            unknown.len(),
+            1,
+            "expected one UnknownOperator for a non-Operator target; got {errors:?}"
+        );
+        assert!(
+            unknown[0].message.contains("not a `formulas:Operator`"),
+            "error must say the target isn't an Operator: {}",
+            unknown[0].message
+        );
+    }
+
+    /// Commit a `formulas:Operator` carrying `arity` as its
+    /// `operator_arity`, plus a unary application of it, and return the
+    /// error list. Lets the arity slot be filled with any `Value` so
+    /// malformed declarations can be exercised.
+    fn validate_operator_with_arity(arity: Value) -> Vec<super::super::super::ValidationError> {
+        let layer = build_formula_layer();
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let op = make_resource(
+            "urn:eigenius:test:ops:bad",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:formulas:Operator",
+                    ))]),
+                ),
+                (wk::SHORT_NAME, Value::String("bad".into())),
+                ("urn:eigenius:formulas:operator_arity", arity),
+            ],
+        );
+        top.add_resource(op).unwrap();
+        let holder = make_resource(
+            "urn:eigenius:test:op_ref_holder",
+            vec![(
+                "urn:eigenius:test:formula_value",
+                Value::Json(app_of("urn:eigenius:test:ops:bad")),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        Validator::new(layer).validate()
+    }
+
+    #[test]
+    fn op_ref_rejects_non_integer_arity() {
+        let errors = validate_operator_with_arity(Value::String("two".into()));
+        let malformed: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::OperatorDeclarationMalformed)
+            .collect();
+        assert_eq!(
+            malformed.len(),
+            1,
+            "expected one OperatorDeclarationMalformed for a string arity; got {errors:?}"
+        );
+        assert!(
+            malformed[0].message.contains("urn:eigenius:test:ops:bad"),
+            "error must name the offending operator: {}",
+            malformed[0].message
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.rule != ValidationRule::OperatorArityMismatch),
+            "a malformed arity must not also be reported as a rank mismatch; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn op_ref_rejects_negative_arity() {
+        // `-1` is an integer but not a possible argument count. The old
+        // `(arity as usize)` comparison wrapped it to
+        // 18446744073709551615 and reported the malformed declaration
+        // as a rank mismatch against the invoking resource.
+        let errors = validate_operator_with_arity(Value::Integer(-1));
+        let malformed: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == ValidationRule::OperatorDeclarationMalformed)
+            .collect();
+        assert_eq!(
+            malformed.len(),
+            1,
+            "expected one OperatorDeclarationMalformed for a negative arity; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn op_ref_accepts_operator_without_arity() {
+        // `operator_arity` is only `recommends` on `formulas:Operator`
+        // (the class `requires` `operator_signature`), so an operator
+        // declaring no arity is schema-conformant and Rule 17 has
+        // nothing to check. Pins the deferred half of eigenius#163:
+        // if the authoritative property changes, this test changes with
+        // it deliberately rather than by accident.
+        let layer = build_formula_layer();
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let op = make_resource(
+            "urn:eigenius:test:ops:no_arity",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:formulas:Operator",
+                    ))]),
+                ),
+                (wk::SHORT_NAME, Value::String("no_arity".into())),
+            ],
+        );
+        top.add_resource(op).unwrap();
+        let holder = make_resource(
+            "urn:eigenius:test:op_ref_holder",
+            vec![(
+                "urn:eigenius:test:formula_value",
+                Value::Json(app_of("urn:eigenius:test:ops:no_arity")),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(layer).validate();
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.rule != ValidationRule::UnknownOperator
+                    && e.rule != ValidationRule::OperatorDeclarationMalformed
+                    && e.rule != ValidationRule::OperatorArityMismatch),
+            "an Operator without `operator_arity` must raise no Rule 17 diagnostic; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn op_ref_with_non_string_operand_is_caught_by_rule_16() {
+        // Rule 17 stays quiet on a malformed `OpRef` operand because
+        // Rule 16 owns the ctor arg shape. Verify the defect is
+        // diagnosed there rather than falling through both rules.
+        let errors = validate_formula_term(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "OpRef", "args": [42]},
+                {"ctor": "Var", "args": ["x"]}
+            ]
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == ValidationRule::InductiveValueMismatch),
+            "a non-string OpRef operand must be diagnosed by Rule 16; got {errors:?}"
         );
     }
 
