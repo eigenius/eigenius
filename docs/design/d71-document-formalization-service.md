@@ -392,8 +392,12 @@ class enc:ProposalDraw {
 string. `enc:draw_unit` points at the `DiscourseUnit` the exchange belongs to, so a per-unit re-run
 (§11) can find its own draws.
 
-`enc:draw_question` and `enc:draw_answer` hold the serialized record — deliberately a transcript
-rather than a modelled structure. The Rust record types (`RankRecord`, `SelectionRecord`, and their
+`enc:draw_record` holds the serialized record — deliberately a transcript rather than a modelled
+structure. (This note first specified a `draw_question` / `draw_answer` PAIR; implementation showed
+that splitting them contradicts the very reason given for not modelling the record, since the split
+is itself a restatement of the contract, and the four seams do not divide the same way — `RankRecord`
+answers with a permutation per word, `SelectionRecord` with a chosen index plus rationale plus
+runners-up. One field, one source of truth.) The Rust record types (`RankRecord`, `SelectionRecord`, and their
 siblings) **are** the replay contract; the key function reads them field by field. Modelling them a
 second time in ESL would create two definitions of one contract with no mechanism keeping them in
 step, and the first divergence would be a silent replay of the wrong answer. The chain field is the
@@ -500,7 +504,7 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 |---|---|---|
 | 1 ✅ | Artifact root + provenance (`ReasoningStructure`, `enc:source_document` → `reference:Reference`) | `artifact_completeness` + `acceptance` green; demo v2 regenerates and still justifies twice / `Fails` on the edited variant |
 | 2 ✅ | Declaration cleanup + doc amendments (§12) | `encoding_validates.rs` green; no dangling `enc_sig:` reference in the tree |
-| 3 | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
+| 3 ✅ | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
 | 4 | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
 | 5 | `FormalizeDocument` RPC | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
 | 6 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
@@ -518,6 +522,27 @@ never re-minted, so Rule 22 does the verifying. `enc:section` no longer carries 
 chain; the §3.5 `acceptance` run is `Holds` / `Fails` with the diagnostic; `run.sh --reparse` exits 0,
 intact COMMITTED and edited REJECTED; workspace tests and `RUSTFLAGS="-D warnings" cargo clippy` are
 clean.
+
+**Slice 3 DONE `2026-08-19`, with one scope correction.** `enc:ProposalDraw` + the closed
+`enc:DrawSeam` enumeration are in `encoding.esl`; `kernel/src/dcg/draw.rs` turns a seam's recorded
+exchanges into resources (IRI content-addressed on `(seam, key)`, so an identical re-record is the
+same resource and the branch does not grow), reads them back index-driven off a layer, and commits
+them onto `doc-<id>` on top of the glossary layer. All four seams gained `to_json` / `keyed_draws` /
+`from_json` beside their existing file `write` / `load`.
+
+Extracting the record-side key removed a real hazard rather than just enabling this: `ReplaySenseRanker::load`
+had been RE-DERIVING `rank_key` inline, with a comment asking the reader to keep the two copies in
+step. It is one `record_key` function now, shared by the loader and the draw emitter — a third copy
+would have been where they diverged, and a divergence there does not fail loudly, it MISSES, and a
+miss falls back to seed order and reports itself as a reproduction.
+
+*Scope correction:* the exit gate is met at the MECHANISM level (`kernel/tests/proposal_draw_round_trip.rs`
+— record → resources → validated layer → read back → replay, 0 misses, seam-filtered), not end to end
+through a surface. `prose-to-esl` opens a DISPOSABLE working copy of the snapshot and discards it on
+exit, so no branch it writes can outlive the run; the CLI's replay arm is files, and that is right for
+a copy-and-discard driver. Draws-on-branch is a property of a run against a LIVE store, so the
+end-to-end arm lands with slice 5's RPC, which `commit_draws` and `draws_from_layer` are already
+shaped for. §13's "independent of the surfaces" anticipated this; the gate wording did not.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been

@@ -141,14 +141,35 @@ impl<C: KindClassifier> RecordingKindClassifier<C> {
         }
     }
 
-    /// Write the recorded verdicts as JSON (sorted by key — deterministic bytes).
-    pub fn write(&self, path: &Path) -> std::io::Result<usize> {
+    /// The recorded verdicts as JSON (sorted by key — deterministic bytes).
+    pub fn to_json(&self) -> std::io::Result<String> {
         let log = self.log.lock().expect("kind log");
         let records: Vec<&KindRecord> = log.values().collect();
-        let json = serde_json::to_string_pretty(&records)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        serde_json::to_string_pretty(&records)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Write the recorded verdicts as JSON (sorted by key — deterministic bytes).
+    pub fn write(&self, path: &Path) -> std::io::Result<usize> {
+        let json = self.to_json()?;
+        let n = self.log.lock().expect("kind log").len();
         std::fs::write(path, json)?;
-        Ok(records.len())
+        Ok(n)
+    }
+
+    /// The recorded verdicts as chain-ready draws (D71 §9) — the same set `write` serialises,
+    /// each paired with the replay key it answers.
+    pub fn keyed_draws(&self) -> std::io::Result<Vec<eigenius_kernel::dcg::draw::KeyedDraw>> {
+        let log = self.log.lock().expect("kind log");
+        log.values()
+            .map(|r| {
+                Ok(eigenius_kernel::dcg::draw::KeyedDraw {
+                    key: record_key(r),
+                    record: serde_json::to_value(r)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -189,14 +210,25 @@ pub struct ReplayKindClassifier {
     misses: AtomicUsize,
 }
 
+/// The same key, computed from a RECORDED exchange rather than a live one. One function, shared by
+/// the replay loader and the D71 draw emitter.
+pub(crate) fn record_key(r: &KindRecord) -> String {
+    kind_key(&r.sentence, &r.gloss)
+}
+
 impl ReplayKindClassifier {
     pub fn load(path: &Path) -> std::io::Result<Self> {
-        let text = std::fs::read_to_string(path)?;
-        let records: Vec<KindRecord> = serde_json::from_str(&text)
+        Self::from_json(&std::fs::read_to_string(path)?)
+    }
+
+    /// Load a recording from its JSON, wherever it came from — a draw file, or the run's
+    /// `doc-<id>` branch via `eigenius_kernel::dcg::draw::draws_from_layer` (D71 §9).
+    pub fn from_json(text: &str) -> std::io::Result<Self> {
+        let records: Vec<KindRecord> = serde_json::from_str(text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut by_key = BTreeMap::new();
         for r in records {
-            by_key.insert(kind_key(&r.sentence, &r.gloss), r);
+            by_key.insert(record_key(&r), r);
         }
         Ok(Self {
             by_key,

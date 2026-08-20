@@ -38,6 +38,7 @@ pub mod augment;
 pub mod category;
 pub(crate) mod chart;
 pub mod closed_class;
+pub mod draw;
 pub mod glossary;
 mod grammar;
 mod holes;

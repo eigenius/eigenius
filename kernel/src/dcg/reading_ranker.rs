@@ -287,14 +287,35 @@ impl<R: ReadingRanker> RecordingReadingRanker<R> {
         }
     }
 
-    /// Write the recorded selections as JSON (sorted by key — deterministic bytes).
-    pub fn write(&self, path: &Path) -> std::io::Result<usize> {
+    /// The recorded selections as JSON (sorted by key — deterministic bytes).
+    pub fn to_json(&self) -> std::io::Result<String> {
         let log = self.log.lock().expect("selection log");
         let records: Vec<&SelectionRecord> = log.values().collect();
-        let json = serde_json::to_string_pretty(&records)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        serde_json::to_string_pretty(&records)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Write the recorded selections as JSON (sorted by key — deterministic bytes).
+    pub fn write(&self, path: &Path) -> std::io::Result<usize> {
+        let json = self.to_json()?;
+        let n = self.log.lock().expect("selection log").len();
         std::fs::write(path, json)?;
-        Ok(records.len())
+        Ok(n)
+    }
+
+    /// The recorded selections as chain-ready draws (D71 §9) — the same set `write` serialises,
+    /// each paired with the replay key it answers.
+    pub fn keyed_draws(&self) -> std::io::Result<Vec<crate::dcg::draw::KeyedDraw>> {
+        let log = self.log.lock().expect("selection log");
+        log.values()
+            .map(|r| {
+                Ok(crate::dcg::draw::KeyedDraw {
+                    key: record_key(r),
+                    record: serde_json::to_value(r)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -347,21 +368,32 @@ pub struct ReplayReadingRanker {
     misses: AtomicUsize,
 }
 
+/// The same key, computed from a RECORDED exchange rather than a live one. One function, shared by
+/// the replay loader and the D71 draw emitter — a second copy is where the two would diverge.
+pub(crate) fn record_key(r: &SelectionRecord) -> String {
+    selection_key(
+        &r.sentence,
+        &r.document_sha256,
+        &r.prior_selections,
+        &r.candidates,
+    )
+}
+
 impl ReplayReadingRanker {
     /// Load a recording written by [`RecordingReadingRanker::write`].
     pub fn load(path: &Path) -> std::io::Result<Self> {
-        let text = std::fs::read_to_string(path)?;
-        let records: Vec<SelectionRecord> = serde_json::from_str(&text)
+        Self::from_json(&std::fs::read_to_string(path)?)
+    }
+
+    /// Load a recording from its JSON, wherever it came from — a draw file, or the run's
+    /// `doc-<id>` branch via [`crate::dcg::draw::draws_from_layer`] (D71 §9).
+    pub fn from_json(text: &str) -> std::io::Result<Self> {
+        let records: Vec<SelectionRecord> = serde_json::from_str(text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut by_key = BTreeMap::new();
         for r in records {
-            // Rebuild the key from the recorded question, so it matches what `select` computes.
-            let k = selection_key(
-                &r.sentence,
-                &r.document_sha256,
-                &r.prior_selections,
-                &r.candidates,
-            );
+            // The key comes from the recorded question, so it matches what `select` computes.
+            let k = record_key(&r);
             by_key.insert(k, r);
         }
         Ok(Self {

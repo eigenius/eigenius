@@ -432,6 +432,66 @@ property enc:source_sha256 : core:string {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ProposalDraw — the run's proposer transcript (D71 §9)
+// ════════════════════════════════════════════════════════════════════
+//
+// A formalization run commits its LLM exchanges to its own `doc-<id>` WORKING branch, never to the
+// branch the claims land on. Two records, two questions: an enc:DecisionPoint says WHAT WAS CHOSEN,
+// for a reader of the graph, and travels in the artifact; a ProposalDraw says WHAT THE PROPOSER WAS
+// ASKED AND SAID, so the document re-runs without an LLM, and stays on the working branch, which is
+// prunable. Neither subsumes the other — a DecisionPoint carries no presented pool and does not
+// exist at all for sense ranking or discourse-kind classification.
+//
+// Draws pinned on the same branch as the glossary that produced their pool make the 2026-08-12
+// failure inexpressible: a draw recorded against a DIFFERENT Stage-A glossary, replayed here, was
+// answering a different question. On a branch the two are committed by the same run.
+
+class enc:ProposalDraw {
+    description = "One recorded proposer exchange on a formalization run: the exact question put to an untrusted proposer and the answer it gave. Committed to the run's doc-<id> working branch, never to the branch the claims land on. Replay reads these back in place of the draw files; a changed question MISSES, it never silently replays a stale answer.";
+    requires enc:draw_seam, enc:draw_key, enc:draw_record;
+    recommends enc:draw_model, reflection:timestamp;
+}
+
+class enc:DrawSeam {
+    description = "Which proposer seam an exchange came from. Four, matching the four record/replay pairs in the pipeline: sense ranking, reading selection, anaphora proposal, discourse-kind classification.";
+}
+
+resource enc:seam_sense_rank : enc:DrawSeam {
+    core:description = "The contextual sense reranker (D65 §4.1) — per word, the candidate senses in seed order and the permutation returned.";
+}
+resource enc:seam_reading_selection : enc:DrawSeam {
+    core:description = "The reading ranker (D63 reading-selection) — the surviving readings as presented, and the one chosen (or an abstention).";
+}
+resource enc:seam_anaphora : enc:DrawSeam {
+    core:description = "The anaphora proposer (D64) — the assembled candidates for a referent hole and the proposer's ranking over them.";
+}
+resource enc:seam_discourse_kind : enc:DrawSeam {
+    core:description = "The discourse-kind classifier (D68) — a claim's frame evidence and the kind class returned.";
+}
+
+property enc:draw_seam : core:resource {
+    description = "Which proposer produced this exchange — a closed enumeration (allows_only, the SelectionAuthority pattern): a new seam is a deliberate vocabulary edit, never a silent mint.";
+    class_types enc:DrawSeam;
+    allows_only enc:seam_sense_rank, enc:seam_reading_selection, enc:seam_anaphora, enc:seam_discourse_kind;
+    domain enc:ProposalDraw;
+}
+
+property enc:draw_key : core:string {
+    description = "The replay key this exchange answers — everything that was part of the question, composed exactly as the seam's key function composes it. Stored so a draw is inspectable and addressable without decoding the record; replay recomputes the key from the record rather than trusting this field.";
+    domain enc:ProposalDraw;
+}
+
+property enc:draw_record : core:string {
+    description = "The seam's own record type, serialized verbatim (RankRecord, SelectionRecord, and their siblings). Deliberately a transcript rather than a modelled structure: those Rust types ARE the replay contract — the key function reads them field by field — so modelling them a second time in ESL would create two definitions of one contract with nothing keeping them in step, and the first divergence would be a silent replay of the wrong answer. One field, one source of truth (D71 §9.2).";
+    domain enc:ProposalDraw;
+}
+
+property enc:draw_model : core:string {
+    description = "The model that answered, when the exchange was live (e.g. 'claude-opus-5'). Absent for deterministic proposers. Advisory: a draw is keyed on the question, not on who answered it, so a model change does not invalidate a recording — it just means the recorded answer is the old model's.";
+    domain enc:ProposalDraw;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // NOT an institution (D71)
 // ════════════════════════════════════════════════════════════════════
 //

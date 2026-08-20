@@ -151,6 +151,26 @@ fn rank_key(sentence: &str, context: &str, words: &[WordSenses]) -> String {
     k
 }
 
+/// The same key, computed from a RECORDED exchange rather than a live one.
+///
+/// `load` used to re-derive this inline, which meant two copies of one contract with a comment
+/// asking the reader to keep them in step. It is one function now, because the D71 draw emitter
+/// needs the key too and a third copy would have been the point where they diverged.
+pub(crate) fn record_key(r: &RankRecord) -> String {
+    let mut k = r.sentence.clone();
+    k.push('\u{1d}');
+    k.push_str(&r.context);
+    for w in &r.words {
+        k.push('\u{1f}');
+        k.push_str(&w.surface.to_lowercase()); // see the note in `rank_key`
+        for s in &w.senses {
+            k.push('\u{1e}');
+            k.push_str(s);
+        }
+    }
+    k
+}
+
 /// **Record** every ranking an inner ranker produces, so the run can later be replayed exactly.
 ///
 /// The contextual reranker is an LLM: it is the one component that can return a different answer
@@ -173,14 +193,35 @@ impl<R: SenseRanker> RecordingSenseRanker<R> {
         }
     }
 
-    /// Write the recorded decisions as JSON (sorted by key — deterministic bytes).
-    pub fn write(&self, path: &std::path::Path) -> std::io::Result<usize> {
+    /// The recorded decisions as JSON (sorted by key — deterministic bytes).
+    pub fn to_json(&self) -> std::io::Result<String> {
         let log = self.log.lock().expect("rank log");
         let records: Vec<&RankRecord> = log.values().collect();
-        let json = serde_json::to_string_pretty(&records)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        serde_json::to_string_pretty(&records)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Write the recorded decisions as JSON (sorted by key — deterministic bytes).
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<usize> {
+        let json = self.to_json()?;
+        let n = self.log.lock().expect("rank log").len();
         std::fs::write(path, json)?;
-        Ok(records.len())
+        Ok(n)
+    }
+
+    /// The recorded decisions as chain-ready draws (D71 §9) — the same set `write` serialises,
+    /// each paired with the replay key it answers.
+    pub fn keyed_draws(&self) -> std::io::Result<Vec<crate::dcg::draw::KeyedDraw>> {
+        let log = self.log.lock().expect("rank log");
+        log.values()
+            .map(|r| {
+                Ok(crate::dcg::draw::KeyedDraw {
+                    key: record_key(r),
+                    record: serde_json::to_value(r)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -245,25 +286,20 @@ pub struct ReplaySenseRanker {
 impl ReplaySenseRanker {
     /// Load a recording written by [`RecordingSenseRanker::write`].
     pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
-        let text = std::fs::read_to_string(path)?;
-        let records: Vec<RankRecord> = serde_json::from_str(&text)
+        Self::from_json(&std::fs::read_to_string(path)?)
+    }
+
+    /// Load a recording from its JSON, wherever it came from — a draw file, or the run's
+    /// `doc-<id>` branch via [`crate::dcg::draw::draws_from_layer`] (D71 §9). One path, so a
+    /// chain-replayed run and a file-replayed run cannot key differently.
+    pub fn from_json(text: &str) -> std::io::Result<Self> {
+        let records: Vec<RankRecord> = serde_json::from_str(text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut by_key = std::collections::BTreeMap::new();
         for r in records {
-            // Rebuild the key from the recorded question, so it matches what `rank` will compute.
-            let mut k = r.sentence.clone();
-            k.push('\u{1d}');
-            k.push_str(&r.context);
-            for w in &r.words {
-                k.push('\u{1f}');
-                // Same normalisation as `rank_key` — see the note there.
-                k.push_str(&w.surface.to_lowercase());
-                for s in &w.senses {
-                    k.push('\u{1e}');
-                    k.push_str(s);
-                }
-            }
-            by_key.insert(k, r.words.iter().map(|w| w.order.clone()).collect());
+            // The key comes from the recorded question, so it matches what `rank` will compute.
+            let key = record_key(&r);
+            by_key.insert(key, r.words.iter().map(|w| w.order.clone()).collect());
         }
         Ok(Self {
             by_key,
