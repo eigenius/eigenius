@@ -26,7 +26,7 @@
 //! translation from proto fields to these same values.
 //!
 //! ```bash
-//! EIGENIUS_DB_SNAPSHOT=/path/to/wordnet-umls-aligned-2026-08-15-d70b \
+//! EIGENIUS_DB_SNAPSHOT=/path/to/wordnet-umls-aligned-2026-08-20 \
 //!   cargo test --release -p eigenius-encoding --test served_formalization -- --ignored --nocapture
 //! ```
 

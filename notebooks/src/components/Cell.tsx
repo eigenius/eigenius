@@ -41,6 +41,7 @@ import { useEigen } from "../runtime/EigenProvider";
 import { useNotebookStore } from "../runtime/notebookStore";
 import { CodeMirrorEditor } from "./editors/CodeMirrorEditor";
 import { ChartCellEditor } from "./cells/ChartCell";
+import { FormalizeCellEditor } from "./cells/FormalizeCell";
 import { MarkdownCell } from "./cells/MarkdownCell";
 import { ProgramRunCellEditor } from "./cells/ProgramRunCell";
 import { CellOutputView } from "./output/CellOutputView";
@@ -84,6 +85,7 @@ const useStyles = makeStyles({
   indexTypescript: { background: tokens.colorPaletteMarigoldForeground2 },
   indexProgramRun: { background: tokens.colorPalettePurpleForeground2 },
   indexChart: { background: tokens.colorPaletteRedForeground2 },
+  indexFormalize: { background: tokens.colorPaletteTealForeground2 },
   spacer: {
     flex: 1,
   },
@@ -111,6 +113,7 @@ const RUNNABLE: Record<CellType, boolean> = {
   typescript: true,
   "program-run": true,
   chart: true,
+  formalize: true,
 };
 
 const TYPE_LABEL: Record<CellType, string> = {
@@ -120,6 +123,7 @@ const TYPE_LABEL: Record<CellType, string> = {
   typescript: "TypeScript",
   "program-run": "Program run",
   chart: "Chart",
+  formalize: "Formalize",
 };
 
 function indexCircleClass(
@@ -133,6 +137,7 @@ function indexCircleClass(
     typescript: styles.indexTypescript,
     "program-run": styles.indexProgramRun,
     chart: styles.indexChart,
+    formalize: styles.indexFormalize,
   };
   return `${styles.indexCircle} ${colorClass[type]}`;
 }
@@ -309,6 +314,8 @@ export function Cell({ cellId }: CellProps) {
             ? <ProgramRunCellEditor cellId={cell.id} cell={cell} />
             : cell.type === "chart"
             ? <ChartCellEditor cellId={cell.id} cell={cell} />
+            : cell.type === "formalize"
+            ? <FormalizeCellEditor cellId={cell.id} cell={cell} />
             : (
               <CodeMirrorEditor
                 source={cell.source}

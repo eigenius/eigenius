@@ -517,7 +517,7 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 | 5a ✅ | Shared emission core (`formalize::emit_from_encoding`) | The demo artifacts regenerate **byte-identically** through the refactored path |
 | 5b ✅ | `FormalizeDocument` RPC over that core | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
 | 6 ✅ | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
-| 7 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
+| 7 ◐ | `formalize` notebook cell | Reseed done and the manifest pin updated in the same commit; SDK round-trip tested. **Playwright e2e NOT run** — see below |
 
 Slices 1–2 are independent of the rest and unblock everything. Slice 3 is independent of the surfaces
 and is what makes slice 5's byte-identity gate cheap to run repeatedly.
@@ -621,6 +621,32 @@ and `encoded: 0` vanished exactly when a document encoded nothing, which §4.1 c
 than an absence. The tool states those four scalars explicitly. And **`bytes` renders as base64**,
 so asking for `text/x-esl` in order to READ it returned base64; the tool decodes the text encodings
 in place and leaves CBOR as bytes.
+
+**Slice 7 `2026-08-20` — cell built, reseed paid, e2e outstanding.** `notebook:formalize` joins the
+`cell_type` enumeration with `doc_id` / `structure_iri` / `lexicon_profile`. The edit was
+unavoidable and deliberately so: that property carries `allows_only` with the note *"new cell types
+require an explicit ontology update"*, and a client-only cell that failed on publish would be exactly
+the wedge the enumeration exists to prevent.
+
+`bootstrap_manifest_pinned.rs` fired as designed — one layer moved, both hashes named, four-step
+follow-through — and the reseed was paid knowingly rather than discovered days later by a broken
+demo, which is what happened for D70. **The whole follow-through verified clean:** draws replay
+against the fresh store with the served artifact byte-identical, `claims-intact.esl` /
+`claims-edited.esl` regenerate with NO diff, §3.5 acceptance `Holds`/`Fails`, artifact-completeness
+loads, demo `--reparse` exit 0. That the artifacts are byte-identical is the evidence the reseed
+reproduced the lexicon exactly — only `notebook` moved, and it does not touch parsing.
+
+The cell's `structure_iri` is excluded from the cell's content-addressed identity while `doc_id` is
+included: what the last RUN produced is not what the cell IS, and hashing it would give the same
+prose a new identity after every run, defeating cell de-duplication. `doc_id` is included because a
+different working branch replays a different set of draws.
+
+**Not done: the Playwright e2e.** The suite runs against a served SPA plus a live kernel, and a
+formalization spec additionally needs the snapshot staged and minutes of parse time per run. Three
+SDK round-trip tests cover the risky half (the publish mapping, and that the cell publishes as
+`formalize` rather than silently degrading to the markdown fallback an unknown type decodes as);
+what is untested is the rendering path. `notebooks/examples/d71-formalize-prose.json` is the manual
+exercise, and it parses through the app's real validator.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been

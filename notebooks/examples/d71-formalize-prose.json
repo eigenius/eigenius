@@ -1,0 +1,48 @@
+{
+  "format_version": 1,
+  "meta": {
+    "title": "Formalizing prose (D71)",
+    "description": "Exercises the formalize cell: prose to typed kernel-checked claims, with the artifact left uncommitted so you read it before landing it. Uses the WRN paragraph from the prose-to-formulas-v2 demo, whose expected output is a committed fixture.",
+    "created": "2026-08-20T00:00:00Z",
+    "modified": "2026-08-20T00:00:00Z",
+    "eigenius_version": "0.1.0"
+  },
+  "cells": [
+    {
+      "id": "d71a0000-0000-4000-8000-000000000001",
+      "type": "markdown",
+      "source": "# Formalizing prose (D71)\n\nThis notebook exercises the **formalize** cell: prose in, typed kernel-checked claims out.\n\n## What the cell does\n\nRunning it calls `FormalizeDocument`, which is **asynchronous** — a document costs minutes and\nseveral LLM round-trips, so the RPC returns a task id and the cell polls it. Watch the run in the\n**Tasks** panel; its kind is `Formalize`.\n\nThe result is an **artifact**: the resource set an `enc:ReasoningStructure` roots — the claims, the\n`DiscourseUnit`s they came from, the `DecisionPoint` recording which reading was chosen and against\nwhich runners-up, the `AnaphorBinding`s, and an `enc:CutItem` for every unit that did *not* encode.\n\n## The artifact is NOT committed\n\nThat is deliberate (D71 §4): generation stays decoupled from commitment, so you **read and diff the\nartifact first**, then land it with an explicit load. The cell shows you the ESL; the next cell is\nwhere you commit it.\n\n## The working branch\n\n`Document id` names a `doc-<id>` branch that holds the document glossary and this run's recorded\nproposer draws. Keep it stable and a re-run **replays those draws instead of re-asking the model** —\nfast, free, and deterministic. Change it and you get a fresh run against a fresh branch.\n\nThe branch is scaffolding, not knowledge: prune it with `Branches → Delete` when you no longer want\nthe transcript. The claims survive, because they live in the artifact you loaded elsewhere."
+    },
+    {
+      "id": "d71a0000-0000-4000-8000-000000000002",
+      "type": "markdown",
+      "source": "## Before you run\n\nThe formalize cell parses against **the lexicon on the branch you are on**. Against an empty chain\nevery content word is out of vocabulary and every sentence lands as a `cut_vocabulary` — an honest\nresult, and not an interesting one.\n\nSo point the notebook at a chain with a lexicon loaded (the WordNet+UMLS snapshot the parse harness\nuses), and load the encoding vocabulary the claims are typed against:\n\n```\nontologies/encoding/encoding.esl\nontologies/encoding/claim-kind-alignment.esl\n```\n\nThe ESL cell below loads them. If they are already on your chain it is a no-op — the commit is\ncontent-addressed, so re-loading identical resources does not advance the branch."
+    },
+    {
+      "id": "d71a0000-0000-4000-8000-000000000003",
+      "type": "esl",
+      "source": "// The claim-kind vocabulary the encoded claims are typed against.\n// Loading it here rather than assuming it: a formalize run needs\n// `enc:` on its chain, and an anaphor's restrictor is checked against\n// a claim's KIND class, which lives in these two files.\n//\n// Paste the contents of ontologies/encoding/encoding.esl and\n// ontologies/encoding/claim-kind-alignment.esl here, or load them with\n// `eig load` against the same branch before running the cell below.\n"
+    },
+    {
+      "id": "d71a0000-0000-4000-8000-000000000004",
+      "type": "formalize",
+      "source": "MSI cancer models had the exonuclease activity of WRN. MSI cancer models required the helicase activity of WRN. These findings show that WRN is a vulnerability of MSI cancer models.",
+      "doc_id": "wrn-first-page"
+    },
+    {
+      "id": "d71a0000-0000-4000-8000-000000000005",
+      "type": "markdown",
+      "source": "## Reading the output\n\nThe banner states the counts and the working branch:\n\n- **N claims** — units that encoded.\n- **M units not encoded** — each one is an `enc:CutItem` in the artifact naming its reason:\n  `cut_ambiguous` (several readings survived and no authority chose), `cut_unresolved` (a referent\n  hole no antecedent resolved), `cut_vocabulary` (an out-of-vocabulary token), `cut_grammar` (every\n  token known, no parse). A cut is a **recorded result**, not a silent drop.\n- **draws replayed** vs **N new draw(s) recorded** — whether this run re-used the working branch's\n  transcript or asked the model.\n\nThen the artifact itself, as ESL. Things worth looking at in it:\n\n- `enc:DecisionPoint` — which reading was selected, on whose authority, and the runner-up skeletons\n  it was chosen against. There is no kernel veto on selection: every candidate type-checks, so this\n  record *is* the control.\n- `enc:AnaphorBinding` — what «These findings» resolved to, with the proposer's confidence and\n  rationale. The kernel re-gate vetoed every type-wrong antecedent before this one survived.\n- `reflection:canonical_proposition` — the actual typed term. This is the claim; the prose is\n  provenance.\n- `enc:ReasoningStructure` at the end — the root, with `source_sha256` pinning the exact bytes."
+    },
+    {
+      "id": "d71a0000-0000-4000-8000-000000000006",
+      "type": "markdown",
+      "source": "## Landing the claims\n\nCopy the artifact from the cell output into an ESL cell and run it — that is the explicit load.\n\nIt is worth understanding what the load does that the formalization did not: the kernel runs\nstructural validation, Rule 22's closed-world reference check, and the D39 justification gate on\nevery landed claim. The formalization *proposed*; the load is where the kernel decides.\n\nA useful thing to try: edit one word of the prose, re-run, and diff the two artifacts. One token of\nprose becomes one line of formula — and any derivation standing on the old claim stops verifying,\nbecause the witness key hashes the proposition."
+    },
+    {
+      "id": "d71a0000-0000-4000-8000-000000000007",
+      "type": "eigenql",
+      "source": "-- After landing the artifact, the claims are queryable like anything\n-- else. Every claim traces back to its span through `from_unit`.\nUSING \"urn:eigenius:encoding:EncodedClaim\",\n      \"urn:eigenius:encoding:DiscourseUnit\"\nMATCH EncodedClaim(?c) { \"urn:eigenius:encoding:from_unit\": ?scoped },\n      DiscourseUnit(?u) { \"urn:eigenius:encoding:prose\": ?prose }\nRETURN [] { claim: ?c, prose: ?prose }\n"
+    }
+  ]
+}

@@ -196,6 +196,38 @@ function renderBody(
         />
       );
 
+    case "formalize":
+      return (
+        <div data-testid="formalize-output">
+          <MessageBar intent={output.cut > 0 ? "warning" : "success"}>
+            <MessageBarBody>
+              <MessageBarTitle>
+                {output.encoded} claim{output.encoded === 1 ? "" : "s"}
+                {output.cut > 0 ? `, ${output.cut} unit(s) not encoded` : ""}
+              </MessageBarTitle>
+              {/* The artifact is NOT committed (D71 §4): generation stays
+                  decoupled from commitment, so say so rather than letting a
+                  green banner imply the claims are on the chain. */}
+              <div>
+                Not committed — load the artifact below to land it.{" "}
+                Working branch <code>{output.docBranch}</code>
+                {output.drawsCommitted > 0
+                  ? `, ${output.drawsCommitted} new draw(s) recorded`
+                  : ", draws replayed"}.
+              </div>
+              <div>
+                <code data-testid="formalize-structure">
+                  {output.structureIri}
+                </code>
+              </div>
+            </MessageBarBody>
+          </MessageBar>
+          <pre className={styles.errorPre} data-testid="formalize-artifact">
+            {output.artifact}
+          </pre>
+        </div>
+      );
+
     case "error":
       return (
         <MessageBar intent="error">

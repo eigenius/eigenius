@@ -29,7 +29,8 @@ export type CellType =
   | "eigenql"
   | "typescript"
   | "program-run"
-  | "chart";
+  | "chart"
+  | "formalize";
 
 /** Source-bearing cell types (markdown, esl, eigenql, typescript). */
 export interface SourceCellJson {
@@ -92,7 +93,36 @@ export interface ChartCellJson {
   title?: string;
 }
 
-export type CellJson = SourceCellJson | ProgramRunCellJson | ChartCellJson;
+/**
+ * Formalization cell (D71) — its `source` is PROSE, not code. Running it calls
+ * `FormalizeDocument`, which is asynchronous: a document costs minutes and N LLM
+ * round-trips, so the cell polls the task and renders the result when it lands.
+ *
+ * `doc_id` names the run's `doc-<id>` working branch, which holds the document
+ * glossary and the run's recorded proposer draws — re-running the cell replays
+ * those instead of re-asking the model, which is what makes a second run fast
+ * and deterministic. `structure_iri` is the `enc:ReasoningStructure` the last
+ * run produced; the artifact is NOT committed by the cell (generation stays
+ * decoupled from commitment), so landing it is an explicit load.
+ */
+export interface FormalizeCellJson {
+  id: string;
+  type: "formalize";
+  /** The prose to formalize. */
+  source: string;
+  /** Names the `doc-<id>` working branch. Defaults to the cell id when unset. */
+  doc_id?: string;
+  /** `enc:ReasoningStructure` from the last run; absent until the cell has run. */
+  structure_iri?: string;
+  /** Optional `lexicon:LexiconProfile` IRI naming the ordered parse scope. */
+  lexicon_profile?: string;
+}
+
+export type CellJson =
+  | SourceCellJson
+  | ProgramRunCellJson
+  | ChartCellJson
+  | FormalizeCellJson;
 
 export interface NotebookMetaJson {
   /**
@@ -238,6 +268,42 @@ function parseCell(value: unknown, index: number): CellJson {
       ...(title !== undefined ? { title } : {}),
     };
   }
+  if (type === "formalize") {
+    const source = obj.source;
+    if (typeof source !== "string") {
+      throw new Error(`notebook: cells[${index}].source must be a string`);
+    }
+    const { doc_id, structure_iri, lexicon_profile } = obj as {
+      doc_id?: unknown;
+      structure_iri?: unknown;
+      lexicon_profile?: unknown;
+    };
+    for (
+      const [name, v] of [
+        ["doc_id", doc_id],
+        ["structure_iri", structure_iri],
+        ["lexicon_profile", lexicon_profile],
+      ] as const
+    ) {
+      if (v !== undefined && typeof v !== "string") {
+        throw new Error(
+          `notebook: cells[${index}].${name} must be a string when present`,
+        );
+      }
+    }
+    return {
+      id,
+      type,
+      source,
+      ...(doc_id !== undefined ? { doc_id: doc_id as string } : {}),
+      ...(structure_iri !== undefined
+        ? { structure_iri: structure_iri as string }
+        : {}),
+      ...(lexicon_profile !== undefined
+        ? { lexicon_profile: lexicon_profile as string }
+        : {}),
+    };
+  }
   if (
     type !== "markdown" &&
     type !== "esl" &&
@@ -245,7 +311,7 @@ function parseCell(value: unknown, index: number): CellJson {
     type !== "typescript"
   ) {
     throw new Error(
-      `notebook: cells[${index}].type must be one of markdown|esl|eigenql|typescript|program-run|chart`,
+      `notebook: cells[${index}].type must be one of markdown|esl|eigenql|typescript|program-run|chart|formalize`,
     );
   }
   const source = obj.source;

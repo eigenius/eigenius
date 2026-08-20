@@ -28,7 +28,7 @@
 //! The `--selections` arm, as the maintained demo drives it (`demo/prose-to-formulas-v2/run.sh`):
 //!
 //! ```bash
-//! prose-to-esl --snapshot ../db-snapshot/wordnet-umls-aligned-2026-08-15-d70b \
+//! prose-to-esl --snapshot ../db-snapshot/wordnet-umls-aligned-2026-08-20 \
 //!              --source     demo/prose-to-formulas-v2/paragraph.txt \
 //!              --ranks      demo/prose-to-formulas-v2/ranks.json \
 //!              --selections demo/prose-to-formulas-v2/selections.json \

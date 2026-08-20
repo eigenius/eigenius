@@ -72,6 +72,7 @@ const CELL_TYPE_IRI: Record<CellType, string> = {
   typescript: `${NB_NS}:typescript`,
   "program-run": `${NB_NS}:program-run`,
   chart: `${NB_NS}:chart`,
+  formalize: `${NB_NS}:formalize`,
 };
 
 const IRI_TO_CELL_TYPE: Record<string, CellType> = {
@@ -81,6 +82,7 @@ const IRI_TO_CELL_TYPE: Record<string, CellType> = {
   [`${NB_NS}:typescript`]: "typescript",
   [`${NB_NS}:program-run`]: "program-run",
   [`${NB_NS}:chart`]: "chart",
+  [`${NB_NS}:formalize`]: "formalize",
 };
 
 const PROGRAM_IRI_PROP = `${NB_NS}:program_iri`;
@@ -91,6 +93,9 @@ const CHART_X_COLUMN_PROP = `${NB_NS}:chart_x_column`;
 const CHART_Y_COLUMN_PROP = `${NB_NS}:chart_y_column`;
 const CHART_SERIES_COLUMN_PROP = `${NB_NS}:chart_series_column`;
 const CHART_TITLE_PROP = `${NB_NS}:chart_title`;
+const DOC_ID_PROP = `${NB_NS}:doc_id`;
+const STRUCTURE_IRI_PROP = `${NB_NS}:structure_iri`;
+const LEXICON_PROFILE_PROP = `${NB_NS}:lexicon_profile`;
 
 // Mirror of NotebookJson / CellJson in notebooks/src/persistence/notebook-format.ts.
 // The SDK keeps its own copy so it doesn't depend on the notebook UI package.
@@ -101,7 +106,8 @@ export type CellType =
   | "eigenql"
   | "typescript"
   | "program-run"
-  | "chart";
+  | "chart"
+  | "formalize";
 
 export type ChartKind =
   | "grouped-bar"
@@ -136,7 +142,21 @@ export interface ChartCellJson {
   title?: string;
 }
 
-export type CellJson = SourceCellJson | ProgramRunCellJson | ChartCellJson;
+/** Formalization cell (D71). Its `source` is PROSE; see the notebook package's copy. */
+export interface FormalizeCellJson {
+  id: string;
+  type: "formalize";
+  source: string;
+  doc_id?: string;
+  structure_iri?: string;
+  lexicon_profile?: string;
+}
+
+export type CellJson =
+  | SourceCellJson
+  | ProgramRunCellJson
+  | ChartCellJson
+  | FormalizeCellJson;
 
 export interface NotebookMetaJson {
   /**
@@ -289,9 +309,24 @@ export function resourcesToNotebookJson(
         ...(typeof titleRaw === "string" ? { title: titleRaw } : {}),
       };
     }
+    if (cellType === "formalize") {
+      const docId = cell[DOC_ID_PROP];
+      const structureIri = cell[STRUCTURE_IRI_PROP];
+      const profile = cell[LEXICON_PROFILE_PROP];
+      return {
+        id,
+        type: cellType,
+        source: String(cell[SOURCE_PROP] ?? ""),
+        ...(typeof docId === "string" ? { doc_id: docId } : {}),
+        ...(typeof structureIri === "string"
+          ? { structure_iri: structureIri }
+          : {}),
+        ...(typeof profile === "string" ? { lexicon_profile: profile } : {}),
+      };
+    }
     return {
       id,
-      type: cellType,
+      type: cellType as "markdown" | "esl" | "eigenql" | "typescript",
       source: String(cell[SOURCE_PROP] ?? ""),
     };
   });
@@ -331,6 +366,10 @@ async function cellIri(cell: CellJson): Promise<string> {
   // Program-run cells:    { cell_type, program_iri, input_iris }
   // Chart cells:          { cell_type, query, chart_kind, x_column,
   //                         y_column, series_column, title }
+  // Formalize cells:      { cell_type, source, doc_id, lexicon_profile }
+  //   `structure_iri` is EXCLUDED: it is what the last RUN produced, not what
+  //   the cell IS. Including it would give the same prose a new identity after
+  //   every run, defeating the content-addressed de-duplication.
   let canonical: string;
   if (cell.type === "program-run") {
     canonical = JSON.stringify({
@@ -347,6 +386,13 @@ async function cellIri(cell: CellJson): Promise<string> {
       y_column: cell.y_column,
       series_column: cell.series_column ?? null,
       title: cell.title ?? null,
+    });
+  } else if (cell.type === "formalize") {
+    canonical = JSON.stringify({
+      cell_type: cell.type,
+      source: cell.source,
+      doc_id: cell.doc_id ?? null,
+      lexicon_profile: cell.lexicon_profile ?? null,
     });
   } else {
     canonical = JSON.stringify({ cell_type: cell.type, source: cell.source });
@@ -408,6 +454,15 @@ function makeCellResource(iri: string, cell: CellJson): EigonResource {
     }
     if (cell.title !== undefined) {
       base[CHART_TITLE_PROP] = cell.title;
+    }
+  } else if (cell.type === "formalize") {
+    base[SOURCE_PROP] = cell.source;
+    if (cell.doc_id !== undefined) base[DOC_ID_PROP] = cell.doc_id;
+    if (cell.structure_iri !== undefined) {
+      base[STRUCTURE_IRI_PROP] = cell.structure_iri;
+    }
+    if (cell.lexicon_profile !== undefined) {
+      base[LEXICON_PROFILE_PROP] = cell.lexicon_profile;
     }
   } else {
     base[SOURCE_PROP] = cell.source;

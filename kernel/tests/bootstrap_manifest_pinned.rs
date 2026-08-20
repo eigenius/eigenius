@@ -31,6 +31,12 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT HAS NOW FIRED IN ANGER (`2026-08-20`). D71 slice 7 added the `formalize` cell type to the
+//! notebook ontology — a change whose whole point is that it is deliberate, since
+//! `notebook:cell_type` carries `allows_only` precisely so a new cell type cannot appear by
+//! accident. The test named the one moved layer and its four-step follow-through, and the reseed
+//! was paid knowingly rather than discovered days later by a broken demo.
+//!
 //! WHAT IT DOES NOT COVER. A snapshot also goes stale when the LEXICON content changes with no
 //! bootstrap edit — the 2026-08-15 atom overrides dropped `drug target` and added `synthetic lethal`,
 //! no manifest moved, and recorded draws still missed. Catching that needs a recorded fingerprint of
@@ -54,7 +60,7 @@ lean-runtime-classes:11de512ae4aea72e0865a19becdefd4daed9c9f6cdf2abd5af3b88d1707
 lean-institution:e48be69b9df06f02232feac048fc4ec5bdebcf62b8a50b90145b9f62176610dc
 reasoning:63e212e4ae4254941d57616e8497ef2fdf025c84bcf6461e07006762011ded58
 statistics:0e179b5ef88c9e01399a84d6c863b6ddb4fe38859374c45b3f685175d584af3b
-notebook:2f0945ef2e6cbd5c7f224e5b286938667eef36546605509b606aa86115bbc6c2
+notebook:5a80a8d298907b9ce177e61076e4bf1868566e405f8784f7c5f4429cb13ff776
 ingest:67534b5bcf3478a18bd5df2a3c856132e8702dd3f9d3e8727b40179794ae0aba
 reference:685e1bd6fbd0a6f4285d674eb1ccac459835c788cde49d4125fde076ed002d6a
 logic:bde155e5644cb03e236cd94a501301b878832707d0ba9c6a361fa204ce9e813d
