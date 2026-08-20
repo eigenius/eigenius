@@ -655,9 +655,17 @@ one cell type. What covers the ground instead:
 - `notebooks/examples/d71-formalize-prose.json` is the manual exercise; it parses through the app's
   real validator and publishes as `formalize`.
 
-What stays untested is the RENDERING path — the cell editor and the output view. A regression there
-shows up as a visibly broken cell, not as silent bad data, which is why this is a defensible place
-to stop.
+**Rendering path verified by hand `2026-08-20`:** the cell editor and the output view both exercised
+in the browser, in both landing modes — the "Load this artifact" button and the `land`-on-run flag.
+What remains uncovered is only *automated* regression on the UI, where a break is visible rather
+than silent.
+
+Getting there found three defects an automated build would have caught first: adding `formalize` to
+the `CellType` union left three exhaustive switches uncovered — including `addCell`, so the UI could
+not create the cell at all — and `npm run build` is `tsc -b && vite build`, so the SPA did not build.
+It was hidden twice over: `tsc -b` is incremental and answered from stale build info, and the
+orchestrator bakes the SPA in an early Docker stage whose cached layer meant `tsc` never re-ran. The
+lesson is cheap: `tsc -b --force` before believing a clean TypeScript build.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been

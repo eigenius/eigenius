@@ -183,7 +183,13 @@ formalizer reported it had none; the kernel image had no WordNet dict, so the se
 used the no-op lemmatizer and EVERY sentence came back `cut_grammar`; and `build-alignment-snapshot.sh`
 copied the base store's PROVENANCE verbatim, so an aligned snapshot could not be told from a raw one.
 
-**Not closed:** a kernel OOM observed during a notebook session — its own note, on deck below.
+**Notebook verified `2026-08-20`** in the browser, both landing modes (the artifact-load button and
+the `land`-on-run flag) — which closes the rendering path slice 7's descoped e2e had left uncovered.
+D71 is DONE.
+
+**Not closed:** the kernel OOM — CAUSE FOUND (retroactive validation on a redefining load over the
+lexicon chain, ~27 GB) and its triggers removed at the call sites, but the underlying unbounded scan
+is untouched. Its own note, on deck below; it is now the only known defect.
 
 Remaining deferrals live in D68 §5/§5a (collective/group term +
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
