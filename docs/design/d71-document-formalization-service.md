@@ -1,6 +1,6 @@
 # D71 — The document formalization service
 
-*Status: design memo · `2026-08-17`. No code yet.*
+*Status: design memo · `2026-08-17`; §5 branch lifetime and §9 draw home decided `2026-08-18`. No code yet.*
 
 *Supersedes [D62](d62-encoding-engine-prose-to-trees.md) §8, which assigned the generation half of
 the encoding engine to the D14 institution protocol. This note reassigns it: formalizing prose is a
@@ -28,6 +28,7 @@ of which is a thin driver. No new pipeline logic lives in any surface.
 | Output | One `EncodedClaim` resource per dispatch | One artifact (resource set), rooted at an `enc:ReasoningStructure` |
 | Commitment | The FIBER commit cycle | An explicit `Load` of the artifact — generation and commitment stay decoupled |
 | Runtime | `runtime: external` (orchestration-hosted) | No institution runtime; the parser is kernel-side and the proposers are the outbound seam |
+| Reproducibility | Draw files beside the source | Draws committed to the `doc-<id>` working branch — a re-run replays from the chain, and the branch is prunable |
 | Institution shape | Generation (D62) + verification (D61) | Verification (D61) only |
 
 §1 argues the negative, §2–§9 specify the positive, §10 states what D61 inherits, §11 scopes the
@@ -163,6 +164,11 @@ set; `discourse_unit` instead writes `"<path> (sha256 <hex>)"` into `enc:section
 meant for `"Results §2.1"`. The service mints (or accepts) a `reference:Reference` for the source and
 sets `enc:source_document` on every unit, leaving `enc:section` for what it is for.
 
+The `reference:Reference` travels **inside** the artifact, like the glossary does. It has to: the
+artifact's units reference it, and Rule 22 is closed-world over same-or-lower layers, so a Reference
+left behind on the working branch would dangle the moment the artifact is loaded anywhere else. This
+holds whichever way §14.1 settles source transport.
+
 Both are pure additions to the emitter and are the first build slice (§13), because every surface
 depends on the handle.
 
@@ -170,17 +176,26 @@ depends on the handle.
 
 ## 5. Where things live
 
-**The doc branch is a workspace, not a destination.** `with_storage(backend, doc_id)` builds the
-doc-glossary layer on the persistent store and commits it to branch `doc-<doc_id>`, drop-and-recreate,
-and *never advances the interactive chain*. That stays. The glossary resources also travel **inside**
-the artifact, so an artifact loaded onto any other branch is self-contained.
+**The doc branch is the run's working record, not a destination.** `with_storage(backend, doc_id)`
+builds the doc-glossary layer on the persistent store and commits it to branch `doc-<doc_id>`,
+drop-and-recreate, and *never advances the interactive chain*. That stays. What the branch holds
+grows: the doc glossary **and** the run's proposal draws (§9). The glossary resources also travel
+**inside** the artifact, so an artifact loaded onto any other branch is self-contained.
+
+**The branch survives the run and is prunable** (decided `2026-08-18`). It is what makes a re-run
+LLM-free and a failed run inspectable; when neither is wanted any more, `DeleteBranch` drops it. What
+is lost on pruning is the transcript and therefore free replay; what survives is every decision, because
+the decisions are in the artifact and the artifact was loaded elsewhere. Pruning is a caller action —
+the service never deletes a branch it did not create in that run.
 
 **Landing is an explicit `Load`** of the artifact onto whatever branch the caller chooses. The service
 does not decide where knowledge goes.
 
-**Idempotency.** Same source + same recorded draws → byte-identical artifact: the emitter is
-deterministic and `--timestamp` is a caller input for exactly this reason. Re-loading an unchanged
-artifact hits the anchored-commit cache and reports `branch_advanced = false`.
+**Idempotency.** Same source + same draws → byte-identical artifact: the emitter is deterministic and
+`--timestamp` is a caller input for exactly this reason. With the draws on the branch (§9), "same
+draws" is the default for a re-run against the same `doc_id` rather than something the caller has to
+arrange. Re-loading an unchanged artifact hits the anchored-commit cache and reports
+`branch_advanced = false`.
 
 ---
 
@@ -213,10 +228,14 @@ already sequential and per-sentence, so this costs a counter.
 **Cancellation** is cooperative at the sentence boundary — the same granularity the loop already
 commits at.
 
-**Resume is out of scope for v1.** The pipeline's live state is the discourse candidate set plus the
-ranker's prior-selection context; restoring it mid-document is a checkpointing design of its own. A
-cancelled run leaves its `doc-<id>` branch and is re-run. Stated here so the omission is a decision,
-not an oversight.
+**Resume is out of scope for v1, and cheaper than it looked.** The pipeline's live state is the
+discourse candidate set plus the ranker's prior-selection context. Serializing that state is a
+checkpointing design of its own — but with the draws on the working branch (§9), it does not have to
+be serialized to be recovered: re-running units 1..k against the same pinned base, the same committed
+glossary, and the same committed draws is deterministic and LLM-free, and reconstructs the state
+exactly. Resume becomes *replay the prefix, then continue live*, which needs no new state format.
+What remains is compute — re-parsing the prefix — so v1 still re-runs from the start and the
+optimisation is deferred with a known shape rather than an unknown one.
 
 ---
 
@@ -312,29 +331,81 @@ load path. Unchanged by this note; still worth fixing where the notebook will sh
 
 ## 9. Where recorded decisions live
 
-Two record systems exist and they answer different questions:
+Three records, three questions, three homes.
 
-| | Chain | Files |
-|---|---|---|
-| What | `enc:DecisionPoint` (authority, selected claim, candidate count, runner-up skeletons), `enc:AnaphorBinding` (authority, antecedent, confidence) | `ranks.json`, `selections.json`, `proposals.json`, `kinds.json` |
-| Question answered | *What was chosen*, for a reader of the graph | *What the proposer was asked and what it said*, so a run reproduces without an LLM |
-| Lifetime | As long as the claim | As long as the experiment |
+| | Decision | Draw | Experiment draw |
+|---|---|---|---|
+| What | `enc:DecisionPoint` (authority, selected claim, candidate count, runner-up skeletons), `enc:AnaphorBinding` (authority, antecedent, confidence) | `enc:ProposalDraw` — the question put to a proposer and the answer it gave, verbatim | `ranks.json`, `selections.json`, `proposals.json`, `kinds.json` |
+| Question answered | *What was chosen*, for a reader of the graph | *What the proposer was asked and said*, so this document re-runs without an LLM | The same, across runs, corpora and model versions |
+| Home | The artifact → wherever it is loaded | The `doc-<id>` working branch | The experiment directory |
+| Lifetime | As long as the claim | Until the branch is pruned | As long as the experiment |
 
-Keep both; do not merge them. The service takes draw handles as **inputs** and emits `DecisionPoint`s
-as **outputs**.
+The decision and the draw are not the same record and neither subsumes the other. A `DecisionPoint`
+says reading 3 was chosen by the ranker with these runners-up; it does not carry the pool as
+presented, the prior-selection context, or the rationale text, and it does not exist at all for sense
+ranking or discourse-kind classification. Reproducing a run needs the draw; reading the graph needs
+the decision.
 
-Two invariants that have already cost measurement time, restated so a surface author does not
-rediscover them:
+### 9.1 Draws live on the working branch
 
-- A draw is keyed on the **presented pool**. A draw recorded against a different Stage-A glossary
-  cannot answer this driver's questions (found `2026-08-12`).
-- A replay with `misses > 0` is a **different experiment, not a reproduction**.
+**Decided `2026-08-18`.** A service run commits its draws to `doc-<id>` as it makes them, alongside
+the glossary layer that run built. This is what makes the earlier deferral unnecessary: the objection
+was that the chain wants the decision, not the transcript — but the transcript is not going on the
+branch the claims land on. It goes on the working branch, which is exactly where a run's scaffolding
+belongs, and which is prunable (§5).
 
-*Open (§14):* whether a service run should also write its draw to the chain, so a re-run is
-reproducible from chain data alone. Deferred — a draw is a prompt-keyed transcript that changes with
-the model, and the chain wants the decision, not the transcript.
+What it buys:
 
----
+- **A re-run reproduces from chain data alone.** Point a run at the same `doc_id` and the draws are
+  already there; no draw files, no key, no LLM. Today that requires four JSON files travelling beside
+  the source.
+- **The pool and the draw are pinned together.** A draw is keyed on the *presented pool*, and the pool
+  is a function of the Stage-A glossary. On the branch, both are committed by the same run, so the
+  consistency the key enforces is structural rather than a filename convention. The failure of
+  `2026-08-12` — a draw recorded against a different Stage-A glossary, replayed against this pipeline
+  and answering a different question — is not expressible in this arrangement.
+- **A failed run is inspectable.** The draws up to the failure point are on the branch.
+
+The invariant that does not change: **a replay with `misses > 0` is a different experiment, not a
+reproduction.** Chain-resident draws miss on exactly the same conditions file draws do, because the
+key is the same key.
+
+### 9.2 The vocabulary
+
+One class in `encoding.esl` (not bootstrap — no reseed), covering all four seams, because the four
+Rust record types share one envelope: a keyed question and the answer to it.
+
+```esl
+class enc:ProposalDraw {
+    description = "One recorded proposer exchange on a formalization run: the exact question put to an
+                   untrusted proposer and the answer it gave. Committed to the run's doc-<id> working
+                   branch, never to the branch the claims land on. Replay reads these back in place of
+                   the draw files; a changed question MISSES, it never silently replays.";
+    requires enc:draw_seam, enc:draw_key, enc:draw_question, enc:draw_answer;
+    recommends enc:draw_unit, enc:draw_model, reflection:timestamp;
+}
+```
+
+`enc:draw_seam` is a closed enumeration of individuals — `sense_rank`, `reading_selection`,
+`anaphora`, `discourse_kind` — in the style of `enc:SelectionAuthority` and `enc:CutKind`, not a
+string. `enc:draw_unit` points at the `DiscourseUnit` the exchange belongs to, so a per-unit re-run
+(§11) can find its own draws.
+
+`enc:draw_question` and `enc:draw_answer` hold the serialized record — deliberately a transcript
+rather than a modelled structure. The Rust record types (`RankRecord`, `SelectionRecord`, and their
+siblings) **are** the replay contract; the key function reads them field by field. Modelling them a
+second time in ESL would create two definitions of one contract with no mechanism keeping them in
+step, and the first divergence would be a silent replay of the wrong answer. The chain field is the
+serialization of the contract, not a restatement of it.
+
+### 9.3 Reading them back
+
+The pipeline gains a draw source that is a branch rather than a set of files. The file arms stay
+exactly as they are — they are what the parse-rate sweep, the demo, and CI run on, and they are how
+a draw is compared *across* runs, which a per-document branch cannot answer.
+
+Note for §11: this is the same shape as the chain-resident pin that the human-override loop needs
+(§11b). Building draws-from-chain builds most of pins-from-chain.
 
 ## 10. What D61 inherits
 
@@ -370,10 +441,12 @@ per-unit and interactive.
 What per-unit-and-interactive additionally requires:
 
 - **(a) Discourse context for a single unit.** Re-encoding sentence 12 alone needs the state that
-  preceded it: the candidate set, the landed claims, and the ranker's prior selections. Two answers —
-  re-run the whole document with the pin added (no new machinery, seconds-to-minutes per edit), or
-  checkpoint the discourse state per unit (fast edits, new machinery, and the same state-restoration
-  problem §6 deferred for resume). This is a design decision, not an implementation detail.
+  preceded it: the candidate set, the landed claims, and the ranker's prior selections. The §9
+  decision changes the shape of this: with the draws on the working branch, re-running units 1..11 is
+  deterministic and LLM-free, so the choice is no longer "serialize the discourse state or don't" but
+  "how much of the prefix to recompute per edit". The cheap version — replay the prefix, re-encode
+  unit 12 under the pin — costs parse time only and needs no new state format. Whether that is fast
+  enough for an interactive surface is a measurement, not a design question.
 - **(b) A chain home for pins.** Today a pin is a TSV row read by a harness. A human override must be
   a chain-resident `DecisionPoint` with `authority_pin` on the doc branch, read back as the ranker's
   declared arm. That is a new input path into the pipeline — pins-from-chain, not pins-from-file.
@@ -382,9 +455,11 @@ What per-unit-and-interactive additionally requires:
   matches the drop-and-recreate lifecycle already in force.
 - **(d) An editable cell.** Per-decision controls and per-unit re-run in the notebook.
 
-**Scope call: separate effort.** (a) and (b) are both structural — one picks a discourse-state model,
-the other changes how the pipeline reads its declared arm — and neither is needed to make the four
-surfaces work. (c) and (d) follow from whatever (a) and (b) decide.
+**Scope call: separate effort** — but a smaller one than when this section was first written. The §9
+decision dissolves most of (a) (prefix replay replaces a state format) and most of (b) (draws-from-chain
+is the same input path as pins-from-chain). What is left is a measurement, a second reader on that
+input path, and the UI. Still out of scope for v1, because none of it is needed to make the four
+surfaces work, and (c)'s supersession semantics deserve their own decision.
 
 Two v1 hooks keep the separate effort cheap, and both are already in this note for other reasons:
 emit the `enc:ReasoningStructure` root (§4.1), so a structure is addressable and a superseding run has
@@ -408,9 +483,10 @@ reading belongs to D61. Also §10 item 6 ("S8 institution wrapper"), §11.3's "i
 
 **Rewrite** [parser-pipeline-plan.md](../notes/parser-pipeline-plan.md) Stage 4 to this shape.
 
-**Add**: `ReasoningStructure` + `reference:Reference` emission; `TaskKind`; the `FormalizeDocument`
-RPC; the `eigenius_formalize_document` MCP tool; the `formalize` notebook cell type (bootstrap edit ⇒
-batched reseed).
+**Add**: `ReasoningStructure` + `reference:Reference` emission; `enc:ProposalDraw` + its seam
+enumeration (§9.2, `encoding.esl`, no reseed) and the draws-from-chain reader beside the file arms;
+`TaskKind`; the `FormalizeDocument` RPC; the `eigenius_formalize_document` MCP tool; the `formalize`
+notebook cell type (bootstrap edit ⇒ batched reseed).
 
 ---
 
@@ -420,26 +496,36 @@ batched reseed).
 |---|---|---|
 | 1 | Artifact root + provenance (`ReasoningStructure`, `enc:source_document` → `reference:Reference`) | `artifact_completeness` + `acceptance` green; demo v2 regenerates and still justifies twice / `Fails` on the edited variant |
 | 2 | Declaration cleanup + doc amendments (§12) | `encoding_validates.rs` green; no dangling `enc_sig:` reference in the tree |
-| 3 | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
-| 4 | `FormalizeDocument` RPC | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
-| 5 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
-| 6 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
+| 3 | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
+| 4 | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
+| 5 | `FormalizeDocument` RPC | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
+| 6 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
+| 7 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
 
-Slices 1–2 are independent of the rest and unblock everything.
+Slices 1–2 are independent of the rest and unblock everything. Slice 3 is independent of the surfaces
+and is what makes slice 5's byte-identity gate cheap to run repeatedly.
 
 ---
 
 ## 14. Open questions
 
+*Answered `2026-08-18`: the `doc-<id>` branch survives a completed run and is prunable (§5); a run
+records its LLM draws to that branch (§9.1). Per-unit discourse checkpointing (§11a) is no longer a
+design question — prefix replay covers it — leaving a measurement, listed below.*
+
 1. **Source transport** — inline text in the request, or a chain-resident source resource? Inline is
-   simpler; chain-resident gives the `reference:Reference` a natural home and makes re-runs cite the
-   same source.
-2. **Does the `doc-<id>` branch survive a completed run?** It is a parse workspace and the artifact is
-   self-contained, so deleting it is defensible; keeping it makes a re-run cheaper and a failure
-   inspectable.
-3. **Draw-to-chain** (§9) — should a service run record its LLM draws on-chain?
-4. **Per-unit discourse checkpointing** (§11a) — needed for interactive override, and the same
-   machinery that would give §6 resume.
+   simpler; chain-resident gives the `reference:Reference` a natural home on the working branch and
+   makes re-runs cite the same source. Either way the Reference is emitted into the artifact (§4.1).
+2. **Draw commit granularity** — one layer per unit, or one draw layer at the end of the run? Per-unit
+   is what makes a failed run inspectable and the prefix replayable, and costs one layer per sentence
+   on the working branch; per-commit cost is known to grow with chain length, which is tolerable for a
+   page and not obviously so for a full paper. Measure before fixing the policy.
+3. **Pruning policy** — manual `DeleteBranch` only, or a retention hint the service records for
+   [D44](d44-automatic-data-lifecycle-management.md) to act on? v1 is manual; the question is whether
+   a working branch should carry its own expiry.
+4. **How much prefix replay is fast enough** (§11a) — a measurement on the WRN page: re-parse cost for
+   a k-unit prefix with all draws replayed, which sets whether interactive per-unit override needs
+   anything beyond replay.
 
 ---
 

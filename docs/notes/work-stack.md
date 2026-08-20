@@ -9,9 +9,11 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 next, behind D69**
+### 0. ▲ ACTIVE — [parser-pipeline-plan.md](parser-pipeline-plan.md) — **Stages 1–3 done; Stage 4 ACTIVE (D71 written, no code)**
 The approved four-stage build map (`2026-08-11`): **reading selection → anaphora completion (D64)
-→ unified landing (Derived, artifact-first) → FormalizeDocument institution**. It is the successor
+→ unified landing (Derived, artifact-first) → the formalization service** (Stage 4 was written as
+"the FormalizeDocument institution"; D71 reassigned it — see the Stage-4 record at the end of this
+entry). It is the successor
 spine for the entries below: Stage 1 is the AMBIG→ENCODED exit gate of (2)'s phase 3 — a
 *selection* stage (LLM `ReadingRanker` in document context, recorded + gated against the 62-pin
 gold set) rather than further multiplicity reduction; Stages 3–4 subsume (3)'s Phase-1-harness and
@@ -108,9 +110,39 @@ ranker = encoded 50 / ambiguous 1 / open 11 / gap 0 over 62 units, replay-verifi
 / 6 wrong / 1 abstained / 9 UNSCORABLE — the pins are isolated-sentence skeletons, so gating the
 composed pipeline needs pins for discourse-resolved readings (named, not closed). The sweep's
 selection accuracy on d67 reproduces the tracked baseline exactly (21/31).** **STAGE 3 EXIT GATE
-MET.** **Active step:
-Stage 4 — the `FormalizeDocument` institution (parser-pipeline plan §4); its design note is
-the first deliverable.** Remaining deferrals live in D68 §5/§5a (collective/group term +
+MET.**
+
+**Stage 4 — ACTIVE. Design note written `2026-08-17/18`:
+[d71-document-formalization-service.md](../design/d71-document-formalization-service.md). No code yet.**
+The note's finding is that the plan's premise was wrong: prose formalization is **not** an
+institution. Tested against D14 §1.2's own four criteria it satisfies one (it registers declarations);
+it has no satisfaction relation of its own (it borrows the kernel validator + the felicity re-gate,
+both excluded by D14 §1.1), no fibre (`enc:EncodedClaim` is a `reflection:DerivedResource`, graded in
+the reasoning fibre), and answers no queries about its results. The precedent agrees: every
+`institution:Institution` in the tree decides something (5 Julia solvers, Lean, statistics, reasoning),
+while five importers doing source→resource-set→Load are none of them. D62 §8's four reasons each trace
+back to a property supplied elsewhere — the Derived cluster by `DerivedClaimGrader`, felicity by
+structural validation — except the fourth, faithfulness, which is D61 and does earn the shape.
+**Instead:** a service operation over the existing `DocumentPipeline`, emitting the resource-set
+artifact, run as a D21 **task**, behind four thin surfaces — CLI (`prose-to-esl`, already one),
+gRPC (`FormalizeDocument`, sibling of `ParseSentence`), MCP (one tool per RPC + the existing task
+polling), notebook (a `formalize` cell — bootstrap edit ⇒ batch the reseed). Async is forced, not
+preferred: MCP has no long-call idiom. Decided `2026-08-18`: the `doc-<id>` branch is the run's
+**working record** — glossary + LLM draws — survives the run and is prunable via `DeleteBranch`;
+draws land there as `enc:ProposalDraw` (one class, four seams, `encoding.esl`, no reseed), so a re-run
+replays from the chain alone and the pool/draw consistency the replay key enforces becomes structural
+(the `2026-08-12` cross-glossary draw failure is not expressible). That also shrank two deferrals:
+resume (§6) and per-unit override (§11a) become *replay the prefix deterministically*, not a
+discourse-state format — what is left is a measurement. **Build order (§13):** 1 artifact root
+(`enc:ReasoningStructure` + `reference:Reference` — both declared today and never emitted) · 2 delete
+the dead `enc:FormalizeDocument`/`qc_formalize_unit` declarations + amend D62 §8/§10/§11.3/§11.5 and
+plan §4 · 3 `ProposalDraw` + branch commit + reader · 4 `TaskKind` · 5 RPC · 6 MCP · 7 notebook cell.
+Slices 1–2 unblock everything and are independent. **Open (§14):** source transport; draw commit
+granularity (per-unit layer count vs chain-length cost); pruning policy (manual vs a D44 hint); the
+prefix-replay measurement. **Human-override loop: separate effort** (§11) — the crude form already
+works via `--pins` + whole-document re-run.
+
+Remaining deferrals live in D68 §5/§5a (collective/group term +
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
 cleanup); kind verdicts + the selections-edited draw + the demo re-pins await human sign-off.
 
