@@ -15,8 +15,7 @@ any detour.
 > largely implemented-or-obsolete, so promoting one by position would be wrong. The live candidates,
 > none of them started:
 >
-> - **The kernel OOM** (on deck below) — one observation, cause unknown, jemalloc profile is the
->   named next action. The only entry here that is a *defect* rather than a plan.
+> - ~~**The kernel OOM**~~ — FIXED `2026-08-20` (commit `e10c9e6`); no longer a candidate.
 > - **D71 residue** — §14's four open questions (source transport, draw commit granularity, pruning
 >   policy, the prefix-replay measurement) and §11's human-override loop, which the §9 draws-on-branch
 >   decision shrank from a design problem to a measurement.
@@ -187,9 +186,10 @@ copied the base store's PROVENANCE verbatim, so an aligned snapshot could not be
 the `land`-on-run flag) — which closes the rendering path slice 7's descoped e2e had left uncovered.
 D71 is DONE.
 
-**Not closed:** the kernel OOM — CAUSE FOUND (retroactive validation on a redefining load over the
-lexicon chain, ~27 GB) and its triggers removed at the call sites, but the underlying unbounded scan
-is untouched. Its own note, on deck below; it is now the only known defect.
+**Kernel OOM: FIXED `2026-08-20`** (commit `e10c9e6`). Retroactive validation's carrier scan now
+streams the chain instead of materialising it (27.8 GB → 3.9 GB), and `redefines_ancestor` compares
+the new definition against the shadowed one in canonical Eigon-CBOR, so an identical redeclaration
+enumerates no dependents at all. The load that killed the kernel twice now takes 30 ms.
 
 Remaining deferrals live in D68 §5/§5a (collective/group term +
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
@@ -315,12 +315,17 @@ done.
 
 ## On deck (pushed onto the stack when its step becomes active)
 
-- **Kernel OOM during a notebook session** ([kernel-oom-notebook-session.md](kernel-oom-notebook-session.md)).
-  27.8 GB RSS, host OOM killer, one observation `2026-08-20`. Query / formalize / topology-depth /
-  taxonomy-count paths all MEASURED out (2.4-2.6 GiB peaks); cause unknown. Next action is the
-  jemalloc heap profile, same instrument the reseed-OOM note is stuck on. One real unbounded path
-  found on the way and worth capping independently: `LayerTopology`'s `include_resources: true`
-  emits a node per resource with no cap, so drilling into a lexicon layer is unbounded.
+- ~~**Kernel OOM during a notebook session**~~ — RESOLVED `2026-08-20`, commit `e10c9e6`
+  ([kernel-oom-notebook-session.md](kernel-oom-notebook-session.md) carries the full account).
+  Two residues, neither blocking and neither a defect on its own:
+  - `LayerTopology`'s `include_resources: true` emits a node per resource **with no cap**, so
+    drilling into a lexicon layer is unbounded. Found on the way, did not cause the kill, still
+    uncapped. Wants a bounded page with an explicit `truncated` marker — never a silent cap.
+  - The carrier scan is still O(chain) in time for a *genuinely changed* property definition. An
+    indexed answer needs a value-independent **predicate → subject** index; the triple index holds
+    only IRI-valued triples and answers `(predicate, object)`. For the IRI-valued half a
+    `scan_predicate(p)` is a prefix scan on the existing `(p, o, s)` key order and needs no new
+    persisted structure.
 
 ## Parked tracks (real, but off this stack)
 Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
