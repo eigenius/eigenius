@@ -202,8 +202,29 @@ async fn resume_one_task(
         }
     };
 
+    // Resume is a PROGRAM-RUN operation. A formalization task pins no program to re-resolve, and
+    // D71 §6 defers its resume deliberately: the pipeline's live state is the discourse candidate
+    // set plus the ranker's prior-selection context, which is recovered by replaying the prefix
+    // (deterministic once the run's draws are on its branch), not by restoring a serialized state.
+    // Marking it Failed with a stated reason beats silently reporting "program not found".
+    let (program_iri, input_iri) = match (&record.kind.program_iri(), &record.kind.input_iri()) {
+        (Some(p), Some(i)) => ((*p).to_string(), (*i).to_string()),
+        _ => {
+            tracing::info!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::TASK_ID } = ?record.task_id,
+                kind = record.kind.label(),
+                "task kind does not resume; marking Failed — re-run it instead"
+            );
+            record.status = TaskStatus::Failed;
+            record.updated_at = now_millis();
+            let _ = task_store.put_task(&record);
+            return;
+        }
+    };
+
     // Resolve program and input resources from the pinned layer.
-    let program = match Iri::parse(&record.program_iri)
+    let program = match Iri::parse(&program_iri)
         .ok()
         .and_then(|i| layer.resolve(&i).map(|arc| (*arc).clone()))
     {
@@ -213,7 +234,7 @@ async fn resume_one_task(
                 { field::OPERATION } = operation::TASK_RESUME,
                 { field::ERROR_KIND } = "program_missing",
                 { field::TASK_ID } = ?record.task_id,
-                { field::PROGRAM_IRI } = %record.program_iri,
+                { field::PROGRAM_IRI } = %program_iri,
                 "task program not found at pinned head"
             );
             record.status = TaskStatus::Failed;
@@ -222,7 +243,7 @@ async fn resume_one_task(
             return;
         }
     };
-    let input = match Iri::parse(&record.input_iri)
+    let input = match Iri::parse(&input_iri)
         .ok()
         .and_then(|i| layer.resolve(&i).map(|arc| (*arc).clone()))
     {

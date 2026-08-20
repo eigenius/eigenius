@@ -860,6 +860,16 @@ message TaskInfo {
   int64 created_at_ms = 11;
   int64 updated_at_ms = 12;
   bool retain_forever = 13;
+  // D71 §6 — what this task IS: "ProgramRun" | "Formalize". Tasks were program-bound; a document
+  // formalization is a task operationally (minutes, N LLM round-trips, wants progress and cancel)
+  // and program-bound by nothing. `program_iri` / `input_iri` are populated for ProgramRun and
+  // EMPTY otherwise, so a reader that only understands programs sees nothing rather than a
+  // synthetic IRI it would then have to special-case.
+  string kind = 14;
+  // Formalize only: the run's `doc-<id>` working branch (glossary layer + proposer draws), and the
+  // sha256 of the bytes formalized. Empty for other kinds.
+  string doc_id = 15;
+  string source_sha256 = 16;
 }
 
 message ListTasksRequest {}

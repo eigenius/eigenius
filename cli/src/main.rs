@@ -2881,7 +2881,9 @@ async fn remote_tasks_list(endpoint: &str, json_output: bool) {
                     .map(|t| {
                         serde_json::json!({
                             "task_id": t.task_id,
+                            "kind": t.kind,
                             "program_iri": t.program_iri,
+                            "doc_id": t.doc_id,
                             "status": t.status,
                             "layer_head": t.layer_head,
                             "step_seq": t.step_seq,
@@ -2894,9 +2896,23 @@ async fn remote_tasks_list(endpoint: &str, json_output: bool) {
             } else if resp.tasks.is_empty() {
                 println!("No tasks.");
             } else {
-                println!("{:<36}  {:<12}  PROGRAM", "TASK ID", "STATUS");
+                println!(
+                    "{:<36}  {:<12}  {:<11}  SUBJECT",
+                    "TASK ID", "STATUS", "KIND"
+                );
                 for t in &resp.tasks {
-                    println!("{:<36}  {:<12}  {}", t.task_id, t.status, t.program_iri);
+                    // Each kind names its own subject: a program run its program, a formalization
+                    // its doc branch. Printing `program_iri` for both would show a blank column and
+                    // invite the reader to assume the task is broken.
+                    let subject = if t.doc_id.is_empty() {
+                        t.program_iri.as_str()
+                    } else {
+                        t.doc_id.as_str()
+                    };
+                    println!(
+                        "{:<36}  {:<12}  {:<11}  {}",
+                        t.task_id, t.status, t.kind, subject
+                    );
                 }
             }
         }
@@ -2924,8 +2940,11 @@ async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
                 let j = serde_json::json!({
                     "task_id": t.task_id,
                     "session_id": t.session_id,
+                    "kind": t.kind,
                     "program_iri": t.program_iri,
                     "input_iri": t.input_iri,
+                    "doc_id": t.doc_id,
+                    "source_sha256": t.source_sha256,
                     "status": t.status,
                     "layer_head": t.layer_head,
                     "step_seq": t.step_seq,
@@ -2940,8 +2959,15 @@ async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
             } else {
                 println!("Task:         {}", t.task_id);
                 println!("Status:       {}", t.status);
-                println!("Program:      {}", t.program_iri);
-                println!("Input:        {}", t.input_iri);
+                println!("Kind:         {}", t.kind);
+                if !t.program_iri.is_empty() {
+                    println!("Program:      {}", t.program_iri);
+                    println!("Input:        {}", t.input_iri);
+                }
+                if !t.doc_id.is_empty() {
+                    println!("Doc branch:   doc-{}", t.doc_id);
+                    println!("Source sha:   {}", t.source_sha256);
+                }
                 println!("Layer head:   {}", t.layer_head);
                 println!("Step seq:     {}", t.step_seq);
                 println!("Last ckpt:    {}", t.last_checkpoint_step);

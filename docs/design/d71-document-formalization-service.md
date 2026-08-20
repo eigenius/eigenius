@@ -505,7 +505,7 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 | 1 ✅ | Artifact root + provenance (`ReasoningStructure`, `enc:source_document` → `reference:Reference`) | `artifact_completeness` + `acceptance` green; demo v2 regenerates and still justifies twice / `Fails` on the edited variant |
 | 2 ✅ | Declaration cleanup + doc amendments (§12) | `encoding_validates.rs` green; no dangling `enc_sig:` reference in the tree |
 | 3 ✅ | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
-| 4 | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
+| 4 ✅ | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
 | 5 | `FormalizeDocument` RPC | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
 | 6 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
 | 7 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
@@ -543,6 +543,21 @@ exit, so no branch it writes can outlive the run; the CLI's replay arm is files,
 a copy-and-discard driver. Draws-on-branch is a property of a run against a LIVE store, so the
 end-to-end arm lands with slice 5's RPC, which `commit_draws` and `draws_from_layer` are already
 shaped for. §13's "independent of the surfaces" anticipated this; the gate wording did not.
+
+**Slice 4 DONE `2026-08-19`.** `TaskRecord` carries a `TaskKind` — `ProgramRun { program_iri,
+input_iri }` or `Formalize { doc_id, source_sha256 }` — instead of two program-shaped fields every
+reader had to assume applied. Program-only readers go through `kind.program_iri()` / `kind.input_iri()`,
+which return `None` for a formalization, and that turned out to matter immediately: the resume sweep
+had been resolving `record.program_iri` unconditionally, so a formalization task would have been
+marked Failed with "task program not found at pinned head". It now declines by kind and says why —
+D71 §6 defers formalization resume deliberately, because the prefix replays deterministically once
+the run's draws are on its branch (§9).
+
+On the wire, `TaskInfo` gains `kind`, `doc_id` and `source_sha256`; `program_iri` / `input_iri` stay
+populated for `ProgramRun` and are EMPTY otherwise, so a reader that only understands programs sees
+nothing rather than a synthetic IRI it would have to special-case. `eig task list` prints the kind
+and each kind's own subject — the program for a run, the doc branch for a formalization — rather than
+a blank PROGRAM column inviting the reader to think the task is broken.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been
