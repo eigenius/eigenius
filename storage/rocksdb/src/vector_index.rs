@@ -198,8 +198,11 @@ fn segment_from_cbor(bytes: &[u8]) -> Result<VectorSegment, StorageError> {
         )));
     }
     let mut vectors = Vec::with_capacity(vector_bytes.len() / 4);
-    for chunk in vector_bytes.chunks_exact(4) {
-        vectors.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+    // Length is checked to be a multiple of 4 above, so the remainder `as_chunks` returns
+    // is empty. The window arrives as `&[u8; 4]`, which is what `from_le_bytes` wants —
+    // dropping the `try_into().unwrap()` that could previously panic on a short chunk.
+    for chunk in vector_bytes.as_chunks::<4>().0 {
+        vectors.push(f32::from_le_bytes(*chunk));
     }
     let expected = subjects.len() * cbor.dim as usize;
     if vectors.len() != expected {

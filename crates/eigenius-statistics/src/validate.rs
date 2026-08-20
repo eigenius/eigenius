@@ -2159,7 +2159,14 @@ fn decode_paired_observations(j: &serde_json::Value) -> Result<Vec<(f64, f64)>, 
             flat.len()
         ));
     }
-    Ok(flat.chunks_exact(2).map(|c| (c[0], c[1])).collect())
+    // Length is checked to be even above, so `as_chunks` tiles it exactly and the
+    // discarded remainder is empty.
+    Ok(flat
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[b, a]| (b, a))
+        .collect())
 }
 
 /// Per-observation entry the Factorial decoder produces: the cell
@@ -2278,7 +2285,10 @@ fn decode_rcbd_observations(j: &serde_json::Value) -> Result<Vec<(usize, usize, 
             flat.len()
         ));
     }
-    flat.chunks_exact(3)
+    // Length is checked to be a multiple of 3 above; the remainder is empty.
+    flat.as_chunks::<3>()
+        .0
+        .iter()
         .enumerate()
         .map(|(row_idx, chunk)| {
             let block = chunk[0];
@@ -2411,7 +2421,10 @@ fn decode_rm_simple_observations(
             flat.len()
         ));
     }
-    flat.chunks_exact(3)
+    // Length is checked to be a multiple of 3 above; the remainder is empty.
+    flat.as_chunks::<3>()
+        .0
+        .iter()
         .enumerate()
         .map(|(row_idx, chunk)| {
             let subject = chunk[0];
@@ -2448,7 +2461,10 @@ fn decode_splitplot_observations(
             flat.len()
         ));
     }
-    flat.chunks_exact(4)
+    // Length is checked to be a multiple of 4 above; the remainder is empty.
+    flat.as_chunks::<4>()
+        .0
+        .iter()
         .enumerate()
         .map(|(row_idx, chunk)| {
             let wp = chunk[0];
