@@ -100,3 +100,59 @@ the tool to use here too:
 Four causes were proposed and eliminated in sequence before this note was opened. Each was
 plausible and unrefuted at the moment it was proposed, and "plausible and unrefuted" was repeatedly
 mistaken for "found it". Only the measurements moved anything. Whatever is next: measure first.
+
+---
+
+## RESOLVED (2026-08-20)
+
+Neither hypothesis above. The kill came from **retroactive validation on a redefining load**, not
+from anything the notebook rendered. Reproduced deterministically outside the notebook:
+`eigenius load ontologies/encoding/encoding.esl` against the aligned snapshot, twice, once per kill.
+
+### Cause
+
+`encoding.esl` is resident in `BOOTSTRAP_CHAIN`, so re-loading it shadows every IRI it declares.
+`redefines_ancestor` asked only *"does an ancestor define this IRI"*, so all 80 resources counted
+as redefinitions. Each of the ~30 property redefinitions then ran case (2)'s carrier scan, which
+called `new_layer.iter_all_resources()` — eagerly materialising a `BTreeMap<Iri, Arc<Resource>>`
+over the whole 7.6M-resource chain, per property.
+
+### Two fixes, both needed
+
+1. **Stream the scan.** `scan_chain_for_property_carriers` walks the chain layer by layer,
+   resolving each IRI through the head, instead of materialising it. Peak RSS **27.8 GB → 3.9 GB**,
+   no kill. But still O(chain) in *time*: the load ran >20 min at 99% CPU, and the kernel stopped
+   answering its compose healthcheck (`eigenius inspect`, 5s timeout) for the duration — the crash
+   became a liveness failure.
+2. **Gate on a *changed* definition.** A shadowing definition is not necessarily a different one.
+   `redefines_ancestor` now compares the new definition against the shadowed one in canonical
+   Eigon-CBOR; identical ⇒ no dependents, no scan. Sound per-IRI because dependent enumeration is a
+   union over changed IRIs, so an IRI that did change is still caught by its own iteration.
+
+   Canonical CBOR, not `PartialEq`: persistence collapses `ResourceRef` into a plain string, so an
+   ancestor read back from storage must still compare equal to the resource re-declaring it. That
+   is the case that has to be cheap. Pinned by
+   `identical_redeclaration_is_not_a_redefinition`, which fails on the old body.
+
+### Result
+
+Same load, same snapshot: **30 ms** (retroactive `.017` → committed `.047`), full commit pipeline
+run, no anchored-cache short-circuit. Kernel healthy throughout.
+
+### Still open
+
+The carrier scan remains O(chain) for a genuinely changed property definition. An indexed answer
+needs a value-independent **predicate → subject** index: the triple index stores only IRI-valued
+triples (nothing at all for `enc:prose`, `enc:span_start`, `enc:confidence`) and answers
+`(predicate, object)`, not `predicate` alone. For the IRI-valued half a `scan_predicate(p)` beside
+`scan_predicate_object(p, o)` would suffice — RocksDB keys are already `(p, o, s)`-ordered, so it
+is a prefix scan and needs no new persisted structure. Not built: after the gate, this path runs
+only on a deliberate ontology edit.
+
+The uncapped `LayerStackView` resource fetch noted above is still uncapped. It did not cause this,
+and it is still worth a bounded page with an explicit `truncated` marker.
+
+### Note on method, revisited
+
+Six hypotheses, five wrong. The one that landed came from reproducing the kill outside the notebook
+and reading the log line immediately before it — not from more static analysis.
