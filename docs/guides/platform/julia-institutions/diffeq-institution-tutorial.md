@@ -88,8 +88,10 @@ julia/institutions/diffeq/
 ├── declarations/
 │   ├── diffeq-ontology.eigon.json     # OdeProblem + OdeSolution + RhsComponent
 │   │                                  # classes + their properties
-│   └── diffeq-institution.eigon.json  # Institution + RuntimeMethodSignature
+│   └── diffeq-institution.eigon.json  # Institution + 2 RuntimeMethodSignatures
+│                                      # (validate_solution, reify_problem)
 │                                      # + AutoOnLoad QueryClass
+│                                      # + ImportFormat if_diffeq_problem
 └── EigeniusDiffEq/
     ├── Project.toml                   # OrdinaryDiffEq + SciMLBase + EigeniusMirror
     └── src/EigeniusDiffEq.jl          # validate_solution + formula_to_value
@@ -146,9 +148,13 @@ Closure walking pulls in `formulas:FormulaTerm` (the inductive type) plus the op
 
 Cold runs take ~5 minutes — OrdinaryDiffEq's dep tree is substantial. Faster than Catalyst, slower than intervals.
 
-### The institution declares one QueryClass
+### The institution declares one QueryClass — and one ImportFormat
 
-`solution_validity`, AutoOnLoad on `OdeSolution`. Future v2: `qc_diffeq_solve` (OnDemand), `qc_diffeq_sensitivity` (OnDemand), trajectory-hashing `ReproducibleIntegration`.
+`solution_validity`, AutoOnLoad on `OdeSolution`, is the only QueryClass. Five resources install in total: the `Institution`, two `RuntimeMethodSignature`s (`validate_solution` and `reify_problem`), that one `QueryClass`, and an `ImportFormat` `if_diffeq_problem`.
+
+`if_diffeq_problem` is the piece the QueryClass list hides. It is the **target side of the Catalyst → DiffEq comorphism**: `to_class` and `payload_type` are both `diffeq:OdeProblem`, and its procedure `reify_problem` is literally `return problem`. The no-op exists so the kernel's comorphism dispatch routes reify calls through the substrate uniformly rather than special-casing an empty import. DiffEq is a comorphism *target* without having an OnDemand surface of its own.
+
+Future v2: `qc_diffeq_solve` (OnDemand), `qc_diffeq_sensitivity` (OnDemand), trajectory-hashing `ReproducibleIntegration`.
 
 ## Step 4 — Read the handler
 
@@ -262,7 +268,7 @@ eigenius load <<<'[
 
 An `OdeProblem` resource was committed. **No AutoOnLoad gate fired** — the institution declares no `query_class: OdeProblem`. The problem is data; only `OdeSolution` claims trigger validation.
 
-Authoring richer ODEs by hand (e.g. the kinase mechanism's six coupled ODEs) is verbose — that's where the **`Catalyst → DiffEq` comorphism** shines: it produces FormulaTerm-typed `OdeProblem`s directly from chain-committed `ReactionNetwork`s. See [Where this is heading](#where-this-is-heading).
+Authoring richer ODEs by hand (e.g. the kinase mechanism's six coupled ODEs) is verbose — that's where the shipped **`Catalyst → DiffEq` comorphism** helps: Catalyst's `compile_to_ode` export procedure produces FormulaTerm-typed `OdeProblem`s directly from chain-committed `ReactionNetwork`s, and the comorphism's middle is then the identity on `OdeProblem`. See [Where this is heading](#where-this-is-heading).
 
 ## Step 8 — Commit the Holds-case OdeSolution
 
@@ -271,6 +277,7 @@ eigenius load <<<'[
   {
     "@id": "urn:eigenius:demo:diffeq:solution:exp_decay_at_1",
     "core:is_a": ["urn:eigenius:diffeq:OdeSolution"],
+    "core:short_name": "exp_decay_at_1",
     "diffeq:problem": "urn:eigenius:demo:diffeq:problem:exp_decay",
     "diffeq:algorithm": "Tsit5",
     "diffeq:abstol": 1e-8,
@@ -298,6 +305,7 @@ eigenius load <<<'[
   {
     "@id": "urn:eigenius:demo:diffeq:solution:exp_decay_wrong",
     "core:is_a": ["urn:eigenius:diffeq:OdeSolution"],
+    "core:short_name": "exp_decay_wrong",
     "diffeq:problem": "urn:eigenius:demo:diffeq:problem:exp_decay",
     "diffeq:algorithm": "Tsit5",
     "diffeq:abstol": 1e-8,
@@ -336,7 +344,7 @@ After running the demo:
 | `OdeProblem` + `OdeSolution` + `RhsComponent` classes + 13 properties | step 1 |
 | `RuntimePackageMirror` | step 3 |
 | `RuntimeEnvironment` (`urn:eigenius:diffeq:env:v1`) | step 5 |
-| `Institution` + `RuntimeMethodSignature` + `QueryClass` | step 6 |
+| `Institution` + 2 `RuntimeMethodSignature`s + `QueryClass` + `ImportFormat` `if_diffeq_problem` | step 6 |
 | Exponential-decay `OdeProblem` (with FormulaTerm RHS) | step 7 |
 | Holds-case `OdeSolution` + `Verdict` + `RuntimeInvocation` | step 8 |
 | Fails-case `Verdict` + `RuntimeInvocation` (audit anchor for the rejection) | step 9 |
@@ -345,13 +353,15 @@ The Fails-case `OdeSolution` is *not* on the chain — its load was rejected. Bu
 
 ## Where this is heading
 
-DiffEq v1.5 (this version, with FormulaTerm-typed RHS) is the foundation. The interesting downstream pieces stack on top.
+DiffEq v1.5 (this version, with FormulaTerm-typed RHS) is the foundation. One of the pieces below has shipped and is marked as such; the rest are not built.
 
-**The `Catalyst → DiffEq` comorphism** (next, the natural pairing of Catalyst and DiffEq):
-- A typed `Comorphism(ef_cat_to_ode_input, m_cat_to_diffeq, if_diffeq_problem)` triple.
-- `m_cat_to_diffeq` is an institution-runtime Component owned by Catalyst that internally calls `ODEProblem(rn, u0_map, tspan, p_map)` to expand mass-action kinetics, then walks the resulting MTK `ODESystem` and produces FormulaTerm RHS components via the same `num_to_formula` path Symbolics' simplifier uses.
-- With both institutions on the chain, FIBER calls like `cap:qc_cat_to_ode(network)` become single-step ways to generate FormulaTerm-typed solvable problems.
-- The kinase mechanism becomes the canonical demo: ReactionNetwork → (comorphism) → OdeProblem with FormulaTerm RHS → (DiffEq AutoOnLoad) → OdeSolution.
+**The `Catalyst → DiffEq` comorphism** — *shipped*, at
+[`julia/comorphisms/catalyst-to-diffeq.eigon.json`](../../../../julia/comorphisms/catalyst-to-diffeq.eigon.json):
+- The declared triple is `Comorphism(ef_cat_to_ode_input, m_id_ode_problem, if_diffeq_problem)`.
+- **`m_id_ode_problem` is an identity `program:Lambda` on `diffeq:OdeProblem`** — `parameter: "p"`, `parameter_type: diffeq:OdeProblem`, body a `program:Var` naming `p`. It is not a Component, it takes no capability level, and it calls nothing. There is no `m_cat_to_diffeq`.
+- The compilation lives **one step earlier**, in the Catalyst-side ExportFormat's procedure `compile_to_ode`. It parses the `@reaction_network` source, computes `Catalyst.netstoichmat(rn) * Catalyst.oderatelaw.(reactions(rn))` for the symbolic RHS, and walks each resulting `Symbolics.Num` into a `FormulaTerm` via the same `num_to_formula` shape Symbolics' simplifier uses. By the time the middle runs, the `OdeProblem` already exists — which is why the middle can be the identity.
+- The comorphism is `exact: false`: mass-action ODE compilation is faithful to the network's deterministic limit, but the network admits other dynamical interpretations (jumps, SDEs) under the same structure.
+- FIBER calls to `qc_cat_to_ode` are the operational surface: ReactionNetwork → (`qc_cat_to_ode`) → OdeProblem with FormulaTerm RHS → (DiffEq AutoOnLoad) → OdeSolution. [`catalyst_to_diffeq_e2e.rs`](../../../../crates/eigenius-julia/tests/catalyst_to_diffeq_e2e.rs) runs the whole path.
 
 **The `DiffEq → IntervalArithmetic` comorphism** (eventually):
 - A `BoundedTrajectory` claim class on the IntervalArithmetic side: claim that `u(t)` stays within an interval over the time domain.

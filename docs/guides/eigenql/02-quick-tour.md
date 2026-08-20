@@ -1,6 +1,6 @@
 # 2. Quick tour
 
-Seven worked examples covering the shapes you'll encounter most often. Each example is drawn from or closely mirrors a test in [kernel/src/query/evaluate.rs](../../../kernel/src/query/evaluate.rs) — you can run them against the same test layer (core ontology + `ontologies/examples/animals.json`).
+Seven worked examples covering the shapes you'll encounter most often. Each example is drawn from or closely mirrors a test in [kernel/src/query/evaluate/](../../../kernel/src/query/evaluate/pattern.rs) — you can run them against the same test layer (core ontology + `ontologies/examples/animals.json`).
 
 ## 2.1. List all classes in the layer
 
@@ -19,11 +19,11 @@ RETURN [] {
 
 **What happens**:
 
-- `USING "urn:eigenius:core:Class"` imports the `Class` class so we can refer to it by its short name (`Class`) in the `MATCH`.
+- `USING "urn:eigenius:core:Class"` asserts that the IRI names a class; the typechecker verifies it. What puts the bare name `Class` in scope is the **core namespace**, which is always implicitly imported. A short name outside `urn:eigenius:core:` needs a `USING NAMESPACE "<prefix>"` clause — see [chapter 4 §4.2](04-program-structure.md#42-using--class-imports-and-using-namespace--short-name-scope).
 - `MATCH Class(?c) { short_name: ?name }` scans the layer for resources whose `is_a` includes `Class`, binds the resource IRI to `?c`, and the value of its `short_name` property to `?name`.
 - `RETURN [] { short_name: ?name }` emits one result row per binding. `[]` means "no class tag on the result rows" (aka a plain row-shape); the object `{ short_name: ?name }` gives the row one property named `short_name`.
 
-**Where it lives in the code**: this is the [`find_all_classes`](../../../kernel/src/query/evaluate.rs) test.
+**Where it lives in the code**: this is the [`find_all_classes`](../../../kernel/src/query/evaluate/pattern.rs) test.
 
 ## 2.2. Filter matches by a property value
 
@@ -46,7 +46,7 @@ RETURN [] {
 - `WHERE ?breed = "German Shepherd"` filters to only bindings where the breed equals the literal string.
 - `RETURN` emits one row per surviving binding with the breed as its single property.
 
-This is the [`where_filtering`](../../../kernel/src/query/evaluate.rs) test.
+This is the [`where_filtering`](../../../kernel/src/query/evaluate/pattern.rs) test.
 
 ## 2.3. Pattern matching on property names with `LIKE`
 
@@ -87,12 +87,12 @@ RETURN [] {}
 
 - The first `DEFINE` rule says "Alice is an ancestor of Bob if Alice reports to Bob".
 - The second rule is recursive: "`?x` is an ancestor of `?z` if `?x` reports to some `?y` and `?y` is already an ancestor of `?z`". The `Ancestor(?y) { ... }` notation matches against the derived relation, not the layer.
-- Both rules together compute the transitive closure via a **seminaive fixpoint** in the evaluator.
+- Both rules together compute the transitive closure via a **fixpoint loop** in the evaluator. The iteration is naive — each round re-evaluates every rule body in full — see [chapter 10 §10.4](10-stratification.md).
 - The final `MATCH ?person {}` and `WHERE ?person = "urn:eigenius:test:alice"` is a guard query — no `RETURN` content, just checking Alice exists.
 
 **Stratification** (chapter 10) ensures recursion stays decidable: a rule may not depend *negatively* on a relation that transitively depends on itself. Here both rules are positive, so the fixpoint converges in at most O(relation-size) iterations.
 
-This is [`recursive_define_ancestor`](../../../kernel/src/query/evaluate.rs).
+This is [`recursive_define_ancestor`](../../../kernel/src/query/evaluate/pattern.rs).
 
 ## 2.5. Aggregation: count instances per class
 
@@ -144,7 +144,7 @@ RETURN [] {
 - `FIBER assay:validate_prediction { … } AS ?check` builds the QueryClass's input resource, calls the assay institution's `query` handler, and binds the returned `Verdict` to `?check`. The response lives in a transient overlay (D2 §7.12) discarded when the query finishes.
 - `WHERE ?check HOLDS` projects the bound Verdict to a Boolean — keeps rows where the assay institution accepted the prediction.
 
-This requires the `FiberRuntime` to carry an `InstitutionIndex` + `InstitutionRuntime` + `ComponentRegistry`; without them the FIBER clause errors at dispatch time. See [chapter 8](08-fiber-clauses.md) and the M8 worked example in [`kernel/tests/d14_dock_assay_demo.rs`](../../../kernel/tests/d14_dock_assay_demo.rs).
+This requires the `FiberRuntime` to carry an `InstitutionIndex` + `InstitutionRuntime` + `ComponentRegistry`; without them the FIBER clause errors at dispatch time. See [chapter 8](08-fiber-clauses.md) and the M8 worked example in [`kernel/tests/dock_assay_demo.rs`](../../../kernel/tests/dock_assay_demo.rs).
 
 ## 2.7. Decidable QueryClass in `WHERE`
 

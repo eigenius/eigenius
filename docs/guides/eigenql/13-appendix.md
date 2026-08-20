@@ -2,45 +2,53 @@
 
 ## 13.1. Grammar reference (EBNF)
 
-The authoritative grammar is [D2 §3](../../design/d2-eigenql-specification.md#3-parser-grammar-ebnf). This appendix summarizes it for quick reference and documents the Phase 11e.2 additions (qualified-name function calls).
+The grammar below is read off the parser — [`kernel/src/query/lexer.rs`](../../../kernel/src/query/lexer.rs) and [`kernel/src/query/parser.rs`](../../../kernel/src/query/parser.rs) — and is current as of 2026-08-20. [D2 §3](../../design/d2-eigenql-specification.md#3-parser-grammar-ebnf) is the design document for the base language, but it predates two extensions the parser has shipped since: [D43](../../design/d43-text-and-vector-retrieval.md) (the similarity operator `~`, its hint set, and `TOP`) and [D59](../../design/d59-eigenql-array-patterns-and-derived-joins.md) (array element patterns). `USING NAMESPACE` and `FIBER … INTO` are likewise parser surface not covered by D2 §3. Where a document and the parser disagree, the parser is what runs.
+
+`X?` is optional, `X*` is zero or more, `X+` is one or more.
 
 ```ebnf
 (* Top-level *)
 Program           ::= Definition* Query
 Definition        ::= 'DEFINE' Identifier '(' Variable (',' Variable)* ')' 'FROM' DefineBody
-Query             ::= MatchPart GroupBy? ReturnClause? OrderBy? Limit? Offset? Distinct?
+Query             ::= MatchPart GroupBy? ReturnClause? OrderBy?
+                      Limit? Top? Offset? Distinct?
+                      (* positional and once each, then end of input *)
 
 (* MatchPart, restricted DEFINE form, and clauses *)
-MatchPart         ::= (UsingClause | UsingInstitution)* Clause+ WhereClause?
-DefineBody        ::= UsingClause* MatchClause WhereClause?     (* no FIBER, no USING INSTITUTION *)
-UsingClause       ::= 'USING' StringLit (',' StringLit)*
-UsingInstitution  ::= 'USING' 'INSTITUTION' StringLit 'AS' Identifier
+MatchPart         ::= UsingDecl* Clause+ WhereClause?
+DefineBody        ::= UsingDecl* MatchClause WhereClause?  (* no FIBER, no USING INSTITUTION *)
+UsingDecl         ::= 'USING' StringLit (',' StringLit)*            (* class imports *)
+                    | 'USING' 'NAMESPACE' StringLit (',' StringLit)*  (* short-name scope *)
+                    | 'USING' 'INSTITUTION' StringLit 'AS' Identifier
 Clause            ::= MatchClause | FiberClause
 MatchClause       ::= 'MATCH' Pattern (',' Pattern)*
 FiberClause       ::= 'FIBER' InstitutionRef ':' QueryClass
-                      '{' (ParamBinding (',' ParamBinding)*)? '}'
-                      'AS' Variable
+                      '{' (ParamBinding (',' ParamBinding)* ','?)? '}'
+                      'AS' Variable ('INTO' StringLit)?
 WhereClause       ::= 'WHERE' Expression (',' Expression)*       (* comma-list, implicitly ANDed *)
 GroupBy           ::= 'GROUP' 'BY' Expression (',' Expression)*
-ReturnClause      ::= 'RETURN' ResultClasses '{' (ReturnItem (',' ReturnItem)*)? '}'
-ResultClasses     ::= '[' ']'                                     (* untyped result *)
-                    | '[' Name (',' Name)* ']'                    (* one or more classes *)
+ReturnClause      ::= 'RETURN' ResultClasses '{' (ReturnItem (',' ReturnItem)* ','?)? '}'
+ResultClasses     ::= '[' (Name (',' Name)*)? ']'                 (* untyped, or one or more *)
                     | Name                                        (* single class, no brackets *)
                     | (* empty — go straight to '{' *)
 OrderBy           ::= 'ORDER' 'BY' OrderItem (',' OrderItem)*
 Limit             ::= 'LIMIT' Integer
+Top               ::= 'TOP' Integer
 Offset            ::= 'OFFSET' Integer
 Distinct          ::= 'DISTINCT'
 
 (* Patterns *)
-Pattern           ::= ('NOT')? ClassRef '(' Variable ')' '{' (PropertyPattern (',' PropertyPattern)*)? '}'
-                    | ('NOT')? Variable '{' (PropertyPattern (',' PropertyPattern)*)? '}'
-PropertyPattern   ::= Name ':' (Variable | Literal)
+Pattern           ::= 'NOT'? (ClassRef '(' Variable ')' | Variable) ObjectPattern
+ObjectPattern     ::= '{' (PropertyPattern (',' PropertyPattern)* ','?)? '}'
+PropertyPattern   ::= Name ':' (Variable | Literal | ArrayPattern)
+ArrayPattern      ::= '[' (Variable (',' Variable)* (',' '...')?)? ']'  (* D59: Exact | AtLeast *)
+                    | '[' '...' Variable '...' ']'   (* D59 Each: one binding per element *)
 
 (* Names *)
-Name              ::= Identifier | StringLit
+Name              ::= Identifier | StringLit          (* a StringLit must parse as a full IRI *)
 ClassRef          ::= Identifier | StringLit
 InstitutionRef    ::= Identifier | StringLit
+QueryClass        ::= Identifier | StringLit
 
 (* FIBER param bindings *)
 ParamBinding      ::= Name ':' Expression
@@ -54,50 +62,66 @@ Expression        ::= OrExpr
 OrExpr            ::= AndExpr ('OR' AndExpr)*
 AndExpr           ::= EqualityExpr ('AND' EqualityExpr)*
 EqualityExpr      ::= RelationalExpr (('=' | '<>') RelationalExpr)*
-RelationalExpr    ::= AdditiveExpr ((CompareOp | 'IN' | 'NOT' 'IN' | 'LIKE' | 'NOT' 'LIKE') AdditiveExpr)*
-CompareOp         ::= '<' | '<=' | '>' | '>='
+RelationalExpr    ::= AdditiveExpr '~' AdditiveExpr HintSet?   (* D43; LHS must be a Variable *)
+                    | AdditiveExpr (RelOp AdditiveExpr)*
+RelOp             ::= '<' | '<=' | '>' | '>=' | 'IN' | 'NOT' 'IN' | 'LIKE' | 'NOT' 'LIKE'
+HintSet           ::= '{' (Hint (',' Hint)*)? '}'
+Hint              ::= 'via' ':' ('text' | 'vector' | 'hybrid')
+                    | 'model' ':' StringLit
+                    | 'k' ':' Integer
+                    | 'limit' ':' Integer
 AdditiveExpr      ::= MultiplicativeExpr (('+' | '-' | '||') MultiplicativeExpr)*
 MultiplicativeExpr::= PowerExpr (('*' | '/' | '%') PowerExpr)*
-PowerExpr         ::= UnaryExpr ('**' UnaryExpr)*
+PowerExpr         ::= UnaryExpr ('**' UnaryExpr)*             (* left-associative *)
 UnaryExpr         ::= ('NOT' | '+' | '-') UnaryExpr
                     | 'NOT' 'EXISTS' '(' Variable ')'
-                    | PrimaryExpr
-PrimaryExpr       ::= Literal
-                    | Variable
-                    | DotPath
+                    | VerdictTerm
+VerdictTerm       ::= PrimaryExpr ('HOLDS' | 'FAILS' | 'UNDECIDABLE')?  (* non-associative *)
+PrimaryExpr       ::= '(' Expression ')'
+                    | '[' ArgList? ']'                        (* array literal; may be empty *)
                     | ScalarFn '(' ArgList ')'
                     | AggregateFn '(' Expression ')'
-                    | QualifiedName '(' ArgList ')'              (* Phase 11e.2 *)
-                    | Identifier                                 (* bare shortname literal *)
-                    | '[' ArgList ']'
-                    | '(' Expression ')'
-DotPath           ::= Variable ('.' Identifier)+
+                    | Variable ('.' Identifier)*              (* variable, or a dot-path *)
+                    | (StringLit | QualifiedName | Identifier) '(' ArgList ')'
+                    | QualifiedName | Identifier              (* bare name: its own text *)
+                    | Literal
+ArgList           ::= Expression (',' Expression)*   (* never empty — no zero-arg call parses *)
 QualifiedName     ::= Identifier ':' Identifier
-ArgList           ::= (Expression (',' Expression)*)?
+Literal           ::= StringLit | Integer | Float | 'true' | 'false'
+ScalarFn          ::= 'DATE' | 'TIMESTAMP' | 'REGEX' | 'LENGTH' | 'CONTAINS' | 'CONCAT'
+AggregateFn       ::= 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'
 ```
 
 **Notes on the form above**
 
-- `MatchPart` allows any interleaving of `USING` and `USING INSTITUTION` clauses — they're not ordered into two phases. `DefineBody` is the restricted form used in `DEFINE` rules: it permits `USING` but neither `USING INSTITUTION` nor `FIBER` (parser enforces this; see [chapter 10](10-stratification.md)).
-- `FIBER` uses `':'` between the institution reference and the query class, not `'.'`.
+- **The trailing clauses are positional.** `parse_query` tests for `GROUP BY`, `RETURN`, `ORDER BY`, `LIMIT`, `TOP`, `OFFSET` and `DISTINCT` in exactly that order, once each, and then requires end of input. `TOP 20 LIMIT 5` does not parse; `LIMIT 5 TOP 20` does (and is then rejected at typecheck, which forbids `TOP` with `LIMIT`). Any keyword out of order surfaces as `unexpected token after query body`.
+- **`USING` and `USING NAMESPACE` do different jobs.** `USING "<class-iri>"` asserts that an IRI resolves to a `Class`; it is checked at typecheck and does nothing else. Bare short names (`MATCH Dog(?d)`) resolve against the **core namespace plus every prefix imported by `USING NAMESPACE "<prefix>"`** — see [`kernel/src/query/resolve.rs`](../../../kernel/src/query/resolve.rs) and [chapter 4 §4.2](04-program-structure.md#42-using--class-imports-and-using-namespace--short-name-scope). A short name matching two imported-namespace resources is an ambiguity error, not a first-wins pick.
+- `MatchPart` allows any interleaving of the three `USING` forms — they're not ordered into phases. `DefineBody` is the restricted form used in `DEFINE` rules: it permits `USING` and `USING NAMESPACE` but neither `USING INSTITUTION` nor `FIBER` (parser enforces this; see [chapter 10](10-stratification.md)).
+- `FIBER` uses `':'` between the institution reference and the query class, not `'.'`. The optional `INTO "<iri>"` suffix pins the response resource at a named chain IRI (D14 §9.3) — see [chapter 8 §8.6](08-fiber-clauses.md).
+- **The similarity operator does not chain.** `~` is handled before the relational loop is entered, so `?a ~ "x" ~ "y"` is a parse error, and its left-hand side must be a bare variable — any other expression fails with `similarity LHS must be a property-bound variable`. Its hint set is closed: exactly the keys `via`, `model`, `k`, `limit`, with `via` restricted to `text` / `vector` / `hybrid`, all rejected at parse time rather than at typecheck.
+- **A verdict predicate is postfix and consumed once**, so `?v HOLDS FAILS` is rejected.
+- **`ArgList` is never empty.** Every argument list runs through `parse_expression_list`, which parses one expression before looking for a comma, so `LENGTH()` and `ns:f()` are parse errors. An empty *array literal* `[]` is fine — that is a different production.
+- A function name may be a quoted IRI: `"urn:eigenius:dock:within_tolerance"(?d, 2.0)` parses as a call, matching the `qualified_name ::= IDENTIFIER ':' IDENTIFIER | STRING` rule of D2 §3.8. A `StringLit` *not* followed by `(` is an ordinary string literal.
 - `WHERE` accepts a comma-separated expression list, all implicitly ANDed.
 - `ReturnClause`'s class spec has three forms: bracketed name list (possibly empty), a single bare name, or omitted entirely (braces directly after `RETURN`).
 - `IN`, `NOT IN`, `LIKE`, and `NOT LIKE` accept any `AdditiveExpr` on the right — typically an array literal for `IN` and a string for `LIKE`, but a variable bound to a list/string is also valid.
 - Equality and relational chains are written as `*` to match the parser, but consecutive non-associative comparisons are unusual; pre-formed chains like `?a = ?b = ?c` are valid by grammar, evaluated left-associatively.
-- `**` is parsed left-associatively in the current implementation despite the precedence table marking it right-associative; this is a known quirk — use parentheses when stacking exponentiation.
+- `**` binds *looser* than the unary operators and folds **left**: `parse_power_expr` calls `parse_unary_expr` on each side and loops rather than recursing, so `-a ** b` is `(-a) ** b` and `2 ** 3 ** 2` is `64`, not `512`. Parenthesise stacked exponents.
+- `Expression::Object` exists in the AST and has no production: object literals in expression position do not parse, and the evaluator's arm for the variant reports `object literals in expressions not yet implemented`.
 - A bare `Identifier` in expression position evaluates to the identifier text as a string literal (used to pass shortnames as values, e.g., in `RETURN`).
-
-**Phase 11e.2 addition**: the `QualifiedName '(' ArgList ')'` alternative in `PrimaryExpr`. Qualified-name function calls dispatch through the institution registry at evaluate time — see [chapter 9](09-institutions.md).
+- **A `-` immediately before a digit lexes as part of the number**, so `?a -1` is two adjacent tokens (`?a`, `-1`) with no operator between them and fails at end of input. Write `?a - 1`.
 
 ## 13.2. Keyword reference
 
+The lexer's keyword table has 42 arms: 40 keywords and the two boolean literals. All keywords are UPPERCASE and case-sensitive except `true` / `false`.
+
 ### Structural keywords
 
-`USING`, `INSTITUTION`, `AS`, `DEFINE`, `FROM`, `MATCH`, `FIBER`, `WHERE`, `RETURN`, `GROUP`, `BY`, `ORDER`, `ASC`, `DESC`, `DISTINCT`, `LIMIT`, `OFFSET`
+`USING`, `NAMESPACE`, `INSTITUTION`, `AS`, `DEFINE`, `FROM`, `MATCH`, `FIBER`, `INTO`, `WHERE`, `RETURN`, `GROUP`, `BY`, `ORDER`, `ASC`, `DESC`, `DISTINCT`, `LIMIT`, `OFFSET`, `TOP`
 
 ### Operator keywords
 
-`AND`, `OR`, `NOT`, `IN`, `LIKE`, `EXISTS`
+`AND`, `OR`, `NOT`, `IN`, `LIKE`, `EXISTS`, `HOLDS`, `FAILS`, `UNDECIDABLE`
 
 ### Built-in function keywords
 
@@ -106,6 +130,10 @@ ArgList           ::= (Expression (',' Expression)*)?
 ### Literal keywords
 
 `true`, `false` (lowercase)
+
+### Not keywords
+
+The similarity hint keys `via`, `model`, `k`, `limit`, and the hint values `text`, `vector`, `hybrid`, are ordinary identifiers matched by position inside a hint set. `via` and `k` are usable as short names elsewhere.
 
 ### Reserved identifiers
 
@@ -129,23 +157,29 @@ All case-sensitive UPPERCASE. Listed alphabetically.
 | `SUM(expr)` | numeric Expression | Integer or Float | Sum over a group. Integer if all inputs integer and sum exact. |
 | `TIMESTAMP(s)` | String | String | Validate ISO 8601 datetime with timezone. Passes through on success. |
 
+None of the eleven accepts a zero-argument call: `COUNT()` and `LENGTH()` are parse errors.
+
 ## 13.4. Operator precedence table
 
-From tightest (evaluated first) to loosest:
+From tightest (evaluated first) to loosest. This table is derived from the descent order in `parse_expression` and agrees with the EBNF in §13.1.
 
 | Level | Operators | Associativity |
 |---|---|---|
 | 1 | Primary: literals, variables, `(...)`, function calls, aggregates, `[...]`, dot-paths | — |
-| 2 | `**` (power) | left (parser quirk; see note) |
+| 2 | Postfix `HOLDS`, `FAILS`, `UNDECIDABLE` | non-associative |
 | 3 | Unary `NOT`, `+`, `-`, `NOT EXISTS` | right |
-| 4 | `*` `/` `%` | left |
-| 5 | `+` `-` `\|\|` | left |
-| 6 | `<` `<=` `>` `>=` `IN` `NOT IN` `LIKE` `NOT LIKE` | left |
-| 7 | `=` `<>` | left |
-| 8 | `AND` | left |
-| 9 | `OR` | left |
+| 4 | `**` (power) | **left** |
+| 5 | `*` `/` `%` | left |
+| 6 | `+` `-` `\|\|` | left |
+| 7 | `<` `<=` `>` `>=` `IN` `NOT IN` `LIKE` `NOT LIKE`, and `~` | left; `~` does not chain |
+| 8 | `=` `<>` | left |
+| 9 | `AND` | left |
+| 10 | `OR` | left |
 
-Note: `**` is conventionally right-associative in mathematics (so `2**3**2 = 2**(3**2) = 512`), but the current parser folds it left (`(2**3)**2 = 64`). Always parenthesise stacked exponents to be explicit.
+Two departures from the conventional table are worth memorising, because both change results silently:
+
+- Unary binds **tighter** than `**`: `- ?a ** 2` parses as `(- ?a) ** 2`, not `-(?a ** 2)`. `parse_power_expr` calls `parse_unary_expr` on each side, so the minus is consumed before the power loop is entered.
+- `**` folds **left**, where mathematics folds right: `2 ** 3 ** 2` is `(2 ** 3) ** 2` = `64`, not `2 ** (3 ** 2)` = `512`.
 
 Use parentheses when in doubt: `(?a + ?b) * ?c` vs `?a + (?b * ?c)`.
 
@@ -239,7 +273,10 @@ All source references in the guide, collected here for easy navigation:
 - [kernel/src/query/parser.rs](../../../kernel/src/query/parser.rs) — parser
 - [kernel/src/query/stratify.rs](../../../kernel/src/query/stratify.rs) — stratification checker
 - [kernel/src/query/type_check.rs](../../../kernel/src/query/type_check.rs) — type validation
-- [kernel/src/query/evaluate.rs](../../../kernel/src/query/evaluate.rs) — evaluator (pattern match, fixpoint, aggregate)
+- [kernel/src/query/evaluate/](../../../kernel/src/query/evaluate/) — evaluator, split by phase: `mod.rs` (strata + fixpoint),
+  `pattern.rs` (pattern match, candidate collection), `expression.rs` (expressions, aggregates),
+  `fiber.rs` (FIBER dispatch, overlay), `similarity.rs` (`~` pre-pass), `return_shape.rs` (RETURN, DISTINCT, ORDER BY)
+- [kernel/src/query/resolve.rs](../../../kernel/src/query/resolve.rs) — namespace-scoped short-name resolution (`USING NAMESPACE`)
 - [kernel/src/query/functions.rs](../../../kernel/src/query/functions.rs) — built-in function dispatch and helpers
 - [kernel/src/query/document.rs](../../../kernel/src/query/document.rs) — result-document shaping
 - [kernel/src/query/error.rs](../../../kernel/src/query/error.rs) — `QueryError`

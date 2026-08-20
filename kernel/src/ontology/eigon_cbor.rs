@@ -136,13 +136,41 @@ pub fn parse_document(cbor: &[u8]) -> Result<Vec<Resource>, CborError> {
 
 /// Produce deterministic CBOR encoding for content-addressed hashing.
 ///
-/// Uses Core Deterministic Encoding (RFC 8949 §4.2):
-/// - Map keys sorted by encoded byte string
-/// - Shortest encoding for each value
+/// Deterministic, **not** RFC 8949 canonical. What holds:
+/// - The bytes are a total function of the in-memory `Resource`:
+///   `@id` first, then the properties in `BTreeMap<Iri>` iteration
+///   order, which is the IRI strings' own byte order and is
+///   independent of insertion order.
+/// - Shortest encoding for each value: `ciborium` emits definite
+///   lengths, shortest integer forms, and the shortest float form
+///   that round-trips.
+///
+/// What does not hold is the map-key ordering of RFC 8949 §4.2.1
+/// (bytewise lexicographic over the *encoded* keys). Every key here is
+/// a text string, whose encoding leads with its length, so §4.2.1
+/// coincides with the length-first ordering of §4.2.3 (retained from
+/// RFC 7049 §3.9): shorter keys sort first. The `BTreeMap` instead
+/// sorts by unencoded content, so the two orders differ whenever a
+/// shorter key is lexicographically greater than a longer one —
+/// `core:is_a` (22 bytes) against `core:description` (29 bytes) on
+/// every class in the chain.
+///
+/// The consequence is bounded but real: a layer id is reproducible by
+/// anything that rebuilds the `Resource` and calls this function, and
+/// is not reproducible by re-encoding the same CBOR data model through
+/// a conforming RFC 8949 canonicalizer — that would sort the keys
+/// differently and hash differently.
+///
+/// `ciborium` does not sort map keys at all; it writes a
+/// `Value::Map` in the order given. It does ship an opt-in
+/// `CanonicalValue` / `cmp_value` (`value/canonical.rs`) implementing
+/// the length-first order and citing "RFC 7049 Section 3.9 ... and RFC
+/// 8949 4.2.3 (as errata)". Eigenius does not use it, and adopting it
+/// would change every layer id on the chain.
 pub fn canonicalize(resource: &Resource) -> Vec<u8> {
-    // BTreeMap iteration is already sorted, and ciborium uses
-    // shortest encoding by default, so serialize_resource produces
-    // deterministic output.
+    // BTreeMap iteration is already sorted (by key content, not by
+    // encoded key), and ciborium uses shortest encoding by default, so
+    // serialize_resource produces deterministic output.
     serialize_resource(resource)
 }
 

@@ -16,12 +16,17 @@
 //! [`LeanInstitution`](crate::LeanInstitution) into the per-process
 //! [`InProcessInstitutionRegistry`](eigenius_kernel::institution::in_process_registry::InProcessInstitutionRegistry).
 //!
-//! The CLI's `serve` subcommand calls [`register`] once per process,
-//! before any chain-walk runs. The chain-scan
-//! `register_in_process_institutions` pass
-//! (kernel-side, Phase 20a.1) then looks the institution up by its
-//! IRI when it encounters the `lean:lean_institution` declaration in
-//! the bootstrapped chain.
+//! **[`register`] has no caller anywhere in this repository.** The
+//! CLI's `serve` path builds the in-process institution list directly
+//! — `eigenius_lean::LeanInstitution::arc()` in `cli/src/main.rs`,
+//! handed to `start_server`, which registers each entry itself. This
+//! module is the seam a host that is not the CLI would use, and it is
+//! kept in step with `eigenius-reasoning` and `eigenius-statistics`,
+//! whose identically-shaped `startup::register` functions are equally
+//! uncalled. Either way, the chain-scan
+//! `register_in_process_institutions` pass (kernel-side, Phase 20a.1)
+//! looks the institution up by its IRI when it encounters the
+//! `lean:lean_institution` declaration in the bootstrapped chain.
 
 use eigenius_kernel::server::EigeniusService;
 

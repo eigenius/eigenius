@@ -27,8 +27,8 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D9 | [NbE unification and type extensions](d9-nbe-unification-and-type-extensions.md) |
 | D10 | [Grothendieck institution protocol](d10-grothendieck-institution-protocol.md) |
 | D11 | [Codata, streams, and resumable execution](d11-codata-streams.md) |
-| D12 | [WASM extensibility](d12-wasm-extensibility.md) |
-| D12b | [Orchestrator WASM plan](d12b-orchestrator-wasm-plan.md) |
+| D12 | [WASM extensibility](d12-wasm-extensibility.md) — **removed 2026-07-08**, retained as historical record |
+| D12b | [Orchestrator WASM plan](d12b-orchestrator-wasm-plan.md) — **removed 2026-07-08**, retained as historical record |
 | D13 | [Durable kernel state](d13-durable-kernel-state.md) |
 | D14 | [Institution realisation](d14-institution-realisation.md) |
 | D18 | [Ontology-as-types resolution](d18-ontology-as-types-resolution.md) |

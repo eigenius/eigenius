@@ -23,10 +23,11 @@ But many compositional patterns need the output to **persist on the chain**:
 - **Multi-step pipelines.** Catalyst → DiffEq → IntervalArithmetic only
   works as a chain of comorphisms if each step's output commits as the next
   step's input.
-- **Downstream gates.** AutoOnLoad gates fire on commit. A comorphism that
-  produces an `OdeProblem` should be able to trigger DiffEq's
-  `validate_solution` gate on the produced problem the same way a
-  hand-authored `OdeProblem` would.
+- **Downstream gates.** AutoOnLoad gates fire on an ordinary authored commit.
+  A comorphism that produces an `OdeProblem` *ought* to be able to trigger
+  DiffEq's `validate_solution` gate on the produced problem the same way a
+  hand-authored `OdeProblem` would. On the present kernel it does not —
+  see [§5.3a](#5-3a-what-reinsertion-does-not-do-autoonload-is-bypassed).
 - **Audit and replay.** A Verdict's `verdict_subject` points at the gated
   resource. If that resource is a comorphism output that was never
   committed, the audit trail has a dangling reference.
@@ -34,10 +35,12 @@ But many compositional patterns need the output to **persist on the chain**:
   the same input, they should see the same output — at the same IRI. The
   chain's role as the source of truth depends on this.
 
-Chain reinsertion is what closes those needs. Phase 19i wired both surfaces
-through the same `commit_with_validation` machinery; the result is that a
-comorphism-produced resource is indistinguishable, from the chain's
-perspective, from a hand-authored resource of the same class.
+Chain reinsertion is what closes those needs — with one exception. Phase 19i
+wired both surfaces through the commit orchestrator, so a comorphism-produced
+resource is a first-class chain resident: matchable, inspectable, traceable.
+It is *not* indistinguishable from a hand-authored resource of the same
+class, because the pipeline it commits through does not run AutoOnLoad
+([§5.3a](#5-3a-what-reinsertion-does-not-do-autoonload-is-bypassed)).
 
 ## 5.2. ESL surface: `comorphisms:foo(input)` → `Exp::InstitutionInvoke`
 
@@ -101,10 +104,11 @@ The dispatch is identical to a plain `FIBER ... AS ?var` clause (FIBER
 calls the OnDemand handler, gets back a typed response). The difference is
 **chain reinsertion**: the response resource commits to the regular chain
 at the named IRI, rather than living in a transient overlay. Both surfaces
-share the same `commit_with_validation` machinery — AutoOnLoad gates bound
-to the response's class fire on commit; the response is reachable by every
-subsequent query; the audit trail (Verdict + RuntimeInvocation) is the
-standard one.
+commit through the same orchestrator and the same pipeline kind — the
+response is reachable by every subsequent query and the audit trail
+(Verdict + RuntimeInvocation) from the dispatch itself is the standard one.
+What neither surface does is fire AutoOnLoad on the reinserted resource
+([§5.3a](#5-3a-what-reinsertion-does-not-do-autoonload-is-bypassed)).
 
 Without `INTO`, the response stays overlay-only (the v0 behaviour, kept
 for queries that don't want side effects). With `INTO`, the caller picks
@@ -115,6 +119,57 @@ resource).
 The EigenQL form is right for *interactive* composition: a notebook author
 or a dashboard query that wants to run a comorphism live, pin the result at
 a known IRI, and have downstream queries find it by that IRI.
+
+## 5.3a. What reinsertion does *not* do: AutoOnLoad is bypassed
+
+Both reinsertion surfaces commit through
+`PipelineKind::WithRetroactive`, whose phase list is
+
+```
+build → structural_validate → retroactive_with_cascade → persist
+```
+
+Compare `PipelineKind::WithInstitutions`, the kind an ordinary authored
+commit uses:
+
+```
+build → structural_validate → retroactive_with_cascade → autoonload_dispatch → persist
+```
+
+`WithRetroactive` has no `autoonload_dispatch` phase. **AutoOnLoad gates
+bound to the produced class do not fire on a comorphism output or on a
+`FIBER … INTO` response.**
+
+This is a deliberate choice, not an oversight. The `FIBER … INTO` path
+explicitly drops the institution index and runtime before committing, with a
+comment recording why
+([`kernel/src/server/query.rs`](../../../kernel/src/server/query.rs)):
+
+> Drop the unused per-query AutoOnLoad snapshots — per D41 §10 FIBER INTO
+> commits through `WithRetroactive`, not `WithInstitutions`, so the gated
+> commit no longer needs the institution index / runtime here. … the commit
+> path deliberately bypasses AutoOnLoad until INTO opts back in.
+
+What still holds:
+
+- Structural validation runs, so a malformed reified resource is rejected.
+- The resource is a first-class chain resident afterwards — matchable by
+  every subsequent query, addressable by IRI, traceable.
+- The dispatch's own audit closure (the `Trace::Comorphism` event and the
+  `RuntimeInvocation`, §5.5) is unaffected; it is produced by the dispatch,
+  not by the commit.
+
+What does not:
+
+- Gate cascades. If you want DiffEq's `validate_solution` to run on a
+  comorphism-produced `OdeProblem`, author the `OdeSolution` claim as an
+  ordinary commit; the comorphism output will not trigger it.
+- Any post-commit institutional hook. `WithRetroactive` registers no
+  `didPersist` hooks, so neither AutoOnLoad nor the vector sweep runs on a
+  reinserted resource.
+
+Plan multi-step pipelines around this: reinsertion gives you the *value* on
+the chain, and an ordinary commit is what gets it *gated*.
 
 ## 5.4. Deterministic content-hash IRIs
 

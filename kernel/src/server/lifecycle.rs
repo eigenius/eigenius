@@ -360,6 +360,25 @@ impl Default for EmbedderStartupConfig {
 /// `embedders` carries the registered Embedder Components (D43 §5.2);
 /// pass [`EmbedderStartupConfig::default`] (empty) when vector
 /// retrieval isn't wanted.
+///
+/// # Security: this server is unauthenticated and unencrypted
+///
+/// It binds `0.0.0.0:<port>` — every interface — and serves plaintext
+/// gRPC and gRPC-Web. There is no `ServerTlsConfig`, no server identity,
+/// no authentication interceptor, no bearer-token or API-key check, and
+/// no authorization check on any RPC. `crate::capability` is institution
+/// registration, not access control. Anything that can reach the port can
+/// read the whole chain and commit to any branch.
+///
+/// The same holds for the orchestrator's HTTP listener and its `/mcp`
+/// handler, and the compose stack publishes both ports on every host
+/// interface while mounting the host Docker socket into the orchestrator
+/// container.
+///
+/// **The deployment assumption is a trusted network**: run this only where
+/// the port is reachable solely by trusted callers — loopback, a private
+/// network segment, or behind a reverse proxy that terminates TLS and
+/// authenticates before forwarding. Do not expose it to the internet.
 pub async fn start_server(
     port: u16,
     orchestrator_endpoint: Option<&str>,

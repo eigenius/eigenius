@@ -209,6 +209,12 @@ The walk does **not** materialise the resources' bodies — it stores references
 
 The consolidated layer's `commit_metadata` records the consolidation operation explicitly: a `consolidation_record: { from: LayerId, to: LayerId, collapsed_count: u64, consolidated_at: Timestamp }` property. This is for audit; the kernel does not consult it for resolve correctness. The presence of this property is also how the diagnostic `db consolidate-summary` command identifies consolidated layers.
 
+> **Not implemented, and not merely pending.** `consolidate_chain` writes no `consolidation_record`, and `db consolidate-summary` does not exist. The blocker is this paragraph's own design: `consolidated_at` is a timestamp, and a property on the consolidated layer enters that layer's content hash, so two consolidations of the same range at different times would produce different layer ids. That breaks the estimate/actual determinism `EstimateConsolidation` promises and the RPC test pins — the predicted id must equal the committed one.
+>
+> The consequence today is that **a consolidated chain cannot say when, or from what range, it was consolidated**; the only trace is the `redirect:<source_layer>` entry a below-head consolidation leaves, and an at-head consolidation leaves not even that.
+>
+> Fixing it means moving the record off the layer's content — a dedicated column family keyed by consolidated layer id is the obvious candidate — or dropping the timestamp from the hashed portion. **That choice has not been made.** Until it is, treat this paragraph as a design intent that the implementation deliberately declines to satisfy, not as a description of behaviour.
+
 ## 7. Trace re-pinning policy
 
 This is the load-bearing policy decision. Three options, of which v1 ships the most conservative.

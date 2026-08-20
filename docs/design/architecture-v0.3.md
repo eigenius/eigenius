@@ -132,7 +132,7 @@ Lean 4 is developed in parallel with the Rust kernel as a formal specification a
 **Lean 4 covers:**
 
 - Eigon structural type system soundness — well-typed resources satisfy their class constraints
-- EigenQL query semantics — pattern matching is sound with respect to the Eigon type system; variable bindings are type-consistent; evaluation terminates (guaranteed for non-recursive queries trivially, and for recursive rules via seminaive fixpoint over finite fact sets; stratified negation prevents paradoxes)
+- EigenQL query semantics — pattern matching is sound with respect to the Eigon type system; variable bindings are type-consistent; evaluation terminates (guaranteed for non-recursive queries trivially, and for recursive rules via a fixpoint over finite fact sets; stratified negation prevents paradoxes)
 - Program type safety — well-typed programs preserve types through execution; termination guaranteed by strong normalization of the EigenTT type theory
 - Stratification consistency — the universe level system prevents self-reference paradoxes
 
@@ -705,7 +705,7 @@ This boundary is clean because the concerns are genuinely different: the type th
 
 EigenQL is a typed semantic query language for pattern matching and retrieval over the Eigon knowledge graph. It provides a declarative way to query resources based on their classes, properties, and relationships, while maintaining type safety with respect to the ontology schema.
 
-EigenQL is a **typed stratified Datalog** with aggregation — it supports conjunctive queries, recursive rule definitions (DEFINE), stratified negation, GROUP BY, aggregation (COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, and DISTINCT. Non-recursive queries evaluate in a single pass; recursive rules use bottom-up seminaive fixpoint evaluation. Negation in MATCH patterns is subject to stratification checking. See design doc D2 (`docs/design/d2-eigenql-specification.md`) for the full specification.
+EigenQL is a **typed stratified Datalog** with aggregation — it supports conjunctive queries, recursive rule definitions (DEFINE), stratified negation, GROUP BY, aggregation (COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, and DISTINCT. Non-recursive queries evaluate in a single pass; recursive rules use bottom-up fixpoint evaluation (naive within a stratum). Negation in MATCH patterns is subject to stratification checking. See design doc D2 (`docs/design/d2-eigenql-specification.md`) for the full specification.
 
 ### 5.2 Query Structure
 
@@ -786,7 +786,7 @@ Additional properties may be made accessible via their shortnames through the Se
 
 ### 5.6 Extension Path to Recursive Datalog
 
-EigenQL supports both standalone queries and recursive rule definitions. Non-recursive queries terminate trivially. Recursive rules terminate via seminaive fixpoint evaluation (bounded by the finite set of derivable facts). Stratified negation prevents paradoxes. The Lean 4 formal track proves type soundness, binding correctness, and stratification safety.
+EigenQL supports both standalone queries and recursive rule definitions. Non-recursive queries terminate trivially. Recursive rules terminate via fixpoint evaluation (bounded by the finite set of derivable facts). Stratified negation prevents paradoxes. The Lean 4 formal track proves type soundness, binding correctness, and stratification safety.
 
 The following constructs are implemented:
 
@@ -803,7 +803,7 @@ DEFINE Ancestor(?x, ?z) FROM
 
 Multiple rules for the same relation provide union semantics. Self-reference enables recursion. Every v1 query remains valid and semantically identical — it is simply a single non-recursive rule.
 
-**Fixpoint evaluation.** Recursive rules are evaluated using bottom-up seminaive evaluation: starting from base facts, applying all rules, adding newly derived facts, and repeating until no new facts are derived. Non-recursive queries bypass the fixpoint loop and evaluate in a single pass as before, with identical performance characteristics.
+**Fixpoint evaluation.** Recursive rules are evaluated bottom-up: starting from base facts, applying all rules, adding newly derived facts, and repeating until no new facts are derived. The iteration is naive — no delta relation — and strata are run in dependency order. Non-recursive queries bypass the fixpoint loop and evaluate in a single pass as before, with identical performance characteristics.
 
 **Stratified negation.** Negation in MATCH patterns (not just WHERE filters), restricted by a stratification checker that orders rule evaluation to ensure negated relations are fully computed before being negated. This prevents paradoxes like "X is true if X is not true." The stratification checker is itself a well-understood algorithm — compute the dependency graph, check for negation cycles — and becomes a genuine proof target for the Lean 4 formal track.
 

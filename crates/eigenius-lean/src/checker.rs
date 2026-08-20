@@ -20,7 +20,9 @@
 //! ## Why panic-catch instead of structured errors?
 //!
 //! nanoda's type-checker reports failure by panicking with a
-//! diagnostic string (see `references/nanoda_lib/src/tc.rs`). Until
+//! diagnostic string (see `src/tc.rs` in the nanoda_lib git
+//! dependency, pinned at rev `6d2f037` in this crate's manifest).
+//! Until
 //! upstream offers a `Result`-returning entry point, we trap the
 //! panic with [`std::panic::catch_unwind`] and lift the message into
 //! [`Verdict::Fails`]. Per D28 §2.3, nanoda still runs in-process so

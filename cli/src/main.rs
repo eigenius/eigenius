@@ -983,9 +983,13 @@ enum MergeCommands {
         #[arg(long, value_name = "LAYER_ID")]
         candidate: String,
         /// Path to a JSON file containing the tentative resolutions
-        /// (array of `{conflict_id, kind, ...}` objects). See
-        /// `docs/cli/merge-resolution-format.md` for the schema, or
+        /// (array of `{conflict_id, kind, ...}` objects). Schema:
+        /// `docs/guides/platform/16-merge-resolution.md` §16.7.3, or
         /// the source of `parse_resolution_file` for the variants.
+        ///
+        /// The `conflict_id` values come from the `PrepareMerge` RPC,
+        /// which has no CLI subcommand — obtain them from the notebook,
+        /// the TypeScript SDK's `prepareMerge`, or a direct gRPC call.
         #[arg(long, value_name = "PATH")]
         resolutions: std::path::PathBuf,
     },

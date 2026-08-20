@@ -17,7 +17,7 @@ The full architectural rationale is in [D6 — Execution architecture](../../des
 | `eigenius program-validate` | No (type-check is in-process) |
 | `eigenius run` against a program with no IO components | No |
 | `eigenius run` against a program that calls `CompleteText`, `CompleteJson`, or any IO component | **Yes** |
-| `capability install <wasm-file>` for IO-capability components | Yes (the orchestrator hosts IO-level WASM components) |
+| Serving the notebook SPA (`EIGENIUS_NOTEBOOK_STATIC`) | Yes (the orchestrator serves it under `/notebooks`) |
 | MCP-driven workflows (LLM agent calling Eigenius operations) | Yes |
 
 If your workload is purely structural — load, query, type-check — you can skip the orchestrator entirely. As soon as a program dispatches an IO component, the kernel needs the orchestrator endpoint.
@@ -56,8 +56,9 @@ Read at startup; no config file:
 |---|---|---|
 | `EIGENIUS_KERNEL_ENDPOINT` | `http://localhost:50051` | gRPC endpoint for the kernel (the orchestrator calls back into the kernel for `read-access` and `query-access` host imports) |
 | `EIGENIUS_ORCHESTRATOR_PORT` | `8080` | HTTP port the orchestrator binds to |
-| `EIGENIUS_MOCK_LLM` | `false` | When `true`, bypass the LLM adapter and return canned responses |
-| `ANTHROPIC_API_KEY` | none | Required when `EIGENIUS_MOCK_LLM` is unset |
+| `EIGENIUS_MOCK_LLM` | `false` | Compared strictly against the string `true`; when it matches, the two LLM handlers are swapped for canned ones |
+| `ANTHROPIC_API_KEY` | none | Read by the Anthropic SDK, not by orchestrator code. There is **no startup check** — a missing key starts cleanly and fails at the first LLM dispatch with a provider error |
+| `EIGENIUS_NOTEBOOK_STATIC` | none | Directory of a built notebook bundle; when set, the SPA is served under `/notebooks` |
 
 When the kernel starts, it expects the orchestrator's endpoint via `--orchestrator <url>` or `EIGENIUS_ORCHESTRATOR_ENDPOINT`. The two endpoints (kernel and orchestrator) are independent and known to each other through these flags.
 
@@ -113,9 +114,9 @@ The mock paths are in the same files as the real paths — `createMockCompleteTe
 
 ## 7.6. The component registry
 
-[`orchestration/src/components/registry.ts`](../../../orchestration/src/components/registry.ts) maintains a map from component IRI to handler function. On startup, `main.ts` registers the two built-in handlers; WASM components installed at runtime via `capability install` join the registry through the WASM addon path.
+[`orchestration/src/components/registry.ts`](../../../orchestration/src/components/registry.ts) maintains a map from component IRI to handler function. On startup, `main.ts` registers the two built-in handlers. The registry is fixed at startup — there is no install-at-runtime path.
 
-When the kernel dispatches a component, the orchestrator's RPC server (`/dispatch`) looks up the IRI in the registry and invokes the handler. The handler returns a CBOR-encoded response, which the orchestrator forwards back to the kernel.
+**There is no `/dispatch` route.** The request handler has four branches — `/health`, `/mcp`, the notebook static route when `EIGENIUS_NOTEBOOK_STATIC` is set, and the Connect service paths — and everything else returns 404. Component dispatch is the `ComponentExecutor` Connect service; the orchestrator registers three services in total (`ComponentExecutor`, `NotebookService`, and a passthrough of the kernel's own `EigeniusKernel` surface). The kernel calls `ComponentExecutor`, the handler runs, and the CBOR-encoded response goes back over the same call.
 
 ## 7.7. The MCP server
 
@@ -249,11 +250,11 @@ The orchestrator logs each MCP request to stderr; pipe it through `jq` when runn
 - **CORS:** not configured. Native MCP clients don't need it; if you want a browser-based agent to call MCP from a different origin, add CORS headers to the `/mcp` branch in [`orchestration/src/server/mod.ts`](../../../orchestration/src/server/mod.ts).
 - **Authentication:** none. The current model assumes the orchestrator port is reachable only to trusted callers (local docker stack, dev environment). Production deployment should front the orchestrator with a proxy that enforces auth before forwarding to `/mcp`.
 
-## 7.8. WASM IO components
+## 7.8. WASM IO components (removed)
 
-WASM components installed with `--capability io` are hosted by the orchestrator (not the kernel) because they need access to the orchestrator's `io-access` host imports (notably `dispatch-component`, which lets WASM IO components call other components — including `CompleteText`).
+WASM extensibility was removed on 2026-07-08. There is no `orchestration/src/wasm/` directory, no WASM addon, no `capability install`, and `wasmtime` is not a dependency of the workspace. The `examples/wasm-*` directories were emptied in the same change.
 
-The WASM addon machinery lives in [`orchestration/src/wasm/`](../../../orchestration/src/wasm/). Worked example: [`wasm-http-shout`](../../../examples/wasm-http-shout/), which dispatches `CompleteText` from inside WASM. See [chapter 9](09-wasm-components.md) §9.6.
+The live extension paths are the built-in TypeScript components (§7.10) and the runtime substrate, whose native addon the orchestrator loads to spawn sibling worker containers ([chapter 11](11-runtime-substrate.md)). [Chapter 9](09-wasm-components.md) is retained as a historical record of the removed path.
 
 ## 7.9. Observability
 
@@ -279,11 +280,11 @@ For non-WASM components implemented in TypeScript:
 3. Declare the component in your ontology (a `Component` resource with `input_type`, `output_type`, and the chosen IRI).
 4. Reference it from your ESL programs by short name or by IRI.
 
-This path is suitable for components that are best written in TypeScript (e.g., wrapping a TypeScript-only library). For components that should be sandboxed and portable, prefer the WASM path ([chapter 9](09-wasm-components.md)).
+This path is suitable for components that are best written in TypeScript (e.g., wrapping a TypeScript-only library). For anything that needs a full language ecosystem, or that should run in an isolated container, use the runtime substrate instead ([chapter 11](11-runtime-substrate.md)).
 
 ## 7.11. Stopping the orchestrator
 
-Plain `Ctrl-C` for the foreground process, or `docker compose down` for the containerized setup. There's no persistent state on the orchestrator side — it's stateless between restarts. All persistent state lives in the kernel.
+Plain `Ctrl-C` for the foreground process, or `docker compose down` for the containerized setup. There is no persistent state on the orchestrator side — it is stateless between restarts. All persistent state lives in the kernel.
 
 ---
 

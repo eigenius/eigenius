@@ -15,25 +15,24 @@
 //! D65 slices 0+2 over the **real RocksStore** — the exact backend the deployed
 //! service uses (`serve --db` → `bootstrap_persistent`).
 //!
-//! Two facts, one passing witness and one recorded finding:
+//! Two facts, both live assertions:
 //!
 //! - [`form_value_index_populates_against_rocksdb_at_seed`] — at SEED the
 //!   `lexicon:form` ValueIndex is active, the closed-class determiner forms are
 //!   value-indexed in the (in-memory-at-seed) index, and a `LexicalIndex` takes
 //!   the lazy path. This is the genuine slice-0+2 witness on the production stack.
 //!
-//! - [`derived_indexes_survive_resume`] (`#[ignore]`) — records a **pre-existing
-//!   structural gap** surfaced by this work: SEED builds the bootstrap chain on
-//!   *in-memory* storage and persists each layer via `store_layer` (resources +
-//!   topology + bloom only — no derived-index entries), while RESUME's
-//!   `build_chain` reconstructs layers from handles **without** repopulating any
-//!   derived index. So a resumed service's persistent triple / value indexes are
-//!   empty for every *seeded* layer (proven: `is_a == core:Class` scans 116 at
-//!   seed, 0 after reopen). User-committed layers are unaffected (they are built
-//!   on persistent storage, so build-time population writes straight to RocksDB).
-//!   The D65 lazy lexicon still *functions* on a resumed service — `form_index`
-//!   is simply not discovered, so it falls back to the eager full-chain scan — but
-//!   the acceleration is inert until the seed/resume index lifecycle is fixed.
+//! - [`derived_indexes_survive_resume`] — seeds a chain, reopens the same
+//!   directory, and asserts that the triple index and the `lexicon:form` value
+//!   index are both still populated. This test was `#[ignore]`d when it was
+//!   written, because it recorded a real structural gap: SEED built the
+//!   bootstrap chain on *in-memory* storage and persisted each layer with
+//!   resources, topology and bloom only, so a resumed service saw empty derived
+//!   indexes for every seeded layer. The gap is closed —
+//!   `RocksStore::store_layer` calls `populate_layer_indexes` on the
+//!   post-validation persist path every commit funnels through, so a seeded
+//!   layer's index entries are durable — and the `#[ignore]` is gone. Do not
+//!   restore it: this test now guards the fix.
 
 use std::sync::Arc;
 

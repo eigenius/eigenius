@@ -1,6 +1,6 @@
 # D56 — Component execution & derivation materialization
 
-*Status: **implemented** (2026-06-13 design, revised same day; realized end-to-end through Phase C — see §9). `RunRuntimeScript` is a kernel remote component routed to the D26 substrate; the WRN wrapped-R family (lme4 in-vivo + KM12, limma D-DIFF ×3, fgsea GSEA, emmeans IF, foci lm, paralogue lm) all lift via `ProgramTrace → IsDerivedAs` and Hold in the clean-DB demo (52/52). Establishes that a **component execution** (side-effecting, external — D26 language runtimes) becomes a chain-resident, witness-bearing derivation **through the existing program-execution subsystem** (`kernel/src/program`, the `RunProgram` RPC / `eigenius run`), not a bespoke "materializer." Distinguishes this from **institution recomputation** (pure, decidable, implicit at commit — D52/AutoOnLoad). Motivated by the WRN `concl_vivo` lift (wrapping lme4 via D55). References D6b (program trace), D8 (components), D26 (RuntimeInvocation), D41 (commit pipeline), D49 (ChainWitness), D52 (statistics institution), D54 (reasoning lemma citation), D55 (R runtime).*
+*Status: **implemented** (2026-06-13 design, revised same day; realized end-to-end through Phase C — see §9). `RunRuntimeScript` is a kernel remote component routed to the D26 substrate; the WRN wrapped-R family (lme4 in-vivo + KM12, limma D-DIFF ×3, fgsea GSEA, emmeans IF, foci lm, paralogue lm) all lift via `ProgramTrace → IsDerivedAs` and Hold in the clean-DB demo (52/52 at the time of the §9 B.4 run; **55/55** as of 2026-08-20 — see the note under §9). Establishes that a **component execution** (side-effecting, external — D26 language runtimes) becomes a chain-resident, witness-bearing derivation **through the existing program-execution subsystem** (`kernel/src/program`, the `RunProgram` RPC / `eigenius run`), not a bespoke "materializer." Distinguishes this from **institution recomputation** (pure, decidable, implicit at commit — D52/AutoOnLoad). Motivated by the WRN `concl_vivo` lift (wrapping lme4 via D55). References D6b (program trace), D8 (components), D26 (RuntimeInvocation), D41 (commit pipeline), D49 (ChainWitness), D52 (statistics institution), D54 (reasoning lemma citation), D55 (R runtime).*
 
 > **Revision note.** The first draft proposed a standalone *materializer* + a *pending-RuntimeInvocation* marker as a new commit-adjacent operation. That was over-built. Eigenius already has the driver (program execution) and already mints the witness (`ProgramTrace → IsDerivedAs`). The corrected model below replaces it: a component execution is **a program invoking a RuntimeScript component**, and `eigenius run` is the demanded-execution driver. §3, §5, §6 carry the corrected design; §1–§2, §4 (the tension and the kind distinction) stand unchanged.
 
@@ -105,5 +105,18 @@ All phases landed. The `RunRuntimeScript` component + orchestrator handler + nap
 - ✅ **B.2b (substrate)** — `RLanguageRuntime` registered in `runtime-substrate-native`'s dispatcher ([`orchestration/runtime-substrate-native/src/lib.rs`](../../orchestration/runtime-substrate-native/src/lib.rs)), mirroring Julia/Lean.
 - ✅ **B.3 (WRN)** — the xenograft `RuntimeScript` + input table + invoking program ([`programs/invivo/`](../../experiments/publications/wrn-helicase/programs/invivo/)); `wrn:vivo_xenograft` replaced; `concl_vivo` derives against the program output. R+lme4 image built + tagged (D55 §6); see [`demo/wrn-helicase/build-r-image.sh`](../../demo/wrn-helicase/build-r-image.sh).
 - ✅ **B.4 (verify)** — clean-DB `docker compose` run; `eigenius run` dispatches to the sibling R container and `concl_vivo` lifts — the first real dispatch leg for a substrate-built R image. The whole WRN chain lands **52/52 Holds** ([`demo/wrn-helicase/run.sh`](../../demo/wrn-helicase/run.sh)).
+
+> **Note on the verdict count, added 2026-08-20.** 52/52 was the figure at this run and is
+> left as the historical record. It has since been superseded by the crossed-ANOVA and
+> microscopy increments: the current count is **55/55**, as recorded in
+> [`experiments/publications/wrn-helicase/docs/04-review.md`](../../experiments/publications/wrn-helicase/docs/04-review.md)
+> §3. The 55 decomposes as 22 statistics gate verdicts — one per analysis plan, 21
+> `stats:StatisticalAnalysisPlan` plus one `stats:ClassificationAnalysisPlan` — and 33
+> reasoning verdicts, one per `reasoning:ReasoningSentence`.
+>
+> Both numbers are **verdict** counts, not conclusion counts, and have been misread as the
+> latter downstream. The chain declares **33** `reasoning:ReasoningSentence`s (15 / 1 / 1 /
+> 3 / 11 / 2 across chain layers 04–09); that is the conclusion count, and it is not 52 or
+> 55 at any revision.
 - ✅ **B.5 (CLI)** — D26 §10's `eigenius script publish/run/list/inspect` (`ScriptCommands` in [`cli/src/main.rs`](../../cli/src/main.rs)).
 - ✅ **Phase C** — generalized: GSEA (fgsea, seed-pinned) → `mech_rule` antecedent; D-DIFF (limma) → `dd_achilles`/`dd_drive`/`dd_gdsc`; plus IF lsmeans (emmeans), 53BP1 foci lm, and the 1.6 GB paralogue co-loss lm — all `RunRuntimeScript` derivations that Hold in the demo.

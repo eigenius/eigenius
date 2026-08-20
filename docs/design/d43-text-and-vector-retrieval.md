@@ -268,7 +268,9 @@ The HNSW path returns approximate results; per-segment recall depends on `ef` (t
 The combined invariant: a layer is queryable through any of its indexes (triple, text, vector) iff `topo:<layer_id>` is committed. With all index data in RocksDB, the implementation is uniform:
 
 - `LayerBuilder::build` produces in-memory descriptions of each index's per-layer contribution: triple-index triples; text-index postings (`text_term:`, `text_docs:`, `text_stats:`, `text_terms_layer:` per active TextIndex Resource); vector-index segments (`vec_seg:` plus `vec_layer:` reverse per active VectorIndex Resource).
-- All of them go into the same `WriteBatch` that carries the layer record (`topo:`, `chain:`, `bloom:`, `branch:` where applicable) plus the triple-index entries (`idx_pos:`, `idx_layer:`).
+- All of them are intended to go into the same `WriteBatch` that carries the layer record (`topo:`, `chain:`, `bloom:`, `branch:` where applicable) plus the triple-index entries (`idx_pos:`, `idx_layer:`).
+
+> **Implementation note (2026-08-20).** Not what happens on the commit path. `RocksStore::store_layer` populates text, vector, value and triple indexes via `populate_layer_indexes` *before* opening its batch, and each index writes its own non-sync batch; `extend_into_batch` is never passed `store_layer`'s batch. The §2.5 single-atomic-write property holds only for the drop path (`delete_layer` → `drop_into_batch`).
 - `RocksStore::store_layer` writes the batch atomically. Layer visibility and all three index types become visible at the same moment.
 
 No filesystem materialisation, no fence pointer, no orphan-recovery sweep. The atomic-commit story is the same envelope Phase 14h established; D43 adds the text and vector key families (in dedicated column families) to the batch.

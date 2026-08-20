@@ -6,6 +6,14 @@
 **Required before:** Phase 5 implementation
 **Resolves:** Integration of Eigon type system with EigenTT/CIC, trace persistence, incremental execution, validation/type-checking relationship
 
+> **Note on the title, added 2026-08-20.** "Unification" here does **not** mean term
+> unification. The document's only use of the word is §8.3, where merging the program
+> executor into the NbE evaluator via capability modes is called "the unification step".
+> This document has no bearing on `kernel/src/nbe/unify.rs`, which is first-order pattern
+> unification for indexed inductives and attributes itself to **D48 phase C**. A reader
+> looking for the metavariable solver wants
+> [D48](d48-indexed-inductive-families.md) §3.1, not this document.
+
 ---
 
 ## 1. Problem Statement
@@ -172,6 +180,17 @@ get : Resource → IRI → Option Value
 - `ground.rs` maps `recommends` properties to `Option T` Sigma components
 - Add `Exp::Get(Box<Exp>, Iri)` for dynamic property access, typed as `Option Value`
 - `Val::Option(Option<Box<Val>>)` for optional values with `Some`/`None`
+
+> **As built (verified 2026-08-20 at `b251c9e`).** Neither `Exp::Get` nor `Val::Option`
+> exists anywhere in the kernel; the two symbols occur in no Rust file in the tree. The
+> ground mapping shipped without a separate `get` form and without an `Option` value
+> constructor. `Exp::PropAccess(Box<Exp>, Iri)` (`kernel/src/nbe/term.rs:128`) is the only
+> property-access form, and optionality is encoded with the existing labeled sum rather
+> than a new `Val` variant: `ground.rs::make_option_type` builds
+> `Val::Data([("some", T), ("none", One)], ρ)`, and recommended properties enter the class
+> Σ-chain wrapped in that. Required properties take their declared type directly. So the
+> "or rejects if undeclared without `get`" clause below describes a form that was never
+> added.
 
 **NbE impact:** `eval(PropAccess(resource, prop))` reduces by looking up the property in the resource value. If declared and present → the value. If declared and absent (recommended) → `None`. The `Get` form always returns `Option Value`.
 

@@ -206,8 +206,8 @@ pub(crate) fn eval_impl<T: Tracer>(
                     eval_impl::<T>(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
                 }
                 _ => {
-                    // IO/Read mode: eagerly evaluate the declaration value
-                    // so that IO dispatch happens in the correct context.
+                    // Effectful: eagerly evaluate the declaration value
+                    // so that effect dispatch happens in the correct context.
                     match d {
                         crate::nbe::term::Decl::Def(patt, _typ, body) => {
                             let (val, value_node) = eval_impl::<T>(body, rho, ctx)?;
@@ -299,7 +299,7 @@ pub(crate) fn eval_impl<T: Tracer>(
             Err(e) => match ctx {
                 EvalCtx::Pure => Err(EvalError::UnboundVariable(e)),
                 _ => {
-                    // IO/Read mode: unbound variables may be component IRIs
+                    // Effectful: unbound variables may be component IRIs
                     // that will be intercepted at the App level.
                     Ok((Val::Nt(Neut::Gen(usize::MAX, x.clone())), T::leaf()))
                 }

@@ -943,10 +943,17 @@ impl LayerBuilder {
     }
 
     /// Create a builder for a trivial-merge layer with N parents
-    /// (Phase 14e). The order of `parents` is part of the layer's
-    /// identity — it's hashed into the `LayerId`. Callers should sort
-    /// by `LayerId` for canonical ordering when no other order is
-    /// natural; `merge_independent_heads` does this automatically.
+    /// (Phase 14e).
+    ///
+    /// Parent order is **not** part of the layer id:
+    /// `compute_position_hash` sorts the parent ids before hashing, so two
+    /// merge layers over the same parents in different orders get the same
+    /// `LayerId`. Order does matter elsewhere — it is preserved in the
+    /// `LayerHandle`'s `parents` vector, `Layer::parent()` returns the
+    /// first, and the persisted `chain:<id>` edge records the first as the
+    /// canonical parent for chain-walk reconstruction. Callers should still
+    /// sort by `LayerId` when no other order is natural;
+    /// `merge_independent_heads` does this automatically.
     pub fn with_parents(name: &str, parents: Vec<Arc<Layer>>) -> Self {
         Self {
             name: name.to_string(),
@@ -1018,8 +1025,25 @@ impl LayerBuilder {
 
     /// Build the immutable `Layer`.
     ///
-    /// Computes the `LayerId` as the SHA-256 hash of the canonical CBOR
-    /// encoding of resources (in IRI order). Populates `cache` with one
+    /// Computes the id in two steps, not one:
+    ///
+    /// 1. `compute_content_hash` — SHA-256 over a domain-separated
+    ///    `content:v1:` preimage with **two** sections: the resources, in
+    ///    IRI order, each as its IRI bytes followed by its canonical CBOR;
+    ///    and the **tombstoned IRIs**, also in IRI order, each `\0`-terminated.
+    ///    A layer that only tombstones has a content hash distinct from an
+    ///    empty layer's.
+    /// 2. `compute_position_hash` — SHA-256 over `position:v1:`, the content
+    ///    hash, the parent count, and the parent ids. That is the `LayerId`.
+    ///
+    /// So the id folds in the parents as well as the content. Note that
+    /// `compute_position_hash` **sorts** the parent ids before hashing, so
+    /// the id is commutative in parent order — `with_parents`' claim that
+    /// parent order is part of the layer's identity is true of the
+    /// `LayerHandle`'s `parents` vector and of `Layer::parent()`, which
+    /// takes the first, but not of the id.
+    ///
+    /// Populates `cache` with one
     /// `(LayerId, Iri) → Arc<Resource>` entry per built resource and
     /// populates `bloom_cache` with this layer's shadowing bloom — both so
     /// subsequent lookups via the returned layer hit the in-memory caches

@@ -253,7 +253,8 @@ A resource may be an instance of multiple classes simultaneously. Validation app
 
 - A **missing key** means the property has no value on this resource.
 - Explicit `null` values are **not allowed** in Eigon-JSON. Omit the key instead.
-- Empty arrays and empty objects are not allowed.
+- Empty objects are not allowed.
+- **Empty arrays are allowed.** The parser accepts `[]` deliberately (`eigon_json.rs`: "Empty arrays are valid JSON and valid Eigon"); per-property non-emptiness is a validator concern, and the only slot required to be non-empty is `is_a`, by Rule 0.
 
 ---
 
@@ -368,7 +369,7 @@ If two ancestor classes contribute properties with the same short_name (e.g., th
 9. **Allowed values checking:** If a property declares `allows_only`, any resource value must be one of the listed resources (by IRI identity).
 10. **Domain checking:** If a property declares `domain`, it may only be used on resources that are instances of at least one of the listed classes (including subclasses).
 11. **Conditional requirements:** If a class declares `conditional_requires`, and a resource's property value matches the `has_value` condition, the properties listed in `then_requires` become required and those in `then_recommends` become recommended.
-12. **Open world:** Extra properties — those not declared in `requires` or `recommends` on any of the resource's classes or their ancestors — are **allowed**. Their presence is not an error.
+12. **Open world:** Extra properties — those not declared in `requires` or `recommends` on any of the resource's classes or their ancestors — are **allowed**. Their presence is not an error, *provided the property key itself is defined*: Rule 22 part (c) requires every property IRI used as a key to resolve to a `core:Property` same-or-lower in the chain (the committing layer counts). An undefined key is a dangling reference, not an open-world extra, and is rejected.
 
 ### 5.5 Self-description
 
@@ -383,6 +384,8 @@ This bootstrap circularity is resolved by hardcoding the Core Ontology in the ke
 ---
 
 ## 6. Canonical form
+
+> **Implementation status (2026-08-20): content addressing does not use this form.** Layer content hashes are SHA-256 over the **CBOR** encoding produced by `kernel/src/ontology/eigon_cbor.rs::canonicalize` (`@id` first, then properties in `BTreeMap<Iri>` order), not over canonical JSON. `eigon_json::canonicalize` — the function carrying the RFC 8785 name — implements neither JCS key ordering nor JCS number formatting, and its only caller is the query engine's return-shape dedup (`query/evaluate/return_shape.rs`). Which of the two is the intended canonical form is an open design question; this section records the original intent.
 
 For content-addressed hashing (used by the layer system for layer identifiers), Eigon-JSON is serialized in canonical form following RFC 8785 (JSON Canonicalization Scheme):
 

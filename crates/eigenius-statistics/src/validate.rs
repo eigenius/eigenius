@@ -23,25 +23,36 @@
 //!    product + observations.
 //! 3. Decode the Bundle's axis slots; keep the observations slot
 //!    raw — each dispatch arm decodes per its expected shape.
-//! 4. Dispatch on the product position (D52 §5.4 table). Phase 1
-//!    wired SingleSampleEstimate; Phase 1.5 added IID. Unsupported
-//!    positions return `Verdict::Fails(WrongTestForDesign)`.
+//! 4. Dispatch. Four routes run *before* the product-position table:
+//!    `MethodComparisonAnalysisPlan` and `ClassificationAnalysisPlan`
+//!    on the plan's own class, then nested and crossed two-way ANOVA
+//!    on the SampleSet's blocking ctor. Otherwise consult the D52 §5.4
+//!    product-position table, which wires seven positions
+//!    (SingleSampleEstimate, IID, Paired, Factorial, RCBD, SplitPlot,
+//!    RepeatedMeasures). Any other position gate-Fails with a
+//!    `WrongTestForDesign:`-prefixed diagnostic string.
 //! 5. Read the claim's `alpha`, `effect_size`, `directionality`,
 //!    `variance_assumption` fields. Run the dispatch arm's numerics
-//!    routine. Each arm reduces to a `(t_statistic, p_value)` tuple
+//!    routine. Each arm reduces to a `(statistic, p_value)` tuple
 //!    for the common verdict-building step.
 //! 6. Run the §7.4 epistemic-scope check against the
 //!    `canonical_proposition`'s head predicate's `is_a` markers.
-//! 7. Build the verdict resource — Holds when p < alpha, Fails with
-//!    structured diagnostic otherwise. Both outcomes carry the
-//!    computed numerics for audit.
+//! 7. Build **two** kinds of resource. The gate `Verdict` attests only
+//!    that the plan was structurally runnable, so it Holds for a test
+//!    that did not reject; it Fails only when a step before the test
+//!    failed, and then no result is emitted. The statistical decision
+//!    rides on a per-effect `StatisticalAnalysisResult` derivation at
+//!    `{plan_iri}:result:{effect_name}`, whose `verdict_ctor` is Holds
+//!    when that effect's p crossed alpha and Fails (`AlphaNotCrossed`)
+//!    when it did not. Only a per-effect Holds carries a
+//!    `canonical_proposition`, so only a rejecting effect admits an
+//!    `IsDerivedAs` witness. Both outcomes carry the computed numerics
+//!    for audit.
 //!
-//! Phase 1 + 1.5 coverage: SingleSampleEstimate + IID (Welch +
-//! Pooled). Phase 2 adds Paired + Factorial. §7.2 non-Identity
-//! outlier dual-verdict, §7.3 Passing-Bablok for method-comparison,
-//! and §7.1 OneSidedWitnessed impossibility-witness validation are
-//! Phase 5 hardening; the surfaces are in place but enforcement is
-//! deferred until the basic dispatch table is wider.
+//! Every diagnostic on both paths is a free-form `String` in the one
+//! `institution:diagnostic` slot. `AlphaNotCrossed`,
+//! `WrongTestForDesign` and `EpistemicScopeViolation` are conventional
+//! prefixes inside that string, not variants of a diagnostic type.
 
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::error::InstitutionError;

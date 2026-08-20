@@ -340,7 +340,7 @@ EigenTT cannot do this: it checks program *composition* (well-typed reductions i
 
 ## 8. The trait surface
 
-Three methods. The institution's only mandatory responsibility is boundary translation; reasoning is optional.
+Four methods, three of them without a default implementation: `institution_iri` (identity), plus the two boundary methods. Only `query` has a default (`NotImplemented`), so the institution's only mandatory *responsibility* beyond naming itself is boundary translation; reasoning is optional.
 
 ```rust
 pub trait Institution: Send + Sync {

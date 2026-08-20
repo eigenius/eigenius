@@ -18,7 +18,7 @@ This document specifies what it takes to register **Lean 4** as that institution
 
 ### 1.1 D14 in one paragraph (so the rest of this doc is readable in isolation)
 
-Under D14, an institution is registered by committing five kinds of typed Resources to the layer chain: an `Institution` (identity and runtime kind), `ExportFormat`s (typed extractions of class instances into EigenTT payloads), `ImportFormat`s (typed constructors of class instances from EigenTT payloads), `QueryClass`es (typed functions in the institution's fibre with a `dispatch_role` of `OnDemand` / `AutoOnLoad` / `Decidable` and a result class — `Verdict` for the gate-on-commit and decide-procedure roles), and `Comorphism`s (triples `(s, m, t)` where `s` is an ExportFormat, `m` is a EigenTT Component, and `t` is an ImportFormat). The institution implements an `Institution` Rust trait with three methods: `extract_typed` (boundary out), `reify` (boundary in), and an optional `query` (for QueryClasses whose implementation is institution-runtime rather than a EigenTT Component). The kernel maintains a derived registry from chain scans, runs `AutoOnLoad` QueryClasses on commit, dispatches `Decidable` QueryClasses from `Exp::NativeDecide`, dispatches `OnDemand` QueryClasses from EigenQL FIBER, and runs Comorphisms via `Exp::InstitutionInvoke`.
+Under D14, an institution is registered by committing five kinds of typed Resources to the layer chain: an `Institution` (identity and runtime kind), `ExportFormat`s (typed extractions of class instances into EigenTT payloads), `ImportFormat`s (typed constructors of class instances from EigenTT payloads), `QueryClass`es (typed functions in the institution's fibre with a `dispatch_role` of `OnDemand` / `AutoOnLoad` / `Decidable` and a result class — `Verdict` for the gate-on-commit and decide-procedure roles), and `Comorphism`s (triples `(s, m, t)` where `s` is an ExportFormat, `m` is a EigenTT Component, and `t` is an ImportFormat). The institution implements an `Institution` Rust trait with four methods: `institution_iri` (identity), `extract_typed` (boundary out), `reify` (boundary in), and an optional `query` (for QueryClasses whose implementation is institution-runtime rather than a EigenTT Component). The kernel maintains a derived registry from chain scans, runs `AutoOnLoad` QueryClasses on commit, dispatches `Decidable` QueryClasses from `Exp::NativeDecide`, dispatches `OnDemand` QueryClasses from EigenQL FIBER, and runs Comorphisms via `Exp::InstitutionInvoke`.
 
 ### 1.2 Non-goals
 
@@ -91,7 +91,9 @@ These are ordinary Eigon classes living in the Lean institution's ontology layer
 - **`LeanProofTerm`** — the central class. Carries the verbatim Lean export bytes (the proof term + its transitive declaration closure), the target Theorem's name, the chain-mirrored proposition (a `lean:LeanExpr` value — see below), the environment reference, the EigonFFI library reference, the Eigenius-side claim it vouches for, and the claim layer hash. A `LeanProofTerm` resource entering the chain triggers `ProofCheck` (§3.3) automatically. On `Holds`, the resource's epistemic status promotes from *derived* to *verified*.
 - **`LeanEnvironment`** — pinned environment as a `RuntimeEnvironment` subclass (§7).
 - **`LeanProject`** — a `RuntimePackage` subclass: the Lean source tree the user authored against, used by the substrate-hosted authoring side (§6.2).
-- **`LeanPackageMirror`** — a `RuntimePackageMirror` subclass: the EigonFFI library (tracked artifact mirroring Eigon classes as Lean types, §5).
+- **`LeanPackageMirror`** — a `RuntimePackageMirror` subclass: the EigonFFI library (tracked artifact mirroring Eigon classes as Lean types, §5). 
+
+> **Implementation status (2026-08-20).** The `LeanPackageMirror` subclass was never created. No ontology declares a class of that name and no Rust type of that name exists. The generator stamps, and the verifier reads, `urn:eigenius:runtime:RuntimePackageMirror` directly — the same generic mirror class the Julia institutions use. Read every `LeanPackageMirror` below as naming that class.
 
 **Chain-mirrored Lean expression language** (sibling spec — D40 forward reference):
 
@@ -338,6 +340,8 @@ All references resolve within the knowledge graph itself. A committed `LeanProof
 
 The `LeanProofTerm`'s content hash (a function of all the fields above) is the cache key for verification results. A re-commit of an identical resource is a no-op; the cached verdict is served. A `LeanProofTerm` whose `proof_term_bytes` is unchanged but whose `claim_layer_hash` differs is a different resource — the AutoOnLoad QueryClass re-runs because the correspondence check resolves against a different ontology state.
 
+> **Implementation status (2026-08-20).** No verification-result cache exists. `LeanInstitution` is stateless by its own doc comment, the AutoOnLoad handler reads no prior verdict before running, and `check_proof` stages the payload into a fresh temporary file and reparses it on every call. Re-verification of an identical proof is unconditional and costs full price. The content-addressed `@id` still holds — identical proofs land at the same IRI — but nothing keys a verdict off it.
+
 nanoda's `Expr` internally carries structural hashes ([`references/nanoda_lib/src/expr.rs:8-18`](../../references/nanoda_lib/src/expr.rs#L8-L18)) — two byte-identical export files type-check to identical Expr DAGs. The chain's content-addressed `@id` composes cleanly with this: identical proofs always land at the same IRI.
 
 ## 7. Environment management
@@ -378,6 +382,8 @@ Institution registrations pin the `LeanEnvironment` IRI they expect. Prior `Lean
 
 The substrate's worker pool handles environment caching for the *authoring* side: warm Lean toolchain workers per environment digest, LRU eviction, image-pull cache. The verification side holds nanoda's parsed environment representation in an in-process LRU cache indexed by `LeanEnvironment` IRI; first checking request loads from the resource bytes (or from a baked artifact in the image, fast path), subsequent requests are served from cache.
 
+> **Implementation status (2026-08-20).** The verification-side half of this is unbuilt. There is no LRU, no parsed-environment retention, and no `LeanEnvironment` lookup on the verification path at all; every call reparses the export from scratch.
+
 ### 7.4 Environment diffing
 
 Two `LeanEnvironment` resources can differ in library versions, axiom sets, or definitional transparencies. The coarse version — "these environments are different, proofs against one are not transferable to the other" — is the image-digest comparison; the structured version (`qc_environment_diff`) is non-trivial and lands as a targeted enhancement when needed.
@@ -386,7 +392,9 @@ Two `LeanEnvironment` resources can differ in library versions, axiom sets, or d
 
 ### 8.1 In-process Rust checker via nanoda_lib
 
-The Lean term **checker** runs as a Rust library linked into the `eigenius-lean` crate. Proof terms produced by `lean4export` (which runs *separately*, on the substrate-hosted authoring side per §2.3 and §6.2) are parsed and checked without leaving the orchestrator process. The specific library is **nanoda_lib** ([github.com/ammkrn/nanoda_lib](https://github.com/ammkrn/nanoda_lib)), vendored in-tree at [`references/nanoda_lib/`](../../references/nanoda_lib/) and accompanied by the specification book [Type Checking in Lean 4](https://ammkrn.github.io/type_checking_in_lean4/).
+The Lean term **checker** runs as a Rust library linked into the `eigenius-lean` crate. Proof terms produced by `lean4export` (which runs *separately*, on the substrate-hosted authoring side per §2.3 and §6.2) are parsed and checked without leaving the orchestrator process. The specific library is **nanoda_lib** ([github.com/ammkrn/nanoda_lib](https://github.com/ammkrn/nanoda_lib)), accompanied by the specification book [Type Checking in Lean 4](https://ammkrn.github.io/type_checking_in_lean4/).
+
+> **Implementation status (2026-08-20).** nanoda is **not** vendored in-tree. `crates/eigenius-lean/Cargo.toml` declares a Cargo git dependency pinned to `rev = "6d2f037"`, which `Cargo.lock` resolves to version 0.4.8-beta. `references/nanoda_lib/` is a git-ignored local clone kept for reading and cited by source comments elsewhere in the tree at a *different* revision, `f58f2f6`; it is not part of any build, and it is absent from a fresh checkout.
 
 This is preferred because:
 
@@ -444,7 +452,7 @@ The institution registers by committing its `Institution`, ExportFormat, and Que
 Three new crates. **Two binaries** end up hosting them, and the split is load-bearing for the trust posture (§2.3): the verification side links into the kernel binary, the authoring side links into the orchestrator binary.
 
 - **`eigenius-lean`** (verification side — links into the **kernel binary** at [`cli/`](../../cli/)). Houses:
-  - The nanoda_lib dependency (vendored at [`references/nanoda_lib/`](../../references/nanoda_lib/)).
+  - The nanoda_lib dependency (a Cargo git dependency pinned at `rev = "6d2f037"`; see the §8.1 status note).
   - The chain-mirror translator (Lean `Expr` ↔ chain-mirrored `lean:LeanExpr`).
   - The EigonFFI correspondence logic.
   - The in-process environment cache (parsed nanoda `Env` LRU).
@@ -499,7 +507,7 @@ D30 and D40 are scoped tightly enough to author in parallel with the first landi
 
 ## 11. Landing plan
 
-D28 was originally drafted as a five-phase plan during a period when the runtime substrate was unfinished and the architectural shape uncertain. With D26 shipped, D27/D29 landed end-to-end, and nanoda_lib vendored, most of the phasing is no longer load-bearing — its purpose was risk management against uncertainties that have been resolved.
+D28 was originally drafted as a five-phase plan during a period when the runtime substrate was unfinished and the architectural shape uncertain. With D26 shipped, D27/D29 landed end-to-end, and nanoda_lib available as a pinned Cargo git dependency, most of the phasing is no longer load-bearing — its purpose was risk management against uncertainties that have been resolved.
 
 The integration is now two landings: a complete first Lean institution, followed by a Mathlib-scale operational landing.
 
@@ -580,7 +588,7 @@ Performance runs 20–50% slower than the C++ kernel. Checks all of Mathlib succ
 
 ### A.3 nanoda_lib — the Rust checker (chosen)
 
-**Repository:** [github.com/ammkrn/nanoda_lib](https://github.com/ammkrn/nanoda_lib) — vendored at [`references/nanoda_lib/`](../../references/nanoda_lib/).
+**Repository:** [github.com/ammkrn/nanoda_lib](https://github.com/ammkrn/nanoda_lib) — consumed as a Cargo git dependency pinned at `rev = "6d2f037"` (v0.4.8-beta), not vendored; see the §8.1 status note.
 **Documentation:** [Type Checking in Lean 4](https://ammkrn.github.io/type_checking_in_lean4/) (Chris Bailey).
 
 A Rust library implementing type inference and checking for Lean 4 kernel terms. Consumable as a Cargo crate dependency, with an optional binary frontend. Clean-room Rust implementation rather than a port of the C++ kernel, consuming lean4export JSON as input.

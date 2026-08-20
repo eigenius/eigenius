@@ -3,6 +3,29 @@
 Working note. Answers: what does it take to strip WASM component support, and
 what can be removed. Read-only analysis — no code changed. Branch `more-nbe-cleanup`.
 
+> **Executed 2026-07-08.** The teardown described below was carried out.
+> D12 and D12b carry `Status: REMOVED` banners; platform guide chapters 9
+> and 10 are retained as historical record with banners of their own. Two
+> residues survive and a reader will meet them:
+>
+> 1. **Eight empty `examples/wasm-*` directories remain on disk.** Step 2
+>    deleted every file under them, and `git ls-files examples/` returns
+>    nothing, but git does not track directories so the empty
+>    `wasm-cbor-echo`, `wasm-d14-arrhenius`, `wasm-d14-assay`,
+>    `wasm-d14-dock`, `wasm-d14-echo`, `wasm-doc-validator`,
+>    `wasm-http-shout` and `wasm-read-query-probe` directories persist in
+>    any working tree that predates the teardown. They are the only
+>    filesystem trace of the removed extension path and contain nothing.
+> 2. **The institution ontology still admits `runtimes:wasm`.** Step 1's
+>    "reserve the value rather than delete it" recommendation was followed
+>    on the ontology side but not paired with a `parse_runtime_kind` arm.
+>    A declaration carrying `runtime: runtimes:wasm` commits cleanly, is
+>    dropped from the institution index with a log warning, and every later
+>    dispatch reports the institution as unregistered. The `Institution`
+>    class also still recommends five Wasm-era properties.
+>
+> Everything below is the pre-teardown analysis, unedited.
+
 ## TL;DR
 
 - **WASM and institutions are separable.** WASM is *one of three* institution

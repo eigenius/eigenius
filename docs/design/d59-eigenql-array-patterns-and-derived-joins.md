@@ -77,7 +77,7 @@ query needs a 2-column join no resource property can carry).
 **Investigate / modify:**
 - `kernel/src/query/evaluate/pattern.rs` — `collect_candidates` (derived branch),
   `try_match_resource` (subject + head-var binding). *(primary)*
-- `kernel/src/query/evaluate/mod.rs` — DEFINE seminaive fixpoint (lines ~83–106):
+- `kernel/src/query/evaluate/mod.rs` — DEFINE fixpoint (lines ~83–106):
   confirm derived bindings store IRIs in the form `values_equal` matches.
 - `kernel/src/query/evaluate/return_shape.rs` — derived-var projection.
 - `kernel/src/query/ast.rs` — `Pattern` shape (no change expected; confirm).
@@ -104,7 +104,8 @@ calls it — but only to *validate*; the order was discarded and the documented
 implemented.
 
 **Fix:** `evaluate/mod.rs` now evaluates **stratum by stratum in order**, running a
-seminaive fixpoint over each stratum's rules with all lower strata already fixed.
+fixpoint over each stratum's rules with all lower strata already fixed. (The
+per-stratum iteration is naive, not seminaive: there is no delta relation.)
 Negation in a higher stratum therefore sees a complete lower relation. (Within a
 stratum only positive recursion is allowed — the stratifier guarantees it — so the
 add-only fixpoint is sound there.)
@@ -156,7 +157,7 @@ recursion.
 With Items 1+2, Reachable is clean and correct:
 ```eigenql
 DEFINE Reach(?t) FROM MATCH "…:Objective"(?o) { thesis: ?t }
-DEFINE Reach(?n) FROM MATCH Reach(?m) { "…:depends_on": [... ?n ...] }   -- joins (Item 1) + iterates (Item 2)
+DEFINE Reach(?n) FROM MATCH Reach(?m) { "…:depends_on": [... ?n ...] }   // joins (Item 1) + iterates (Item 2)
 DEFINE Node(?x) FROM MATCH "…:Milestone"(?x) {}
 DEFINE Node(?x) FROM MATCH "…:Axiom"(?x) {}
 DEFINE Unreachable(?x) FROM MATCH Node(?x) {}, NOT Reach(?x) {}

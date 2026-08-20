@@ -122,9 +122,19 @@ Same single core, clean store, measured separately:
 | WordNet base (classes) | 113,954 | ~28,000 res/s |
 | WordNet entries (`wordnet-001.esl`) | 246,178 | **4,088 res/s** |
 
-**Entries are ~7× more expensive.** They pay the felicity gate (`dcg::lexicon::gate_entry`): check
-`⟦cat⟧ ≡ sem_type`, then check the `sem` actually inhabits `⟦cat⟧` — real EigenTT type-checking per
-entry. Classes pay only reference resolution. This is where reseed wall-clock goes.
+**Entries are ~7× more expensive.** *(Attribution corrected 2026-08-20 — the original text blamed the
+felicity gate, which never ran in this measurement.)* These are loads through the kernel commit path,
+and that path does not call `dcg::lexicon::gate_entry`: the gate's call sites are the importer
+binaries, one CLI subcommand and tests, all behind an opt-in `--validate` flag the reseed script does
+not pass. What entries do pay is **Rule 21, twice per entry**. Rule 21 decodes and `check_infer`s
+every value whose declared range is `eigentt:TypeExpr`, and a `lexicon:LexicalEntry` carries two such
+properties — `lexicon:cat` and `lexicon:sem_type`. So each entry costs two EigenTT decode-plus-
+type-check passes where a class costs none. Classes pay only reference resolution. This is where
+reseed wall-clock goes.
+
+Note the consequence for what the check *means*: Rule 21 checks each `TypeExpr` slot in isolation. It
+never relates `cat` to `sem_type`, which is the cross-field felicity obligation the gate exists to
+enforce. Production ingest pays most of the gate's cost and gets none of its guarantee.
 
 The 4,088 figure is not the same measurement as the headline 5,227: different chunk (WordNet vs
 UMLS) and a nearly empty store versus one with ~7.5 M resources already committed.

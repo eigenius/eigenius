@@ -25,7 +25,7 @@ Verification leaves a typed audit trail with five resource kinds:
 |---|---|
 | [`LeanProject`](../../../design/d28-lean-4-as-institution.md#31-resource-classes) | A Lake project — `lakefile.lean` + `lean-toolchain` + source files. The substrate's authoring runtime builds it and runs `lean4export`. |
 | [`LeanEnvironment`](../../../design/d28-lean-4-as-institution.md#71-leanenvironment-extends-runtimeenvironment) | Digest-pinned Docker image + axiom allowlist + lockfile hash. Subclass of `RuntimeEnvironment`. The lockfile-hash field anchors the proof against a specific dependency-tree state. |
-| [`LeanPackageMirror`](../../../design/d30-eigon-to-lean-faithful-translation.md) | The generated EigeniusFFI Lake package that mirrors a chain layer's classes into Lean structures. The proof's proposition references types in this mirror; correspondence checking walks these. |
+| `runtime:RuntimePackageMirror` ([D30](../../../design/d30-eigon-to-lean-faithful-translation.md)) | The generated EigeniusFFI Lake package that mirrors a chain layer's classes into Lean structures. The proof's proposition references types in this mirror; correspondence checking walks these. **Naming:** D28, D30 and this guide previously called it a `LeanPackageMirror`. No class and no Rust type of that name exists — the generator stamps `urn:eigenius:runtime:RuntimePackageMirror`, the substrate's generic mirror class the Julia institutions also use, and the verifier reads that IRI. The old name still appears in some diagnostic strings the institution emits. |
 | `LeanProofPayload` | Verbatim `lean4export` output as a string. The exact bytes nanoda re-checks; no compression, no canonicalisation. |
 | `LeanProofTerm` | Wires payload + mirror + claim together. Carries the chain-mirrored proposition ([`lean:LeanExpr`](../../../design/d40-chain-mirrored-lean-expressions.md)) and the IRI of the chain-side claim the proof discharges. |
 
@@ -39,13 +39,15 @@ AutoOnLoad fires on `LeanProofTerm` commits and produces a sixth shape:
 
 [D28 §5.5](../../../design/d28-lean-4-as-institution.md#55-the-correspondence-check) specifies what `qc_proof_check` verifies for every `LeanProofTerm` that commits. AutoOnLoad fires it; the kernel rejects the commit if it fails.
 
-1. **Proof validity.** `nanoda_lib::check_proof(payload_bytes)` parses the export JSON, type-checks each declaration against the axiom allowlist on the `LeanEnvironment`, and confirms the named theorem's term has the named type. Implementation: [`crates/eigenius-lean/src/checker.rs`](../../../../crates/eigenius-lean/src/checker.rs). Panic-catching wraps the call so a bug in the bundled checker becomes `Verdict::Fails` with a structured diagnostic, not a kernel crash.
+1. **Proof validity.** `nanoda_lib::check_proof(payload_bytes)` parses the export JSON, type-checks each declaration against an axiom allowlist, and confirms the named theorem is declared. The allowlist is a **hard-coded four-element constant** in the institution (`DEFAULT_LEAN_AXIOMS`), not a value read from the chain — see [axiom allowlist policy](#axiom-allowlist-policy) below. Implementation: [`crates/eigenius-lean/src/checker.rs`](../../../../crates/eigenius-lean/src/checker.rs). One `catch_unwind` wraps `check_all_declars`, so a checker rejection — which nanoda reports by panicking — becomes `Verdict::Fails` carrying the panic message rather than a kernel crash. The parser call that precedes it sits outside the guard.
 
-2. **Mirror correspondence.** Walks the proof term's proposition (chain-mirrored as `lean:LeanExpr`) for `Const` references with names like `EigeniusFFI.Patient`. Maps each back to a chain class IRI via the `LeanPackageMirror`'s `mirrored_classes` list. The chain claim's `is_a[0]` must appear in that list. Implementation: [`crates/eigenius-lean/src/institution.rs`](../../../../crates/eigenius-lean/src/institution.rs)'s `structural_correspondence_matches`.
+2. **Mirror correspondence.** Two obligations, both in [`crates/eigenius-lean/src/institution.rs`](../../../../crates/eigenius-lean/src/institution.rs) under `do_correspondence_check`. `check_mirror_covers_claim_class` resolves `claim_iri` and requires the claim's class IRI to appear in the mirror's `mirrored_classes` list. `check_proposition_structural_correspondence` then walks the proof term's `proposition` — chain-mirrored as `lean:LeanExpr` — collects every `Const` reference under the `EigeniusFFI` namespace, and requires at least one to map back, through `mirrored_classes` and each class's `core:short_name`, to the claim's class.
+
+   Note what this does **not** do: it never compares the proposition against the proof bytes. `bytes_to_lean_expr` is authoring-side and is never called from `institution.rs`. Nothing establishes that the committed proposition is the type of the theorem nanoda checked, so a valid proof of one theorem bound to a claim about an unrelated class of the same mirror still yields `Holds`. Both anchors are `recommends` rather than `requires`, and each absent anchor silently skips its check.
 
 3. **Anchor consistency.** Recomputes the SHA-256 over the mirror's embedded `library_content` archive (using the D30 §10.2 length-prefixed framing) and compares to the declared `library_content_hash`. Mismatch = tampering, even if the proof type-checks.
 
-All three must pass for `Verdict::Holds`. Any one failing produces `Verdict::Fails` with a typed diagnostic (`AxiomNotPermitted`, `PropositionMismatch`, `FFIVersionMismatch`, etc.; see [D28 §9.1](../../../design/d28-lean-4-as-institution.md#91-failure-modes-and-diagnostics)).
+All three must pass for `Verdict::Holds`. Any one failing produces `Verdict::Fails` carrying a single diagnostic **string**. The institution defines exactly three prefixes for it — `FFIVersionMismatch`, `AnchorContentHashMismatch`, `PropositionMismatch` — written onto the front of the message so a consumer can match by leading token. [D28 §9.1](../../../design/d28-lean-4-as-institution.md#91-failure-modes-and-diagnostics) enumerates more, `AxiomNotPermitted` among them; those were never built. An axiom violation arrives as an opaque nanoda panic string, because axiom policy is enforced inside the checker rather than by the institution.
 
 ## Walking the audit chain (lean-verification notebook)
 
@@ -60,7 +62,7 @@ proof_term                                 [LeanProofTerm — proof + propositio
   │ ↑ proof_payload
   │  proof_payload                         [LeanProofPayload — verbatim lean4export bytes]
   │ ↑ mirror_iri
-  │  mirror                                [LeanPackageMirror — audit anchor]
+  │  mirror                                [runtime:RuntimePackageMirror — audit anchor]
   │  │ ↑ source_layer
   │  │  bootstrap head layer               [universal ancestor of every claim layer]
   │  │ ↑ library_content_hash
@@ -108,7 +110,7 @@ This is the high-level shape; the demo's generator binary ([`crates/eigenius-lea
    namespace EigeniusFFI
 
    structure Patient where
-     weight : Float
+     weight : { x : Float // 0.0 ≤ x }
      deriving Repr
 
    end EigeniusFFI
@@ -118,10 +120,17 @@ This is the high-level shape; the demo's generator binary ([`crates/eigenius-lea
    -- Capstone.lean
    import EigeniusFFI
 
-   theorem patient_weight_nonneg :
-       ∀ p : EigeniusFFI.Patient, p.weight ≥ 0 → p.weight + 10 ≥ 10 := by
-     intro p _; omega
+   theorem patient_weight_nonneg : ∀ p : EigeniusFFI.Patient, 0.0 ≤ p.weight.val :=
+     fun p => p.weight.property
    ```
+
+   That is the committed capstone verbatim; do not simplify it to a bare `weight : Float` proved
+   `by omega`, which is what this guide printed until 2026-08-20 and which does not compile —
+   `omega` is a decision procedure for linear integer and natural arithmetic and does not apply
+   to `Float`. The refinement type is the point: D30 §9.1 lifts the chain-side `min_value: 0.0`
+   constraint into Lean's type system, so the nonnegativity obligation is discharged at
+   construction and the theorem is the field's `property` projection. What the capstone
+   demonstrates is the closed audit chain, not the proof's difficulty.
 
 3. **Build + export.** Inside the Lake project:
 
@@ -138,13 +147,15 @@ This is the high-level shape; the demo's generator binary ([`crates/eigenius-lea
 
 6. **Commit the five resources** (Patient class, instance, mirror, payload, proof term) as a single Eigon-JSON document loaded via `eigenius load`. AutoOnLoad fires automatically on the proof term's commit and produces the verdict resource.
 
-The generator binary at `crates/eigenius-lean/examples/gen_verification_demo.rs` performs steps 2-6 for the capstone proof and writes the result to `notebooks/examples/lean-verification-demo.eigon.json`. Use it as the executable spec.
+The generator binary at `crates/eigenius-lean/examples/gen_verification_demo.rs` performs steps 2-6 for the capstone proof and writes the result to [`notebooks/examples/lean-verification-demo.eigon.json`](../../../../notebooks/examples/lean-verification-demo.eigon.json) — the loadable five-resource Eigon document, and the fixture to read when you want the committed shapes. (The `lean-verification.json` this guide opens with is the *notebook* that queries the chain afterwards; it is not the fixture.) Use the generator as the executable spec.
 
 ## Axiom allowlist policy
 
-Every `LeanEnvironment` declares a `lean_permitted_axioms` list (D28 §7.1). The institution's default — and the value baked into the demo — is the four community-baseline axioms: `propext`, `Classical.choice`, `Quot.sound`, `Lean.trustCompiler`.
+The allowlist the verifier uses is a hard-coded four-element constant, `DEFAULT_LEAN_AXIOMS` in `crates/eigenius-lean/src/institution.rs`: `propext`, `Classical.choice`, `Quot.sound`, `Lean.trustCompiler` — the community-baseline set of D28 §7.1.
 
-`Classical.choice` stays in the default because even trivial proofs through modern Lean stdlib pull it via `Subtype`'s projection helpers — an empty allowlist would reject essentially every real proof. Constructive-only deployments override per-env by stamping a tighter `lean_permitted_axioms` on their own `LeanEnvironment` resource. The override is the audited resource property, not a code patch (D28 §12 — resolved at end of Phase 20a).
+`Classical.choice` stays in it because even trivial proofs through modern Lean stdlib pull it via `Subtype`'s projection helpers, so an empty allowlist would reject essentially every real proof.
+
+**The per-environment override D28 §12 describes has no effect on a verdict.** `lean:lean_permitted_axioms` is declared, is `requires` on `lean:LeanEnvironment`, and is read by the *authoring* runtime; nothing on the verification path reads it. The institution's own comment gives the reason — the wiring waits on the authoring runtime's environment resource reaching the chain, and the environment IRI is not there today. A constructive-only deployment cannot express that policy by committing a tighter `LeanEnvironment`; changing the allowlist today is a code change.
 
 ## Toolchain pin and upgrade
 
@@ -176,16 +187,17 @@ The full e2e test ([`crates/eigenius-lean-runtime/tests/lean_image_build_e2e.rs`
 
 ## Performance shape
 
-A single-theorem proof of the capstone shape (one `omega` against `Float` ordering, transitively pulling in `Subtype` / `Classical.choice` / `LE.le.toLT` and the EigeniusFFI.Patient structure) exports to ~9 kLoC of JSON (~200 KB). `nanoda_lib` re-checks it in under a second on a modern laptop. The integration test [`crates/eigenius-lean/tests/capstone_test.rs`](../../../../crates/eigenius-lean/tests/capstone_test.rs) is `#[ignore]` because of that cost; run with `-- --ignored` when verifying changes touching the institution.
+A single-theorem proof of the capstone shape (one `Subtype.property` projection against a refinement-typed `Float` field, transitively pulling in `Subtype` / `Classical.choice` / `LE.le.toLT` and the `EigeniusFFI.Patient` structure) exports to ~9 kLoC of JSON (~200 KB). `nanoda_lib` re-checks it in under a second on a modern laptop. The integration test [`crates/eigenius-lean/tests/capstone_test.rs`](../../../../crates/eigenius-lean/tests/capstone_test.rs) is `#[ignore]` because of that cost; run with `-- --ignored` when verifying changes touching the institution.
 
 Memory note: nanoda parses the full export into an `Expr`-tree before type-checking. For small proofs this is fast; for Mathlib-scale proofs the parsed tree can be hundreds of MB. The Phase 20b plan ([implementation-plan.md §Phase 20b](../../../design/implementation-plan.md)) sizes this up when a Mathlib-dependent consumer appears.
 
 ## Troubleshooting
 
-- **`Verdict::Fails` with `PropositionMismatch`** — the proposition decoded from the proof bytes doesn't match the chain-mirrored proposition on the `LeanProofTerm`. Almost always means the fixture was regenerated against different proof bytes; re-run the generator binary.
-- **`Verdict::Fails` with `FFIVersionMismatch`** — the mirror's `source_layer` isn't reachable from the claim's layer, or the proposition references a class the mirror doesn't list. Check that the chain-side class declaration's IRI appears in `mirrored_classes`.
+- **`Verdict::Fails` with `PropositionMismatch`** — the committed `proposition` on the `LeanProofTerm` references no `EigeniusFFI.*` type that maps back to the claim's class. Nothing here compares the proposition against the proof bytes, so re-running the generator only helps if it changes which classes the proposition names. Check that the proposition mentions the mirrored type for the claim's class, and that the class's `core:short_name` matches the Lean structure's name.
+- **`Verdict::Fails` with `FFIVersionMismatch`** — the mirror doesn't resolve, its `source_layer` isn't reachable from the verification head, or the claim's class isn't in `mirrored_classes`. Check that the chain-side class declaration's IRI appears in `mirrored_classes`. Note that check 2a compares `source_layer` against the *verification head's* ancestry rather than against the layer defining the claim's class, so a class that acquired a required property after the proof was authored is not detected.
+- **`Verdict::Fails` with `AnchorContentHashMismatch`** — the SHA-256 recomputed over the mirror's embedded `library_content` archive doesn't match the declared `library_content_hash`. The check compares two fields of one committed resource, so it catches an inconsistent pair, not a coherently rewritten mirror.
 - **`FormatViolation: value '<hex>' does not match format 'urn:eigenius:core:formats:iri'`** — the `source_layer` value isn't IRI-shaped. Wrap the hex layer ID in `urn:eigenius:layer:<hex>`. The institution's check accepts both forms.
-- **`MissingRequired` errors at commit** — the `LeanPackageMirror` is missing a required property (`short_name`, `description`, `language`, `generator_identifier`, etc.). The generator binary's `mirror_resource()` function sets all of them; if you're rolling your own, mirror its shape.
+- **`MissingRequired` errors at commit** — the `runtime:RuntimePackageMirror` is missing a required property (`short_name`, `description`, `language`, `generator_identifier`, etc.). The generator binary's `mirror_resource()` function sets all of them; if you're rolling your own, mirror its shape.
 - **Verdict missing after kernel restart** — fixed in Phase 20a final round. If recurring, check that the kernel ran a clean shutdown (`docker compose stop kernel` with sufficient grace period). The sync-write durability fix at [`storage/rocksdb/src/lib.rs`](../../../../storage/rocksdb/src/lib.rs) makes branch-ref + layer commits durable across forced restarts.
 
 ## Cross-references

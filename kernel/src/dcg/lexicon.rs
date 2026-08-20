@@ -18,12 +18,21 @@
 //!
 //! 1. **Entry handling.** Resolve an entry's `sem` reference to a value ([`resolve_sem`]), build a parse
 //!    [`Item`] from a committed entry ([`entry_to_item`]), and the **felicity gate** ([`gate_entry`]) —
-//!    the trusted filter every LLM- or import-produced entry must pass. An entry is admitted iff
+//!    the intended filter for every LLM- or import-produced entry. An entry is admitted iff
 //!    `⟦cat⟧ ≡ sem_type` and its `sem` actually inhabits `⟦cat⟧`. The kernel is the oracle.
+//!
+//!    **It is not on the commit path.** Every call site is an importer binary, one CLI subcommand,
+//!    or a test; nothing under `kernel/src/{validation,layer,commit}` calls it, and in the importers
+//!    it sits behind an opt-in `--validate` flag that `scripts/reseed-lexicon-db.sh` does not pass.
+//!    A production lexicon load is gated by Rule 21 alone, which checks each `eigentt:TypeExpr` slot
+//!    in isolation and never relates `cat` to `sem_type`. Committing a lexicon does not run this.
 //! 2. **The index.** [`LexicalIndex`] is a `form → entries` map over a layer's committed
 //!    `lexicon:LexicalEntry` resources, resolving each through `entry_to_item` above. Lazy (a probe of
-//!    an active `core:ValueIndex` — the production path at WordNet's 325k entries) or eager (a full
-//!    chain scan) — behaviour-identical.
+//!    an active `core:ValueIndex` — the production path at WordNet scale) or eager (a full
+//!    chain scan) — behaviour-identical. WordNet is often quoted at 325k entries; what this
+//!    importer emits is **465,554** `lexicon:LexicalEntry` resources
+//!    (`docs/notes/lexicon-load-benchmarks-2026-07-27.md`), against its own counter's 465,642 — an
+//!    88-entry disagreement that is recorded there and not explained.
 //!
 //! [`LexicalLookup`] is the trait the parser sees: **two methods, and nothing else**. That is
 //! deliberate. `LexicalIndex` began as exactly what its name says and grew a chart parser, a beam, a

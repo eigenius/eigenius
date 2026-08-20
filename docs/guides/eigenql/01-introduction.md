@@ -29,7 +29,7 @@ The six pipeline stages are:
 2. **Parse** — build the AST ([kernel/src/query/parser.rs](../../../kernel/src/query/parser.rs))
 3. **Stratify** — validate DEFINE rule negation-cycles ([kernel/src/query/stratify.rs](../../../kernel/src/query/stratify.rs))
 4. **Type-check** — validate classes, variables, FIBER clauses ([kernel/src/query/type_check.rs](../../../kernel/src/query/type_check.rs))
-5. **Evaluate** — match patterns, run DEFINE fixpoint, group, aggregate, shape ([kernel/src/query/evaluate.rs](../../../kernel/src/query/evaluate.rs))
+5. **Evaluate** — match patterns, run DEFINE fixpoint, group, aggregate, shape ([kernel/src/query/evaluate/](../../../kernel/src/query/evaluate/mod.rs))
 6. **Wrap** — produce the result document ([kernel/src/query/document.rs](../../../kernel/src/query/document.rs))
 
 Type-check and stratification errors are reported all at once when possible; evaluation errors stop at the first failure.

@@ -161,7 +161,7 @@ Components take exactly one positional input, optionally with a trailing config 
 
 ## 10.4. Kernel errors (compile succeeded, kernel rejects)
 
-Once the ESL compiler emits resources successfully, the resources can still fail when the kernel type-checks or evaluates them. These errors come from [`kernel/src/nbe/check.rs`](../../../kernel/src/nbe/check.rs) and [`kernel/src/nbe/eval.rs`](../../../kernel/src/nbe/eval.rs).
+Once the ESL compiler emits resources successfully, the resources can still fail when the kernel type-checks or evaluates them. These errors come from [`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) and [`kernel/src/nbe/eval/mod.rs`](../../../kernel/src/nbe/eval/mod.rs).
 
 **Cannot infer type**
 
@@ -219,7 +219,7 @@ A normal type-check failure. The expected and actual types differ; the messages 
 
 **FIBER requires institution registry**
 
-This is an EigenQL error, not ESL — but you might see it if you compile ESL programs that use institution capabilities and then run them with a `Pure` or `Read` capability mode that lacks the registry. Use `EvalCtx::Check` or `EvalCtx::IO` with the registry attached. See [chapter 8](08-capability-modes.md).
+This is an EigenQL error, not ESL — but you might see it if you compile ESL programs that use institution capabilities and then run them under `EvalCtx::Pure`, which has no registry. Use `EvalCtx::effectful(layer, hooks)` with an `InstitutionEngine` that carries the registry. See [chapter 8](08-capability-modes.md).
 
 **Comorphism unimplemented**
 

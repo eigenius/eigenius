@@ -458,9 +458,10 @@ pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";
 
 // --- D49 ChainWitness: Trace event classes + canonical proposition ---
 //
-// The four Trace classes are the chain-side artifacts whose commits the
-// D49 witness emitter projects into the per-Layer witness index. Their
-// IRIs are looked up by class name during `build_witness_index`.
+// The four Trace classes are the chain-side artifacts the D49 witness
+// machinery reads. Their IRIs are matched by class name in
+// `trace_category` during `layer_admits_witness`; nothing is
+// materialised into an index (D66 slice 0).
 
 /// Resource recording that a resource was declared by a human/agent.
 /// Carries `reflection:resource` (target IRI). Per D49 §6, a successful

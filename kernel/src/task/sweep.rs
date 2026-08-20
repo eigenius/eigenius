@@ -20,23 +20,34 @@
 //! call to an Embedder Component — commit later, asynchronously,
 //! through a sweep that this module owns.
 //!
+//! **This module is not the sweep the server runs.** The served path is
+//! `server::hooks` → [`crate::task::sweep_registry::SweepCoordinator::trigger_async`]
+//! → [`crate::query::vector::indexing::sweep_layer_vectors_async`], which
+//! builds its own cancellation flag and `AsyncSweepOptions` and never
+//! constructs a [`VectorSweepDriver`]. The only non-test constructor of
+//! `VectorSweepDriver` is `SweepCoordinator::trigger_blocking`, whose only
+//! mention outside `sweep_registry.rs` is a comment. Read the contract
+//! below as the *synchronous* driver's contract, and check
+//! `trigger_async` for what a served commit actually does — notably, it
+//! hardcodes `max_retries: 0`, so the retry clause below does not apply
+//! to it.
+//!
 //! The driver wraps the work-doer in [`crate::query::vector::indexing`]
 //! ([`crate::query::vector::indexing::sweep_layer_vectors_with_options`])
 //! with the per-D43 §5.5 sweep contract:
 //!
 //! - **Observability.** Each sweep run owns a [`TaskRecord`] whose
 //!   `status` reflects `Running` → `Completed` / `Failed` /
-//!   `Cancelled`. v1 keeps the record in-process; persisting it
-//!   through `TaskStore` so `GetTaskStatus` can observe it is the
-//!   wiring step performed when the post-Load commit hook gains a
-//!   `task_store` handle (the M5 follow-up that lights up §5.5's
-//!   coverage query).
+//!   `Cancelled`. The record stays in-process: `SweepCoordinator` holds
+//!   no `TaskStore` handle, so no sweep record ever reaches the store and
+//!   `GetTaskStatus` cannot report one. Wiring it is still open.
 //! - **Cancellation.** A cooperative-cancellation [`AtomicBool`]
 //!   handle is exposed via [`VectorSweepDriver::cancel_handle`]; the
 //!   sweep checks it between Resources and Indexes and returns
 //!   [`crate::query::vector::indexing::SweepError::Cancelled`] when
-//!   raised. `delete_layer(L)` will flip it for any sweep targeting
-//!   `L` once the commit hook is in place.
+//!   raised. Nothing flips it in production: `delete_layer(L)` does not
+//!   cancel an in-flight sweep against `L`, and
+//!   `SweepRegistry::cancel_by_layer` has no caller outside tests.
 //! - **Retry.** Transient [`crate::program::embedder::EmbedderError::Io`]
 //!   failures retry up to `max_retries` times with exponential
 //!   backoff per [`SweepOptions::retry_backoff_base_ms`].

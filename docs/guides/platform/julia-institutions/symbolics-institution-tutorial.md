@@ -102,14 +102,14 @@ julia/institutions/symbolics/
 │   │                                     # input classes for QueryClasses,
 │   │                                     # SymbolicEquation + VariableBinding,
 │   │                                     # ReductionStrategy inductive
-│   └── symbolics-institution.eigon.json  # Institution / RuntimeMethodSignatures
-│                                         # / QueryClasses (AutoOnLoad x4 +
-│                                         #  OnDemand x1 + Decidable x1) /
-│                                         # ExportFormat
+│   └── symbolics-institution.eigon.json  # Institution / 8 RuntimeMethodSignatures
+│                                         # / 7 QueryClasses (AutoOnLoad x4 +
+│                                         #  OnDemand x2 + Decidable x1) /
+│                                         # 2 ExportFormats — 18 resources
 └── EigeniusSymbolics/
     ├── Project.toml                      # Symbolics + SymbolicUtils + EigeniusMirror
-    └── src/EigeniusSymbolics.jl          # 5 handler functions covering all 6
-                                          # QueryClasses
+    └── src/EigeniusSymbolics.jl          # 8 handler entry points, one per
+                                          # RuntimeMethodSignature
 ```
 
 The shared formula language lives separately in [`ontologies/formulas/formulas-ontology.json`](../../../../ontologies/formulas/formulas-ontology.json) and is part of the kernel bootstrap — it's already on every chain by the time you start.
@@ -137,6 +137,7 @@ The Symbolics ontology declares the institution's chain-committable surface — 
 | `SymbolicallyReducesTo` | Class | Claim: under the named strategy, source reduces to result. Validated at commit. |
 | `SimplifyRequest` | Class | Composite input class for the OnDemand `qc_symb_simplify`. |
 | `EquivalenceCheck` | Class | Composite input class for the Decidable `qc_symb_check_equivalence`. |
+| `SymbolicsToJuMPInput` | Class | Composite input class for the OnDemand `qc_symb_to_jump` and the source side of the Symbolics → JuMP comorphism. Requires `objective` (a `SymbolicExpression`), `variable_names` and `sense`; recommends `framing_variable_bounds` and `framing_constraints`. The last two are typed at **JuMP's** `VariableBound` and `Constraint` classes, which is why the JuMP ontology must load before this one — a `class_types` reference has to resolve at commit time. |
 
 The validator checks each at commit. Worth pausing on `SymbolicExpression.term`:
 
@@ -198,7 +199,7 @@ The intervals handler decodes `BoundedBy → Interval`, returns a Verdict (a Dic
 
 ### The institution declares more dispatch roles
 
-Where intervals declared one `QueryClass` (`bounded_by_validity`, AutoOnLoad), Symbolics declares six:
+Where intervals declared one `QueryClass` (`bounded_by_validity`, AutoOnLoad), Symbolics declares **seven**:
 
 | QueryClass | Dispatch role | Input | Output |
 |---|---|---|---|
@@ -207,7 +208,24 @@ Where intervals declared one `QueryClass` (`bounded_by_validity`, AutoOnLoad), S
 | `satisfies_equation_validity` | AutoOnLoad | `SatisfiesEquation` | `Verdict` |
 | `symbolically_reduces_to_validity` | AutoOnLoad | `SymbolicallyReducesTo` | `Verdict` |
 | `qc_symb_simplify` | OnDemand | `SimplifyRequest` | `SymbolicExpression` |
+| `qc_symb_to_jump` | OnDemand | `SymbolicsToJuMPInput` | `jump:OptimisationProblem` |
 | `qc_symb_check_equivalence` | Decidable | `EquivalenceCheck` | `Verdict` |
+
+`qc_symb_to_jump` is the one that reaches outside the institution: its `result_class` is a **JuMP-owned** class, and its handler `frame_as_optimisation_problem` is also the procedure of the ExportFormat `ef_symb_to_jump_input`. That pairing is what makes the Symbolics → JuMP comorphism's middle an identity on `OptimisationProblem` — the framing happens here, on the Symbolics side.
+
+Two ExportFormats install alongside them:
+
+| ExportFormat | `from_class` | `payload_type` | Procedure |
+|---|---|---|---|
+| `ef_symb_expr` | `SymbolicExpression` | `formulas:FormulaTerm` | `extract_term` (`return expr.term`) |
+| `ef_symb_to_jump_input` | `SymbolicsToJuMPInput` | `jump:OptimisationProblem` | `frame_as_optimisation_problem` |
+
+And eight `RuntimeMethodSignature`s — one per handler entry point:
+`validate_simplifies_to`, `validate_substitutes`, `validate_satisfies_equation`,
+`validate_symbolically_reduces_to`, `simplify_expression`, `check_equivalence`,
+`extract_term`, `frame_as_optimisation_problem`. The last two exist for the
+comorphism boundaries and are easy to miss when counting from the QueryClass
+list alone: eighteen resources install in total.
 
 Three different dispatch roles, all on one institution. Worth understanding what that means before walking through the demo's invocations:
 
@@ -467,7 +485,7 @@ After the full demo runs, the following resources have been committed (all reach
 | Symbolics ontology classes (10 of them) | step 1 |
 | `RuntimePackageMirror` | step 3 |
 | `RuntimeEnvironment` (`urn:eigenius:symbolics:env:v1`) | step 5 |
-| `Institution`, 6 RuntimeMethodSignatures, 6 QueryClasses, ExportFormat | step 6 |
+| `Institution`, 8 RuntimeMethodSignatures, 7 QueryClasses, 2 ExportFormats (18 resources) | step 6 |
 | `SimplifiesTo` claim (`x*0 → 0`) + Verdict + RuntimeInvocation | step 7 |
 | `SymbolicExpression` (`(x + 0) * 1`) | step 9 |
 | `Substitutes` claim + Verdict | step 11 |
@@ -485,7 +503,7 @@ Everything in this demo is downstream of the three D32 claims listed at the top:
 - **`FormulaTerm` is shared across institutions.** The same FormulaTerm shape that this demo's Symbolics handler decodes is also what the IntervalArithmetic handler in the cross-institution probe ([`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs)) decodes — different institutions, identical chain-side payload. Step 9's pre-committed SymbolicExpression could have been authored in a Catalyst or DiffEq context with the same wire shape.
 - **Operators carry typed signatures.** Every `OpRef` in every FormulaTerm in this demo got rank-checked against an on-chain `Operator.operator_signature` at commit time (D32 §5.4). Authoring `App(App(OpRef("formulas:ops:add"), Var("x")), LitFloat(0.0), LitFloat(1.0))` — an extra arg — gets rejected before the worker ever sees it.
 
-The runtime mechanics — three dispatch roles, six QueryClasses, four claim types — are the surface. The chain shapes underneath (typed inductive values, typed operator signatures, mirror-driven Julia dispatch) are what makes them composable across institutions.
+The runtime mechanics — three dispatch roles, seven QueryClasses, four claim types — are the surface. The chain shapes underneath (typed inductive values, typed operator signatures, mirror-driven Julia dispatch) are what makes them composable across institutions.
 
 ## Common failure modes
 

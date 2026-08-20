@@ -28,10 +28,11 @@
 //!
 //! Standalone `extend_layer` / `drop_layer` create their own
 //! `WriteBatch`; `extend_into_batch` / `drop_into_batch` append to a
-//! caller-supplied batch so `RocksStore::store_layer` can commit
-//! layer + indexes in a single atomic write (D43 §2.5 / §5.6 — the
-//! vector segments are the one structural exception that may also
-//! be backfilled by the M5 post-Load sweep).
+//! caller-supplied batch. `RocksStore::delete_layer` passes its batch to
+//! `drop_into_batch`; `RocksStore::store_layer` does not call
+//! `extend_into_batch`, so the D43 §2.5 single-atomic-write property
+//! holds on the drop path only (see GAP-05-14). Vector segments are in
+//! any case also backfilled by the M5 post-Load sweep (D43 §5.6).
 
 use crate::{run_blocking, CF_VEC};
 use eigenius_kernel::layer::{LayerId, VectorDoc, VectorIndex, VectorIndexStats, VectorSegment};

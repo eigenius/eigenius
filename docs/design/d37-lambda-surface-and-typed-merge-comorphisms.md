@@ -437,10 +437,10 @@ merge_comorphism project:patient_ancestor_aware for project:Patient {
     (a, b, opt) => match opt {
         Some(ancestor) =>
             if a.weight == ancestor.weight
-                then b   -- A didn't change weight; safe to take B
-                else a,  -- A changed; prefer A's weight
+                then b   // A didn't change weight; safe to take B
+                else a,  // A changed; prefer A's weight
         None =>
-            a            -- no ancestor; default to A
+            a            // no ancestor; default to A
     }
 }
 ```

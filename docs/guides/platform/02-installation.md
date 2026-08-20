@@ -6,7 +6,7 @@ The platform builds and runs on Linux (native or Windows with WSL 2) and macOS. 
 
 ### Rust 1.97+
 
-The Rust version pinned by [`deploy/Dockerfile.kernel`](../../../deploy/Dockerfile.kernel) is **1.97**. Earlier versions may fail to build some workspace dependencies.
+The Rust version pinned by [`deploy/Dockerfile.kernel`](../../../deploy/Dockerfile.kernel) is **1.97**, and that Dockerfile is the only place it is pinned. There is no `rust-version` key in `Cargo.toml` and no `rust-toolchain` / `rust-toolchain.toml` file, so nothing enforces the version on a developer machine — an older toolchain gets a dependency compile error rather than a clear MSRV message. Install 1.97 or newer.
 
 Install via [rustup](https://rustup.rs):
 
@@ -21,6 +21,25 @@ Verify:
 ```bash
 rustc --version  # rustc 1.97.0 or newer
 ```
+
+### Lean 4 (via elan) — required for the workspace build
+
+`cargo build --workspace` does not complete without a Lean toolchain. `crates/eigenius-lean-worker`'s build script compiles a C bridge against Lean's `lean.h`; it looks in `EIGENIUS_LEAN_INCLUDE_DIR`, then `LEAN_SYSROOT`, then `lean --print-prefix`, and panics if none resolves. There is no fallback to system include paths, and no feature flag that skips the crate in a workspace build.
+
+The pinned version is the single line in [`lean/runtime-worker/lean-toolchain`](../../../lean/runtime-worker/lean-toolchain) — today `leanprover/lean4:v4.29.1`. Install [elan](https://github.com/leanprover/elan), which reads that file and fetches the right toolchain:
+
+```bash
+curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-init.sh | sh
+source "$HOME/.elan/env"
+```
+
+Verify:
+
+```bash
+lean --print-prefix   # must print a prefix containing include/lean/lean.h
+```
+
+If Lean is installed somewhere `lean --print-prefix` cannot see, set `EIGENIUS_LEAN_INCLUDE_DIR` to the directory containing `lean/lean.h` instead.
 
 ### Deno
 

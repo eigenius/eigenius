@@ -665,7 +665,9 @@ Every layer commit atomically writes:
 1. `layer:<new_id>:meta` and all `layer:<new_id>:res:<iri>` entries.
 2. `topo:<new_id>` with the LayerHandle.
 3. `bloom:<new_id>` with the layer's per-IRI shadowing bloom (§5.2).
-4. `idx_pos:` and `idx_layer:` entries for each indexable `(s, p, o)` triple in the new layer (§5.9). Population happens at `LayerBuilder::build` time through the shared `Arc<dyn TripleIndex>` in `LayerStorage`; the persistent backend's `RocksTripleIndex` writes to the same RocksDB so the entries are durable by the time the layer's other content lands.
+4. `idx_pos:` and `idx_layer:` entries for each indexable `(s, p, o)` triple in the new layer (§5.9).
+
+> **Implementation note (2026-08-20).** Index population moved out of `LayerBuilder::build`: `RocksStore::store_layer` calls `populate_layer_indexes` at its top, before it opens the `WriteBatch`, and each index then commits its own **non-sync** batch. So the index entries are durable *before* the layer's other content lands, but they are **not in the same batch** — this step is not part of the §6.3 atomic write on the commit path. The drop path is atomic: `delete_layer` passes its batch to each index's `drop_into_batch`. `extend_into_batch` exists to close the write-side gap and `store_layer` does not call it.
 5. `branch:<branch_name>` to point at `<new_id>` (separate `update_branch` CAS — see §5.4).
 
 Steps 1–3 are one RocksDB `WriteBatch` inside `store_layer`; RocksDB guarantees atomicity across the batch, so partial commits of layer/topology/bloom are impossible. Step 4's index writes happen via a separate `WriteBatch` driven by `RocksTripleIndex::extend_layer`. A crash between step 4 and step 1 leaves orphan index entries — invisible to queries because the chain-membership filter drops them, harmless until the next `delete_layer` call against the orphan layer reclaims them. Step 5 (branch CAS) is sequenced after the layer is durable per §5.4.

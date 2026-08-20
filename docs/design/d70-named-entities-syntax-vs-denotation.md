@@ -1,7 +1,10 @@
 # D70 — Named entities: proper-name SYNTAX vs named-individual DENOTATION
 
 *Status: **IMPLEMENTED 2026-08-15 — see §0.** §5 D1 and D3 MEASURED 2026-08-15; D2 answered for genes/proteins and unanswerable
-for diseases on this corpus. §4 revised: O1 demoted to a stopgap, O2 made concrete by D3**. No code yet. Motivated by three independent failures
+for diseases on this corpus. §4 revised: O1 demoted to a stopgap, O2 made concrete by D3.* (The line
+that followed, "No code yet", was left over from the pre-implementation draft and contradicted the
+sentence before it; removed 2026-08-20. The implemented half is verifiable in the lexicon ontology,
+the UMLS importer and the parser.) *Motivated by three independent failures
 in the WRN-page measurement (2026-08-13…15) that turn out to be one axis: the UMLS importer decides
 "is this a named individual?" with a single flag (`Concept::symbol`), and that flag simultaneously
 fixes how a term BEHAVES SYNTACTICALLY (bare, no determiner, no plural) and what it DENOTES (an entity

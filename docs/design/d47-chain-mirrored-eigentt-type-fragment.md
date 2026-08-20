@@ -93,6 +93,16 @@ D47's `ConstRef(iri)` ctor unifies the three: a single chain ctor that carries a
 
 ## 3. The `core:EigenTTType` inductive
 
+> **As built (verified 2026-08-20 at `b251c9e`).** The inductive shipped under a different
+> IRI and is larger than this section specifies. It is `urn:eigenius:eigentt:TypeExpr`,
+> declared in `ontologies/eigentt/eigentt-type-fragment.json`, not
+> `urn:eigenius:core:EigenTTType` in `core-ontology.json`. It carries **18** ctors, not the
+> 9 tabulated below: the 9 here (`Sort`, `Var`, `ConstRef`, `App`, `Pi`, `Sig`, `Lam`,
+> `One`, `Id`) plus `Ann`, `UnitVal`, `LitInt`, `LitString`, `LitFloat`, `CtorApp`, `Pair`,
+> `Fst` and `Snd`. §3.5's decision to omit literals for v1 was reversed — all three literal
+> formers ship. The codec is `kernel/src/program/eigentt_type_mirror.rs`, which encodes and
+> decodes exactly those 18.
+
 ### 3.1 Ctor table
 
 | Ctor | Args | Decodes to `Exp` | Notes |
@@ -371,9 +381,36 @@ For every type-level closed `Exp`, `decode_type(encode_type(e)) ≡ e` modulo:
 
 Property-based tests (`proptest`) cover the closed type-level subset.
 
+> **As built (verified 2026-08-20 at `b251c9e`).** No property-based test covers the round
+> trip. `proptest` is declared in the workspace `Cargo.toml` and in `kernel/Cargo.toml`, and
+> is used in no Rust file under `kernel/`, `crates/`, `storage/` or `cli/`. Round-trip
+> coverage is 35 example-based `#[test]`s in the codec module itself
+> (`kernel/src/program/eigentt_type_mirror.rs`).
+
 ---
 
 ## 5. Validator integration
+
+> **As built (verified 2026-08-20 at `b251c9e`).** This section is superseded. A new
+> validator rule *was* added — **Rule 21**,
+> `kernel/src/validation/rules/eigentt_value.rs`, `check_type_expr_well_typed` — and it does
+> both halves this section defers. It keys off the declared range
+> (`class_types ∋ eigentt:TypeExpr`) rather than off a property name, decodes the tree with
+> the D47 codec (`decode_type`), and then type-checks the decoded `Exp` against the chain
+> with `nbe::check::check_infer`. Type-checking at commit is therefore *not* the consumer's
+> responsibility, contrary to the paragraph below; Rule 21 consolidated what had been three
+> overlapping checks, including the old Rule 20 canonical-proposition decode check and
+> `check_inductive_value`'s bespoke `ConstRef`/`CtorApp` walk, which now skips
+> `eigentt:TypeExpr`. The diagnostics are `TypeExprMalformed` and `TypeExprIllTyped`;
+> `ConstRefUnresolved` and `ConstRefArityMismatch` were never built, and the codec's decode
+> errors — `ConstRefWrongClass` among them — surface through `TypeExprMalformed` instead.
+>
+> One limit on the type-check is worth recording here because this section is where a reader
+> looks for it: Rule 21 calls `check_infer` and **discards the type it returns**, so the
+> guarantee at commit is well-typedness, not membership of any particular sort. A
+> `canonical_proposition` holding an integer literal type-checks and commits. The `P : Sort 0`
+> check exists only off the commit path, in the felicity gate and in the reasoning
+> institution's justification validator.
 
 `core:EigenTTType` is a chain `InductiveType`; D32's existing validator handles the value-tree walk against the ctor schema for free. No new validator rule.
 

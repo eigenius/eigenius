@@ -100,7 +100,7 @@ WHERE ?desc ~ "concurrent commit recovery"
 
 `?desc` was bound by the `description: ?desc` property pattern; the operator consults the active index(es) on `description` to decide which rows survive. The same operator works whether the schema declared only a TextIndex, only a VectorIndex, or both (§6.6).
 
-`~` sits at relational precedence in the [operator table](12-appendix.md) — between additive and comparison operators. `?a ~ "x" AND ?b ~ "y"` parses as `(?a ~ "x") AND (?b ~ "y")`, no parentheses needed. The operator is right-bounded by its hint block (next section) or by the next clause keyword.
+`~` sits at relational precedence in the [operator table](13-appendix.md) — between additive and comparison operators. `?a ~ "x" AND ?b ~ "y"` parses as `(?a ~ "x") AND (?b ~ "y")`, no parentheses needed. The operator is right-bounded by its hint block (next section) or by the next clause keyword.
 
 **The operator is Boolean.** It returns true for rows the platform decided are similar enough; the platform-internal score it computed feeds `TOP N`'s implicit ranking (§6.5) but is not exposed as a value the query can bind. If you need score inspection for debugging, the EXPLAIN-equivalent surface is deferred to a future revision; see [D43 §3.7](../../design/d43-text-and-vector-retrieval.md).
 
