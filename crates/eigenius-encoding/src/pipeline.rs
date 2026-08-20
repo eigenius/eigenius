@@ -158,21 +158,7 @@ pub struct Args {
 /// In [`OutputFormat::Esl`] the JSON is printed back as source. A document the printer cannot
 /// express is an ERROR, not a fallback to JSON: silently writing a different format under a
 /// `.esl` path would be worse than failing.
-fn write_doc(path: &Path, json: &str, format: OutputFormat) -> Result<(), String> {
-    let body = match format {
-        OutputFormat::Json => json.to_string(),
-        OutputFormat::Esl => {
-            let doc: serde_json::Value = serde_json::from_str(json)
-                .map_err(|e| format!("emitted document is not valid JSON: {e}"))?;
-            // Pretty: this binary exists to produce source a person reads. A parsed sentence's
-            // proposition is a deep application spine, and on one line its structure is invisible.
-            eigenius_kernel::esl::print::print_document_with(
-                &doc,
-                eigenius_kernel::esl::print::Layout::Pretty,
-            )
-            .map_err(|e| format!("cannot print {} as ESL: {e}", path.display()))?
-        }
-    };
+fn write_doc(path: &Path, body: &[u8]) -> Result<(), String> {
     std::fs::write(path, body).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
@@ -503,8 +489,17 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             source_ref: args.source_ref.as_deref(),
         },
     })?;
-    let json = artifact.json;
-    write_doc(&args.out, &json, format)?;
+    // The CLI's `--out` decides the encoding; the kernel owns the mapping, so this is the one
+    // place the driver expresses a format at all.
+    use eigenius_kernel::dcg::formalizer::{render_artifact, ArtifactFormat};
+    let rendered = render_artifact(
+        &artifact.resources,
+        match format {
+            OutputFormat::Json => ArtifactFormat::EigonJson,
+            OutputFormat::Esl => ArtifactFormat::Esl,
+        },
+    )?;
+    write_doc(&args.out, &rendered)?;
     eprintln!(
         "\nwrote {} ({} encoded, {} cut, {} glossary)",
         args.out.display(),

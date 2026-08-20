@@ -190,6 +190,26 @@ pub fn emit_document(
     sentences: &[ParsedSentence<'_>],
     cuts: &[CutSentence],
 ) -> Result<String, EmitError> {
+    Ok(
+        serde_json::to_string_pretty(&serialize_document(&emit_resources(
+            meta, glossary, sentences, cuts,
+        )?))
+        .expect("serialize Eigon-JSON"),
+    )
+}
+
+/// The artifact as RESOURCES, before any encoding is chosen.
+///
+/// [`emit_document`] is the Eigon-JSON rendering of this; the served path renders whichever format
+/// the request asked for (`render_artifact`). One builder, three encodings — the alternative is a
+/// format decision living in every caller, which is how a served run ends up emitting a shape the
+/// committed fixtures never compared against.
+pub fn emit_resources(
+    meta: &DocumentMeta<'_>,
+    glossary: &[Resource],
+    sentences: &[ParsedSentence<'_>],
+    cuts: &[CutSentence],
+) -> Result<Vec<Resource>, EmitError> {
     let DocumentMeta {
         ns,
         source_path,
@@ -513,7 +533,7 @@ pub fn emit_document(
     );
     out.push(structure);
 
-    Ok(serde_json::to_string_pretty(&serialize_document(&out)).expect("serialize Eigon-JSON"))
+    Ok(out)
 }
 
 /// The `enc:DiscourseUnit` record — identical for encoded and cut sentences.

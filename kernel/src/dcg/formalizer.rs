@@ -53,6 +53,66 @@ pub enum DrawSource {
     Live,
 }
 
+/// How the artifact comes back.
+///
+/// Mirrors [`crate::server::proto::LoadRequest`]'s `bytes` + `content_type` pair rather than
+/// pinning one encoding, because the artifact is BOTH a machine payload and something a person
+/// reads: D71 §4 makes generation/commitment decoupling the point — the artifact is inspected and
+/// diffed, then `Load`ed — and `Load` itself accepts either encoding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ArtifactFormat {
+    /// Canonical Eigon-CBOR. The default: it is what `Load` prefers and what nothing has to
+    /// re-parse.
+    #[default]
+    Cbor,
+    /// Eigon-JSON — the form the committed test fixtures and the demo diff against.
+    EigonJson,
+    /// ESL source. The most readable, and the only form that can FAIL to render: a document the
+    /// printer cannot express is an error, never a silent fallback to another encoding — writing a
+    /// different format under an `.esl` name would be worse than failing.
+    Esl,
+}
+
+impl ArtifactFormat {
+    /// The `content_type` string, matching `LoadRequest`'s vocabulary.
+    pub fn content_type(self) -> &'static str {
+        match self {
+            Self::Cbor => "application/cbor",
+            Self::EigonJson => "application/eigon+json",
+            Self::Esl => "text/x-esl",
+        }
+    }
+}
+
+/// Render a resource set in the requested format.
+///
+/// Lives here, beside the format enum, because all three serializers are kernel-side and a caller
+/// that re-derived the mapping would be the second place format policy lives.
+pub fn render_artifact(
+    resources: &[crate::ontology::resource::Resource],
+    format: ArtifactFormat,
+) -> Result<Vec<u8>, String> {
+    match format {
+        ArtifactFormat::Cbor => Ok(crate::ontology::eigon_cbor::serialize_document(resources)),
+        ArtifactFormat::EigonJson => Ok(json_bytes(resources)),
+        ArtifactFormat::Esl => {
+            let doc: serde_json::Value = serde_json::from_slice(&json_bytes(resources))
+                .map_err(|e| format!("emitted document is not valid JSON: {e}"))?;
+            crate::esl::print::print_document_with(&doc, crate::esl::print::Layout::Pretty)
+                .map(String::into_bytes)
+                .map_err(|e| format!("cannot render the artifact as ESL: {e}"))
+        }
+    }
+}
+
+/// Pretty Eigon-JSON. Pretty because this artifact exists to be read: a parsed proposition is a
+/// deep application spine, and on one line its structure is invisible.
+fn json_bytes(resources: &[crate::ontology::resource::Resource]) -> Vec<u8> {
+    serde_json::to_string_pretty(&crate::ontology::eigon_json::serialize_document(resources))
+        .expect("serialize Eigon-JSON")
+        .into_bytes()
+}
+
 /// One formalization run, as values — no paths, no clap, no snapshot.
 pub struct FormalizeRequest {
     /// The prose to formalize.
@@ -81,12 +141,16 @@ pub struct FormalizeRequest {
     /// not an aborted run (D71 §8).
     pub strict: bool,
     pub draws: DrawSource,
+    /// How the artifact should come back.
+    pub format: ArtifactFormat,
 }
 
 /// What a run produced.
 pub struct FormalizeOutput {
-    /// The artifact, as Eigon-JSON. A caller that wants ESL prints it through the ESL printer.
-    pub artifact_json: String,
+    /// The artifact, in [`FormalizeRequest::format`].
+    pub artifact: Vec<u8>,
+    /// What `artifact` is encoded as — echoed so a caller need not track the request to read it.
+    pub content_type: ArtifactFormat,
     /// The `enc:ReasoningStructure` that roots it — the handle a caller re-opens or supersedes.
     pub structure_iri: String,
     pub encoded: usize,

@@ -256,12 +256,20 @@ FormalizeDocument(
   scope[] | profile,            // D65 lexicon scope
   draws { ranks, selections, proposals, kinds },  // replay handles; absent ⇒ live
   strict,                       // default false — see §8
-  format                        // Esl | EigonJson
+  format                        // Cbor | EigonJson | Esl
 ) -> task_id
 ```
 
 The completed task exposes the artifact and the `enc:ReasoningStructure` IRI. Committing is a separate
 `Load` by the caller.
+
+The artifact comes back as **bytes plus a content type**, mirroring `LoadRequest` — which takes
+`bytes resources` with `"application/cbor" | "application/eigon+json"` — rather than pinning one
+encoding. CBOR-only is the convention for payloads nothing reads (the institution boundary, layer
+persistence, `TaskRecord`); the artifact is the opposite case, since §4's whole decoupling argument
+is that a person inspects and diffs it before `Load`ing it. `ArtifactFormat::Esl` is the only arm
+that can FAIL to render, and it fails rather than falling back: writing a different encoding under an
+`.esl` name would be worse than erroring.
 
 A second operation, **`FormalizeUnit`** — re-encode one unit inside an existing `ReasoningStructure` —
 is what §11 needs. It is specified there, not here, because its context requirement is the open

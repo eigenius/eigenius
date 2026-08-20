@@ -33,14 +33,18 @@ use eigenius_kernel::dcg::SentenceOutcome;
 use eigenius_kernel::ontology::resource::Resource;
 
 use crate::emit::{
-    emit_document, CutReason, CutSentence, DocumentMeta, ParsedSentence, SentenceSelection,
+    emit_resources, CutReason, CutSentence, DocumentMeta, ParsedSentence, SentenceSelection,
 };
 use crate::select::Pin;
 
-/// What a run produced: the artifact and the counts a driver reports.
+/// What a run produced: the artifact's RESOURCES and the counts a driver reports.
+///
+/// Deliberately not a rendered string. The artifact has three encodings (CBOR, Eigon-JSON, ESL) and
+/// which one a run wants is the caller's business; baking one in here put the choice in every
+/// driver, which is how a served run ends up emitting a shape the committed fixtures never
+/// compared against. Render with `eigenius_kernel::dcg::formalizer::render_artifact`.
 pub struct Artifact {
-    /// Eigon-JSON. A driver that wants ESL prints it back through the ESL printer.
-    pub json: String,
+    pub resources: Vec<eigenius_kernel::ontology::resource::Resource>,
     pub encoded: usize,
     pub cut: usize,
     pub glossary: usize,
@@ -234,9 +238,10 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
     if !glossary.is_empty() {
         eprintln!("glossary: {} Stage-A resource(s) emitted", glossary.len());
     }
-    let json = emit_document(&inputs.meta, &glossary, &parsed, &cuts).map_err(|e| e.to_string())?;
+    let resources =
+        emit_resources(&inputs.meta, &glossary, &parsed, &cuts).map_err(|e| e.to_string())?;
     Ok(Artifact {
-        json,
+        resources,
         encoded: parsed.len(),
         cut: cuts.len(),
         glossary: glossary.len(),
@@ -464,7 +469,11 @@ impl DocumentFormalizer for EncodingFormalizer {
         let draws_committed = commit_draws(&backend, &req.doc_id, doc_layer, draw_resources_all)?;
 
         Ok(FormalizeOutput {
-            artifact_json: artifact.json,
+            artifact: eigenius_kernel::dcg::formalizer::render_artifact(
+                &artifact.resources,
+                req.format,
+            )?,
+            content_type: req.format,
             structure_iri: format!("{}:structure", req.ns),
             encoded: artifact.encoded,
             cut: artifact.cut,
