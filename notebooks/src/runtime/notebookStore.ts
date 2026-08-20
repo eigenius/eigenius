@@ -240,6 +240,8 @@ export type CellOutput =
     /** The artifact, as text (the cell always asks for ESL — it is meant to be read). */
     artifact: string;
     docBranch: string;
+    /** Set when the cell's `land` flag committed the artifact on this run. */
+    landed?: { layerId: string; resourceCount: number };
   }
   | {
     kind: "error";
@@ -1466,6 +1468,7 @@ function serializeCell(c: CellJson): CellJson {
       ...(c.lexicon_profile !== undefined
         ? { lexicon_profile: c.lexicon_profile }
         : {}),
+      ...(c.land !== undefined ? { land: c.land } : {}),
     };
   }
   return { id: c.id, type: c.type, source: c.source };
@@ -1628,7 +1631,13 @@ async function executeCell(
  */
 async function executeFormalizeCell(
   eigen: Eigen,
-  cell: { id: string; source: string; doc_id?: string; lexicon_profile?: string },
+  cell: {
+    id: string;
+    source: string;
+    doc_id?: string;
+    lexicon_profile?: string;
+    land?: boolean;
+  },
 ): Promise<CellOutput> {
   const prose = cell.source.trim();
   if (prose.length === 0) {
@@ -1670,14 +1679,33 @@ async function executeFormalizeCell(
   if (result.error.length > 0) {
     return { kind: "error", message: result.error };
   }
+  const artifact = new TextDecoder().decode(result.artifact);
+
+  // LAND ON RUN (D71). Off by default — the artifact exists to be read first — but
+  // once the decision is recorded in the cell, `Run all` reproduces the chain state
+  // rather than stopping at "an artifact was produced". Idempotent: the artifact is
+  // content-addressed, so re-running unchanged prose does not advance the branch.
+  let landed: { layerId: string; resourceCount: number } | undefined;
+  if (cell.land) {
+    const resp = await eigen.load(artifact, {
+      contentType: "application/x-esl",
+      autoCommit: true,
+    });
+    landed = {
+      layerId: resp.layerId,
+      resourceCount: Number(resp.resourceCount ?? 0),
+    };
+  }
+
   return {
     kind: "formalize",
     structureIri: result.structureIri,
     encoded: result.encoded,
     cut: result.cut,
     drawsCommitted: result.drawsCommitted,
-    artifact: new TextDecoder().decode(result.artifact),
+    artifact,
     docBranch: started.docBranch,
+    landed,
   };
 }
 

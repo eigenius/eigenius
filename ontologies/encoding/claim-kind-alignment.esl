@@ -27,9 +27,26 @@
 //   Readings whose restrictor carries an unaligned sense simply do not resolve to claims —
 //   the alignment doubles as sense discrimination, which is the point.
 //
-// enc:Hypothesis / enc:Suggestion have no alignment facts yet (the page never refers with
-// «these hypotheses»); enc:Assertion is deliberately unaligned FOREVER (an unmarked claim is
-// not discourse-referable — fail-closed).
+// ALIGNED `2026-08-20` — enc:Hypothesis, enc:Suggestion. Both were previously unaligned only
+// because the WRN page never refers with «these hypotheses» / «these suggestions»; that is a
+// property of one corpus, not of the vocabulary, and an unaligned kind fails the restrictor check
+// SILENTLY (the demonstrative just does not resolve). Senses read from WordNet 3.0 data.noun:
+//   hypothesis  n05888929 "a tentative insight into the natural world; a concept that is not yet
+//                          verified but that if true would explain certain facts"   → Hypothesis
+//               n07162545 "a proposal intended to explain certain facts or observations"
+//                                                                                   → Hypothesis
+//   suggestion  n05916155 "an idea that is suggested"                               → Suggestion
+//               n07162680 "a proposal offered for acceptance or rejection"          → Suggestion
+//   NOT aligned — wn:n06782680 (hypothesis as "a message expressing an opinion based on
+//                 incomplete evidence" — the speech-act/conjecture reading, not the document's
+//                 marked hypothesis); wn:n07246582 (persuasion formulated as a suggestion) and
+//                 wn:n00158996 (inducing hypnosis) — the hypnotic senses; wn:n13773361 (a just
+//                 detectable amount, "a suggestion of an accent"); wn:n05771679 (association of
+//                 ideas). No UMLS parents: unlike finding/observation, these are discourse acts
+//                 rather than clinical-data concepts, and UMLS's near matches are the wrong kind.
+//
+// enc:Assertion is deliberately unaligned FOREVER (an unmarked claim is not discourse-referable —
+// fail-closed).
 
 namespace enc     = "urn:eigenius:encoding";
 namespace wn      = "urn:eigenius:wn";
@@ -45,4 +62,12 @@ class enc:Observation : enc:Claim, wn:n01002956, umlscui:C0302523, umlscui:C5890
 
 class enc:Classification : enc:Claim, wn:n01012712 {
     description = "A claim assigning items to categories («These classifications were highly concordant …»). ALIGNED (this layer): wn classification = 'the act of distributing things into classes'.";
+}
+
+class enc:Hypothesis : enc:Claim, wn:n05888929, wn:n07162545 {
+    description = "A claim the document marks as conjectured, typically by its matrix frame («We hypothesized that …»). Referable as a hypothesis; never as a finding. ALIGNED (this layer): wn hypothesis = 'a tentative insight … not yet verified'; wn hypothesis = 'a proposal intended to explain certain facts or observations'.";
+}
+
+class enc:Suggestion : enc:Claim, wn:n05916155, wn:n07162680 {
+    description = "A claim the document presents as suggested/indicated rather than established («… suggest that …» as the matrix frame). ALIGNED (this layer): wn suggestion = 'an idea that is suggested'; wn suggestion = 'a proposal offered for acceptance or rejection'.";
 }

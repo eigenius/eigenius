@@ -399,6 +399,59 @@ enum Commands {
         command: LexiconCommands,
     },
 
+    /// Formalize prose into typed, kernel-checked claims (D71). Remote mode only —
+    /// it needs the served lexicon chain.
+    ///
+    /// The run is a TASK: a document costs minutes and several LLM round-trips. This
+    /// waits for it by default and writes the artifact; `--no-wait` prints the task id
+    /// instead, and `tasks status` / `tasks cancel` take it from there.
+    ///
+    /// The artifact is NOT committed. Generation stays decoupled from commitment
+    /// (D71 §4), so read it, then land it with `load`.
+    Formalize {
+        /// File of prose to formalize. `-` reads stdin.
+        file: String,
+        /// Names the run's `doc-<id>` working branch, which holds the document glossary
+        /// and this run's recorded proposer draws. Re-using it REPLAYS those draws
+        /// instead of re-asking the model. Defaults to the file stem.
+        #[arg(long)]
+        doc_id: Option<String>,
+        /// Write the artifact here instead of stdout.
+        #[arg(long)]
+        out: Option<String>,
+        /// Artifact encoding.
+        #[arg(long, default_value = "text/x-esl",
+              value_parser = ["application/cbor", "application/eigon+json", "text/x-esl"])]
+        format: String,
+        /// Branch to parse over — this is how you say WHICH LEXICON.
+        #[arg(long)]
+        branch: Option<String>,
+        /// Ordered `lexicon:Lexicon` IRIs; array order IS resolution precedence (D65 §4).
+        #[arg(long)]
+        scope: Vec<String>,
+        /// A `lexicon:LexiconProfile` IRI naming that ordered list. Excludes `--scope`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// IRI prefix for the emitted resources.
+        #[arg(long)]
+        ns: Option<String>,
+        /// An existing `reference:Reference` IRI to cite instead of minting one.
+        #[arg(long)]
+        source_ref: Option<String>,
+        /// Model for this run's untrusted proposers; also what each recorded draw names
+        /// as its answerer.
+        #[arg(long)]
+        model: Option<String>,
+        /// Abort on the first unit that does not encode, instead of recording it as an
+        /// `enc:CutItem`. Default is to record: an artifact should state what did not
+        /// encode rather than vanish.
+        #[arg(long)]
+        strict: bool,
+        /// Print the task id and exit instead of waiting.
+        #[arg(long)]
+        no_wait: bool,
+    },
+
     /// Manage external institutions (D31 §5, Phase 19a.5.e)
     Institution {
         #[command(subcommand)]
@@ -1108,6 +1161,40 @@ async fn main() {
                 remote_institution(endpoint, command, cli.json).await
             }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
+            Commands::Formalize {
+                file,
+                doc_id,
+                out,
+                format,
+                branch,
+                scope,
+                profile,
+                ns,
+                source_ref,
+                model,
+                strict,
+                no_wait,
+            } => {
+                remote_formalize(
+                    endpoint,
+                    FormalizeArgs {
+                        file: &file,
+                        doc_id: doc_id.as_deref(),
+                        out: out.as_deref(),
+                        format: &format,
+                        branch: branch.as_deref(),
+                        scope: &scope,
+                        profile: profile.as_deref(),
+                        ns: ns.as_deref(),
+                        source_ref: source_ref.as_deref(),
+                        model: model.as_deref(),
+                        strict,
+                        no_wait,
+                    },
+                    cli.json,
+                )
+                .await
+            }
             Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
             Commands::Lexicon { command } => match command {
                 LexiconCommands::Parse {
@@ -1300,6 +1387,17 @@ async fn main() {
         }
         Commands::Tasks { .. } => {
             eprintln!("'tasks' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Formalize { .. } => {
+            // Not an arbitrary restriction: formalization parses against the SERVED lexicon
+            // chain, and the in-process path over a snapshot is `prose-to-esl`, which exists
+            // precisely because a byte-reproducible run wants file-based draws rather than a
+            // branch.
+            eprintln!(
+                "'formalize' requires --endpoint (it parses against the served lexicon chain).\n\
+                 For a reproducible in-process run over a snapshot, use prose-to-esl."
+            );
             std::process::exit(1);
         }
         Commands::Branch { .. } => {
@@ -2019,6 +2117,174 @@ fn cmd_lexicon_parse(
 
 /// Remote `lexicon parse`: call the kernel's `ParseSentence` RPC over the committed
 /// chain. The kernel builds the (lazy) `Parser` server-side and returns the forest.
+/// Arguments for [`remote_formalize`], bundled: twelve positional parameters is a shape where a
+/// caller can transpose two `Option<&str>`s and still compile.
+struct FormalizeArgs<'a> {
+    file: &'a str,
+    doc_id: Option<&'a str>,
+    out: Option<&'a str>,
+    format: &'a str,
+    branch: Option<&'a str>,
+    scope: &'a [String],
+    profile: Option<&'a str>,
+    ns: Option<&'a str>,
+    source_ref: Option<&'a str>,
+    model: Option<&'a str>,
+    strict: bool,
+    no_wait: bool,
+}
+
+/// `formalize` — start a D71 formalization task, wait for it, write the artifact.
+///
+/// Waiting is the default here and NOT on the MCP surface, for a real difference: a CLI invocation
+/// can block for minutes, an MCP tool call cannot. `--no-wait` gives the agent-shaped behaviour.
+async fn remote_formalize(endpoint: &str, args: FormalizeArgs<'_>, json_output: bool) {
+    use eigenius_kernel::server::proto as pb;
+
+    let source_text = if args.file == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+            eprintln!("read stdin: {e}");
+            std::process::exit(1);
+        }
+        buf
+    } else {
+        match std::fs::read_to_string(args.file) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("read {}: {e}", args.file);
+                std::process::exit(1);
+            }
+        }
+    };
+    if source_text.trim().is_empty() {
+        eprintln!("{}: no prose to formalize", args.file);
+        std::process::exit(1);
+    }
+    // The doc id names a BRANCH, so it has to be IRI-safe; the file stem usually is not.
+    let doc_id = args.doc_id.map(str::to_string).unwrap_or_else(|| {
+        std::path::Path::new(args.file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("prose")
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    });
+
+    let mut client = connect_client(endpoint).await;
+    let started = match client
+        .formalize_document(pb::FormalizeDocumentRequest {
+            source_text,
+            source_path: args.file.to_string(),
+            source_ref: args.source_ref.unwrap_or("").to_string(),
+            doc_id: doc_id.clone(),
+            ns: args.ns.unwrap_or("").to_string(),
+            timestamp: String::new(),
+            branch: args.branch.unwrap_or("").to_string(),
+            at_layer: String::new(),
+            scope: args.scope.to_vec(),
+            profile: args.profile.unwrap_or("").to_string(),
+            options: Some(pb::FormalizationOptions {
+                model: args.model.unwrap_or("").to_string(),
+                strict: args.strict,
+                ..Default::default()
+            }),
+            inline_draws: None,
+            live_draws: false,
+            format: args.format.to_string(),
+        })
+        .await
+    {
+        Ok(r) => r.into_inner(),
+        Err(e) => {
+            eprintln!("formalize failed: {}", e.message());
+            std::process::exit(1);
+        }
+    };
+
+    if args.no_wait {
+        if json_output {
+            println!(
+                "{}",
+                serde_json::json!({ "task_id": started.task_id, "doc_branch": started.doc_branch })
+            );
+        } else {
+            println!("task {}  (branch {})", started.task_id, started.doc_branch);
+            println!("watch it with: tasks status {}", started.task_id);
+        }
+        return;
+    }
+
+    eprintln!(
+        "formalizing → task {} on branch {}",
+        started.task_id, started.doc_branch
+    );
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let status = match client
+            .get_task_status(pb::GetTaskStatusRequest {
+                task_id: started.task_id.clone(),
+            })
+            .await
+        {
+            Ok(r) => r.into_inner().task.map(|t| t.status).unwrap_or_default(),
+            Err(e) => {
+                eprintln!("task status failed: {}", e.message());
+                std::process::exit(1);
+            }
+        };
+        match status.as_str() {
+            "Completed" | "Failed" | "Cancelled" => break,
+            _ => continue,
+        }
+    }
+
+    let result = match client
+        .get_formalization_result(pb::GetFormalizationResultRequest {
+            task_id: started.task_id.clone(),
+        })
+        .await
+    {
+        Ok(r) => r.into_inner(),
+        Err(e) => {
+            eprintln!("fetch result failed: {}", e.message());
+            std::process::exit(1);
+        }
+    };
+    if !result.error.is_empty() {
+        eprintln!("formalization failed: {}", result.error);
+        std::process::exit(1);
+    }
+    if !result.found {
+        eprintln!("task {} produced no result", started.task_id);
+        std::process::exit(1);
+    }
+
+    // The counts go to STDERR so `formalize x.txt > out.esl` is the artifact and nothing else.
+    eprintln!(
+        "{} claim(s), {} unit(s) not encoded, {} draw(s) recorded on {}",
+        result.encoded, result.cut, result.draws_committed, started.doc_branch
+    );
+    eprintln!("root: {}", result.structure_iri);
+    eprintln!("NOT committed — load the artifact to land it.");
+
+    match args.out {
+        Some(path) => {
+            if let Err(e) = std::fs::write(path, &result.artifact) {
+                eprintln!("write {path}: {e}");
+                std::process::exit(1);
+            }
+            eprintln!("wrote {path}");
+        }
+        None => {
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(&result.artifact);
+        }
+    }
+}
+
 async fn remote_parse(
     endpoint: &str,
     sentence: &str,

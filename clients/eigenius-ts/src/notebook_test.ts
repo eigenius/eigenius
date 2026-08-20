@@ -49,6 +49,7 @@ const CELL: CellJson = {
   doc_id: "wrn-first-page",
   structure_iri: "urn:eigenius:demo:v2:structure",
   lexicon_profile: "urn:eigenius:lexicon:profile:biomed",
+  land: true,
 };
 
 Deno.test("a formalize cell survives publish and re-read", async () => {
@@ -66,6 +67,9 @@ Deno.test("a formalize cell survives publish and re-read", async () => {
   assertEquals(cell.doc_id, "wrn-first-page");
   assertEquals(cell.structure_iri, "urn:eigenius:demo:v2:structure");
   assertEquals(cell.lexicon_profile, "urn:eigenius:lexicon:profile:biomed");
+  // `land` decides whether `Run all` commits. Losing it on a round-trip would
+  // silently turn a reproducible notebook into one that only produces artifacts.
+  assertEquals(cell.land, true);
 });
 
 Deno.test("a formalize cell publishes as the formalize CellType, not a fallback", async () => {
@@ -98,4 +102,11 @@ Deno.test("cell identity ignores structure_iri but tracks doc_id", async () => {
   // `doc_id` DOES change identity: a different working branch is a different
   // cell, because it replays a different set of draws.
   assertNotEquals(base.cellIris[0], differentBranch.cellIris[0]);
+
+  // So does `land`: two cells over the same prose that differ on whether they
+  // commit are different cells, not one cell in two moods.
+  const noLand = await notebookJsonToResources(
+    notebook([{ ...CELL, land: false }]),
+  );
+  assertNotEquals(base.cellIris[0], noLand.cellIris[0]);
 });

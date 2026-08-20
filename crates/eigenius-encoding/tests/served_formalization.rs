@@ -26,7 +26,7 @@
 //! translation from proto fields to these same values.
 //!
 //! ```bash
-//! EIGENIUS_DB_SNAPSHOT=/path/to/wordnet-umls-aligned-2026-08-20 \
+//! EIGENIUS_DB_SNAPSHOT=/path/to/wordnet-umls-aligned-2026-08-20c \
 //!   cargo test --release -p eigenius-encoding --test served_formalization -- --ignored --nocapture
 //! ```
 
@@ -58,32 +58,9 @@ fn the_served_run_emits_the_same_artifact_as_the_cli() {
     let (head, backend) =
         open_head_and_backend(std::path::Path::new(&snapshot)).expect("open snapshot");
 
-    // The claim-kind vocabulary is not in the lexicon snapshot, and the demo chain-loads it before
-    // parsing: a demonstrative's restrictor is checked against a claim's KIND class.
-    let mut head = head;
-    for rel in [
-        "ontologies/encoding/encoding.esl",
-        "ontologies/encoding/claim-kind-alignment.esl",
-    ] {
-        let src = read(rel);
-        let resources = eigenius_kernel::esl::compile_against_layer(&src, &head)
-            .unwrap_or_else(|e| panic!("{rel} does not compile: {e:?}"));
-        let mut b = eigenius_kernel::layer::LayerBuilder::new(rel, Some(Arc::clone(&head)));
-        for r in resources {
-            b.add_resource(r).expect("add");
-        }
-        let layer = Arc::new(
-            b.build(eigenius_kernel::layer::LayerStorage::with_persistent(
-                Arc::clone(&backend),
-            )),
-        );
-        use eigenius_kernel::commit::LayerPersister;
-        eigenius_kernel::commit::BackendPersister::new(Some(Arc::clone(&backend)))
-            .persist("main", &layer)
-            .unwrap_or_else(|e| panic!("persist {rel}: {e:?}"));
-        head = layer;
-    }
-
+    // NOTHING TO CHAIN-LOAD (since 2026-08-20). `encoding.esl` is in the bootstrap chain and
+    // `claim-kind-alignment.esl` is layered into the aligned snapshot, so a served run needs no
+    // preparation — which is the property this test now also covers.
     let lemmatizer: Arc<dyn Lemmatizer + Send + Sync> = Arc::new(
         eigenius_wordnet::lemmatizer::MorphyLemmatizer::load(std::path::Path::new(&repo(
             "references/WordNet-3.0/dict",

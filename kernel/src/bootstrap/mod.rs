@@ -385,6 +385,30 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/lexicon/closed-class.esl"),
         format: OntologyFormat::Esl,
     },
+    // encoding (D62 §6 / D71) — the encoding-pipeline CONTRACT: DiscourseUnit,
+    // ScopedUnit, EncodedClaim + the discourse-kind classes, DecisionPoint,
+    // AnaphorBinding, CutItem, LexicalGap, ReasoningStructure, ProposalDraw.
+    //
+    // BOOTSTRAPPED because the kernel already depends on it: `dcg::parse::resolve`
+    // hardcodes `urn:eigenius:encoding:EncodedClaim` to find a landed claim's kind
+    // class, and `eigenius-reasoning` carries the six kind IRIs as consts. Leaving
+    // the vocabulary in a user layer did not remove that dependency, it only made
+    // it undeclared — `FormalizeDocument` degraded quietly on a chain without it.
+    // Same bar `reasoning` / `statistics` / `lean-institution` already clear.
+    //
+    // D62 §11.3 said this from the start; D71 slice 2 argued the other way to keep
+    // vocabulary edits off the reseed path, and was wrong on the merits — the
+    // dependency was already there and unchecked (`2026-08-20`).
+    //
+    // NOT here: `claim-kind-alignment.esl`. It redeclares the kind classes with
+    // `wn:` / `umlscui:` parents that exist only after a lexicon import, so it is
+    // snapshot-coupled curation, layered by scripts/build-alignment-snapshot.sh
+    // alongside the wordnet↔umls merges.
+    BootstrapOntology {
+        name: "encoding",
+        source: include_str!("../../../ontologies/encoding/encoding.esl"),
+        format: OntologyFormat::Esl,
+    },
 ];
 
 /// Bootstrap the Eigenius kernel.
@@ -774,7 +798,7 @@ mod tests {
     #[test]
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
-        // Head is the notebook layer
+        // Head is the encoding layer
         // (on top of lean-institution → lean-runtime-classes →
         // lean-expressions → formulas → runtime → institution →
         // reflection → program → core).
@@ -793,7 +817,11 @@ mod tests {
         assert!(!ctx.head().is_root());
         // closed-class (D63 §8.3) is the tip; then ontology (D63 §8.5 3c), lexicon,
         // logic, reference, ingest (D53), notebook.
-        let ontology = ctx.head().parent().unwrap();
+        // encoding (D71) sits at the tip: the D62 pipeline contract, bootstrapped
+        // because the kernel already names its IRIs (see BOOTSTRAP_CHAIN).
+        let closed_class = ctx.head().parent().unwrap();
+        assert!(!closed_class.is_root());
+        let ontology = closed_class.parent().unwrap();
         assert!(!ontology.is_root());
         let lexicon = ontology.parent().unwrap();
         assert!(!lexicon.is_root());

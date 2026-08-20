@@ -116,6 +116,15 @@ export interface FormalizeCellJson {
   structure_iri?: string;
   /** Optional `lexicon:LexiconProfile` IRI naming the ordered parse scope. */
   lexicon_profile?: string;
+  /**
+   * Land the artifact on run (D71). Off by default: generation stays decoupled
+   * from commitment, so a run gives you something to READ first. Turning it on
+   * records the decision in the cell, so `Run all` reproduces the chain state
+   * rather than stopping at "an artifact was produced". Idempotent — the
+   * artifact is content-addressed, so unchanged prose does not advance the
+   * branch.
+   */
+  land?: boolean;
 }
 
 export type CellJson =
@@ -273,11 +282,17 @@ function parseCell(value: unknown, index: number): CellJson {
     if (typeof source !== "string") {
       throw new Error(`notebook: cells[${index}].source must be a string`);
     }
-    const { doc_id, structure_iri, lexicon_profile } = obj as {
+    const { doc_id, structure_iri, lexicon_profile, land } = obj as {
       doc_id?: unknown;
       structure_iri?: unknown;
       lexicon_profile?: unknown;
+      land?: unknown;
     };
+    if (land !== undefined && typeof land !== "boolean") {
+      throw new Error(
+        `notebook: cells[${index}].land must be a boolean when present`,
+      );
+    }
     for (
       const [name, v] of [
         ["doc_id", doc_id],
@@ -302,6 +317,7 @@ function parseCell(value: unknown, index: number): CellJson {
       ...(lexicon_profile !== undefined
         ? { lexicon_profile: lexicon_profile as string }
         : {}),
+      ...(land !== undefined ? { land: land as boolean } : {}),
     };
   }
   if (

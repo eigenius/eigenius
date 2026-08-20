@@ -75,8 +75,28 @@ echo "  entries rewritten: $(grep -c '^resource ' "$ESL" || true)"
 
 # The load goes through the kernel: Rule 22, type-checking, the commit gate. A layer that would
 # corrupt the chain is rejected here rather than discovered at parse time.
-say "loading it onto a fresh copy of the base → $OUT"
-scripts/add-layer-to-snapshot.sh --base "$BASE" --out "$OUT" "$ESL"
+# TWO layers, in one pass (one copy of the base, not two):
+#
+#   1. the merges-derived wordnet↔umls alignment, emitted above
+#   2. ontologies/encoding/claim-kind-alignment.esl — the D68 claim-kind alignment
+#
+# (2) belongs here rather than in the bootstrap for the same reason (1) does: it
+# redeclares each discourse-kind class with `wn:` / `umlscui:` PARENTS, and those
+# concepts exist only after a lexicon import. It is curation about a particular
+# lexicon inventory (its targets are probe-derived), so it is snapshot-coupled
+# exactly like the merge set. Its own header already says it follows "the
+# layered-resolution pattern the wordnet↔umls alignment established".
+#
+# It is what makes «these findings» resolve: the demonstrative's restrictor is the
+# LEXICON's `finding` class, and a landed `enc:Finding` claim reaches it only
+# through the parents this file adds. Without it every claim-referring
+# demonstrative fails the restrictor check — silently, as an unresolved hole.
+# Baking it into the snapshot retires the `--chain-load` step five callers were
+# each remembering separately.
+CLAIM_KINDS="ontologies/encoding/claim-kind-alignment.esl"
+[[ -f "$CLAIM_KINDS" ]] || { echo "error: $CLAIM_KINDS not found" >&2; exit 1; }
+say "loading both alignment layers onto a fresh copy of the base → $OUT"
+scripts/add-layer-to-snapshot.sh --base "$BASE" --out "$OUT" "$ESL" "$CLAIM_KINDS"
 
 # AMEND THE PROVENANCE STAMP. `add-layer-to-snapshot.sh` copies the base store verbatim, so the
 # aligned snapshot inherited the base's `alignment : none` line — meaning the stamp could not
@@ -84,10 +104,14 @@ scripts/add-layer-to-snapshot.sh --base "$BASE" --out "$OUT" "$ESL"
 # it exists to answer. Found 2026-08-20 by a `just which-snapshot` on a staged aligned store that
 # reported "raw reseed".
 if [[ -f "$OUT/PROVENANCE" ]]; then
-    sed -i 's|^alignment       : none .*|alignment       : '"$(basename "$MERGES")"' (layered by scripts/build-alignment-snapshot.sh)|' "$OUT/PROVENANCE"
+    # Name BOTH inputs. A stamp that recorded only the merge set would go stale the
+    # moment the claim-kind alignment changed, which is the same half-truth the
+    # inherited `alignment : none` line was.
+    sed -i 's|^alignment       : none .*|alignment       : '"$(basename "$MERGES")"' + '"$(basename "$CLAIM_KINDS")"' (layered by scripts/build-alignment-snapshot.sh)|' "$OUT/PROVENANCE"
     {
         echo "aligned_from    : $(basename "$BASE")"
         echo "aligned_at      : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "claim_kinds     : $(basename "$CLAIM_KINDS")"
     } >> "$OUT/PROVENANCE"
 fi
 

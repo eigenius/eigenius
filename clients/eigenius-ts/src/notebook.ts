@@ -96,6 +96,7 @@ const CHART_TITLE_PROP = `${NB_NS}:chart_title`;
 const DOC_ID_PROP = `${NB_NS}:doc_id`;
 const STRUCTURE_IRI_PROP = `${NB_NS}:structure_iri`;
 const LEXICON_PROFILE_PROP = `${NB_NS}:lexicon_profile`;
+const LAND_PROP = `${NB_NS}:land`;
 
 // Mirror of NotebookJson / CellJson in notebooks/src/persistence/notebook-format.ts.
 // The SDK keeps its own copy so it doesn't depend on the notebook UI package.
@@ -150,6 +151,8 @@ export interface FormalizeCellJson {
   doc_id?: string;
   structure_iri?: string;
   lexicon_profile?: string;
+  /** Land the artifact on run (D71). See the notebook package's copy. */
+  land?: boolean;
 }
 
 export type CellJson =
@@ -322,6 +325,9 @@ export function resourcesToNotebookJson(
           ? { structure_iri: structureIri }
           : {}),
         ...(typeof profile === "string" ? { lexicon_profile: profile } : {}),
+        ...(typeof cell[LAND_PROP] === "boolean"
+          ? { land: cell[LAND_PROP] as boolean }
+          : {}),
       };
     }
     return {
@@ -366,7 +372,7 @@ async function cellIri(cell: CellJson): Promise<string> {
   // Program-run cells:    { cell_type, program_iri, input_iris }
   // Chart cells:          { cell_type, query, chart_kind, x_column,
   //                         y_column, series_column, title }
-  // Formalize cells:      { cell_type, source, doc_id, lexicon_profile }
+  // Formalize cells:      { cell_type, source, doc_id, lexicon_profile, land }
   //   `structure_iri` is EXCLUDED: it is what the last RUN produced, not what
   //   the cell IS. Including it would give the same prose a new identity after
   //   every run, defeating the content-addressed de-duplication.
@@ -393,6 +399,9 @@ async function cellIri(cell: CellJson): Promise<string> {
       source: cell.source,
       doc_id: cell.doc_id ?? null,
       lexicon_profile: cell.lexicon_profile ?? null,
+      // `land` IS part of the cell's identity: two cells over the same prose that
+      // differ on whether they commit are different cells.
+      land: cell.land ?? false,
     });
   } else {
     canonical = JSON.stringify({ cell_type: cell.type, source: cell.source });
@@ -464,6 +473,7 @@ function makeCellResource(iri: string, cell: CellJson): EigonResource {
     if (cell.lexicon_profile !== undefined) {
       base[LEXICON_PROFILE_PROP] = cell.lexicon_profile;
     }
+    if (cell.land !== undefined) base[LAND_PROP] = cell.land;
   } else {
     base[SOURCE_PROP] = cell.source;
   }

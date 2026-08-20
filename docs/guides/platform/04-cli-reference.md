@@ -556,7 +556,15 @@ Inspect and control persisted tasks (D21).
 eigenius --endpoint http://localhost:50051 tasks list
 ```
 
-List every task in the session with status (`Running`, `Completed`, `Failed`, `Cancelled`).
+List every task in the session with its **kind**, status (`Running`, `Completed`, `Failed`, `Cancelled`), and that kind's own subject — the program for a `ProgramRun`, the `doc-<id>` working branch for a `Formalize` (D71 §6).
+
+```
+TASK ID                               STATUS        KIND         SUBJECT
+2ae08b30-7571-48ec-87b0-7a81215cb2b4  Completed     Formalize    wrn-first-page
+9f31c0a4-...                          Completed     ProgramRun   urn:eigenius:demo:analyze
+```
+
+Tasks used to be program-bound, and a formalization would have shown a blank PROGRAM column reading like a broken task. `TaskRecord` carries a kind instead, so each row names what it actually is.
 
 ### `tasks status <TASK_ID>`
 
@@ -564,7 +572,7 @@ List every task in the session with status (`Running`, `Completed`, `Failed`, `C
 eigenius --endpoint http://localhost:50051 tasks status <uuid>
 ```
 
-Detailed status: program IRI, input layer IDs, current checkpoint, elapsed time, last event.
+Detailed status: kind, current checkpoint, elapsed time, last event, and the fields that kind has — program + input IRIs for a `ProgramRun`, doc branch + source sha256 for a `Formalize`. Fields belonging to another kind are omitted rather than shown empty.
 
 ### `tasks cancel <TASK_ID>`
 
@@ -768,6 +776,38 @@ eigenius lexicon parse "every Werner syndrome affects HeLa" \
 | `--scope <LEXICON_IRI>` | Restrict the parse to these `lexicon:Lexicon` IRIs. Repeatable; order is resolution precedence, earlier ranks first. Omitted means the whole chain, unscoped. |
 | `--profile <PROFILE_IRI>` | A `lexicon:LexiconProfile` naming an ordered scope. Mutually exclusive with `--scope`. |
 | `--file <FILE>` | Local mode only. ESL / Eigon-JSON domain files to load over bootstrap before parsing. Ignored in remote mode. |
+
+### `formalize <FILE> [--doc-id <ID>] [--out <FILE>] [--format <MIME>] [--branch <NAME>] [--scope <IRI>]... [--profile <IRI>] [--ns <PREFIX>] [--source-ref <IRI>] [--model <ID>] [--strict] [--no-wait]` (requires `--endpoint`)
+
+Formalize prose into typed, kernel-checked claims (D71). The document-level sibling of `lexicon parse`.
+
+```bash
+# Wait for the run and write the artifact
+eigenius --endpoint http://localhost:50051 formalize paper-intro.txt --out claims.esl
+
+# Read it, then land it — the artifact is NOT committed by the run
+eigenius --endpoint http://localhost:50051 load claims.esl
+```
+
+The run is a **task**: a document costs minutes and several LLM round-trips. This waits by default and is the one surface that can — an MCP tool call cannot block that long, which is why the RPC is asynchronous at all. `--no-wait` prints the task id and returns; `tasks status` / `tasks cancel` take it from there.
+
+Counts go to stderr and the artifact to stdout, so `formalize x.txt > out.esl` yields the artifact and nothing else.
+
+| flag | why you would use it |
+|---|---|
+| `--doc-id` | Names the run's `doc-<id>` working branch, which holds the document glossary and this run's recorded proposer draws. **Re-using it replays those draws instead of re-asking the model** — a second run of the same prose is fast, free and deterministic. Defaults to the file stem, IRI-sanitised. |
+| `--branch` | What to parse over — this is how you say *which lexicon*. Vocabulary is not passed to this command: `load` it and name the branch. |
+| `--scope` / `--profile` | D65 §4 parse scope: ordered `lexicon:Lexicon` IRIs (array order IS resolution precedence), or a `lexicon:LexiconProfile` naming that list. Mutually exclusive, same as `lexicon parse`. |
+| `--format` | `text/x-esl` (default here — you are going to read it), `application/eigon+json`, or `application/cbor`. |
+| `--strict` | Abort on the first unit that does not encode, instead of recording it as an `enc:CutItem`. The default records: an artifact should state what did not encode rather than drop it silently. |
+| `--model` | The model this run's untrusted proposers call, and what each recorded draw names as its answerer. |
+| `--source-ref` | Cite an existing `reference:Reference` instead of minting a document-local one. It must resolve on the chain the artifact loads onto — Rule 22 verifies. |
+
+**A first run on a fresh `--doc-id` asks the model**, so it needs a kernel built `--features use-llm` and an `ANTHROPIC_API_KEY` (`just up-llm`). Without them it fails closed rather than parsing unranked — a cap-only run is a different experiment, not a quieter version of the same one.
+
+**Local mode is deliberately unsupported.** Formalization parses against the served lexicon chain. For a byte-reproducible in-process run over a snapshot — replaying draws from files rather than a branch, failing closed on anything that does not encode — use `prose-to-esl` in `crates/eigenius-encoding`, which is what the demos and the parse harness run.
+
+Other surfaces onto the same RPC: the notebook's `formalize` cell ([chapter 14](14-notebook.md)), and the MCP tools `eigenius_formalize_document` / `eigenius_get_formalization_result`.
 
 ## 4.16. Output formatting
 

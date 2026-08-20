@@ -25,7 +25,7 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Class"
     ],
-    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris`; formalize cells carry PROSE in `source` plus `doc_id` (+ optional `structure_iri` / `lexicon_profile`); chart cells carry `chart_query` + `chart_kind` + `chart_x_column` + `chart_y_column` (+ optional `chart_series_column` / `chart_title`).",
+    "urn:eigenius:core:description": "A single cell of a notebook. Cell IRIs are content-addressed (sha-256 over the cell's structural form), so identical cells across notebooks share a single resource. Source-bearing cells (markdown/esl/eigenql/typescript) carry a `source` string; program-run cells carry `program_iri` + `input_iris`; formalize cells carry PROSE in `source` plus `doc_id` (+ optional `structure_iri` / `lexicon_profile` / `land`); chart cells carry `chart_query` + `chart_kind` + `chart_x_column` + `chart_y_column` (+ optional `chart_series_column` / `chart_title`).",
     "urn:eigenius:core:short_name": "Cell",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
@@ -296,6 +296,18 @@
     "urn:eigenius:core:description": "Optional lexicon:LexiconProfile IRI naming the ordered parse scope for a formalize cell (D65 §4). Absent = the whole chain.",
     "urn:eigenius:core:short_name": "lexicon_profile",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:notebook:Cell"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:notebook:land",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "A formalize cell's LAND-ON-RUN flag (D71). Off by default: generation stays decoupled from commitment, so the first thing a run gives you is an artifact to read, not a committed layer. Turning it on records the decision IN THE CELL, so `Run all` reproduces the chain state instead of stopping at 'an artifact was produced'. Loading is idempotent — the artifact is content-addressed, so re-running unchanged prose does not advance the branch.",
+    "urn:eigenius:core:short_name": "land",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
     "urn:eigenius:core:domain": [
       "urn:eigenius:notebook:Cell"
     ]

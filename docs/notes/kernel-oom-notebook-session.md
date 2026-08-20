@@ -1,6 +1,7 @@
 # Kernel OOM during a notebook session — open investigation
 
-**Status:** open, one observation, cause unknown. Opened `2026-08-20`.
+**Status:** CAUSE FOUND `2026-08-20` — retroactive validation on a redefining load over the
+lexicon chain. Triggers removed at the call sites; the underlying unbounded scan is still open.
 
 ## The observation
 
@@ -21,7 +22,36 @@ The kernel logged nothing for the ~7 minutes before the kill. The session includ
 formalize cell run, several failed EigenQL queries, and layer views opened on small
 notebook-result layers.
 
-## What has been RULED OUT (measured, not argued)
+## CAUSE FOUND (`2026-08-20`) — retroactive validation on a redefining load
+
+**Reproduced twice, deliberately the second time.** `commit.retroactive.start` is the last line in
+the kernel log before both kills (27.8 GB, then 27.2 GB).
+
+Loading a layer that REDEFINES existing resources triggers Rule 22's retroactive validation across
+the chain. On the 7.6M-resource lexicon chain that scan is what allocates ~27 GB. This is the
+**already-known open issue** recorded against the reference-integrity work: retroactive validation
+was scoped to redefinitions, and a 7.6M-chain retroactive-scan OOM was fixed once by gating the
+property-key case — but the full-chain-resident OOM was left open, and this is it.
+
+Both observations fit:
+
+- The original session loaded `encoding.esl` and then `claim-kind-alignment.esl`, and the alignment
+  file REDECLARES each discourse-kind class (that is its whole mechanism — it adds lexicon parents).
+  Five redefinitions, full-chain retroactive scan, dead kernel.
+- The second was `demo/prose-to-formulas-v2/run.sh` loading `encoding.esl` after it had been moved
+  into the bootstrap chain, which makes *every* resource in it a redefinition.
+
+**Fixed at the call sites** by not re-loading what already arrives: `encoding.esl` is bootstrapped
+and the alignment rides in the snapshot, so neither the demo nor the notebook loads them any more.
+That removes the trigger; it does not remove the hazard. **Any** load that redefines a resource on a
+lexicon-scale chain can still do this, and there is nothing between a user and that outcome — no
+cap, no diagnostic, no refusal. The kernel dies with no log line.
+
+What remains open is therefore the underlying scan, not the incident: retroactive validation needs
+to be index-driven (the fix pattern `typed_resource_iris` established for `build_axiom_env` and
+`draws_from_layer`), or bounded with a typed refusal when the affected set is too large.
+
+## What was RULED OUT on the way (measured, not argued)
 
 Peak RSS on the same chain, same build, sampled with `docker stats` at 2–3s intervals:
 

@@ -32,6 +32,7 @@ import {
   Field,
   Input,
   makeStyles,
+  Switch,
   Textarea,
   tokens,
 } from "@fluentui/react-components";
@@ -100,6 +101,16 @@ export function FormalizeCellEditor(
           />
         </Field>
       </div>
+      <Field
+        hint="Off: the run produces an artifact to read, and landing it is a separate step. On: `Run all` reproduces the chain state too. Loading is idempotent — unchanged prose does not advance the branch."
+      >
+        <Switch
+          checked={cell.land ?? false}
+          label="Land the artifact on run"
+          data-testid="formalize-land"
+          onChange={(_e, d) => update(cellId, { land: d.checked })}
+        />
+      </Field>
       {cell.structure_iri && (
         <div className={styles.hint} data-testid="formalize-structure-iri">
           Last run produced {cell.structure_iri} — the artifact is not

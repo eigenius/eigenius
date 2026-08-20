@@ -80,7 +80,7 @@ eig_load() {
 hr() { printf '\n\033[1m%s\033[0m\n' "── $* ─────────────────────────────────────────"; }
 
 hr "0. Kernel on the LEXICON snapshot"
-SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-20}"
+SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-20c}"
 [[ -d "$SNAPSHOT" ]] || { echo "ERROR: snapshot not found: $SNAPSHOT" >&2; exit 1; }
 VOLUME="${VOLUME:-eigenius_eigenius_db}"
 echo "staging $(basename "$SNAPSHOT") into volume $VOLUME (the snapshot itself is read-only)"
@@ -101,9 +101,10 @@ if [[ $REPARSE == 1 ]]; then
     # proposals, discourse kinds. No LLM, no network, no key — and a MISS in any of them fails
     # closed rather than silently falling back.
     #
-    # `--chain-load` puts the claim-kind vocabulary on the parse's own chain: the anaphor's
-    # restrictor is checked against a claim's KIND class, which lives in encoding.esl +
-    # claim-kind-alignment.esl and is not part of the lexicon snapshot.
+    # NOTHING TO CHAIN-LOAD (since `2026-08-20`). The anaphor's restrictor is still checked
+    # against a claim's KIND class — that has not changed — but both halves now arrive on their
+    # own: `encoding.esl` is in the kernel's bootstrap chain, and `claim-kind-alignment.esl` is
+    # layered into the aligned snapshot by scripts/build-alignment-snapshot.sh.
     for variant in "paragraph:claims-intact:" "paragraph-edited:claims-edited:-edited"; do
         IFS=: read -r src out suffix <<<"$variant"
         # The source path is passed REPO-RELATIVE and the command runs from $REPO: it lands in the
@@ -112,8 +113,6 @@ if [[ $REPARSE == 1 ]]; then
         # (`enc:source_sha256` pins the bytes; the path is caller-supplied text.)
         ( cd "$REPO" && "$REPO/target/release/prose-to-esl" --snapshot "$SNAPSHOT" \
             --source "demo/prose-to-formulas-v2/$src.txt" \
-            --chain-load "$REPO/ontologies/encoding/encoding.esl" \
-            --chain-load "$REPO/ontologies/encoding/claim-kind-alignment.esl" \
             --ranks      "$HERE/ranks$suffix.json" \
             --selections "$HERE/selections$suffix.json" \
             --proposals  "$HERE/proposals$suffix.json" \
@@ -133,10 +132,14 @@ narrate() {
 }
 
 hr "1. Vocabulary, the claim-kind axis, and the pinned literature rule"
-eig_load "$REPO/ontologies/encoding/encoding.esl"
-# The discourse-kind classes' alignment to lexicon senses — what makes «these findings» resolvable
-# to a landed claim at all (D68). The parse needed it too (see --chain-load above).
-eig_load "$REPO/ontologies/encoding/claim-kind-alignment.esl"
+# NOT loaded here any more (`2026-08-20`): `encoding.esl` is in the kernel's bootstrap chain and
+# `claim-kind-alignment.esl` is layered into the aligned snapshot. They arrive on their own.
+#
+# Re-loading them was not merely redundant, it was FATAL. Every resource in a bootstrapped
+# ontology re-loaded is a REDEFINITION, and a redefinition triggers Rule 22's retroactive
+# validation across the chain — which on the 7.6M-resource lexicon reached 27 GB and was killed by
+# the host OOM killer. Witnessed twice on `2026-08-20`; `commit.retroactive.start` is the last line
+# in the kernel log both times. See docs/notes/kernel-oom-notebook-session.md.
 eig_load "$HERE/onco-typed.esl"
 eig_load "$HERE/literature-rules.esl"
 BASE="$(eig branch show main --json | grep -o '"head_layer": *"[^"]*"' | cut -d'"' -f4)"

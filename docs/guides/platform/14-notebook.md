@@ -10,7 +10,7 @@ This chapter is the operational reference for the notebook UX. Chain operations 
 
 ## 14.1. What's in a notebook
 
-A notebook is an ordered sequence of typed cells. Six cell types are supported:
+A notebook is an ordered sequence of typed cells. Seven cell types are supported:
 
 | Type | What it does | Run dispatch |
 |---|---|---|
@@ -20,6 +20,7 @@ A notebook is an ordered sequence of typed cells. Six cell types are supported:
 | `typescript` | Sandboxed TS that runs in the browser with the SDK in scope. The cell's `return` value is auto-rendered (Resource → inspector, ResultSet → table, Topology → layer stack, plain object → JSON tree). | `new Function("eigen", "previousOutputs", "console", "React", "h", "charts", "nb", source)` — seven injected names, not two: the SDK client, the previous cells' outputs, a captured `console`, `React` and its `createElement` as `h`, the chart components, and `nb` notebook helpers (`nb.rows(document)` decodes a ResultSet). A cell may return a React element and the auto-renderer mounts it. |
 | `program-run` | Form-based program invocation: program IRI + one or more input IRIs. Single input renders as inspector + trace; multiple inputs render as a results table. | `eigen.runProgramByIri(programIri, inputIri)` per input |
 | `chart` | Form-based chart: pick a chart kind (`grouped-bar` / `vertical-bar` / `horizontal-bar` / `donut` / `line` / `area`), write an EigenQL query, bind axis columns by `RETURN` short-name. Output is the corresponding Fluent `@fluentui/react-charts` component. | `eigen.query(query)` then pivot rows into the kind's data shape |
+| `formalize` | **Prose, not code** (D71). Runs the formalization service over the cell's text and renders the per-unit outcome: claims, the `DecisionPoint` recording which reading was chosen against which runners-up, the `AnaphorBinding`s, and an `enc:CutItem` for every unit that did not encode. ASYNCHRONOUS — a document costs minutes and several LLM round-trips, so the cell starts a task and polls it; watch it in the Tasks panel with kind `Formalize`. **The artifact is NOT committed**: generation stays decoupled from commitment, so you read and diff it, then land it with an explicit `esl` cell. `Document id` names the run's `doc-<id>` working branch, which holds the document glossary and the run's recorded proposer draws — keep it stable and a re-run replays those instead of re-asking the model. | `eigen.formalizeDocument(prose, docId)` → poll `getTaskStatus` → `getFormalizationResult` |
 
 Cells are inserted via the hover-revealed `+` between any two cells (and above first / below last). Per-cell toolbar: type label · `Run` (when runnable) · `↑` / `↓` (move) · `🗑` (delete).
 
@@ -92,6 +93,14 @@ See [chapter 8 §8.4](08-demos.md#84-kinase-institutions--multi-institution-juli
 Ten cells alternating markdown (audit-chain narrative) and EigenQL (one query per step backward through the chain). The first EigenQL cell finds the `Verdict::Holds` resource AutoOnLoad produced; subsequent cells trace the cross-references back to the chain-side Patient class declaration.
 
 See [chapter 8 §8.5](08-demos.md#85-lean-verification--lean-4-verification-audit-chain) for the storyline overview and [`platform/lean-institution/`](lean-institution/) for the in-process verification-side slow-walk.
+
+### Formalizing prose (D71)
+
+[`notebooks/examples/d71-formalize-prose.json`](../../../notebooks/examples/d71-formalize-prose.json). The showcase for the `formalize` cell: prose in, typed kernel-checked claims out. Uses the WRN paragraph from the `prose-to-formulas-v2` demo deliberately — that paragraph's expected output is a committed, byte-compared fixture, so the cell's result can be checked against a known-correct artifact rather than eyeballed.
+
+Six cells: intro → prerequisites → **the formalize cell** → how to read the output → how to land it → an EigenQL query over the landed claims. The markdown carries the three things that are otherwise easy to get wrong — that the artifact is not committed, that the `doc-<id>` branch is prunable scaffolding whose draws make a re-run free, and that an `enc:CutItem` is a recorded *result* rather than a failure.
+
+**Prerequisites: a lexicon snapshot, and nothing else to load.** The encoding contract is in the kernel's bootstrap chain and the claim-kind alignment is layered into the aligned snapshot (see the repo README, *Building the lexicon image*). A first run on a fresh `Document id` asks the model, so it needs a kernel built `--features use-llm` (`just up-llm`) and an `ANTHROPIC_API_KEY`; every later run on the same id replays the recorded draws for free.
 
 ### Markdown maths
 

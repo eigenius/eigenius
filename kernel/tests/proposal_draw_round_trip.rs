@@ -184,6 +184,50 @@ fn a_recorded_draw_round_trips_through_the_chain_and_replays_with_zero_misses() 
     );
 }
 
+/// The draw survives a CBOR encode/decode cycle.
+///
+/// **This is NOT the regression test for the shape bug, and saying so matters.** CBOR encodes
+/// `ResourceRef` as plain `Text` (`eigon_cbor.rs:207`), so a decoded value is a `String` — but
+/// `LayerBuilder::add_resource` RE-CANONICALISES it back to a ref against the ontology, which is
+/// why this passes both before and after the fix. The persisted read path (`build_chain` over
+/// stored bytes) never goes through the builder, so a draw read off a committed branch keeps the
+/// string shape, and `draws_from_layer` matching only `ResourceRef` returned `[]` — a silent live
+/// re-ask with no error anywhere.
+///
+/// Reproducing that needs a real persisted store, so the witness is live rather than a unit test:
+/// a second `eigenius formalize` on the same doc id reported `11 draw(s) recorded` before the fix
+/// and `0 draw(s) recorded` after, with the four seams reading 7824 / 11977 / 2591 / 1536 bytes off
+/// the branch (`2026-08-20`). What this test does cover is that the encode/decode cycle itself
+/// preserves the draw, which is worth keeping.
+#[test]
+fn draws_survive_a_cbor_encode_decode_cycle() {
+    let recorder = RecordingSenseRanker::new(ReverseRanker);
+    let live = ask(&recorder);
+    let resources = draw_resources(
+        "urn:eigenius:test:doc",
+        DrawSeam::SenseRank,
+        &recorder.keyed_draws().expect("keyed draws"),
+        None,
+        "2026-08-19T00:00:00Z",
+    )
+    .expect("draw resources");
+
+    let mut b = LayerBuilder::new("doc-draws", Some(encoding_chain()));
+    for r in resources {
+        let bytes = eigenius_kernel::ontology::eigon_cbor::serialize_resource(&r);
+        let reloaded = eigenius_kernel::ontology::eigon_cbor::parse_resource(&bytes)
+            .expect("draw round-trips through CBOR");
+        b.add_resource(reloaded).expect("adds");
+    }
+    let branch = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let json = draws_from_layer(&branch, DrawSeam::SenseRank).expect("read back");
+    assert_ne!(json, "[]");
+    let replay = ReplaySenseRanker::from_json(&json).expect("replay loads");
+    assert_eq!(ask(&replay), live);
+    assert_eq!(replay.misses(), 0);
+}
+
 /// Seams do not bleed into each other: a chain carrying several runs' draws replays each seam's
 /// set on its own. Without the filter, `from_json` would be handed another seam's record shape.
 #[test]

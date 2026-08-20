@@ -526,6 +526,59 @@ scripts/provision-umls.sh --all               # all semantic types (large)
 See [Installation §2.6](docs/guides/platform/02-installation.md) for the full
 list of flags, env overrides, and the UMLS licensing constraints.
 
+### Building the lexicon image
+
+The importers above load a corpus into a *running* kernel. For everyday work you
+want the other thing: a **snapshot** — a prebuilt RocksDB store carrying the whole
+lexicon, that a kernel can be started against directly. The demos, the parse
+harness and the D71 formalization service all expect one.
+
+It is built in three steps, and each exists for a reason worth knowing:
+
+```bash
+# 1. RESEED — build a store from scratch against the CURRENT bootstrap.
+#    `--umls-all` is not optional for a snapshot you intend to parse with: the
+#    bare form loads an 8-TUI subset, which silently changes every measurement.
+#    ~20 min, ~2.8 GiB out.
+scripts/reseed-lexicon-db.sh --umls-all
+
+# 2. ALIGN — layer the curated alignments on top of a copy of that store:
+#    the wordnet↔umls concept merges, and the D68 claim-kind alignment that
+#    lets «These findings» resolve to a landed claim.
+scripts/build-alignment-snapshot.sh \
+    --base ../db-snapshot/wordnet-umls-<date> \
+    --out  ../db-snapshot/wordnet-umls-aligned-<date>
+
+# 3. STAGE — copy it into the kernel's docker volume. `just up` does NOT do
+#    this; it starts against whatever the volume already holds.
+just stage-snapshot           # newest aligned snapshot, autodetected
+just which-snapshot           # what is staged right now (reads its PROVENANCE)
+```
+
+**A reseed is only needed when the BOOTSTRAP changes** — the ontologies compiled
+into the kernel. `kernel/tests/bootstrap_manifest_pinned.rs` fails the moment one
+does, names the layer that moved, and lists the follow-through; an existing store
+would otherwise refuse to resume with `ManifestDrift`. Importing a corpus does
+not require one.
+
+**Two things the snapshot carries so you do not have to load them.** The D62
+encoding contract (`encoding.esl`) is in the kernel's bootstrap chain, because
+the kernel names its IRIs. The claim-kind alignment is layered by step 2, because
+it references `wn:` / `umlscui:` concepts that exist only after a lexicon import.
+Both used to be `--chain-load` steps that five separate callers each remembered.
+
+**For formalization specifically** the kernel needs the live proposers and the
+WordNet Morphy dictionary, neither of which is in the default image:
+
+```bash
+scripts/provision-wordnet.sh download   # compose bind-mounts references/WordNet-3.0/dict
+ANTHROPIC_API_KEY=sk-... just up-llm    # builds the kernel with --features use-llm
+```
+
+Without the dict the served parser falls back to a no-op lemmatizer and *every*
+sentence comes back as a grammar cut; the startup log line `Parse lemmatizer: …`
+says which one loaded.
+
 **Note for WSL 2 users:** all of the above installs into the WSL
 distribution (Ubuntu or similar), not Windows itself. VS Code's WSL
 remote extension is the smoothest way to edit the repo from Windows
