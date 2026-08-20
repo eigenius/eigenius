@@ -516,7 +516,7 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 | 4 ✅ | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
 | 5a ✅ | Shared emission core (`formalize::emit_from_encoding`) | The demo artifacts regenerate **byte-identically** through the refactored path |
 | 5b ✅ | `FormalizeDocument` RPC over that core | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
-| 6 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
+| 6 ✅ | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
 | 7 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
 
 Slices 1–2 are independent of the rest and unblock everything. Slice 3 is independent of the surfaces
@@ -607,6 +607,20 @@ the same prose under two doc ids produced two different artifacts, falsifying §
 claim. Fixed by `with_source("<path> (sha256 <hex>)")` on both drivers — what the claim was actually
 derived from. The demo artifacts regenerate with the corrected provenance; the witness key hashes
 the PROPOSITION, not the provenance, so no justification moved.
+
+**Slice 6 DONE `2026-08-20`.** Two tools, matching the server's one-tool-per-RPC rule:
+`eigenius_formalize_document` (returns a task id) and `eigenius_get_formalization_result`. Task
+polling needed nothing new — `eigenius_get_task_status` already existed, which is what made async
+the cheap option here rather than the expensive one. Inline draws are deliberately NOT exposed: an
+agent should not be pasting four JSON draw arrays into a tool call, and branch-sourced draws are the
+default anyway.
+
+Two consumer-facing corrections the tests forced. **protobuf-es omits default-valued fields**, so an
+unfinished run came back as `{}` — `found: false` vanished exactly when a polling caller needs it,
+and `encoded: 0` vanished exactly when a document encoded nothing, which §4.1 calls a result rather
+than an absence. The tool states those four scalars explicitly. And **`bytes` renders as base64**,
+so asking for `text/x-esl` in order to READ it returned base64; the tool decodes the text encodings
+in place and leaves CBOR as bytes.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been
