@@ -141,13 +141,26 @@ run, no anchored-cache short-circuit. Kernel healthy throughout.
 
 ### Still open
 
-The carrier scan remains O(chain) for a genuinely changed property definition. An indexed answer
+The carrier scan remains O(chain) for a genuinely changed property definition. **MEASURED**
+`2026-08-20` on the aligned snapshot: a throwaway branch off `main`, one property's `description`
+changed in `encoding.esl` (genuine change, no constraint tightened), loaded — **3m55s total, 3m47s
+of it retroactive**, for that single property. The kernel stayed responsive (every healthcheck
+`exit=0`), so this is slow, not a liveness failure.
+
+~30 µs per chain resource: that is a storage fetch plus CBOR decode, not bloom checks. It rules out
+the cheap fix — the scan does call `Layer::resolve` outside any `ResolveMemoScope`, so every IRI
+pays an uncached head→root walk, and reading each layer's own resource instead would be sound
+(a shadowed carrier only ever produces a conservative false positive) — but that removes the walk,
+not the fetch, so it is a constant factor at best. Only *not touching the resources* removes the
+cost. An indexed answer
 needs a value-independent **predicate → subject** index: the triple index stores only IRI-valued
 triples (nothing at all for `enc:prose`, `enc:span_start`, `enc:confidence`) and answers
 `(predicate, object)`, not `predicate` alone. For the IRI-valued half a `scan_predicate(p)` beside
 `scan_predicate_object(p, o)` would suffice — RocksDB keys are already `(p, o, s)`-ordered, so it
 is a prefix scan and needs no new persisted structure. Not built: after the gate, this path runs
-only on a deliberate ontology edit.
+only on a deliberate ontology edit. The trigger to build it is a workflow change, not a code
+condition — if editing property definitions against the full lexicon chain becomes something done
+interactively rather than at reseed time, 4 minutes per edit stops being acceptable.
 
 The uncapped `LayerStackView` resource fetch noted above is still uncapped. It did not cause this,
 and it is still worth a bounded page with an explicit `truncated` marker.
