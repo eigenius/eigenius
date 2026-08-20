@@ -506,7 +506,8 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 | 2 ✅ | Declaration cleanup + doc amendments (§12) | `encoding_validates.rs` green; no dangling `enc_sig:` reference in the tree |
 | 3 ✅ | `enc:ProposalDraw` + commit draws to `doc-<id>` + draws-from-chain reader | A recorded run re-runs from the branch alone with `misses == 0` and emits a byte-identical artifact; the file arms still replay unchanged |
 | 4 ✅ | `TaskKind` generalization | Existing task tests green; a formalize task appears in `ListTasks` with its own kind |
-| 5 | `FormalizeDocument` RPC | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
+| 5a ✅ | Shared emission core (`formalize::emit_from_encoding`) | The demo artifacts regenerate **byte-identically** through the refactored path |
+| 5b | `FormalizeDocument` RPC over that core | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
 | 6 | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
 | 7 | `formalize` notebook cell (read-only) | Playwright e2e; reseed done and the manifest pin updated in the same commit |
 
@@ -558,6 +559,28 @@ populated for `ProgramRun` and are EMPTY otherwise, so a reader that only unders
 nothing rather than a synthetic IRI it would have to special-case. `eig task list` prints the kind
 and each kind's own subject — the program for a run, the doc branch for a formalization — rather than
 a blank PROGRAM column inviting the reader to think the task is broken.
+
+**Slice 5 split (`2026-08-19`).** Slice 5 as scoped is roughly four times slices 1–4 combined, and
+it has a hard dependency the plan did not name: the artifact emitter lives in `eigenius-encoding`,
+which DEPENDS ON the kernel, so the kernel's gRPC layer cannot call it. The established answer in
+this tree is a kernel-declared trait filled in by the top-level binary — the same seam
+`ParseConfig::lemmatizer` uses, for the same reason (`the kernel cannot depend on eigenius-wordnet
+(cycle)`). So slice 5 becomes:
+
+- **5a — the shared emission core.** Everything downstream of `DocumentPipeline::encode` is the same
+  work for every surface: map each `SentenceOutcome` to an emission record under the run's selection
+  authority, fail closed or record a `CutItem` under `partial`, emit the artifact. Only the INPUTS
+  differ (file paths vs request fields). Lifted out of the 500-line `prose-to-esl` driver into
+  `crates/eigenius-encoding/src/formalize.rs` as `emit_from_encoding(&EmissionInputs)`, taking values
+  rather than paths.
+- **5b — the RPC** over that core, via a `DocumentFormalizer` trait the kernel declares and the
+  binary injects, plus the `TaskKind::Formalize` record from slice 4 and an artifact-retrieval path.
+
+**5a DONE `2026-08-19`.** Lifted rather than reimplemented, deliberately: the alternative is two
+emitters that agree until they do not, and since the CLI's artifacts are the demo's committed,
+byte-compared fixtures, a served run emitting a slightly different shape would be caught by nothing.
+Gate met — `claims-intact.esl` regenerates **byte-identical** to the committed file through the
+refactored path.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been

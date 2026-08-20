@@ -32,6 +32,7 @@
 //! diagnostic, never a silent pick.
 
 pub mod emit;
+pub mod formalize;
 pub mod pipeline;
 pub mod select;
 pub mod snapshot;
