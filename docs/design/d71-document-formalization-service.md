@@ -517,7 +517,7 @@ notebook cell type (bootstrap edit ⇒ batched reseed).
 | 5a ✅ | Shared emission core (`formalize::emit_from_encoding`) | The demo artifacts regenerate **byte-identically** through the refactored path |
 | 5b ✅ | `FormalizeDocument` RPC over that core | E2E over the demo paragraph through the RPC produces an artifact **byte-identical** to the CLI's |
 | 6 ✅ | MCP tool | `orchestration/tests/mcp_test.ts` covers start → poll → artifact |
-| 7 ◐ | `formalize` notebook cell | Reseed done and the manifest pin updated in the same commit; SDK round-trip tested. **Playwright e2e NOT run** — see below |
+| 7 ✅ | `formalize` notebook cell | Reseed done and the manifest pin updated in the same commit; SDK round-trip tested; the served path verified end to end in the container. Playwright e2e DESCOPED (`2026-08-20`) |
 
 Slices 1–2 are independent of the rest and unblock everything. Slice 3 is independent of the surfaces
 and is what makes slice 5's byte-identity gate cheap to run repeatedly.
@@ -641,12 +641,23 @@ included: what the last RUN produced is not what the cell IS, and hashing it wou
 prose a new identity after every run, defeating cell de-duplication. `doc_id` is included because a
 different working branch replays a different set of draws.
 
-**Not done: the Playwright e2e.** The suite runs against a served SPA plus a live kernel, and a
-formalization spec additionally needs the snapshot staged and minutes of parse time per run. Three
-SDK round-trip tests cover the risky half (the publish mapping, and that the cell publishes as
-`formalize` rather than silently degrading to the markdown fallback an unknown type decodes as);
-what is untested is the rendering path. `notebooks/examples/d71-formalize-prose.json` is the manual
-exercise, and it parses through the app's real validator.
+**Playwright e2e DESCOPED** (`2026-08-20`, user decision). The suite needs a served SPA, a live
+kernel, the staged snapshot and minutes of parse time per run — a lot of standing infrastructure for
+one cell type. What covers the ground instead:
+
+- Three SDK round-trip tests cover the risky half: the publish mapping, and that the cell publishes
+  as `formalize` rather than silently degrading to the markdown fallback an unknown type decodes as
+  (a round-trip alone would pass either way).
+- The whole served path was exercised by hand in the container on `2026-08-20`: `FormalizeDocument`
+  → `TaskKind::Formalize` → live proposers → `doc-<id>` branch carrying 11 recorded draws →
+  artifact, over the demo's three-sentence paragraph, with all three sentences ENCODED and the
+  «These findings» anaphora resolved. Peak RSS 2.43 GiB.
+- `notebooks/examples/d71-formalize-prose.json` is the manual exercise; it parses through the app's
+  real validator and publishes as `formalize`.
+
+What stays untested is the RENDERING path — the cell editor and the output view. A regression there
+shows up as a visibly broken cell, not as silent bad data, which is why this is a defensible place
+to stop.
 
 One defect surfaced and fixed while regenerating: the old `enc:section` string embedded the
 INVOKER'S ABSOLUTE PATH (`/home/hm/src/eigenius/...`), so the committed artifact had never been

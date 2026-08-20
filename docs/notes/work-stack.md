@@ -9,7 +9,21 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 0. ▲ ACTIVE — [d71-document-formalization-service.md](../design/d71-document-formalization-service.md) — **the last stage of the parser-pipeline map; written, no code**
+> **NO ENTRY IS ACTIVE (`2026-08-20`).** D71 met its gate, which empties the parser-pipeline spine
+> that has been the top of this stack since `2026-08-11`. The next active item is a decision, not an
+> inheritance: entries (1) and (2) below are the pre-D71 spine and were assessed on `2026-08-19` as
+> largely implemented-or-obsolete, so promoting one by position would be wrong. The live candidates,
+> none of them started:
+>
+> - **The kernel OOM** (on deck below) — one observation, cause unknown, jemalloc profile is the
+>   named next action. The only entry here that is a *defect* rather than a plan.
+> - **D71 residue** — §14's four open questions (source transport, draw commit granularity, pruning
+>   policy, the prefix-replay measurement) and §11's human-override loop, which the §9 draws-on-branch
+>   decision shrank from a design problem to a measurement.
+> - **D61 faithfulness** — the half that D71 §10 reserved the institution shape for, and the only
+>   thing in the tree that still earns it.
+
+### 0. ✔ [d71-document-formalization-service.md](../design/d71-document-formalization-service.md) — **BUILT `2026-08-20`; all seven slices in, verified end to end in the container**
 The four-stage build map (`2026-08-11`) — **reading selection → anaphora completion (D64) → unified
 landing (Derived, artifact-first) → the formalization service** — is retired as a file
 (`parser-pipeline-plan.md`, deleted `2026-08-19`): Stages 1–3 are built, each has its own design
@@ -149,6 +163,27 @@ reproducible off this machine — the demo now passes a repo-relative `--source`
 granularity (per-unit layer count vs chain-length cost); pruning policy (manual vs a D44 hint); the
 prefix-replay measurement. **Human-override loop: separate effort** (§11) — the crude form already
 works via `--pins` + whole-document re-run.
+
+**ALL SEVEN SLICES DONE `2026-08-20`.** 6: two MCP tools (`eigenius_formalize_document` +
+`eigenius_get_formalization_result`); task polling needed nothing new. 7: `notebook:formalize` in the
+cell-type enumeration — a bootstrap edit, so the manifest pin fired as designed and the reseed was
+paid knowingly (`wordnet-umls-aligned-2026-08-20`); the whole follow-through verified, with both demo
+artifacts regenerating with NO diff, which is the evidence the reseed reproduced the lexicon exactly.
+**Playwright e2e DESCOPED** (user decision): the SDK round-trip tests cover the publish mapping, the
+served path was exercised by hand in the container, and what stays untested is the rendering path,
+where a regression is visible rather than silent.
+
+**Verified in the container `2026-08-20`:** `FormalizeDocument` → `TaskKind::Formalize` → live
+proposers → `doc-<id>` branch with 11 recorded draws → artifact, over the demo's three-sentence
+paragraph: all three ENCODED, «These findings» resolved, peak RSS 2.43 GiB. Getting there fixed four
+defects the slices had left: the orchestrator's kernel passthrough is a CURATED LIST and did not
+route the two new methods (now pinned by a test, the way the MCP tool inventory already was);
+`cli`'s `use-llm` did not forward to `eigenius-encoding`, so live proposers existed in a binary whose
+formalizer reported it had none; the kernel image had no WordNet dict, so the served parser silently
+used the no-op lemmatizer and EVERY sentence came back `cut_grammar`; and `build-alignment-snapshot.sh`
+copied the base store's PROVENANCE verbatim, so an aligned snapshot could not be told from a raw one.
+
+**Not closed:** a kernel OOM observed during a notebook session — its own note, on deck below.
 
 Remaining deferrals live in D68 §5/§5a (collective/group term +
 star coercion, persistent plural referents, hole number) and D67 §8 (reflection source-axis
