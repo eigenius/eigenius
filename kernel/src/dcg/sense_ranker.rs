@@ -358,23 +358,42 @@ mod anthropic {
     /// the caller degrades gracefully — the reranker only reorders a beam, never gates validity.
     pub struct AnthropicSenseRanker {
         api_key: String,
-        model: String,
+        model: crate::dcg::anthropic_client::ModelConfig,
     }
 
     impl AnthropicSenseRanker {
         pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+            Self::with_config(
+                api_key,
+                crate::dcg::anthropic_client::ModelConfig::with_model(model),
+            )
+        }
+
+        /// Build with an explicit [`ModelConfig`] — how a formalization run selects the model it
+        /// wants, and what a recorded draw names as the answerer (D71 §7.1 / §9).
+        pub fn with_config(
+            api_key: impl Into<String>,
+            model: crate::dcg::anthropic_client::ModelConfig,
+        ) -> Self {
             Self {
                 api_key: api_key.into(),
-                model: model.into(),
+                model,
             }
         }
 
         /// From `$ANTHROPIC_API_KEY`, defaulting to a fast model. `None` if the key is unset.
         pub fn from_env() -> Option<Self> {
+            Self::from_env_with(Default::default())
+        }
+
+        /// From `$ANTHROPIC_API_KEY` with an explicit [`ModelConfig`]. The formalization service
+        /// threads one config to every proposer in a run, so a draw's recorded model is the run's,
+        /// not a per-seam default (D71 §7.1 / §9).
+        pub fn from_env_with(cfg: crate::dcg::anthropic_client::ModelConfig) -> Option<Self> {
             std::env::var("ANTHROPIC_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
-                .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
+                .map(|k| Self::with_config(k, cfg.clone()))
         }
 
         fn ask(&self, instructions: &str) -> Option<SenseRankingReply> {

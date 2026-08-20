@@ -133,7 +133,7 @@ pub async fn adjudicate_batch(
 ) -> Result<Vec<Verdict>, String> {
     let reply: BatchReply = eigenius_kernel::dcg::anthropic_client::anthropic_structured(
         api_key,
-        model,
+        &eigenius_kernel::dcg::anthropic_client::ModelConfig::with_model(model),
         &prompt(batch),
     )
     .await?;

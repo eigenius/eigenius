@@ -288,19 +288,29 @@ mod anthropic {
     /// (the claim lands Assertion, fail-closed).
     pub struct AnthropicKindClassifier {
         api_key: String,
-        model: String,
+        model: eigenius_kernel::dcg::anthropic_client::ModelConfig,
         /// The whole document — the classifier judges the sentence IN CONTEXT.
         document: String,
     }
 
     impl AnthropicKindClassifier {
         pub fn from_env(document: &str) -> Option<Self> {
+            Self::from_env_with(document, Default::default())
+        }
+
+        /// From `$ANTHROPIC_API_KEY` with an explicit [`ModelConfig`] — how a formalization run
+        /// selects the model it wants, and what a recorded draw names as the answerer
+        /// (D71 §7.1 / §9).
+        pub fn from_env_with(
+            document: &str,
+            model: eigenius_kernel::dcg::anthropic_client::ModelConfig,
+        ) -> Option<Self> {
             std::env::var("ANTHROPIC_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
                 .map(|k| Self {
                     api_key: k,
-                    model: eigenius_kernel::dcg::anthropic_client::DEFAULT_MODEL.to_string(),
+                    model: model.clone(),
                     document: document.to_string(),
                 })
         }
