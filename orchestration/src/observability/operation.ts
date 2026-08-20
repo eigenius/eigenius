@@ -97,6 +97,10 @@ export const KERNEL_PASSTHROUGH_CONSOLIDATE_CHAIN =
 export const KERNEL_PASSTHROUGH_ESTIMATE_CONSOLIDATION =
   "orchestrator.kernel.estimate_consolidation";
 export const KERNEL_PASSTHROUGH_LIST_TASKS = "orchestrator.kernel.list_tasks";
+export const KERNEL_PASSTHROUGH_FORMALIZE_DOCUMENT =
+  "orchestrator.kernel.formalize_document";
+export const KERNEL_PASSTHROUGH_GET_FORMALIZATION_RESULT =
+  "orchestrator.kernel.get_formalization_result";
 export const KERNEL_PASSTHROUGH_GET_TASK_STATUS =
   "orchestrator.kernel.get_task_status";
 export const KERNEL_PASSTHROUGH_CANCEL_TASK = "orchestrator.kernel.cancel_task";

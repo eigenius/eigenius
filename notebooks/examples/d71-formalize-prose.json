@@ -42,7 +42,7 @@
     {
       "id": "d71a0000-0000-4000-8000-000000000007",
       "type": "eigenql",
-      "source": "-- After landing the artifact, the claims are queryable like anything\n-- else. Every claim traces back to its span through `from_unit`.\nUSING \"urn:eigenius:encoding:EncodedClaim\",\n      \"urn:eigenius:encoding:DiscourseUnit\"\nMATCH EncodedClaim(?c) { \"urn:eigenius:encoding:from_unit\": ?scoped },\n      DiscourseUnit(?u) { \"urn:eigenius:encoding:prose\": ?prose }\nRETURN [] { claim: ?c, prose: ?prose }\n"
+      "source": "// After landing the artifact, the claims are queryable like anything else.\n//\n// The join walks the provenance chain the emitter builds, one hop at a time:\n//   EncodedClaim --from_unit--> ScopedUnit --unit--> DiscourseUnit\n// so every claim traces back to the exact prose span it was derived from.\n// Dropping the middle hop would not error — it would silently cross-join every\n// claim with every unit.\n//\n// `USING NAMESPACE` (note the TRAILING COLON) is what lets the patterns name\n// classes by short name; without it the type-checker cannot resolve them.\nUSING NAMESPACE \"urn:eigenius:encoding:\"\nMATCH EncodedClaim(?c) { \"urn:eigenius:encoding:from_unit\": ?scoped }\nMATCH ScopedUnit(?scoped) { \"urn:eigenius:encoding:unit\": ?u }\nMATCH DiscourseUnit(?u) { \"urn:eigenius:encoding:prose\": ?prose }\nRETURN [] { claim: ?c, prose: ?prose }"
     }
   ]
 }

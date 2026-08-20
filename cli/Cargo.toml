@@ -84,4 +84,10 @@ cuda = ["eigenius-embedder-candle/cuda"]
 metal = ["eigenius-embedder-candle/metal"]
 # D63/GH#97 Lever 1: enable the contextual LLM sense reranker in the served/local parse path
 # (the kernel's `AnthropicSenseRanker`, opt-in, needs ANTHROPIC_API_KEY at runtime).
-use-llm = ["eigenius-kernel/use-llm"]
+# Forwards to EVERY crate whose live proposers this binary can reach. Missing
+# eigenius-encoding here (slice 5b, fixed 2026-08-20) built a kernel with live
+# proposers whose FORMALIZER could not use them: the served run reported "this
+# binary has no live ranker" while `AnthropicSenseRanker` sat in the same
+# binary. A feature that does not propagate fails silently in exactly this
+# shape — the symptom names the wrong crate.
+use-llm = ["eigenius-kernel/use-llm", "eigenius-encoding/use-llm"]

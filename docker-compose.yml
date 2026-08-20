@@ -29,6 +29,11 @@ services:
     build:
       context: .
       dockerfile: deploy/Dockerfile.kernel
+      args:
+        # Empty by default. Set CARGO_FEATURES=use-llm to build a kernel whose
+        # untrusted proposers can actually call a model — required for a D71
+        # formalization run on a doc branch with no recorded draws yet.
+        CARGO_FEATURES: ${CARGO_FEATURES:-}
     ports:
       - "50051:50051"
     environment:
@@ -45,9 +50,25 @@ services:
       #                                          lexicon reseed fitting a 32 GB host and not
       # Not mystery tuning: delete this and the reseed goes back to running at the edge of RAM.
       - MALLOC_ARENA_MAX=${MALLOC_ARENA_MAX:-2}
+      # D71 formalization: a run with no recorded draws asks the model. Unset
+      # here is harmless — the proposers report a missing key and the run fails
+      # closed rather than silently degrading to an unranked parse.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db"]
     volumes:
       - eigenius_db:/var/lib/eigenius/db
+      # WordNet's Morphy dictionary, read-only. NOT baked into the image:
+      # `references/` is gitignored, so the data is a download, not a repo
+      # artefact. Without it the served parser silently falls back to the no-op
+      # `Identity` lemmatizer and EVERY sentence yields zero parses — which
+      # surfaces as `cut_grammar`, i.e. looks like a grammar gap. The startup
+      # log line "Parse lemmatizer: …" says which one loaded.
+      #
+      # Get it with: scripts/provision-wordnet.sh download  (idempotent; the
+      # same script the lexicon import uses — see docs/guides/platform §2.6.1).
+      # Princeton's license permits redistribution with its notice; this repo
+      # downloads rather than vendors, which is why the path is gitignored.
+      - ./references/WordNet-3.0/dict:/usr/share/eigenius/wordnet/dict:ro
     depends_on:
       orchestrator:
         condition: service_healthy

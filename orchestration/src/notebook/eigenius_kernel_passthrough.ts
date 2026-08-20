@@ -229,6 +229,25 @@ export function registerEigeniusKernelPassthrough(
         kernel.raw.cancelTask,
         req,
       ),
+
+    // Formalization (D71). The notebook's `formalize` cell starts a run and
+    // then polls it through the three task methods just above — which is why
+    // async cost nothing extra here, and also why omitting THESE two produced
+    // a cell that failed at the first call with Connect's default
+    // "not implemented": a method absent from this curated list is not routed,
+    // however complete the kernel behind it is.
+    formalizeDocument: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_FORMALIZE_DOCUMENT,
+        kernel.raw.formalizeDocument,
+        req,
+      ),
+    getFormalizationResult: (req) =>
+      proxy(
+        operation.KERNEL_PASSTHROUGH_GET_FORMALIZATION_RESULT,
+        kernel.raw.getFormalizationResult,
+        req,
+      ),
     // Tags panel (D34 §G.2 / §8 / Phase 8). Immutable named refs;
     // CreateTag rejects duplicates with `already_exists`, DeleteTag
     // is idempotent. Tags are GC roots — created tags survive across

@@ -78,6 +78,19 @@ echo "  entries rewritten: $(grep -c '^resource ' "$ESL" || true)"
 say "loading it onto a fresh copy of the base → $OUT"
 scripts/add-layer-to-snapshot.sh --base "$BASE" --out "$OUT" "$ESL"
 
+# AMEND THE PROVENANCE STAMP. `add-layer-to-snapshot.sh` copies the base store verbatim, so the
+# aligned snapshot inherited the base's `alignment : none` line — meaning the stamp could not
+# distinguish an aligned snapshot from the raw reseed it was built from, which is the one question
+# it exists to answer. Found 2026-08-20 by a `just which-snapshot` on a staged aligned store that
+# reported "raw reseed".
+if [[ -f "$OUT/PROVENANCE" ]]; then
+    sed -i 's|^alignment       : none .*|alignment       : '"$(basename "$MERGES")"' (layered by scripts/build-alignment-snapshot.sh)|' "$OUT/PROVENANCE"
+    {
+        echo "aligned_from    : $(basename "$BASE")"
+        echo "aligned_at      : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >> "$OUT/PROVENANCE"
+fi
+
 # Keep the artefact next to the merge set for inspection. It is gitignored and regenerated on every
 # run; nothing downstream reads it.
 cp "$ESL" experiments/lexicon-align/alignment.esl
