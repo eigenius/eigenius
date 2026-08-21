@@ -135,6 +135,13 @@ jobs:
 
       - name: Install buf
         uses: bufbuild/buf-setup-action@v1
+        with:
+          # buf-setup resolves its download URL through the GitHub API. Unauthenticated,
+          # that shares the runner IP's rate limit and fails with "API rate limit
+          # exceeded" — an infrastructure flake on a PR that may not touch protos at all
+          # (seen on #185, which changes only .gitignore). The token raises the limit to
+          # the per-repo one; the action's own log warns when it is absent.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Lint protos
         run: buf lint
