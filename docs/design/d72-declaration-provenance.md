@@ -1,6 +1,6 @@
 # D72 — Declaration provenance: agent and warrant
 
-*Status: design memo · `2026-08-20`. Decision recorded; no code yet.*
+*Status: BUILT `2026-08-20` in [#177](https://github.com/eigenius/eigenius/pull/177) (`a40c952`). §3.1, §3.3 and §4 record what was designed; the **As built** notes below record where the implementation departed from it and why.*
 
 *Arises from [#141](https://github.com/eigenius/eigenius/issues/141) / [#167](https://github.com/eigenius/eigenius/issues/167).
 PR #177 stopped `stamp_declared` overwriting an author's `declared_by`; that fix hit a wall which is
@@ -36,7 +36,10 @@ Every authored value in the tree names something other than a person:
 | `methodology:ic50-classification-convention` | 20 | a convention |
 | `d57:m3-generator` | 20 | a program |
 
-Zero name an agent. D6b's illustrative `"Eigenius core team"` is the only agent-shaped value in the
+Zero name an agent — **except** `urn:schema_org` and `urn:obo:obo-foundry`, which on closer
+reading are the agent axis after all: those terms genuinely *are* declared by those projects.
+As built they stay in `declared_by` and became `reflection:Organization` resources, so 2140 of
+the ~2400 values kept their meaning and gained a referent instead of moving. D6b's illustrative `"Eigenius core team"` is the only agent-shaped value in the
 design corpus, and it is an organization. The property is documented as the agent axis and used as
 the warrant axis.
 
@@ -76,6 +79,16 @@ knows where knowledge came from; the compiler does not.
 
 ### 3.1 `agent:Agent`
 
+> **As built: the vocabulary lives in `reflection`, not its own layer.** A separate `agent`
+> layer below `reflection` is unconstructible: `stamp_declared` injects a
+> `reflection:DeclaredResource` reference into every resource the ESL compiler emits, so no
+> ESL layer can sit below `reflection` — the trial layer failed `UnresolvedClassReference` on
+> all nine of its own resources — while `declared_by`'s `class_types` must resolve
+> same-or-lower (Rule 22). The circularity is created by the defect this note exists to fix.
+> The classes are therefore `reflection:Agent` / `Person` / `Organization` / `orcid`, and the
+> two bootstrap agents are `reflection:agent:unattributed` and
+> `reflection:agent:eigenius_core_team`.
+
 A new root-layer namespace. `Agent` with `Person` and `Organization` subclasses (aligned to the
 imported schema.org vocabulary rather than duplicating it).
 
@@ -102,6 +115,14 @@ chain, same-or-lower**. The #167 defect class stops being a bug to fix and becom
 `"esl-compiler"` is not an IRI, and an `agent:` IRI that resolves to nothing fails at commit.
 
 ### 3.3 `warranted_by` is the new property
+
+> **As built: the 48 warrant targets are `reflection:DeclaredResource`, not a new class.**
+> §8.2 asked whether `warranted_by` should carry `class_types`; a `Warrant` marker class was
+> rejected because it would be a fifth category cutting across the four epistemic types, and a
+> criterion *is* declared by a human. Each stub's description says it is a stub: those
+> identifiers existed only as unresolvable strings, and writing a plausible account of what
+> `wrn-paper:mmr-restoration-criterion` asserts would fabricate domain claims into a
+> publication chain.
 
 ```
 property reflection:warranted_by : core:resource {
@@ -130,6 +151,16 @@ compiler is an agent the **session** can know. Two options, decided here as (b):
   `declared_by` on `class`/`property`/`axiom`/`def`/…, and the compiler fills an unset one from a
   configured session agent rather than a literal. A build with no configured agent fails closed
   rather than inventing one.
+
+> **As built: (b), with the fail-closed clause relaxed to a default agent.** The compiler reads
+> `EIGENIUS_DECLARED_BY`; absent or malformed, it writes `reflection:agent:unattributed` rather
+> than refusing to build. The marker is deliberately not a real party — naming one for
+> unattributed content would be a worse falsehood than the `"esl-compiler"` literal it replaces,
+> because it would name someone who exists. §8.1's question is answered: an explicit env var,
+> **not** the git committer identity.
+>
+> The ESL grammar slot on the theory forms is **not built**; the session agent covers the need
+> and a per-declaration override remains available.
 
 (b) preserves D6b's enforcement model and keeps "who asserted this" answerable, which is the point
 of the epistemic cluster. It costs a grammar change and a compiler configuration surface.
@@ -160,6 +191,12 @@ Pre-production posture applies — drop-and-reseed is acceptable and there are n
 
 ## 7. Build order
 
+> **All seven steps landed in #177**, plus two the order did not anticipate: the example
+> notebook `stats-and-reasoning.json` (four ESL cells writing string warrants — no test
+> compiles notebook JSON, so nothing caught it), and `DeclaredClaimGrader` / `DerivedClaimLander`,
+> which wrote `declared_by` as a String defaulting to `"encoding-pipeline"` — the same shape as
+> `"esl-compiler"`. Also folded in: `core:short_name` gained `pattern: \S+`.
+
 1. `agent` ontology layer + `Agent`/`Person`/`Organization` + `orcid`. Independent of everything else.
 2. `reflection:warranted_by`, un-typed target. Additive; no existing value moves yet.
 3. Importer change: schema.org and OBO write `warranted_by` instead of `declared_by`.
@@ -171,6 +208,12 @@ Pre-production posture applies — drop-and-reseed is acceptable and there are n
 Steps 1–2 are additive and can land immediately. Step 5 is the breaking one and must not precede 3–4.
 
 ## 8. Open questions
+
+> **Resolved:** (1) the session agent is `EIGENIUS_DECLARED_BY`, not the git committer;
+> (2) `warranted_by` carries no `class_types` and the stubs are `DeclaredResource` (§3.3).
+> **Still open:** (3) whether `ObservedResource.source` needs the same treatment — measured and
+> filed as [#183](https://github.com/eigenius/eigenius/issues/183): 141 values, 84 distinct, 70
+> containing spaces, so it is prose for half its uses and needs its own split before any retype.
 
 1. **Session agent configuration** (§4b) — env var, a config file, or the git committer identity?
    The last is tempting and wrong: a commit author is who *committed*, not who *asserted*.
