@@ -195,11 +195,11 @@ fn well_formed_claim_commits() {
 /// `(core:Class : Prop)` reaches this gate already wearing `Sort(0)` and the
 /// gate has nothing to catch.
 ///
-/// Verified against this commit: the annotated class commits. #175 closes the
-/// unannotated route; the annotated one closes when #191 does, at which point
-/// this test flips to green and the `ignore` comes off.
+/// #175 closes the unannotated route; the annotated one needed #191, which lands in
+/// the same commit series. Measured both ways: with #175 alone the annotated class
+/// COMMITS, and this test fails; with #191 present it is rejected. That is why the two
+/// had to land together, and this test is the evidence.
 #[test]
-#[ignore = "blocked on eigenius#191 — `check` admits EigonClass against Sort(0)"]
 fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
     let annotated = Value::Json(serde_json::json!({
         "ctor": "Ann",
