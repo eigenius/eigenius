@@ -3,7 +3,13 @@
 **Status: design note for review — precedes any code.** Stage 3 of the four-stage build map
 (retired `2026-08-19`; the as-built record is work-stack entry 0, and Stage 4 became
 [D71](../design/d71-document-formalization-service.md)). Settled inputs: parsed sentences land
-**Derived** (user decision 2026-08-10; the Declared cluster is reserved for curator-pinned rules);
+**Derived** (user decision 2026-08-10; the Declared cluster is reserved for curator-pinned rules) —
+**SUPERSEDED `2026-08-21` by [D73](../design/d73-justification-logic-witnesses-and-traces.md) §6: parsed
+sentences land DECLARED, by the agent or by the source document's authors.** That decision split the world on
+*parsed vs curated*; the operative axis is **who asserts**. The parser is a formulation instrument — it produces
+form and a fidelity record, never a warrant, because fidelity is D61's subject and unbuilt. What the parse
+witnesses is the artifact fact ("this text parses to this well-typed term"), bounded by the program's type
+(D73 §3.3); the domain proposition is asserted by a named agent, which D72 made expressible;
 selection lives inside the discourse loop (Stage 1); anaphora resolves inside it (Stage 2, exit
 gate met 2026-08-11 — open 20→15 on the page, residuals = claims / plural sets / quantifier
 witnesses / Σ-restrictor accommodation).
