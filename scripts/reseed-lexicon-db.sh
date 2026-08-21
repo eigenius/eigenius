@@ -44,6 +44,9 @@
 #   VOLUME         docker volume name (default: eigenius_eigenius_db — compose project "eigenius")
 #   SNAPSHOT_ROOT  parent dir for snapshots (default: ../db-snapshot relative to repo root)
 #   CARGO_PROFILE_IMG  kernel image build profile (default: ci — functionally identical, faster than release)
+#   CARGO_FEATURES     cargo features for the kernel image (default: none). Set to `use-llm` to
+#                      leave an image whose proposers can actually call a model — otherwise every
+#                      LLM path runs cap-only, which is a DIFFERENT experiment.
 #
 # Prerequisites (NOT provisioned here; both are gitignored, licensed/large):
 #   - WordNet 3.0 dict at references/WordNet-3.0/dict   (scripts/provision-wordnet.sh downloads it)
@@ -141,8 +144,16 @@ CLI="$ROOT/target/release/eigenius"
 
 # ── 2. kernel image from HEAD (so the seeded bootstrap matches the code that runs the test) ──
 if [[ "$BUILD_IMAGE" == "1" ]]; then
-  say "building kernel docker image from HEAD ($(git rev-parse --short HEAD), profile=$CARGO_PROFILE_IMG)"
-  docker compose build --build-arg CARGO_PROFILE="$CARGO_PROFILE_IMG" kernel
+  say "building kernel docker image from HEAD ($(git rev-parse --short HEAD), profile=$CARGO_PROFILE_IMG, features='${CARGO_FEATURES:-}')"
+  # CARGO_FEATURES is forwarded, matching docker-compose.yml's build arg. Without this the
+  # reseed always leaves an image with no `use-llm`, so the next `docker compose up` silently
+  # reuses it and every LLM path — sense ranker, reading ranker, anaphora proposer, D71
+  # formalize — runs cap-only. That is a DIFFERENT experiment, not a degraded one, and the
+  # only symptom is a mid-run cell failure hours later.
+  docker compose build \
+    --build-arg CARGO_PROFILE="$CARGO_PROFILE_IMG" \
+    --build-arg CARGO_FEATURES="${CARGO_FEATURES:-}" \
+    kernel
 fi
 
 # ── 3. clean volume + bring up kernel alone (orchestrator not needed for deterministic ingest) ──
