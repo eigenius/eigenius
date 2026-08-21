@@ -187,3 +187,33 @@ fn a_type_in_the_proposition_slot_is_rejected_by_the_commit() {
 fn well_formed_claim_commits() {
     commit_claim(a_real_proposition()).expect("a claim asserting a Prop commits");
 }
+
+/// The residual route, pinned: issue #191. `check` admits `EigonClass` and
+/// `EigonPrimitive` against **every** universe including `Sort(0)`
+/// (`nbe/check/mod.rs`), while inference gives them `Sort(1)`. `Exp::Ann(e,
+/// t)` checks `e` against `t` and then reports `t` as the inferred type, so
+/// `(core:Class : Prop)` reaches this gate already wearing `Sort(0)` and the
+/// gate has nothing to catch.
+///
+/// Verified against this commit: the annotated class commits. #175 closes the
+/// unannotated route; the annotated one closes when #191 does, at which point
+/// this test flips to green and the `ignore` comes off.
+#[test]
+#[ignore = "blocked on eigenius#191 — `check` admits EigonClass against Sort(0)"]
+fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
+    let annotated = Value::Json(serde_json::json!({
+        "ctor": "Ann",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]},
+            {"ctor": "Sort", "args": [0]}
+        ]
+    }));
+    let errors = rejection_errors(annotated, "a class annotated as Prop");
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.rule == ValidationRule::TypeExprNotAProposition
+                || e.rule == ValidationRule::TypeExprIllTyped),
+        "no propositionhood or typing diagnostic among {errors:?}"
+    );
+}
