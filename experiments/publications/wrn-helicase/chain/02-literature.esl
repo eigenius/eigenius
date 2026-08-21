@@ -36,6 +36,7 @@ namespace reference  = "urn:eigenius:reference";
 namespace lit        = "urn:eigenius:reference:lit";
 namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 namespace wrnlit     = "urn:eigenius:pub:wrn:lit";
+namespace wrn        = "urn:eigenius:pub:wrn";
 
 // ════════════════════════════════════════════════════════════════════
 // Imported-claim propositions — what the literature warrants assert
@@ -411,66 +412,97 @@ resource wrnlit:cite_ccle_gdsc : reference:Citation {
 
 resource wrnlit:lit_synthetic_lethality_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_synthetic_lethality;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_wrn_separable_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_wrn_separable;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_c911_design_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_c911_design;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_ps15_readout_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_ps15_readout;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_wrn_nucleolar_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_wrn_nucleolar;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_ceres_method_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_ceres_method;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_drive_data_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_drive_data;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_limma_method_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_limma_method;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_voom_method_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_voom_method;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_hallmark_sets_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_hallmark_sets;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
 
 resource wrnlit:lit_msh3_instability_trace : reflection:DeclarationTrace {
     reflection:resource    = wrnlit:lit_msh3_instability;
-    reflection:declared_by = "wrn-literature";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_wrn_literature;
     reflection:timestamp   = "2026-06-16T00:00:00Z";
 }
+
+// ── The declaring agent (D72 §3.1) ───────────────────────────────────
+//
+// Every DeclaredResource below records TWO independent facts: WHO asserted it
+// (reflection:declared_by, this agent) and WHAT GROUNDS it
+// (reflection:warranted_by, a wrn:warrant_* resource). Before D72 the single
+// `declared_by` slot carried the warrant and the ESL compiler overwrote it with
+// the literal "esl-compiler" (#141/#167).
+
+resource wrn:authors : reflection:Agent {
+    core:description = "The author group of Chan EM, et al., Nature 2019, 568:551-556, doi:10.1038/s41586-019-1102-x - 'WRN helicase is a synthetic lethal target in microsatellite unstable cancers'. The declarer of the hypotheses, criteria, conventions and directionality choices this chain encodes from that paper. A collective author byline is an Agent but neither a Person nor an Organization, so it is typed as the base class.";
+    core:short_name = "wrn_authors";
+}
+
+resource wrn:warrant_wrn_literature : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-literature`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_wrn_literature";
+}
+

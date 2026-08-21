@@ -53,7 +53,8 @@ resource wrn:ds_supp1 : bench:Dataset {
 // ─── Declared: the motivating hypothesis (H1) ────────────────────────
 
 resource wrn:h1 : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:hypothesis";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_hypothesis;
     reflection:rationale   = "Hypothesis: dMMR / MSI may create genetic vulnerabilities — motivating a query of large-scale dependency datasets for genes selectively essential in MSI. (Warranted by the synthetic-lethality framing, ref [1]; the DNA-repair-defect strategy, refs [2,3].)";
     reflection:canonical_proposition = type_expr(
         onco:SelectivelyEssential("some_gene", "MSI")
@@ -61,7 +62,8 @@ resource wrn:h1 : reflection:DeclaredResource {
 }
 resource wrn:h1_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:h1;
-    reflection:declared_by = "wrn-paper:hypothesis";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_hypothesis;
     reflection:timestamp   = "2026-06-12T13:00:00Z";
 }
 
@@ -113,7 +115,8 @@ resource wrn:dd_drive_trace : reflection:ProgramTrace {
 // SpecStr applies it at WRN in the certificate.
 
 resource wrn:discovery_rule : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:discovery-logic";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_discovery_logic;
     reflection:rationale   = "A gene that is the top preferential dependency in MSI vs MSS in two INDEPENDENT large-scale screens (CRISPR/Achilles and RNAi/DRIVE) is selectively essential in MSI. Independent-platform replication is the warrant.";
     reflection:canonical_proposition = type_expr(
         forall (g : core:string) =>
@@ -124,7 +127,8 @@ resource wrn:discovery_rule : reflection:DeclaredResource {
 }
 resource wrn:discovery_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:discovery_rule;
-    reflection:declared_by = "wrn-paper:discovery-logic";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_discovery_logic;
     reflection:timestamp   = "2026-06-12T13:00:04Z";
 }
 
@@ -214,3 +218,18 @@ resource wrn:discovery_finding_trace : reflection:ProgramTrace {
     reflection:source    = "eigenius:wrn-phase1-encoding";
     reflection:timestamp = "2026-06-12T13:00:07Z";
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource wrn:warrant_discovery_logic : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:discovery-logic`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_discovery_logic";
+}
+
+resource wrn:warrant_hypothesis : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:hypothesis`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_hypothesis";
+}
+
