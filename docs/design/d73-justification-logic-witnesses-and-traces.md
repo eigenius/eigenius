@@ -143,20 +143,60 @@ the chain. That work was done as provenance hygiene; it was repairing the base c
 The count of `DeclaredEvidence` leaves under a conclusion is therefore a real measure: **how much of this is still
 assumed, and by whom.**
 
-### 3.2 Our CS is not axiomatically appropriate, and internalization must be restated
+### 3.2 Our CS is not axiomatically appropriate, so internalization is restated — and wanted
 
-In Artemov, constants justify *axioms*, and Thm 2.14 requires the CS to be **axiomatically appropriate** — every axiom
-has a constant. Ours is different in kind: `DeclaredEvidence(iri)` is admitted for whatever proposition sits on a
-committed resource, which is an arbitrary domain claim, not an axiom.
+In Artemov, constants justify *axioms*, and Thm 2.14 requires the CS to be **axiomatically appropriate**. Ours is
+different in kind: a grounding constant is admitted for whatever proposition sits on a committed resource, which is an
+arbitrary domain claim, not an axiom. So **internalization in Artemov's sense cannot hold** — nothing guarantees every
+axiom has a constant. D39 §10 notes the difference without drawing this consequence.
 
-D39 §10 notes the difference; it does not draw the consequence. **Internalization in Artemov's sense cannot hold**,
-because nothing guarantees every axiom has a constant. The answerable analogue is a property of the *chain*, not of
-the logic:
+**Decision: we want the chain analogue, scoped to compositions.**
 
-> **Chain internalization.** If the chain establishes `P`, some chain-resident witness pairs a term with `P`.
+> **Chain internalization.** If the chain *derives* or *verifies* `P`, a chain-resident witness pairs a term with `P`.
 
-Whether that is a goal is §13's first open question. It is the property that would let "the chain establishes P" imply
-"there is something to cite".
+Scoped deliberately. `Declared` and `Observed` are the **assumed base** — the leaves of §3.1, where the chain stops
+explaining itself. Their witnesses *are* the assumption, and there is no prior act to internalize. `Derived` and
+`Verified` are the cases where the chain actually did something, and an act that establishes something should leave a
+citable reason behind.
+
+Why it matters: **a proposition nobody can cite is a dead end.** Witnesses are what make a fact usable as a premise, so
+an establishing act that emits no witness forces the next agent to re-assert the fact as a fresh `Declared` leaf —
+converting something the system *knew* into something it merely *assumes*.
+
+The invariant carries its own escape hatch, because §3.3 shows not every derivation has a proposition to internalize:
+
+> Every `Derived` or `Verified` resource either carries a witness for its stated proposition, or is explicitly marked
+> **provenance-only** — derived in fact, uncitable as a reason.
+
+That keeps the property checkable and makes the uninternalized set countable. Known violations today:
+`VerificationTrace` emits nothing (§4.1); D6b hedges the same way about EigenQL `FIBER … INTO` commits and comorphism
+reify outputs. Each is a place where the chain plausibly knows something it cannot cite.
+
+### 3.3 What a derivation may witness is bounded by its specification
+
+A program is a computation `f : I → O`. Applying it establishes `f(i) : O` — application at the **type** level. That is
+a real derivation, but its content is *inhabitation*: this artifact is a well-formed `O`, produced from `i` by `f`. As
+a proposition it is about the **artifact**, close to `Asserts(output_iri)` plus provenance. Thin, and correctly thin.
+
+EigenTT terms are the other case. Where `P : A -> Prop` is applied to `a : A`, the result `P(a)` is a genuine
+proposition, and `App` / `spec_str` do real justification work. Institution inference rules live here.
+
+Two consequences.
+
+**`DerivedEvidence(iri)` is correctly a constant, not a polynomial.** Where the specification is a *type* rather than a
+*Prop*, there is no propositional composition to record. The term algebra is also right to have **no constructor for
+"program applied to input"** — program application is not a justification step. (An earlier draft of this document
+argued the opposite; withdrawn.)
+
+**The rule:**
+
+> A derivation may witness only a proposition its specification entails. For `f : I -> O` that is an inhabitation fact
+> about the output. A domain proposition requires either a Prop-valued rule, or a declared leaf naming who asserts it.
+
+The live violation is `enc:EncodedClaim`. It *requires* `canonical_proposition`, is a `DerivedResource`, and is produced
+by the parser. What the parser establishes is *"this text parses to this well-typed term"*. What the claim carries is a
+domain proposition about the world. `IsDerivedAs(iri, P)` is admitted for a `P` the program never established, and a
+certificate can cite it. §6 is the resolution.
 
 ## 4. The four grounding families and their traces
 
@@ -220,7 +260,41 @@ node.** The chain explains one step more of itself, and the count in §3.1 goes 
 Consequence for vocabulary: `warranted_by` must not acquire semantics that compete with `JustifiedBy`. A claim
 carrying both is one formalized reason and one not-yet.
 
-## 6. Two lattices, deliberately independent
+## 6. Boundary: formulation is not justification
+
+*Outside the scope of justification logic. Recorded here because it decides which epistemic class a pipeline output
+takes, and §3.3 leaves that question open.*
+
+The parsing pipeline is a **formulation instrument**. It produces a well-formed proposition and a fidelity record. It
+does not produce a warrant, because **fidelity is not covered by this document** — "this encoding is faithful to what
+the author wrote" is its own proposition, D61's subject, and unbuilt.
+
+Since the parse cannot warrant fidelity, the only honest status for its output is **Declared**: some agent takes
+responsibility for the proposition. Which agent depends on the use, and the two uses differ *only* in that:
+
+| use | asserted by |
+|---|---|
+| encoding a source document | the document's authors — e.g. `wrn:authors` |
+| an agent formulating its own claim | the agent running the pipeline |
+
+In both, the parse contributes **form and fidelity, never warrant**. The `ProgramTrace` stays attached to the encoding
+artifact and witnesses the inhabitation fact of §3.3; the claim cites an agent.
+
+D71's architecture already has the joint: generation is decoupled from commitment, and the notebook's `land` flag is
+the agent's act of taking responsibility — the moment a formulation becomes an assertion.
+
+**This supersedes the Stage-3 settlement of `2026-08-10`** ("parsed sentences land Derived; the Declared cluster
+reserved for curator-pinned rules"). That split the world on *parsed vs curated*; the operative axis is **who asserts**.
+D72 supplies what makes the change possible: `wrn:authors` is a resolvable `reflection:Agent`, so a claim from that
+paper can cite the people who made it rather than the program that transcribed it.
+
+Three propositions remain distinct and must not collapse into one witness:
+
+1. *this text parses to this well-typed term* — the artifact fact, witnessed by the `ProgramTrace` (§3.3)
+2. *this encoding is faithful to what the author wrote* — D61, unwarranted today
+3. *what the author wrote is true* — never established by any of the above; only ever declared, by a named agent
+
+## 7. Two lattices, deliberately independent
 
 **The epistemic axis** (`reflection`) answers *where knowledge came from* and selects the grounding constructor.
 
@@ -232,7 +306,7 @@ discourse needs it": the resource a demonstrative («these findings») can bind,
 a second `is_a` (D68 §2). The axes are orthogonal and must stay so: a Finding can be Declared, Derived or Verified,
 and the discourse kind says nothing about the warrant.
 
-## 7. Invariants
+## 8. Invariants
 
 1. The justification term is retained whole; every epistemic summary is a query over it. (§1)
 2. `JustifiedBy(j, P)` and `JustifiedBy(j, Q)` are the same type only when `P` and `Q` are convertible. (#137)
@@ -243,7 +317,7 @@ and the discourse kind says nothing about the warrant.
 7. `IsVerifiedAs(iri, P)` holds only when the attached proof's statement translates to `P`. (§4.1, unfixed)
 8. The epistemic and discourse axes are independent. (§6)
 
-## 8. What D39 said that survives
+## 9. What D39 said that survives
 
 Carried forward unchanged: the motivation (§1), the term algebra (§3), the Reasoning institution and
 `ReasoningSentence` (§4), the three-layer constraint on what counts as a justification (§5), the reasoning patterns
@@ -255,7 +329,7 @@ about the justification relation with an admission check that simply does not ru
 
 Withdrawn: **§8 in its entirety**, and §10's factivity parenthetical.
 
-## 9. Build order
+## 10. Build order
 
 1. **(a), the unwritable type** — prerequisite for testing anything else at the ESL level.
 2. **D49 §7**, the `VerifiedPropositionView` comorphism — closes #159 and makes `VerifiedEvidence` mean what D39 said.
@@ -264,7 +338,7 @@ Withdrawn: **§8 in its entirety**, and §10's factivity parenthetical.
 
 Steps 1 and 2 are independent. Step 3 depends on nothing but is a vocabulary change with consumers.
 
-## 10. Open questions
+## 11. Open questions
 
 1. **Is chain internalization (§3.2) a goal?** If yes it is a gate on commit paths that establish propositions without
    emitting a witness. If no, say so, because the Artemov reading invites the assumption that it holds.
