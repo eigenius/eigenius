@@ -617,8 +617,9 @@ Verified, committed fixtures (gate items):
 - **One** DeclarationTrace on the branch (the literature rule), down from ≥62 Declared.
 - **Rule 24 against the real WordNet/UMLS resources** (`wn:v02203362_t`, `wn:n13440063`, …, not the
   stand-ins): `onco-typed.esl`'s two definitions commit, 673 ms.
-- **`spec_poly` at the Σ-term** for «MSI cancer models» type-checks on the real chain (§9's
-  universe oddity remains undiagnosed but does not bite here either).
+- **`spec_poly` at the Σ-term** for «MSI cancer models» type-checks on the real chain (it did so
+  through the lenient universe arm §9 now diagnoses; eigenius#136 removes that arm, and the site
+  needs the reformulation §9 describes).
 
 Verified, `--reparse` against the **aligned** snapshot: both variants parse each sentence to exactly
 1 closed reading, and the regenerated `claims-intact.esl` / `claims-edited.esl` are **byte-identical**
@@ -703,7 +704,7 @@ cannot be deferred.)*
 | Emit side does not | `kernel/src/layer/witness_index.rs:206,223,249` |
 | α-canonicalization is a targeted patch | `kernel/src/witness/mod.rs:130-136,181` |
 | Index errors discarded | `kernel/src/layer/mod.rs:1165,1176` |
-| `spec_poly` applied at `Set` | `demo/prose-to-formulas/inference.esl` (slice 3; previously the generated `bridges.esl`) |
+| `spec_poly` applied at `Set` | `demo/prose-to-formulas-v2/inference.esl:112` (slice 3; previously the generated `bridges.esl`) |
 | Decode preserves author binder names | `kernel/src/program/eigentt_type_mirror.rs:431-439` (`Pi`), `:443-451` (`Sig`) |
 | `Lam` is `(name, dom, body)`; dom validated then dropped | `kernel/src/program/eigentt_type_mirror.rs:453-465` |
 | Decode's `"App"` arm is already head-aware and folds args | `kernel/src/program/eigentt_type_mirror.rs:474-482` |
@@ -715,12 +716,25 @@ cannot be deferred.)*
 | Class→entity routes | `ontologies/ontology/ontology.esl:41,52`; verb arrow `crates/eigenius-wordnet/src/convert.rs:210` |
 | Consequent drops the model | `rule_1` antecedent arg2 holds `umlscui:C0920269`; consequent holds only `v0`,`v1` |
 
-## 9. Unresolved observation
+## 9. Diagnosed: the site rode on a lenient checker arm (eigenius#136)
 
-`spec_poly` binds `T : Set` and is applied at `T := Set` (`demo/prose-to-formulas/inference.esl`).
-The kernel has
-`Sort(n) : Sort(n+1)` (`kernel/src/nbe/check/mod.rs:616,1136`) and cumulativity `Sort(m) <: Sort(n)`
-iff `m ≤ n` (`kernel/src/nbe/check/conv.rs:292`), which does not obviously admit `Set : Set`. The demo
-commits and loads, so either the universe rule is being read wrongly here or something is lenient at
-that site. **Not diagnosed.** D66 §2.2 reuses this instantiation, so it inherits whatever the answer is;
-worth settling independently of this document.
+`spec_poly` binds `T : Set` and is applied at `T := Set`
+(`demo/prose-to-formulas-v2/inference.esl:112`). The kernel has `Sort(n) : Sort(n+1)`
+(`kernel/src/nbe/check/mod.rs`, `check_infer`) and cumulativity `Sort(m) <: Sort(n)` iff `m ≤ n`
+(`kernel/src/nbe/check/conv.rs`), neither of which admits `Set : Set`. Check mode did: it carried
+`(Exp::Sort(_), Val::Sort(1)) => Ok(())`, admitting every universe against `Set`. That arm arrived
+in D46, which translated the pre-D46 `(Exp::Type(_), Val::Set)` mechanically into an indexed `Sort`
+and so widened it to cover `Set` on the left.
+
+eigenius#136 replaced the three Sort arms with the predicative, cumulative rule `Sort(n) : Sort(m)`
+iff `n < m`, which agrees with inference. The `T := Set` instantiation is now rejected —
+`universe stratification: Sort(1) does not inhabit Sort(1)`.
+
+The rule being eliminated quantifies over a kind (`forall (m : Set)`, over
+`HasActivity : Set -> Set -> Prop`), so its domain really is `Set` and eliminating the quantifier
+needs a domain binder strictly above `Set`. Raising `spec_poly`'s binder to `T : Type 1`, with the
+certificate unchanged, restores `Holds`; both ends are pinned in
+`crates/eigenius-reasoning/tests/spec_poly_universe.rs`. Whether the reasoning ontology takes that
+level-1 bump or universe-polymorphic binders is open — `spec_poly`'s signature is published in
+`docs/spec/ai-computed-provenance-1.0.md`. D66 §2.2 reuses this instantiation and inherits the
+answer.

@@ -1,0 +1,95 @@
+// Reduction of the `spec_poly`-at-`Set` site in
+// `demo/prose-to-formulas-v2/inference.esl` to a chain that builds in
+// memory: a literature rule quantified over `Set` (its subject is a
+// kind, not a name), eliminated with `JustifiedBy.spec_poly` at a
+// concrete class.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace poly       = "urn:eigenius:demo:poly";
+
+class poly:Model : core:Resource {
+    description = "A cancer model — the Set-level term the rule is specialised at.";
+}
+
+data poly:HasActivity : Set -> Prop {
+}
+
+data poly:RequiresActivity : Set -> Prop {
+}
+
+resource poly:rule : reflection:DeclaredResource {
+    reflection:declared_by = "literature:illustrative-dependency-rule";
+    reflection:rationale   = "Illustrative. Quantified over the MODEL, which is a kind, so the domain of the quantifier is Set.";
+
+    reflection:canonical_proposition = type_expr(
+        forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)
+    );
+}
+
+resource poly:rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = poly:rule;
+    reflection:declared_by = "literature:illustrative-dependency-rule";
+    reflection:timestamp   = "2026-08-18T00:00:00Z";
+}
+
+resource poly:obs : reflection:ObservedResource {
+    reflection:source      = "instrument-log:illustrative";
+    reflection:observed_at = "2026-08-18T00:00:00Z";
+
+    reflection:canonical_proposition = type_expr(
+        poly:HasActivity(poly:Model)
+    );
+}
+
+resource poly:obs_trace : reflection:ObservationTrace {
+    reflection:resource  = poly:obs;
+    reflection:source    = "instrument-log:illustrative";
+    reflection:timestamp = "2026-08-18T00:00:00Z";
+}
+
+resource poly:concl : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:demo:poly:Model";
+
+    reasoning:proposition = type_expr(
+        poly:RequiresActivity(poly:Model)
+    );
+
+    reasoning:justification = App(
+        SpecStr(
+            DeclaredEvidence("urn:eigenius:demo:poly:rule"),
+            "urn:eigenius:demo:poly:rule#Model"
+        ),
+        ObservedEvidence("urn:eigenius:demo:poly:obs")
+    );
+
+    reasoning:certificate = type_expr(
+        app(
+            poly:HasActivity(poly:Model),
+            poly:RequiresActivity(poly:Model),
+            SpecStr(
+                DeclaredEvidence("urn:eigenius:demo:poly:rule"),
+                "urn:eigenius:demo:poly:rule#Model"
+            ),
+            ObservedEvidence("urn:eigenius:demo:poly:obs"),
+            spec_poly(
+                Set,
+                (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
+                DeclaredEvidence("urn:eigenius:demo:poly:rule"),
+                poly:Model,
+                "urn:eigenius:demo:poly:rule#Model",
+                declared(
+                    "urn:eigenius:demo:poly:rule",
+                    forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m),
+                    ()
+                )
+            ),
+            observed(
+                "urn:eigenius:demo:poly:obs",
+                poly:HasActivity(poly:Model),
+                ()
+            )
+        )
+    );
+}
