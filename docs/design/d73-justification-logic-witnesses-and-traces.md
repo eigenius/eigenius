@@ -163,6 +163,12 @@ Why it matters: **a proposition nobody can cite is a dead end.** Witnesses are w
 an establishing act that emits no witness forces the next agent to re-assert the fact as a fresh `Declared` leaf —
 converting something the system *knew* into something it merely *assumes*.
 
+**This is already in use for kernel-checked derivations, under another name.** Measured on the WRN chain
+(`2026-08-21`): all 22 `VerifiedEvidence` citations target `reasoning:ReasoningSentence` resources — a conclusion
+whose polynomial type-checked becomes a citable constant, so later certificates need not re-derive it. That is
+Artemov's internalization step, in production. So the decision above is partly a *description* of existing practice;
+what is missing is only the external-prover case (§4.1).
+
 The invariant carries its own escape hatch, because §3.3 shows not every derivation has a proposition to internalize:
 
 > Every `Derived` or `Verified` resource either carries a witness for its stated proposition, or is explicitly marked
@@ -224,6 +230,15 @@ certificate type-checked. So two different things are both called Verified:
 | `IsVerifiedAs` as emitted today | the kernel type-checked a certificate | yes |
 
 The second is sound but is a different claim — the kernel checked a derivation, not an external prover.
+
+**And the second is what real content means.** Measured across the WRN encoding chain (`2026-08-21`): 22
+`VerifiedEvidence` citations, **all** targeting `ReasoningSentence` resources, and **not one** `VerificationTrace`,
+`proof_term` or `proof_system` in the entire chain. The flagship experiment uses `VerifiedEvidence` to mean
+*"the kernel type-checked this conclusion's certificate"*, and it works precisely because
+`emit_from_reasoning_sentence` is the only path that emits.
+
+So this is not a latent hazard to be resolved before someone trips on it. One side is established usage; the other is
+documentation for a path that has never run. The naming is the defect — see §11.4.
 
 **D39 §10's factivity sentence describes the first path**: *"`VerifiedEvidence`-grounded justifications imply truth
 (the Lean checker validated the proof, so the proposition holds)."* That path emits nothing. The sentence is not
@@ -288,6 +303,14 @@ reserved for curator-pinned rules"). That split the world on *parsed vs curated*
 D72 supplies what makes the change possible: `wrn:authors` is a resolvable `reflection:Agent`, so a claim from that
 paper can cite the people who made it rather than the program that transcribed it.
 
+**Scope of the change, measured (`2026-08-21`): three citations.** Only claims produced by the *parser* move.
+`demo/prose-to-formulas-v2/inference.esl` cites `DerivedEvidence("…:claim_1")` three times, one of them commented
+"THE LIVE DEPENDENCY". The WRN chain is hand-authored and contains **zero** `enc:EncodedClaim`; its 79
+`DerivedEvidence` citations target `*_plan:result` statistics-institution outputs, which are genuine program outputs
+and stay Derived under §3.3. An earlier estimate of this scope was wrong by counting every `DerivedEvidence` in the
+tree; the WRN chain uses unqualified constructor names via a namespace binding, so a `reasoning:`-prefixed grep both
+missed 177 citations and then over-attributed them.
+
 Three propositions remain distinct and must not collapse into one witness:
 
 1. *this text parses to this well-typed term* — the artifact fact, witnessed by the `ProgramTrace` (§3.3)
@@ -346,5 +369,10 @@ Steps 1 and 2 are independent. Step 3 depends on nothing but is a vocabulary cha
    specifies inverting the forward translation; whether the inverse is verified or assumed is unsettled.
 3. **Should `spec_str` generalize beyond `core:string`?** Monomorphic today; numeric and structural specialization
    were deferred to the measurement-statistics institution.
-4. **Does `reflection:epistemic_status` survive as a materialized query result**, or is it removed? §1.2 says it must
+4. **Rename or split `VerifiedEvidence`?** §4.1's measurement shows the constructor means "kernel-checked
+   conclusion" in all real usage, while the documentation describes an external-prover path that emits nothing.
+   Either rename it and free `Verified` for D49 §7's prover case, or keep it for the prover and add a distinct
+   constructor for internalized conclusions. Both are bootstrap edits to `reasoning.esl` plus 22 citations in the WRN
+   chain, so the change wants folding into whichever reseed §10's step 6 needs rather than paid separately.
+5. **Does `reflection:epistemic_status` survive as a materialized query result**, or is it removed? §1.2 says it must
    not be the source of truth; it does not say it must not exist.
