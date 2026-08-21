@@ -52,6 +52,7 @@ namespace screen     = "urn:eigenius:demo:screen";
 // scheme (see `crates/eigenius-statistics/src/validate.rs`).
 namespace screen_confirmatory_result =
     "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result";
+namespace agent = "urn:eigenius:reflection:agent";
 
 // ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
 
@@ -61,7 +62,8 @@ data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
 // ─── Impossibility witness for the one-sided directionality ────────
 
 resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
-    reflection:declared_by = "methodology:kinase-glo-emax-floor";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_methodology_kinase_glo_emax_floor;
     reflection:rationale   = "Kinase-Glo's E_max plateau and the cell-free target panel jointly exclude the inverse direction: mean IC50 cannot biologically be above the assay-class threshold under this protocol. Licenses the one-sided p-value path.";
 }
 
@@ -171,3 +173,12 @@ resource screen_confirmatory_result:main_effect :
         )
     );
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `methodology:kinase-glo-emax-floor`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_methodology_kinase_glo_emax_floor";
+}
+

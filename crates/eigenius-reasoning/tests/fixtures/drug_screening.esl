@@ -96,6 +96,7 @@ namespace screen       = "urn:eigenius:demo:screen";
 // `claim_eig0291_lowic50`, so `screen_result:main_effect` lands at
 // `urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect`.
 namespace screen_result = "urn:eigenius:demo:screen:claim_eig0291_lowic50:result";
+namespace agent = "urn:eigenius:reflection:agent";
 
 // ─── Step 1: domain vocabulary ─────────────────────────────────────
 
@@ -111,7 +112,8 @@ data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
 // that the bridge lifts the statistical claim into.
 
 resource screen:rule_strong : reflection:DeclaredResource {
-    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_literature_smith_et_al_2024_3_2;
     reflection:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
 
     reflection:canonical_proposition = type_expr(
@@ -123,7 +125,8 @@ resource screen:rule_strong : reflection:DeclaredResource {
 
 resource screen:rule_strong_trace : reflection:DeclarationTrace {
     reflection:resource    = screen:rule_strong;
-    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_literature_smith_et_al_2024_3_2;
     reflection:timestamp   = "2026-04-10T09:00:00Z";
 }
 
@@ -156,7 +159,8 @@ resource screen:m_eig0291_sampleset_trace : reflection:ObservationTrace {
 // requirements beyond the `is_a` membership.
 
 resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
-    reflection:declared_by = "methodology:kinase-glo-emax-floor";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_methodology_kinase_glo_emax_floor;
     reflection:rationale   = "Kinase-Glo's E_max plateau and the cell-free target panel jointly exclude the inverse direction: mean IC50 cannot biologically be above the assay-class threshold under this protocol. This is the chain-resident proof-of-inverse-direction-impossibility that licenses the one-sided p-value path.";
 }
 
@@ -224,7 +228,8 @@ resource screen_result:main_effect :
 // Monomorphic — one bridge resource per (sample_set, compound) pair.
 
 resource screen:bridge_eig0291_lowic50 : reflection:DeclaredResource {
-    reflection:declared_by = "methodology:ic50-classification-convention";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_methodology_ic50_classification_convention;
     reflection:rationale   = "The medicinal-chemistry convention that a sample's mean IC50 being statistically below 100 nM justifies classifying the underlying compound as HasLowIC50 at the assayed target. Specialised to the EIG_0291 sample-set / compound pair; the polymorphic shape would universally-quantify over (sample_set, compound) with an explicit `sample_for(s, c)` premise.";
 
     reflection:canonical_proposition = type_expr(
@@ -239,7 +244,8 @@ resource screen:bridge_eig0291_lowic50 : reflection:DeclaredResource {
 
 resource screen:bridge_eig0291_lowic50_trace : reflection:DeclarationTrace {
     reflection:resource    = screen:bridge_eig0291_lowic50;
-    reflection:declared_by = "methodology:ic50-classification-convention";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_methodology_ic50_classification_convention;
     reflection:timestamp   = "2026-03-04T14:22:11Z";
 }
 
@@ -355,3 +361,24 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
         )
     );
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource screen:warrant_literature_smith_et_al_2024_3_2 : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `literature:smith_et_al_2024_3.2`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_literature_smith_et_al_2024_3_2";
+}
+
+resource screen:warrant_methodology_ic50_classification_convention : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `methodology:ic50-classification-convention`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_methodology_ic50_classification_convention";
+}
+
+resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `methodology:kinase-glo-emax-floor`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_methodology_kinase_glo_emax_floor";
+}
+

@@ -7,9 +7,11 @@ namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace demo       = "urn:eigenius:demo:nested";
+namespace agent = "urn:eigenius:reflection:agent";
 
 resource demo:viability_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:viability-impairment-directionality";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = demo:warrant_wrn_paper_viability_impairment_directionality;
     reflection:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability; the directional claim is group A (sgWRN) mean below group B (control). The inverse is not the hypothesis, licensing the one-sided test.";
 }
 
@@ -90,3 +92,12 @@ resource demo:plan_ES2_trace : reflection:ProgramTrace {
     reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource demo:warrant_wrn_paper_viability_impairment_directionality : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `wrn-paper:viability-impairment-directionality`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_wrn_paper_viability_impairment_directionality";
+}
+

@@ -51,6 +51,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace reasoning  = "urn:eigenius:reasoning";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
+namespace agent = "urn:eigenius:reflection:agent";
 
 // ─── Domain vocabulary ─────────────────────────────────────────────
 //
@@ -80,7 +81,8 @@ data screen:sample_for : core:string -> core:string -> Prop {
 // The polymorphic bridge then serves all such pairs uniformly.
 
 resource screen:sample_for_eig0291_confirmatory : reflection:DeclaredResource {
-    reflection:declared_by = "lab-bookkeeping:plate-2026-03-11-confirmatory";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_lab_bookkeeping_plate_2026_03_11_confirmatory;
     reflection:rationale   = "The confirmatory SampleSet at urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset was prepared from compound EIG_0291 — recorded by the assay technician at plate-load time. Pure relationship fact; no methodological reasoning.";
 
     reflection:canonical_proposition = type_expr(
@@ -93,7 +95,8 @@ resource screen:sample_for_eig0291_confirmatory : reflection:DeclaredResource {
 
 resource screen:sample_for_eig0291_confirmatory_trace : reflection:DeclarationTrace {
     reflection:resource    = screen:sample_for_eig0291_confirmatory;
-    reflection:declared_by = "lab-bookkeeping:plate-2026-03-11-confirmatory";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_lab_bookkeeping_plate_2026_03_11_confirmatory;
     reflection:timestamp   = "2026-03-11T10:18:42Z";
 }
 
@@ -107,7 +110,8 @@ resource screen:sample_for_eig0291_confirmatory_trace : reflection:DeclarationTr
 // low-IC50 inhibitor, which is structurally wrong.
 
 resource screen:bridge_lowic50 : reflection:DeclaredResource {
-    reflection:declared_by = "methodology:ic50-classification-convention";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_methodology_ic50_classification_convention;
     reflection:rationale   = "Universal: for any sample set s drawn from compound c, if s's mean IC50 is statistically below 100 nM, classify c as HasLowIC50 at the assayed target. Methodology + threshold are baked into the bridge's identity; a different threshold needs a different bridge.";
 
     reflection:canonical_proposition = type_expr(
@@ -121,14 +125,16 @@ resource screen:bridge_lowic50 : reflection:DeclaredResource {
 
 resource screen:bridge_lowic50_trace : reflection:DeclarationTrace {
     reflection:resource    = screen:bridge_lowic50;
-    reflection:declared_by = "methodology:ic50-classification-convention";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_methodology_ic50_classification_convention;
     reflection:timestamp   = "2026-04-10T09:00:00Z";
 }
 
 // ─── Universal literature rule ─────────────────────────────────────
 
 resource screen:rule_strong : reflection:DeclaredResource {
-    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_literature_smith_et_al_2024_3_2;
     reflection:rationale   = "Universal: any compound with low IC50 at this target is a strong inhibitor at the same target.";
 
     reflection:canonical_proposition = type_expr(
@@ -139,7 +145,8 @@ resource screen:rule_strong : reflection:DeclaredResource {
 
 resource screen:rule_strong_trace : reflection:DeclarationTrace {
     reflection:resource    = screen:rule_strong;
-    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_literature_smith_et_al_2024_3_2;
     reflection:timestamp   = "2026-04-10T09:00:00Z";
 }
 
@@ -277,3 +284,24 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
         )
     );
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource screen:warrant_lab_bookkeeping_plate_2026_03_11_confirmatory : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `lab-bookkeeping:plate-2026-03-11-confirmatory`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_lab_bookkeeping_plate_2026_03_11_confirmatory";
+}
+
+resource screen:warrant_literature_smith_et_al_2024_3_2 : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `literature:smith_et_al_2024_3.2`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_literature_smith_et_al_2024_3_2";
+}
+
+resource screen:warrant_methodology_ic50_classification_convention : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `methodology:ic50-classification-convention`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_methodology_ic50_classification_convention";
+}
+

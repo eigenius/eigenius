@@ -30,6 +30,7 @@ namespace reasoning  = "urn:eigenius:reasoning";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace bench      = "urn:eigenius:benchmark";
 namespace s16        = "urn:eigenius:bench:sab16";
+namespace agent = "urn:eigenius:reflection:agent";
 
 // ─── Phase 1: per-task predicate vocabulary ────────────────────────
 // Conformance predicates over the solution IRI — one per methodological
@@ -59,7 +60,8 @@ data s16:ImplementsRequiredFilter : core:string -> Prop {
 // convention, distinguished). Each admits IsDeclaredAs via its trace.
 
 resource s16:conf_featurization : reflection:DeclaredResource {
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:rationale   = "Featurize with Morgan fingerprints, radius 2, 2048 bits. Warrant: the task's domain knowledge specifies Morgan fingerprints (spec); radius 2 / 2048 bits is the ECFP4 community default (convention).";
     reflection:canonical_proposition = type_expr(
         s16:ConformsFeaturization("urn:eigenius:bench:sab16:solution")
@@ -67,12 +69,14 @@ resource s16:conf_featurization : reflection:DeclaredResource {
 }
 resource s16:conf_featurization_trace : reflection:DeclarationTrace {
     reflection:resource    = s16:conf_featurization;
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:timestamp   = "2026-06-12T10:00:00Z";
 }
 
 resource s16:conf_alert_catalogs : reflection:DeclaredResource {
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:rationale   = "Detect structural alerts with an RDKit FilterCatalog containing BOTH the PAINS and Brenk catalogs. Warrant: the instruction names both PAINS and Brenk (spec).";
     reflection:canonical_proposition = type_expr(
         s16:ConformsAlertCatalogs("urn:eigenius:bench:sab16:solution")
@@ -80,12 +84,14 @@ resource s16:conf_alert_catalogs : reflection:DeclaredResource {
 }
 resource s16:conf_alert_catalogs_trace : reflection:DeclarationTrace {
     reflection:resource    = s16:conf_alert_catalogs;
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:timestamp   = "2026-06-12T10:00:01Z";
 }
 
 resource s16:conf_reduction : reflection:DeclaredResource {
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:rationale   = "Similarity reduction: for each hit take the MAXIMUM Tanimoto over ALL train actives. Warrant: the instruction says 'maximum tanimoto similarity ... to any of the active compounds' (spec) — max-over-actives, not mean.";
     reflection:canonical_proposition = type_expr(
         s16:ConformsReduction("urn:eigenius:bench:sab16:solution")
@@ -93,12 +99,14 @@ resource s16:conf_reduction : reflection:DeclaredResource {
 }
 resource s16:conf_reduction_trace : reflection:DeclarationTrace {
     reflection:resource    = s16:conf_reduction;
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:timestamp   = "2026-06-12T10:00:02Z";
 }
 
 resource s16:conf_threshold : reflection:DeclaredResource {
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:rationale   = "Keep a hit only when its max Tanimoto is STRICTLY less than 0.5. Warrant: the instruction says 'less than 0.5' (spec) — strict, not <=.";
     reflection:canonical_proposition = type_expr(
         s16:ConformsThreshold("urn:eigenius:bench:sab16:solution")
@@ -106,12 +114,14 @@ resource s16:conf_threshold : reflection:DeclaredResource {
 }
 resource s16:conf_threshold_trace : reflection:DeclarationTrace {
     reflection:resource    = s16:conf_threshold;
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:timestamp   = "2026-06-12T10:00:03Z";
 }
 
 resource s16:conf_composition : reflection:DeclaredResource {
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:rationale   = "Keep a hit iff it is alert-free AND below the similarity threshold (logical conjunction of the two gates). Warrant: the instruction requires no PAINS/Brenk substructures and max Tanimoto < 0.5 jointly (spec).";
     reflection:canonical_proposition = type_expr(
         s16:ConformsComposition("urn:eigenius:bench:sab16:solution")
@@ -119,7 +129,8 @@ resource s16:conf_composition : reflection:DeclaredResource {
 }
 resource s16:conf_composition_trace : reflection:DeclarationTrace {
     reflection:resource    = s16:conf_composition;
-    reflection:declared_by = "agent:sab16-method";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_agent_sab16_method;
     reflection:timestamp   = "2026-06-12T10:00:04Z";
 }
 
@@ -128,7 +139,8 @@ resource s16:conf_composition_trace : reflection:DeclarationTrace {
 // five axes. Declared as the benchmark acceptance criterion.
 
 resource s16:impl_rule : reflection:DeclaredResource {
-    reflection:declared_by = "benchmark:sab16-acceptance";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_benchmark_sab16_acceptance;
     reflection:rationale   = "A solution implements the required compound filter iff it conforms on every methodological axis: featurization, alert catalogs, similarity reduction, threshold, and composition.";
     reflection:canonical_proposition = type_expr(
         forall (p : core:string) =>
@@ -142,7 +154,8 @@ resource s16:impl_rule : reflection:DeclaredResource {
 }
 resource s16:impl_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = s16:impl_rule;
-    reflection:declared_by = "benchmark:sab16-acceptance";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = s16:warrant_benchmark_sab16_acceptance;
     reflection:timestamp   = "2026-06-12T10:00:05Z";
 }
 
@@ -324,3 +337,18 @@ resource s16:solution_trace : reflection:ProgramTrace {
     reflection:source    = "agent:sab16-condition-c-loop";
     reflection:timestamp = "2026-06-12T10:05:00Z";
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource s16:warrant_agent_sab16_method : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `agent:sab16-method`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_agent_sab16_method";
+}
+
+resource s16:warrant_benchmark_sab16_acceptance : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `benchmark:sab16-acceptance`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_benchmark_sab16_acceptance";
+}
+

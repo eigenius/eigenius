@@ -12,9 +12,11 @@ namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
 namespace reasoning  = "urn:eigenius:reasoning";
 namespace obj        = "urn:eigenius:obj:d57";
+namespace agent = "urn:eigenius:reflection:agent";
 
 resource obj:synthesis_rule : reflection:DeclaredResource {
-    reflection:declared_by = "d57:synthesis";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_synthesis;
     reflection:rationale   = "schema.org is mapped into Eigenius when: the mapping discipline is defined (m1), validated on representative real terms (m2), the generator produces the full mappable vocabulary that loads+validates (m3), and the cut between mapped and residual is accounted (m4). Those four together establish SchemaOrgMapped.";
     reflection:canonical_proposition = type_expr(
         obj:MappingDisciplineDefined("schema_org")
@@ -30,7 +32,8 @@ resource obj:synthesis_rule : reflection:DeclaredResource {
 }
 resource obj:synthesis_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = obj:synthesis_rule;
-    reflection:declared_by = "d57:synthesis";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_synthesis;
     reflection:timestamp   = "2026-06-20T00:00:00Z";
 }
 resource obj:concl_main : reasoning:ReasoningSentence {
@@ -78,3 +81,12 @@ resource obj:concl_main : reasoning:ReasoningSentence {
             jCA, c3, cCA)
     );
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource obj:warrant_d57_synthesis : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `d57:synthesis`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_d57_synthesis";
+}
+
