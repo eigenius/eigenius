@@ -1,6 +1,17 @@
 # D39 — Justification Logic as a First-Class Institution
 
-*Status: v2 design proposal · June 2026*
+*Status: **SUPERSEDED `2026-08-21` by [D73](d73-justification-logic-witnesses-and-traces.md).** Retained as the
+record of the term algebra's design and rationale, which D73 carries forward unchanged (§§1, 3–7, 9, 11).*
+
+*Two parts of this document are **withdrawn** and must not be implemented from here:*
+
+- *§8 (epistemic category propagation) — it collapses the justification term into a four-valued scalar, which is the
+  same loss §1 rejects modal logic for, and its rule grades the disjunctive `Sum` as if it were the conjunctive `App`.
+  D73 §1 replaces it: the term is retained whole and every category is a query over it.*
+- *§10's factivity parenthetical — "the Lean checker validated the proof, so the proposition holds" describes an
+  admission path that does not exist. D73 §4.1; the fix is D49 §7, designed and unbuilt (eigenius#159).*
+
+*Original status: v2 design proposal · June 2026*
 
 *Companion documents: [D14 institution realisation](d14-institution-realisation.md), [D28 Lean 4 as institution](d28-lean-4-as-institution.md), [D32 chain-mirrored EigenTT inductives](d32-chain-mirrored-mini-tt-inductives.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D48 indexed inductive families](d48-indexed-inductive-families.md), [D49 `ChainWitness` machinery](d49-chainwitness-machinery.md), [D6 execution architecture](d6-execution-architecture.md).*
 
