@@ -170,8 +170,18 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
     // still carries only a `core:string` tag, so the term algebra stays first-order and needs no
     // new constructor — `SpecStr(j, tag)` serves, with the tag naming the instantiation for audit
     // rather than carrying it.
+    // `T : Type 1`, not `T : Set` (eigenius#136). The rule this eliminates may itself
+    // quantify over a KIND — the demo's `forall (m : Set)` over
+    // `HasActivity : Set -> Set -> Prop` — so its domain genuinely is `Set`, and binding
+    // `T : Set` would need `Set : Set` to instantiate. That is impredicative, and an
+    // inconsistent type theory inhabits every `Prop`, so with Rule 21 on the commit gate a
+    // certificate could certify a false claim. Binding one level up costs no expressiveness:
+    // `Set : Type 1` holds by stratification, and every ordinary class `C : Set` satisfies
+    // `C : Type 1` by cumulativity. The level is FIXED at 1, not polymorphic — a rule
+    // quantifying over `Type 1` domains would need `Type 2`, and so on up the ladder.
+    // Genuine universe polymorphism is the standing fix; see the follow-up issue.
     spec_poly :
-        forall (T : Set,
+        forall (T : Type 1,
                 P : T -> Prop,
                 j : reasoning:JustificationTerm,
                 x : T,

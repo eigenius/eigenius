@@ -119,37 +119,41 @@ fn verdict(reasoning_source: &str) -> (String, Option<String>) {
     (ctor, diagnostic)
 }
 
-/// `T : Set` as shipped: instantiating `T := Set` is `Set : Set`, rejected.
+/// The shipped ontology binds `T : Type 1`, so instantiating `T := Set` is
+/// `Set : Type 1` — legal by stratification — and the demo's certificate holds.
 #[test]
-fn spec_poly_at_a_set_domain_is_rejected_as_shipped() {
+fn spec_poly_holds_as_shipped() {
     let (ctor, diagnostic) = verdict(include_str!("../../../ontologies/reasoning/reasoning.esl"));
     assert_eq!(
         ctor,
-        wk::VERDICT_FAILS,
-        "spec_poly at T := Set instantiates a `T : Set` binder with `Set` itself; \
+        wk::VERDICT_HOLDS,
+        "spec_poly at T := Set must hold against the shipped `T : Type 1` binder; \
          got {ctor}, diagnostic: {diagnostic:?}"
-    );
-    let diagnostic = diagnostic.unwrap_or_default();
-    assert!(
-        diagnostic.contains("universe stratification"),
-        "expected a universe-stratification diagnostic, got: {diagnostic}"
     );
 }
 
-/// Raising the binder one universe (`T : Type 1`) is the whole fix on the
-/// ontology side — the certificate is unchanged and holds again.
+/// The converse, and the reason the ontology moved: with the binder back at `T : Set`,
+/// instantiating `T := Set` IS `Set : Set` and the checker rejects it.
+///
+/// Rewriting the shipped source rather than keeping a stale copy — a second copy would
+/// drift, and the assertion below fails loudly if the binder ever moves again.
 #[test]
-fn spec_poly_holds_when_the_domain_binder_is_raised_one_universe() {
+fn spec_poly_at_a_set_domain_is_rejected() {
     let source = include_str!("../../../ontologies/reasoning/reasoning.esl")
-        .replace("forall (T : Set,", "forall (T : Type 1,");
+        .replace("forall (T : Type 1,", "forall (T : Set,");
     assert!(
-        source.contains("forall (T : Type 1,"),
+        source.contains("forall (T : Set,"),
         "the `spec_poly` domain binder moved — this rewrite no longer applies"
     );
     let (ctor, diagnostic) = verdict(&source);
     assert_eq!(
         ctor,
-        wk::VERDICT_HOLDS,
-        "expected Holds with `T : Type 1`; got {ctor}, diagnostic: {diagnostic:?}"
+        wk::VERDICT_FAILS,
+        "a `T : Set` binder instantiated at `Set` is `Set : Set`; got {ctor}"
+    );
+    let diagnostic = diagnostic.unwrap_or_default();
+    assert!(
+        diagnostic.contains("universe stratification"),
+        "expected a universe-stratification diagnostic, got: {diagnostic}"
     );
 }

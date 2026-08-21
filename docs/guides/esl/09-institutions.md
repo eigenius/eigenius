@@ -310,7 +310,7 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
         JustifiedBy(j, forall (x : core:string) => P(x)) ->
         JustifiedBy(SpecStr(j, t), P(t)),
 
-    spec_poly : forall (T : Set, P : T -> Prop, j, x : T, tag : core:string) =>
+    spec_poly : forall (T : Type 1, P : T -> Prop, j, x : T, tag : core:string) =>
         JustifiedBy(j, forall (y : T) => P(y)) ->
         JustifiedBy(SpecStr(j, tag), P(x)),
 }
