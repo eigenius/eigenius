@@ -2399,7 +2399,14 @@ impl Compiler {
             r.set(prop_iri, value);
         }
 
-        stamp_declared(&mut r);
+        // NOT stamped (D72 §5). `resource { }` is the general instance form: it carries
+        // ProgramTraces, ObservationTraces, measured witnesses and imported data as
+        // readily as human assertions, so inferring the epistemic category from the
+        // keyword asserts something the compiler cannot know. The D71 demo artifact had
+        // a `reflection:ProgramTrace` whose own `source` names the producing lander
+        // stamped `DeclaredResource` + "a human asserted this". The author's `is_a` is
+        // the category; the eight theory forms below still stamp, because writing
+        // `axiom` or `class` IS a human assertion.
         Ok(vec![r])
     }
 
@@ -3431,7 +3438,34 @@ fn compute_witness_lambda_iri(resource: &Resource) -> Iri {
 /// question; it names the channel the declaration arrived through.
 /// A `declared_by` written in the ESL source is the real attribution
 /// and always wins over it.
-const UNATTRIBUTED_DECLARER: &str = "esl-compiler";
+/// The bootstrap agent meaning "no agent was recorded" (D72 §3.1). An explicit marker
+/// of absence, and a real resolvable resource — `declared_by` is resource-typed since
+/// D72 §3.2, so the old `"esl-compiler"` literal would now fail Rule 22 at commit.
+const UNATTRIBUTED_DECLARER: &str = "urn:eigenius:reflection:agent:unattributed";
+
+/// Env var naming the agent to attribute declarations to for this compile.
+///
+/// Deliberately NOT the git committer identity: a commit author is who *committed*,
+/// which diverges from who *asserted* the moment anyone lands someone else's work.
+const SESSION_AGENT_ENV: &str = "EIGENIUS_DECLARED_BY";
+
+/// The agent this compile attributes unattributed declarations to.
+///
+/// An explicitly configured agent wins; otherwise the unattributed marker. A malformed
+/// value is NOT silently ignored — it falls back and the caller sees the marker rather
+/// than a fabricated attribution, which is the whole point of D72.
+fn session_declarer() -> String {
+    declarer_from(std::env::var(SESSION_AGENT_ENV).ok().as_deref())
+}
+
+/// The pure half of [`session_declarer`], so the policy is testable without mutating
+/// process environment from a parallel test.
+fn declarer_from(configured: Option<&str>) -> String {
+    match configured.map(str::trim) {
+        Some(v) if crate::ontology::iri::Iri::parse(v).is_ok() => v.to_string(),
+        _ => UNATTRIBUTED_DECLARER.to_string(),
+    }
+}
 
 /// Append `DeclaredResource` to `is_a` and default `declared_by` on a
 /// compiled resource (D6b epistemic stamping, Phase 10b Step 3).
@@ -3465,9 +3499,12 @@ fn stamp_declared(resource: &mut Resource) {
 
     let declared_by_iri = iri(crate::ontology::well_known::DECLARED_BY);
     if resource.get(&declared_by_iri).is_none() {
+        // A `ResourceRef`: `declared_by` is resource-typed with
+        // `class_types reflection:Agent`, so Rule 8 and Rule 22 require a declarer that
+        // resolves same-or-lower.
         resource.set(
             declared_by_iri,
-            Value::String(UNATTRIBUTED_DECLARER.to_string()),
+            Value::ResourceRef(iri(&session_declarer())),
         );
     }
 }
@@ -4312,9 +4349,12 @@ mod tests {
             .any(|i| i.as_str() == crate::ontology::well_known::DECLARED_RESOURCE)
     }
 
+    /// Reads through both value shapes: the compiler writes a `ResourceRef`, and CBOR
+    /// persistence collapses that to a `String`, so a helper matching only one would
+    /// pass or fail for the wrong reason.
     fn declared_by(r: &Resource) -> Option<String> {
         r.get(&iri(crate::ontology::well_known::DECLARED_BY))
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .and_then(|v| v.as_iri_str().map(|s| s.to_string()))
     }
 
     #[test]
@@ -4334,7 +4374,7 @@ mod tests {
             has_declared_resource(r),
             "ESL class should have DeclaredResource in is_a"
         );
-        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
     #[test]
@@ -4354,11 +4394,15 @@ mod tests {
             has_declared_resource(r),
             "ESL property should have DeclaredResource in is_a"
         );
-        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
+    /// `resource { }` is NOT stamped (D72 §5): it is the general instance form and
+    /// carries traces, measurements and imported data as readily as human assertions,
+    /// so the compiler cannot infer the epistemic category from the keyword. Renamed
+    /// from `esl_resource_stamped_declared_resource`, which pinned the old behaviour.
     #[test]
-    fn esl_resource_stamped_declared_resource() {
+    fn esl_resource_is_not_stamped_declared_resource() {
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
@@ -4371,10 +4415,14 @@ mod tests {
         );
         let r = &resources[0];
         assert!(
-            has_declared_resource(r),
-            "ESL resource should have DeclaredResource in is_a"
+            !has_declared_resource(r),
+            "the author's is_a is the epistemic category; the compiler must not add one"
         );
-        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+        assert_eq!(
+            declared_by(r),
+            None,
+            "no declarer may be invented for a resource whose category the compiler does not know"
+        );
     }
 
     #[test]
@@ -4394,7 +4442,7 @@ mod tests {
             has_declared_resource(r),
             "ESL program should have DeclaredResource in is_a"
         );
-        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
     #[test]
@@ -4415,7 +4463,7 @@ mod tests {
             has_declared_resource(r),
             "ESL codata should have DeclaredResource in is_a"
         );
-        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
     /// eigenius#141 / #167 — a `declared_by` written in the source is
@@ -4444,25 +4492,42 @@ mod tests {
         assert!(has_declared_resource(r));
     }
 
-    /// The placeholder still applies where the source states nothing.
-    /// (Only the `resource` form has a body that can carry an
-    /// arbitrary property; `class` / `property` / `data` / `program`
-    /// bodies are fixed grammars with no slot for `declared_by`, so
-    /// the placeholder is the only value they can get.)
+    /// A theory form with no configured session agent gets the unattributed marker.
+    ///
+    /// The `class` / `property` / `data` / `program` bodies are fixed grammars with no
+    /// slot for `declared_by`, so this is the only value they can carry unless
+    /// `EIGENIUS_DECLARED_BY` names one. Previously written against the `resource`
+    /// form, which no longer stamps at all (D72 §5).
     #[test]
-    fn unattributed_resource_gets_placeholder_declarer() {
+    fn unattributed_theory_form_gets_the_absence_marker() {
         let resources = compile_esl(
             r#"
+            namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            resource ex:rex : ex:Dog {
-                ex:name = "Rex";
+            class ex:Dog {
+                description = "a dog";
             }
         "#,
         );
         assert_eq!(
             declared_by(&resources[0]),
             Some(UNATTRIBUTED_DECLARER.to_string())
+        );
+    }
+
+    /// The session agent overrides the marker, and a malformed value falls back to it
+    /// rather than being written through — a value that is not an IRI would fail
+    /// Rule 22 at commit, and inventing an attribution is what D72 exists to stop.
+    #[test]
+    fn session_declarer_policy() {
+        assert_eq!(declarer_from(None), UNATTRIBUTED_DECLARER);
+        assert_eq!(declarer_from(Some("")), UNATTRIBUTED_DECLARER);
+        assert_eq!(declarer_from(Some("not an iri")), UNATTRIBUTED_DECLARER);
+        assert_eq!(
+            declarer_from(Some("  urn:eigenius:agent:hmw  ")),
+            "urn:eigenius:agent:hmw",
+            "surrounding whitespace is trimmed, not treated as malformed"
         );
     }
 
@@ -5134,7 +5199,7 @@ mod tests {
             has_declared_resource(r),
             "ESL data should have DeclaredResource in is_a"
         );
-        assert_eq!(declared_by(r), Some("esl-compiler".to_string()));
+        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
     #[test]
