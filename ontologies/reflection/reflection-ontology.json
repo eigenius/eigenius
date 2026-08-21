@@ -79,6 +79,47 @@
   },
 
   {
+    "@id": "urn:eigenius:reflection:Agent",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An entity that can assert something \u2014 a person, an organization, or a group acting as one (D72 \u00a73.1). Identity is the IRI, by convention urn:eigenius:reflection:agent:<id>; contact details and external identifiers are properties, because they change while the agent does not. Named by reflection:declared_by to record WHO asserted a resource; what GROUNDS an assertion is reflection:warranted_by, a different question with a different answer. Lives in `reflection` rather than a namespace of its own because declared_by's class_types must resolve same-or-lower (Rule 22), and `stamp_declared` injects a reflection reference into every ESL layer, so no layer carrying agents could sit below this one.",
+    "urn:eigenius:core:short_name": "Agent"
+  },
+  {
+    "@id": "urn:eigenius:reflection:Person",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Agent"],
+    "urn:eigenius:core:description": "An individual human. reflection:orcid is the preferred persistent external identifier \u2014 the discipline the reference ontology applies to DOI and PubMed ID: real, resolvable identifiers only, never fabricated.",
+    "urn:eigenius:core:short_name": "Person",
+    "urn:eigenius:core:recommends": ["urn:eigenius:reflection:orcid"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:Organization",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Agent"],
+    "urn:eigenius:core:description": "An institution, laboratory, company, project, or standards body asserting as a single entity \u2014 used where authorship is corporate rather than individual: a vocabulary maintainer, a core team, a consortium.",
+    "urn:eigenius:core:short_name": "Organization"
+  },
+  {
+    "@id": "urn:eigenius:reflection:orcid",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "ORCID iD, bare form '0000-0002-1825-0097' \u2014 the persistent identifier for a researcher. Must be a real, validated iD; never invent one.",
+    "urn:eigenius:core:short_name": "orcid",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:agent:unattributed",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:Agent"],
+    "urn:eigenius:core:description": "No agent was recorded for this declaration \u2014 the ESL compiler's default when no session agent is configured. An explicit marker of ABSENCE, never an assertion that this agent authored anything: naming a real party for unattributed content would be a worse falsehood than the 'esl-compiler' literal it replaces, because it would name someone who exists. Query for it to find declarations still needing attribution.",
+    "urn:eigenius:core:short_name": "unattributed"
+  },
+  {
+    "@id": "urn:eigenius:reflection:agent:eigenius_core_team",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:Organization"],
+    "urn:eigenius:core:description": "The Eigenius maintainers \u2014 the declarer of the platform's own bootstrap ontologies, which genuinely are asserted by this group. Not a default for user-authored content.",
+    "urn:eigenius:core:short_name": "Eigenius core team"
+  },
+
+  {
     "@id": "urn:eigenius:reflection:EpistemicStatus",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:description": "An epistemic status value: declared, observed, derived, or verified.",
@@ -328,6 +369,13 @@
     "urn:eigenius:core:description": "Who declared this resource.",
     "urn:eigenius:core:short_name": "declared_by",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:reflection:warranted_by",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The criterion, convention, source, or prior result that grounds this declaration \u2014 what warrants it, as opposed to who asserted it (reflection:declared_by) or why in prose (reflection:rationale). Carries no class_types: warranting resources are heterogeneous (a reference:Citation, a methodology convention, a criterion resource, a generator program) and no single class covers them yet (D72 \u00a73.3).",
+    "urn:eigenius:core:short_name": "warranted_by",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
   },
   {
     "@id": "urn:eigenius:reflection:rationale",
