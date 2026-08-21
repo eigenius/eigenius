@@ -85,6 +85,21 @@ pub enum ValidationRule {
     /// A FormulaTerm `App` spine doesn't match the leftmost operator's
     /// declared arity. D32 §5.4 / Phase 19d.0.d.
     OperatorArityMismatch,
+    /// The `OpRef` at the head of a FormulaTerm `App` spine names an
+    /// operator the chain cannot supply: the operand is not a
+    /// well-formed IRI, it resolves to nothing in the layer chain, or
+    /// it resolves to a resource that is not a `formulas:Operator`.
+    /// The defect is in the resource carrying the term — a typo in an
+    /// operator IRI is the most likely authoring error in a
+    /// FormulaTerm, and without this the term commits and fails later
+    /// at institution dispatch. See eigenius#162.
+    UnknownOperator,
+    /// The `OpRef` head resolves to a `formulas:Operator` whose
+    /// `operator_arity` cannot be read as a non-negative integer, so
+    /// the App-spine rank check has nothing to check against. The
+    /// defect is in the operator declaration, not in the resource
+    /// carrying the term. See eigenius#162.
+    OperatorDeclarationMalformed,
     /// A `MergeComorphism` resource is structurally inconsistent
     /// with its declared `merge_target_class` (D37 §5.2). Typical
     /// causes: the referenced `merge_transformation` isn't a
