@@ -131,6 +131,16 @@ pub enum ValidationRule {
     /// applied to the wrong argument type, an application of a non-function).
     /// Caught by `check_infer` (Rule 21).
     TypeExprIllTyped,
+    /// A slot whose declared role is a **proposition**
+    /// ([`well_known::PROPOSITION_SLOTS`](crate::ontology::well_known::PROPOSITION_SLOTS))
+    /// holds a term that type-checks but does not inhabit `Prop` — a type
+    /// (`Sort(1)` and up), an unapplied predicate, or a literal. Distinct
+    /// from [`ValidationRule::TypeExprIllTyped`]: the term is well-typed,
+    /// it is simply not an assertion. Every downstream consumer of these
+    /// slots — the witness index, `JustifiedBy` certificate checking —
+    /// reads them as propositions by construction, so this is the gate
+    /// that makes that construction true. See eigenius#175.
+    TypeExprNotAProposition,
     /// An `eigentt:Definition` is not well-formed (D66 slice 2). One of: its body does not decode;
     /// it is **recursive**, which would make decode's peel-and-substitute non-terminating; its body
     /// is **not in normal form**, breaking D9's rule that a definition's identity is the normal form
