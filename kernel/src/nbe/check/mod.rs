@@ -609,15 +609,28 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             check(ctx, y, &a_val)
         }
 
-        // Universe hierarchy: Type(n) : Type(n+1) prevents impredicativity.
+        // Universe hierarchy, predicative and cumulative: `Sort(n) : Sort(m)`
+        // exactly when `n < m`. This is the checking-mode image of the
+        // inference rule `Sort(n) : Sort(n+1)` (see `check_infer`) composed
+        // with cumulativity `Sort(m) <: Sort(n)` iff `m <= n` (`conv.rs`),
+        // so check mode and inference accept the same universe judgements.
+        //
+        // In particular `Set : Set` (`Sort(1) : Sort(1)`) is rejected, and so
+        // is the cycle `Set : Type(1) : Set` that the pre-D46 pair of rules
+        // (`Type(n) : Set` for the top-universe reading, plus `Set : Type(1)`)
+        // admitted. Either shape is Girard's paradox and makes every
+        // proposition on the chain provable; Rule 21 checks propositions at
+        // commit, so this is a property of what the chain accepts.
+        //
         // Self-referential meta-claims (e.g. a level-1 trace referencing
         // level-1) are blocked at resource ingestion by the universe
         // stratification validator (Rule 13), not in the term checker.
-        (Exp::Sort(n), Val::Sort(m)) if *n + 1 == *m => Ok(()),
-        // Type(n) : Set (Set is the top universe for backward compatibility)
-        (Exp::Sort(_), Val::Sort(1)) => Ok(()),
-        // Set : Type(1)
-        (Exp::Sort(1), Val::Sort(2)) => Ok(()),
+        (Exp::Sort(n), Val::Sort(m)) if n < m => Ok(()),
+        (Exp::Sort(n), Val::Sort(m)) => Err(CheckError::TypeMismatch(format!(
+            "universe stratification: Sort({n}) does not inhabit Sort({m}) — \
+             a universe lives strictly above itself, `Sort(k) : Sort(k+1)`. \
+             (Prop = Sort(0), Set = Sort(1), Type(k) = Sort(k+1).)"
+        ))),
 
         // EigonClass/EigonPrimitive are ground types at level 0 but
         // inhabit all higher universes (cumulative).
@@ -1427,6 +1440,84 @@ mod tests {
     #[test]
     fn check_one_has_type_set() {
         check(&mut ctx(), &Exp::One, &Val::Sort(1)).unwrap();
+    }
+
+    /// eigenius#136 — `Set : Set` is rejected in checking mode.
+    ///
+    /// Until this was fixed, `(Exp::Sort(_), Val::Sort(1))` admitted every
+    /// universe against `Set`, so `Set : Set` type-checked and Girard's
+    /// paradox was expressible in a term the commit gate (Rule 21) checks.
+    #[test]
+    fn set_does_not_inhabit_set() {
+        let err = check(&mut ctx(), &Exp::Sort(1), &Val::Sort(1))
+            .expect_err("Set : Set must be rejected");
+        assert!(
+            format!("{err:?}").contains("universe stratification"),
+            "expected a universe-stratification diagnostic, got: {err:?}"
+        );
+    }
+
+    /// No universe inhabits itself, at any level.
+    #[test]
+    fn no_universe_inhabits_itself() {
+        for n in 0..5 {
+            assert!(
+                check(&mut ctx(), &Exp::Sort(n), &Val::Sort(n)).is_err(),
+                "Sort({n}) : Sort({n}) must be rejected"
+            );
+        }
+    }
+
+    /// The universe cycle `Set : Type(1) : Set` is as inconsistent as
+    /// `Set : Set`, so the `Type(n) : Set` half goes too — `Set` is not a
+    /// top universe. (Pre-D46 the checker admitted both halves.)
+    #[test]
+    fn a_higher_universe_does_not_inhabit_set() {
+        for n in 2..6 {
+            assert!(
+                check(&mut ctx(), &Exp::Sort(n), &Val::Sort(1)).is_err(),
+                "Sort({n}) : Set must be rejected — Set is not the top universe"
+            );
+        }
+    }
+
+    /// The predicative, cumulative rule the fix installs: `Sort(n) : Sort(m)`
+    /// iff `n < m`. `Prop : Set`, `Set : Type(1)`, and cumulative jumps such
+    /// as `Prop : Type(3)` all stand.
+    #[test]
+    fn a_universe_inhabits_every_universe_strictly_above_it() {
+        for n in 0..5 {
+            for m in 0..6 {
+                let got = check(&mut ctx(), &Exp::Sort(n), &Val::Sort(m)).is_ok();
+                assert_eq!(
+                    got,
+                    n < m,
+                    "check(Sort({n}), Sort({m})) = {got}, expected {}",
+                    n < m
+                );
+            }
+        }
+    }
+
+    /// Check mode and inference must accept the same universe judgements:
+    /// `check(Sort(n), Sort(m))` succeeds exactly when the inferred
+    /// `Sort(n+1)` is a subtype of `Sort(m)`. Before the fix, check mode was
+    /// strictly the more permissive of the two.
+    #[test]
+    fn check_mode_and_inference_agree_on_universes() {
+        for n in 0..5 {
+            for m in 0..6 {
+                let checked = check(&mut ctx(), &Exp::Sort(n), &Val::Sort(m)).is_ok();
+                let inferred = check_infer(&mut ctx(), &Exp::Sort(n)).unwrap();
+                let subsumed =
+                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::Sort(m)).is_ok();
+                assert_eq!(
+                    checked, subsumed,
+                    "Sort({n}) against Sort({m}): check mode says {checked}, \
+                     infer-then-subsume says {subsumed}"
+                );
+            }
+        }
     }
 
     #[test]

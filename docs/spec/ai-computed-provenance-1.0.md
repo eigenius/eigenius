@@ -1415,7 +1415,7 @@ certificate is stored and re-checkable rather than erased. It MUST declare exact
 | `sum_l` | `JustifiedBy(j₁, P)` | `JustifiedBy(Sum(j₁, j₂), P)` |
 | `sum_r` | `JustifiedBy(j₂, P)` | `JustifiedBy(Sum(j₁, j₂), P)` |
 | `spec_str` | `JustifiedBy(j, ∀ x : string. P(x))` | `JustifiedBy(SpecStr(j, t), P(t))` |
-| `spec_poly` | `JustifiedBy(j, ∀ y : T. P(y))` for any domain `T : Set` | `JustifiedBy(SpecStr(j, tag), P(x))` |
+| `spec_poly` | `JustifiedBy(j, ∀ y : T. P(y))` for any domain `T : Type 1` (so `Set` itself, and every `C : Set` by cumulativity) | `JustifiedBy(SpecStr(j, tag), P(x))` |
 
 **ACP-A-32.** There MUST be no elimination rule for `Sum` ([ACP-7-7](#72-certificates)).
 
