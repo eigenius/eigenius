@@ -80,8 +80,25 @@ eig_load() {
 hr() { printf '\n\033[1m%s\033[0m\n' "── $* ─────────────────────────────────────────"; }
 
 hr "0. Kernel on the LEXICON snapshot"
-SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$REPO/../db-snapshot/wordnet-umls-aligned-2026-08-20c}"
-[[ -d "$SNAPSHOT" ]] || { echo "ERROR: snapshot not found: $SNAPSHOT" >&2; exit 1; }
+# Newest ALIGNED snapshot by mtime, the same rule `just stage-snapshot` and
+# `scripts/measure-parse-rate.sh` use. This was a hardcoded name until `2026-08-21`, which
+# rots on every reseed: a bootstrap edit rehashes the chain, the pinned snapshot drifts, and
+# the run dies in `prose-to-esl` with ManifestDrift after having already staged the stale
+# store into the volume. `scripts/reseed-lexicon-db.sh` even ends by telling you to re-point
+# this line by hand — a step that only works if someone reads the message.
+#
+# ALIGNED, not raw: the anaphor's restrictor is checked against a claim's KIND class, and
+# `claim-kind-alignment.esl` arrives only in the aligned layer. A raw snapshot fails closed.
+SNAPSHOT_ROOT="${SNAPSHOT_ROOT:-$REPO/../db-snapshot}"
+SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$(ls -1dt "$SNAPSHOT_ROOT"/wordnet-umls-aligned-* 2>/dev/null | head -1 || true)}"
+[[ -n "$SNAPSHOT" ]] || {
+    echo "ERROR: no aligned snapshot under $SNAPSHOT_ROOT" >&2
+    echo "  run scripts/reseed-lexicon-db.sh --umls-all, then scripts/build-alignment-snapshot.sh" >&2
+    exit 1
+}
+[[ -d "$SNAPSHOT" && -f "$SNAPSHOT/CURRENT" ]] || {
+    echo "ERROR: not a RocksDB store: $SNAPSHOT" >&2; exit 1
+}
 VOLUME="${VOLUME:-eigenius_eigenius_db}"
 echo "staging $(basename "$SNAPSHOT") into volume $VOLUME (the snapshot itself is read-only)"
 docker run --rm -v "$SNAPSHOT":/src:ro -v "$VOLUME":/dst alpine \
