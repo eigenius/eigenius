@@ -79,6 +79,7 @@ const CORE_PROPERTY: &str = "urn:eigenius:core:Property";
 const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
 const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 const DECLARED_BY_VALUE: &str = "urn:schema_org";
+const ORGANIZATION: &str = "urn:eigenius:reflection:Organization";
 
 // core scalars + formats
 const D_STRING: &str = "urn:eigenius:core:string";
@@ -361,6 +362,7 @@ pub fn convert(nodes: &[Json]) -> ConvertReport {
         }
         // else: untyped / non-vocabulary node — skip.
     }
+    emit_declarer(&mut report);
     report
 }
 
@@ -372,10 +374,40 @@ fn common_meta(r: &mut Resource, n: &Json, https: &str) {
         r.set(iri(DESCRIPTION), Value::String(comment.to_string()));
     }
     r.set(iri(SOURCE_IRL), Value::String(https.to_string()));
+    // A `ResourceRef`, not a `String`: `declared_by` is resource-typed (D72 §3.2), so
+    // Rule 8 and Rule 22 require the declarer to resolve same-or-lower. `emit_declarer`
+    // below puts that resource in this same layer.
+    r.set(iri(DECLARED_BY), Value::ResourceRef(iri(DECLARED_BY_VALUE)));
+}
+
+/// The schema.org project as a `reflection:Organization`, emitted into this layer so
+/// every term's `declared_by` resolves.
+///
+/// `urn:schema_org` was already the value every term carried; it is now the IRI of a
+/// real resource rather than an unvalidated string. schema.org's terms genuinely are
+/// declared by that project, so this is the agent axis (who asserted), not the warrant
+/// axis (what grounds it) — D72 §1.
+fn emit_declarer(report: &mut ConvertReport) {
+    let mut r = Resource::new(iri(DECLARED_BY_VALUE));
     r.set(
-        iri(DECLARED_BY),
-        Value::String(DECLARED_BY_VALUE.to_string()),
+        iri(IS_A),
+        Value::Array(vec![Value::ResourceRef(iri(ORGANIZATION))]),
     );
+    r.set(
+        iri(DESCRIPTION),
+        Value::String(
+            "The schema.org project — the collaboration between Google, Microsoft, Yahoo \
+             and Yandex that maintains the schema.org vocabulary, and the declarer of every \
+             term imported from it."
+                .to_string(),
+        ),
+    );
+    r.set(iri(SHORT_NAME), Value::String("schema.org".to_string()));
+    r.set(
+        iri(SOURCE_IRL),
+        Value::String("https://schema.org/".to_string()),
+    );
+    report.resources.push(r);
 }
 
 fn iri(s: &str) -> Iri {
