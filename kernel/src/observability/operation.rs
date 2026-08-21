@@ -111,7 +111,11 @@ pub const NBE_EVAL: &str = "kernel.nbe.eval";
 // --- Programs ---
 
 pub const PROGRAM_RUN: &str = "kernel.program.run";
-pub const PROGRAM_TYPE_CHECK: &str = "kernel.program.type_check";
+/// `ValidateProgram`'s static checks: parse, component templates,
+/// output-schema bijectivity. Named for what runs — the kernel does
+/// not EigenTT-type-check a `program:Program` on any path (#143), so
+/// there is no `kernel.program.type_check` operation to log under.
+pub const PROGRAM_STATIC_CHECKS: &str = "kernel.program.static_checks";
 
 // --- Institutions / capabilities ---
 

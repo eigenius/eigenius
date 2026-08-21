@@ -26,6 +26,17 @@ use crate::program::expr;
 use std::sync::Arc;
 use tonic::{Response, Status};
 
+/// Names for `ValidateProgramResponse::checks_performed`. A name is
+/// emitted only by the code path that runs the check it names, so the
+/// list is a record of what happened rather than a description of what
+/// the handler intends to do.
+///
+/// There is deliberately no `type_check` constant: nothing in this
+/// module runs `nbe::check::check` — see [`EigeniusService::handle_validate_program`].
+pub const CHECK_PARSE: &str = "parse";
+pub const CHECK_COMPONENT_TEMPLATE: &str = "component_template";
+pub const CHECK_OUTPUT_SCHEMA: &str = "output_schema";
+
 impl EigeniusService {
     /// Shared execution path for `RunProgram` and `RunProgramByIri`.
     ///
@@ -559,6 +570,30 @@ impl EigeniusService {
         }))
     }
 
+    /// Run the static checks the kernel has for a `program:Program`
+    /// and report exactly which ones ran.
+    ///
+    /// Three checks: the body decodes to a EigenTT term and every
+    /// referenced class resolves (`parse`), D8 component templates
+    /// resolve against the input type (`component_template`), and the
+    /// D8 §4 output schemas are bijective (`output_schema`). Each name
+    /// goes into `checks_performed` as it runs, and `valid` is the
+    /// conjunction over that list and nothing else.
+    ///
+    /// **No EigenTT type-check runs here** (issue #143). `parse_program`
+    /// returns a term and a Pi type, and running
+    /// `nbe::check::check(term, typ)` is two lines — but the checker
+    /// cannot type a `program:Component` reference. `parse_apply`
+    /// encodes a component as `Exp::Var(<component IRI>)` and
+    /// `check_infer`'s `Var` arm resolves names in `Gamma` only, so
+    /// checking the repo's own `ontologies/examples/simple-program.json`
+    /// returns `IllFormed("unbound variable in type context:
+    /// urn:eigenius:program:components:Identity")`. Reporting that as
+    /// `valid: false` would be as untrue as the success claim it
+    /// replaced: the program runs correctly. Wiring the check honestly
+    /// needs a typing rule for component references first — see the
+    /// issue for what that entails. Until then `checks_performed` omits
+    /// `"type_check"`, and no log or field here claims one ran.
     pub(super) async fn handle_validate_program(
         &self,
         req: ValidateProgramRequest,
@@ -577,6 +612,10 @@ impl EigeniusService {
 
         match expr::parse_program(&program, ctx.head()) {
             Ok((_term, typ)) => {
+                // `parse` ran and passed. Every further name is pushed
+                // by the code that runs the check it names, so a check
+                // skipped for shape reasons stays out of the list.
+                let mut checks_performed = vec![CHECK_PARSE.to_string()];
                 // Validate template references against input type
                 let mut template_errors = Vec::new();
                 let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
@@ -627,6 +666,7 @@ impl EigeniusService {
                                 });
                             }
                         }
+                        checks_performed.push(CHECK_COMPONENT_TEMPLATE.to_string());
                     }
                 }
 
@@ -640,37 +680,46 @@ impl EigeniusService {
                         severity: "error".to_string(),
                     });
                 }
+                checks_performed.push(CHECK_OUTPUT_SCHEMA.to_string());
 
                 if template_errors.is_empty() {
                     tracing::debug!(
-                        { field::OPERATION } = operation::PROGRAM_TYPE_CHECK,
+                        { field::OPERATION } = operation::PROGRAM_STATIC_CHECKS,
                         program_iri = program.id().map(|i| i.as_str()).unwrap_or(""),
-                        program_type = ?typ,
-                        "program type-check succeeded"
+                        declared_type = ?typ,
+                        checks_performed = ?checks_performed,
+                        "program static checks passed; no EigenTT type-check ran (#143)"
                     );
                     Ok(Response::new(ValidateProgramResponse {
                         valid: true,
                         errors: Vec::new(),
                         program_type: format!("{typ:?}"),
+                        checks_performed,
                     }))
                 } else {
                     Ok(Response::new(ValidateProgramResponse {
                         valid: false,
                         errors: template_errors,
                         program_type: format!("{typ:?}"),
+                        checks_performed,
                     }))
                 }
             }
+            // `parse_program` failed, so nothing downstream of it ran.
+            // The rule is `parse`, not `type_check`: the body did not
+            // decode to a EigenTT term, which is a decoding failure —
+            // the term was never handed to the checker.
             Err(e) => Ok(Response::new(ValidateProgramResponse {
                 valid: false,
                 errors: vec![ValidationError {
                     resource_iri: String::new(),
                     property_iri: String::new(),
-                    rule: "type_check".to_string(),
+                    rule: CHECK_PARSE.to_string(),
                     message: e,
                     severity: "error".to_string(),
                 }],
                 program_type: String::new(),
+                checks_performed: vec![CHECK_PARSE.to_string()],
             })),
         }
     }

@@ -259,3 +259,111 @@ fn row_count_from_document(document: &[u8]) -> i64 {
     }
     panic!("no ResultSet in query response document");
 }
+
+/// `ValidateProgram` must report only the checks it ran.
+///
+/// The program under test is the repo's own identity example. It runs
+/// correctly, and the handler's static checks all pass, so `valid` is
+/// `true` — but its body applies `program:components:Identity`, and
+/// nothing in the kernel can EigenTT-type-check a component reference
+/// (issue #143; the companion unit test
+/// `program::tests::identity_program_does_not_type_check` pins the
+/// checker's actual verdict on this same program). The response must
+/// therefore name `parse`, `component_template`, and `output_schema`
+/// in `checks_performed` and must NOT name `type_check`.
+#[tokio::test(flavor = "multi_thread")]
+async fn validate_program_reports_only_checks_it_ran() {
+    let endpoint = start_test_server().await;
+    let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
+
+    // `simple-program.json` types its input and output as
+    // `example:Dog`, which lives in `animals.json`.
+    let animals_json = include_str!("../../ontologies/examples/animals.json");
+    let load = client
+        .load(LoadRequest {
+            resources: animals_json.as_bytes().to_vec(),
+            content_type: "application/eigon+json".to_string(),
+            auto_commit: true,
+            branch: String::new(),
+            policy: None,
+            explicit_tombstones: Vec::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(load.success, "load failed: {:?}", load.errors);
+
+    let program_json = include_str!("../../ontologies/examples/simple-program.json");
+    let resp = client
+        .validate_program(ValidateProgramRequest {
+            program: program_json.as_bytes().to_vec(),
+            content_type: "application/eigon+json".to_string(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(resp.valid, "static checks should pass: {:?}", resp.errors);
+    assert_eq!(
+        resp.checks_performed,
+        vec![
+            eigenius_kernel::server::CHECK_PARSE,
+            eigenius_kernel::server::CHECK_COMPONENT_TEMPLATE,
+            eigenius_kernel::server::CHECK_OUTPUT_SCHEMA,
+        ],
+        "checks_performed must list exactly the checks the handler ran"
+    );
+    assert!(
+        !resp.checks_performed.iter().any(|c| c == "type_check"),
+        "no EigenTT type-check runs in ValidateProgram (#143), so the response \
+         must not claim one; got {:?}",
+        resp.checks_performed
+    );
+    // The declared type is reported, and it is only the declared type:
+    // `program_type` is built from `input_type`/`output_type`, never
+    // verified against the body.
+    assert!(
+        resp.program_type.starts_with("Pi("),
+        "program_type should be the declared Pi type, got {:?}",
+        resp.program_type
+    );
+}
+
+/// A program whose declared types do not resolve fails at `parse`, and
+/// the failure is reported under the rule `parse` — not `type_check`,
+/// which would name a checker the term never reached.
+#[tokio::test(flavor = "multi_thread")]
+async fn validate_program_parse_failure_is_reported_as_parse() {
+    let endpoint = start_test_server().await;
+    let mut client = EigeniusKernelClient::connect(endpoint).await.unwrap();
+
+    // `example:Missing` is in no layer of the chain, so
+    // `resolve_class_type` fails inside `parse_program`.
+    let program_json = r#"{
+      "@id": "urn:eigenius:example:broken-program",
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+      "urn:eigenius:program:input_type": "urn:eigenius:example:Missing",
+      "urn:eigenius:program:output_type": "urn:eigenius:example:Missing",
+      "urn:eigenius:program:body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+        "urn:eigenius:program:name": "input"
+      }
+    }"#;
+    let resp = client
+        .validate_program(ValidateProgramRequest {
+            program: program_json.as_bytes().to_vec(),
+            content_type: "application/eigon+json".to_string(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert!(!resp.valid, "unresolvable class must not validate");
+    assert_eq!(resp.errors.len(), 1, "errors: {:?}", resp.errors);
+    assert_eq!(resp.errors[0].rule, eigenius_kernel::server::CHECK_PARSE);
+    assert_eq!(
+        resp.checks_performed,
+        vec![eigenius_kernel::server::CHECK_PARSE],
+        "parse failed, so no later check ran"
+    );
+}

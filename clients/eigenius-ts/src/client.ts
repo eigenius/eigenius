@@ -617,11 +617,19 @@ export class Eigen {
   }
 
   /**
-   * Type-check a program against the active layer chain.
+   * Run a program's static checks against the active layer chain.
    *
-   * The program is sent inline (no IRI lookup); the kernel validates
-   * stratification, totality, and component-argument shapes and
-   * returns any structured ValidationErrors.
+   * The program is sent inline (no IRI lookup). The kernel decodes the
+   * body to a EigenTT term, resolves the classes it references, checks
+   * component-argument templates against the input type, and checks
+   * D8 §4 output-schema bijectivity; it returns any structured
+   * ValidationErrors.
+   *
+   * `valid` covers exactly the checks named in `checksPerformed`. It is
+   * not a well-typedness claim: the kernel runs no EigenTT type-check
+   * on a program (issue #143), so `checksPerformed` never contains
+   * `"type_check"`. Gate on that name, not on `valid`, if you need
+   * well-typedness.
    */
   async validateProgram(
     program: string | Uint8Array,

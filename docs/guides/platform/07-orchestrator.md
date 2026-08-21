@@ -14,7 +14,7 @@ The full architectural rationale is in [D6 — Execution architecture](../../des
 |---|---|
 | `eigenius load`, `validate`, `compile`, `inspect` | No |
 | `eigenius query` against in-process or remote kernel | No (queries are read-only) |
-| `eigenius program-validate` | No (type-check is in-process) |
+| `eigenius program-validate` | No (static checks run in-process) |
 | `eigenius run` against a program with no IO components | No |
 | `eigenius run` against a program that calls `CompleteText`, `CompleteJson`, or any IO component | **Yes** |
 | Serving the notebook SPA (`EIGENIUS_NOTEBOOK_STATIC`) | Yes (the orchestrator serves it under `/notebooks`) |
