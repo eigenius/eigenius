@@ -1174,6 +1174,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return Ok(TypeExpr::LitFloat { value: f, pos });
             }
+            TokenKind::BoolLit(b) => {
+                self.advance();
+                return Ok(TypeExpr::LitBool { value: b, pos });
+            }
             _ => {}
         }
         let name = self.parse_qualified_name()?;

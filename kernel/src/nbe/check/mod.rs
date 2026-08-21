@@ -1262,7 +1262,8 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         }
         // eigenius#71 / D49 — literal values infer to their primitive
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
-        // through D47 as the `LitString` / `LitInt` / `LitFloat` ctors;
+        // through D47 as the `LitString` / `LitInt` / `LitFloat` /
+        // `LitBool` ctors (eigenius#71, eigenius#142);
         // the kernel checks equality on them via the standard `Val`
         // `PartialEq` path (LitFloat uses `PartialEq` on f64 — NaN
         // compares unequal, but literal NaN propositions are an edge
@@ -1272,6 +1273,9 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             crate::nbe::term::PrimitiveType::Integer,
         )),
         Exp::LitFloat(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
+        Exp::LitBool(_) => Ok(Val::EigonPrimitive(
+            crate::nbe::term::PrimitiveType::Boolean,
+        )),
         Exp::Codata(_) => {
             check_type(ctx, exp)?;
             Ok(Val::Sort(1))

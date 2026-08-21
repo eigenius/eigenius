@@ -93,15 +93,20 @@ D47's `ConstRef(iri)` ctor unifies the three: a single chain ctor that carries a
 
 ## 3. The `core:EigenTTType` inductive
 
-> **As built (verified 2026-08-20 at `b251c9e`).** The inductive shipped under a different
+> **As built (verified 2026-08-21, eigenius#142).** The inductive shipped under a different
 > IRI and is larger than this section specifies. It is `urn:eigenius:eigentt:TypeExpr`,
 > declared in `ontologies/eigentt/eigentt-type-fragment.json`, not
-> `urn:eigenius:core:EigenTTType` in `core-ontology.json`. It carries **18** ctors, not the
+> `urn:eigenius:core:EigenTTType` in `core-ontology.json`. It carries **19** ctors, not the
 > 9 tabulated below: the 9 here (`Sort`, `Var`, `ConstRef`, `App`, `Pi`, `Sig`, `Lam`,
-> `One`, `Id`) plus `Ann`, `UnitVal`, `LitInt`, `LitString`, `LitFloat`, `CtorApp`, `Pair`,
-> `Fst` and `Snd`. §3.5's decision to omit literals for v1 was reversed — all three literal
-> formers ship. The codec is `kernel/src/program/eigentt_type_mirror.rs`, which encodes and
-> decodes exactly those 18.
+> `One`, `Id`) plus `Ann`, `UnitVal`, `LitInt`, `LitString`, `LitFloat`, `LitBool`,
+> `CtorApp`, `Pair`, `Fst` and `Snd`. §3.5's decision to omit literals for v1 was reversed —
+> all four literal formers ship. `LitBool` was added last (eigenius#142), so that a
+> `program:Literal` holding a boolean decodes to `Exp::LitBool(b)` rather than to
+> `Exp::EigonPrimitive(Boolean)` — the literal's *type*. The codec is
+> `kernel/src/program/eigentt_type_mirror.rs`, which encodes and decodes exactly those 19.
+> Adding `LitBool` is purely additive: no ctor was renamed and no arity changed, so every
+> already-persisted term decodes to the same `Exp`. There is no codec version field and none
+> was needed.
 
 ### 3.1 Ctor table
 
@@ -213,6 +218,8 @@ For D46's two default-admitted axioms to encode, the core ontology needs the fol
 ### 3.5 Why no literals
 
 For axiom statements, we don't need `LitInt` / `LitString` ctors — closed propositions don't typically embed concrete numeric or string literals at the *type* level. If a future axiom needs to mention a literal (e.g., a sized type bound), we add a `LitInt(integer)` and `LitString(string)` ctor; that's a one-line extension. For v1, omit.
+
+**Reversed as built.** All four literal ctors ship — `LitInt`, `LitString`, `LitFloat`, `LitBool` — see the §3 note.
 
 ### 3.6 Why no `Patt::Pair` / nested patterns
 

@@ -371,6 +371,8 @@ The same `parse_type_expr` grammar that powers `axiom` ([§4.4a](04-declarations
 | `eigentt:fst(p)` / `eigentt:snd(p)` | `Exp::Fst(p)` / `Exp::Snd(p)` |
 | `()` | `Exp::Unit` |
 | `"literal-iri"` | `Exp::LitString("literal-iri")` |
+| `42` / `1.5` | `Exp::LitInt(42)` / `Exp::LitFloat(1.5)` |
+| `true` / `false` | `Exp::LitBool(true)` / `Exp::LitBool(false)` |
 
 The `LitString` form is what lets you embed concrete subject IRIs — `screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")` — directly in a proposition without authoring a separate `core:axiom_statement` resource per compound. The kernel treats the literal as an opaque `string` value; downstream institutions consume it by string-equality matching.
 

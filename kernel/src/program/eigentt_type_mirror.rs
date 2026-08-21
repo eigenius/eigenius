@@ -225,6 +225,9 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::LitString(s) => Ok(ctor("LitString", vec![json!(s)])),
         Exp::LitInt(n) => Ok(ctor("LitInt", vec![json!(*n)])),
         Exp::LitFloat(f) => Ok(ctor("LitFloat", vec![json!(*f)])),
+        // eigenius#142 — the boolean counterpart, added so
+        // `program:Literal` booleans have a value-carrying term.
+        Exp::LitBool(b) => Ok(ctor("LitBool", vec![json!(*b)])),
         // Note: Exp::Con (anonymous Sum constructor) is intentionally
         // not yet encoded — chain-resident axioms reference declared
         // inductives via Exp::InductiveCtor; anonymous Sum ctors don't
@@ -600,6 +603,16 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             })?;
             Ok(Exp::LitFloat(f))
         }
+        "LitBool" => {
+            expect_arg_count("LitBool", 1, args)?;
+            let b = args[0].as_bool().ok_or_else(|| {
+                DecodeError::MalformedValue(format!(
+                    "LitBool arg must be a JSON boolean, got {:?}",
+                    args[0]
+                ))
+            })?;
+            Ok(Exp::LitBool(b))
+        }
 
         other => Err(DecodeError::UnknownCtor(other.to_string())),
     }
@@ -935,6 +948,12 @@ mod tests {
     }
 
     #[test]
+    fn encodes_lit_bool() {
+        let v = encode_type(&Exp::LitBool(true)).unwrap();
+        assert_eq!(v, Value::Json(ctor_obj("LitBool", vec![json!(true)])));
+    }
+
+    #[test]
     fn lit_string_roundtrip() {
         // No layer chain needed for literals — they decode pure-locally,
         // never touching the chain.
@@ -971,6 +990,40 @@ mod tests {
         let encoded = encode_type(&original).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn lit_bool_roundtrip() {
+        let layer = empty_layer();
+        for original in [Exp::LitBool(true), Exp::LitBool(false)] {
+            let encoded = encode_type(&original).unwrap();
+            let decoded = decode_type(&encoded, &layer).unwrap();
+            assert_eq!(decoded, original);
+        }
+    }
+
+    /// eigenius#142 — `LitBool` is purely ADDITIVE to the codec. Terms
+    /// already persisted (no version field exists to bump) still decode
+    /// to the same `Exp`, and the arg is type-checked like the others:
+    /// a JSON string in the slot is rejected, not silently coerced.
+    #[test]
+    fn lit_bool_is_additive_and_typed() {
+        let layer = empty_layer();
+        for pre_existing in [
+            ctor_obj("LitInt", vec![json!(42)]),
+            ctor_obj("LitString", vec![json!("s")]),
+            ctor_obj("LitFloat", vec![json!(1.5)]),
+            ctor_obj("Sort", vec![json!(1)]),
+            ctor_obj("UnitVal", vec![]),
+        ] {
+            decode_type(&Value::Json(pre_existing.clone()), &layer)
+                .unwrap_or_else(|e| panic!("{pre_existing} no longer decodes: {e}"));
+        }
+        let malformed = Value::Json(ctor_obj("LitBool", vec![json!("true")]));
+        match decode_type(&malformed, &layer) {
+            Err(DecodeError::MalformedValue(msg)) => assert!(msg.contains("LitBool"), "{msg}"),
+            other => panic!("expected MalformedValue, got {other:?}"),
+        }
     }
 
     #[test]

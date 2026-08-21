@@ -43,9 +43,18 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
                 r
             }))
         }
-        RVal::Integer(_) | RVal::Float(_) | RVal::Boolean(_) => {
-            Val::ResourceVal(Box::new(crate::ontology::resource::Resource::new_embedded()))
-        }
+        // eigenius#142 — the inbound mirror of the `val_to_resource_value`
+        // literal arms. These three used to collapse to an EMPTY embedded
+        // resource, so `Construct { p = 42 }` followed by `.p` read back
+        // `Embedded({})`. `RVal::String` deliberately keeps its
+        // one-property-wrapper shape: `val_to_resource_value` unwraps a
+        // single-string-prop `ResourceVal` back to `RVal::String` (the
+        // `CompleteText` output path) and `decide_structural`'s `as_str`
+        // reads the payload out of it, so switching it to `Val::LitString`
+        // is a separate change with its own blast radius.
+        RVal::Integer(n) => Val::LitInt(*n),
+        RVal::Float(f) => Val::LitFloat(*f),
+        RVal::Boolean(b) => Val::LitBool(*b),
         RVal::Embedded(r) => Val::ResourceVal(r.clone()),
         RVal::Array(items) => Val::List(items.iter().map(resource_value_to_val).collect()),
         RVal::ResourceRef(iri) => Val::EigonClass(iri.clone()),
@@ -82,6 +91,7 @@ pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
         Val::LitString(s) => RVal::String(s.clone()),
         Val::LitInt(n) => RVal::Integer(*n),
         Val::LitFloat(f) => RVal::Float(*f),
+        Val::LitBool(b) => RVal::Boolean(*b),
         Val::EigonClass(iri) => RVal::String(iri.as_str().to_string()),
         Val::List(items) => RVal::Array(items.iter().map(val_to_resource_value).collect()),
         Val::Con(ref name, _) if name == "nil" || name == "cons" => {

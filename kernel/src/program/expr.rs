@@ -18,7 +18,7 @@
 //! to a EigenTT term. No translation layer needed.
 
 use crate::layer::Layer;
-use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt, PrimitiveType};
+use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt};
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -972,13 +972,7 @@ fn parse_literal(resource: &Resource) -> Result<Exp, String> {
         }
         Some(Value::Integer(n)) => Ok(Exp::LitInt(*n)),
         Some(Value::Float(f)) => Ok(Exp::LitFloat(*f)),
-        // eigenius#142: there is no `Exp::LitBool`, so a boolean
-        // literal still decodes to its *type*. Two programs returning
-        // `true` and `false` remain identical terms. Adding the
-        // constructor is a term-representation decision (it needs
-        // matching arms in `eval`, `readback`, `check_infer`,
-        // `positivity`, `subst` and the D47 codec) and is left open.
-        Some(Value::Boolean(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
+        Some(Value::Boolean(b)) => Ok(Exp::LitBool(*b)),
         _ => Ok(Exp::Unit),
     }
 }

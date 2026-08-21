@@ -26,7 +26,7 @@
 //! ## Why this is restricted to a fragment, and refuses outside it
 //!
 //! `Exp` has forty-odd variants. A definition body, however, arrives by decoding a stored
-//! `eigentt:TypeExpr`, whose eighteen constructors cover a much smaller shape. Two ways to write
+//! `eigentt:TypeExpr`, whose nineteen constructors cover a much smaller shape. Two ways to write
 //! this were available and both are wrong:
 //!
 //! - **A catch-all `other => other.clone()`**, the pattern `freshen_anaphor` and `abstract_class`
@@ -202,7 +202,8 @@ fn subst_inner(
         | Exp::EigonResource(_)
         | Exp::LitString(_)
         | Exp::LitInt(_)
-        | Exp::LitFloat(_) => body.clone(),
+        | Exp::LitFloat(_)
+        | Exp::LitBool(_) => body.clone(),
 
         // Everything else is outside the fragment. Refusing is the point — see the module docs.
         other => return Err(SubstError::OutsideFragment(variant_name(other))),

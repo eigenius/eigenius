@@ -22,6 +22,9 @@
 //! `Construct` field fed by a literal came back as
 //! `Embedded(Resource { properties: {} })` — an empty resource, for
 //! every literal, with no error raised.
+//!
+//! Boolean was the last of the four: it had no value-carrying term at
+//! all until `Exp::LitBool` / `Val::LitBool` were added.
 
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::term::Exp;
@@ -104,18 +107,10 @@ fn literal_values_reach_the_program_output() {
         "float literal must arrive as 1.5"
     );
 
-    // eigenius#142, still open: there is no `Exp::LitBool`, so a
-    // boolean literal decodes to `Exp::EigonPrimitive(Boolean)` and
-    // marshals to an empty embedded resource. Pinned so the gap is
-    // visible and so adding `LitBool` forces this assertion to be
-    // updated to `Value::Boolean(true)`.
-    assert!(
-        matches!(
-            out.get(&iri("urn:eigenius:example:flag")),
-            Some(Value::Embedded(r)) if r.properties().is_empty()
-        ),
-        "boolean literals have no value-carrying term (eigenius#142), got {:?}",
-        out.get(&iri("urn:eigenius:example:flag"))
+    assert_eq!(
+        out.get(&iri("urn:eigenius:example:flag")),
+        Some(&Value::Boolean(true)),
+        "boolean literal must arrive as true"
     );
 }
 
@@ -139,6 +134,24 @@ fn programs_with_different_constants_produce_different_outputs() {
     assert_ne!(
         a.get(&iri("urn:eigenius:example:ratio")),
         b.get(&iri("urn:eigenius:example:ratio"))
+    );
+}
+
+/// eigenius#142 boolean half: `true` and `false` must not produce the
+/// same output. Before `Exp::LitBool` both decoded to
+/// `Exp::EigonPrimitive(Boolean)` — one term, one value.
+#[test]
+fn boolean_literals_true_and_false_are_distinguishable() {
+    let t = run(&literal_program_json("1", r#""x""#, "1.0", "true"));
+    let f = run(&literal_program_json("1", r#""x""#, "1.0", "false"));
+
+    assert_eq!(
+        t.get(&iri("urn:eigenius:example:flag")),
+        Some(&Value::Boolean(true))
+    );
+    assert_eq!(
+        f.get(&iri("urn:eigenius:example:flag")),
+        Some(&Value::Boolean(false))
     );
 }
 
@@ -178,6 +191,7 @@ fn literal_terms_carry_their_payload() {
         Exp::LitString("hello".to_string())
     );
     assert_eq!(field("urn:eigenius:example:ratio"), Exp::LitFloat(1.5));
+    assert_eq!(field("urn:eigenius:example:flag"), Exp::LitBool(true));
 }
 
 /// A string literal that is a `urn:` / `http` IRI still decodes to

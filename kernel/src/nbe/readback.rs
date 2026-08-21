@@ -224,6 +224,7 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         Val::LitString(s) => Exp::LitString(s.clone()),
         Val::LitInt(n) => Exp::LitInt(*n),
         Val::LitFloat(f) => Exp::LitFloat(*f),
+        Val::LitBool(b) => Exp::LitBool(*b),
 
         // Sized types (Phase 11b step 14, D19 §8).
         Val::SizeSort => Exp::SizeSort,
@@ -473,6 +474,17 @@ mod tests {
 
         let v3 = Val::Sort(1);
         assert_ne!(readback_val(0, &v1), readback_val(0, &v3));
+    }
+
+    /// eigenius#142 — `LitBool` needs no conversion rule of its own:
+    /// `eq_nf` is readback plus `Exp`'s derived `PartialEq`, so
+    /// `true` and `false` are distinguished by the readback arm alone.
+    #[test]
+    fn lit_bool_readback_distinguishes_true_from_false() {
+        use crate::nbe::check::eq_nf;
+        assert_eq!(readback_val(0, &Val::LitBool(true)), Exp::LitBool(true));
+        assert!(eq_nf(0, &Val::LitBool(true), &Val::LitBool(true)).is_ok());
+        assert!(eq_nf(0, &Val::LitBool(true), &Val::LitBool(false)).is_err());
     }
 
     // --- Codata readback tests (D11, Phase 9b-i) ---

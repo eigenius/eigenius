@@ -197,6 +197,7 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::LitString(s) => Ok((Val::LitString(s.clone()), T::leaf())),
         Exp::LitInt(n) => Ok((Val::LitInt(*n), T::leaf())),
         Exp::LitFloat(f) => Ok((Val::LitFloat(*f), T::leaf())),
+        Exp::LitBool(b) => Ok((Val::LitBool(*b), T::leaf())),
 
         Exp::Dec(d, e) => {
             match ctx {
@@ -886,6 +887,12 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
         (Val::Unit, Val::Unit) => true,
         (Val::EigonClass(a), Val::EigonClass(b)) => a == b,
         (Val::EigonPrimitive(a), Val::EigonPrimitive(b)) => a == b,
+        // eigenius#142 — literals are ground values; without these
+        // `DecEq(LitInt(1), LitInt(1))` fell through to `false`.
+        (Val::LitString(a), Val::LitString(b)) => a == b,
+        (Val::LitInt(a), Val::LitInt(b)) => a == b,
+        (Val::LitFloat(a), Val::LitFloat(b)) => a == b,
+        (Val::LitBool(a), Val::LitBool(b)) => a == b,
         (Val::ResourceVal(a), Val::ResourceVal(b)) => {
             // Compare resource contents for equality
             a.properties() == b.properties() && a.id() == b.id()
@@ -923,10 +930,15 @@ fn decide_structural(constraint: &Constraint, val: &Val) -> Decision {
     };
     let as_int = |v: &Val| match v {
         Val::ResourceVal(r) => resource_payload(r).and_then(|x| x.as_integer()),
+        // eigenius#142 — an integer property value now marshals to
+        // `Val::LitInt`, not to an empty `ResourceVal` whose payload was
+        // `None`, so `MinValue` / `MaxValue` can decide at all.
+        Val::LitInt(n) => Some(*n),
         _ => None,
     };
     let as_str = |v: &Val| match v {
         Val::ResourceVal(r) => resource_payload(r).and_then(|x| x.as_str().map(str::to_owned)),
+        Val::LitString(s) => Some(s.clone()),
         _ => None,
     };
     match constraint {
