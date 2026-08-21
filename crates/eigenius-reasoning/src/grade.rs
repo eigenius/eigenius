@@ -51,6 +51,9 @@ const JUSTIFIED_BY: &str = "urn:eigenius:reasoning:JustifiedBy";
 /// `urn:eigenius:reasoning:JustificationTerm` — the justification algebra the certificate indexes over.
 const JUSTIFICATION_TERM: &str = "urn:eigenius:reasoning:JustificationTerm";
 const REFLECTION_DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
+/// The bootstrap agent meaning "no agent was recorded" (D72 §3.1) — a real, resolvable
+/// resource, unlike the literals that used to sit in this slot.
+pub const UNATTRIBUTED_AGENT: &str = "urn:eigenius:reflection:agent:unattributed";
 const REFLECTION_TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
 const REFLECTION_SOURCE: &str = "urn:eigenius:reflection:source";
 /// `urn:eigenius:encoding:EncodedClaim` — the Derived cluster's claim class (D67 §1).
@@ -108,6 +111,12 @@ pub struct ClaimSource<'a> {
     /// a cluster that cannot actually commit (`MissingRequired`) — and in-process tests will not
     /// catch it, because `LayerBuilder` does not run the validator; only a real `eigenius load`
     /// does (found 2026-08-03).
+    ///
+    /// Must be the **IRI of a `reflection:Agent`** since D72 §3.2 retyped the property: it is
+    /// written as a `ResourceRef`, so Rule 8 and Rule 22 require it to resolve same-or-lower.
+    /// A program's name is not an answer to *who* — that belongs in `provenance`, which the
+    /// Derived cluster's `ProgramTrace` records. `UNATTRIBUTED_AGENT` is the honest value when
+    /// no agent is known.
     pub declared_by: &'a str,
     pub timestamp: &'a str,
     /// The program-provenance line the Derived cluster's `ProgramTrace` records as
@@ -211,7 +220,7 @@ impl ClaimGrader for DeclaredClaimGrader {
         declaring.set(iri(wk::CANONICAL_PROPOSITION)?, prop_value.clone());
         declaring.set(
             iri(REFLECTION_DECLARED_BY)?,
-            Value::String(source.declared_by.to_string()),
+            Value::ResourceRef(iri(source.declared_by)?),
         );
 
         // (2) The DeclarationTrace — emits IsDeclaredAs(declaring, P) into the chain witness index.
@@ -231,7 +240,7 @@ impl ClaimGrader for DeclaredClaimGrader {
         );
         trace.set(
             iri(REFLECTION_DECLARED_BY)?,
-            Value::String(source.declared_by.to_string()),
+            Value::ResourceRef(iri(source.declared_by)?),
         );
         trace.set(
             iri(REFLECTION_TIMESTAMP)?,

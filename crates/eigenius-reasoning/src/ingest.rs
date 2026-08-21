@@ -67,7 +67,11 @@ impl<'a> DerivedClaimLander<'a> {
     pub fn new(doc_id: &str, classifier: &'a dyn KindClassifier) -> Self {
         Self {
             doc_id: doc_id.to_string(),
-            declared_by: "encoding-pipeline".to_string(),
+            // An agent IRI, not a program's name: `declared_by` is resource-typed since
+            // D72 §3.2, and "which program computed this" is already recorded as the
+            // ProgramTrace's `reflection:source`. A caller who knows the asserting agent
+            // supplies it; absent that, the honest value is the absence marker.
+            declared_by: crate::grade::UNATTRIBUTED_AGENT.to_string(),
             timestamp: "2026-08-03T00:00:00Z".to_string(),
             emission_ns: None,
             source_label: None,
@@ -287,7 +291,7 @@ impl DocumentIngestion for InProcessIngestion<'_> {
                         // Parsed sentences land DERIVED (D67 §1): a program (the parser)
                         // produced the claim from the source text; the trace is the warrant.
                         warrant: Warrant::Derived,
-                        declared_by: "encoding-pipeline",
+                        declared_by: crate::grade::UNATTRIBUTED_AGENT,
                         timestamp: "2026-08-03T00:00:00Z",
                         provenance: &provenance,
                         kind_classes: &[],

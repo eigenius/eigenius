@@ -93,7 +93,8 @@ resource wrn:va_fail_k577m_trace : reflection:ProgramTrace {
 // rescued — attributes the viability loss to WRN inactivation, ruling out
 // off-target effects of the silencing reagent.
 resource wrn:ontarget_rule : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:on-target-rescue-logic";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_on_target_rescue_logic;
     reflection:rationale   = "sgWRN-EIJ silences endogenous WRN but not exogenous WRN cDNA. If re-expressing WRN cDNA rescues the viability loss from sgWRN-EIJ — while a reagent targeting both endogenous and exogenous WRN (sgWRN2) is not rescued — the phenotype is attributable to loss of WRN, not to an off-target effect of the silencing reagent. Hence the depletion phenotype is on-target.";
     reflection:canonical_proposition = type_expr(
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
@@ -103,7 +104,8 @@ resource wrn:ontarget_rule : reflection:DeclaredResource {
 }
 resource wrn:ontarget_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:ontarget_rule;
-    reflection:declared_by = "wrn-paper:on-target-rescue-logic";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_on_target_rescue_logic;
     reflection:timestamp   = "2026-06-13T02:00:00Z";
 }
 
@@ -111,7 +113,8 @@ resource wrn:ontarget_rule_trace : reflection:DeclarationTrace {
 // localises the essential activity: helicase-dead (K577M) failing to rescue
 // means the helicase activity is required for the phenotype.
 resource wrn:helicase_rule : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_structure_function_dissection;
     reflection:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase, and these activities are SEPARABLE — the E84A and K577M point mutants each ablate one without the other (Swanson 2004 [14], a litclaim premise). Given that separability, rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity: a helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
     reflection:canonical_proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
@@ -123,7 +126,8 @@ resource wrn:helicase_rule : reflection:DeclaredResource {
 }
 resource wrn:helicase_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:helicase_rule;
-    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_structure_function_dissection;
     reflection:timestamp   = "2026-06-13T02:00:00Z";
 }
 
@@ -131,7 +135,8 @@ resource wrn:helicase_rule_trace : reflection:DeclarationTrace {
 // rescues shows that activity is dispensable: exonuclease-dead (E84A)
 // rescuing means the exonuclease activity is not required.
 resource wrn:exo_rule : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_structure_function_dissection;
     reflection:rationale   = "Given that WRN's exonuclease and helicase activities are SEPARABLE (E84A ablates only the exonuclease; Swanson 2004 [14], a litclaim premise), an exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
     reflection:canonical_proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
@@ -143,7 +148,8 @@ resource wrn:exo_rule : reflection:DeclaredResource {
 }
 resource wrn:exo_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:exo_rule;
-    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_structure_function_dissection;
     reflection:timestamp   = "2026-06-13T02:00:00Z";
 }
 
@@ -240,3 +246,18 @@ resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
             cert1, verified(CONCL, RES))
     );
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource wrn:warrant_on_target_rescue_logic : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:on-target-rescue-logic`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_on_target_rescue_logic";
+}
+
+resource wrn:warrant_structure_function_dissection : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:structure-function-dissection`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_structure_function_dissection";
+}
+

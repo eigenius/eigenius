@@ -47,6 +47,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace onco2      = "urn:eigenius:demo:onco-typed";
 namespace umlscui    = "urn:eigenius:umlscui";
 namespace wn         = "urn:eigenius:wn";
+namespace agent = "urn:eigenius:reflection:agent";
 
 // The classes the rule mentions, drawn from two different lexicons the graph already held:
 //
@@ -64,7 +65,8 @@ namespace wn         = "urn:eigenius:wn";
 // Declared resource claims it is true; it claims someone stood behind it, and says who.
 resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
     // WHO stands behind the rule. A citation slot: in a real chain this would identify the paper.
-    reflection:declared_by = "literature:illustrative-dependency-rule";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = onco2:warrant_literature_illustrative_dependency_rule;
 
     // WHY, recorded on chain rather than in a comment a reader of the graph would never see.
     reflection:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Quantified over the model, so applying it to a particular one is an explicit specialization rather than a silent generalization. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
@@ -109,6 +111,16 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
 // on every declaration it emits, definitions included, and mints no witness.
 resource onco2:lit_rule_exo_implies_helicase_trace : reflection:DeclarationTrace {
     reflection:resource    = onco2:lit_rule_exo_implies_helicase;
-    reflection:declared_by = "literature:illustrative-dependency-rule";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = onco2:warrant_literature_illustrative_dependency_rule;
     reflection:timestamp   = "2026-08-03T00:00:00Z";
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource onco2:warrant_literature_illustrative_dependency_rule : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `literature:illustrative-dependency-rule`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_literature_illustrative_dependency_rule";
+}
+

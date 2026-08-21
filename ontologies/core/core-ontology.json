@@ -146,9 +146,10 @@
   {
     "@id": "urn:eigenius:core:short_name",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Short identifier for a resource, used by external integrations. Must be unique within a class's effective property set.",
+    "urn:eigenius:core:description": "Short identifier for a resource, used by external integrations. Must be unique within a class's effective property set. Constrained to contain no whitespace \u2014 the one property that holds across all 196941 short_name values in the tree, and the one that actually matters for the external integrations this exists for. Deliberately NOT an identifier pattern: 7638 values are NCBI gene symbols where hyphens are standard nomenclature (NKX3-2, H1-0, GAS8-AS1), and eigenius#31 asks to ALLOW hyphens in local names rather than ban them.",
     "urn:eigenius:core:short_name": "short_name",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:pattern": "\\S+"
   },
   {
     "@id": "urn:eigenius:core:subclass_of",

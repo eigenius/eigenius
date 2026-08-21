@@ -148,6 +148,8 @@ const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 /// auditors can tell "this Property was inferred by the importer"
 /// apart from "this Property was declared by the source curators."
 const CONVERTER_DECLARED_BY: &str = "urn:obo:converter:eigenius-obograph";
+const ORGANIZATION: &str = "urn:eigenius:reflection:Organization";
+const UNATTRIBUTED: &str = "urn:eigenius:reflection:agent:unattributed";
 
 /// HTTP IRI rewriting prefixes — paired (input, output).
 const OBO_HTTP_PREFIX: &str = "http://purl.obolibrary.org/obo/";
@@ -352,11 +354,76 @@ pub fn convert_document(doc: &GraphDocument) -> ConvertReport {
     convert_document_with(doc, &ConvertOptions::default())
 }
 
+/// `declared_by` as a `ResourceRef` (D72 §3.2). The property is resource-typed, so
+/// Rule 8 and Rule 22 require the declarer to resolve same-or-lower; `emit_declarers`
+/// puts one resource per distinct value into the same layer.
+///
+/// A value that will not parse as an IRI falls back to the platform's explicit
+/// "nobody recorded who" agent rather than being dropped — losing the attribution
+/// silently is what D72 exists to stop.
+fn declarer_ref(value: &str) -> Value {
+    match Iri::parse(value) {
+        Ok(i) => Value::ResourceRef(i),
+        Err(_) => Value::ResourceRef(Iri::parse(UNATTRIBUTED).expect("well-known IRI")),
+    }
+}
+
+/// One `reflection:Organization` per distinct `declared_by` value seen in this run.
+///
+/// MODELLING NOTE, stated rather than hidden: an OBO `declared_by` is usually the
+/// source graph's IRI (`http://purl.obolibrary.org/obo/go.owl`), which names the
+/// ontology, not literally a legal entity. Typing it `Organization` reads it as "the
+/// project that maintains this ontology" — GO, ChEBI and their peers are
+/// consortium-maintained, so "the Gene Ontology project declared this term" is true,
+/// and the graph IRI is the stable identifier available for that project. If a source
+/// ever needs the distinction, the honest move is a `warranted_by` pointing at the
+/// ontology release and a `declared_by` pointing at its maintainer.
+fn emit_declarers(by_iri: &mut BTreeMap<String, Resource>, declarers: &BTreeSet<String>) {
+    for value in declarers {
+        let Ok(iri) = Iri::parse(value) else { continue };
+        if by_iri.contains_key(value) {
+            continue;
+        }
+        let mut r = Resource::new(iri);
+        r.set(
+            Iri::parse(IS_A).expect("well-known IRI"),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse(ORGANIZATION).expect("well-known IRI"),
+            )]),
+        );
+        r.set(
+            Iri::parse(DESCRIPTION).expect("well-known IRI"),
+            Value::String(format!(
+                "The project maintaining `{value}` — the declarer of every term imported from it."
+            )),
+        );
+        // Sanitised to an identifier: every one of the ~2800 `short_name` values in the
+        // ontologies is `[A-Za-z_][A-Za-z0-9_]*`, and the property exists for external
+        // integrations. A raw graph tail like `go.owl` would be the tree's first dotted
+        // one. The readable form stays in `description`.
+        let tail = value.rsplit('/').next().unwrap_or(value);
+        let mut short: String = tail
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        if !short.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            short.insert(0, '_');
+        }
+        r.set(
+            Iri::parse(SHORT_NAME).expect("well-known IRI"),
+            Value::String(short),
+        );
+        by_iri.insert(value.clone(), r);
+    }
+}
+
 /// Conversion entry point with explicit options. See
 /// [`ConvertOptions`] for the knobs.
 pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> ConvertReport {
     let mut report = ConvertReport::default();
     let mut by_iri: BTreeMap<String, Resource> = BTreeMap::new();
+    let mut declarers: BTreeSet<String> = BTreeSet::new();
+    declarers.insert(CONVERTER_DECLARED_BY.to_string());
 
     for graph in &doc.graphs {
         // Per-graph declared_by, resolving in priority order: caller
@@ -368,6 +435,7 @@ pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> Conv
             .clone()
             .or_else(|| graph.id.clone())
             .unwrap_or_else(|| "urn:obo:converter:unknown-graph".to_string());
+        declarers.insert(declared_by_value.clone());
 
         for node in &graph.nodes {
             let (urn_str, source_irl) = rewrite_iri(&node.id);
@@ -392,6 +460,7 @@ pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> Conv
         }
     }
 
+    emit_declarers(&mut by_iri, &declarers);
     let synthetic_count = ensure_synthetic_property_declarations(&mut by_iri);
     if synthetic_count > 0 {
         *report
@@ -462,7 +531,7 @@ fn ensure_synthetic_property_declarations(by_iri: &mut BTreeMap<String, Resource
         );
         r.set(
             Iri::parse(DECLARED_BY).expect("well-known IRI"),
-            Value::String(CONVERTER_DECLARED_BY.to_string()),
+            declarer_ref(CONVERTER_DECLARED_BY),
         );
         let data_type = synthetic_predicate_data_type(&iri_str);
         r.set(
@@ -544,7 +613,7 @@ fn node_to_resource(
     }
     r.set(
         Iri::parse(DECLARED_BY).expect("well-known IRI"),
-        Value::String(declared_by.to_string()),
+        declarer_ref(declared_by),
     );
 
     if let Some(lbl) = node.lbl.as_deref() {
@@ -669,7 +738,7 @@ fn apply_edge(
         }
         r.set(
             Iri::parse(DECLARED_BY).expect("well-known IRI"),
-            Value::String(declared_by.to_string()),
+            declarer_ref(declared_by),
         );
         r
     });
@@ -798,8 +867,8 @@ mod tests {
         }
         // `declared_by` defaults to the sample doc's graph IRI.
         match cell.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::String(s)) => assert_eq!(s, "http://example.org/g1"),
-            other => panic!("expected declared_by string, got {other:?}"),
+            Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), "http://example.org/g1"),
+            other => panic!("expected declared_by string as ResourceRef, got {other:?}"),
         }
     }
 
@@ -1234,10 +1303,12 @@ mod tests {
 
         // declared_by defaults to the source graph IRI.
         match nucleus.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::String(s)) => {
-                assert_eq!(s, "http://purl.obolibrary.org/obo/go.owl");
+            // A `ResourceRef` since D72 §3.2 retyped `declared_by`; the declarer
+            // resource itself is emitted into the same layer by `emit_declarers`.
+            Some(Value::ResourceRef(i)) => {
+                assert_eq!(i.as_str(), "http://purl.obolibrary.org/obo/go.owl");
             }
-            other => panic!("expected declared_by String, got {other:?}"),
+            other => panic!("expected declared_by ResourceRef, got {other:?}"),
         }
     }
 
@@ -1260,8 +1331,10 @@ mod tests {
         let report = convert_document_with(&doc, &opts);
         let nucleus = find(&report, "urn:obo:GO:0005634");
         match nucleus.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::String(s)) => assert_eq!(s, "urn:eigenius:agents:go-curators"),
-            other => panic!("expected override declared_by, got {other:?}"),
+            Some(Value::ResourceRef(i)) => {
+                assert_eq!(i.as_str(), "urn:eigenius:agents:go-curators")
+            }
+            other => panic!("expected override declared_by as ResourceRef, got {other:?}"),
         }
     }
 
@@ -1290,8 +1363,8 @@ mod tests {
         let report = convert_document(&doc);
         let decl = find(&report, "urn:obo:adhocLink");
         match decl.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::String(s)) => {
-                assert_eq!(s, CONVERTER_DECLARED_BY);
+            Some(Value::ResourceRef(i)) => {
+                assert_eq!(i.as_str(), CONVERTER_DECLARED_BY);
             }
             other => panic!("expected converter declared_by, got {other:?}"),
         }

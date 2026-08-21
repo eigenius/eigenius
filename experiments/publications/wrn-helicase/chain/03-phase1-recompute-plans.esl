@@ -54,7 +54,8 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // direction (MSS more dependent) is not the biological claim under test.
 
 resource wrn:msi_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:synthetic-lethal-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_synthetic_lethal_directionality;
     reflection:rationale   = "Synthetic lethality predicts MSI-specific WRN dependence: the directional claim is that MSI cells are more WRN-dependent than MSS. The inverse direction (MSS more dependent than MSI) is not the hypothesis, licensing the one-sided p-value.";
 }
 
@@ -131,7 +132,8 @@ resource wrn:wrn_dep_plan_trace : reflection:ProgramTrace {
 // drug_screening.esl bridge.
 
 resource wrn:bridge_msi_selective : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:selective-essentiality-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_selective_essentiality_criterion;
     reflection:rationale   = "If a sample set measuring WRN dependency by MSI status has its MSI-group mean strictly below its MSS-group mean (MSI more dependent), WRN is selectively essential in MSI. The directional statistical claim is the warrant.";
 
     reflection:canonical_proposition = type_expr(
@@ -143,7 +145,8 @@ resource wrn:bridge_msi_selective : reflection:DeclaredResource {
 
 resource wrn:bridge_msi_selective_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_msi_selective;
-    reflection:declared_by = "wrn-paper:selective-essentiality-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_selective_essentiality_criterion;
     reflection:timestamp   = "2026-06-12T14:00:00Z";
 }
 
@@ -159,7 +162,8 @@ resource wrn:bridge_msi_selective_trace : reflection:DeclarationTrace {
 // Pairs: (x = ms_deletions_normed, y = avg_WRN_dep).
 
 resource wrn:mutator_load_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:mutator-load-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mutator_load_directionality;
     reflection:rationale   = "The hypothesis is that accumulating MSI deletions increase WRN dependence — a negative correlation between #MS-deletions and WRN dependency score (more deletions ⇒ more negative ⇒ more dependent). The inverse direction is not the claim, licensing the one-sided test.";
 }
 
@@ -221,7 +225,8 @@ resource wrn:wrn_corr_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_mutator_load : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:mutator-load-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mutator_load_criterion;
     reflection:rationale   = "If WRN dependency negatively correlates with mutator load (#MS deletions) across MSI lines, WRN dependency tracks mutator load — supporting the refinement that a stronger mutator phenotype drives WRN dependence.";
 
     reflection:canonical_proposition = type_expr(
@@ -233,7 +238,8 @@ resource wrn:bridge_mutator_load : reflection:DeclaredResource {
 
 resource wrn:bridge_mutator_load_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_mutator_load;
-    reflection:declared_by = "wrn-paper:mutator-load-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mutator_load_criterion;
     reflection:timestamp   = "2026-06-12T14:30:00Z";
 }
 
@@ -251,7 +257,8 @@ resource wrn:bridge_mutator_load_trace : reflection:DeclarationTrace {
 // dependence — and the biomarker — is restricted to the common MSI lineages.
 
 resource wrn:lineage_mutator_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:lineage-mutator-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_lineage_mutator_directionality;
     reflection:rationale   = "The hypothesis is that the common MSI lineages carry MORE microsatellite deletions than the uncommon ones (higher mutator load drives the lineage-restricted WRN dependence). The inverse direction is not the claim, licensing the one-sided test.";
 }
 
@@ -307,7 +314,8 @@ resource wrn:mutator_load_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_lineage_mutator : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:lineage-mutator-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_lineage_mutator_criterion;
     reflection:rationale   = "If among MSI lines the uncommon-lineage group has its mean MS-deletion load strictly below the common-lineage group, the common MSI lineages carry an elevated mutator load. The directional statistical claim is the warrant for the lineage restriction of the biomarker.";
 
     reflection:canonical_proposition = type_expr(
@@ -319,7 +327,8 @@ resource wrn:bridge_lineage_mutator : reflection:DeclaredResource {
 
 resource wrn:bridge_lineage_mutator_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_lineage_mutator;
-    reflection:declared_by = "wrn-paper:lineage-mutator-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_lineage_mutator_criterion;
     reflection:timestamp   = "2026-06-16T14:30:00Z";
 }
 
@@ -333,7 +342,8 @@ resource wrn:bridge_lineage_mutator_trace : reflection:DeclarationTrace {
 // (paper two-tailed t-test p = 3.2e-8).
 
 resource wrn:coloc_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:nucleolar-delocalization-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_nucleolar_delocalization_directionality;
     reflection:rationale   = "The hypothesis is that WRN's nucleolar (fibrillarin) colocalization is REDUCED in MSI relative to lineage-matched MSS — a directional decrease. The inverse direction is not the claim, licensing the one-sided test.";
 }
 
@@ -379,7 +389,8 @@ resource wrn:coloc_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_coloc : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:nucleolar-delocalization-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_nucleolar_delocalization_criterion;
     reflection:rationale   = "If WRN–fibrillarin colocalization in MSI lines is strictly below the lineage-matched MSS group, WRN is delocalized from the nucleolus in MSI. The directional statistical claim is the warrant.";
 
     reflection:canonical_proposition = type_expr(
@@ -391,7 +402,8 @@ resource wrn:bridge_coloc : reflection:DeclaredResource {
 
 resource wrn:bridge_coloc_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_coloc;
-    reflection:declared_by = "wrn-paper:nucleolar-delocalization-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_nucleolar_delocalization_criterion;
     reflection:timestamp   = "2026-06-16T15:00:00Z";
 }
 
@@ -405,7 +417,8 @@ resource wrn:bridge_coloc_trace : reflection:DeclarationTrace {
 // below group B = Ch3+5 → directional lt(mean_diff_of, 0)); paper t-test p≈2.3e-3.
 
 resource wrn:hcr_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:mmr-restoration-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mmr_restoration_directionality;
     reflection:rationale   = "The hypothesis is that restoring MMR (Ch3+5) INCREASES mismatch-repair capacity over the MMR-deficient parental — a directional increase. The inverse direction is not the claim, licensing the one-sided test.";
 }
 
@@ -449,7 +462,8 @@ resource wrn:hcr_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_hcr : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
     reflection:rationale   = "If the MMR-deficient parental's mismatch-repair capacity is strictly below the MMR-restored Ch3+5 group, MMR restoration restores functional repair — confirming the model's MMR defect is genuine. The directional statistical claim is the warrant.";
 
     reflection:canonical_proposition = type_expr(
@@ -461,7 +475,8 @@ resource wrn:bridge_hcr : reflection:DeclaredResource {
 
 resource wrn:bridge_hcr_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_hcr;
-    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
     reflection:timestamp   = "2026-06-16T15:30:00Z";
 }
 
@@ -585,7 +600,8 @@ resource wrn:wrn_recq_plan_trace : reflection:ProgramTrace {
 // rationale records the three other RecQ helicases' kernel-computed,
 // non-significant p-values as the declared basis for "only WRN".
 resource wrn:recq_uniqueness_rule : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:recq-family-specificity";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_recq_family_specificity;
     reflection:rationale   = "Among the RecQ helicases tested MSI-vs-MSS in the same Achilles CRISPR-CERES cohort (32 MSI / 413 MSS, all lineages): only WRN has a significant MSI-selective dependency (Wilcoxon P = 1.1e-8, median -0.49 vs -0.11; kernel-recomputed via wrn_recq_plan). BLM (P = 0.65), RECQL (P = 0.58) and RECQL5 (P = 0.11) are all non-significant (kernel-computed against the same pinned snapshot); RECQL4 is absent from the 18Q4 CERES matrix (paper Ext Data 1c: n.s.). A null is not derivable, so the non-selectivity of the other three is a declared scientific judgment — at this n and effect scale, their non-significance indicates no MSI-selective dependency. Given WRN's significant selective dependency, WRN is therefore the only MSI-selective RecQ helicase.";
 
     reflection:canonical_proposition = type_expr(
@@ -597,7 +613,8 @@ resource wrn:recq_uniqueness_rule : reflection:DeclaredResource {
 
 resource wrn:recq_uniqueness_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:recq_uniqueness_rule;
-    reflection:declared_by = "wrn-paper:recq-family-specificity";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_recq_family_specificity;
     reflection:timestamp   = "2026-06-12T14:45:00Z";
 }
 
@@ -627,7 +644,8 @@ resource wrn:biomarker_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_biomarker : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:biomarker-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_biomarker_criterion;
     reflection:rationale   = "If MSI status predicts WRN dependency with PPV >= 0.7 AND sensitivity >= 0.9 (at the dependency < -0.5 threshold), MSI is a strong biomarker for WRN dependency — a predictive relationship comparable to established oncogene dependency biomarkers (KRAS/BRAF). The two classifier-quality facts are the warrant.";
 
     reflection:canonical_proposition = type_expr(
@@ -641,7 +659,8 @@ resource wrn:bridge_biomarker : reflection:DeclaredResource {
 
 resource wrn:bridge_biomarker_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_biomarker;
-    reflection:declared_by = "wrn-paper:biomarker-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_biomarker_criterion;
     reflection:timestamp   = "2026-06-12T15:00:00Z";
 }
 
@@ -659,7 +678,8 @@ resource wrn:bridge_biomarker_trace : reflection:DeclarationTrace {
 // dependence — the "p53 contributes" half of C-MECH's p53 dissection.
 
 resource wrn:p53_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:p53-contribution-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_p53_contribution_directionality;
     reflection:rationale   = "The mechanistic hypothesis is that WRN loss activates p53, so p53-proficient MSI cells are predicted MORE dependent on WRN than p53-impaired ones. That directional prediction (intact more dependent) is the claim under test; the inverse is not, licensing the one-sided p-value (paper reports two-sided P = 0.02; one-sided ~0.01).";
 }
 
@@ -707,7 +727,8 @@ resource wrn:p53_dep_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_p53_modulates : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:p53-contribution-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_p53_contribution_criterion;
     reflection:rationale   = "If WRN dependence differs by p53 status across MSI lines (p53-intact mean strictly below p53-impaired — more dependent), then p53 status modulates WRN dependence: it contributes to, but does not solely determine, the dependence (both strata remain dependent; DSBs are toxic independent of p53).";
 
     reflection:canonical_proposition = type_expr(
@@ -719,7 +740,8 @@ resource wrn:bridge_p53_modulates : reflection:DeclaredResource {
 
 resource wrn:bridge_p53_modulates_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_p53_modulates;
-    reflection:declared_by = "wrn-paper:p53-contribution-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_p53_contribution_criterion;
     reflection:timestamp   = "2026-06-13T03:00:00Z";
 }
 
@@ -740,7 +762,8 @@ resource wrn:bridge_p53_modulates_trace : reflection:DeclarationTrace {
 // va_competition ToolArtifact.
 
 resource wrn:viability_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:viability-impairment-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_viability_impairment_directionality;
     reflection:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability: the directional claim is sgWRN viability below negative-control viability (group A mean < group B). The inverse is not the hypothesis, licensing the one-sided test.";
 }
 
@@ -833,7 +856,8 @@ resource wrn:viab_OVK18_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_viability : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:selective-viability-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_selective_viability_criterion;
     reflection:rationale   = "If WRN depletion significantly impairs viability (sgWRN below negative controls in the competition assay) in MSI lines — recomputed for KM12 (two-way ANOVA P=2.7e-19) and OVK18 (P=1.2e-7) — while sparing MSS lines (ES2 P=0.37, SW620 P=0.23, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion selectively impairs MSI viability.";
 
     reflection:canonical_proposition = type_expr(
@@ -846,7 +870,8 @@ resource wrn:bridge_viability : reflection:DeclaredResource {
 }
 resource wrn:bridge_viability_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_viability;
-    reflection:declared_by = "wrn-paper:selective-viability-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_selective_viability_criterion;
     reflection:timestamp   = "2026-06-13T05:00:00Z";
 }
 
@@ -866,7 +891,8 @@ resource wrn:bridge_viability_trace : reflection:DeclarationTrace {
 // pinned Nature ED Fig 4 XLSX (data/MANIFEST.md).
 
 resource wrn:cellcycle_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:cellcycle-arrest-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_cellcycle_arrest_directionality;
     reflection:rationale   = "DSB-driven cell-cycle arrest reduces the proliferating (S-phase) fraction: the directional claim is sgWRN %S-phase below negative-control %S-phase (group A mean < group B). The inverse (WRN loss increasing S-phase) is not the hypothesis, licensing the one-sided test.";
 }
 
@@ -982,7 +1008,8 @@ resource wrn:cc_OVK18_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_cellcycle : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:cellcycle-arrest-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_cellcycle_arrest_criterion;
     reflection:rationale   = "If WRN depletion significantly reduces the S-phase fraction (sgWRN %S below negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=6.1e-7), SW48 (P=3.5e-4), OVK18 (P=2.6e-6) — while sparing MSS lines (SW620 P=0.16, SW837 P=0.67, ES2 P=0.69, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective cell-cycle arrest — a downstream consequence of DSB-driven DDR.";
 
     reflection:canonical_proposition = type_expr(
@@ -997,7 +1024,8 @@ resource wrn:bridge_cellcycle : reflection:DeclaredResource {
 }
 resource wrn:bridge_cellcycle_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_cellcycle;
-    reflection:declared_by = "wrn-paper:cellcycle-arrest-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_cellcycle_arrest_criterion;
     reflection:timestamp   = "2026-06-13T06:00:00Z";
 }
 
@@ -1015,7 +1043,8 @@ resource wrn:bridge_cellcycle_trace : reflection:DeclarationTrace {
 // judgment). Source: pinned Nature ED Fig 4 XLSX (data/MANIFEST.md).
 
 resource wrn:apoptosis_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:apoptosis-induction-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_apoptosis_induction_directionality;
     reflection:rationale   = "DSB-driven apoptosis raises the apoptotic fraction: the directional claim is negative-control apoptosis below sgWRN apoptosis (group A = control mean < group B = sgWRN mean). The inverse (WRN loss reducing apoptosis) is not the hypothesis, licensing the one-sided test.";
 }
 
@@ -1131,7 +1160,8 @@ resource wrn:apop_OVK18_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_apoptosis : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:apoptosis-induction-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_apoptosis_induction_criterion;
     reflection:rationale   = "If WRN depletion significantly raises the apoptotic fraction (sgWRN apoptosis above negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=3.4e-3), SW48 (P=3.6e-4), OVK18 (P=3.6e-5) — while sparing MSS lines (SW620 P=0.10, SW837 P=0.41, ES2 P=0.57, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective apoptosis — a downstream consequence of DSB-driven DDR.";
 
     reflection:canonical_proposition = type_expr(
@@ -1146,7 +1176,8 @@ resource wrn:bridge_apoptosis : reflection:DeclaredResource {
 }
 resource wrn:bridge_apoptosis_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_apoptosis;
-    reflection:declared_by = "wrn-paper:apoptosis-induction-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_apoptosis_induction_criterion;
     reflection:timestamp   = "2026-06-13T06:30:00Z";
 }
 
@@ -1198,7 +1229,8 @@ resource wrn:apop_shrna_KM12_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_apop_shrna : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:apoptosis-shrna-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_apoptosis_shrna_criterion;
     reflection:rationale   = "If WRN knockDOWN (shWRN) raises the apoptotic fraction above the shRFP control in the MSI line KM12 — recomputed here — while the lineage-matched MSS line SW837 is spared (control ~12 vs shWRN ~8.6, not elevated; a null is not derivable, so 'spared' is the declared judgment), then WRN loss causes MSI apoptosis via an shRNA reagent orthogonal to the CRISPR knockout — establishing the apoptosis is on-target, not a Cas9 artifact.";
 
     reflection:canonical_proposition = type_expr(
@@ -1210,7 +1242,8 @@ resource wrn:bridge_apop_shrna : reflection:DeclaredResource {
 
 resource wrn:bridge_apop_shrna_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_apop_shrna;
-    reflection:declared_by = "wrn-paper:apoptosis-shrna-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_apoptosis_shrna_criterion;
     reflection:timestamp   = "2026-06-16T16:00:00Z";
 }
 
@@ -1239,7 +1272,8 @@ resource wrn:bridge_apop_shrna_trace : reflection:DeclarationTrace {
 // ToolArtifact (retired in wrn-phase5). Source: pinned Nature ED Fig 10 XLSX.
 
 resource wrn:mmr_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:mmr-restoration-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mmr_restoration_directionality;
     reflection:rationale   = "MMR proficiency sustains WRN-depletion viability: the directional claim is that the MMR-deficient (or MLH1-re-knocked-out) context shows LOWER shWRN viability than the MMR-restored context (group A mean < group B). The inverse (MMR restoration reducing viability) is not the hypothesis, licensing the one-sided test.";
 }
 
@@ -1365,7 +1399,8 @@ resource wrn:mmr_resens2_plan_trace : reflection:ProgramTrace {
 
 // ── Declared bridge: the three contrasts compose the causal dissection ──
 resource wrn:bridge_mmr_restoration : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
     reflection:rationale   = "If restoring MMR raises WRN-depletion viability (Ch2 below Ch3+5+sgCh2-2, recomputed two-way ANOVA P=5.7e-20) AND re-knocking-out MLH1 in the restored line re-lowers it (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2, P=3.3e-12; Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2, P=1.6e-16), then the rescue is attributable to MMR (the MLH1-KO controls isolate MMR from the chromosome transfer) and restoring MMR PARTIALLY rescues WRN dependence. 'Partially' is load-bearing: the rescue is modest (Ch3+5 shWRN viability ≈0.71, not restored to 1.0), so dMMR contributes to but does not fully explain WRN dependence (cf. D-REFINE mutator load).";
 
     reflection:canonical_proposition = type_expr(
@@ -1380,7 +1415,8 @@ resource wrn:bridge_mmr_restoration : reflection:DeclaredResource {
 }
 resource wrn:bridge_mmr_restoration_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_mmr_restoration;
-    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
     reflection:timestamp   = "2026-06-13T07:00:00Z";
 }
 
@@ -1402,7 +1438,8 @@ resource wrn:bridge_mmr_restoration_trace : reflection:DeclarationTrace {
 // Nature Fig 2 Source Data. Replaces the linked-external va_rescue_{wt,e84a}.
 
 resource wrn:rescue_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by = "wrn-paper:on-target-rescue-directionality";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_on_target_rescue_directionality;
     reflection:rationale   = "An EIJ-spared functional WRN cDNA RAISES sgWRN-EIJ viability above the GFP (no-rescue) control: the directional claim is GFP-background sgWRN-EIJ viability below the cDNA-background (group A mean < group B). The inverse (re-expressing WRN lowering viability) is not the hypothesis, licensing the one-sided test.";
 }
 
@@ -1477,7 +1514,8 @@ resource wrn:rescue_e84a_plan_trace : reflection:ProgramTrace {
 }
 
 resource wrn:bridge_rescue_wt : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:on-target-rescue-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_on_target_rescue_criterion;
     reflection:rationale   = "If re-expressing WT WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=2.4e-7), the cDNA rescues the depletion — the EIJ reagent spares the cDNA, so functional WRN is restored.";
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
@@ -1487,12 +1525,14 @@ resource wrn:bridge_rescue_wt : reflection:DeclaredResource {
 }
 resource wrn:bridge_rescue_wt_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_rescue_wt;
-    reflection:declared_by = "wrn-paper:on-target-rescue-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_on_target_rescue_criterion;
     reflection:timestamp   = "2026-06-13T08:00:00Z";
 }
 
 resource wrn:bridge_rescue_e84a : reflection:DeclaredResource {
-    reflection:declared_by = "wrn-paper:exonuclease-dispensable-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_exonuclease_dispensable_criterion;
     reflection:rationale   = "If the exonuclease-dead (E84A) WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=3.4e-6), it still rescues — the exonuclease activity is dispensable for the rescue.";
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
@@ -1502,6 +1542,154 @@ resource wrn:bridge_rescue_e84a : reflection:DeclaredResource {
 }
 resource wrn:bridge_rescue_e84a_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_rescue_e84a;
-    reflection:declared_by = "wrn-paper:exonuclease-dispensable-criterion";
+    reflection:declared_by  = wrn:authors;
+    reflection:warranted_by = wrn:warrant_exonuclease_dispensable_criterion;
     reflection:timestamp   = "2026-06-13T08:00:00Z";
 }
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource wrn:warrant_apoptosis_induction_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:apoptosis-induction-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_apoptosis_induction_criterion";
+}
+
+resource wrn:warrant_apoptosis_induction_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:apoptosis-induction-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_apoptosis_induction_directionality";
+}
+
+resource wrn:warrant_apoptosis_shrna_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:apoptosis-shrna-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_apoptosis_shrna_criterion";
+}
+
+resource wrn:warrant_biomarker_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:biomarker-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_biomarker_criterion";
+}
+
+resource wrn:warrant_cellcycle_arrest_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:cellcycle-arrest-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_cellcycle_arrest_criterion";
+}
+
+resource wrn:warrant_cellcycle_arrest_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:cellcycle-arrest-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_cellcycle_arrest_directionality";
+}
+
+resource wrn:warrant_exonuclease_dispensable_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:exonuclease-dispensable-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_exonuclease_dispensable_criterion";
+}
+
+resource wrn:warrant_lineage_mutator_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:lineage-mutator-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_lineage_mutator_criterion";
+}
+
+resource wrn:warrant_lineage_mutator_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:lineage-mutator-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_lineage_mutator_directionality";
+}
+
+resource wrn:warrant_mmr_restoration_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:mmr-restoration-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_mmr_restoration_criterion";
+}
+
+resource wrn:warrant_mmr_restoration_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:mmr-restoration-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_mmr_restoration_directionality";
+}
+
+resource wrn:warrant_mutator_load_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:mutator-load-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_mutator_load_criterion";
+}
+
+resource wrn:warrant_mutator_load_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:mutator-load-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_mutator_load_directionality";
+}
+
+resource wrn:warrant_nucleolar_delocalization_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:nucleolar-delocalization-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_nucleolar_delocalization_criterion";
+}
+
+resource wrn:warrant_nucleolar_delocalization_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:nucleolar-delocalization-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_nucleolar_delocalization_directionality";
+}
+
+resource wrn:warrant_on_target_rescue_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:on-target-rescue-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_on_target_rescue_criterion";
+}
+
+resource wrn:warrant_on_target_rescue_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:on-target-rescue-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_on_target_rescue_directionality";
+}
+
+resource wrn:warrant_p53_contribution_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:p53-contribution-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_p53_contribution_criterion";
+}
+
+resource wrn:warrant_p53_contribution_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:p53-contribution-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_p53_contribution_directionality";
+}
+
+resource wrn:warrant_recq_family_specificity : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:recq-family-specificity`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_recq_family_specificity";
+}
+
+resource wrn:warrant_selective_essentiality_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:selective-essentiality-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_selective_essentiality_criterion";
+}
+
+resource wrn:warrant_selective_viability_criterion : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:selective-viability-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_selective_viability_criterion";
+}
+
+resource wrn:warrant_synthetic_lethal_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:synthetic-lethal-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_synthetic_lethal_directionality";
+}
+
+resource wrn:warrant_viability_impairment_directionality : reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
+    core:description = "Warrant stub for `wrn-paper:viability-impairment-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_viability_impairment_directionality";
+}
+

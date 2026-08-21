@@ -40,6 +40,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace reasoning  = "urn:eigenius:reasoning";
 namespace ingest     = "urn:eigenius:ingest";
 namespace obj        = "urn:eigenius:obj:d57";
+namespace agent = "urn:eigenius:reflection:agent";
 
 // ── sub-propositions for the m3 decomposition ───────────────────────
 data obj:InputArtifactObserved  : core:string -> Prop { }
@@ -82,19 +83,22 @@ resource obj:gen_output_trace : reflection:ObservationTrace {
 
 // ── GeneratorConforms — Declared, mechanically witnessed ────────────
 resource obj:generator_checks : reflection:DeclaredResource {
-    reflection:declared_by = "d57:m3-generator";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_m3_generator;
     reflection:rationale   = "Witnessed mechanically by crates/eigenius-schemaorg/tests/output_validates.rs (run: cargo test -p eigenius-schemaorg -- --ignored), converting the content-pinned V30.0 input (sha256 0f0c97a4...) into the content-pinned output (sha256 f4de231a...): (1) output_loads_and_validates — all 2114 resources (683 classes, 51 enumeration classes, 250 members, 1130 properties) load onto core+reflection and the kernel Validator reports 0 errors (Expressible); (2) no_resource_carries_core_domain — domainIncludes is inverted into advisory core:recommends, zero core:domain restrictions leak; (3) enumeration_ranged_properties_close_with_allows_only — every closable enumeration range carries allows_only over the TRANSITIVE member closure, the 66-property Enumeration tier splitting exactly into 62 closed + 4 genuinely-open member-less enums (BusinessFunction, BusinessEntityType, BedType, WarrantyScope — members defined in external vocabularies); (4) source_irl_round_trips_to_id — every emitted resource's source_irl reverses to its urn:schema_org: @id; (5) conversion_is_deterministic. The correspondence rules also have CI-safe coverage in src/convert.rs unit tests. Grade: Declared — the conformance properties are established by a cargo test run; the Level-2 upgrade runs the generator as a kernel-dispatched program (D56 wrapped-program, ProgramTrace -> IsDerivedAs — the WRN wrapped-R pattern, no new institution) so concl_generator can discharge GeneratorConforms via derived(...) (docs/notes/d57-mechanical-evidence-plan.md).";
     reflection:canonical_proposition = type_expr( obj:GeneratorConforms("schema_org") );
 }
 resource obj:generator_checks_trace : reflection:DeclarationTrace {
     reflection:resource    = obj:generator_checks;
-    reflection:declared_by = "d57:m3-generator";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_m3_generator;
     reflection:timestamp   = "2026-06-20T00:00:00Z";
 }
 
 // ── the m3 rule and its conclusion (modus ponens over the three legs) ─
 resource obj:generator_rule : reflection:DeclaredResource {
-    reflection:declared_by = "d57:m3-generator";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_m3_generator;
     reflection:rationale   = "The generator produces the mappable vocabulary when: the pinned input exists (InputArtifactObserved), the generated output exists (OutputArtifactObserved), and that output conforms to the m1 discipline (GeneratorConforms). The two artifacts are content-hashed Observed witnesses; conformance is the mechanically-checked bridge between them.";
     reflection:canonical_proposition = type_expr(
         obj:InputArtifactObserved("schema_org")
@@ -108,20 +112,38 @@ resource obj:generator_rule : reflection:DeclaredResource {
 }
 resource obj:generator_rule_trace : reflection:DeclarationTrace {
     reflection:resource    = obj:generator_rule;
-    reflection:declared_by = "d57:m3-generator";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_m3_generator;
     reflection:timestamp   = "2026-06-20T00:00:00Z";
 }
 
 // ── m4: the cut is accounted ────────────────────────────────────────
 resource obj:cut_accounting : reflection:DeclaredResource {
-    reflection:declared_by = "d57:m4-cut";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_m4_cut;
     reflection:rationale   = "The generator emits a coverage report (data/coverage.json) accounting the cut for V30.0, and the accounting is mechanically checked: crates/eigenius-schemaorg/tests/output_validates.rs::cut_partitions_the_schema_namespace independently recounts the parsed graph and reproduces the report exactly — every schema: node lands in exactly one bucket (mapped 2114 = 683 classes + 51 enum classes + 250 members + 1130 properties; folded 15 DataTypes; excluded-by-layer 848; the remainder non-vocabulary), so nothing is silently dropped. Property ranges by tier: Clean 867, by-convention 188, enumeration 66 (62 closed via allows_only + 4 genuinely-open member-less enums), defaulted 9. The Tier-3 relational residual is recorded but NOT mapped (equivalentClass 48, equivalentProperty 89, subPropertyOf 142, inverseOf 45, supersededBy 82 — inert provenance, no reasoner). Every in-scope schema: term is therefore either mapped or in the justified residual.";
     reflection:canonical_proposition = type_expr( obj:CutAccounted("schema_org") );
 }
 resource obj:cut_accounting_trace : reflection:DeclarationTrace {
     reflection:resource    = obj:cut_accounting;
-    reflection:declared_by = "d57:m4-cut";
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = obj:warrant_d57_m4_cut;
     reflection:timestamp   = "2026-06-20T00:00:00Z";
 }
 
 // (concl_generator + concl_cut live in 04b-conclusions.esl, loaded AFTER the run.)
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource obj:warrant_d57_m3_generator : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `d57:m3-generator`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_d57_m3_generator";
+}
+
+resource obj:warrant_d57_m4_cut : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Warrant stub for `d57:m4-cut`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_d57_m4_cut";
+}
+
