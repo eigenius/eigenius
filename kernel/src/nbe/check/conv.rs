@@ -275,12 +275,18 @@ pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), CheckErro
 /// Current scope is exactly the sized-types relaxation — everywhere
 /// else subtyping degenerates to equality (`eq_nf`). The relaxation:
 ///
-/// For a pair of applied inductive types `I(p₁ … pₙ)` with identical
-/// declarations, each parameter is compared position-wise:
+/// For a pair of applied inductive types `I(p₁ … pₙ)(i₁ … iₘ)` with
+/// identical declarations, each **parameter** is compared position-wise:
 /// - positions whose declared type is `SizeSort` are compared with
 ///   [`crate::nbe::sized::size_le_with_hyps`] — `sub_pᵢ ≤ sup_pᵢ`
 ///   suffices, with the TSO consulted for neutral entailment;
 /// - all other positions must be definitionally equal (`eq_nf`).
+///
+/// **Indices are invariant** and must be definitionally equal position-wise
+/// (D48; eigenius#137). The relaxation above is the sized-types subtyping
+/// discipline for the parameter telescope only — an index is what
+/// distinguishes `Vec A 0` from `Vec A 1`, so a subtyping rule there would
+/// identify types the family exists to keep apart.
 ///
 /// This is what makes `T(s) <: T(ŝ s) <: T(∞)` admissible — the
 /// driving motivation for sized types. With `tso` populated from
@@ -297,6 +303,45 @@ pub fn subtype_of_with_hyps(
     super_: &Val,
     tso: &crate::nbe::sized_rigid::Tso,
 ) -> Result<(), CheckError> {
+    subtype_of_inner(level, sub, super_, tso, Indices::Compare)
+}
+
+/// Whether [`subtype_of_inner`] compares the index telescope of two
+/// applications of the same inductive declaration.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Indices {
+    /// Indices are compared with `eq_nf`, position-wise. The rule for
+    /// every caller except constructor checking.
+    Compare,
+    /// Indices are left to the caller. The single caller is
+    /// [`super::inductive::check_inductive_ctor_args`], which unifies the
+    /// conclusion indices itself (D48 Phase D) immediately afterwards;
+    /// unification can instantiate metavariables that `eq_nf` would reject.
+    DeferToCaller,
+}
+
+/// Constructor-site subtyping: [`subtype_of_with_hyps`] with the index
+/// telescope left to the caller.
+///
+/// Only sound when the caller compares the indices itself. The one caller
+/// is `check_inductive_ctor_args`, which runs D48 Phase D index unification
+/// on the same pair of values on the next statement.
+pub(super) fn subtype_of_deferring_indices(
+    level: usize,
+    sub: &Val,
+    super_: &Val,
+    tso: &crate::nbe::sized_rigid::Tso,
+) -> Result<(), CheckError> {
+    subtype_of_inner(level, sub, super_, tso, Indices::DeferToCaller)
+}
+
+fn subtype_of_inner(
+    level: usize,
+    sub: &Val,
+    super_: &Val,
+    tso: &crate::nbe::sized_rigid::Tso,
+    index_policy: Indices,
+) -> Result<(), CheckError> {
     // Universe cumulativity: Sort(m) <: Sort(n) iff m <= n.
     // D46 §3.2 — Prop ⊆ Set ⊆ Type(1) ⊆ Type(2) ⊆ …
     if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
@@ -312,16 +357,16 @@ pub fn subtype_of_with_hyps(
         Val::InductiveType {
             decl: d1,
             params: p1,
-            indices: _,
+            indices: i1,
         },
         Val::InductiveType {
             decl: d2,
             params: p2,
-            indices: _,
+            indices: i2,
         },
     ) = (sub, super_)
     {
-        if d1 == d2 && p1.len() == p2.len() && p1.len() == d1.params.len() {
+        if d1 == d2 && p1.len() == p2.len() && p1.len() == d1.params.len() && i1.len() == i2.len() {
             for (i, (sub_p, sup_p)) in p1.iter().zip(p2.iter()).enumerate() {
                 let decl_param_ty = &d1.params[i].1;
                 if matches!(decl_param_ty, Exp::SizeSort) {
@@ -340,6 +385,25 @@ pub fn subtype_of_with_hyps(
                     continue;
                 } else {
                     eq_nf(level, sub_p, sup_p)?;
+                }
+            }
+            // Indices are invariant (eigenius#137). Before this loop the
+            // function returned right after the parameter telescope, so
+            // `Vec A 0` and `Vec A 1` were interconvertible — and for a
+            // family declared with zero parameters and only indices, which
+            // is the shape of every `data P : core:string -> Prop` predicate
+            // in the ontologies, ANY two applications were interconvertible.
+            // No relaxation applies here: the sized-types rule above is a
+            // parameter-telescope discipline, and an index is precisely what
+            // distinguishes two types of one family.
+            if index_policy == Indices::Compare {
+                for (i, (sub_i, sup_i)) in i1.iter().zip(i2.iter()).enumerate() {
+                    eq_nf(level, sub_i, sup_i).map_err(|err| {
+                        CheckError::TypeMismatch(format!(
+                            "`{}`: index #{i} mismatch: {err}",
+                            d1.name
+                        ))
+                    })?;
                 }
             }
             return Ok(());
@@ -686,5 +750,212 @@ mod tests {
         let expected = mk_sized_type(decl, Val::SizeInf, Val::One);
         check(&mut c, &Exp::Var("x".to_string()), &expected)
             .expect("x : SizedStream(i, 1) should check against SizedStream(∞, 1)");
+    }
+}
+
+/// eigenius#137 — indices are part of a type's identity.
+#[cfg(test)]
+mod index_conversion_tests {
+    use super::*;
+
+    use crate::nbe::check::testutil::*;
+    use crate::nbe::check::{check, CheckCtx};
+    use crate::nbe::env::{gen_val, up_gamma, Rho};
+    use crate::nbe::term::{InductiveCtorDecl, InductiveDecl, Patt, PrimitiveType};
+    use std::sync::Arc;
+
+    /// `data Vec (A : Set) : Nat -> Set` — one parameter, one index.
+    fn vec_decl() -> Arc<InductiveDecl> {
+        let nat = nat_decl();
+        Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Vec").unwrap(),
+            name: "Vec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::InductiveType(nat, Vec::new()))],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        })
+    }
+
+    /// `Vec 1 n` — the parameter is instantiated at `One`, which is the
+    /// `Set` the tests do not vary.
+    fn vec_at(decl: &Arc<InductiveDecl>, n: Val) -> Val {
+        Val::InductiveType {
+            decl: decl.clone(),
+            params: vec![Val::One],
+            indices: vec![n],
+        }
+    }
+
+    /// Nat `zero` and `succ zero`, evaluated.
+    fn zero_and_one() -> (Val, Val) {
+        let nat = nat_decl();
+        let c = CheckCtx::new(Rho::Nil, vec![]);
+        let zero_exp = nat_zero_exp(&nat);
+        let one_exp = Exp::InductiveCtor(nat, "succ".to_string(), vec![zero_exp.clone()]);
+        let zero = c.eval(&zero_exp, &Rho::Nil).unwrap();
+        let one = c.eval(&one_exp, &Rho::Nil).unwrap();
+        (zero, one)
+    }
+
+    /// `Vec A 0` and `Vec A 1` are different types.
+    ///
+    /// The inductive case of [`subtype_of_with_hyps`] returned `Ok(())` right
+    /// after the parameter telescope, never reaching the `eq_nf` fallback that
+    /// compares indices, so this pair was definitionally equal on every path
+    /// that goes through conversion — every expression form without a
+    /// dedicated `check` arm.
+    #[test]
+    fn vec_at_distinct_indices_is_not_convertible() {
+        let decl = vec_decl();
+        let (zero, one) = zero_and_one();
+        let err = subtype_of(0, &vec_at(&decl, zero), &vec_at(&decl, one))
+            .expect_err("`Vec A 0 <: Vec A 1` must be rejected");
+        assert!(
+            format!("{err:?}").contains("index #0 mismatch"),
+            "expected an index-mismatch diagnostic, got: {err:?}"
+        );
+    }
+
+    /// Conversion at equal indices is unaffected.
+    #[test]
+    fn vec_at_equal_indices_is_convertible() {
+        let decl = vec_decl();
+        let (zero, _) = zero_and_one();
+        subtype_of(0, &vec_at(&decl, zero.clone()), &vec_at(&decl, zero))
+            .expect("`Vec A 0 <: Vec A 0` must hold");
+    }
+
+    /// `data P : core:string -> Prop` — zero parameters, one index. The shape
+    /// of every domain predicate in the ontologies (`onco:MSI`,
+    /// `screen:HasLowIC50`, `bench:concerns`, …).
+    fn string_predicate_decl() -> Arc<InductiveDecl> {
+        Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:HasLowIC50").unwrap(),
+            name: "HasLowIC50".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::EigonPrimitive(PrimitiveType::String))],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        })
+    }
+
+    /// The old guard read `p1.len() == p2.len() && p1.len() == d1.params.len()`
+    /// over the *parameter* vectors, which holds trivially at zero parameters;
+    /// the parameter loop then ran zero times and any two applications of the
+    /// family were interconvertible.
+    #[test]
+    fn zero_parameter_family_at_distinct_indices_is_not_convertible() {
+        let decl = string_predicate_decl();
+        let at = |s: &str| Val::InductiveType {
+            decl: decl.clone(),
+            params: Vec::new(),
+            indices: vec![Val::LitString(s.to_string())],
+        };
+        let err = subtype_of(0, &at("compound-A"), &at("compound-B"))
+            .expect_err("HasLowIC50(\"compound-A\") <: HasLowIC50(\"compound-B\") is rejected");
+        assert!(
+            format!("{err:?}").contains("index #0 mismatch"),
+            "expected an index-mismatch diagnostic, got: {err:?}"
+        );
+        subtype_of(0, &at("compound-A"), &at("compound-A"))
+            .expect("the same application converts with itself");
+    }
+
+    /// A two-index family rejects a mismatch in the *second* index — the shape
+    /// of `reasoning:JustifiedBy : JustificationTerm -> Prop -> Type 0`, whose
+    /// index #1 is the proposition the certificate is about.
+    #[test]
+    fn a_mismatch_in_a_later_index_is_rejected() {
+        let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Concerns").unwrap(),
+            name: "Concerns".to_string(),
+            params: Vec::new(),
+            indices: vec![
+                (Patt::Unit, Exp::EigonPrimitive(PrimitiveType::String)),
+                (Patt::Unit, Exp::EigonPrimitive(PrimitiveType::String)),
+            ],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let at = |a: &str, b: &str| Val::InductiveType {
+            decl: decl.clone(),
+            params: Vec::new(),
+            indices: vec![Val::LitString(a.to_string()), Val::LitString(b.to_string())],
+        };
+        let err = subtype_of(0, &at("WRN", "MSI"), &at("WRN", "MSS"))
+            .expect_err("a second-index mismatch must be rejected");
+        assert!(
+            format!("{err:?}").contains("index #1 mismatch"),
+            "expected an index-#1 diagnostic, got: {err:?}"
+        );
+    }
+
+    /// Conversion is what `check` falls back to for every expression form
+    /// without a dedicated arm, so the rejection has to be visible from
+    /// `check`, not only from the `subtype_of` API.
+    #[test]
+    fn a_variable_at_one_index_does_not_check_against_another() {
+        let decl = vec_decl();
+        let (zero, one) = zero_and_one();
+        let x_val = gen_val(&Rho::Nil);
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), x_val.clone());
+        let gamma = up_gamma(
+            &Vec::new(),
+            &Patt::Var("x".to_string()),
+            &vec_at(&decl, zero),
+            &x_val,
+        )
+        .unwrap();
+        let mut c = CheckCtx::new(rho, gamma);
+        let err = check(&mut c, &Exp::Var("x".to_string()), &vec_at(&decl, one))
+            .expect_err("`x : Vec A 0` must not check against `Vec A 1`");
+        assert!(
+            format!("{err:?}").contains("index #0 mismatch"),
+            "expected an index-mismatch diagnostic, got: {err:?}"
+        );
+    }
+
+    /// The constructor path keeps its own D48 Phase D index unification —
+    /// [`subtype_of_deferring_indices`] leaves indices to it — so a
+    /// constructor whose conclusion index differs from the expected one is
+    /// still rejected, with the unification diagnostic.
+    #[test]
+    fn a_constructor_at_the_wrong_index_is_still_rejected() {
+        // `data Box : 1 -> Set { mk : Box () }`: the one ctor concludes at
+        // index `()`, so checking it against `Box x` for a rigid `x` fails.
+        let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
+            name: "Box".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let box_unit = Exp::InductiveType(self_ref, vec![Exp::Unit]);
+        let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
+            name: "Box".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: box_unit,
+            }],
+        });
+        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let expected = Val::InductiveType {
+            decl: decl.clone(),
+            params: Vec::new(),
+            indices: vec![gen_val(&Rho::Nil)],
+        };
+        let ctor = Exp::InductiveCtor(decl, "mk".to_string(), Vec::new());
+        let err = check(&mut c, &ctor, &expected)
+            .expect_err("`Box.mk : Box ()` must not check against `Box x`");
+        assert!(
+            format!("{err:?}").contains("index #0 mismatch"),
+            "expected the D48 Phase D unification diagnostic, got: {err:?}"
+        );
     }
 }

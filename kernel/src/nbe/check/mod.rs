@@ -632,10 +632,29 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
              (Prop = Sort(0), Set = Sort(1), Type(k) = Sort(k+1).)"
         ))),
 
-        // EigonClass/EigonPrimitive are ground types at level 0 but
-        // inhabit all higher universes (cumulative).
-        (Exp::EigonClass(_), Val::Sort(1)) | (Exp::EigonPrimitive(_), Val::Sort(1)) => Ok(()),
-        (Exp::EigonClass(_), Val::Sort(_)) | (Exp::EigonPrimitive(_), Val::Sort(_)) => Ok(()),
+        // EigonClass / EigonPrimitive are ground types in `Set`: inference
+        // gives `Sort(1)` (see `check_infer`), and cumulativity
+        // `Sort(m) <: Sort(n)` iff `m <= n` (`conv.rs`) carries that to every
+        // universe at or above `Set`. It does not carry down to
+        // `Prop = Sort(0)`, which is strictly below. This is infer-then-
+        // subsume, so check mode and inference accept the same judgements.
+        //
+        // The arm this replaces read `Val::Sort(_)` and so admitted
+        // `SomeClass : Prop` — a class standing where a proposition is
+        // expected (`JustifiedBy(j, P)`, `reflection:canonical_proposition`,
+        // anything Rule 21 checks at the commit gate) with no diagnostic
+        // (eigenius#191). Same check-vs-infer disagreement eigenius#136
+        // removed for `Sort`.
+        (Exp::EigonClass(_), Val::Sort(m)) | (Exp::EigonPrimitive(_), Val::Sort(m)) if *m >= 1 => {
+            Ok(())
+        }
+        (Exp::EigonClass(_), Val::Sort(m)) | (Exp::EigonPrimitive(_), Val::Sort(m)) => {
+            Err(CheckError::TypeMismatch(format!(
+                "universe stratification: an Eigon class or primitive inhabits `Set` \
+                 (`Sort(1)`) and every universe above it, not `Sort({m})`. A class is \
+                 not a proposition. (Prop = Sort(0), Set = Sort(1), Type(k) = Sort(k+1).)"
+            )))
+        }
 
         // Codata type formation: codata { ... } : Set
         (Exp::Codata(_), Val::Sort(1)) => check_type(ctx, exp),
@@ -1514,6 +1533,76 @@ mod tests {
                 assert_eq!(
                     checked, subsumed,
                     "Sort({n}) against Sort({m}): check mode says {checked}, \
+                     infer-then-subsume says {subsumed}"
+                );
+            }
+        }
+    }
+
+    /// eigenius#191 — `SomeClass : Prop` is rejected in checking mode.
+    ///
+    /// Until this was fixed, `(Exp::EigonClass(_), Val::Sort(_))` admitted a
+    /// class against every universe, `Sort(0)` included, so a class could
+    /// stand where a proposition is expected with no diagnostic.
+    #[test]
+    fn an_eigon_class_does_not_inhabit_prop() {
+        let class = Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:test:CellLine").unwrap());
+        let err = check(&mut ctx(), &class, &Val::Sort(0))
+            .expect_err("`SomeClass : Prop` must be rejected");
+        assert!(
+            format!("{err:?}").contains("universe stratification"),
+            "expected a universe-stratification diagnostic, got: {err:?}"
+        );
+    }
+
+    /// Same for the Eigon primitives — `core:string : Prop` is not a thing.
+    #[test]
+    fn an_eigon_primitive_does_not_inhabit_prop() {
+        let prim = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
+        let err = check(&mut ctx(), &prim, &Val::Sort(0))
+            .expect_err("`core:string : Prop` must be rejected");
+        assert!(
+            format!("{err:?}").contains("universe stratification"),
+            "expected a universe-stratification diagnostic, got: {err:?}"
+        );
+    }
+
+    /// The rule the fix installs: a ground Eigon type inhabits `Set` and, by
+    /// cumulativity, every universe above it — and nothing below.
+    #[test]
+    fn an_eigon_ground_type_inhabits_set_and_every_universe_above() {
+        let class = Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:test:CellLine").unwrap());
+        let prim = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Integer);
+        for exp in [&class, &prim] {
+            for m in 0..6 {
+                let got = check(&mut ctx(), exp, &Val::Sort(m)).is_ok();
+                assert_eq!(
+                    got,
+                    m >= 1,
+                    "check({exp:?}, Sort({m})) = {got}, expected {}",
+                    m >= 1
+                );
+            }
+        }
+    }
+
+    /// Check mode and inference must accept the same judgements for the
+    /// ground Eigon types: `check(C, Sort(m))` succeeds exactly when the
+    /// inferred `Sort(1)` is a subtype of `Sort(m)`. Before the fix, check
+    /// mode was strictly the more permissive of the two.
+    #[test]
+    fn check_mode_and_inference_agree_on_eigon_ground_types() {
+        let class = Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:test:CellLine").unwrap());
+        let prim = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
+        for exp in [&class, &prim] {
+            for m in 0..6 {
+                let checked = check(&mut ctx(), exp, &Val::Sort(m)).is_ok();
+                let inferred = check_infer(&mut ctx(), exp).unwrap();
+                let subsumed =
+                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::Sort(m)).is_ok();
+                assert_eq!(
+                    checked, subsumed,
+                    "{exp:?} against Sort({m}): check mode says {checked}, \
                      infer-then-subsume says {subsumed}"
                 );
             }

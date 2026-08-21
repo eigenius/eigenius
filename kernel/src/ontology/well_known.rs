@@ -490,9 +490,42 @@ pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
 /// `eigentt:TypeExpr` payload. Absent value defaults to `Asserts(iri)`
-/// at witness-emission time. Type-checked at `Prop` at commit by the
-/// validator extension shipped in D49 Phase 5.
+/// at witness-emission time. Type-checked at `Prop` at commit by
+/// [`PROPOSITION_SLOTS`] / Rule 21.
 pub const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
+
+/// The `eigentt:TypeExpr`-ranged properties whose declared role is a
+/// **proposition**: the value must inhabit `Prop` (`Sort(0)`), not merely
+/// type-check. Rule 21 (`validation/rules/eigentt_value.rs`) enforces it.
+///
+/// `eigentt:TypeExpr` is the range of every D47-encoded EigenTT tree, and
+/// most of those trees are legitimately *not* propositions —
+/// `eigentt:axiom_statement` and `eigentt:definition_type` hold types
+/// (`Sort(1)`/`Sort(2)`), `lexicon:cat` holds an inductive value,
+/// `lexicon:term` holds a λ-term, `reasoning:certificate` holds a proof
+/// term whose *type* is a Prop. The range alone therefore cannot carry the
+/// obligation; membership here is what distinguishes a slot that asserts
+/// something from a slot that merely holds a term. Each entry's ontology
+/// declaration already states the obligation in its `core:description`;
+/// this list is where the kernel acts on it (eigenius#175).
+///
+/// Adding a slot is a tightening: every value already committed to it must
+/// infer `Sort(0)` or the chain stops resolving.
+pub const PROPOSITION_SLOTS: &[&str] = &[
+    // "The Prop-typed EigenTT proposition this resource canonically asserts."
+    CANONICAL_PROPOSITION,
+    // "The Prop-typed EigenTT proposition this sentence asserts."
+    "urn:eigenius:reasoning:proposition",
+    // "The Prop-typed EigenTT proposition the EntailmentRequest is asking
+    //  the chain to warrant."
+    "urn:eigenius:reasoning:candidate_proposition",
+    // "The Prop-typed proposition this Milestone TARGETS or this Axiom admits."
+    "urn:eigenius:objective:proposition",
+    // "An Option's claim, as a Prop — never prose."
+    "urn:eigenius:objective:option_claim",
+    // "The assembled proposition — kernel-checked to inhabit Prop."
+    "urn:eigenius:lexicon:prop",
+];
 
 // --- D49 ChainWitness: predicate-type IRIs ---
 //

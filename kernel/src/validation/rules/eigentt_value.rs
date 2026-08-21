@@ -24,11 +24,22 @@
 //! 2. **type-check** the decoded `Exp` against the chain (`nbe::check_infer`) —
 //!    the Semantic Felicity Condition: a predicate applied to the wrong
 //!    argument type, an application of a non-function, etc. →
-//!    [`ValidationRule::TypeExprIllTyped`].
+//!    [`ValidationRule::TypeExprIllTyped`];
+//! 3. **require `Prop`** of the slots that assert something —
+//!    [`wk::PROPOSITION_SLOTS`] — by keeping the type step 2 infers and
+//!    demanding `Sort(0)` → [`ValidationRule::TypeExprNotAProposition`].
 //!
-//! It keys off the declared **range** (`class_types ∋ eigentt:TypeExpr`), not a
-//! property name — `reflection:canonical_proposition` is special only by
-//! convention, not by the type system. This rule **consolidates** what were
+//! Step 3 is what separates a claim from an arbitrary term. `check_infer`
+//! already computes the type; discarding it let an integer literal commit as
+//! a resource's `reflection:canonical_proposition` — the slot the witness
+//! index projects into `IsDeclaredAs`/`IsDerivedAs` and the slot
+//! `JustifiedBy` certificates are checked against (eigenius#175).
+//!
+//! Steps 1–2 key off the declared **range** (`class_types ∋
+//! eigentt:TypeExpr`), not a property name. Step 3 cannot: that range covers
+//! propositions, types, and terms alike, so the propositionhood obligation is
+//! carried per-property by [`wk::PROPOSITION_SLOTS`]. This rule
+//! **consolidates** what were
 //! three overlapping checks: the canonical-proposition decode check (old Rule
 //! 20), `check_inductive_value`'s bespoke `ConstRef`/`CtorApp` resolution walk
 //! for `eigentt:TypeExpr` (now skipped — see `inductive.rs`), and the
@@ -38,6 +49,8 @@
 //! inductives) re-resolve at decode time and applications are fully typed.
 
 use super::super::{ValidationError, ValidationRule, Validator};
+use crate::nbe::readback::readback_val;
+use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
@@ -108,18 +121,56 @@ impl Validator {
             Vec::new(),
             std::sync::Arc::clone(&self.layer),
         );
-        if let Err(reason) = crate::nbe::check::check_infer(&mut ctx, &exp) {
+        let inferred = match crate::nbe::check::check_infer(&mut ctx, &exp) {
+            Ok(ty) => ty,
+            Err(reason) => {
+                return vec![ValidationError {
+                    resource_id: res_id.clone(),
+                    property: Some(prop_iri.clone()),
+                    rule: ValidationRule::TypeExprIllTyped,
+                    message: format!(
+                        "eigentt:TypeExpr value decodes but does not type-check against the \
+                         chain: {reason}"
+                    ),
+                }];
+            }
+        };
+
+        // (3) Propositionhood. Step 2 establishes only that the term HAS a
+        // type. A slot that asserts something must hold a term whose type is
+        // `Prop` — `Sort(0)`. `Sort(1)` is a type, not a claim; a literal's
+        // type is not a universe at all.
+        if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str()) && !matches!(inferred, Val::Sort(0)) {
             return vec![ValidationError {
                 resource_id: res_id.clone(),
                 property: Some(prop_iri.clone()),
-                rule: ValidationRule::TypeExprIllTyped,
+                rule: ValidationRule::TypeExprNotAProposition,
                 message: format!(
-                    "eigentt:TypeExpr value decodes but does not type-check against the chain: \
-                     {reason}"
+                    "{prop_iri} must hold a proposition — a term inhabiting Prop = Sort(0) — but \
+                     this value inhabits {}. The slot is read as a proposition by the witness \
+                     index and by JustifiedBy certificate checking.",
+                    describe_inhabited(&inferred)
                 ),
             }];
         }
         vec![]
+    }
+}
+
+/// Name what a decoded term turned out to inhabit, for the step-3
+/// diagnostic. Universes get their D46 names; anything else is reported as a
+/// non-universe, since the author's error there is that the slot holds a
+/// term rather than a statement.
+fn describe_inhabited(ty: &Val) -> String {
+    match ty {
+        Val::Sort(0) => "Prop = Sort(0)".to_string(),
+        Val::Sort(1) => "Set = Sort(1)".to_string(),
+        Val::Sort(n) => format!("Type({}) = Sort({n})", n - 1),
+        other => {
+            let readback = format!("{:?}", readback_val(0, other));
+            let shown: String = readback.chars().take(160).collect();
+            format!("a non-universe type (so the value is a term, not a statement): {shown}")
+        }
     }
 }
 
@@ -180,10 +231,142 @@ mod tests {
             .filter(|e| {
                 matches!(
                     e.rule,
-                    ValidationRule::TypeExprMalformed | ValidationRule::TypeExprIllTyped
+                    ValidationRule::TypeExprMalformed
+                        | ValidationRule::TypeExprIllTyped
+                        | ValidationRule::TypeExprNotAProposition
                 )
             })
             .collect()
+    }
+
+    /// A `reflection:DeclaredResource` carrying `value` in the real
+    /// `reflection:canonical_proposition` slot — a member of
+    /// `wk::PROPOSITION_SLOTS`, so step 3 applies.
+    fn claim_with_proposition(id: &str, value: Value) -> Resource {
+        let mut r = Resource::new(iri(id));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+        );
+        r.set(
+            iri("urn:eigenius:reflection:declared_by"),
+            Value::String("test:eigentt_value".into()),
+        );
+        r.set(iri(wk::CANONICAL_PROPOSITION), value);
+        r
+    }
+
+    fn errors_for_claim(value: Value) -> Vec<crate::validation::ValidationError> {
+        let chain = chain_with_eigentt_prop();
+        let mut top = LayerBuilder::new("claim", Some(chain));
+        top.add_resource(claim_with_proposition("urn:eigenius:test:claim", value))
+            .unwrap();
+        eigentt_errors(Arc::new(top.build(LayerStorage::in_memory())))
+    }
+
+    /// `measurements:lt(1.0, 2.0)` — an axiom application at `Prop`.
+    fn a_real_proposition() -> Value {
+        Value::Json(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "App", "args": [
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt"]},
+                    {"ctor": "LitFloat", "args": [1.0]}
+                ]},
+                {"ctor": "LitFloat", "args": [2.0]}
+            ]
+        }))
+    }
+
+    #[test]
+    fn proposition_in_a_proposition_slot_passes() {
+        let errs = errors_for_claim(a_real_proposition());
+        assert!(
+            errs.is_empty(),
+            "an axiom application at Prop must commit; got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn integer_literal_in_a_proposition_slot_rejected() {
+        // eigenius#175's example: a literal decodes and type-checks (at
+        // `core:integer`), so steps 1–2 pass. Only step 3 catches it.
+        let encoded = encode_type(&Exp::LitInt(42)).unwrap();
+        let errs = errors_for_claim(encoded);
+        assert_eq!(
+            errs.len(),
+            1,
+            "an integer literal is not a proposition; got {errs:?}"
+        );
+        assert!(matches!(
+            errs[0].rule,
+            ValidationRule::TypeExprNotAProposition
+        ));
+        assert!(
+            errs[0].message.contains("Prop = Sort(0)"),
+            "diagnostic should name the obligation: {}",
+            errs[0].message
+        );
+    }
+
+    #[test]
+    fn a_type_in_a_proposition_slot_rejected() {
+        // `Prop` itself is a perfectly good `eigentt:TypeExpr` — it passes in
+        // the unconstrained `test:tx` slot above — but it inhabits `Set`, so
+        // it asserts nothing.
+        let encoded = encode_type(&Exp::Sort(0)).unwrap();
+        let errs = errors_for_claim(encoded);
+        assert_eq!(errs.len(), 1, "`Prop` asserts nothing; got {errs:?}");
+        assert!(matches!(
+            errs[0].rule,
+            ValidationRule::TypeExprNotAProposition
+        ));
+        assert!(
+            errs[0].message.contains("Set = Sort(1)"),
+            "diagnostic should name what the value does inhabit: {}",
+            errs[0].message
+        );
+    }
+
+    #[test]
+    fn unapplied_predicate_in_a_proposition_slot_rejected() {
+        // `measurements:lt` on its own is `float -> float -> Prop` — a
+        // predicate, not the claim that some pair satisfies it.
+        let value = Value::Json(serde_json::json!({
+            "ctor": "ConstRef",
+            "args": ["urn:eigenius:measurements:lt"]
+        }));
+        let errs = errors_for_claim(value);
+        assert_eq!(
+            errs.len(),
+            1,
+            "an unapplied predicate is not a proposition; got {errs:?}"
+        );
+        assert!(matches!(
+            errs[0].rule,
+            ValidationRule::TypeExprNotAProposition
+        ));
+    }
+
+    #[test]
+    fn non_proposition_slots_still_admit_non_props() {
+        // The obligation is per-slot, not per-range: `test:tx` is
+        // `eigentt:TypeExpr`-ranged but not a proposition slot, so a type and
+        // a literal both belong there. Guards against step 3 being widened to
+        // the whole range, which would reject every `eigentt:axiom_statement`
+        // and `lexicon:cat` on the chain.
+        for exp in [Exp::Sort(1), Exp::LitInt(7)] {
+            let chain = chain_with_eigentt_prop();
+            let mut top = LayerBuilder::new("tx", Some(chain));
+            let encoded = encode_type(&exp).unwrap();
+            top.add_resource(holder_with_tx("urn:eigenius:test:tx_holder", encoded))
+                .unwrap();
+            let errs = eigentt_errors(Arc::new(top.build(LayerStorage::in_memory())));
+            assert!(
+                errs.is_empty(),
+                "{exp:?} must pass in test:tx; got {errs:?}"
+            );
+        }
     }
 
     #[test]

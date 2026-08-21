@@ -18,8 +18,9 @@
 //! Split from `check.rs`; nanoda precedent (`inductive.rs` apart
 //! from `tc.rs`).
 
-use super::conv::{is_propositional_in_ctx, is_syntactically_propositional_type};
-use super::subtype_of_with_hyps;
+use super::conv::{
+    is_propositional_in_ctx, is_syntactically_propositional_type, subtype_of_deferring_indices,
+};
 use super::witness::try_synthesize_chain_witness;
 use super::{check, check_infer, CheckCtx, CheckError};
 use crate::nbe::env::{gen_val, Rho};
@@ -549,7 +550,10 @@ pub(super) fn check_inductive_ctor_args(
         params: params.to_vec(),
         indices: expected_indices.to_vec(),
     };
-    subtype_of_with_hyps(
+    // Parameter telescope only — the index telescope is settled by the D48
+    // Phase D unification below, which can instantiate metavariables that
+    // `subtype_of_with_hyps`'s definitional index comparison would reject.
+    subtype_of_deferring_indices(
         ctx.rho.len(),
         &actual_result,
         &expected_result,
@@ -562,11 +566,9 @@ pub(super) fn check_inductive_ctor_args(
         ))
     })?;
 
-    // D48 Phase D — index unification. `subtype_of_with_hyps`
-    // (inductive-param case) only iterates the parameter telescope; it
-    // ignores `indices`. For indexed inductives (`decl.indices` non-empty),
-    // explicitly unify each actual conclusion index against the
-    // corresponding expected index. Failures are reported as
+    // D48 Phase D — index unification. For indexed inductives
+    // (`decl.indices` non-empty), unify each actual conclusion index
+    // against the corresponding expected index. Failures are reported as
     // "index mismatch" with the structured unification error.
     if !decl.indices.is_empty() {
         let (actual_indices, expected_indices_for_unify): (&[Val], &[Val]) =
