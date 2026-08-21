@@ -397,9 +397,21 @@ fn emit_declarers(by_iri: &mut BTreeMap<String, Resource>, declarers: &BTreeSet<
                 "The project maintaining `{value}` — the declarer of every term imported from it."
             )),
         );
+        // Sanitised to an identifier: every one of the ~2800 `short_name` values in the
+        // ontologies is `[A-Za-z_][A-Za-z0-9_]*`, and the property exists for external
+        // integrations. A raw graph tail like `go.owl` would be the tree's first dotted
+        // one. The readable form stays in `description`.
+        let tail = value.rsplit('/').next().unwrap_or(value);
+        let mut short: String = tail
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        if !short.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            short.insert(0, '_');
+        }
         r.set(
             Iri::parse(SHORT_NAME).expect("well-known IRI"),
-            Value::String(value.rsplit('/').next().unwrap_or(value).to_string()),
+            Value::String(short),
         );
         by_iri.insert(value.clone(), r);
     }

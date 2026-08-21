@@ -116,7 +116,7 @@
     "@id": "urn:eigenius:reflection:agent:eigenius_core_team",
     "urn:eigenius:core:is_a": ["urn:eigenius:reflection:Organization"],
     "urn:eigenius:core:description": "The Eigenius maintainers \u2014 the declarer of the platform's own bootstrap ontologies, which genuinely are asserted by this group. Not a default for user-authored content.",
-    "urn:eigenius:core:short_name": "Eigenius core team"
+    "urn:eigenius:core:short_name": "eigenius_core_team"
   },
 
   {

@@ -402,7 +402,7 @@ fn emit_declarer(report: &mut ConvertReport) {
                 .to_string(),
         ),
     );
-    r.set(iri(SHORT_NAME), Value::String("schema.org".to_string()));
+    r.set(iri(SHORT_NAME), Value::String("schema_org".to_string()));
     r.set(
         iri(SOURCE_IRL),
         Value::String("https://schema.org/".to_string()),
