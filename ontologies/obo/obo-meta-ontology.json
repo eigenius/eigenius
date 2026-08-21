@@ -1,5 +1,12 @@
 [
   {
+    "@id": "urn:obo:obo-foundry",
+    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:Organization"],
+    "urn:eigenius:core:description": "The OBO Foundry \u2014 the collaborative of biomedical-ontology developers that maintains the shared principles and the OBO term namespace, and the declarer of the OBO meta-vocabulary below. Minted by the D72 migration: `declared_by` is resource-typed, so the value these terms already carried needed a resource to name.",
+    "urn:eigenius:core:short_name": "obo_foundry",
+    "urn:eigenius:core:source_irl": "https://obofoundry.org/"
+  },
+  {
     "@id": "urn:obo:has_exact_synonym",
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Property",

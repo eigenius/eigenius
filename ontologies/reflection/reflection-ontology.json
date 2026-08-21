@@ -366,9 +366,10 @@
   {
     "@id": "urn:eigenius:reflection:declared_by",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Who declared this resource.",
+    "urn:eigenius:core:description": "The agent who asserted this resource (D72 \u00a73.2). Resource-typed so Rule 8 and Rule 22 require the declarer to exist in the chain: a bare string like the ESL compiler's old \"esl-compiler\" literal is not an IRI and no longer commits. This is the agent axis only \u2014 what GROUNDS the assertion is reflection:warranted_by, and why in prose is reflection:rationale. Before D72 this one slot carried all three, and in practice carried the warrant.",
     "urn:eigenius:core:short_name": "declared_by",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Agent"]
   },
   {
     "@id": "urn:eigenius:reflection:warranted_by",
