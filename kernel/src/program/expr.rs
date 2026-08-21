@@ -968,10 +968,16 @@ fn parse_literal(resource: &Resource) -> Result<Exp, String> {
             if Iri::parse(s).is_ok() && (s.starts_with("urn:") || s.starts_with("http")) {
                 return Ok(Exp::Var(s.clone())); // Resource reference
             }
-            Ok(Exp::EigonPrimitive(PrimitiveType::String)) // String literal
+            Ok(Exp::LitString(s.clone()))
         }
-        Some(Value::Integer(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
-        Some(Value::Float(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
+        Some(Value::Integer(n)) => Ok(Exp::LitInt(*n)),
+        Some(Value::Float(f)) => Ok(Exp::LitFloat(*f)),
+        // eigenius#142: there is no `Exp::LitBool`, so a boolean
+        // literal still decodes to its *type*. Two programs returning
+        // `true` and `false` remain identical terms. Adding the
+        // constructor is a term-representation decision (it needs
+        // matching arms in `eval`, `readback`, `check_infer`,
+        // `positivity`, `subst` and the D47 codec) and is left open.
         Some(Value::Boolean(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
         _ => Ok(Exp::Unit),
     }

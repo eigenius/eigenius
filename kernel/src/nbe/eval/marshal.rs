@@ -74,6 +74,14 @@ pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
             RVal::Embedded(r.clone())
         }
         Val::Unit => RVal::String(String::new()),
+        // eigenius#142: literal values carry their payload to the
+        // Eigon side. Without these arms the catch-all below turns
+        // every literal a `Construct` field evaluates to into an empty
+        // embedded resource, so the value never reaches the caller
+        // even once `parse_literal` decodes it.
+        Val::LitString(s) => RVal::String(s.clone()),
+        Val::LitInt(n) => RVal::Integer(*n),
+        Val::LitFloat(f) => RVal::Float(*f),
         Val::EigonClass(iri) => RVal::String(iri.as_str().to_string()),
         Val::List(items) => RVal::Array(items.iter().map(val_to_resource_value).collect()),
         Val::Con(ref name, _) if name == "nil" || name == "cons" => {
