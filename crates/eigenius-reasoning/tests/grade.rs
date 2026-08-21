@@ -127,7 +127,7 @@ fn declared_grader_produces_a_commit_passing_claim() {
             &ClaimSource {
                 stem: "urn:eigenius:doc:demo:s0",
                 warrant: Warrant::Declared,
-                declared_by: "encoding-pipeline",
+                declared_by: eigenius_reasoning::grade::UNATTRIBUTED_AGENT,
                 timestamp: "2026-08-03T00:00:00Z",
                 provenance: "",
                 kind_classes: &[],
@@ -178,7 +178,7 @@ fn declared_claim_needs_its_declaration_trace() {
             &ClaimSource {
                 stem: "urn:eigenius:doc:demo:s0",
                 warrant: Warrant::Declared,
-                declared_by: "encoding-pipeline",
+                declared_by: eigenius_reasoning::grade::UNATTRIBUTED_AGENT,
                 timestamp: "2026-08-03T00:00:00Z",
                 provenance: "",
                 kind_classes: &[],
