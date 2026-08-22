@@ -378,11 +378,6 @@ fn subtype_of_inner(
                             readback_val(level, sup_p),
                         )));
                     }
-                } else if matches!(decl_param_ty, Exp::Sort(0)) {
-                    // Proof irrelevance (D46 §5): if the parameter's declared
-                    // type is Prop, any two parameter values are equal as
-                    // inhabitants of a propositional sort.
-                    continue;
                 } else {
                     eq_nf(level, sub_p, sup_p)?;
                 }
@@ -957,5 +952,70 @@ mod index_conversion_tests {
             format!("{err:?}").contains("index #0 mismatch"),
             "expected the D48 Phase D unification diagnostic, got: {err:?}"
         );
+    }
+
+    // ---------- eigenius#209 — parameters that RANGE OVER propositions ----------
+
+    /// `logic:And (P : Prop, Q : Prop) : Prop` — the real declaration
+    /// (`ontologies/logic/logic.esl:38`).
+    fn and_decl() -> std::sync::Arc<InductiveDecl> {
+        std::sync::Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").unwrap(),
+            name: "And".to_string(),
+            params: vec![
+                (Patt::Var("P".into()), Exp::Sort(0)),
+                (Patt::Var("Q".into()), Exp::Sort(0)),
+            ],
+            indices: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        })
+    }
+
+    fn and_of(a: &str, b: &str) -> Val {
+        let prop = |n: &str| Val::EigonClass(crate::ontology::iri::Iri::parse(n).unwrap());
+        Val::InductiveType {
+            decl: and_decl(),
+            params: vec![prop(a), prop(b)],
+            indices: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn distinct_conjunctions_are_not_convertible() {
+        // The parameter loop used to skip any parameter whose DECLARED TYPE was `Sort(0)`, calling
+        // it proof irrelevance. It is not: proof irrelevance collapses two INHABITANTS OF a
+        // proposition, and a parameter declared `P : Prop` ranges over PROPOSITIONS. The arm
+        // asserted that all propositions are equal, which made `And(A, B)` and `And(C, D)`
+        // convertible for any operands at all.
+        //
+        // #137's shape, one telescope over: there the INDEX loop returned early, here the PARAMETER
+        // loop relaxed. That fix left this one standing because it never touched this loop.
+        //
+        // The correct rule already lives at `def_eq_at_type`, keyed on `is_propositional_in_ctx` —
+        // does the TYPE inhabit `Sort(0)` — which is what nanoda's kernel does
+        // (`is_proof(e) = is_prop(infer(e))`). Nothing is lost by deleting the duplicate: a
+        // parameter that genuinely is a proof reaches irrelevance through that rule instead.
+        assert!(
+            subtype_of(
+                0,
+                &and_of("urn:test:A", "urn:test:B"),
+                &and_of("urn:test:C", "urn:test:D")
+            )
+            .is_err(),
+            "conjunctions sharing no operand must not be convertible"
+        );
+    }
+
+    #[test]
+    fn the_same_conjunction_is_still_convertible_with_itself() {
+        // The guard against over-correcting: removing the arm must not make a family
+        // non-reflexive.
+        subtype_of(
+            0,
+            &and_of("urn:test:A", "urn:test:B"),
+            &and_of("urn:test:A", "urn:test:B"),
+        )
+        .expect("a conjunction is convertible with itself");
     }
 }
