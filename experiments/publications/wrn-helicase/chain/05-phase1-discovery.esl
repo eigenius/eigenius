@@ -87,7 +87,8 @@ resource wrn:dd_achilles : bench:ToolArtifact {
         onco:TopDifferentialDependency("WRN", "Achilles_MSI")
     );
 }
-resource wrn:dd_achilles_trace : reflection:ProgramTrace {
+resource wrn:dd_achilles_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:dd_achilles;
     reflection:source    = "limma moderated-t recompute via programs/differential-dependency/dd-achilles-limma-program.json (D56 wrapped-R; substrate-spawned R worker over the pinned Achilles matrix); emits wrn:dd_achilles:result";
     reflection:timestamp = "2026-06-12T13:00:01Z";
@@ -103,7 +104,8 @@ resource wrn:dd_drive : bench:ToolArtifact {
         onco:TopDifferentialDependency("WRN", "DRIVE_MSI")
     );
 }
-resource wrn:dd_drive_trace : reflection:ProgramTrace {
+resource wrn:dd_drive_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:dd_drive;
     reflection:source    = "R 4.3.3 differential-dependency recompute vs pinned snapshot (data/MANIFEST.md)";
     reflection:timestamp = "2026-06-12T13:00:02Z";
@@ -144,9 +146,9 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
     reasoning:justification = App(
         App(
             SpecStr(DeclaredEvidence("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
-            DerivedEvidence("urn:eigenius:pub:wrn:dd_achilles")
+            DeclaredEvidence("urn:eigenius:pub:wrn:dd_achilles")
         ),
-        DerivedEvidence("urn:eigenius:pub:wrn:dd_drive")
+        DeclaredEvidence("urn:eigenius:pub:wrn:dd_drive")
     );
 
     reasoning:certificate = type_expr(
@@ -182,9 +184,9 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
                 G,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(TA, TD -> SE, j0, DerivedEvidence(DDA), rule_cert, derived(DDA, TA))
+            cert1 = app(TA, TD -> SE, j0, DeclaredEvidence(DDA), rule_cert, declared(DDA, TA))
         in
-        app(TD, SE, reasoning:App(j0, DerivedEvidence(DDA)), DerivedEvidence(DDD), cert1, derived(DDD, TD))
+        app(TD, SE, reasoning:App(j0, DeclaredEvidence(DDA)), DeclaredEvidence(DDD), cert1, declared(DDD, TD))
     );
 }
 
@@ -217,7 +219,8 @@ resource wrn:discovery_finding : bench:TaskOutput {
     ];
     reflection:derivation = wrn:discovery_finding_trace;
 }
-resource wrn:discovery_finding_trace : reflection:ProgramTrace {
+resource wrn:discovery_finding_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:discovery_finding;
     reflection:source    = "eigenius:wrn-phase1-encoding";
     reflection:timestamp = "2026-06-12T13:00:07Z";

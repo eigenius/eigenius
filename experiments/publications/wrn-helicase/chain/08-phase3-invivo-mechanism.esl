@@ -67,7 +67,8 @@ resource wrn:vivo_seed_control : bench:ToolArtifact {
         onco:SeedControlInert("WRN", "xenograft_growth")
     );
 }
-resource wrn:vivo_seed_control_trace : reflection:ProgramTrace {
+resource wrn:vivo_seed_control_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:vivo_seed_control;
     reflection:source    = "wrn-paper:Fig-2d C911 seed control (linked-external)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
@@ -117,7 +118,7 @@ resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
             DeclaredEvidence("urn:eigenius:pub:wrn:seed_control_rule"),
             DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_c911_design")
         ),
-        DerivedEvidence("urn:eigenius:pub:wrn:vivo_seed_control")
+        DeclaredEvidence("urn:eigenius:pub:wrn:vivo_seed_control")
     );
     reasoning:certificate = type_expr(
         alias
@@ -129,12 +130,12 @@ resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
             OT   = onco:OnTarget("WRN", "xenograft_growth"),
             RULE_P = C911 -> SC -> OT,
             jC911 = DeclaredEvidence(LIT),
-            jSC   = DerivedEvidence(ART),
+            jSC   = DeclaredEvidence(ART),
             cert1 = app(C911, SC -> OT, DeclaredEvidence(RULE), jC911,
                         declared(RULE, RULE_P), declared(LIT, C911))
         in
         app(SC, OT, reasoning:App(DeclaredEvidence(RULE), jC911), jSC,
-            cert1, derived(ART, SC))
+            cert1, declared(ART, SC))
     );
 }
 
@@ -243,7 +244,8 @@ resource wrn:mech_dsb : bench:ToolArtifact {
         onco:CausesDSBs("WRN", "MSI")
     );
 }
-resource wrn:mech_dsb_trace : reflection:ProgramTrace {
+resource wrn:mech_dsb_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:mech_dsb;
     reflection:source    = "wrn-paper:Fig-4 / ED-Fig-6,7 DSB-marker IF (linked-external)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
@@ -279,9 +281,9 @@ resource wrn:concl_dsb : reasoning:ReasoningSentence {
     reasoning:proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
     );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb");
+    reasoning:justification = DeclaredEvidence("urn:eigenius:pub:wrn:mech_dsb");
     reasoning:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:mech_dsb",
+        declared("urn:eigenius:pub:wrn:mech_dsb",
                 onco:CausesDSBs("WRN", "MSI"))
     );
 }
@@ -382,7 +384,7 @@ resource wrn:concl_mech : reasoning:ReasoningSentence {
         App(
             App(
                 DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
-                DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb")
+                DeclaredEvidence("urn:eigenius:pub:wrn:mech_dsb")
             ),
             VerifiedEvidence("urn:eigenius:pub:wrn:concl_cellcycle_recomputed")
         ),
@@ -399,11 +401,11 @@ resource wrn:concl_mech : reasoning:ReasoningSentence {
             AA   = onco:CausesApoptosis("WRN", "MSI"),
             DL   = onco:DSBDrivenLethality("WRN", "MSI"),
             RULE_P = DSB -> CA -> AA -> DL,
-            jDSB = DerivedEvidence(ART),
+            jDSB = DeclaredEvidence(ART),
             jCA  = VerifiedEvidence(CC),
             jAA  = VerifiedEvidence(AP),
             cert1 = app(DSB, CA -> AA -> DL, DeclaredEvidence(RULE), jDSB,
-                        declared(RULE, RULE_P), derived(ART, DSB)),
+                        declared(RULE, RULE_P), declared(ART, DSB)),
             cert2 = app(CA, AA -> DL, reasoning:App(DeclaredEvidence(RULE), jDSB),
                         jCA, cert1, verified(CC, CA))
         in
@@ -426,7 +428,8 @@ resource wrn:fish_readout : bench:ToolArtifact {
         onco:NotViaTelomereDefect("WRN", "MSI")
     );
 }
-resource wrn:fish_readout_trace : reflection:ProgramTrace {
+resource wrn:fish_readout_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:fish_readout;
     reflection:source    = "wrn-paper:Fig-4d,e / ED-Fig-8a telomere-FISH (linked-external)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
@@ -437,9 +440,9 @@ resource wrn:concl_not_telomere : reasoning:ReasoningSentence {
     reasoning:proposition = type_expr(
         onco:NotViaTelomereDefect("WRN", "MSI")
     );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:fish_readout");
+    reasoning:justification = DeclaredEvidence("urn:eigenius:pub:wrn:fish_readout");
     reasoning:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:fish_readout",
+        declared("urn:eigenius:pub:wrn:fish_readout",
                 onco:NotViaTelomereDefect("WRN", "MSI"))
     );
 }

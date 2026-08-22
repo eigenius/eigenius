@@ -927,3 +927,88 @@ fn the_minted_trace_keys_the_witness_on_the_sentences_own_proposition() {
         "the trace must NOT admit `Asserts(sentence_iri)` — the sentence does not assert itself"
     );
 }
+
+// ── eigenius#205: a declared-external execution admits Declared, never Derived ──
+
+#[test]
+fn an_external_execution_trace_admits_declared_not_derived() {
+    // `Derived` holds a trace tied to a KERNEL-INITIATED activity — running a program, invoking an
+    // institution, a query that writes back. An author writing down that a program ran elsewhere is
+    // making a different claim: there is no `f : I -> O`, so no specification, so nothing entailed
+    // (D73 §3.3). `ExternalExecutionTrace` carries that claim and `trace_category` maps it to
+    // Declared.
+    //
+    // The kernel cannot tell a hand-authored `ProgramTrace` from one it minted — no "kernel-only,
+    // refused from input" mechanism exists anywhere in the validator — so the distinction has to be
+    // carried by the CLASS. This test is that distinction.
+    use eigenius_kernel::layer::layer_admits_witness;
+    use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+
+    let ctx = build_full_chain();
+    let target = "urn:test:v205:transcribed";
+    let target_iri = Iri::parse(target).unwrap();
+
+    let prop = json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "LitString", "args": [target]},
+        ],
+    });
+
+    // The artifact whose values were transcribed from a run the kernel never invoked.
+    let mut artifact = Resource::new(target_iri.clone());
+    artifact.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk::DECLARED_RESOURCE).unwrap(),
+        )]),
+    );
+    artifact.set(
+        Iri::parse(wk::DECLARED_BY).unwrap(),
+        Value::String("urn:eigenius:reflection:agent:unattributed".into()),
+    );
+    artifact.set(
+        Iri::parse(wk::CANONICAL_PROPOSITION).unwrap(),
+        Value::Json(prop.clone()),
+    );
+
+    let mut trace = Resource::new(Iri::parse("urn:test:v205:transcribed-trace").unwrap());
+    trace.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk::EXTERNAL_EXECUTION_TRACE).unwrap(),
+        )]),
+    );
+    trace.set(
+        Iri::parse(wk::REFLECTION_RESOURCE).unwrap(),
+        Value::ResourceRef(target_iri.clone()),
+    );
+    trace.set(
+        Iri::parse(wk::DECLARED_BY).unwrap(),
+        Value::String("urn:eigenius:reflection:agent:unattributed".into()),
+    );
+    trace.set(
+        Iri::parse("urn:eigenius:reflection:source").unwrap(),
+        Value::String("R 4.3.3 recompute run outside the kernel (linked-external)".into()),
+    );
+
+    let mut b = LayerBuilder::new("v205", Some(ctx.head().clone()));
+    b.add_resource(artifact).unwrap();
+    b.add_resource(trace).unwrap();
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let exp =
+        eigenius_kernel::program::eigentt_type_mirror::decode_type(&Value::Json(prop), &layer)
+            .expect("proposition decodes");
+    let key = |c| WitnessKey::from_exp(c, target_iri.clone(), &exp).expect("key builds");
+
+    assert!(
+        layer_admits_witness(&layer, &key(WitnessCategory::Declared)),
+        "an ExternalExecutionTrace must admit IsDeclaredAs — someone asserts the run happened"
+    );
+    assert!(
+        !layer_admits_witness(&layer, &key(WitnessCategory::Derived)),
+        "and must NOT admit IsDerivedAs — no kernel-initiated activity produced this"
+    );
+}

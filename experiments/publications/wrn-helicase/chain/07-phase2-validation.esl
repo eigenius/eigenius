@@ -76,7 +76,8 @@ resource wrn:va_fail_k577m : bench:ToolArtifact {
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
     );
 }
-resource wrn:va_fail_k577m_trace : reflection:ProgramTrace {
+resource wrn:va_fail_k577m_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:va_fail_k577m;
     reflection:source    = "wrn-paper:Fig-2b,c rescue assay (linked-external)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
@@ -194,7 +195,7 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
             DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
             DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
         ),
-        DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
+        DeclaredEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
     );
     reasoning:certificate = type_expr(
         alias
@@ -206,12 +207,12 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
             RA   = onco:RequiresActivity("WRN", "helicase"),
             RULE_P = SEP -> FR -> RA,
             jSEP = DeclaredEvidence(LIT),
-            jFR  = DerivedEvidence(ART),
+            jFR  = DeclaredEvidence(ART),
             cert1 = app(SEP, FR -> RA, DeclaredEvidence(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
         app(FR, RA, reasoning:App(DeclaredEvidence(RULE), jSEP), jFR,
-            cert1, derived(ART, FR))
+            cert1, declared(ART, FR))
     );
 }
 

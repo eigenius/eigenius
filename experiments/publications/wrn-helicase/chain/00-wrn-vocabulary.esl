@@ -1,0 +1,173 @@
+// wrn-vocabulary — the measurement properties the WRN wrapped-R programs emit.
+//
+// WHY THIS FILE EXISTS (eigenius#210). Rule 22 §c requires a property KEY to resolve to a declared
+// `core:Property`: open-world freedom covers `requires` / `recommends`, never vocabulary. The WRN
+// programs write 33 output keys through `r_eigon_set_f64` and not one was ever declared, so the
+// chain has not loaded since that rule landed (`ff7f6cc`, 2026-06-27) — about two weeks after the
+// last real demo run. Two months unnoticed, because `wrn_phase2/3/5.rs` build layers with
+// `LayerBuilder::build`, which does not run the validator.
+//
+// STUDY-LOCAL BY DECISION, including the two that were not. `adj_p_value` and `lrt_p_value` were
+// emitted into the `urn:eigenius:measurements:` namespace, which claims generality — but the
+// measurement-statistics institution has never read either (`grep` over
+// `crates/eigenius-statistics/src/` finds nothing). A `measurements:` key the measurements
+// institution has never heard of reads as supported and is not, so they are re-namespaced here
+// with the rest. If the institution ever consumes them, promoting them is a deliberate move then
+// rather than an accident now.
+//
+// All 33 are `core:float`: every one is written by `r_eigon_set_f64`, `differential_rank` included
+// (`rnk <- as.numeric(w)`). NO `domain` is declared — these are outputs of wrapped-R programs, and
+// the resources carrying them are whatever each program named, not a class this file owns.
+// Constraining them would also entangle this file with eigenius#205, which reclassifies the traces
+// over the hand-authored artifacts; the two are disjoint and should stay so.
+
+namespace core = "urn:eigenius:core";
+namespace wrn  = "urn:eigenius:pub:wrn";
+
+// ── Program input-table schemas, referenced by `program:input_type` ───────────
+//
+// Marker classes. The tables' columns are read positionally by `r_eigon_f64_array` /
+// `r_eigon_str_array`, so the class names the SHAPE a program expects rather than constraining it
+// field by field.
+
+class wrn:XenograftTable {
+    description = "The Fig 2d xenograft growth table (73 observations): per-mouse tumour volume by day and Dox arm — the input to the lme4 random-slope model.";
+}
+
+class wrn:CompetitionTable {
+    description = "The Fig 4 KM12 competition-assay table (30 observations): per-guide viability across 3 sgWRN and 2 control guides, 6 technical replicates each. The guide is the biological replication unit.";
+}
+
+// ── Measurement outputs ──────────────────────────────────────────────────────
+
+property wrn:adj_p_value : core:float {
+    description = "Benjamini-Hochberg adjusted p-value for WRN in the limma moderated-t differential-dependency fit.";
+}
+
+property wrn:lrt_p_value : core:float {
+    description = "Likelihood-ratio-test p-value from the lme4 model comparison — the interaction or fixed effect under test.";
+}
+
+property wrn:differential_rank : core:float {
+    description = "WRN's rank among MSI-preferential dependencies, ordered by raw p among negative-logFC genes. Rank 1 is what TopDifferentialDependency asserts.";
+}
+
+property wrn:dsb_foci_fc_msi : core:float {
+    description = "53BP1 DSB-foci fold-change in MSI lines.";
+}
+
+property wrn:dsb_foci_fc_mss : core:float {
+    description = "53BP1 DSB-foci fold-change in MSS lines.";
+}
+
+property wrn:dsb_msi_interaction : core:float {
+    description = "MSI x treatment interaction coefficient for 53BP1 DSB foci.";
+}
+
+property wrn:dsb_msi_interaction_p : core:float {
+    description = "p-value of the 53BP1 DSB-foci MSI interaction.";
+}
+
+property wrn:gh2ax_foci_fc_msi : core:float {
+    description = "gammaH2AX foci fold-change in MSI lines.";
+}
+
+property wrn:gh2ax_foci_fc_mss : core:float {
+    description = "gammaH2AX foci fold-change in MSS lines.";
+}
+
+property wrn:gh2ax_foci_interaction : core:float {
+    description = "MSI x treatment interaction coefficient for gammaH2AX foci.";
+}
+
+property wrn:gh2ax_foci_interaction_p : core:float {
+    description = "p-value of the gammaH2AX foci MSI interaction.";
+}
+
+property wrn:gh2ax_interaction_p : core:float {
+    description = "p-value of the gammaH2AX intensity MSI interaction.";
+}
+
+property wrn:gh2ax_logfc_msi : core:float {
+    description = "gammaH2AX intensity log fold-change in MSI lines.";
+}
+
+property wrn:gh2ax_logfc_mss : core:float {
+    description = "gammaH2AX intensity log fold-change in MSS lines.";
+}
+
+property wrn:nes_apoptosis : core:float {
+    description = "fgsea normalized enrichment score, HALLMARK_APOPTOSIS.";
+}
+
+property wrn:nes_e2f_targets : core:float {
+    description = "fgsea normalized enrichment score, HALLMARK_E2F_TARGETS.";
+}
+
+property wrn:nes_g2m_checkpoint : core:float {
+    description = "fgsea normalized enrichment score, HALLMARK_G2M_CHECKPOINT.";
+}
+
+property wrn:nes_p53_pathway : core:float {
+    description = "fgsea normalized enrichment score, HALLMARK_P53_PATHWAY.";
+}
+
+property wrn:p21_logfc : core:float {
+    description = "p21 log fold-change on WRN depletion.";
+}
+
+property wrn:p21_null_logfc : core:float {
+    description = "p21 log fold-change in the TP53-null control arm — the specificity comparator.";
+}
+
+property wrn:p21_p_value : core:float {
+    description = "p-value of the p21 induction contrast.";
+}
+
+property wrn:padj_g2m_checkpoint : core:float {
+    description = "fgsea adjusted p-value, HALLMARK_G2M_CHECKPOINT.";
+}
+
+property wrn:padj_p53_pathway : core:float {
+    description = "fgsea adjusted p-value, HALLMARK_P53_PATHWAY.";
+}
+
+property wrn:paralog_baseline_msi_beta : core:float {
+    description = "MSI coefficient in the baseline (uncontrolled) paralogue model.";
+}
+
+property wrn:paralog_baseline_msi_p : core:float {
+    description = "p-value of the baseline MSI coefficient.";
+}
+
+property wrn:paralog_controlled_msi_beta_min : core:float {
+    description = "Smallest MSI coefficient across the paralogue-controlled models — the conservative bound.";
+}
+
+property wrn:paralog_controlled_msi_p_max : core:float {
+    description = "Largest MSI p-value across the paralogue-controlled models. Survival of BOTH bounds is what NotExplainedByParalogLoss rests on.";
+}
+
+property wrn:patm_foci_fc_msi : core:float {
+    description = "phospho-ATM foci fold-change in MSI lines.";
+}
+
+property wrn:patm_foci_fc_mss : core:float {
+    description = "phospho-ATM foci fold-change in MSS lines.";
+}
+
+property wrn:patm_msi_interaction : core:float {
+    description = "MSI x treatment interaction coefficient for phospho-ATM foci.";
+}
+
+property wrn:patm_msi_interaction_p : core:float {
+    description = "p-value of the phospho-ATM foci MSI interaction.";
+}
+
+property wrn:pp53_logfc : core:float {
+    description = "phospho-p53 log fold-change on WRN depletion.";
+}
+
+property wrn:pp53_p_value : core:float {
+    description = "p-value of the phospho-p53 contrast.";
+}
