@@ -82,7 +82,6 @@ resource wrn:dd_achilles : bench:ToolArtifact {
     bench:tool            = "R limma::lmFit/eBayes moderated-t (D56 wrapped-R over a D53 PinnedExternalFile); reproduced live: WRN rank 1, Q = 4.81e-24 (vs paper 4.8e-24, CRISPR/Achilles)";
     bench:produced_from   = ["urn:eigenius:pub:wrn:ds_achilles", "urn:eigenius:pub:wrn:ds_supp1"];
     bench:tool_parameters = "MSI vs MSS differential dependency over 17,634 genes via limma moderated-t (3-file MSI join: DepMap_ID -> sample_info CCLE_name -> Supp Table 1 CCLE_MSI); WRN rank = 1; reproduced Q = 4.81e-24.";
-    reflection:derivation = wrn:dd_achilles_trace;
     reflection:canonical_proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "Achilles_MSI")
     );
@@ -99,7 +98,6 @@ resource wrn:dd_drive : bench:ToolArtifact {
     bench:tool            = "R limma::lmFit/eBayes + BH (mean-diff + ranking recomputed; moderated-t Q linked, Phase 2.5)";
     bench:produced_from   = ["urn:eigenius:pub:wrn:ds_drive", "urn:eigenius:pub:wrn:ds_supp1"];
     bench:tool_parameters = "MSI vs MSS differential dependency; WRN rank = 1; paper Q = 1.5e-45 (RNAi/DRIVE).";
-    reflection:derivation = wrn:dd_drive_trace;
     reflection:canonical_proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "DRIVE_MSI")
     );
@@ -206,6 +204,7 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
 // four warranted conclusions that compose it.
 
 resource wrn:discovery_finding : bench:TaskOutput {
+    reflection:derivation = wrn:discovery_finding_trace;
     bench:task             = "urn:eigenius:pub:wrn:question_msi_vulnerability";
     bench:deliverable_kind = "prose";
     bench:payload = "Computational discovery (DepMap Achilles CRISPR + Project DRIVE RNAi): WRN, a RecQ DNA helicase, is the top preferential dependency in microsatellite-unstable (MSI) vs microsatellite-stable (MSS) cancer cell lines, independently in both screens; it is the only MSI-selective member of the RecQ helicase family; MSI is a strong biomarker for WRN dependency (comparable to KRAS/BRAF); and WRN dependency tracks mutator load within MSI lines. The biomarker is lineage-restricted — the common MSI lineages carry a higher microsatellite-deletion load than uncommon ones (ED Fig 2b) — and the dependence is modulated but not abolished by TP53 status (largely p53-independent). Conclusion: WRN is selectively essential in MSI cancers.";
@@ -217,10 +216,14 @@ resource wrn:discovery_finding : bench:TaskOutput {
         "urn:eigenius:pub:wrn:concl_lineage_mutator_recomputed",
         "urn:eigenius:pub:wrn:concl_p53_modulates"
     ];
-    reflection:derivation = wrn:discovery_finding_trace;
 }
-resource wrn:discovery_finding_trace : reflection:ExternalExecutionTrace {
-    reflection:declared_by = wrn:authors;
+// Still a ProgramTrace, deliberately (eigenius#205). This is the one of the seven
+// declared-external traces that #166's audit did NOT list, and the only one whose target is a
+// `bench:TaskOutput` rather than a `bench:ToolArtifact` — and TaskOutput REQUIRES
+// `reflection:derivation`, whose class_types is [ProgramTrace]. Migrating it therefore needs
+// the harness ontology to admit a declared-external deliverable, which is a benchmark-harness
+// question, not a WRN one. Left as-is and recorded rather than forced.
+resource wrn:discovery_finding_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:discovery_finding;
     reflection:source    = "eigenius:wrn-phase1-encoding";
     reflection:timestamp = "2026-06-12T13:00:07Z";
