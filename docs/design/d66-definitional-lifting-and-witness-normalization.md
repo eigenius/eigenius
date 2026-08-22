@@ -92,7 +92,7 @@ argument holds `umlscui:C0920269` (MSI cancer models) and the consequent holds o
 
 So the lift discards the experimental context, and a discarding step is an implication. Since
 **no `JustifiedBy` constructor produces `JustifiedBy(_, A -> B)`** (`ontologies/reasoning/reasoning.esl:26-31`;
-the nine constructors are four groundings, `app`, `sum_l`, `sum_r`, `spec_str`, `spec_poly`), that
+the eight constructors are four groundings, `app`, `sum_l`, `sum_r`, `spec_poly`), that
 implication can only enter as a grounding — i.e. Declared.
 
 This is worse than an extra artifact: the generalisation from *"MSI cancer models had WRN's exonuclease

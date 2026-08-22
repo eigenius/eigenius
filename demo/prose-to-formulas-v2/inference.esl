@@ -97,9 +97,9 @@ resource inferred:sentence : reasoning:ReasoningSentence {
                 "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
             ),
 
-            // j2 — the warrant for the antecedent: the PARSER's own witness, cited directly.
-            // `claim_1` was committed under a `ProgramTrace`, which mints `IsDerivedAs`.
-            reasoning:DerivedEvidence("urn:eigenius:demo:v2:claim_1"),
+            // j2 — the warrant for the antecedent: the landed claim's own witness, cited directly.
+            // `claim_1` was committed under a `DeclarationTrace`, which mints `IsDeclaredAs`.
+            reasoning:DeclaredEvidence("urn:eigenius:demo:v2:claim_1"),
 
             // Sub-proof 1 : JustifiedBy(SpecStr(...), A -> B).
             //
@@ -128,7 +128,13 @@ resource inferred:sentence : reasoning:ReasoningSentence {
                 )
             ),
 
-            // Sub-proof 2 : JustifiedBy(DerivedEvidence(claim_1), A). THE LIVE DEPENDENCY.
+            // Sub-proof 2 : JustifiedBy(DeclaredEvidence(claim_1), A). THE LIVE DEPENDENCY.
+            //
+            // DECLARED, not Derived (D73 §6 / eigenius#201, superseding the 2026-08-10 settlement).
+            // The parser established that sentence 1's text parses to this well-typed term — not
+            // that the term is faithful to what the author wrote (D61, unbuilt), and not that what
+            // the author wrote is true. A `derived(...)` citation would have read as "a program
+            // established A", which is the collapse D73 §6 forbids.
             //
             // The witness key hashes the PROPOSITION, not just the IRI, so this citation is bound
             // to the exact term sentence 1 parsed to. With the negation inserted, sentence 1 parses
@@ -137,7 +143,7 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             //
             // Sentence 2's own claim is untouched and still commits, so the document still says
             // the conclusion. Nothing compared the two texts; the dependency did the work.
-            reasoning:derived(
+            reasoning:declared(
                 "urn:eigenius:demo:v2:claim_1",
                 onco_typed:HasActivity(msi, umlscui:C0388246),
                 ()
@@ -155,7 +161,7 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             ),
             "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
         ),
-        reasoning:DerivedEvidence("urn:eigenius:demo:v2:claim_1")
+        reasoning:DeclaredEvidence("urn:eigenius:demo:v2:claim_1")
     );
 
     // The proposition concluded: B from the `app` above. Sentence 2 of the paragraph asserts this

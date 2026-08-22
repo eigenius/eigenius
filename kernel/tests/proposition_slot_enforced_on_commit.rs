@@ -93,6 +93,12 @@ fn claim(proposition: Value) -> Resource {
         iri("urn:eigenius:encoding:from_unit"),
         Value::String(SCOPED.into()),
     );
+    // REQUIRED since eigenius#201 made `enc:EncodedClaim` a `reflection:DeclaredResource`: a parse
+    // establishes form, not warrant, so a landed claim must name the agent who asserts it.
+    r.set(
+        iri("urn:eigenius:reflection:declared_by"),
+        Value::String("urn:eigenius:reflection:agent:unattributed".into()),
+    );
     r.set(iri(wk::CANONICAL_PROPOSITION), proposition);
     r
 }

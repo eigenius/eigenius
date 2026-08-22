@@ -169,12 +169,16 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
                 onco:SelectivelyEssential(g, MSI),
 
             j0 = reasoning:SpecStr(DeclaredEvidence(RULE), G),
-            rule_cert = spec_str(
+            rule_cert = spec_poly(
+                // T : the domain
+                core:string,
                 fun (g : core:string) =>
                     onco:TopDifferentialDependency(g, ACTX) ->
                     onco:TopDifferentialDependency(g, DCTX) ->
                     onco:SelectivelyEssential(g, MSI),
                 DeclaredEvidence(RULE),
+                G,
+                // tag : audit label, same IRI as the instance
                 G,
                 declared(RULE, RULE_P)
             ),

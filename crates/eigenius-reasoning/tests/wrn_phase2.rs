@@ -134,6 +134,37 @@ fn esl_against_pending(
                  its IRI to `pending`."
             );
         }
+        if ctor != wk::VERDICT_HOLDS {
+            continue;
+        }
+        // eigenius#200: a passing check is a verification event, so it mints the chain-side
+        // artifact that D39 §5 pairs with the witness. Asserted HERE because this loop is the only
+        // place the whole WRN chain's sentences are walked — 33 of them across phases 2, 3 and 5 —
+        // and because the loop's own shape is what left the gap: it reads `outcome.output` for the
+        // verdict and discarded `outcome.derivations`, which is where the trace rides.
+        let traces: Vec<_> = outcome
+            .derivations
+            .iter()
+            .filter(|d| {
+                d.is_a()
+                    .iter()
+                    .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
+            })
+            .collect();
+        assert_eq!(
+            traces.len(),
+            1,
+            "`{iri}` Held but minted {} VerificationTrace(s); expected exactly one",
+            traces.len()
+        );
+        assert_eq!(
+            traces[0]
+                .get(&Iri::parse(wk::REFLECTION_RESOURCE).unwrap())
+                .and_then(|v| v.as_str().map(str::to_string))
+                .as_deref(),
+            Some(iri.as_str()),
+            "`{iri}`'s trace must attest the sentence itself"
+        );
     }
     layer
 }

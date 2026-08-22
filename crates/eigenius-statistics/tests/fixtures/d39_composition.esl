@@ -237,10 +237,14 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
             // outer j1, j2
             rule_j, full_app,
             // outer c1 : specialise the literature rule at EIG_0291.
-            spec_str(
+            spec_poly(
+                // T : the domain
+                core:string,
                 fun (x : core:string) =>
                     screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
                 DeclaredEvidence(RULE),
+                EIG,
+                // tag : audit label, same IRI as the instance
                 EIG,
                 declared(RULE, RULE_P)
             ),
@@ -254,22 +258,30 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
                 app(
                     S_FOR, STAT -> HAS_LOW,
                     bridge_full, sf_j,
-                    // inner c1'' : nested spec_str — specialise the
+                    // inner c1'' : nested spec_poly — specialise the
                     // bridge at s, then at c.
-                    spec_str(
+                    spec_poly(
+                        // T : the domain
+                        core:string,
                         fun (c : core:string) =>
                             screen:sample_for(SS, c)
                             -> stats:lt(stats:mean_of(SS), 100.0)
                             -> screen:HasLowIC50(c),
                         bridge_s,
                         EIG,
-                        spec_str(
+                        // tag : audit label, same IRI as the instance
+                        EIG,
+                        spec_poly(
+                            // T : the domain
+                            core:string,
                             fun (s : core:string) =>
                                 forall (c : core:string) =>
                                     screen:sample_for(s, c)
                                     -> stats:lt(stats:mean_of(s), 100.0)
                                     -> screen:HasLowIC50(c),
                             DeclaredEvidence(BRIDGE),
+                            SS,
+                            // tag : audit label, same IRI as the instance
                             SS,
                             declared(BRIDGE, BRIDGE_P)
                         )

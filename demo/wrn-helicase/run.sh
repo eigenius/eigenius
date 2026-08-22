@@ -100,6 +100,12 @@ echo
 # as premises, so it must load before the phases that cite it.
 echo "--- Step 1: Load ontology deps (bench-core, onco, wrn-literature) ---"
 eig load "$REPO_DIR/experiments/benchmark/base-ontologies/bench-core.esl"
+# harness-ontology declares bench:TaskOutput + its deliverable_kind / payload /
+# reasoning_chain / task properties, which 05-phase1-discovery.esl's
+# `wrn:discovery_finding` inhabits. bench-core has never declared them, and this load
+# list was never updated, so every run has failed at step 3 with
+# UnresolvedClassReference. Its deps are bootstrap-only (core / formats / reflection).
+eig load "$REPO_DIR/experiments/benchmark/harness-ontology.esl"
 eig load "$WRN/chain/01-onco.esl"
 eig load "$WRN/chain/02-literature.esl"
 echo

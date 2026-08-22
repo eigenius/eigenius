@@ -352,14 +352,16 @@
   {
     "@id": "urn:eigenius:reflection:VerificationTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Trace recording that a formal proof was attached to a resource.",
+    "urn:eigenius:core:description": "Trace recording that a proof of a resource's proposition was checked by a proof system. The chain-side audit artifact paired with an IsVerifiedAs witness, on the same footing as DeclarationTrace / ObservationTrace / ProgramTrace for the other three grounding families (D39 \u00a75). TWO VERIFIERS PRODUCE THIS, distinguished by proof_system, not by class: an external prover (lean4, coq, agda) whose exported proof blob is checked, and the kernel itself, whose type-checked JustifiedBy certificate IS the proof term. Kernel-checking is verification -- treating the two as different kinds would say by naming what proof_system already says (eigenius#200).",
     "urn:eigenius:core:short_name": "VerificationTrace",
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:resource",
       "urn:eigenius:reflection:proof_system",
       "urn:eigenius:reflection:proof_term",
-      "urn:eigenius:reflection:derivation_trace",
       "urn:eigenius:reflection:timestamp"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:derivation_trace"
     ]
   },
 
@@ -760,7 +762,7 @@
   {
     "@id": "urn:eigenius:reflection:proof_system",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The proof system used (lean4, coq, agda).",
+    "urn:eigenius:core:description": "Which verifier checked the proof. An external prover (lean4, coq, agda), or the Eigenius kernel itself (urn:eigenius:kernel) when the proof term is a type-checked JustifiedBy certificate. Illustrative, not an allows_only: adding a verifier must not be a bootstrap edit.",
     "urn:eigenius:core:short_name": "proof_system",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
@@ -768,7 +770,7 @@
   {
     "@id": "urn:eigenius:reflection:proof_term",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "IRI of the proof term in blob storage.",
+    "urn:eigenius:core:description": "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the ReasoningSentence whose certificate type-checked. Both are IRIs; only the former is a blob.",
     "urn:eigenius:core:short_name": "proof_term",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
@@ -777,7 +779,7 @@
   {
     "@id": "urn:eigenius:reflection:derivation_trace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The ProgramTrace being verified.",
+    "urn:eigenius:core:description": "The ProgramTrace being verified. RECOMMENDED, not required (eigenius#200): a kernel-verified ReasoningSentence has no ProgramTrace to point at -- D39 \u00a74.2 satisfies its inherited derivation requirement with the certificate field, the certificate being the derivation. Requiring this field would force that case to point it at itself, a fiction to satisfy a schema.",
     "urn:eigenius:core:short_name": "derivation_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"],

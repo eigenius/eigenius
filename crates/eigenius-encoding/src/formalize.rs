@@ -449,6 +449,11 @@ impl DocumentFormalizer for EncodingFormalizer {
                 source_path: &req.source_path,
                 source_sha256: &sha,
                 timestamp: &req.timestamp,
+                // No agent is threaded through this surface yet, so the claim names the absence
+                // rather than hiding it behind the program that parsed it (eigenius#201 / D72).
+                // Supplying a real `reflection:Agent` is D71's `land` story: the moment a
+                // formulation becomes an assertion is the moment someone takes responsibility.
+                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
                 source_ref: req.source_ref.as_deref(),
             },
         })?;

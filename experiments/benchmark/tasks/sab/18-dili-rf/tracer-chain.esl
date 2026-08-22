@@ -208,7 +208,9 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
             j3 = reasoning:App(j2, DeclaredEvidence(D3)),
             j4 = reasoning:App(j3, DeclaredEvidence(D4)),
 
-            rule_cert = spec_str(
+            rule_cert = spec_poly(
+                // T : the domain
+                core:string,
                 fun (p : core:string) =>
                     s18:ConformsFeaturization(p) ->
                     s18:ConformsLabelMapping(p) ->
@@ -217,6 +219,8 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
                     s18:ConformsOutputFormat(p) ->
                     s18:ImplementsDILIPredictor(p),
                 DeclaredEvidence(RULE),
+                P,
+                // tag : audit label, same IRI as the instance
                 P,
                 declared(RULE, RULE_P)
             ),

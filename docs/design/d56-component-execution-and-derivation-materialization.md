@@ -1,6 +1,6 @@
 # D56 — Component execution & derivation materialization
 
-*Status: **implemented** (2026-06-13 design, revised same day; realized end-to-end through Phase C — see §9). `RunRuntimeScript` is a kernel remote component routed to the D26 substrate; the WRN wrapped-R family (lme4 in-vivo + KM12, limma D-DIFF ×3, fgsea GSEA, emmeans IF, foci lm, paralogue lm) all lift via `ProgramTrace → IsDerivedAs` and Hold in the clean-DB demo (52/52 at the time of the §9 B.4 run; **55/55** as of 2026-08-20 — see the note under §9). Establishes that a **component execution** (side-effecting, external — D26 language runtimes) becomes a chain-resident, witness-bearing derivation **through the existing program-execution subsystem** (`kernel/src/program`, the `RunProgram` RPC / `eigenius run`), not a bespoke "materializer." Distinguishes this from **institution recomputation** (pure, decidable, implicit at commit — D52/AutoOnLoad). Motivated by the WRN `concl_vivo` lift (wrapping lme4 via D55). References D6b (program trace), D8 (components), D26 (RuntimeInvocation), D41 (commit pipeline), D49 (ChainWitness), D52 (statistics institution), D54 (reasoning lemma citation), D55 (R runtime).*
+*Status: **implemented** (2026-06-13 design, revised same day; realized end-to-end through Phase C — see §9). `RunRuntimeScript` is a kernel remote component routed to the D26 substrate; the WRN wrapped-R family (lme4 in-vivo + KM12, limma D-DIFF ×3, fgsea GSEA, emmeans IF, foci lm, paralogue lm) all lift via `ProgramTrace → IsDerivedAs` and Held in the clean-DB demo at the §9 B.4 run (52/52). **The demo does not currently load** — see the status note under §9 (eigenius#210). Establishes that a **component execution** (side-effecting, external — D26 language runtimes) becomes a chain-resident, witness-bearing derivation **through the existing program-execution subsystem** (`kernel/src/program`, the `RunProgram` RPC / `eigenius run`), not a bespoke "materializer." Distinguishes this from **institution recomputation** (pure, decidable, implicit at commit — D52/AutoOnLoad). Motivated by the WRN `concl_vivo` lift (wrapping lme4 via D55). References D6b (program trace), D8 (components), D26 (RuntimeInvocation), D41 (commit pipeline), D49 (ChainWitness), D52 (statistics institution), D54 (reasoning lemma citation), D55 (R runtime).*
 
 > **Revision note.** The first draft proposed a standalone *materializer* + a *pending-RuntimeInvocation* marker as a new commit-adjacent operation. That was over-built. Eigenius already has the driver (program execution) and already mints the witness (`ProgramTrace → IsDerivedAs`). The corrected model below replaces it: a component execution is **a program invoking a RuntimeScript component**, and `eigenius run` is the demanded-execution driver. §3, §5, §6 carry the corrected design; §1–§2, §4 (the tension and the kind distinction) stand unchanged.
 
@@ -113,6 +113,23 @@ All phases landed. The `RunRuntimeScript` component + orchestrator handler + nap
 > §3. The 55 decomposes as 22 statistics gate verdicts — one per analysis plan, 21
 > `stats:StatisticalAnalysisPlan` plus one `stats:ClassificationAnalysisPlan` — and 33
 > reasoning verdicts, one per `reasoning:ReasoningSentence`.
+>
+> **55/55 is a DECLARED count, not a run result** (clarified `2026-08-22`). It is what the chain
+> declares — 22 statistics plans + 33 reasoning sentences — read off `04-review.md` §3, not a
+> figure any execution produced. The last actual end-to-end run is B.4's 52/52. The status line
+> at the top of this document cited the two figures side by side as though both were run results;
+> corrected.
+>
+> **The demo has not loaded since.** First run after B.4, on `2026-08-22`, failed with 23 distinct
+> undeclared-vocabulary errors (eigenius#210). Rule 22 §c — property keys must resolve to a
+> declared `core:Property` — landed in `ff7f6cc` on `2026-06-27`, roughly two weeks after B.4, and
+> the WRN chain has never satisfied it. Two months unnoticed, because the `wrn_phase*` tests build
+> with `LayerBuilder::build`, which does not run the validator.
+>
+> `urn:eigenius:program:components:RunRuntimeScript` is part of the same gap: §7 step 1 added it to
+> the kernel's `REMOTE_COMPONENTS`, and it was never declared as a component resource in
+> `program-ontology.json` alongside the other nine. The kernel can dispatch it; the chain cannot
+> reference it.
 >
 > Both numbers are **verdict** counts, not conclusion counts, and have been misread as the
 > latter downstream. The chain declares **33** `reasoning:ReasoningSentence`s (15 / 1 / 1 /

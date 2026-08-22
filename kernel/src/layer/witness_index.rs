@@ -148,7 +148,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 
 /// Could `resource` ever admit a `ChainWitness`?
 ///
-/// True for the five classes [`layer_admits_witness`] can emit from: the three Trace classes, a
+/// True for the six classes [`layer_admits_witness`] can emit from: the four Trace classes, a
 /// `reflection:InstitutionEmittedDerivation`, and a `reasoning:ReasoningSentence`. Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
@@ -164,13 +164,24 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 
 /// The witness category a Trace class attests, or `None` if the class is not a Trace.
 ///
-/// `VerificationTrace` is absent deliberately: it is admitted via a comorphism-reified
-/// `VerifiedPropositionView` (D49 §7) and becomes a fourth arm when that view exists.
+/// All four grounding families are here (eigenius#200). `VerificationTrace` was absent until
+/// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
+/// `VerifiedPropositionView`. That deferred the wrong half: the view is how a LEAN proof's
+/// proposition reaches the trace, not what makes a `VerificationTrace` admit a witness. The trace
+/// already names its target through `reflection:resource`, so `emit_from_trace` reads the target's
+/// `canonical_proposition` for it exactly as it does for the other three — nothing about the
+/// Verified category needs special handling here.
+///
+/// The consequence of the omission was a witness with no artifact: `emit_from_reasoning_sentence`
+/// synthesised a Verified key straight from the sentence, so every Verified witness on every chain
+/// was traceless, breaking D39 §5's invariant that the trace and the witness are two projections of
+/// one validator event.
 fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
     match class_iri {
         wk::DECLARATION_TRACE => Some(WitnessCategory::Declared),
         wk::OBSERVATION_TRACE => Some(WitnessCategory::Observed),
         wk::PROGRAM_TRACE => Some(WitnessCategory::Derived),
+        wk::VERIFICATION_TRACE => Some(WitnessCategory::Verified),
         _ => None,
     }
 }
@@ -281,16 +292,46 @@ fn emit_from_trace(
 ) -> Option<WitnessKey> {
     let target_iri = resolve_target_iri(trace)?;
     let target_resource = layer.resolve(&target_iri)?;
-    let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
-    let prop_hash = match target_resource.get(&prop_iri) {
-        Some(encoded_prop) => hash_stored_proposition(layer, &target_iri, encoded_prop)?,
-        None => default_asserts_proposition_hash(layer, &target_iri)?,
-    };
+    let prop_hash = target_proposition_hash(layer, &target_iri, &target_resource)?;
     Some(WitnessKey {
         category,
         iri: target_iri,
         prop_hash,
     })
+}
+
+/// The proposition a trace's target canonically asserts, hashed.
+///
+/// Three slots can hold it, tried in order:
+///
+/// 1. `reflection:canonical_proposition` — the general slot.
+/// 2. `reasoning:proposition` — where a `ReasoningSentence` keeps the same thing under a different
+///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
+///    [`emit_from_reasoning_sentence`] reads slot 2, so without this arm a `VerificationTrace`
+///    targeting a sentence would fall through to slot 3 and key the witness against
+///    `Asserts(sentence_iri)` — a DIFFERENT hash from the one the sentence itself emits, and the
+///    one no certificate cites.
+/// 3. the D39 §4.1 default `Asserts(target_iri)`.
+fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -> Option<[u8; 32]> {
+    if let Some(encoded) = Iri::parse(wk::CANONICAL_PROPOSITION)
+        .ok()
+        .and_then(|i| target.get(&i))
+    {
+        return hash_stored_proposition(layer, target_iri, encoded);
+    }
+    if target
+        .is_a()
+        .iter()
+        .any(|c| c.as_str() == REASONING_SENTENCE)
+    {
+        if let Some(encoded) = Iri::parse(REASONING_PROPOSITION)
+            .ok()
+            .and_then(|i| target.get(&i))
+        {
+            return hash_stored_proposition(layer, target_iri, encoded);
+        }
+    }
+    default_asserts_proposition_hash(layer, target_iri)
 }
 
 /// Build the default proposition `Asserts(target_iri)` per D39 §4.1

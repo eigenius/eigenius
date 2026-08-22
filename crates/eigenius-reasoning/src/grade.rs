@@ -55,11 +55,12 @@ const REFLECTION_DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 /// resource, unlike the literals that used to sit in this slot.
 pub const UNATTRIBUTED_AGENT: &str = "urn:eigenius:reflection:agent:unattributed";
 const REFLECTION_TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
-const REFLECTION_SOURCE: &str = "urn:eigenius:reflection:source";
 /// `urn:eigenius:encoding:EncodedClaim` — the Derived cluster's claim class (D67 §1).
 const ENCODED_CLAIM_CLASS: &str = "urn:eigenius:encoding:EncodedClaim";
-/// `urn:eigenius:reflection:ProgramTrace` — the trace that mints `IsDerivedAs` (D56).
-const PROGRAM_TRACE_CLASS: &str = wk::PROGRAM_TRACE;
+/// `urn:eigenius:reflection:DeclarationTrace` — the trace that mints `IsDeclaredAs`. Parsed claims
+/// land through this since eigenius#201 / D73 §6; it was a `ProgramTrace` minting `IsDerivedAs`
+/// until `2026-08-21`.
+const DECLARATION_TRACE_CLASS: &str = wk::DECLARATION_TRACE;
 
 /// The epistemic grade of a claim. A **structural projection** of the `JustificationTerm` constructor
 /// (D39) — not a stored field. `Declared` is the honest floor a parsed proposition enters at; it climbs
@@ -82,19 +83,25 @@ pub enum Grade {
 pub enum Warrant {
     /// The honest floor (reshape §4 row 1): the source document asserts the proposition.
     Declared,
-    /// A PROGRAM derived the claim from hashed input (the parser over a source span) — the
-    /// `reflection:ProgramTrace` warrant (D67 §1; the Derived-landing decision 2026-08-10).
-    Derived,
+    /// The PARSER produced the claim from a source span. Lands **Declared**, not Derived
+    /// (D73 §6 / eigenius#201, superseding the `2026-08-10` Derived-landing decision): the parse
+    /// establishes that the text parses to this well-typed term, not that the term is faithful to
+    /// what the author wrote (D61, unbuilt) nor that what the author wrote is true. The agent named
+    /// in `declared_by` is who takes responsibility — the source document's authors when encoding a
+    /// paper, the operating agent when an agent formulates its own claim.
+    Parsed,
 }
 
 impl Warrant {
     /// The grade this warrant projects to. Public because a caller that builds a cluster through
-    /// [`DerivedClaimGrader::cluster`] directly (to control the IRIs) still has to state the
+    /// [`ParsedClaimGrader::cluster`] directly (to control the IRIs) still has to state the
     /// grade, and it must be THIS projection, not a second hand-written mapping.
     pub fn grade(self) -> Grade {
         match self {
             Warrant::Declared => Grade::Declared,
-            Warrant::Derived => Grade::Derived,
+            // Not `Grade::Derived`: the parser is a formulation instrument, not a warrant
+            // (eigenius#201).
+            Warrant::Parsed => Grade::Declared,
         }
     }
 }
@@ -114,19 +121,22 @@ pub struct ClaimSource<'a> {
     ///
     /// Must be the **IRI of a `reflection:Agent`** since D72 §3.2 retyped the property: it is
     /// written as a `ResourceRef`, so Rule 8 and Rule 22 require it to resolve same-or-lower.
-    /// A program's name is not an answer to *who* — that belongs in `provenance`, which the
-    /// Derived cluster's `ProgramTrace` records. `UNATTRIBUTED_AGENT` is the honest value when
-    /// no agent is known.
+    /// A program's name is not an answer to *who* — that belongs in `provenance`. Required by BOTH
+    /// clusters since eigenius#201 made the parsed cluster Declared. `UNATTRIBUTED_AGENT` is the
+    /// honest value when no agent is known.
     pub declared_by: &'a str,
     pub timestamp: &'a str,
-    /// The program-provenance line the Derived cluster's `ProgramTrace` records as
-    /// `reflection:source` — *which program derived the claim from which bytes* (e.g.
-    /// "DCG parse (D63) of <path> chars a..b (source sha256 …)"). Ignored by the Declared
-    /// grader (`declared_by` answers a different question: *who* asserts, not *what computed*).
+    /// The program-provenance line — *which program produced the claim from which bytes*.
+    ///
+    /// **Recorded once per RUN, on the `enc:ReasoningStructure`'s `ProgramTrace`, not here**
+    /// (eigenius#201 second pass): one parse run is one program execution, so repeating the engine
+    /// line on every claim's trace stated the same fact N times. Retained on `ClaimSource` for the
+    /// curated grader and for callers assembling their own cluster; the parsed grader no longer
+    /// writes it.
     pub provenance: &'a str,
     /// The discourse-KIND classes the claim carries beside its record class (D68 §2 — the
     /// two-axis claim: `is_a = [enc:EncodedClaim, <kinds…>]`, what makes it referable by a
-    /// demonstrative's restrictor). Consumed by the Derived grader; ignored by Declared.
+    /// demonstrative's restrictor). Consumed by the parsed grader; ignored by the curated one.
     pub kind_classes: &'a [Iri],
 }
 
@@ -140,8 +150,8 @@ pub struct GradedClaim {
     /// the `enc:EncodedClaim` (Derived cluster), the `ReasoningSentence` (inference clusters).
     pub claim_iri: Iri,
     /// The `ReasoningSentence` the D39 gate validates at commit, when the cluster carries one.
-    /// `None` for the Derived cluster — its trust story is the `ProgramTrace` minting
-    /// `IsDerivedAs`, with no certificate to check.
+    /// `None` for the parsed cluster — its trust story is the agent named in `declared_by`, with
+    /// no certificate to check.
     pub gate_sentence: Option<Iri>,
     /// The grade the claim commits at (projected from the [`Warrant`]).
     pub grade: Grade,
@@ -273,22 +283,36 @@ impl ClaimGrader for DeclaredClaimGrader {
     }
 }
 
-/// The **Derived** grader (D67 §1 — the settled landing shape for parsed sentences): the
-/// 2-resource cluster
+/// The **parsed-claim** grader (D73 §6 — the landing shape for parsed sentences): the 2-resource
+/// cluster
 ///
-/// 1. the **`enc:EncodedClaim`** — carries `reflection:canonical_proposition = P`;
-/// 2. its **`reflection:ProgramTrace`** — `reflection:resource → claim` plus the program
-///    provenance ([`ClaimSource::provenance`]) and timestamp — which mints
-///    `IsDerivedAs(claim_iri, P)` into the witness index at commit.
+/// 1. the **`enc:EncodedClaim`** — carries `reflection:canonical_proposition = P` and
+///    `reflection:declared_by`, the agent taking responsibility for `P`;
+/// 2. its **`reflection:DeclarationTrace`** — `reflection:resource → claim`, the same
+///    `declared_by` and a timestamp — which mints `IsDeclaredAs(claim_iri, P)` into the witness
+///    index at commit.
 ///
-/// Downstream certificates cite `derived(claim_iri, P, _)`. There is no `ReasoningSentence` and
-/// no certificate: the trust story is the trace (a program produced the claim from hashed
-/// input), so [`GradedClaim::gate_sentence`] is `None` and the D39 gate has nothing to check at
-/// commit — a certificate citing the claim breaks the moment the prose changes and the parser
-/// derives a different `P`, which is the point.
-pub struct DerivedClaimGrader;
+/// The RUN that produced the form is recorded once, elsewhere: the `enc:ReasoningStructure` is a
+/// `reflection:DerivedResource` whose single `ProgramTrace` names the engine and the input bytes.
+/// Two objects, two categories — the process is Derived, the propositions are Declared.
+///
+/// Downstream certificates cite `declared(claim_iri, P, _)`.
+///
+/// **This landed Derived until `2026-08-21`** (eigenius#201), as a `ProgramTrace` minting
+/// `IsDerivedAs`. The `2026-08-10` settlement behind that split the world on *parsed vs curated*;
+/// D73 §6 replaced the axis with *who asserts*. The parser is a formulation instrument: it
+/// establishes that the text parses to this well-typed term, and cannot establish that the term is
+/// faithful to what the author wrote (D61, unbuilt) or that what the author wrote is true. Three
+/// propositions that must not collapse into one witness — and `IsDerivedAs(claim, P)` collapsed
+/// them, because a certificate citing it read as "a program established P".
+///
+/// There is still no `ReasoningSentence` and no certificate, so [`GradedClaim::gate_sentence`] is
+/// `None` and the D39 gate has nothing to check at commit. A certificate citing the claim still
+/// breaks the moment the prose changes and the parser produces a different `P` — the witness key
+/// hashes the proposition — which is the point and is unchanged by the grade.
+pub struct ParsedClaimGrader;
 
-impl DerivedClaimGrader {
+impl ParsedClaimGrader {
     /// The Derived cluster construction — the ONE source of its shape, shared by the trait path
     /// (stem-derived IRIs) and the artifact emitter (`eigenius-encoding`), which keeps its
     /// historical `{ns}:claim_{n}` / `{ns}:trace_{n}` naming for byte-stable regeneration of
@@ -298,7 +322,7 @@ impl DerivedClaimGrader {
         claim_iri: &str,
         trace_iri: &str,
         proposition: &Exp,
-        provenance: &str,
+        declared_by: &str,
         timestamp: &str,
         kind_classes: &[Iri],
     ) -> Result<(Resource, Resource), GradeError> {
@@ -312,16 +336,21 @@ impl DerivedClaimGrader {
         classes.extend(kind_classes.iter().map(|k| Value::ResourceRef(k.clone())));
         claim.set(iri(wk::IS_A)?, Value::Array(classes));
         claim.set(iri(wk::CANONICAL_PROPOSITION)?, prop_value);
+        // REQUIRED now that `enc:EncodedClaim` is a `reflection:DeclaredResource` (eigenius#201).
+        claim.set(
+            iri(REFLECTION_DECLARED_BY)?,
+            Value::ResourceRef(iri(declared_by)?),
+        );
 
         let mut trace = Resource::new(iri(trace_iri)?);
         trace.set(
             iri(wk::IS_A)?,
-            Value::Array(vec![Value::ResourceRef(iri(PROGRAM_TRACE_CLASS)?)]),
+            Value::Array(vec![Value::ResourceRef(iri(DECLARATION_TRACE_CLASS)?)]),
         );
         trace.set(iri(wk::REFLECTION_RESOURCE)?, Value::ResourceRef(claim_id));
         trace.set(
-            iri(REFLECTION_SOURCE)?,
-            Value::String(provenance.to_string()),
+            iri(REFLECTION_DECLARED_BY)?,
+            Value::ResourceRef(iri(declared_by)?),
         );
         trace.set(
             iri(REFLECTION_TIMESTAMP)?,
@@ -331,7 +360,7 @@ impl DerivedClaimGrader {
     }
 }
 
-impl ClaimGrader for DerivedClaimGrader {
+impl ClaimGrader for ParsedClaimGrader {
     fn grade(&self, proposition: &Exp, source: &ClaimSource) -> Result<GradedClaim, GradeError> {
         let claim_iri = format!("{}:claim", source.stem);
         let trace_iri = format!("{}:trace", source.stem);
@@ -339,7 +368,7 @@ impl ClaimGrader for DerivedClaimGrader {
             &claim_iri,
             &trace_iri,
             proposition,
-            source.provenance,
+            source.declared_by,
             source.timestamp,
             source.kind_classes,
         )?;

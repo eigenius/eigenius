@@ -776,3 +776,154 @@ fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
         .expect("handler returns outcome");
     assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_FAILS);
 }
+
+// ── eigenius#200: a passing check mints a VerificationTrace ──────────
+
+/// The sentence IRI used by the two `VerificationTrace` tests below.
+const TRACED_SENTENCE: &str = "urn:test:v200:sentence";
+
+/// A `ReasoningSentence` with a real IRI (unlike `synthetic_sentence`, which is embedded and so has
+/// nothing to attest).
+fn iri_sentence(iri_str: &str, proposition: Value, justification: Value, cert: Value) -> Resource {
+    let mut r = Resource::new(Iri::parse(iri_str).unwrap());
+    r.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse("urn:eigenius:reasoning:ReasoningSentence").unwrap(),
+        )]),
+    );
+    r.set(Iri::parse(iris::PROP_PROPOSITION).unwrap(), proposition);
+    r.set(Iri::parse(iris::PROP_JUSTIFICATION).unwrap(), justification);
+    r.set(Iri::parse(iris::PROP_CERTIFICATE).unwrap(), cert);
+    r
+}
+
+/// Assemble the passing sentence the two tests share, plus its context.
+fn passing_traced_sentence() -> (ExecutionContext, Resource, serde_json::Value) {
+    let target = "urn:test:v200:axiom";
+    let ctx = build_chain_with_declared_axiom(target);
+    let asserts_subtree = json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "LitString", "args": [target]},
+        ],
+    });
+    let sentence = iri_sentence(
+        TRACED_SENTENCE,
+        Value::Json(asserts_subtree.clone()),
+        Value::Json(json!({"ctor": "DeclaredEvidence", "args": [target]})),
+        justified_by_declared_certificate(target, asserts_subtree.clone()),
+    );
+    (ctx, sentence, asserts_subtree)
+}
+
+#[test]
+fn passing_validation_emits_a_kernel_verification_trace() {
+    // D39 §5: the trace and the witness are two projections of one validator event. That held for
+    // Declared, Observed and Derived and not for Verified — nothing in the kernel ever created a
+    // `VerificationTrace`, so every Verified witness was traceless (eigenius#200).
+    let (ctx, sentence, _) = passing_traced_sentence();
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_HOLDS);
+
+    let trace = match outcome.derivations.as_slice() {
+        [t] => t,
+        other => panic!(
+            "expected exactly one VerificationTrace, got {}",
+            other.len()
+        ),
+    };
+    let get = |p: &str| {
+        trace
+            .get(&Iri::parse(p).unwrap())
+            .and_then(|v| v.as_str().map(str::to_string))
+    };
+    assert!(trace
+        .is_a()
+        .iter()
+        .any(|c| c.as_str() == wk::VERIFICATION_TRACE));
+    assert_eq!(
+        get(wk::REFLECTION_RESOURCE).as_deref(),
+        Some(TRACED_SENTENCE)
+    );
+    // The verifier is what distinguishes this from a Lean trace — same class, different prover.
+    assert_eq!(
+        get(wk::PROOF_SYSTEM).as_deref(),
+        Some("urn:eigenius:kernel")
+    );
+    // The certificate lives on the sentence, so the sentence IS the proof term's location.
+    assert_eq!(get(wk::PROOF_TERM).as_deref(), Some(TRACED_SENTENCE));
+    assert!(get(wk::TIMESTAMP).is_some(), "trace carries a timestamp");
+    // `derivation_trace` is `recommends`, not `requires`: a ReasoningSentence has no ProgramTrace
+    // to point at, and pointing the slot at itself would be a fiction.
+    assert!(
+        trace
+            .get(&Iri::parse("urn:eigenius:reflection:derivation_trace").unwrap())
+            .is_none(),
+        "the kernel case must not invent a derivation_trace"
+    );
+}
+
+#[test]
+fn the_minted_trace_keys_the_witness_on_the_sentences_own_proposition() {
+    // The subtle half. `emit_from_trace` reads the TARGET's `reflection:canonical_proposition`,
+    // but a ReasoningSentence keeps its proposition under `reasoning:proposition`. Without the
+    // ReasoningSentence arm in `target_proposition_hash` the trace falls through to the D39 §4.1
+    // default and keys the witness against `Asserts(sentence_iri)` — a different hash from the one
+    // the sentence emits, and one no certificate legitimately cites. A chain could then discharge
+    // `JustifiedBy(VerifiedEvidence(s), Asserts(s))`: the sentence asserting itself.
+    //
+    // The trace is committed in a CHILD of the layer holding the sentence, so
+    // `layer_admits_witness`'s self-attesting step (which is layer-LOCAL) cannot answer and the
+    // trace path is the only one under test. Committing them together — what the gate actually
+    // does — lets the sentence answer first and would hide the difference.
+    use eigenius_kernel::layer::layer_admits_witness;
+    use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+
+    let (ctx, sentence, asserts_subtree) = passing_traced_sentence();
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    let trace = outcome.derivations[0].clone();
+
+    let mut b = LayerBuilder::new("v200-sentence", Some(ctx.head().clone()));
+    b.add_resource(sentence).unwrap();
+    let with_sentence = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let mut b2 = LayerBuilder::new("v200-trace", Some(with_sentence));
+    b2.add_resource(trace).unwrap();
+    let layer = Arc::new(b2.build(LayerStorage::in_memory()));
+
+    let key_for = |subtree: serde_json::Value| {
+        let exp = eigenius_kernel::program::eigentt_type_mirror::decode_type(
+            &Value::Json(subtree),
+            &layer,
+        )
+        .expect("proposition decodes");
+        WitnessKey::from_exp(
+            WitnessCategory::Verified,
+            Iri::parse(TRACED_SENTENCE).unwrap(),
+            &exp,
+        )
+        .expect("witness key builds")
+    };
+
+    assert!(
+        layer_admits_witness(&layer, &key_for(asserts_subtree)),
+        "the trace must admit the sentence's OWN proposition as its Verified key"
+    );
+    assert!(
+        !layer_admits_witness(
+            &layer,
+            &key_for(json!({
+                "ctor": "App",
+                "args": [
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+                    {"ctor": "LitString", "args": [TRACED_SENTENCE]},
+                ],
+            }))
+        ),
+        "the trace must NOT admit `Asserts(sentence_iri)` — the sentence does not assert itself"
+    );
+}

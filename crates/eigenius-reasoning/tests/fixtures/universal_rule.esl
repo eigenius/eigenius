@@ -5,8 +5,8 @@
 //   forall c : core:string, HasLowIC50(c) -> StrongInhibitor(c)
 //
 // rather than specialised to a single compound. The ReasoningSentence
-// applies the universal rule to EIG_0291 via the new
-// `JustifiedBy.spec_str` constructor — kernel beta-reduces
+// applies the universal rule to EIG_0291 via the
+// `JustifiedBy.spec_poly` rule — kernel beta-reduces
 // `(forall c, P c)("urn:EIG_0291")` to `P("urn:EIG_0291")` at
 // type-check time. Same rule resource can be reused for any compound
 // without re-committing.
@@ -21,7 +21,7 @@
 //    The body proposition references its binder.
 // 3. The new `JustificationTerm.SpecStr(j, t)` ctor in the
 //    `justification` chain inductive value.
-// 4. The new `JustifiedBy.spec_str` ctor in the certificate,
+// 4. The `JustifiedBy.spec_poly` rule in the certificate,
 //    producing the specialised type via kernel NbE beta-reduction
 //    of the rule's universal proposition at "urn:EIG_0291".
 
@@ -89,7 +89,7 @@ resource screen:m_eig0291_trace : reflection:ObservationTrace {
 //   App(SpecStr(DeclaredEvidence(rule_iri), "urn:EIG_0291"),
 //       ObservedEvidence(obs_iri))
 //
-// The certificate's `spec_str` ctor witnesses that the rule (with
+// The certificate's `spec_poly` rule witnesses that the rule (with
 // its universal proposition) applied at "urn:EIG_0291" yields the
 // specialised `HasLowIC50("urn:EIG_0291") -> StrongInhibitor(...)`
 // proposition — which `app` then composes with the observation to
@@ -129,10 +129,13 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
             // j2 : JT — the observation
             ObservedEvidence("urn:eigenius:demo:screen:m_eig0291"),
             // c1 : JustifiedBy(j1, A -> B)
-            //    = spec_str(P, DeclaredEvidence(rule), "urn:EIG_0291", rule_cert)
+            //    = spec_poly(core:string, P, DeclaredEvidence(rule),
+            //                "urn:EIG_0291", "urn:EIG_0291", rule_cert)
             //   where rule_cert : JustifiedBy(DeclaredEvidence(rule),
             //                                 forall x, P(x))
-            spec_str(
+            spec_poly(
+                // T : the domain
+                core:string,
                 // P : core:string -> Prop
                 //
                 // Deliberately uses a different binder name (`x`) than
@@ -145,6 +148,8 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
                 // j : JT
                 DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
                 // t : core:string
+                "urn:eigenius:demo:screen:EIG_0291",
+                // tag : audit label, same IRI as the instance
                 "urn:eigenius:demo:screen:EIG_0291",
                 // rule_cert : JustifiedBy(j, forall x, P(x))
                 declared(

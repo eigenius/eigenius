@@ -46,7 +46,7 @@ D14 §1.2 states what an institution is. Applied to the encoding engine:
 | D14 §1.2 criterion | Encoding engine |
 |---|---|
 | "Has its own notion of well-formedness — a satisfaction relation expressible as functions over typed Resources" | **No.** It borrows the kernel's: structural validation plus the parse-time felicity re-gate. D14 §1.1 excludes both from the protocol — the validator is the switchboard, not a fibre. |
-| "Produces results with internal structure — morphisms within its fibre" | **No.** There is no encoding fibre. `enc:EncodedClaim` is a `reflection:DerivedResource` ([encoding.esl:356](../../ontologies/encoding/encoding.esl#L356)); the claims land in the reasoning fibre and are graded there. |
+| "Produces results with internal structure — morphisms within its fibre" | **No.** There is no encoding fibre. `enc:EncodedClaim` is a `reflection:DeclaredResource` (encoding.esl; Declared since eigenius#201); the claims land in the reasoning fibre and are graded there. |
 | "Can answer queries about its own results" | **No.** |
 | "Registers by committing typed declarations and providing a runtime" | Yes — but this is true of any component that ships an ontology. |
 

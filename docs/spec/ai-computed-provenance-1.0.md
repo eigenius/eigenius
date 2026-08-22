@@ -1414,14 +1414,13 @@ certificate is stored and re-checkable rather than erased. It MUST declare exact
 | `app` | `JustifiedBy(j₁, A → B)`, `JustifiedBy(j₂, A)` | `JustifiedBy(App(j₁, j₂), B)` |
 | `sum_l` | `JustifiedBy(j₁, P)` | `JustifiedBy(Sum(j₁, j₂), P)` |
 | `sum_r` | `JustifiedBy(j₂, P)` | `JustifiedBy(Sum(j₁, j₂), P)` |
-| `spec_str` | `JustifiedBy(j, ∀ x : string. P(x))` | `JustifiedBy(SpecStr(j, t), P(t))` |
 | `spec_poly` | `JustifiedBy(j, ∀ y : T. P(y))` for any domain `T : Type 1` (so `Set` itself, and every `C : Set` by cumulativity) | `JustifiedBy(SpecStr(j, tag), P(x))` |
 
 **ACP-A-32.** There MUST be no elimination rule for `Sum` ([ACP-7-7](#72-certificates)).
 
 **ACP-A-33.** No constructor's conclusion may be at an implication
 ([ACP-7-9](#73-no-implication-introduction)). Inspection of the table above confirms this: `app`
-concludes at `B`, `sum_l` and `sum_r` at `P`, `spec_str` and `spec_poly` at an instance of `P`, and
+concludes at `B`, `sum_l` and `sum_r` at `P`, `spec_poly` at an instance of `P`, and
 the four grounding rules at the witnessed proposition.
 
 **ACP-A-34.** Each constructor's full dependent signature MUST be carried on the chain, encoded per
@@ -1445,7 +1444,7 @@ property that carries it ([ACP-3-8](#32-the-metamodel-classes-properties-inducti
 | Selection among readings | `enc:DecisionPoint` | the unit, the selected claim, candidate count, rationale, authority, ranked alternatives |
 | Resolution of a reference | `enc:AnaphorBinding` | the unit, the hole, the accepted antecedent, the surface form, authority, confidence |
 | Omission | `enc:CutItem` | the unit, the reason class |
-| Landed claim | `enc:EncodedClaim` | a `reflection:DerivedResource` carrying the proposition |
+| Landed claim | `enc:EncodedClaim` | a `reflection:DeclaredResource` carrying the proposition and the agent asserting it |
 
 **ACP-A-37.** The selection authorities MUST be exactly: a human-supplied pin; the reading ranker; and
 the case where a single candidate survived and no choice existed.

@@ -39,7 +39,7 @@ use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 
 use crate::claim_kind::{frame_kind, KindClassifier, KIND_ASSERTION};
-use crate::grade::{ClaimGrader, ClaimSource, DerivedClaimGrader, GradedClaim, Warrant};
+use crate::grade::{ClaimGrader, ClaimSource, GradedClaim, ParsedClaimGrader, Warrant};
 use crate::validate::do_validate_justification;
 use crate::ReasoningInstitution;
 
@@ -140,11 +140,11 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
             // only the naming differs.
             Some(ns) => {
                 let n = ordinal + 1;
-                let (claim, trace) = DerivedClaimGrader::cluster(
+                let (claim, trace) = ParsedClaimGrader::cluster(
                     &format!("{ns}:claim_{n}"),
                     &format!("{ns}:trace_{n}"),
                     item.sem(),
-                    &provenance,
+                    &self.declared_by,
                     &self.timestamp,
                     &kinds,
                 )
@@ -154,15 +154,15 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                     resources: vec![claim, trace],
                     claim_iri,
                     gate_sentence: None,
-                    grade: Warrant::Derived.grade(),
+                    grade: Warrant::Parsed.grade(),
                 }
             }
-            None => DerivedClaimGrader
+            None => ParsedClaimGrader
                 .grade(
                     item.sem(),
                     &ClaimSource {
                         stem: &format!("urn:eigenius:doc:{}:s{}", self.doc_id, ordinal),
-                        warrant: Warrant::Derived,
+                        warrant: Warrant::Parsed,
                         declared_by: &self.declared_by,
                         timestamp: &self.timestamp,
                         provenance: &provenance,
@@ -290,7 +290,7 @@ impl DocumentIngestion for InProcessIngestion<'_> {
                         stem: &stem,
                         // Parsed sentences land DERIVED (D67 §1): a program (the parser)
                         // produced the claim from the source text; the trace is the warrant.
-                        warrant: Warrant::Derived,
+                        warrant: Warrant::Parsed,
                         declared_by: crate::grade::UNATTRIBUTED_AGENT,
                         timestamp: "2026-08-03T00:00:00Z",
                         provenance: &provenance,

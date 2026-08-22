@@ -40,11 +40,12 @@ resource v2:claim_1 : encoding:EncodedClaim, encoding:Observation {
             )
         )
     );
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
 }
 
-resource v2:trace_1 : reflection:ProgramTrace {
+resource v2:trace_1 : reflection:DeclarationTrace {
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
     reflection:resource = "urn:eigenius:demo:v2:claim_1";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 0 «MSI cancer models had the exonuclease activity of WRN.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -83,11 +84,12 @@ resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
             )
         )
     );
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
 }
 
-resource v2:trace_2 : reflection:ProgramTrace {
+resource v2:trace_2 : reflection:DeclarationTrace {
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
     reflection:resource = "urn:eigenius:demo:v2:claim_2";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 1 «MSI cancer models required the helicase activity of WRN.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -131,11 +133,12 @@ resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
             v2:claim_2
         )
     );
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
 }
 
-resource v2:trace_3 : reflection:ProgramTrace {
+resource v2:trace_3 : reflection:DeclarationTrace {
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
     reflection:resource = "urn:eigenius:demo:v2:claim_3";
-    reflection:source = "eigenius-reasoning lander: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c), sentence 2 «These findings show that WRN is a vulnerability of MSI cancer models.»";
     reflection:timestamp = "2026-08-03T00:00:00Z";
 }
 
@@ -158,10 +161,17 @@ resource v2:binding_3_0 : encoding:AnaphorBinding {
     reflection:rationale = "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim from sentence 1), it is the top-ranked antecedent, with the understanding that it collectively represents the set of findings established in the discourse.";
 }
 
+resource v2:run_trace : reflection:ProgramTrace {
+    reflection:resource = "urn:eigenius:demo:v2:structure";
+    reflection:source = "eigenius-encoding prose-to-eigon: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (source sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c)";
+    reflection:timestamp = "2026-08-03T00:00:00Z";
+}
+
 resource v2:structure : encoding:ReasoningStructure {
     core:description = "The encoding of demo/prose-to-formulas-v2/paragraph.txt: 3 claim(s), 0 unit(s) recorded as not encoding.";
     encoding:claims = ["urn:eigenius:demo:v2:claim_1", "urn:eigenius:demo:v2:claim_2", "urn:eigenius:demo:v2:claim_3"];
     encoding:document = "urn:eigenius:demo:v2:source";
     encoding:source_path = "demo/prose-to-formulas-v2/paragraph.txt";
     encoding:source_sha256 = "0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c";
+    reflection:derivation = "urn:eigenius:demo:v2:run_trace";
 }

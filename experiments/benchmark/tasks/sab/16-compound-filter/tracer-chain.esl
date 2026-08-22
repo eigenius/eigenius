@@ -224,7 +224,9 @@ resource s16:concl_solution_implements : reasoning:ReasoningSentence {
 
             // certificate spine — specialise the rule, then discharge the
             // five conformances one at a time via Artemov application.
-            rule_cert = spec_str(
+            rule_cert = spec_poly(
+                // T : the domain
+                core:string,
                 fun (p : core:string) =>
                     s16:ConformsFeaturization(p) ->
                     s16:ConformsAlertCatalogs(p) ->
@@ -233,6 +235,8 @@ resource s16:concl_solution_implements : reasoning:ReasoningSentence {
                     s16:ConformsComposition(p) ->
                     s16:ImplementsRequiredFilter(p),
                 DeclaredEvidence(RULE),
+                P,
+                // tag : audit label, same IRI as the instance
                 P,
                 declared(RULE, RULE_P)
             ),

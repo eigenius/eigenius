@@ -254,6 +254,7 @@ resource lit:liberzon_2015 : reference:Reference {
 
 // [1] the synthetic-lethality framing that motivates the whole discovery.
 resource wrnlit:lit_synthetic_lethality : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "The study's premise — exploit a synthetic-lethal vulnerability of MSI cancers — rests on the established strategy that synthetic-lethal interactions can be harnessed for anticancer drug discovery.";
     reflection:canonical_proposition = type_expr( litclaim:SyntheticLethalityExploitable("anticancer_therapy") );
     reference:cites                  = lit:chan_giaccia_2011;
@@ -263,6 +264,7 @@ resource wrnlit:lit_synthetic_lethality : reference:Citation {
 
 // [14] separable exonuclease / helicase activities → the structure-function dissection.
 resource wrnlit:lit_wrn_separable : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "WRN's 3'->5' exonuclease and helicase activities are separable, with E84A and K577M point mutants abolishing the respective activity — the basis for the cDNA rescue panel that shows the helicase (not the exonuclease) is required.";
     reflection:canonical_proposition = type_expr( litclaim:WRNActivitiesSeparable("WRN") );
     reference:cites                  = lit:swanson_2004;
@@ -272,6 +274,7 @@ resource wrnlit:lit_wrn_separable : reference:Citation {
 
 // [16] C911 seed-control design → the seed_control_rule.
 resource wrnlit:lit_c911_design : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "A C911 control (nt 9-11 complemented to preserve the off-target seed while disrupting on-target silencing) isolates on-target from shRNA seed off-target effects — the design behind the in-vivo seed control.";
     reflection:canonical_proposition = type_expr( litclaim:C911ControlIsValid("shRNA") );
     reference:cites                  = lit:buehler_2012;
@@ -281,6 +284,7 @@ resource wrnlit:lit_c911_design : reference:Citation {
 
 // [17] p53-S15 as a p53-activation readout → the ED5 p-p53 IF warrant.
 resource wrnlit:lit_ps15_readout : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "Phosphorylation of p53 at Ser15 is an ATR/ATM DNA-damage-response target that marks p53 activation — the interpretation under the ED Fig 5 phospho-p53 immunofluorescence (the ActivatesP53Response warrant).";
     reflection:canonical_proposition = type_expr( litclaim:pS15MarksP53Activation("p53") );
     reference:cites                  = lit:loughery_2014;
@@ -290,6 +294,7 @@ resource wrnlit:lit_ps15_readout : reference:Citation {
 
 // [20] WRN nucleolar/nucleoplasm dynamics → the ED8d delocalization warrant.
 resource wrnlit:lit_wrn_nucleolar : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "WRN relocalizes between the nucleoli and the nucleoplasm — the established repair-protein dynamics under the ED Fig 8d WRN-fibrillarin colocalization readout (the ReducedNucleolarColocalization warrant).";
     reflection:canonical_proposition = type_expr( litclaim:WRNNucleolarDynamics("WRN") );
     reference:cites                  = lit:bendtsen_2014;
@@ -299,6 +304,7 @@ resource wrnlit:lit_wrn_nucleolar : reference:Citation {
 
 // [10] CERES → the Achilles dependency scoring the D-DIFF runs over.
 resource wrnlit:lit_ceres_method : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "CERES computationally corrects the copy-number effect in CRISPR-Cas9 essentiality screens — the method behind the Achilles gene-effect matrix the headline differential-dependency analysis (dd_achilles) is computed over.";
     reflection:canonical_proposition = type_expr( litclaim:CERESCorrectsCopyNumber("Achilles") );
     reference:cites                  = lit:meyers_2017;
@@ -308,6 +314,7 @@ resource wrnlit:lit_ceres_method : reference:Citation {
 
 // [11] DRIVE → the RNAi dependency matrix the D-DIFF replicate runs over.
 resource wrnlit:lit_drive_data : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "Project DRIVE is the deep-RNAi (DEMETER2) cancer-dependency compendium — the source of the DRIVE gene-dependency matrix the orthogonal differential-dependency replicate (dd_drive) is computed over.";
     reflection:canonical_proposition = type_expr( litclaim:DRIVEDependencyDataset("DRIVE") );
     reference:cites                  = lit:mcdonald_2017;
@@ -317,6 +324,7 @@ resource wrnlit:lit_drive_data : reference:Citation {
 
 // [36] limma → the moderated-t method of the D-DIFF warrants.
 resource wrnlit:lit_limma_method : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "limma's empirical-Bayes moderated-t differential expression is the method wrapped in the dd_achilles / dd_drive / dd_gdsc warrants (variance shrinkage is what lifts WRN to rank 1).";
     reflection:canonical_proposition = type_expr( litclaim:LimmaModeratedT("limma") );
     reference:cites                  = lit:ritchie_2015;
@@ -326,6 +334,7 @@ resource wrnlit:lit_limma_method : reference:Citation {
 
 // [40] voom → the RNA-seq DE step of the GSEA warrant.
 resource wrnlit:lit_voom_method : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "voom precision weights enable limma's linear-model tools on RNA-seq read counts — the differential-expression step that ranks genes before fgsea in the gsea_mech warrant.";
     reflection:canonical_proposition = type_expr( litclaim:VoomPrecisionWeights("voom") );
     reference:cites                  = lit:law_2014;
@@ -335,6 +344,7 @@ resource wrnlit:lit_voom_method : reference:Citation {
 
 // [43] MSigDB Hallmark → the gene-set collection the GSEA warrant scores against.
 resource wrnlit:lit_hallmark_sets : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "The MSigDB Hallmark collection is the curated gene-set resource the gsea_mech warrant scores the WRN-KO ranking against (the .gmt pinned under the D53 Collection profile).";
     reflection:canonical_proposition = type_expr( litclaim:HallmarkGeneSets("Hallmark") );
     reference:cites                  = lit:liberzon_2015;
@@ -344,6 +354,7 @@ resource wrnlit:lit_hallmark_sets : reference:Citation {
 
 // [22] MSH3 loss → the HCT116 Ch3+5 MMR-restoration model basis.
 resource wrnlit:lit_msh3_instability : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reflection:rationale             = "Loss of MutS homologue 3 (MSH3) causes microsatellite instability in colorectal cancer — the basis for the HCT116 Ch3+5 MMR-restoration model (restoring MLH1/MSH3 restores repair; the C-MMR and ED Fig 10a warrants).";
     reflection:canonical_proposition = type_expr( litclaim:MSH3LossCausesInstability("MSH3") );
     reference:cites                  = lit:haugen_2008;
@@ -357,6 +368,7 @@ resource wrnlit:lit_msh3_instability : reference:Citation {
 // ════════════════════════════════════════════════════════════════════
 
 resource wrnlit:cite_kim : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:kim_2013;
     reference:citation_type   = reference:obtains_background_from;
     reference:reference_label = "4";
@@ -364,6 +376,7 @@ resource wrnlit:cite_kim : reference:Citation {
 }
 
 resource wrnlit:cite_le : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:le_2017;
     reference:citation_type   = reference:obtains_background_from;
     reference:reference_label = "8";
@@ -371,6 +384,7 @@ resource wrnlit:cite_le : reference:Citation {
 }
 
 resource wrnlit:cite_barretina : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:barretina_2012;
     reference:citation_type   = reference:cites_as_source_document;
     reference:reference_label = "12";
@@ -378,6 +392,7 @@ resource wrnlit:cite_barretina : reference:Citation {
 }
 
 resource wrnlit:cite_iorio : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:iorio_2016;
     reference:citation_type   = reference:cites_as_source_document;
     reference:reference_label = "13";
@@ -385,6 +400,7 @@ resource wrnlit:cite_iorio : reference:Citation {
 }
 
 resource wrnlit:cite_rossi : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:rossi_2010;
     reference:citation_type   = reference:obtains_background_from;
     reference:reference_label = "15";
@@ -392,6 +408,7 @@ resource wrnlit:cite_rossi : reference:Citation {
 }
 
 resource wrnlit:cite_nowsheen : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:nowsheen_2012;
     reference:citation_type   = reference:obtains_background_from;
     reference:reference_label = "19";
@@ -399,6 +416,7 @@ resource wrnlit:cite_nowsheen : reference:Citation {
 }
 
 resource wrnlit:cite_ccle_gdsc : reference:Citation {
+    reflection:declared_by           = wrn:authors;
     reference:cites           = lit:ccle_gdsc_2015;
     reference:citation_type   = reference:cites_as_authority;
     reference:reference_label = "34";
