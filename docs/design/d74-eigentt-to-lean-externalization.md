@@ -110,27 +110,57 @@ resources. Each becomes `Const(Name, levels)` — and **which `Name`** is the on
 decision in this document.
 
 The requirement is a *total, injective, and stable* map from IRI to Lean `Name`, agreed by both the
-externalizer and whatever produced the export. Two candidate sources:
+externalizer and whatever produced the export.
 
-1. **D30's mirror namespace.** The EigeniusFFI package already names mirrored classes, and D28's
-   correspondence check already walks propositions looking for names in that namespace. Reusing it
-   keeps one naming authority.
-2. **A direct IRI mangling** (`urn:eigenius:demo:onco:RequiresActivity` → `Eigenius.demo.onco.RequiresActivity`),
-   independent of whether D30's generator has run.
+**Decided `2026-08-22`: the mirror is the authority, and the mangling lives inside it.**
 
-**These are not interchangeable.** (1) ties externalization to the mirror generator having produced
-a package covering every class the proposition mentions, and inherits D30's `UnrepresentableClass`
-failures. (2) is total over IRIs but names things the Lean environment may not define — which
-surfaces as a `def_eq` failure against the export rather than as a translation error, i.e. a worse
-diagnostic at a later stage.
+D74 cannot invent names. The export was compiled against D30's generated package, so a name the
+generator did not emit cannot appear in the export, and inventing one would turn a naming
+disagreement into a `def_eq` mismatch — a worse diagnostic at a later stage. The map therefore
+reproduces the generator's, and a class the mirror does not cover is **refused at externalization**
+with a diagnostic naming the class and the mirror.
 
-**Recommendation: (1), with (2) as the mangling *within* it.** Mirror-defined names when D30 covers
-the class, and refuse — with a diagnostic naming the class and the mirror — when it does not. The
-export was produced against the mirror; a name the mirror does not define cannot appear in it, so
-refusing early is strictly more informative than proving a `def_eq` mismatch late.
+### 3.3.1 D30's current naming is not injective, and that has to be fixed first
 
-This decision must be pinned before implementation, and it is the one thing here that another
-component's behaviour depends on.
+D30 §7.1 emits `structure <short_name>` flat inside `namespace EigeniusFFI`, so the Lean name of a
+class is its `core:short_name`. §11.1 checks that class short_names are valid Lean identifiers and
+that *property* short_names are unique within a class's transitive field set — **it does not check
+that CLASS short_names are unique across the closure.**
+
+Measured over every ontology in the repo (`2026-08-22`): **948 class short_names, 8 colliding.**
+
+| short_name | IRIs |
+|---|---|
+| `Person` | `reflection:Person`, `schema_org:Person` |
+| `Organization` | `reflection:Organization`, `schema_org:Organization` |
+| `Axiom` | `eigentt:Axiom`, `objective:Axiom` |
+| `Observation` | `core:Observation`, `enc:Observation` |
+| `DecisionPoint` | `enc:DecisionPoint`, `objective:DecisionPoint` |
+| `CutItem` | `enc:CutItem`, `objective:CutItem` |
+| `Hypothesis` | `enc:Hypothesis`, `objective:Hypothesis` |
+| `Map` | `program:Map`, `schema_org:Map` |
+
+`reflection:Person` is not incidental — D72 made it a `reflection:Agent` subclass, so it is what
+`declared_by` resolves to on any attributed claim.
+
+A closure containing both members of a pair emits two `structure Person` declarations in one
+namespace. That is a D30 defect independent of this document; it becomes load-bearing here because
+a non-injective map means externalization can name the wrong class, which is the failure mode §5
+calls proving the wrong theorem soundly.
+
+**The mangling: qualify by the IRI's namespace segment.** `urn:eigenius:reflection:Person` becomes
+`EigeniusFFI.reflection.Person`; `urn:schema_org:Person` becomes `EigeniusFFI.schema_org.Person`.
+Lean namespaces are dot-separated, so this is idiomatic rather than an escape encoding, it stays
+readable in a proof, and it is injective wherever IRIs are — which is everywhere, by construction.
+
+This is a change to **D30's** emission, not only to D74's reading of it: the generator must place
+each structure in its namespace-qualified path, and §11.1 should gain the class-level uniqueness
+check that makes the property-level one meaningful. Tracked as eigenius#208, and a **prerequisite**
+for implementing this document.
+
+The remaining latitude is narrow: whether the namespace segment is the full `urn:` path minus the
+local name (`reflection`, `schema_org`) or only its last component. The table above is satisfied by
+the last component; a chain with two `reflection`-suffixed namespaces would not be.
 
 ---
 
@@ -211,8 +241,10 @@ D74 therefore joins nanoda_lib and D30 in the TCB.
 
 ## 6. Open questions
 
-1. **§3.3 — the IRI → `Name` map.** Recommended above, not settled. Everything else here is
-   mechanical once it is fixed.
+1. ~~**§3.3 — the IRI → `Name` map.**~~ **Decided `2026-08-22`** — the mirror, with
+   namespace-qualified mangling inside it (§3.3). It carries a prerequisite: D30's flat
+   `EigeniusFFI.<short_name>` is not injective (8 live collisions, §3.3.1) and must be qualified
+   before externalization can rely on it.
 2. **Where does `def_eq` run?** Inside the existing `check_proof` call (one arena, one parse) or as
    a second entry point beside it. The first is cheaper and keeps the export parsed once; the second
    keeps `check_proof`'s current contract untouched.
