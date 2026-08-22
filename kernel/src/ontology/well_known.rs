@@ -482,6 +482,12 @@ pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
 /// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
 
+/// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
+/// (eigenius#205). Admits `IsDeclaredAs`, not `IsDerivedAs`: `Derived` holds a trace tied to a
+/// KERNEL-INITIATED activity, and a transcription has no `f : I -> O`, so no specification, so
+/// nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different claim.
+pub const EXTERNAL_EXECUTION_TRACE: &str = "urn:eigenius:reflection:ExternalExecutionTrace";
+
 /// `reflection:resource` — the target IRI a Trace points at. Common to
 /// all four Trace classes (semantically; for `ProgramTrace` the role is
 /// played by the output resource's own IRI, not a separate property).

@@ -4,15 +4,26 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:ingest:DatasetSchema"
     ],
-    "urn:eigenius:core:description": "DepMap 18Q4 curated omics container (R serialization, readRDS). A named list of cell-line x gene matrices: DRIVE (RNAi dep), CRISPR (CERES dep), GE (log2 TPM expression), CN (log2 relative copy number), MUT_HOT/MUT_DAM/MUT_OTHER (binary mutation), MUT (mutation calls df), RPPA (protein). A multi-schema container consumed member-wise; not a single tabular layout.",
+    "urn:eigenius:core:description": "DepMap 18Q4 curated omics container (R serialization, readRDS). A named list of cell-line x gene matrices: DRIVE (RNAi dep), CRISPR (CERES dep), GE (log2 TPM expression), CN (log2 relative copy number), MUT_HOT/MUT_DAM/MUT_OTHER (binary mutation), MUT (mutation calls df), RPPA (protein). A multi-schema container consumed member-wise; not a single tabular layout. The member list is stated here rather than in ingest:member: that property is an intra-file selector for ONE member with domain ingest:DatasetSchema, and it was carrying a comma-joined list on the nested ingest:Layout — a domain violation and a malformed value (eigenius#210). Binding each member properly means ingest:schemas with one DatasetSchema per member (D53 §10); nothing consumes the binding today, so the list stays descriptive until something does.",
     "urn:eigenius:ingest:dimension": [
-      { "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"], "urn:eigenius:ingest:name": "cell_line" },
-      { "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"], "urn:eigenius:ingest:name": "gene" }
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:ingest:Dimension"
+        ],
+        "urn:eigenius:ingest:name": "cell_line"
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:ingest:Dimension"
+        ],
+        "urn:eigenius:ingest:name": "gene"
+      }
     ],
     "urn:eigenius:ingest:layout": {
-      "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Layout"],
-      "urn:eigenius:ingest:kind": "Other",
-      "urn:eigenius:ingest:member": "DRIVE,CRISPR,GE,CN,MUT_HOT,MUT_DAM,MUT_OTHER,MUT,RPPA"
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:ingest:Layout"
+      ],
+      "urn:eigenius:ingest:kind": "Other"
     }
   }
 ]

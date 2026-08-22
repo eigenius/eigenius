@@ -595,6 +595,19 @@
   },
 
   {
+    "@id": "urn:eigenius:program:components:RunRuntimeScript",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:description": "Run a chain-resident runtime:RuntimeScript in its pinned RuntimeEnvironment via the D26 substrate. The single generic IO component behind every wrapped external tool (D56 §6): a program applies it with the input resource as component input and the script + environment as the component argument, the orchestrator routes it to the language runtime, and `eigenius run` commits the ProgramTrace over the output (D56 §3.1). DECLARED 2026-08-22 (eigenius#210): D56 §7 step 1 added this IRI to the kernel's REMOTE_COMPONENTS and that landed; the matching declaration here never did, so the kernel could DISPATCH the component while no chain could REFERENCE it — every WRN program naming it failed Rule 22's reference-integrity check. No component:argument_type is declared: the argument is a runtime:RuntimeScript, and the `runtime` layer stacks ABOVE `program` in the bootstrap chain, so naming it here would be a cross-layer reference Rule 22 forbids (same-or-lower). The argument is typed where it is dispatched, not here.",
+    "urn:eigenius:core:short_name": "RunRuntimeScript",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:io",
+    "urn:eigenius:program:component:deterministic": false,
+    "urn:eigenius:program:component:fallible": true
+  },
+
+  {
     "@id": "urn:eigenius:program:components:completion:user_prompt",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "User prompt template with {{property_iri}} substitution patterns.",

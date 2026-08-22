@@ -235,7 +235,7 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
 
 // ─── Phase 5: the deliverable ──────────────────────────────────────
 
-resource s18:solution : bench:TaskOutput {
+resource s18:solution : bench:TaskOutput, reflection:DerivedResource {
     bench:task             = "urn:eigenius:bench:sab18:task";
     bench:deliverable_kind = "python_source";
     bench:reasoning_chain  = ["urn:eigenius:bench:sab18:concl_solution_implements"];

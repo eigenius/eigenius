@@ -31,6 +31,12 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED ON THE D73 CLOSE-OUT (`2026-08-22`): two layers, `program` (eigenius#210 declared
+//! `program:components:RunRuntimeScript`, which D56 §7 added to the kernel's REMOTE_COMPONENTS
+//! and never declared here, so the kernel could dispatch a component no chain could reference)
+//! and `reflection` (eigenius#205 added `ExternalExecutionTrace`, the Declared-admitting sibling
+//! of `ProgramTrace`). Folded into ONE reseed with #210's vocabulary work rather than paying two.
+//!
 //! IT FIRED AGAIN (`2026-08-21`), on the D73 batch: three layers at once — `reflection`
 //! (eigenius#200 relaxed `VerificationTrace.derivation_trace` to `recommends` and widened two
 //! descriptions), `reasoning` (eigenius#203 retired the `spec_str` rule) and `encoding`
@@ -56,8 +62,8 @@ use eigenius_kernel::bootstrap::current_manifest;
 const EXPECTED: &str = "\
 core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
 eigentt-type-fragment:5dfce7f7508be045308e77049ea01f749b0e3d84315709dd3be0a5e8187a8577
-program:23d0359ea194547b9dd81c3672d0290278a8db6f171637a273e3efb41c515b1a
-reflection:4cbdbf5e6b7bbc57ef4c8b4118eed6352019e81c1a4f8f66575c80d1c5856d44
+program:224bb234a8651afdeb5144dca0e609afded5a633dd6495f4ae588e44bf855d4e
+reflection:c4c613c9b8391371f6c3346c2248f79f846ae674f5022b629665eee556cdb9a8
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf
 institution:27871f87612484d6469b66a4b0379731152af0c1f8eb04007c8b0343f4648c13
 runtime:4c05dc3b114acb2554e8f8d594a6878f94e8f60f3a512d46eb816d3a030f26cc

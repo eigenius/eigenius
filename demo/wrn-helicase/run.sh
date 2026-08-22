@@ -106,6 +106,10 @@ eig load "$REPO_DIR/experiments/benchmark/base-ontologies/bench-core.esl"
 # list was never updated, so every run has failed at step 3 with
 # UnresolvedClassReference. Its deps are bootstrap-only (core / formats / reflection).
 eig load "$REPO_DIR/experiments/benchmark/harness-ontology.esl"
+# The WRN programs' measurement vocabulary — 33 f64 output keys plus the two input-table
+# schemas. Rule 22 §c requires a property KEY to resolve to a declared core:Property, and none
+# of these was ever declared (eigenius#210), so nothing after phase 1 could load.
+eig load "$WRN/chain/00-wrn-vocabulary.esl"
 eig load "$WRN/chain/01-onco.esl"
 eig load "$WRN/chain/02-literature.esl"
 echo

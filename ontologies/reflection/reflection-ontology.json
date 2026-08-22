@@ -296,8 +296,32 @@
     ]
   },
   {
+    "@id": "urn:eigenius:reflection:ProductionTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A record that some activity PRODUCED a resource — the abstract parent of the traces reflection:derivation can point at. Says only that the resource was produced and that this is the record of it; WHAT KIND OF ACTOR produced it is the concrete subclass's business (eigenius#205): reflection:ProgramTrace for a kernel-initiated run, reflection:ExternalExecutionTrace for an execution an author asserts happened elsewhere. Introduced because `derivation` was typed at ProgramTrace directly, so a class that REQUIRES a derivation could not be attested by a declared-external production at all. Widening the property to this parent makes the link expressible without conflating the two kinds: trace_category still matches the CONCRETE class, so Derived and Declared stay distinct.",
+    "urn:eigenius:core:short_name": "ProductionTrace",
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:resource"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:ExternalExecutionTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ProductionTrace"],
+    "urn:eigenius:core:description": "Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate. Admits IsDeclaredAs, not IsDerivedAs (eigenius#205). Derived holds a trace tied to a KERNEL-INITIATED activity — running a program, invoking an institution, or a query that writes back. Anything else is a declaration that a program ran, with an agent behind it: no f : I -> O, so no specification, so nothing entailed (D73 §3.3). The distinction was previously carried informally in prose: four WRN traces write '(linked-external)' into reflection:source, which is the signal that vocabulary was missing rather than content wrong. NOT a weaker ProgramTrace — a different claim. `source` says where it ran; `declared_by` says who vouches that it did.",
+    "urn:eigenius:core:short_name": "ExternalExecutionTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:resource",
+      "urn:eigenius:reflection:declared_by",
+      "urn:eigenius:reflection:source"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:timestamp",
+      "urn:eigenius:reflection:rationale"
+    ]
+  },
+  {
     "@id": "urn:eigenius:reflection:ProgramTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ProductionTrace"],
     "urn:eigenius:core:description": "Trace recording that a resource was produced by a program (a kernel-evaluated `program` body or an institution-emitted DerivedResource per D49 §6). The minimum shape mirrors DeclarationTrace and ObservationTrace — `resource` (the target IRI), `source` (the program / procedure / institution that produced the resource, as a string), `timestamp` (when it was produced). The richer execution-trace shape (program/started_at/completed_at/trace_tree/output/metrics/etc.) is recommended optional metadata authored by kernel-emitted traces; user-authored ProgramTraces typically only fill the three required fields, matching the witness-emitter contract that reads `reflection:resource` uniformly across all four trace classes.",
     "urn:eigenius:core:short_name": "ProgramTrace",
     "urn:eigenius:core:requires": [
@@ -405,10 +429,10 @@
   {
     "@id": "urn:eigenius:reflection:derivation",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Link to the ProgramTrace that produced this resource.",
+    "urn:eigenius:core:description": "Link to the ProductionTrace recording how this resource was produced. Typed at the PARENT (eigenius#205), so it admits a reflection:ProgramTrace for a kernel-initiated run and a reflection:ExternalExecutionTrace for one an author asserts happened elsewhere. It was typed at ProgramTrace directly, which made a declared-external production unlinkable on any class that requires a derivation — bench:TaskOutput does. Which kind produced it is read off the trace's own class, not this property.",
     "urn:eigenius:core:short_name": "derivation",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"]
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProductionTrace"]
   },
   {
     "@id": "urn:eigenius:reflection:verification",

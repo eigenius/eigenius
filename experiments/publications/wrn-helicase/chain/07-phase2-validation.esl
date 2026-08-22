@@ -67,7 +67,8 @@ namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 // D-HELICASE evidence (helicase required): helicase-dead (K577M) WRN cDNA
 // FAILS to rescue sgWRN-EIJ — a measured non-rescue, not absence of data
 // (Fig. 2b, c). The dual E84A/K577M also fails (helicase loss is sufficient).
-resource wrn:va_fail_k577m : bench:ToolArtifact {
+resource wrn:va_fail_k577m : bench:ToolArtifact, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:tool            = "sgWRN-EIJ rescue assay (KM12 + K577M WRN cDNA)";
     bench:produced_from   = ["wrn-paper:Fig-2b", "wrn-paper:Fig-2c"];
     bench:tool_parameters = "Helicase-dead (K577M) WRN cDNA FAILS to rescue KM12 viability from sgWRN-EIJ (viability stayed impaired — a measured non-rescue): the rescue test is non-significant, GFP-EIJ 0.41 vs K577M-EIJ 0.37, kernel-recomputed two-sample t-test P=0.13 (no rise; if anything slightly lower). dual E84A/K577M also fails. The non-rescue is a NULL (not derivable as a positive warrant), so this stays a Declared measured-non-rescue — the recomputed n.s. p grounds the judgment.";
@@ -76,7 +77,8 @@ resource wrn:va_fail_k577m : bench:ToolArtifact {
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
     );
 }
-resource wrn:va_fail_k577m_trace : reflection:ProgramTrace {
+resource wrn:va_fail_k577m_trace : reflection:ExternalExecutionTrace {
+    reflection:declared_by = wrn:authors;
     reflection:resource  = wrn:va_fail_k577m;
     reflection:source    = "wrn-paper:Fig-2b,c rescue assay (linked-external)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
@@ -194,7 +196,7 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
             DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
             DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
         ),
-        DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
+        DeclaredEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
     );
     reasoning:certificate = type_expr(
         alias
@@ -206,12 +208,12 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
             RA   = onco:RequiresActivity("WRN", "helicase"),
             RULE_P = SEP -> FR -> RA,
             jSEP = DeclaredEvidence(LIT),
-            jFR  = DerivedEvidence(ART),
+            jFR  = DeclaredEvidence(ART),
             cert1 = app(SEP, FR -> RA, DeclaredEvidence(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
         app(FR, RA, reasoning:App(DeclaredEvidence(RULE), jSEP), jFR,
-            cert1, derived(ART, FR))
+            cert1, declared(ART, FR))
     );
 }
 

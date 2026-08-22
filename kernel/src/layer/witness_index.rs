@@ -148,7 +148,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 
 /// Could `resource` ever admit a `ChainWitness`?
 ///
-/// True for the six classes [`layer_admits_witness`] can emit from: the four Trace classes, a
+/// True for the seven classes [`layer_admits_witness`] can emit from: the five Trace classes, a
 /// `reflection:InstitutionEmittedDerivation`, and a `reasoning:ReasoningSentence`. Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
@@ -182,6 +182,11 @@ fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
         wk::OBSERVATION_TRACE => Some(WitnessCategory::Observed),
         wk::PROGRAM_TRACE => Some(WitnessCategory::Derived),
         wk::VERIFICATION_TRACE => Some(WitnessCategory::Verified),
+        // An author recording that a program ran elsewhere (eigenius#205). DECLARED, not Derived:
+        // `Derived` is reserved for a trace tied to a kernel-initiated activity, and a
+        // transcription establishes only that someone asserts the run happened. `declared_by` is
+        // required on the class, so the assertion always has an agent behind it.
+        wk::EXTERNAL_EXECUTION_TRACE => Some(WitnessCategory::Declared),
         _ => None,
     }
 }
