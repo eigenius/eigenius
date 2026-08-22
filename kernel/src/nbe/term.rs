@@ -409,12 +409,15 @@ pub enum PrimitiveType {
 /// a top-level environment (nanoda_lib style); for now the inline
 /// representation keeps the change local to the NbE evaluator.
 ///
-/// Equality is defined by `name` alone — not structural. This matches
-/// the name-based dispatch the kernel uses everywhere (iota reduction,
-/// type checker arm, cross-inductive references). Semantically two
-/// inductive declarations with the same name are the same inductive
-/// (we don't support overloading). The practical payoff: a "stub"
-/// `Arc<InductiveDecl>` carrying just a name can stand in for the
+/// Equality is defined by `iri` alone — not structural. (The comment
+/// here said `name` until eigenius#199; the impl below has compared
+/// `iri` since gh #75 made the IRI the identifier and demoted `name`
+/// to a diagnostic label.) This matches the identity-based dispatch the
+/// kernel uses everywhere (iota reduction, type checker arm,
+/// cross-inductive references). Semantically two inductive
+/// declarations with the same IRI are the same inductive (we don't
+/// support overloading). The practical payoff: a "stub"
+/// `Arc<InductiveDecl>` carrying just the IRI can stand in for the
 /// full declaration at use sites where the full ctor list isn't yet
 /// available (self-references during ctor-type construction, cross-
 /// inductive argument-type references) without breaking type-checker

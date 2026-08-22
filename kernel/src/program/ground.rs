@@ -361,7 +361,7 @@ fn resolve_codata_type(
     };
 
     // Type parameter telescope (empty for non-parameterised codata).
-    let params_telescope = decode_params(class_iri, resource)?;
+    let params_telescope = decode_params(class_iri, resource, layer)?;
 
     // Self-reference stub — mirrors `resolve_inductive_type`'s use of
     // a name-only `InductiveDecl`.
@@ -628,8 +628,8 @@ pub(crate) fn resolve_inductive_type(
         _ => return Err(format!("inductive type '{class_iri}' missing 'short_name'")),
     };
 
-    let params_telescope = decode_params(class_iri, resource)?;
-    let indices_telescope = decode_indices(class_iri, resource)?;
+    let params_telescope = decode_params(class_iri, resource, layer)?;
+    let indices_telescope = decode_indices(class_iri, resource, layer)?;
     let sort = decode_result_sort(class_iri, resource)?;
 
     // Build the self-reference stub used inside constructor types.
@@ -674,6 +674,7 @@ pub(crate) fn resolve_inductive_type(
 fn decode_indices(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
 ) -> Result<Vec<(Patt, Exp)>, String> {
     let indices_iri = Iri::parse(wk::INDICES).unwrap();
     let arr = match resource.get(&indices_iri) {
@@ -707,7 +708,7 @@ fn decode_indices(
             Some(Value::String(s)) => s.as_str(),
             _ => "urn:eigenius:core:Set",
         };
-        let kind_exp = decode_index_kind_str(kind_str);
+        let kind_exp = decode_index_kind_str(kind_str, layer);
         // Anonymous-index encoding: the ESL parser uses "_" as the
         // sentinel name. Honour the encoding by emitting `Patt::Unit`.
         let patt = if name == "_" {
@@ -754,6 +755,7 @@ fn decode_result_sort(
 fn decode_params(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
 ) -> Result<Vec<(Patt, Exp)>, String> {
     let type_params_iri = Iri::parse(wk::TYPE_PARAMS).unwrap();
     let arr = match resource.get(&type_params_iri) {
@@ -787,10 +789,49 @@ fn decode_params(
             Some(Value::String(s)) => s.as_str(),
             _ => "urn:eigenius:core:Set",
         };
-        let kind_exp = decode_param_kind_str(kind_str);
+        let kind_exp = decode_param_kind_str(kind_str, layer);
         params.push((Patt::Var(name), kind_exp));
     }
     Ok(params)
+}
+
+/// Whether `arg_iri` names a declared inductive in the chain, and if so a
+/// name-only stub `InductiveDecl` for it.
+///
+/// **The one rule for a fully-qualified IRI appearing in TYPE position.**
+/// `InductiveDecl` equality is by IRI, so a stub carrying just the IRI and
+/// short name is enough for the type checker's name-based dispatch; we
+/// deliberately do NOT recurse into `resolve_inductive_type` for the target,
+/// which would loop on mutually-referential declarations.
+///
+/// Three decoders reach for this — `decode_arg_type` (constructor argument
+/// types), `decode_index_kind_str` (index telescope) and
+/// `decode_param_kind_str` (parameter telescope). They used to disagree:
+/// only the first consulted the chain, so an inductive named as a
+/// constructor argument decoded to `Exp::InductiveType` while the *same*
+/// inductive named as an index kind decoded to `Exp::EigonClass`. That
+/// disagreement is eigenius#199 — it made `reasoning:JustifiedBy`'s index
+/// #0 (`JustificationTerm`) an `EigonClass` that no inhabitant could check
+/// against, so the one relation carrying the platform's guarantee was the
+/// one whose type the surface language could not express.
+fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>> {
+    let resource_arc = layer.resolve(arg_iri)?;
+    let resource: &crate::ontology::resource::Resource = &resource_arc;
+    if !is_inductive_type(resource) {
+        return None;
+    }
+    let name = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+        Some(Value::String(s)) => s.clone(),
+        _ => arg_iri.local_name().to_string(),
+    };
+    Some(Arc::new(InductiveDecl {
+        iri: arg_iri.clone(),
+        name,
+        params: Vec::new(),
+        indices: Vec::new(),
+        sort: Exp::Sort(1),
+        ctors: Vec::new(),
+    }))
 }
 
 /// Map a chain-side `param_kind` string from a `core:type_params` entry
@@ -805,9 +846,12 @@ fn decode_params(
 ///   at `core:string` and the chain-resident declaration carries that
 ///   IRI verbatim.
 ///
+/// - An IRI naming a declared inductive → `Exp::InductiveType` with a
+///   name-only stub, via [`inductive_stub_for`] (eigenius#199).
+///
 /// Everything else falls through to `Exp::Sort(1)` (Set) — the
 /// forward-compat default that preserves pre-D49 decoder behaviour.
-fn decode_param_kind_str(kind_str: &str) -> Exp {
+fn decode_param_kind_str(kind_str: &str, layer: &Layer) -> Exp {
     match kind_str {
         s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
         s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
@@ -820,7 +864,17 @@ fn decode_param_kind_str(kind_str: &str) -> Exp {
         wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
         wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
         wk::BOOLEAN => Exp::EigonPrimitive(PrimitiveType::Boolean),
-        _ => Exp::Sort(1),
+        // A parameter typed by a declared inductive (eigenius#199).
+        // Before this arm such a kind fell through to `Sort(1)`, so the
+        // parameter was silently typed `Set` — strictly worse than the
+        // index telescope's `EigonClass`, since `Set` accepts anything.
+        other => match Iri::parse(other).ok().and_then(|i| {
+            inductive_stub_for(&i, layer).map(|stub| Exp::InductiveType(stub, Vec::new()))
+        }) {
+            Some(exp) => exp,
+            // Forward-compat default, preserving pre-D49 decoder behaviour.
+            None => Exp::Sort(1),
+        },
     }
 }
 
@@ -832,7 +886,7 @@ fn decode_param_kind_str(kind_str: &str) -> Exp {
 /// through the param-kind matcher; un-`urn:`-prefixed names that
 /// don't parse as IRIs and aren't bare names fall through to
 /// `Sort(1)` as a forward-compat default.
-fn decode_index_kind_str(kind_str: &str) -> Exp {
+fn decode_index_kind_str(kind_str: &str, layer: &Layer) -> Exp {
     match kind_str {
         s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
         s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
@@ -847,7 +901,13 @@ fn decode_index_kind_str(kind_str: &str) -> Exp {
         wk::BOOLEAN => Exp::EigonPrimitive(PrimitiveType::Boolean),
         _ => {
             if let Ok(iri) = Iri::parse(kind_str) {
-                Exp::EigonClass(iri)
+                // A declared inductive decodes to `InductiveType`, matching
+                // what its inhabitants infer to and what `decode_arg_type`
+                // has always produced for the same IRI (eigenius#199).
+                match inductive_stub_for(&iri, layer) {
+                    Some(stub) => Exp::InductiveType(stub, Vec::new()),
+                    None => Exp::EigonClass(iri),
+                }
             } else if !kind_str.contains(':') {
                 Exp::Var(kind_str.to_string())
             } else {
@@ -1152,27 +1212,12 @@ fn decode_arg_type(
     // the target — the stub is enough for name-based dispatch and
     // avoids infinite recursion on mutually-referential decls (out of
     // scope but worth guarding against).
-    if let Some(other_resource_arc) = layer.resolve(&arg_iri) {
-        let other_resource: &crate::ontology::resource::Resource = &other_resource_arc;
-        if is_inductive_type(other_resource) {
-            let other_name = match other_resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
-                Some(Value::String(s)) => s.clone(),
-                _ => arg_iri.local_name().to_string(),
-            };
-            let stub = Arc::new(InductiveDecl {
-                iri: arg_iri.clone(),
-                name: other_name,
-                params: Vec::new(),
-                indices: Vec::new(),
-                sort: Exp::Sort(1),
-                ctors: Vec::new(),
-            });
-            let sub_args: Result<Vec<Exp>, String> = type_args_arr
-                .iter()
-                .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
-                .collect();
-            return Ok(Exp::InductiveType(stub, sub_args?));
-        }
+    if let Some(stub) = inductive_stub_for(&arg_iri, layer) {
+        let sub_args: Result<Vec<Exp>, String> = type_args_arr
+            .iter()
+            .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
+            .collect();
+        return Ok(Exp::InductiveType(stub, sub_args?));
     }
 
     // Any other class IRI: emit an EigonClass marker. The type
@@ -2151,11 +2196,24 @@ mod tests {
         // emits for intermediate index positions ("Prop" / "Set" /
         // "Type:N"). Without this mapping, JustifiedBy and similar
         // sort-indexed predicates can't round-trip through the codec.
-        assert!(matches!(decode_param_kind_str("Prop"), Exp::Sort(0)));
-        assert!(matches!(decode_param_kind_str("Set"), Exp::Sort(1)));
-        assert!(matches!(decode_param_kind_str("Type:0"), Exp::Sort(1)));
-        assert!(matches!(decode_param_kind_str("Type:2"), Exp::Sort(3)));
-        assert!(matches!(decode_param_kind_str("Type:7"), Exp::Sort(8)));
+        let layer = build_test_layer();
+        assert!(matches!(
+            decode_param_kind_str("Prop", &layer),
+            Exp::Sort(0)
+        ));
+        assert!(matches!(decode_param_kind_str("Set", &layer), Exp::Sort(1)));
+        assert!(matches!(
+            decode_param_kind_str("Type:0", &layer),
+            Exp::Sort(1)
+        ));
+        assert!(matches!(
+            decode_param_kind_str("Type:2", &layer),
+            Exp::Sort(3)
+        ));
+        assert!(matches!(
+            decode_param_kind_str("Type:7", &layer),
+            Exp::Sort(8)
+        ));
     }
 
     #[test]
@@ -2163,12 +2221,78 @@ mod tests {
         // Index-kind variant — same Sort-literal coverage as
         // `decode_param_kind_str` plus the bare-name and qualified-IRI
         // paths the index telescope can exercise.
-        assert!(matches!(decode_index_kind_str("Prop"), Exp::Sort(0)));
-        assert!(matches!(decode_index_kind_str("Set"), Exp::Sort(1)));
-        assert!(matches!(decode_index_kind_str("Type:0"), Exp::Sort(1)));
-        assert!(matches!(decode_index_kind_str("Type:5"), Exp::Sort(6)));
+        let layer = build_test_layer();
+        assert!(matches!(
+            decode_index_kind_str("Prop", &layer),
+            Exp::Sort(0)
+        ));
+        assert!(matches!(decode_index_kind_str("Set", &layer), Exp::Sort(1)));
+        assert!(matches!(
+            decode_index_kind_str("Type:0", &layer),
+            Exp::Sort(1)
+        ));
+        assert!(matches!(
+            decode_index_kind_str("Type:5", &layer),
+            Exp::Sort(6)
+        ));
         // Confirm the bare-name path still resolves to a variable so the
         // new Sort-literal arms don't shadow legitimate index references.
-        assert!(matches!(decode_index_kind_str("A"), Exp::Var(ref s) if s == "A"));
+        assert!(matches!(decode_index_kind_str("A", &layer), Exp::Var(ref s) if s == "A"));
+        // A class IRI that is NOT an inductive still decodes to
+        // `EigonClass` — the fix narrows to declared inductives only.
+        assert!(matches!(
+            decode_index_kind_str("urn:eigenius:examples:Animal", &layer),
+            Exp::EigonClass(_)
+        ));
+    }
+
+    #[test]
+    fn index_and_param_kinds_naming_an_inductive_decode_to_inductive_type() {
+        // eigenius#199. `decode_arg_type` has always consulted the chain
+        // and produced `Exp::InductiveType` for an inductive named in a
+        // constructor argument. The index and parameter telescopes did
+        // not: an index kind fell through to `EigonClass`, a param kind
+        // all the way to `Sort(1)`. Since a value of that inductive
+        // infers to `InductiveType`, the index form could never be
+        // satisfied — `reasoning:JustifiedBy`'s type was unwritable.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut builder = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let src = r#"
+            namespace core = "urn:eigenius:core";
+            namespace t    = "urn:eigenius:t";
+            data t:Term { Leaf(core:string), }
+            class t:PlainClass { }
+        "#;
+        let mut b = LayerBuilder::new("t", Some(core));
+        for r in crate::esl::compile(src).expect("test ESL compiles") {
+            b.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        match decode_index_kind_str("urn:eigenius:t:Term", &layer) {
+            Exp::InductiveType(decl, args) => {
+                assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term");
+                assert!(args.is_empty());
+            }
+            other => panic!("index kind naming an inductive decoded to {other:?}"),
+        }
+        match decode_param_kind_str("urn:eigenius:t:Term", &layer) {
+            Exp::InductiveType(decl, _) => assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term"),
+            other => panic!("param kind naming an inductive decoded to {other:?}"),
+        }
+        // A non-inductive class keeps its previous decoding on both paths.
+        assert!(matches!(
+            decode_index_kind_str("urn:eigenius:t:PlainClass", &layer),
+            Exp::EigonClass(_)
+        ));
+        assert!(matches!(
+            decode_param_kind_str("urn:eigenius:t:PlainClass", &layer),
+            Exp::Sort(1)
+        ));
     }
 }
