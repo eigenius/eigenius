@@ -143,6 +143,29 @@ Calling this lazily on first witness lookup (rather than eagerly at Layer constr
 
 ## 7. `IsVerifiedAs` via the Lean → Reasoning comorphism
 
+> **SUPERSEDED `2026-08-21`. Do not implement this section as written.** It specifies recovering the EigenTT
+> proposition by **inverting** D30's forward translation and reifying it as a `reasoning:VerifiedPropositionView`.
+> The replacement is **externalize-and-check**: the Lean institution translates the claim's existing
+> `reflection:canonical_proposition` *into* Lean, Lean returns a proof term, and the baked-in `nanoda_lib` checks
+> that term against the **externalized statement** — so `IsVerifiedAs(iri, P)` is admitted with `P` the claim's own
+> proposition, and no inverse translation exists. Tracked in [#159](https://github.com/eigenius/eigenius/issues/159);
+> see also [D73](d73-justification-logic-witnesses-and-traces.md) §4.1.
+>
+> **Why this section chose the inverse, and why the premise is gone.** When the Lean institution was built,
+> `eigentt:TypeExpr` and the impredicative `Prop` universe did not exist, so Lean's proposition was the only
+> representation available and recovering it was the only option. D46 and D47 removed that constraint.
+>
+> **Why the replacement is better, not merely different.** The forward translation is *total* on the domain that
+> matters — every EigenTT proposition is expressible by construction — whereas the inverse is *partial* over Lean's
+> larger language, which this section itself concedes ("On transform failure … the comorphism reify emits
+> `Verdict::Fails`"). Externalizing also leaves one trusted translation instead of two, and removes the reified
+> `VerifiedPropositionView` entirely.
+>
+> What survives from this section: the *uniformity* requirement — the witness emitter should read a proposition
+> through one path for all four families, not a special case for Lean. Externalization satisfies that by making the
+> claim's own `canonical_proposition` the thing read, which is what the other three families already do.
+
+
 `IsVerifiedAs` is the one case where the proposition `P` is not declared on the resource — it is what the verifier's proof actually inhabits, and the verifier is the only party that knows the answer in its own type theory. An earlier draft of this memo introduced a new `Institution::export_proposition` trait method to surface this; that shape is over-engineered. The cross-institution translation is exactly what a D14 *comorphism* already does, and the witness emitter does not need a special path: it reads `canonical_proposition` from a chain-resident view that the comorphism reifies, identically to the other three witness families.
 
 **Decision: comorphism-reify pattern, no new trait surface.** D39 §7 already declares a Reasoning ↔ Lean comorphism family; the Lean → Reasoning direction is what we need. The witness emitter for `VerificationTrace` (§6) is *uniform across all four witness families* — it always reads `canonical_proposition` from a chain resource. The Lean case is no longer special; it simply reads the property from a comorphism-reified `VerifiedPropositionView` resource rather than from a user-authored `VerifiedResource` directly.

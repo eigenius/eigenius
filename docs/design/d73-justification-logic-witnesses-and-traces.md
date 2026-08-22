@@ -244,13 +244,26 @@ documentation for a path that has never run. The naming is the defect — see §
 (the Lean checker validated the proof, so the proposition holds)."* That path emits nothing. The sentence is not
 merely unearned; it describes a route that does not exist.
 
-**The fix is designed and unbuilt.** [D49](d49-chainwitness-machinery.md) §7 specifies it: a Lean → Reasoning
-comorphism reifies a `reasoning:VerifiedPropositionView` carrying `canonical_proposition` — the EigenTT-form
-proposition obtained by inverting D30's translation — and the witness emitter reads it through the same uniform path
-as the other three families, keyed on the source `VerifiedResource`'s IRI. The kernel comment at
-`witness_index.rs:168` says exactly this: *"becomes a fourth arm when that view exists."*
+**The fix is designed, and the design changed on `2026-08-21`.** [D49](d49-chainwitness-machinery.md) §7 specified
+recovering the EigenTT proposition by **inverting** D30's translation and reifying a
+`reasoning:VerifiedPropositionView`. That section is now superseded. The replacement is **externalize-and-check**:
+the Lean institution translates the claim's existing `canonical_proposition` *into* Lean, Lean returns a proof term,
+and the baked-in `nanoda_lib` checks it against the **externalized statement** — so `IsVerifiedAs(iri, P)` is admitted
+with `P` the claim's own proposition and no inverse exists.
 
-So [#159](https://github.com/eigenius/eigenius/issues/159) is **D49 §7 not implemented**, not an open design question.
+Better on three counts. The forward translation is **total** on the domain that matters, while the inverse is partial
+over Lean's larger language — D49 §7 concedes its own failure mode. It leaves **one** trusted translation instead of
+two, which is what §4.2 is about. And it removes the reified view entirely, so the witness keys on the claim's own
+proposition hash.
+
+D49 §7 chose the inverse because `eigentt:TypeExpr` and the `Prop` universe did not exist when the Lean institution
+was built; D46 and D47 removed that constraint. Same shape of correction this document makes to D39 §8 — a design
+right for its premises, outliving them.
+
+The gap is also one level lower than [#159](https://github.com/eigenius/eigenius/issues/159) states: `checker.rs`
+takes a **`target_name`** and `Holds` means *"every declaration type-checks and the target name resolves"*. Nothing
+compares the named theorem's **statement** to anything. Externalization is what supplies a statement to compare
+against.
 
 ### 4.2 Factivity is relative, and should say so
 
