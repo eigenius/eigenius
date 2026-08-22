@@ -18,7 +18,7 @@
 //! to a EigenTT term. No translation layer needed.
 
 use crate::layer::Layer;
-use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt, PrimitiveType};
+use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt};
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
@@ -968,11 +968,11 @@ fn parse_literal(resource: &Resource) -> Result<Exp, String> {
             if Iri::parse(s).is_ok() && (s.starts_with("urn:") || s.starts_with("http")) {
                 return Ok(Exp::Var(s.clone())); // Resource reference
             }
-            Ok(Exp::EigonPrimitive(PrimitiveType::String)) // String literal
+            Ok(Exp::LitString(s.clone()))
         }
-        Some(Value::Integer(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
-        Some(Value::Float(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
-        Some(Value::Boolean(_)) => Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
+        Some(Value::Integer(n)) => Ok(Exp::LitInt(*n)),
+        Some(Value::Float(f)) => Ok(Exp::LitFloat(*f)),
+        Some(Value::Boolean(b)) => Ok(Exp::LitBool(*b)),
         _ => Ok(Exp::Unit),
     }
 }

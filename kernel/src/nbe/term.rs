@@ -124,6 +124,13 @@ pub enum Exp {
     /// (eigenius#71). Type: `Exp::EigonPrimitive(PrimitiveType::Float)`.
     /// Round-trips through D47 as `LitFloat`.
     LitFloat(f64),
+    /// Literal boolean value at the expression level (eigenius#142).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::Boolean)`. Same shape
+    /// as `LitString` / `LitInt` / `LitFloat` — a closed literal that
+    /// round-trips through D47 as the `LitBool` ctor of
+    /// `eigentt:TypeExpr`. Added so `program:Literal` booleans decode
+    /// to their value rather than to `EigonPrimitive(Boolean)`.
+    LitBool(bool),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),
     /// Template literal with extracted property references.

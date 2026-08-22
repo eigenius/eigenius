@@ -376,7 +376,8 @@ pub fn check_guarded(
         | Exp::EigonResource(_)
         | Exp::LitString(_)
         | Exp::LitInt(_)
-        | Exp::LitFloat(_) => Ok(()),
+        | Exp::LitFloat(_)
+        | Exp::LitBool(_) => Ok(()),
     }
 }
 

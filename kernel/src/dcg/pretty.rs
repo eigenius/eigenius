@@ -111,6 +111,7 @@ pub fn pretty_term(e: &Exp) -> String {
         Exp::LitString(s) => format!("{s:?}"),
         Exp::LitInt(i) => i.to_string(),
         Exp::LitFloat(f) => f.to_string(),
+        Exp::LitBool(b) => b.to_string(),
         // Bounded fallback for any variant not special-cased: the variant kind, never
         // the full Debug (which would inline inductive declarations).
         other => exp_kind(other).to_string(),

@@ -121,7 +121,7 @@ TypeExpr     ::= QualifiedName                                           (* "Nat
               |  '(' ')'                                                 (* unit VALUE, Exp::Unit *)
               |  '(' TypeExpr ':' TypeExpr ')'                           (* annotation — mode switch *)
               |  'alias' AliasBinding (',' AliasBinding)* 'in' TypeExpr  (* compile-time substitution *)
-              |  StringLit | Integer | Float                             (* Exp::LitString / LitInt / LitFloat *)
+              |  StringLit | Integer | Float | 'true' | 'false'          (* Exp::LitString / LitInt / LitFloat / LitBool *)
 
 TypedParams  ::= TypedParam (',' TypedParam)*
               |  '(' TypedParam (',' TypedParam)* ')'   (* outer parens optional *)

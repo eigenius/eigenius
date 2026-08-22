@@ -76,6 +76,9 @@ pub enum Val {
     /// Literal floating-point value (eigenius#71). Type:
     /// `Val::EigonPrimitive(PrimitiveType::Float)`.
     LitFloat(f64),
+    /// Literal boolean value (eigenius#142). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::Boolean)`.
+    LitBool(bool),
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),

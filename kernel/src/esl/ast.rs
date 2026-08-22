@@ -622,6 +622,13 @@ pub enum TypeExpr {
         value: f64,
         pos: Position,
     },
+    /// eigenius#142 — boolean literal in type position. Lowers to
+    /// `Exp::LitBool`. Needed so a D47 term containing the `LitBool`
+    /// ctor prints to ESL source that reparses.
+    LitBool {
+        value: bool,
+        pos: Position,
+    },
     /// eigenius#72 Layer 3 — type-level lambda introduced by `fun`:
     /// `fun (i : T) => body`. Used as a motive for `match … returning
     /// <motive>` over indexed inductives. Compiles to nested
@@ -695,7 +702,8 @@ impl TypeExpr {
             | TypeExpr::Ann { pos, .. }
             | TypeExpr::LitString { pos, .. }
             | TypeExpr::LitInt { pos, .. }
-            | TypeExpr::LitFloat { pos, .. } => pos,
+            | TypeExpr::LitFloat { pos, .. }
+            | TypeExpr::LitBool { pos, .. } => pos,
         }
     }
 }

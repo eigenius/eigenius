@@ -48,7 +48,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "\
 core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
-eigentt-type-fragment:4fb2c97c14e5ef00e1b8e1c842563b2150d19b1cfcf2d8ed245c762a742e057c
+eigentt-type-fragment:5dfce7f7508be045308e77049ea01f749b0e3d84315709dd3be0a5e8187a8577
 program:23d0359ea194547b9dd81c3672d0290278a8db6f171637a273e3efb41c515b1a
 reflection:493baa39ccfd7fdc173cab8e87b83479202d71c631b7403e64d42f339c7ec94e
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf

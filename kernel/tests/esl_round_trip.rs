@@ -178,6 +178,53 @@ fn every_demo_term_round_trips_through_esl() {
     eprintln!("round-tripped {checked} D47 terms from the demo corpus");
 }
 
+/// eigenius#142 — a boolean literal survives ESL source → D47 term → printed ESL → D47 term.
+///
+/// The `LitBool` ctor was added to `eigentt:TypeExpr` for `program:Literal` booleans; without the
+/// matching `true` / `false` surface in `parse_type_expr` the printer would emit source that does
+/// not reparse, which is exactly what `print_then_compile` catches.
+#[test]
+fn boolean_literal_round_trips_through_esl() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+
+    for (literal, json) in [("true", true), ("false", false)] {
+        let src = format!(
+            "namespace rt = \"urn:eigenius:roundtrip\";\n\n\
+             resource rt:probe : rt:Probe {{\n    rt:term = type_expr({literal});\n}}\n"
+        );
+        let resources = esl::compile_against_layer(&src, layer)
+            .unwrap_or_else(|e| panic!("{literal} does not compile: {e:?}"));
+        let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
+            .expect("well-formed IRI");
+        let term = resources
+            .iter()
+            .find_map(|r| match r.get(&iri) {
+                Some(eigenius_kernel::ontology::resource::Value::Json(j)) => Some(j.clone()),
+                _ => None,
+            })
+            .expect("rt:term is a D47 term");
+
+        assert_eq!(
+            term,
+            serde_json::json!({"ctor": "LitBool", "args": [json]}),
+            "`{literal}` in a type position must encode as the LitBool ctor"
+        );
+        assert!(is_d47_term(&term), "LitBool must classify as a D47 ctor");
+        assert_eq!(
+            print_type_expr(&term, &mut Namespaces::new()).expect("prints"),
+            literal
+        );
+
+        let back = print_then_compile(&term, "rt", layer).expect("reparses");
+        assert_eq!(
+            alpha_canonicalize_proposition_json(&term),
+            alpha_canonicalize_proposition_json(&back),
+            "`{literal}` changed across the round trip"
+        );
+    }
+}
+
 /// The printer must REFUSE a term it has no surface for rather than emit something lossy — a
 /// decompiler that drops a subterm yields source compiling to a different chain object.
 #[test]

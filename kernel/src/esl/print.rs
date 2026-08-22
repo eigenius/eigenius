@@ -371,6 +371,11 @@ impl Printer<'_> {
                     }
                 })
                 .ok_or_else(|| self.err("`LitFloat` needs a number", path)),
+            "LitBool" => args
+                .first()
+                .and_then(Value::as_bool)
+                .map(|b| b.to_string())
+                .ok_or_else(|| self.err("`LitBool` needs a boolean", path)),
 
             "UnitVal" => Ok("()".into()),
 
@@ -591,6 +596,7 @@ const D47_CTORS: &[&str] = &[
     "LitString",
     "LitInt",
     "LitFloat",
+    "LitBool",
 ];
 
 /// Whether every constructor in `term` belongs to the D47 set.

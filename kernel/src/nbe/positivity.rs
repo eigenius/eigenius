@@ -364,7 +364,8 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         | Exp::EigonResource(_)
         | Exp::LitString(_)
         | Exp::LitInt(_)
-        | Exp::LitFloat(_) => false,
+        | Exp::LitFloat(_)
+        | Exp::LitBool(_) => false,
     }
 }
 

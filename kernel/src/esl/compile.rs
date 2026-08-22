@@ -376,7 +376,7 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
 ///   later binding is substituted with prior bindings already in env,
 ///   then added to env for subsequent bindings + the body.
 /// - All other variants (`Sort`, `LitString`, `LitInt`, `LitFloat`,
-///   `Arrow`) recurse into their children unchanged.
+///   `LitBool`, `Arrow`) recurse into their children unchanged.
 fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) -> ast::TypeExpr {
     match typ {
         ast::TypeExpr::Unit { .. } => typ.clone(),
@@ -502,7 +502,8 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
         ast::TypeExpr::Sort { .. }
         | ast::TypeExpr::LitString { .. }
         | ast::TypeExpr::LitInt { .. }
-        | ast::TypeExpr::LitFloat { .. } => typ.clone(),
+        | ast::TypeExpr::LitFloat { .. }
+        | ast::TypeExpr::LitBool { .. } => typ.clone(),
     }
 }
 
@@ -1228,7 +1229,8 @@ impl Compiler {
             )),
             ast::TypeExpr::LitString { pos, .. }
             | ast::TypeExpr::LitInt { pos, .. }
-            | ast::TypeExpr::LitFloat { pos, .. } => Err(EslError::compiler(
+            | ast::TypeExpr::LitFloat { pos, .. }
+            | ast::TypeExpr::LitBool { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "literal values are not allowed in chain-value type-expression slots \
                  (codata observation types, etc.); they only appear in Exp-encoded \
@@ -1656,6 +1658,7 @@ impl Compiler {
             ast::TypeExpr::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
             ast::TypeExpr::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
             ast::TypeExpr::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
+            ast::TypeExpr::LitBool { value, .. } => Ok(Exp::LitBool(*value)),
             // Eliminated by the early-return at the top of this fn.
             ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
         }
@@ -1919,7 +1922,8 @@ impl Compiler {
             ast::TypeExpr::Sort { .. }
             | ast::TypeExpr::LitString { .. }
             | ast::TypeExpr::LitInt { .. }
-            | ast::TypeExpr::LitFloat { .. } => encode_leaf(self, typ),
+            | ast::TypeExpr::LitFloat { .. }
+            | ast::TypeExpr::LitBool { .. } => encode_leaf(self, typ),
             // Eliminated by the early-return at the top of this fn.
             ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
         }
