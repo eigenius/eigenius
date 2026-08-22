@@ -280,7 +280,7 @@ change does not fail at all.
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
 | `selections-edited.json` | recorded once | the reading-selection draw for the EDITED variant, replayed. It selects by draw, not by pin, because the negated sentence's pinned skeleton matches three readings differing only in sense — a tie a sense-erased pin cannot break, so the pin arm fails closed there (correctly). |
 | `literature-rules.esl` | — | the pinned `∀m. A → B`, cited — the ONLY DeclarationTrace on the branch |
-| `claims-intact.esl` | `prose-to-esl` | units + encoded claims + DeclarationTraces + decision points |
+| `claims-intact.esl` | `prose-to-esl` | units + encoded claims + DeclarationTraces + decision points + the run's ProgramTrace |
 | `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
 | `inference.esl` | hand-authored | the CONCLUDED claim — the literature rule specialized at the model and applied to sentence 1's own parse |
 

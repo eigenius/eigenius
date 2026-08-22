@@ -30,24 +30,28 @@
 //! ```text
 //!   reference:Reference       the source work every unit hangs off (minted, or cited by IRI)
 //!   enc:ReasoningStructure    the artifact ROOT — the claims, the source, the bytes parsed
+//!   reflection:ProgramTrace ─▶ IsDerivedAs structure   ← the RUN, recorded once
 //! ```
 //!
 //! The root exists so the artifact has a HANDLE: a service returns it, a notebook cell re-opens it,
 //! and a later run has something to supersede (D71 §4.1). Without it the artifact is a bag of
 //! resources whose only membership test is "was in the same file".
 //!
-//! The `DeclarationTrace` makes this **Declared** (eigenius#201 / D73 §6): the parser is a
-//! formulation instrument, so the claim names the AGENT who asserts `P` while the trace's
-//! `reflection:rationale` records which program produced that form from which bytes. A certificate
-//! that cites `declared(claim_iri, P)` still breaks the moment the prose changes and the parser
-//! produces a different `P` — the witness key hashes the proposition — which is the whole point and
-//! is unaffected by the grade.
+//! TWO OBJECTS, TWO CATEGORIES (eigenius#201). Encoding a document produces two kinds of thing:
 //!
-//! What the parse establishes — *"this text parses to this well-typed term"* — is therefore
-//! RECORDED here but not CITABLE: `enc:ScopedUnit` carries no `canonical_proposition`, and no
-//! predicate expresses the artifact fact, so there is nothing for a witness to key on. Before
-//! #201 that fact was citable but mislabelled, as `IsDerivedAs(claim, P)` where `P` was the
-//! DOMAIN proposition — a program establishing a claim about the world, which it never did.
+//!   - THE PROCESS's output — `enc:ReasoningStructure`, a function of (engine, bytes) -> structure.
+//!     A program run, so **Derived**, witnessed by ONE `ProgramTrace` for the run.
+//!   - THE PROPOSITIONS — `enc:EncodedClaim`, **Declared** by a named agent. The parser fixes their
+//!     FORM; it does not assert their content.
+//!
+//! The old shape had this inverted where it counted: no trace on the structure, and N
+//! `ProgramTrace`s on the CLAIMS — one per sentence — each minting `IsDerivedAs(claim, P)` for a
+//! `P` about the world. Wrong CARDINALITY (one run is one execution) and wrong PROPOSITION (the run
+//! establishes what came out of the engine, never that a claim is true).
+//!
+//! A certificate citing `declared(claim_iri, P)` still breaks the moment the prose changes and the
+//! parser produces a different `P` — the witness key hashes the proposition — which is the whole
+//! point and is unaffected by the grade.
 
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
@@ -276,11 +280,10 @@ pub fn emit_resources(
         // (`ParsedClaimGrader::cluster`, D73 §6); this emitter keeps its historical
         // `claim_{n}` / `trace_{n}` naming (committed artifacts regenerate byte-identically)
         // and adds only the document-structural fields the grader does not know about.
-        let provenance = format!(
-            "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
-             chars {}..{} (source sha256 {source_sha256})",
-            s.span.0, s.span.1
-        );
+        //
+        // No per-claim engine provenance: one parse run is one program execution, recorded once on
+        // the root's `ProgramTrace` below. The per-claim SPAN it used to carry alongside the engine
+        // line is already on this unit's `enc:DiscourseUnit` (`enc:span_start` / `enc:span_end`).
         let (mut claim, trace) = match &s.cluster {
             Some((claim, trace)) => (claim.clone(), trace.clone()),
             None => ParsedClaimGrader::cluster(
@@ -288,7 +291,6 @@ pub fn emit_resources(
                 &format!("{ns}:trace_{n}"),
                 s.item.sem(),
                 declared_by,
-                &provenance,
                 timestamp,
                 &[],
             )
@@ -550,6 +552,37 @@ pub fn emit_resources(
             sentences.len(),
             cuts.len()
         )),
+    );
+
+    // ONE ProgramTrace for the RUN (eigenius#201, second pass). The parse is a program execution —
+    // (engine, bytes) -> structure — so it gets exactly one trace, on the run's output. Not one per
+    // sentence: that was the old shape's cardinality error, and each of those N traces additionally
+    // claimed the program had derived a proposition about the world.
+    //
+    // Emitted BEFORE the structure so the IRI it references is defined above it, matching the
+    // ordering discipline the root already follows for `enc:claims`.
+    let run_trace_iri = format!("{ns}:run_trace");
+    let mut run_trace = res(&run_trace_iri, &[&format!("{REFL}:ProgramTrace")]);
+    run_trace.set(
+        iri(&format!("{REFL}:resource")),
+        Value::ResourceRef(iri(&format!("{ns}:structure"))),
+    );
+    run_trace.set(
+        iri(&format!("{REFL}:source")),
+        Value::String(format!(
+            "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
+             (source sha256 {source_sha256})"
+        )),
+    );
+    run_trace.set(
+        iri(&format!("{REFL}:timestamp")),
+        Value::String(timestamp.to_string()),
+    );
+    out.push(run_trace);
+
+    structure.set(
+        iri(&format!("{REFL}:derivation")),
+        Value::ResourceRef(iri(&run_trace_iri)),
     );
     out.push(structure);
 
@@ -878,5 +911,81 @@ mod tests {
             !json.contains("selected_by") && !json.contains("authority_"),
             "the pin arm emits no SelectionAuthority — byte-stability of committed artifacts"
         );
+    }
+
+    /// eigenius#201, second pass: the artifact's TWO objects take opposite epistemic categories,
+    /// and the run gets exactly ONE trace.
+    #[test]
+    fn the_run_is_derived_once_and_the_claims_are_declared() {
+        let it = item();
+        let three = [
+            sentence(&it, SentenceSelection::Sole),
+            sentence(&it, SentenceSelection::Sole),
+            sentence(&it, SentenceSelection::Sole),
+        ];
+        let json = emit(&three);
+        let doc: serde_json::Value = serde_json::from_str(&json).expect("artifact is JSON");
+        let resources = doc["@graph"]
+            .as_array()
+            .or_else(|| doc.as_array())
+            .expect("the artifact is a resource list");
+
+        let class_is = |r: &serde_json::Value, c: &str| {
+            r["urn:eigenius:core:is_a"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(c)))
+        };
+
+        // CARDINALITY is the point: one parse run is one program execution. The old shape emitted
+        // one ProgramTrace per SENTENCE — here that would be three.
+        let program_traces: Vec<_> = resources
+            .iter()
+            .filter(|r| class_is(r, "urn:eigenius:reflection:ProgramTrace"))
+            .collect();
+        assert_eq!(
+            program_traces.len(),
+            1,
+            "exactly one ProgramTrace for the run, over {} sentences",
+            three.len()
+        );
+
+        // ...and it is on the RUN's output, not on a claim.
+        let structure_iri = "urn:eigenius:test:doc:structure";
+        assert_eq!(
+            program_traces[0]["urn:eigenius:reflection:resource"].as_str(),
+            Some(structure_iri),
+            "the run's trace targets the ReasoningStructure"
+        );
+
+        let structure = resources
+            .iter()
+            .find(|r| r["@id"].as_str() == Some(structure_iri))
+            .expect("the artifact has a root");
+        assert!(class_is(
+            structure,
+            "urn:eigenius:encoding:ReasoningStructure"
+        ));
+        assert!(
+            structure["urn:eigenius:reflection:derivation"].is_string()
+                || structure["urn:eigenius:reflection:derivation"].is_object(),
+            "the structure points at its ProgramTrace (required by DerivedResource)"
+        );
+
+        // The propositions are Declared, one trace each, each naming an agent.
+        let decl_traces: Vec<_> = resources
+            .iter()
+            .filter(|r| class_is(r, "urn:eigenius:reflection:DeclarationTrace"))
+            .collect();
+        assert_eq!(
+            decl_traces.len(),
+            three.len(),
+            "one DeclarationTrace per claim"
+        );
+        for t in &decl_traces {
+            assert!(
+                !t["urn:eigenius:reflection:declared_by"].is_null(),
+                "a DeclarationTrace names who declared: {t}"
+            );
+        }
     }
 }

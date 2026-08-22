@@ -74,7 +74,7 @@ logic:bde155e5644cb03e236cd94a501301b878832707d0ba9c6a361fa204ce9e813d
 lexicon:51aa4972dd065159a0124ed22e776819a9016d92a4fdfb4d8841ad56581e81fa
 ontology:12321a1bb48ad9f89071cd6500a0791f4a33a60ced9c4fdaf0e82e6dae9faa70
 closed-class:7c15f2350e7de9e4e1af0291f2cedc2753867265841d09c3be7192dc7f91813d
-encoding:e3694cdda3390cb916686cc72fdc5513347928a774d4cf072edbb8758bac2130
+encoding:eba8626de510a15d3c66811db50847b7a6bd93ed4d39eb9718d04368a6ba608a
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On

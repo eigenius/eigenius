@@ -420,9 +420,32 @@ property enc:confidence : core:float {
 // S6 — ReasoningStructure: the assembled per-document encoding
 // ════════════════════════════════════════════════════════════════════
 
-class enc:ReasoningStructure {
-    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing.";
-    requires enc:claims;
+// DERIVED — and this is the one place in the encoding artifact that genuinely is.
+//
+// THE TWO OBJECTS (eigenius#201, second pass). Encoding a document produces two kinds of thing,
+// and they take opposite epistemic categories:
+//
+//   1. THE PROCESS's output — this class. Applying the parse engine to bytes is a program run:
+//      a function of (engine, source_sha256) -> structure. That is Derived in the plain sense,
+//      witnessed by ONE reflection:ProgramTrace for the run.
+//   2. THE PROPOSITIONS — enc:EncodedClaim, one per claim, DECLARED by a named agent. The parser
+//      chooses the FORM; it does not assert the content.
+//
+// Until 2026-08-22 the artifact had this exactly inverted at the level that mattered: no trace on
+// the structure at all, and N ProgramTraces on the CLAIMS — one per sentence — each minting
+// IsDerivedAs(claim, P) where P was a proposition about the world. Wrong on both counts. Wrong
+// CARDINALITY, because one parse run is one program execution, not one per sentence; and wrong
+// PROPOSITION, because what the run establishes is that this structure came out of this engine
+// over these bytes, never that any claim in it is true.
+//
+// The structure's own proposition needs no new vocabulary. Nothing CITES "the run happened" the way
+// a certificate cites a claim's warrant — it is provenance — so the D39 §4.1 default
+// `Asserts(structure_iri)` is adequate: the structure's identity already pins the engine, the bytes
+// and the claim set.
+
+class enc:ReasoningStructure : reflection:DerivedResource {
+    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing. DERIVED: this is the output of a program run over hashed input, and reflection:derivation points at the single ProgramTrace recording that run. The claims it assembles are Declared, by an agent — the parse fixes their form, not their content.";
+    requires enc:claims, reflection:derivation;
     recommends enc:document, enc:source_path, enc:source_sha256;
 }
 

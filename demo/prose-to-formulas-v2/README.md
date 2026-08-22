@@ -84,7 +84,7 @@ and with it the ranker picks the reading a human had pinned — on both variants
 | `ranks*.json`, `selections*.json`, `proposals*.json`, `kinds*.json` | recorded once each | the four LLM stages' draws, replayed |
 | `onco-typed.esl` | — | domain predicates DEFINED over the parser's lexicon (copied from v1) |
 | `literature-rules.esl` | — | the pinned `∀m. A → B` — the only DeclarationTrace on the branch |
-| `claims-intact.esl` / `claims-edited.esl` | `prose-to-esl` | the artifact: units, claims (with kinds), DeclarationTraces, DecisionPoints, AnaphorBindings |
+| `claims-intact.esl` / `claims-edited.esl` | `prose-to-esl` | the artifact: units, claims (with kinds), DeclarationTraces, DecisionPoints, AnaphorBindings, and one run-level ProgramTrace on the `enc:ReasoningStructure` |
 | `inference.esl` | hand-authored | the recorded derivation citing `claim_1` |
 
 `--chain-load` puts `encoding.esl` + `claim-kind-alignment.esl` on the parse's own chain: the

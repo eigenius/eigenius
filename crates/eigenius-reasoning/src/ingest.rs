@@ -145,7 +145,6 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                     &format!("{ns}:trace_{n}"),
                     item.sem(),
                     &self.declared_by,
-                    &provenance,
                     &self.timestamp,
                     &kinds,
                 )

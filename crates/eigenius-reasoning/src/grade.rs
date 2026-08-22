@@ -61,9 +61,6 @@ const ENCODED_CLAIM_CLASS: &str = "urn:eigenius:encoding:EncodedClaim";
 /// land through this since eigenius#201 / D73 §6; it was a `ProgramTrace` minting `IsDerivedAs`
 /// until `2026-08-21`.
 const DECLARATION_TRACE_CLASS: &str = wk::DECLARATION_TRACE;
-/// `reflection:rationale` — recommended on a `DeclarationTrace`. Carries the parse-provenance line
-/// (which program, which bytes): the reason this proposition was declared in this form.
-const REFLECTION_RATIONALE: &str = "urn:eigenius:reflection:rationale";
 
 /// The epistemic grade of a claim. A **structural projection** of the `JustificationTerm` constructor
 /// (D39) — not a stored field. `Declared` is the honest floor a parsed proposition enters at; it climbs
@@ -129,11 +126,13 @@ pub struct ClaimSource<'a> {
     /// honest value when no agent is known.
     pub declared_by: &'a str,
     pub timestamp: &'a str,
-    /// The program-provenance line the parsed cluster's `DeclarationTrace` records as
-    /// `reflection:rationale` — *which program produced the claim from which bytes* (e.g.
-    /// "DCG parse (D63) of <path> chars a..b (source sha256 …)"). It is the RATIONALE for the
-    /// declaration, not a warrant for it: `declared_by` answers *who asserts*, this answers *how
-    /// the form was arrived at*. Ignored by the curated Declared grader.
+    /// The program-provenance line — *which program produced the claim from which bytes*.
+    ///
+    /// **Recorded once per RUN, on the `enc:ReasoningStructure`'s `ProgramTrace`, not here**
+    /// (eigenius#201 second pass): one parse run is one program execution, so repeating the engine
+    /// line on every claim's trace stated the same fact N times. Retained on `ClaimSource` for the
+    /// curated grader and for callers assembling their own cluster; the parsed grader no longer
+    /// writes it.
     pub provenance: &'a str,
     /// The discourse-KIND classes the claim carries beside its record class (D68 §2 — the
     /// two-axis claim: `is_a = [enc:EncodedClaim, <kinds…>]`, what makes it referable by a
@@ -290,8 +289,12 @@ impl ClaimGrader for DeclaredClaimGrader {
 /// 1. the **`enc:EncodedClaim`** — carries `reflection:canonical_proposition = P` and
 ///    `reflection:declared_by`, the agent taking responsibility for `P`;
 /// 2. its **`reflection:DeclarationTrace`** — `reflection:resource → claim`, the same
-///    `declared_by`, a timestamp, and the parse-provenance line as `reflection:rationale` — which
-///    mints `IsDeclaredAs(claim_iri, P)` into the witness index at commit.
+///    `declared_by` and a timestamp — which mints `IsDeclaredAs(claim_iri, P)` into the witness
+///    index at commit.
+///
+/// The RUN that produced the form is recorded once, elsewhere: the `enc:ReasoningStructure` is a
+/// `reflection:DerivedResource` whose single `ProgramTrace` names the engine and the input bytes.
+/// Two objects, two categories — the process is Derived, the propositions are Declared.
 ///
 /// Downstream certificates cite `declared(claim_iri, P, _)`.
 ///
@@ -320,7 +323,6 @@ impl ParsedClaimGrader {
         trace_iri: &str,
         proposition: &Exp,
         declared_by: &str,
-        provenance: &str,
         timestamp: &str,
         kind_classes: &[Iri],
     ) -> Result<(Resource, Resource), GradeError> {
@@ -350,12 +352,6 @@ impl ParsedClaimGrader {
             iri(REFLECTION_DECLARED_BY)?,
             Value::ResourceRef(iri(declared_by)?),
         );
-        // The parse-provenance line: which program produced this term from which bytes. The
-        // RATIONALE for the declaration, not a warrant for it (eigenius#201).
-        trace.set(
-            iri(REFLECTION_RATIONALE)?,
-            Value::String(provenance.to_string()),
-        );
         trace.set(
             iri(REFLECTION_TIMESTAMP)?,
             Value::String(timestamp.to_string()),
@@ -373,7 +369,6 @@ impl ClaimGrader for ParsedClaimGrader {
             &trace_iri,
             proposition,
             source.declared_by,
-            source.provenance,
             source.timestamp,
             source.kind_classes,
         )?;

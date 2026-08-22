@@ -301,8 +301,34 @@ responsibility for the proposition. Which agent depends on the use, and the two 
 | encoding a source document | the document's authors — e.g. `wrn:authors` |
 | an agent formulating its own claim | the agent running the pipeline |
 
-In both, the parse contributes **form and fidelity, never warrant**. The `ProgramTrace` stays attached to the encoding
-artifact and witnesses the inhabitation fact of §3.3; the claim cites an agent.
+In both, the parse contributes **form, never warrant**. The `ProgramTrace` stays attached to the encoding artifact and
+witnesses the inhabitation fact of §3.3; the claim cites an agent.
+
+### 6.1 Which artifact, and how many traces
+
+*"Attached to the encoding artifact"* was under-specified, and the first implementation pass read it as *"attached to
+the claim"* — the only per-sentence resource in reach — and so deleted the trace rather than moving it. Settled
+`2026-08-22`: **encoding a document produces two objects, and they take opposite categories.**
+
+| object | class | category | trace | how many |
+|---|---|---|---|---|
+| the run's output | `enc:ReasoningStructure` | **Derived** | `ProgramTrace` → structure | **one per run** |
+| each proposition | `enc:EncodedClaim` | **Declared** | `DeclarationTrace` → claim | one per claim |
+
+`enc:ReasoningStructure` is the right target because it already *is* the run's output: it carries `enc:source_path`
+("the run's input location") and `enc:source_sha256` ("the exact bytes this structure was derived from"). It is a
+function of (engine, bytes) → structure, which is Derived in the plain sense of §4.
+
+The old shape was wrong twice over, and the second error hid the first. It minted **N** `ProgramTrace`s for **one**
+program execution — one per sentence — so the cardinality never matched the process; and each of them keyed
+`IsDerivedAs(claim, P)` on a `P` about the world, so a certificate citing one read as *a program established P*.
+
+Nothing needs a new predicate. A certificate cites a claim's warrant; nothing cites *"the run happened"* — that is
+provenance — so the §4.1 default `Asserts(structure_iri)` suffices, the structure's identity having already pinned the
+engine, the bytes and the claim set.
+
+This also places the parse inside the rule of eigenius#205: a run through D71's service is **kernel-initiated**, so its
+`ProgramTrace` is a legitimately kernel-minted Derived witness rather than one an author wrote down.
 
 D71's architecture already has the joint: generation is decoupled from commitment, and the notebook's `land` flag is
 the agent's act of taking responsibility — the moment a formulation becomes an assertion.
