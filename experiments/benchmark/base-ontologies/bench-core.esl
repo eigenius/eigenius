@@ -35,8 +35,8 @@ namespace bench      = "urn:eigenius:benchmark";
 
 // ── Typed tool boundary ──────────────────────────────────────────────
 
-class bench:ToolArtifact : reflection:DerivedResource {
-    description = "The typed output of running an external tool/library on typed inputs. The kernel checks the boundary (the named tool + the input resources + the inherited derivation trace), not the internal computation. Every RDKit/pymatgen/sklearn/scanpy output in the pilot is a ToolArtifact.";
+class bench:ToolArtifact {
+    description = "The typed output of running an external tool/library on typed inputs. The kernel checks the boundary (the named tool + the input resources + the production trace), not the internal computation. Every RDKit/pymatgen/sklearn/scanpy output in the pilot is a ToolArtifact. EPISTEMICALLY NEUTRAL, and each instance declares its own status alongside this class (eigenius#166): `is_a = [bench:ToolArtifact, reflection:DerivedResource]` when the KERNEL ran the tool, `[bench:ToolArtifact, reflection:DeclaredResource]` when an author records that a tool ran elsewhere. The shape of the artifact and the warrant behind it are independent axes — the same split D68 §2 draws between a claim's discourse kind and its epistemic source. This class subclassed reflection:DerivedResource until 2026-08-22, which made every transcription claim a derivation it did not have.";
     requires bench:tool, bench:produced_from;
     recommends bench:tool_parameters;
 }

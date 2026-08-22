@@ -254,7 +254,7 @@ resource s16:concl_solution_implements : reasoning:ReasoningSentence {
 // binds it to its source via reasoning_chain. Per-compound results are the
 // program's OUTPUT, not individually reasoned.
 
-resource s16:solution : bench:TaskOutput {
+resource s16:solution : bench:TaskOutput, reflection:DerivedResource {
     bench:task             = "urn:eigenius:bench:sab16:task";
     bench:deliverable_kind = "python_source";
     bench:reasoning_chain  = ["urn:eigenius:bench:sab16:concl_solution_implements"];

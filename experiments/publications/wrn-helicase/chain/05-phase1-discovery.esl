@@ -78,7 +78,8 @@ resource wrn:h1_trace : reflection:DeclarationTrace {
 // commits wrn:dd_achilles:result under a ProgramTrace -> IsDerivedAs witness.
 // This node is the narrative anchor the C-WRN certificate cites; running the
 // program emits the live witness carrying the same canonical_proposition.
-resource wrn:dd_achilles : bench:ToolArtifact {
+resource wrn:dd_achilles : bench:ToolArtifact, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:tool            = "R limma::lmFit/eBayes moderated-t (D56 wrapped-R over a D53 PinnedExternalFile); reproduced live: WRN rank 1, Q = 4.81e-24 (vs paper 4.8e-24, CRISPR/Achilles)";
     bench:produced_from   = ["urn:eigenius:pub:wrn:ds_achilles", "urn:eigenius:pub:wrn:ds_supp1"];
     bench:tool_parameters = "MSI vs MSS differential dependency over 17,634 genes via limma moderated-t (3-file MSI join: DepMap_ID -> sample_info CCLE_name -> Supp Table 1 CCLE_MSI); WRN rank = 1; reproduced Q = 4.81e-24.";
@@ -95,7 +96,8 @@ resource wrn:dd_achilles_trace : reflection:ExternalExecutionTrace {
 }
 
 // D-DIFF (DRIVE): same, independent RNAi screen. Paper Q = 1.5e-45.
-resource wrn:dd_drive : bench:ToolArtifact {
+resource wrn:dd_drive : bench:ToolArtifact, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:tool            = "R limma::lmFit/eBayes + BH (mean-diff + ranking recomputed; moderated-t Q linked, Phase 2.5)";
     bench:produced_from   = ["urn:eigenius:pub:wrn:ds_drive", "urn:eigenius:pub:wrn:ds_supp1"];
     bench:tool_parameters = "MSI vs MSS differential dependency; WRN rank = 1; paper Q = 1.5e-45 (RNAi/DRIVE).";
@@ -205,7 +207,8 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
 // TaskOutput, deliverable_kind = "prose"); reasoning_chain points at the
 // four warranted conclusions that compose it.
 
-resource wrn:discovery_finding : bench:TaskOutput {
+resource wrn:discovery_finding : bench:TaskOutput, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:task             = "urn:eigenius:pub:wrn:question_msi_vulnerability";
     bench:deliverable_kind = "prose";
     bench:payload = "Computational discovery (DepMap Achilles CRISPR + Project DRIVE RNAi): WRN, a RecQ DNA helicase, is the top preferential dependency in microsatellite-unstable (MSI) vs microsatellite-stable (MSS) cancer cell lines, independently in both screens; it is the only MSI-selective member of the RecQ helicase family; MSI is a strong biomarker for WRN dependency (comparable to KRAS/BRAF); and WRN dependency tracks mutator load within MSI lines. The biomarker is lineage-restricted — the common MSI lineages carry a higher microsatellite-deletion load than uncommon ones (ED Fig 2b) — and the dependence is modulated but not abolished by TP53 status (largely p53-independent). Conclusion: WRN is selectively essential in MSI cancers.";

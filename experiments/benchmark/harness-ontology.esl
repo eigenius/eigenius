@@ -26,8 +26,8 @@ namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
 namespace bench      = "urn:eigenius:benchmark";
 
-class bench:TaskOutput : reflection:DerivedResource {
-    description = "Chain-resident deliverable handle for a benchmark task (D50 §5b): the artifact the task asked for, plus the ReasoningSentences that justified its construction. A DerivedResource — the deliverable is derived from the reasoning chain + the agent loop that produced it.";
+class bench:TaskOutput {
+    description = "Chain-resident deliverable handle for a benchmark task (D50 §5b): the artifact the task asked for, plus the ReasoningSentences that justified its construction. EPISTEMICALLY NEUTRAL, like bench:ToolArtifact (eigenius#166): a deliverable an agent loop produced declares `reflection:DerivedResource` beside this class; one an author records declares `reflection:DeclaredResource`. `reflection:derivation` stays REQUIRED either way — every deliverable has a production record — and since eigenius#205 that property is typed at reflection:ProductionTrace, so the record may be a ProgramTrace or an ExternalExecutionTrace. Which it is says what kind of actor produced the deliverable; this class no longer prejudges it.";
     requires bench:task,
              bench:deliverable_kind,
              bench:payload,

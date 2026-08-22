@@ -58,7 +58,8 @@ class wrn:XenograftTable : reflection:ObservedResource {
 }
 
 // Linked-external: the C911 seed-matched control is inert in vivo.
-resource wrn:vivo_seed_control : bench:ToolArtifact {
+resource wrn:vivo_seed_control : bench:ToolArtifact, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:tool            = "C911 seed-control xenograft (shWRN1 vs shWRN1-C911)";
     bench:produced_from   = ["wrn-paper:Fig-2d"];
     bench:tool_parameters = "shWRN1-C911 (nt 9-11 of shWRN1 mutated to complement, preserving the off-target 'seed') does NOT impair KM12 xenograft growth, whereas on-target shWRN1 does. The seed-matched control is inert. LINKED-EXTERNAL.";
@@ -235,7 +236,8 @@ resource wrn:concl_paralog : reasoning:ReasoningSentence {
 // the Chk2(T68) western blot (ED 7e — band levels, no per-cell numeric data) and
 // the shRNA in-vitro/in-vivo γH2AX confirmation (Fig 2e / ED 7e, CRISPR-artifact
 // control). No source-data sheet exists for either.
-resource wrn:mech_dsb : bench:ToolArtifact {
+resource wrn:mech_dsb : bench:ToolArtifact, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
     bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
     bench:tool_parameters = "WRN silencing substantially increased γH2AX and 53BP1 foci (DSB markers) in MSI but not MSS cells; corroborated by increased phospho-ATM(S1981) foci and Chk2(T68) phosphorylation; confirmed with shRNA in vitro and in vivo (not a CRISPR/Cas9 artifact). LINKED-EXTERNAL.";
@@ -419,7 +421,8 @@ resource wrn:concl_mech : reasoning:ReasoningSentence {
 // after shWRN1 induction directly showed diffuse chromosomal DSBs WITHOUT
 // telomeric end-to-end fusions or signal loss — ruling out a telomere defect
 // as the basis of the synthetic lethality.
-resource wrn:fish_readout : bench:ToolArtifact {
+resource wrn:fish_readout : bench:ToolArtifact, reflection:DeclaredResource {
+    reflection:declared_by = wrn:authors;
     bench:tool            = "telomere PNA-FISH of metaphase spreads (± shWRN1)";
     bench:produced_from   = ["wrn-paper:Fig-4d", "wrn-paper:Fig-4e", "wrn-paper:ED-Fig-8a"];
     bench:tool_parameters = "WRN silencing induced DSB/fragmentation throughout chromosomes in MSI but not MSS cells, with NO specific telomeric defects (no increased end-to-end fusions, no telomeric signal loss). The synthetic lethality is not via a telomere defect — an explicitly tested-and-rejected hypothesis. LINKED-EXTERNAL.";
