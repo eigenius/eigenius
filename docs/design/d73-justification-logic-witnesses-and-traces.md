@@ -83,6 +83,34 @@ Different consumers want different projections, and a scalar answers only one of
 The last one is the point. A stored category cannot answer a counterfactual; a retained polynomial can. This is what
 justification logic buys over modal epistemic logic, and D39 §8 spends it.
 
+**Built `2026-08-22` (eigenius#204)**, as `reasoning:qc_project_justification` — an OnDemand query class on the
+Reasoning institution, not EigenQL. EigenQL was the natural home and cannot host it: a `JustificationTerm` is a
+recursive D47 tagged-dict inside a single property value, `Clause` is `Pattern | Fiber`, patterns match triples, and
+the AST has no recursion construct. The term is opaque to it.
+
+Everything above is one function plus readings of its output. A term's **support** is its disjunctive normal form —
+the alternative minimal ground-sets, any one of which carries the conclusion:
+
+| term | support |
+|---|---|
+| a grounding leaf `L` | `{{L}}` |
+| `App(a, b)` | `{ sa ∪ sb : sa ∈ support(a), sb ∈ support(b) }` — conjunctive |
+| `Sum(a, b)` | `support(a) ∪ support(b)` — **disjunctive** |
+| `SpecStr(j, tag)` | `support(j)` — specialization changes what is concluded, not what it rests on |
+
+*"Every leaf is `VerifiedEvidence` on some spanning sub-polynomial"* is then an **existential over alternatives**, and
+that existential is load-bearing: a conclusion resting on `Sum(VerifiedEvidence(a), DeclaredEvidence(b))` IS fully
+verified, because the `a` branch carries it alone. Reading `Sum` conjunctively understates every conclusion that has a
+fallback — which is the shape a careful author writes, and precisely what D39 §8's propagation rule got wrong.
+
+The exposure questions (*what does it rest on*, *which measurements*) read as a **union** across alternatives: a ground
+appearing on any branch is one the conclusion may rest on.
+
+`App` over `Sum` multiplies, so support is exponential in nested alternatives. Real terms are small — the largest on
+the WRN chain is three grounds — but the bound is real, so the projection **refuses past a cap rather than truncating**:
+every one of these answers reads as exhaustive, and a quiet truncation would make each of them wrong in the
+safe-looking direction.
+
 **`reflection:epistemic_status` on a reasoning sentence is therefore denormalization** — a cached projection that can
 drift from the term it summarizes. It may be kept as a materialized query result; it must not be the source of truth.
 
@@ -391,7 +419,9 @@ Withdrawn: **§8 in its entirety**, and §10's factivity parenthetical.
 
 1. **(a), the unwritable type** — prerequisite for testing anything else at the ESL level.
 2. **D49 §7**, the `VerifiedPropositionView` comorphism — closes #159 and makes `VerifiedEvidence` mean what D39 said.
-3. **Withdraw §8's stored category**; expose the projections of §1.2 as queries over the retained term.
+3. **Withdraw §8's stored category**; expose the projections of §1.2 as queries over the retained term. — *Done: the
+   withdrawal was free (§8 was never implemented); the queries landed `2026-08-22` as
+   `reasoning:qc_project_justification` (eigenius#204).*
 4. **Warrant formalization** as an ongoing activity, measured by §3.1's leaf count.
 
 Steps 1 and 2 are independent. Step 3 depends on nothing but is a vocabulary change with consumers.
@@ -412,5 +442,8 @@ Steps 1 and 2 are independent. Step 3 depends on nothing but is a vocabulary cha
    bad name: nothing in the kernel ever created a `VerificationTrace`. Fixed by giving `trace_category` its fourth
    arm and having the reasoning institution mint a trace on a passing check. Cost: no constructor change, no
    migration of the 22 WRN citations, `JustificationTerm` unchanged at seven constructors.
-5. **Does `reflection:epistemic_status` survive as a materialized query result**, or is it removed? §1.2 says it must
-   not be the source of truth; it does not say it must not exist.
+5. ~~**Does `reflection:epistemic_status` survive as a materialized query result?**~~ **Decided `2026-08-22`
+   (eigenius#204): it stays what it already is and the projections are separate.** Nothing ever computed it from a
+   term — it is written in one place, for program outputs — so there was no cached projection to keep or remove, and
+   `qc_project_justification` returns a `JustificationProjection` rather than writing a scalar back. A materialized
+   projection can be added later against a built query; adding vocabulary for one first would have been speculative.

@@ -375,6 +375,105 @@ resource reasoning:qc_consistency_check : institution:QueryClass {
     institution:institution_ref = reasoning:reasoning_institution;
 }
 
+// ════════════════════════════════════════════════════════════════════
+// Justification projections (D73 §1.2, eigenius#204)
+// ════════════════════════════════════════════════════════════════════
+//
+// WHAT THE POLYNOMIAL IS FOR. D39 §8 specified collapsing a JustificationTerm to a scalar grade at
+// commit. It was never implemented and D73 withdrew it — but its replacement was never built
+// either, which left the term retained and nothing able to ask anything of it. These are the
+// questions §1.2 argues the retained term can answer and a stored scalar cannot:
+//
+//   is this fully verified?              every ground of SOME alternative is VerifiedEvidence
+//   what does it rest on unproved?       the DeclaredEvidence grounds
+//   which agents are we trusting?        declared_by of those grounds (expressible since D72)
+//   which measurements?                  the ObservedEvidence grounds
+//   would it survive losing X?           SOME alternative cites X nowhere
+//
+// The last one is the argument for the whole document. A scalar records what the grounds CAME TO,
+// not what they were, so there is nothing left to recompute over; the polynomial keeps them.
+//
+// ONE QUERY, NOT ONE PER QUESTION. Computing the term's support — its disjunctive normal form — is
+// the whole cost; slicing that support is free. A projection_kind enum to choose a slice would be
+// ceremony, so the result carries every slice and the one genuinely parameterised question (the
+// counterfactual) rides an optional input.
+//
+// SUM IS DISJUNCTIVE, and getting that wrong is exactly what D39 §8's propagation rule did. A
+// conclusion resting on Sum(VerifiedEvidence(a), DeclaredEvidence(b)) IS fully verified — the `a`
+// branch carries it alone. Reading Sum conjunctively understates every conclusion with a fallback,
+// which is the shape a careful author writes.
+
+class reasoning:ProjectionRequest {
+    description = "Input to qc_project_justification (D73 §1.2): ask what a committed ReasoningSentence's JustificationTerm rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
+    requires reasoning:subject_sentence;
+    recommends reasoning:counterfactual_iri;
+}
+
+property reasoning:subject_sentence : core:resource {
+    description = "The ReasoningSentence whose JustificationTerm is being projected.";
+    class_types reasoning:ReasoningSentence;
+}
+
+property reasoning:counterfactual_iri : core:string {
+    description = "An IRI to withdraw: would the conclusion still stand without it? Answered in reasoning:survives_without. A plain string, not a resource reference — the question is asked ABOUT a citation, and asking it of an IRI the chain no longer resolves is the point, so Rule 22's closed-world check must not apply.";
+    format = formats:iri;
+}
+
+class reasoning:JustificationProjection {
+    description = "The result of projecting a JustificationTerm: its support (the alternative minimal ground-sets, any one of which carries the conclusion) read along each axis D73 §1.2 names. A REPORT, never an assertion — it states what the term rests on, not that any of it is true, and carries no canonical_proposition for that reason.";
+    requires reasoning:subject_sentence, reasoning:support_count, reasoning:fully_verified;
+    recommends reasoning:declared_grounds, reasoning:observed_grounds, reasoning:derived_grounds,
+               reasoning:verified_grounds, reasoning:counterfactual_iri, reasoning:survives_without;
+}
+
+property reasoning:support_count : core:integer {
+    description = "How many alternative ground-sets the term admits. 1 means a single chain of dependencies with no fallback; >1 means Sum offered alternatives.";
+    domain reasoning:JustificationProjection;
+}
+
+property reasoning:fully_verified : core:boolean {
+    description = "Whether EVERY ground of SOME alternative is VerifiedEvidence. Existential over alternatives because Sum is disjunctive: one fully-verified branch verifies the conclusion even where another rests on a declaration.";
+    domain reasoning:JustificationProjection;
+}
+
+property reasoning:declared_grounds : core:value_array {
+    description = "The IRIs cited by DeclaredEvidence grounds — what the conclusion rests on that nobody proved. A UNION across alternatives, not an intersection: this is a question about exposure, and a ground appearing on any branch is one the conclusion may rest on. Pair with reflection:declared_by on each to get 'which agents are we trusting' (answerable only since D72 made declared_by a resolvable Agent).";
+    element_type = core:string;
+    domain reasoning:JustificationProjection;
+}
+
+property reasoning:observed_grounds : core:value_array {
+    description = "The IRIs cited by ObservedEvidence grounds — which measurements the conclusion rests on. Union across alternatives, as for declared_grounds.";
+    element_type = core:string;
+    domain reasoning:JustificationProjection;
+}
+
+property reasoning:derived_grounds : core:value_array {
+    description = "The IRIs cited by DerivedEvidence grounds — which program outputs the conclusion rests on. Union across alternatives.";
+    element_type = core:string;
+    domain reasoning:JustificationProjection;
+}
+
+property reasoning:verified_grounds : core:value_array {
+    description = "The IRIs cited by VerifiedEvidence grounds — which checked proofs the conclusion rests on. Union across alternatives.";
+    element_type = core:string;
+    domain reasoning:JustificationProjection;
+}
+
+property reasoning:survives_without : core:boolean {
+    description = "Whether SOME alternative cites reasoning:counterfactual_iri nowhere — would the conclusion still stand having lost it. Present only when the request named one. THE counterfactual D73 §1.2 argues the retained polynomial buys: a stored scalar grade cannot answer it, because it records what the grounds came to rather than what they were.";
+    domain reasoning:JustificationProjection;
+}
+
+resource reasoning:qc_project_justification : institution:QueryClass {
+    core:description = "OnDemand: project a committed ReasoningSentence's JustificationTerm onto the axes of D73 §1.2 — is it fully verified, what does it rest on unproved, which measurements, and would it survive losing a named IRI. Returns a JustificationProjection, not a Verdict: this reports what the term rests on, it does not judge it.";
+    institution:query_class = reasoning:ProjectionRequest;
+    institution:result_class = reasoning:JustificationProjection;
+    institution:dispatch_role = [dispatch:on_demand];
+    institution:query_handler = proc:project_justification;
+    institution:institution_ref = reasoning:reasoning_institution;
+}
+
 // ── Reasoning → Lean comorphism — deferred to gh #73 ─────────────────
 //
 // Per D39 §7, the Reasoning institution should declare a bidirectional

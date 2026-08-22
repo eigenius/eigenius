@@ -69,6 +69,22 @@ pub fn extract_justification(
     sentence: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<Val, InstitutionError> {
+    let exp = justification_exp(sentence, ctx)?;
+    eval(&exp, &Rho::Nil).map_err(|e| {
+        InstitutionError::ComputationFailed(format!("failed to evaluate justification: {e:?}"))
+    })
+}
+
+/// The same decode, stopped one step earlier: the SYNTACTIC `Exp::InductiveCtor` tree.
+///
+/// [`extract_justification`] evaluates this into a `Val` because the validate handler needs a value
+/// to build `JustifiedBy(j, p)` from. The projections of D73 §1.2 want the opposite — they walk the
+/// constructor application itself, since a `JustificationTerm` IS its tree and evaluating it only
+/// obscures the shape (eigenius#204).
+pub fn justification_exp(
+    sentence: &Resource,
+    ctx: &ExecutionContext,
+) -> Result<Exp, InstitutionError> {
     let value = sentence
         .get(&Iri::parse(iris::PROP_JUSTIFICATION).expect("static IRI"))
         .ok_or_else(|| {
@@ -93,12 +109,8 @@ pub fn extract_justification(
         }
     };
 
-    let exp = chain_value_to_exp(value, &jt_decl).map_err(|e| {
-        InstitutionError::ComputationFailed(format!("malformed justification: {e}"))
-    })?;
-    eval(&exp, &Rho::Nil).map_err(|e| {
-        InstitutionError::ComputationFailed(format!("failed to evaluate justification: {e:?}"))
-    })
+    chain_value_to_exp(value, &jt_decl)
+        .map_err(|e| InstitutionError::ComputationFailed(format!("malformed justification: {e}")))
 }
 
 /// Decode a D32 §3.7-shaped chain inductive value into the kernel's

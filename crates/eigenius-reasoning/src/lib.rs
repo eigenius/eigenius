@@ -63,6 +63,7 @@ pub mod extract;
 pub mod grade;
 pub mod ingest;
 pub mod institution;
+pub mod project;
 pub mod startup;
 pub mod validate;
 

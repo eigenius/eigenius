@@ -71,6 +71,20 @@ pub mod iris {
     /// over a committed-sentence set. v1 returns NotImplemented (Phase 7).
     pub const PROC_CONSISTENCY_CHECK: &str = "urn:eigenius:reasoning:proc:consistency_check";
 
+    /// D73 §1.2 / eigenius#204 — project a retained JustificationTerm onto its support.
+    pub const PROC_PROJECT_JUSTIFICATION: &str =
+        "urn:eigenius:reasoning:proc:project_justification";
+    pub const JUSTIFICATION_PROJECTION: &str = "urn:eigenius:reasoning:JustificationProjection";
+    pub const PROP_SUBJECT_SENTENCE: &str = "urn:eigenius:reasoning:subject_sentence";
+    pub const PROP_COUNTERFACTUAL_IRI: &str = "urn:eigenius:reasoning:counterfactual_iri";
+    pub const PROP_SUPPORT_COUNT: &str = "urn:eigenius:reasoning:support_count";
+    pub const PROP_FULLY_VERIFIED: &str = "urn:eigenius:reasoning:fully_verified";
+    pub const PROP_DECLARED_GROUNDS: &str = "urn:eigenius:reasoning:declared_grounds";
+    pub const PROP_OBSERVED_GROUNDS: &str = "urn:eigenius:reasoning:observed_grounds";
+    pub const PROP_DERIVED_GROUNDS: &str = "urn:eigenius:reasoning:derived_grounds";
+    pub const PROP_VERIFIED_GROUNDS: &str = "urn:eigenius:reasoning:verified_grounds";
+    pub const PROP_SURVIVES_WITHOUT: &str = "urn:eigenius:reasoning:survives_without";
+
     // Property IRIs on ReasoningSentence — used by the validate handler
     // to read the three fields.
     pub const PROP_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
@@ -157,6 +171,9 @@ impl Institution for ReasoningInstitution {
             iris::PROC_VALIDATE_JUSTIFICATION => do_validate_justification(self, input, ctx),
             iris::PROC_ENTAILMENT_QUERY => do_entailment_query(input, ctx),
             iris::PROC_CONSISTENCY_CHECK => do_consistency_check(input, ctx),
+            iris::PROC_PROJECT_JUSTIFICATION => {
+                crate::project::do_project_justification(input, ctx)
+            }
             _ => Err(InstitutionError::NotImplemented(format!(
                 "ReasoningInstitution has no query handler for procedure `{procedure_iri}`"
             ))),
