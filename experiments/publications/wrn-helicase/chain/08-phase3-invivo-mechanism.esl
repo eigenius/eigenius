@@ -62,6 +62,7 @@ resource wrn:vivo_seed_control : bench:ToolArtifact {
     bench:tool            = "C911 seed-control xenograft (shWRN1 vs shWRN1-C911)";
     bench:produced_from   = ["wrn-paper:Fig-2d"];
     bench:tool_parameters = "shWRN1-C911 (nt 9-11 of shWRN1 mutated to complement, preserving the off-target 'seed') does NOT impair KM12 xenograft growth, whereas on-target shWRN1 does. The seed-matched control is inert. LINKED-EXTERNAL.";
+    reflection:derivation = wrn:vivo_seed_control_trace;
     reflection:canonical_proposition = type_expr(
         onco:SeedControlInert("WRN", "xenograft_growth")
     );
@@ -238,6 +239,7 @@ resource wrn:mech_dsb : bench:ToolArtifact {
     bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
     bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
     bench:tool_parameters = "WRN silencing substantially increased γH2AX and 53BP1 foci (DSB markers) in MSI but not MSS cells; corroborated by increased phospho-ATM(S1981) foci and Chk2(T68) phosphorylation; confirmed with shRNA in vitro and in vivo (not a CRISPR/Cas9 artifact). LINKED-EXTERNAL.";
+    reflection:derivation = wrn:mech_dsb_trace;
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
     );
@@ -421,6 +423,7 @@ resource wrn:fish_readout : bench:ToolArtifact {
     bench:tool            = "telomere PNA-FISH of metaphase spreads (± shWRN1)";
     bench:produced_from   = ["wrn-paper:Fig-4d", "wrn-paper:Fig-4e", "wrn-paper:ED-Fig-8a"];
     bench:tool_parameters = "WRN silencing induced DSB/fragmentation throughout chromosomes in MSI but not MSS cells, with NO specific telomeric defects (no increased end-to-end fusions, no telomeric signal loss). The synthetic lethality is not via a telomere defect — an explicitly tested-and-rejected hypothesis. LINKED-EXTERNAL.";
+    reflection:derivation = wrn:fish_readout_trace;
     reflection:canonical_proposition = type_expr(
         onco:NotViaTelomereDefect("WRN", "MSI")
     );

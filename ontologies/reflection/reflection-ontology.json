@@ -392,6 +392,17 @@
     ]
   },
   {
+    "@id": "urn:eigenius:reflection:ProductionTrace",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "A record that some activity PRODUCED a resource — the abstract parent of the traces reflection:derivation can point at. Says only that the resource was produced and that this is the record of it; WHAT KIND OF ACTOR produced it is the concrete subclass's business (eigenius#205): reflection:ProgramTrace for a kernel-initiated run, reflection:ExternalExecutionTrace for an execution an author asserts happened elsewhere. Introduced because `derivation` was typed at ProgramTrace directly, so a class that REQUIRES a derivation — bench:TaskOutput does — could not be attested by a declared-external production at all. Widening the property to this parent makes the link expressible without conflating the two kinds: trace_category still matches the CONCRETE class, so Derived and Declared stay distinct.",
+    "urn:eigenius:core:short_name": "ProductionTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:resource"
+    ]
+  },
+  {
     "@id": "urn:eigenius:reflection:ProgramTrace",
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Class"
@@ -416,6 +427,9 @@
       "urn:eigenius:reflection:executed_steps",
       "urn:eigenius:reflection:epistemic_status",
       "urn:eigenius:reflection:universe_level"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:ProductionTrace"
     ]
   },
   {
@@ -483,6 +497,9 @@
     "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:timestamp",
       "urn:eigenius:reflection:rationale"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:ProductionTrace"
     ]
   },
   {
@@ -539,11 +556,11 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Property"
     ],
-    "urn:eigenius:core:description": "Link to the ProgramTrace that produced this resource.",
+    "urn:eigenius:core:description": "Link to the ProductionTrace recording how this resource was produced. Typed at the PARENT (eigenius#205), so it admits a reflection:ProgramTrace for a kernel-initiated run and a reflection:ExternalExecutionTrace for one an author asserts happened elsewhere. It was typed at ProgramTrace directly, which made a declared-external production unlinkable on any class that requires a derivation. Which kind produced it is read off the trace's own class, not this property.",
     "urn:eigenius:core:short_name": "derivation",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": [
-      "urn:eigenius:reflection:ProgramTrace"
+      "urn:eigenius:reflection:ProductionTrace"
     ]
   },
   {
