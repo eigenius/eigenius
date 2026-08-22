@@ -21,7 +21,7 @@
 //!   enc:DiscourseUnit    prose + character span in the source
 //!   enc:ScopedUnit       (thin — unscoped; the whole chain is the scope)
 //!   enc:EncodedClaim     reflection:canonical_proposition = the parsed Prop, D47-encoded
-//!   reflection:ProgramTrace  ──▶  IsDerivedAs claim_iri P     ← the witness downstream cites
+//!   reflection:DeclarationTrace ─▶ IsDeclaredAs claim_iri P   ← the witness downstream cites
 //!   enc:DecisionPoint    which reading was taken, out of how many, and on whose authority
 //! ```
 //!
@@ -36,9 +36,18 @@
 //! and a later run has something to supersede (D71 §4.1). Without it the artifact is a bag of
 //! resources whose only membership test is "was in the same file".
 //!
-//! The `ProgramTrace` is what makes this **Derived**: a program (the parser) produced the claim from
-//! a hashed input span. A certificate that cites `derived(claim_iri, P)` therefore breaks the moment
-//! the prose changes and the parser derives a different `P` — which is the whole point.
+//! The `DeclarationTrace` makes this **Declared** (eigenius#201 / D73 §6): the parser is a
+//! formulation instrument, so the claim names the AGENT who asserts `P` while the trace's
+//! `reflection:rationale` records which program produced that form from which bytes. A certificate
+//! that cites `declared(claim_iri, P)` still breaks the moment the prose changes and the parser
+//! produces a different `P` — the witness key hashes the proposition — which is the whole point and
+//! is unaffected by the grade.
+//!
+//! What the parse establishes — *"this text parses to this well-typed term"* — is therefore
+//! RECORDED here but not CITABLE: `enc:ScopedUnit` carries no `canonical_proposition`, and no
+//! predicate expresses the artifact fact, so there is nothing for a witness to key on. Before
+//! #201 that fact was citable but mislabelled, as `IsDerivedAs(claim, P)` where `P` was the
+//! DOMAIN proposition — a program establishing a claim about the world, which it never did.
 
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
