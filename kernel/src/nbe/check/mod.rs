@@ -1264,10 +1264,13 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
         // through D47 as the `LitString` / `LitInt` / `LitFloat` /
         // `LitBool` ctors (eigenius#71, eigenius#142);
-        // the kernel checks equality on them via the standard `Val`
-        // `PartialEq` path (LitFloat uses `PartialEq` on f64 — NaN
-        // compares unequal, but literal NaN propositions are an edge
-        // case the user code is welcome to surface as a diagnostic).
+        // Equality on them is decided by `eq_nf`, which reads the values
+        // back and compares the resulting `Exp`s — `Val` derives no
+        // `PartialEq`, so there is no "standard `Val` equality" path (an
+        // earlier version of this comment said there was). `Exp`'s derived
+        // `PartialEq` gives `LitFloat` f64 comparison, so a literal NaN is
+        // unequal to itself; user code is welcome to surface that as a
+        // diagnostic rather than the kernel special-casing it.
         Exp::LitString(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::String)),
         Exp::LitInt(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Integer,
