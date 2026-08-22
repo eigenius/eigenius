@@ -174,9 +174,10 @@ The invariant carries its own escape hatch, because §3.3 shows not every deriva
 > Every `Derived` or `Verified` resource either carries a witness for its stated proposition, or is explicitly marked
 > **provenance-only** — derived in fact, uncitable as a reason.
 
-That keeps the property checkable and makes the uninternalized set countable. Known violations today:
-`VerificationTrace` emits nothing (§4.1); D6b hedges the same way about EigenQL `FIBER … INTO` commits and comorphism
-reify outputs. Each is a place where the chain plausibly knows something it cannot cite.
+That keeps the property checkable and makes the uninternalized set countable. Known violations: `VerificationTrace`
+emitted nothing (§4.1) until eigenius#200 closed it on `2026-08-21`; D6b hedges the same way about EigenQL
+`FIBER … INTO` commits and comorphism reify outputs, which #206 tracks. Each is a place where the chain plausibly
+knows something it cannot cite.
 
 ### 3.3 What a derivation may witness is bounded by its specification
 
@@ -185,7 +186,7 @@ a real derivation, but its content is *inhabitation*: this artifact is a well-fo
 a proposition it is about the **artifact**, close to `Asserts(output_iri)` plus provenance. Thin, and correctly thin.
 
 EigenTT terms are the other case. Where `P : A -> Prop` is applied to `a : A`, the result `P(a)` is a genuine
-proposition, and `App` / `spec_str` do real justification work. Institution inference rules live here.
+proposition, and `App` / `spec_poly` do real justification work. Institution inference rules live here.
 
 Two consequences.
 
@@ -199,10 +200,13 @@ argued the opposite; withdrawn.)
 > A derivation may witness only a proposition its specification entails. For `f : I -> O` that is an inhabitation fact
 > about the output. A domain proposition requires either a Prop-valued rule, or a declared leaf naming who asserts it.
 
-The live violation is `enc:EncodedClaim`. It *requires* `canonical_proposition`, is a `DerivedResource`, and is produced
-by the parser. What the parser establishes is *"this text parses to this well-typed term"*. What the claim carries is a
-domain proposition about the world. `IsDerivedAs(iri, P)` is admitted for a `P` the program never established, and a
-certificate can cite it. §6 is the resolution.
+The live violation was `enc:EncodedClaim`. It *requires* `canonical_proposition`, was a `DerivedResource`, and is
+produced by the parser. **Fixed `2026-08-21` by eigenius#201**, which is §6 applied; the statement of the violation
+stands as the reason.
+
+What the parser establishes is *"this text parses to this well-typed term"*. What the claim carries is a domain
+proposition about the world. `IsDerivedAs(iri, P)` was admitted for a `P` the program never established, and a
+certificate could cite it.
 
 ## 4. The four grounding families and their traces
 
@@ -218,8 +222,13 @@ trace. That is legitimate and matches Artemov: a CS is assumed, not proved.
 
 ### 4.1 Verified: two crossed notions, and a designed-but-unbuilt path
 
-`trace_category` has arms for `DeclarationTrace`, `ObservationTrace` and `ProgramTrace`. **There is no arm for
-`VerificationTrace`.** A resource carrying an actual Lean proof therefore emits no witness and cannot be cited.
+**Closed `2026-08-21` by eigenius#200; the analysis below is what led there.** `trace_category` now has all four
+arms, and the reasoning institution mints a `VerificationTrace` when a certificate checks. The resolution was not to
+separate the two notions but to recognise them as one: kernel-checking IS verification, and `proof_system`
+distinguishes the verifier. Historical statement of the defect follows.
+
+`trace_category` had arms for `DeclarationTrace`, `ObservationTrace` and `ProgramTrace`. **There was no arm for
+`VerificationTrace`.** A resource carrying an actual Lean proof therefore emitted no witness and could not be cited.
 
 What *does* emit a Verified witness is `emit_from_reasoning_sentence` — a `ReasoningSentence` whose `JustifiedBy`
 certificate type-checked. So two different things are both called Verified:
@@ -325,8 +334,8 @@ Three propositions remain distinct and must not collapse into one witness:
 own description says it "names the root the reflection: source lattice deliberately lacks, at the enc: level where
 discourse needs it": the resource a demonstrative («these findings») can bind, whatever its epistemic source.
 
-`enc:EncodedClaim : reflection:DerivedResource` sits on both — Derived by construction, carrying its discourse kind as
-a second `is_a` (D68 §2). The axes are orthogonal and must stay so: a Finding can be Declared, Derived or Verified,
+`enc:EncodedClaim : reflection:DeclaredResource` sits on both — Declared by construction (eigenius#201), carrying its
+discourse kind as a second `is_a` (D68 §2). The axes are orthogonal and must stay so: a Finding can be Declared, Derived or Verified,
 and the discourse kind says nothing about the warrant.
 
 ## 8. Invariants
@@ -367,12 +376,15 @@ Steps 1 and 2 are independent. Step 3 depends on nothing but is a vocabulary cha
    emitting a witness. If no, say so, because the Artemov reading invites the assumption that it holds.
 2. **Where does the Lean/EigenTT statement comparison happen**, and is D30's translation trusted or checked? D49 §7
    specifies inverting the forward translation; whether the inverse is verified or assumed is unsettled.
-3. **Should `spec_str` generalize beyond `core:string`?** Monomorphic today; numeric and structural specialization
-   were deferred to the measurement-statistics institution.
-4. **Rename or split `VerifiedEvidence`?** §4.1's measurement shows the constructor means "kernel-checked
-   conclusion" in all real usage, while the documentation describes an external-prover path that emits nothing.
-   Either rename it and free `Verified` for D49 §7's prover case, or keep it for the prover and add a distinct
-   constructor for internalized conclusions. Both are bootstrap edits to `reasoning.esl` plus 22 citations in the WRN
-   chain, so the change wants folding into whichever reseed §10's step 6 needs rather than paid separately.
+3. ~~**Should `spec_str` generalize beyond `core:string`?**~~ **Decided `2026-08-21` (eigenius#203): the question
+   was stale and the answer is the other direction.** `spec_str` had already been generalized — by `spec_poly`,
+   which strictly subsumes it — so the live question was whether to keep two rules for one thing. It was retired.
+   `SpecStr` the constructor stays; `JustificationTerm` remains at seven constructors.
+4. ~~**Rename or split `VerifiedEvidence`?**~~ **Decided `2026-08-21` (eigenius#200): neither.** The premise was
+   that "external prover proved it" and "the kernel checked a certificate" are different kinds. They are the same
+   kind by different verifiers, and `proof_system` already records which. The defect was a missing ARTIFACT, not a
+   bad name: nothing in the kernel ever created a `VerificationTrace`. Fixed by giving `trace_category` its fourth
+   arm and having the reasoning institution mint a trace on a passing check. Cost: no constructor change, no
+   migration of the 22 WRN citations, `JustificationTerm` unchanged at seven constructors.
 5. **Does `reflection:epistemic_status` survive as a materialized query result**, or is it removed? §1.2 says it must
    not be the source of truth; it does not say it must not exist.

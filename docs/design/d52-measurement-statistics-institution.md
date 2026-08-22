@@ -16,7 +16,7 @@ In scope:
 - The `SampleSet` sum type for Tier 1 (IID, Paired, Factorial) and Tier 2 (RCBD, Split-Plot, Repeated-Measures) experimental designs.
 - The institution's decidable-recomputation contract: what the kernel runs at commit time, what verdict it returns, what artifacts it emits.
 - Opinionated stances on three field-wide conflicts: hypothesis-test directionality, outlier handling, regression for method comparison.
-- Interaction with D39 reasoning: how the institution's `DerivedResource` output feeds the `JustifiedBy.app` / `JustifiedBy.spec_str` composition pipeline.
+- Interaction with D39 reasoning: how the institution's `DerivedResource` output feeds the `JustifiedBy.app` / `JustifiedBy.spec_poly` composition pipeline.
 
 Out of scope:
 
@@ -33,7 +33,7 @@ A D14 `Decidable QueryClass` institution. Its dispatch shape:
 - **Consumes**: a `StatisticalAnalysisPlan` resource (committed by the chain author) whose payload references a `SampleSet` ObservedResource holding raw replicate values, plus the asserted claim parameters (null/alternative hypothesis, alpha, effect-size threshold, directionality, etc.).
 - **Recomputes**: the statistic from the SampleSet using the test prescribed by the SampleSet's design topology and the claim's variance assumption.
 - **Returns a Verdict**: `Holds` or `Fails(diagnostic)`. On `Holds`, the kernel emits a `DerivedResource` whose `canonical_proposition` is the threshold predicate the claim establishes (e.g. `screen:HasLowIC50("urn:...:EIG_0291")`), together with a `ProgramTrace` admitting the `IsDerivedAs` witness (D49 §6).
-- **Composability**: the emitted DerivedResource is consumed downstream by D39 reasoning via `DerivedEvidence` in a `JustifiedBy.app` / `JustifiedBy.spec_str` composition. The statistics institution does not know — and does not need to know — what reasoning conclusion the chain author will derive from its output.
+- **Composability**: the emitted DerivedResource is consumed downstream by D39 reasoning via `DerivedEvidence` in a `JustifiedBy.app` / `JustifiedBy.spec_poly` composition. The statistics institution does not know — and does not need to know — what reasoning conclusion the chain author will derive from its output.
 
 This is the **decidability boundary**: every statistical claim must be recomputable from raw data alone in finite time using deterministic numerical procedures. Subjective judgement (whether IC50 < 100 nM is biologically meaningful) lives in declared literature rules at the D39 layer. The statistics institution settles only the arithmetic question.
 
@@ -493,7 +493,7 @@ The statistics institution's output is the *input* to D39 reasoning. The flow is
    );
    ```
 
-   The certificate's `derived(...)` JustifiedBy constructor consumes the `IsDerivedAs` witness from step 3; the `spec_str(...)` constructor specializes the rule at `"urn:...:EIG_0291"`; the `app(...)` constructor composes the specialised implication with the observation to derive `StrongInhibitor("urn:...:EIG_0291")`.
+   The certificate's `derived(...)` JustifiedBy constructor consumes the `IsDerivedAs` witness from step 3; the `spec_poly(...)` rule specializes the rule at `"urn:...:EIG_0291"`; the `app(...)` constructor composes the specialised implication with the observation to derive `StrongInhibitor("urn:...:EIG_0291")`.
 
 The statistics institution does not know — and explicitly does not need to know — what reasoning conclusion the chain author will derive from its output. It certifies only that the `derived_proposition` holds against the raw replicates. The reasoning layer composes from there.
 

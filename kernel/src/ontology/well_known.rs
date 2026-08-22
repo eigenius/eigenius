@@ -475,17 +475,28 @@ pub const OBSERVATION_TRACE: &str = "urn:eigenius:reflection:ObservationTrace";
 /// IRI is the witness `iri` key; per D49 §6 commit emits an `IsDerivedAs`
 /// witness.
 pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
-/// Resource recording that a formal proof was attached to a resource. Per
-/// D49 §6 + §7, the `IsVerifiedAs` witness is admitted only after the
-/// `Lean → Reasoning` comorphism's reify produces a
-/// `reasoning:VerifiedPropositionView` whose `canonical_proposition` is
-/// the EigenTT form of the proved proposition.
+/// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
+/// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
+/// whose exported blob D49 §7's `Lean → Reasoning` comorphism reifies into a
+/// `reasoning:VerifiedPropositionView`, and the kernel, whose type-checked `JustifiedBy`
+/// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
 
 /// `reflection:resource` — the target IRI a Trace points at. Common to
 /// all four Trace classes (semantically; for `ProgramTrace` the role is
 /// played by the output resource's own IRI, not a separate property).
 pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
+
+/// `reflection:proof_system` — which verifier checked the proof recorded by a
+/// [`VERIFICATION_TRACE`]: an external prover (`lean4`, `coq`, `agda`) or `urn:eigenius:kernel`.
+pub const PROOF_SYSTEM: &str = "urn:eigenius:reflection:proof_system";
+
+/// `reflection:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
+/// prover's blob, or the chain-resident IRI of the `ReasoningSentence` whose certificate checked.
+pub const PROOF_TERM: &str = "urn:eigenius:reflection:proof_term";
+
+/// `reflection:timestamp` — when a Trace's event occurred. Required by every Trace class.
+pub const TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
 
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded

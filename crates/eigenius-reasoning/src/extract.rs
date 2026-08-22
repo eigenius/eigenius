@@ -605,12 +605,12 @@ data probe:Lits {
             "DeclaredEvidence : core:string -> J, got {args:?}"
         );
 
-        let spec_str = decl
+        let spec_str_ctor = decl
             .ctors
             .iter()
             .find(|c| c.name == "SpecStr")
             .expect("SpecStr declared");
-        let args = ctor_arg_types(&decl, spec_str).expect("telescope walks");
+        let args = ctor_arg_types(&decl, spec_str_ctor).expect("telescope walks");
         match args.as_slice() {
             [Exp::InductiveType(d, _), Exp::EigonPrimitive(PrimitiveType::String)] => {
                 assert_eq!(d.iri.as_str(), iris::JUSTIFICATION_TERM);

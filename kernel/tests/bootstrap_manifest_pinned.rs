@@ -31,7 +31,14 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
-//! IT HAS NOW FIRED IN ANGER (`2026-08-20`). D71 slice 7 added the `formalize` cell type to the
+//! IT FIRED AGAIN (`2026-08-21`), on the D73 batch: three layers at once — `reflection`
+//! (eigenius#200 relaxed `VerificationTrace.derivation_trace` to `recommends` and widened two
+//! descriptions), `reasoning` (eigenius#203 retired the `spec_str` rule) and `encoding`
+//! (eigenius#201 made `enc:EncodedClaim` a `DeclaredResource`). Batching the three into one reseed
+//! is the whole reason #196 groups them; the test named exactly the three that were edited and
+//! nothing else, which is the check that the edits were the intended ones.
+//!
+//! IT HAD FIRED IN ANGER BEFORE (`2026-08-20`). D71 slice 7 added the `formalize` cell type to the
 //! notebook ontology — a change whose whole point is that it is deliberate, since
 //! `notebook:cell_type` carries `allows_only` precisely so a new cell type cannot appear by
 //! accident. The test named the one moved layer and its four-step follow-through, and the reseed
@@ -50,7 +57,7 @@ const EXPECTED: &str = "\
 core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
 eigentt-type-fragment:5dfce7f7508be045308e77049ea01f749b0e3d84315709dd3be0a5e8187a8577
 program:23d0359ea194547b9dd81c3672d0290278a8db6f171637a273e3efb41c515b1a
-reflection:493baa39ccfd7fdc173cab8e87b83479202d71c631b7403e64d42f339c7ec94e
+reflection:4cbdbf5e6b7bbc57ef4c8b4118eed6352019e81c1a4f8f66575c80d1c5856d44
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf
 institution:27871f87612484d6469b66a4b0379731152af0c1f8eb04007c8b0343f4648c13
 runtime:4c05dc3b114acb2554e8f8d594a6878f94e8f60f3a512d46eb816d3a030f26cc
@@ -58,7 +65,7 @@ formulas:ba63b387d496f46effd86b6e544c2daebea69b605c5b366123f17317bbae7957
 lean-expressions:6263f64c4fb167dedb9ba69c2e353517bd343b21da7ad6aa346f42f2b975fac5
 lean-runtime-classes:11de512ae4aea72e0865a19becdefd4daed9c9f6cdf2abd5af3b88d17078294e
 lean-institution:e48be69b9df06f02232feac048fc4ec5bdebcf62b8a50b90145b9f62176610dc
-reasoning:470635660f8a1d3a4591cc7ff2374028ceb6e6dbab0d60d8cc220e9902cbd201
+reasoning:85fee3e7c3fe16c5e392983696b8e3c97467d7c126c8bb593d9892d1d5d73e8f
 statistics:0e179b5ef88c9e01399a84d6c863b6ddb4fe38859374c45b3f685175d584af3b
 notebook:376c2726292782680b5534319890b63af0a70d6e8f5938972be6ee2d30d635e9
 ingest:67534b5bcf3478a18bd5df2a3c856132e8702dd3f9d3e8727b40179794ae0aba
@@ -67,7 +74,7 @@ logic:bde155e5644cb03e236cd94a501301b878832707d0ba9c6a361fa204ce9e813d
 lexicon:51aa4972dd065159a0124ed22e776819a9016d92a4fdfb4d8841ad56581e81fa
 ontology:12321a1bb48ad9f89071cd6500a0791f4a33a60ced9c4fdaf0e82e6dae9faa70
 closed-class:7c15f2350e7de9e4e1af0291f2cedc2753867265841d09c3be7192dc7f91813d
-encoding:8ed5da3a143011c1a42f58f81963114cc6ae9084337f4e2cc17196059b03e8db
+encoding:e3694cdda3390cb916686cc72fdc5513347928a774d4cf072edbb8758bac2130
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On

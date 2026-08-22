@@ -15,7 +15,7 @@
 //! **The formalization seam** (D71 §7.1) — the kernel declares it, the top-level binary fills it in.
 //!
 //! Formalizing a document ends in an ARTIFACT: the resource set an `enc:ReasoningStructure` roots.
-//! Building that set needs `emit_document` and `DerivedClaimGrader`, which live in
+//! Building that set needs `emit_document` and `ParsedClaimGrader`, which live in
 //! `eigenius-encoding` and `eigenius-reasoning` — both of which DEPEND ON this crate. The kernel's
 //! gRPC layer therefore cannot call them, and inverting the dependency is not on the table: the
 //! grader belongs above the kernel, not inside it.

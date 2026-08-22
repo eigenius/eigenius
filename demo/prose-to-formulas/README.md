@@ -84,7 +84,7 @@ and one rule **pinned from the literature**, not from this document:
 ```
 
 The parser turns each sentence into a closed, felicity-gated `Prop`, committed as an
-`enc:EncodedClaim` under a `reflection:ProgramTrace` that mints `IsDerivedAs claim_i P_i`. There is
+`enc:EncodedClaim` under a `reflection:DeclarationTrace` that mints `IsDeclaredAs claim_i P_i`. There is
 no lift step: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon, so
 each parsed proposition already **is** a domain formula. Then the pinned rule is specialized at the
 model and applied to the measurement's claim, and the result is:
@@ -125,7 +125,7 @@ sentence 2's claim  (ASSERTED)       ✓ still commits — nothing about sentenc
 the derivation on sentence 1         ✗ REJECTED — inference.esl refused at commit
 ```
 
-Sentence 1 parses to a different proposition, so no `IsDerivedAs` witness matches the one the
+Sentence 1 parses to a different proposition, so no `IsDeclaredAs` witness matches the one the
 recorded certificate cites for its antecedent. The inferred claim has nothing left to stand on —
 while the document's own assertion of the same conclusion is untouched.
 
@@ -238,8 +238,14 @@ WitnessKey { category: Derived, iri: claim_iri, prop_hash: sha256(encode(P)) }
 
 `lookup_chain_witness` walks the layer and every ancestor
 ([`witness_index.rs`](../../kernel/src/layer/witness_index.rs)). The key is minted on the other side
-by the parser's `reflection:ProgramTrace`: a trace whose `reflection:resource` points at the claim
-emits `IsDerivedAs claim_iri P`, where `P` is the claim's own `canonical_proposition`.
+by the parser's `reflection:DeclarationTrace`: a trace whose `reflection:resource` points at the
+claim emits `IsDeclaredAs claim_iri P`, where `P` is the claim's own `canonical_proposition`.
+
+Declared, not Derived, since eigenius#201 (D73 §6). The parser establishes that the text parses to
+this well-typed term — not that the term is faithful to what the author wrote (D61, unbuilt), nor
+that what the author wrote is true. A `derived` witness would have said a program established the
+domain proposition, which it did not. What is unchanged is the part that makes the demo work: the
+key hashes the PROPOSITION, so editing the prose still breaks the citation.
 
 **The author of a certificate cannot supply the witness. Only the chain can.**
 
@@ -274,7 +280,7 @@ change does not fail at all.
 | `ranks.json`, `ranks-edited.json` | recorded once each | the sense reranker's decisions, replayed — no LLM, no network, no key. One per variant: the replay key includes each word's candidate senses, so the edited paragraph is a different question. |
 | `selections-edited.json` | recorded once | the reading-selection draw for the EDITED variant, replayed. It selects by draw, not by pin, because the negated sentence's pinned skeleton matches three readings differing only in sense — a tie a sense-erased pin cannot break, so the pin arm fails closed there (correctly). |
 | `literature-rules.esl` | — | the pinned `∀m. A → B`, cited — the ONLY DeclarationTrace on the branch |
-| `claims-intact.esl` | `prose-to-esl` | units + encoded claims + ProgramTraces + decision points |
+| `claims-intact.esl` | `prose-to-esl` | units + encoded claims + DeclarationTraces + decision points |
 | `claims-edited.esl` | `prose-to-esl` | the same, from the edited prose |
 | `inference.esl` | hand-authored | the CONCLUDED claim — the literature rule specialized at the model and applied to sentence 1's own parse |
 
@@ -309,7 +315,7 @@ every run would reshape it around any edit, and nothing would ever fail to commi
 thing the demo exists to show. `--reparse` regenerates only the claims.
 
 The two halves run on two branches off one base, rather than as two loads onto one chain, because a
-redefinition does not retract the earlier layer's witness: `IsDerivedAs claim_1 P_original` would
+redefinition does not retract the earlier layer's witness: `IsDeclaredAs claim_1 P_original` would
 still be reachable and the certificate would still resolve.
 
 ## What a `Holds` does NOT mean
@@ -318,8 +324,11 @@ Two witnesses stand behind the intact commit, and neither is about biology.
 
 | witness | grade | what it actually attests |
 |---|---|---|
-| `IsDerivedAs(claim_i, P)` | **Derived** | the DCG parser, run over bytes with a recorded sha256 at a recorded span, produced proposition `P` — a fact about **the text** |
+| `IsDeclaredAs(claim_i, P)` | **Declared** | the named agent asserts `P`; the trace records that the DCG parser, run over bytes with a recorded sha256 at a recorded span, arrived at that FORM — a fact about **the text**, not a warrant for `P` |
 | `IsDeclaredAs(lit_rule, ∀m. A(m) → B(m))` | **Declared** | a human asserts the published dependency between the two activities, with author and rationale |
+
+Both are Declared since eigenius#201, and that is the honest reading: nothing in this demo derives
+a claim about biology. What differs is only who asserts and on what basis.
 
 `spec_poly` and `app` compose them and the result commits at **Declared** — a conclusion is no
 better than its weakest link, and the rule is the weak one.
@@ -361,7 +370,7 @@ about the world, graded Declared.
 
 That is a property of the logic, not an authoring shortcut: **there is no implication introduction.**
 No rule produces `JustifiedBy(_, A → B)` — `app` yields `B`, `sum_l`/`sum_r` yield `P`,
-`spec_str`/`spec_poly` yield `P(t)`. An implication enters only through a grounding, so a rule
+`spec_poly` yields `P(x)`. An implication enters only through a grounding, so a rule
 connecting propositions must be asserted; it cannot be proved.
 
 ## Appendix: `spec_poly`
@@ -370,15 +379,17 @@ The elimination this demo's certificate uses:
 
 ```esl
 spec_poly :
-    forall (T : Set, P : T -> Prop, j : JustificationTerm, x : T, tag : core:string) =>
+    forall (T : Type 1, P : T -> Prop, j : JustificationTerm, x : T, tag : core:string) =>
     JustifiedBy(j, forall (y : T) => P(y)) -> JustifiedBy(SpecStr(j, tag), P(x)),
 ```
 
-A `JustifiedBy` constructor in [`reasoning.esl`](../../ontologies/reasoning/reasoning.esl) (landed
-2026-08-03; `reasoning.esl` is bootstrapped, so adding it cost a lexicon reseed). `spec_str` is
-monomorphic on `core:string`; `spec_poly` eliminates a universal at any domain. It binds the domain
-type and the instance on the *proof* side while the justification term carries only a string tag,
-so `JustificationTerm` needed no change; only `JustifiedBy` gained a constructor.
+The only specialization rule in [`reasoning.esl`](../../ontologies/reasoning/reasoning.esl) (landed
+2026-08-03; `reasoning.esl` is bootstrapped, so adding it cost a lexicon reseed). A monomorphic
+`spec_str` over `core:string` stood beside it until 2026-08-21, when it was retired as strictly
+subsumed (eigenius#203). `spec_poly` binds the domain type and the instance on the *proof* side
+while the justification term carries only a string tag, so `JustificationTerm` needed no change;
+only `JustifiedBy` gained a constructor. The domain binder is `Type 1`, not `Set`: a rule whose own
+quantifier ranges over `Set` would otherwise need `Set : Set` to instantiate (eigenius#136).
 `inference.esl` applies it at `T := Set` to specialize the literature rule at «MSI cancer models» —
 a nested compound-kind term, not a class IRI. (D66 §9 records an undiagnosed universe question
 about that instantiation; it type-checks today.)

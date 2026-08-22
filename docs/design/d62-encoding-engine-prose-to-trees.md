@@ -168,7 +168,7 @@ this seam without reshaping the driver.
 > [D71](d71-document-formalization-service.md) §1 tested that against D14 §1.2's own four criteria
 > and it satisfies one: the engine has no satisfaction relation of its own (it borrows the kernel
 > validator and the felicity re-gate, which D14 §1.1 excludes from the protocol), no fibre
-> (`enc:EncodedClaim` is a `reflection:DerivedResource`, graded in the reasoning fibre), and answers
+> (`enc:EncodedClaim` is a `reflection:DeclaredResource` since eigenius#201, graded in the reasoning fibre), and answers
 > no queries about its results. Every registered institution in the tree decides something; five
 > importers doing source→resource-set→`Load` are institutions none. **The engine is a service over
 > the kernel's `DocumentPipeline`, emitting a resource-set artifact.** The declarations this section

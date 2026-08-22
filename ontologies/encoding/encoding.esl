@@ -343,11 +343,28 @@ resource enc:cut_unresolved : enc:CutKind {
 // S6 — EncodedClaim: a committed, graded, witnessed Prop
 // ════════════════════════════════════════════════════════════════════
 //
-// Derived by construction: the engine is a generation institution whose output the
-// kernel attests (D56 IsDerivedAs); grade climbs to Verified only via D61 (deferred).
+// DECLARED, not Derived (D73 §6, eigenius#201 — supersedes the 2026-08-10 settlement).
+//
+// The parser is a FORMULATION INSTRUMENT: it produces a well-formed proposition and a fidelity
+// record. It does not produce a warrant, because "this encoding is faithful to what the author
+// wrote" is its own proposition — D61's subject, and unbuilt. Since the parse cannot warrant
+// fidelity, the only honest status for its output is Declared: some agent takes responsibility.
+//
+// Three propositions stay distinct and must not collapse into one witness:
+//
+//   1. this text parses to this well-typed term — the artifact fact, witnessed by the ProgramTrace
+//      on the ENCODING artifact, bounded by the program's type (D73 §3.3)
+//   2. this encoding is faithful to what the author wrote — D61, unwarranted today
+//   3. what the author wrote is true — never established by either; only ever declared
+//
+// The 2026-08-10 settlement split the world on PARSED vs CURATED. The operative axis is WHO
+// ASSERTS: encoding a source document is asserted by the document's authors (e.g. wrn:authors);
+// an agent formulating its own claim is asserted by the agent running the pipeline. D72 is what
+// makes the first expressible — wrn:authors is a resolvable reflection:Agent, so a claim from a
+// paper cites the people who made it rather than the program that transcribed it.
 
-class enc:EncodedClaim : reflection:DerivedResource {
-    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. Carries its source unit (provenance) and its grade (reflection:epistemic_status — Derived by construction; Verified only via the D61 faithfulness back-stop, deferred). The fidelity-to-intent check (S7) is deferred to D61. A landed claim ALSO carries its discourse KIND as a second is_a class (enc:Finding / … — D68 §2, the two-axis claim model): the checker's multi-class inhabitation is what lets a demonstrative's restrictor resolve to it.";
+class enc:EncodedClaim : reflection:DeclaredResource {
+    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. DECLARED, not Derived (D73 §6): the parser establishes that the text parses to this well-typed term, not that the term is faithful to what the author wrote (D61, unbuilt) nor that what the author wrote is true. reflection:declared_by names the agent taking responsibility — the source document's authors when encoding a paper, the pipeline's operating agent when an agent formulates its own claim. Carries its source unit (provenance). A landed claim ALSO carries its discourse KIND as a second is_a class (enc:Finding / … — D68 §2, the two-axis claim model): the checker's multi-class inhabitation is what lets a demonstrative's restrictor resolve to it.";
     requires enc:from_unit, reflection:canonical_proposition;
     recommends enc:confidence;
 }
@@ -500,7 +517,7 @@ property enc:draw_model : core:string {
 // DELETED on `2026-08-19`: nothing ever implemented `enc_sig:formalize_unit`, and D71 concluded the
 // shape was wrong, not merely unbuilt. Prose formalization has no satisfaction relation of its own
 // (it borrows the kernel validator and the felicity re-gate, which D14 §1.1 excludes from the
-// protocol), no fibre (enc:EncodedClaim is a reflection:DerivedResource, graded in the reasoning
+// protocol), no fibre (enc:EncodedClaim is a reflection:DeclaredResource, graded in the reasoning
 // fibre), and answers no queries about its results — one of D14 §1.2's four criteria. It is a
 // SERVICE over the kernel's DocumentPipeline, emitting the artifact these classes describe.
 //

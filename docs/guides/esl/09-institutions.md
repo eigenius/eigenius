@@ -281,7 +281,7 @@ Each constructor has a precise epistemic role:
 - **`VerifiedEvidence(iri)`** — cite a `VerifiedResource` (formal-proof artifact from the Lean institution or any future verification institution). The chain attests *that a formal proof checker accepted the proof*. Cumulates into `DerivedEvidence` through the `VerifiedResource subclass_of DerivedResource` coercion in the witness index ([§6.4a](06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)).
 - **`App(j1, j2)`** — Artemov Application: if `j1` justifies `A -> B` and `j2` justifies `A`, then `App(j1, j2)` justifies `B`. The reasoning-layer modus-ponens combinator, used to apply a literature rule (`HasLowIC50(c) -> StrongInhibitor(c)`) to a derived fact (`HasLowIC50(EIG_0291)`).
 - **`Sum(j1, j2)`** — Artemov Sum: if either `j1` or `j2` justifies `P`, then `Sum(j1, j2)` justifies `P`. Models "we have multiple independent grounds for the same conclusion." The `JustifiedBy.sum_l` / `JustifiedBy.sum_r` certificate constructors realize the two directional choices.
-- **`SpecStr(j, t)`** — universal-quantifier specialization: if `j` justifies `forall (x : core:string) => P(x)`, then `SpecStr(j, t)` justifies `P(t)`. Used to apply a universal literature rule (`forall (c : core:string), HasLowIC50(c) -> StrongInhibitor(c)`) at a specific compound IRI (`SpecStr(DeclaredEvidence(rule), "urn:...:EIG_0291")`). One term ctor serves both certificate constructors: `JustifiedBy.spec_str` eliminates a quantifier over `core:string`, `JustifiedBy.spec_poly` one over any domain. The term's second slot stays a `core:string` in both cases — it *names* the instantiation for audit rather than carrying it, which keeps the justification algebra first-order.
+- **`SpecStr(j, t)`** — universal-quantifier specialization: if `j` justifies `forall (x : core:string) => P(x)`, then `SpecStr(j, t)` justifies `P(t)`. Used to apply a universal literature rule (`forall (c : core:string), HasLowIC50(c) -> StrongInhibitor(c)`) at a specific compound IRI (`SpecStr(DeclaredEvidence(rule), "urn:...:EIG_0291")`). `JustifiedBy.spec_poly` eliminates the quantifier at any domain. The term's second slot is a `core:string` audit TAG — it *names* the instantiation rather than carrying it, which keeps the justification algebra first-order while the instance itself is bound on the proof side.
 
 ### 9.10.2. The `JustifiedBy` certificate predicate
 
@@ -306,10 +306,6 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
     sum_l : forall (P, j1, j2) => JustifiedBy(j1, P) -> JustifiedBy(Sum(j1, j2), P),
     sum_r : forall (P, j1, j2) => JustifiedBy(j2, P) -> JustifiedBy(Sum(j1, j2), P),
 
-    spec_str : forall (P : core:string -> Prop, j, t) =>
-        JustifiedBy(j, forall (x : core:string) => P(x)) ->
-        JustifiedBy(SpecStr(j, t), P(t)),
-
     spec_poly : forall (T : Type 1, P : T -> Prop, j, x : T, tag : core:string) =>
         JustifiedBy(j, forall (y : T) => P(y)) ->
         JustifiedBy(SpecStr(j, tag), P(x)),
@@ -318,11 +314,11 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
 
 The four grounding constructors each consume a [`ChainWitness.Is*As`](06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) — a `Prop`-typed witness the kernel admits at type-check time from the layer's witness index. The author never writes the witness explicitly; the kernel synthesizes it from the cited IRI and proposition via the [D49 synthesis algorithm](../../design/d49-chainwitness-machinery.md). If no admitted witness matches the (category, iri, proposition) triple, type-checking fails with a `NoAdmittedChainWitness` diagnostic naming the missing trace shape.
 
-The five composition constructors (`app`, `sum_l`, `sum_r`, `spec_str`, `spec_poly`) are pure type-theoretic combinators — no witness lookup, just standard inductive-family pattern matching.
+The four composition constructors (`app`, `sum_l`, `sum_r`, `spec_poly`) are pure type-theoretic combinators — no witness lookup, just standard inductive-family pattern matching.
 
-**`spec_poly` vs. `spec_str`.** `spec_str` is monomorphic on `core:string`, which covers rules quantified over IRIs but not over the sorts a parsed proposition carries: the DCG's arguments are classes, so a `Set`-quantified rule (a `Prop`, commits like any other declaration) needs its universal eliminated at a `Set`. `spec_poly` does that at any domain — `demo/prose-to-formulas/inference.esl` uses it to specialize the literature rule's `∀ (m : Set)` at the nested compound-kind term for «MSI cancer models».
+**`spec_poly` is the only specialization rule.** A monomorphic `spec_str`, quantifying only over `core:string`, stood beside it until `2026-08-21` (eigenius#203). It was strictly subsumed — `T := core:string`, `x := t`, `tag := t` recovers it exactly, and both produce the same term `SpecStr(j, tag)` — and it was a trap: it covers rules quantified over IRIs but not over the sorts a parsed proposition carries. The DCG's arguments are classes, so a `Set`-quantified rule (a `Prop`, commits like any other declaration) needs its universal eliminated at a `Set`, and `spec_str` silently did not fit. `spec_poly` eliminates at any domain — `demo/prose-to-formulas-v2/inference.esl` uses it to specialize the literature rule's `∀ (m : Set)` at the nested compound-kind term for «MSI cancer models».
 
-**No implication introduction.** No constructor produces `JustifiedBy(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `spec_str` / `spec_poly` yield `P` at an instance. An implication therefore enters the system only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a rule relating propositions cannot be *derived*; it must be Declared, and quantifying it and eliminating with `spec_str` / `spec_poly` is what lets one rule serve many instances.
+**No implication introduction.** No constructor produces `JustifiedBy(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `spec_poly` yields `P` at an instance. An implication therefore enters the system only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a rule relating propositions cannot be *derived*; it must be Declared, and quantifying it and eliminating with `spec_poly` is what lets one rule serve many instances.
 
 ### 9.10.3. The `ReasoningSentence` resource
 

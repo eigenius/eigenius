@@ -57,7 +57,7 @@ mod branches;
 mod consolidate;
 mod formalize;
 mod gc;
-mod helpers;
+pub mod helpers;
 mod hooks;
 mod inspect;
 mod lifecycle;

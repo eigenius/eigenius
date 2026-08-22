@@ -47,7 +47,7 @@ use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
-use eigenius_reasoning::DerivedClaimGrader;
+use eigenius_reasoning::ParsedClaimGrader;
 
 use crate::select::Pin;
 
@@ -79,8 +79,17 @@ pub struct DocumentMeta<'a> {
     /// SHA-256 of the parsed bytes. A prose edit is then visible on the chain, not only in the
     /// propositions it changed.
     pub source_sha256: &'a str,
-    /// The `reflection:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
+    /// The `reflection:timestamp` on each DeclarationTrace. Caller-fixed so emission is reproducible.
     pub timestamp: &'a str,
+    /// `reflection:declared_by` — the agent taking responsibility for every claim this document
+    /// lands. REQUIRED since eigenius#201 made `enc:EncodedClaim` a `reflection:DeclaredResource`:
+    /// a parse establishes form, not warrant, so a landed claim must name who asserts it (D73 §6).
+    ///
+    /// Must be the IRI of a resolvable `reflection:Agent` (D72). For an encoded paper that is the
+    /// paper's authors; for an agent formulating its own claims it is that agent.
+    /// [`UNATTRIBUTED_AGENT`] is the honest value when the caller knows of no agent — it names the
+    /// absence rather than hiding it behind the program that did the parsing.
+    pub declared_by: &'a str,
     /// The `reference:Reference` for the source work.
     ///
     /// `None` MINTS a document-local one at `<ns>:source` and emits it into the artifact — the
@@ -215,6 +224,7 @@ pub fn emit_resources(
         source_path,
         source_sha256,
         timestamp,
+        declared_by,
         ..
     } = *meta;
     let doc_iri = meta.reference_iri();
@@ -253,8 +263,8 @@ pub fn emit_resources(
         );
         out.push(scoped);
 
-        // The Derived claim cluster — claim + ProgramTrace — comes from the ONE construction
-        // (`DerivedClaimGrader::cluster`, D67 §1); this emitter keeps its historical
+        // The parsed claim cluster — claim + DeclarationTrace — comes from the ONE construction
+        // (`ParsedClaimGrader::cluster`, D73 §6); this emitter keeps its historical
         // `claim_{n}` / `trace_{n}` naming (committed artifacts regenerate byte-identically)
         // and adds only the document-structural fields the grader does not know about.
         let provenance = format!(
@@ -264,10 +274,11 @@ pub fn emit_resources(
         );
         let (mut claim, trace) = match &s.cluster {
             Some((claim, trace)) => (claim.clone(), trace.clone()),
-            None => DerivedClaimGrader::cluster(
+            None => ParsedClaimGrader::cluster(
                 &claim_iri,
                 &format!("{ns}:trace_{n}"),
                 s.item.sem(),
+                declared_by,
                 &provenance,
                 timestamp,
                 &[],
@@ -633,6 +644,7 @@ mod tests {
                 source_path: "test.txt",
                 source_sha256: "deadbeef",
                 timestamp: "2026-08-11T00:00:00Z",
+                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
                 source_ref: None,
             },
             glossary,
@@ -758,6 +770,7 @@ mod tests {
                 source_path: "test.txt",
                 source_sha256: "deadbeef",
                 timestamp: "2026-08-11T00:00:00Z",
+                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
                 source_ref: Some("urn:eigenius:reference:lit:chan_2019"),
             },
             &[],

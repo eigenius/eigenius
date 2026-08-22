@@ -47,6 +47,7 @@ use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 use eigenius_kernel::program::eigentt_type_mirror::decode_type;
 use eigenius_kernel::program::ground::resolve_class_type;
+use eigenius_kernel::server::helpers::{millis_to_iso8601, now_millis};
 
 use crate::institution::iris;
 use crate::institution::ReasoningInstitution;
@@ -141,10 +142,67 @@ pub fn do_validate_justification(
         )));
     }
 
-    Ok(QueryOutcome::from_output(verdict_resource(
-        wk::VERDICT_HOLDS,
-        None,
-    )))
+    // ── Step 7: the certificate checked — emit the VerificationTrace ─
+    //
+    // eigenius#200. The kernel is a proof system, and a type-checked `JustifiedBy` certificate is a
+    // proof term in it, so a passing check is a verification event like any other and gets the same
+    // chain-side audit artifact the other three grounding families get. Without this the Verified
+    // family was the one place D39 §5's invariant failed — `emit_from_reasoning_sentence`
+    // synthesised a witness straight from the sentence, so every Verified witness on every chain
+    // was traceless.
+    //
+    // The trace rides `outcome.derivations`, which the kernel commits alongside the Verdict only
+    // when the gate Holds — so a `Fails` mints nothing, which is the point.
+    let trace = match sentence.id() {
+        Some(sentence_iri) => vec![verification_trace(sentence_iri)],
+        // An embedded sentence has no IRI to attest; the gate still answers.
+        None => Vec::new(),
+    };
+    Ok(QueryOutcome {
+        output: verdict_resource(wk::VERDICT_HOLDS, None),
+        derivations: trace,
+        partial_invocation: None,
+    })
+}
+
+/// The `reflection:VerificationTrace` a passing `ValidateJustification` mints.
+///
+/// `proof_system` is the kernel itself, which is what distinguishes this from a Lean / Coq / Agda
+/// trace — the two are the same kind of artifact by different verifiers, so they are one class and
+/// not two (eigenius#200). `proof_term` is the sentence's own IRI: the certificate lives on the
+/// sentence, so the sentence IS the proof term's location, and unlike an external prover's blob it
+/// is already chain-resident.
+///
+/// `derivation_trace` is deliberately absent. It is `recommends`, not `requires`, precisely for
+/// this case: a `ReasoningSentence` has no `ProgramTrace` to point at — D39 §4.2 satisfies its
+/// inherited derivation requirement with the certificate field — and pointing the slot at itself to
+/// satisfy a schema would be a fiction.
+fn verification_trace(sentence_iri: &Iri) -> Resource {
+    const KERNEL_PROOF_SYSTEM: &str = "urn:eigenius:kernel";
+    let trace_iri = Iri::parse(&format!("{}:verification", sentence_iri.as_str()))
+        .expect("a sentence IRI with a `:verification` suffix parses");
+    let mut r = Resource::new(trace_iri);
+    r.set(
+        Iri::parse(wk::IS_A).expect("well-known IRI"),
+        Value::Array(vec![Value::String(wk::VERIFICATION_TRACE.to_string())]),
+    );
+    r.set(
+        Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI"),
+        Value::String(sentence_iri.as_str().to_string()),
+    );
+    r.set(
+        Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"),
+        Value::String(KERNEL_PROOF_SYSTEM.to_string()),
+    );
+    r.set(
+        Iri::parse(wk::PROOF_TERM).expect("well-known IRI"),
+        Value::String(sentence_iri.as_str().to_string()),
+    );
+    r.set(
+        Iri::parse(wk::TIMESTAMP).expect("well-known IRI"),
+        Value::String(millis_to_iso8601(now_millis())),
+    );
+    r
 }
 
 /// Read a required property off the ReasoningSentence; fail with a

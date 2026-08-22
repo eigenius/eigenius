@@ -73,8 +73,8 @@ pub use claim_kind::{
     ReplayKindClassifier,
 };
 pub use grade::{
-    ClaimGrader, ClaimSource, DeclaredClaimGrader, DerivedClaimGrader, Grade, GradeError,
-    GradedClaim, Warrant,
+    ClaimGrader, ClaimSource, DeclaredClaimGrader, Grade, GradeError, GradedClaim,
+    ParsedClaimGrader, Warrant, UNATTRIBUTED_AGENT,
 };
 pub use ingest::{
     ClaimVerdict, DerivedClaimLander, DocumentIngestion, InProcessIngestion, IngestedDocument,

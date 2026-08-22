@@ -171,7 +171,7 @@ done
 hr "2. INTACT — the document as written"
 cat "$HERE/paragraph.txt"
 echo
-echo "-- the parsed claims: one enc:EncodedClaim + ProgramTrace per sentence, each carrying its"
+echo "-- the parsed claims: one enc:EncodedClaim + DeclarationTrace per sentence, each carrying its"
 echo "   DISCOURSE KIND as a second is_a class, plus the DecisionPoint recording who chose the"
 echo "   reading and why, plus the AnaphorBinding for sentence 3."
 eig_load --branch v2-intact "$HERE/claims-intact.esl"
@@ -255,7 +255,7 @@ else
     echo
     echo "   ✓ REJECTED — the derivation is gone with the measurement it stood on."
     echo
-    echo "     inference.esl cites claim_1 DIRECTLY — the parser's own IsDerivedAs witness — for"
+    echo "     inference.esl cites claim_1 DIRECTLY — the parser's own IsDeclaredAs witness — for"
     echo "     its antecedent. The witness key hashes the PROPOSITION; the edited sentence parses"
     echo "     to a different term, so there is no witness under that key. (The kernel reports the"
     echo "     gate verdict, not the missing witness; the ValidateJustification diagnostic is not"

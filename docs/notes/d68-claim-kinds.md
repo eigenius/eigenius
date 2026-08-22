@@ -178,7 +178,7 @@ source-axis cleanup (recorded in D67 §8), any bootstrap edit.
 - **Reasoning**: `claim_kind.rs` — the frame table (`hypothesized/suggest that` → deterministic
   kinds), the `KindClassifier` trait with Recording (memoizing) / Replay (miss = Assertion,
   counted) arms and the live `AnthropicKindClassifier` (use-llm, document context);
-  `ClaimSource.kind_classes` → `DerivedClaimGrader::cluster` writes `is_a = [EncodedClaim,
+  `ClaimSource.kind_classes` → `ParsedClaimGrader::cluster` writes `is_a = [EncodedClaim,
   <kinds…>]`; `DerivedClaimLander` composes frame → classifier → Assertion default and
   accumulates the clusters.
 - **§5 refinement at implementation**: sets resolve at the plural hole with EVERY member

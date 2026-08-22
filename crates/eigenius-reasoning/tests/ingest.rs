@@ -15,7 +15,7 @@
 //! `ingest` — the document → graded-claims path end to end (D63/D67).
 //!
 //! The "layer up": [`InProcessIngestion`] composes the DCG pipeline with the
-//! [`DerivedClaimGrader`] (D67 §1 — parsed sentences land Derived) and proves the full algorithm
+//! [`ParsedClaimGrader`] (D73 §6 — parsed sentences land Declared) and proves the full algorithm
 //! in one call — prose → parse → grade → committed claim whose `ProgramTrace` mints the
 //! `IsDerivedAs` witness. This is the first-class form of what was an inline test-code harness.
 
@@ -28,7 +28,7 @@ use eigenius_kernel::dcg::{
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{layer_admits_witness, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
-use eigenius_reasoning::{DerivedClaimGrader, DocumentIngestion, Grade, InProcessIngestion};
+use eigenius_reasoning::{DocumentIngestion, Grade, InProcessIngestion, ParsedClaimGrader};
 
 /// A no-op anaphora proposer — the demo document has no pronouns, so the resolver never consults it.
 struct NoProposer;
@@ -63,14 +63,14 @@ fn outcome_kind(o: &SentenceOutcome) -> &'static str {
 }
 
 #[test]
-fn ingest_produces_a_derived_witnessed_claim() {
+fn ingest_produces_a_declared_witnessed_claim() {
     // Prose → parse → grade → committed DERIVED cluster (D67 §1): the trust story is the
     // ProgramTrace minting `IsDerivedAs(claim, P)` on the chain — no ReasoningSentence, no gate
     // verdict. This replaces the pre-D67 Declared landing for parsed sentences
     // (`DeclaredClaimGrader` remains for curator-pinned rules; its cluster is covered by
     // `tests/grade.rs`).
     let base = demo_base();
-    let grader = DerivedClaimGrader;
+    let grader = ParsedClaimGrader;
     let ingestion = InProcessIngestion::new(
         base,
         &Identity,
@@ -94,22 +94,21 @@ fn ingest_produces_a_derived_witnessed_claim() {
     };
     let claim = s.claim.as_ref().expect("an Encoded sentence grades");
     assert!(
-        matches!(claim.grade, Grade::Derived),
-        "parsed sentences land DERIVED (D67 §1)"
+        matches!(claim.grade, Grade::Declared),
+        "parsed sentences land DECLARED (D73 §6 / eigenius#201). The parser establishes that the \
+         text parses to this well-typed term — not that the term is faithful to what the author \
+         wrote (D61, unbuilt), nor that what the author wrote is true."
     );
     assert_eq!(
         claim.resources.len(),
         2,
-        "the cluster is EncodedClaim + ProgramTrace"
+        "the cluster is EncodedClaim + DeclarationTrace"
     );
     assert!(
         claim.gate_sentence.is_none(),
-        "no ReasoningSentence — the trace is the warrant, nothing for the D39 gate"
+        "no ReasoningSentence — the declaring agent is the warrant, nothing for the D39 gate"
     );
-    assert!(
-        s.verdict.is_none(),
-        "a Derived cluster gets no gate verdict"
-    );
+    assert!(s.verdict.is_none(), "a parsed cluster gets no gate verdict");
 
     let SentenceOutcome::Encoded(item) = &s.outcome else {
         unreachable!()
@@ -120,16 +119,21 @@ fn ingest_produces_a_derived_witnessed_claim() {
         pretty.contains("kind_of"),
         "the graded proposition is the parsed kind-predication sem: {pretty}"
     );
-    // The trace MINTS the witness: `IsDerivedAs(claim_iri, P)` is admitted on the committed
-    // chain — this is what downstream `derived(claim_iri, P, _)` certificates resolve against.
-    let key = WitnessKey::from_exp(
-        WitnessCategory::Derived,
-        claim.claim_iri.clone(),
-        item.sem(),
-    )
-    .expect("the proposition hashes");
+    // The trace MINTS the witness: `IsDeclaredAs(claim_iri, P)` is admitted on the committed
+    // chain — what downstream `declared(claim_iri, P, _)` certificates resolve against.
+    let key_for = |category| {
+        WitnessKey::from_exp(category, claim.claim_iri.clone(), item.sem())
+            .expect("the proposition hashes")
+    };
     assert!(
-        layer_admits_witness(&doc.layer, &key),
-        "the ProgramTrace mints IsDerivedAs(claim, P) into the chain witness index"
+        layer_admits_witness(&doc.layer, &key_for(WitnessCategory::Declared)),
+        "the DeclarationTrace mints IsDeclaredAs(claim, P) into the chain witness index"
+    );
+    // The half that makes eigenius#201 a real change rather than a relabelling: a `derived(...)`
+    // citation must no longer resolve. It read as "a program established P", which is the collapse
+    // of D73 §6's three propositions into one witness.
+    assert!(
+        !layer_admits_witness(&doc.layer, &key_for(WitnessCategory::Derived)),
+        "no IsDerivedAs — the parse is a formulation instrument, not a warrant"
     );
 }

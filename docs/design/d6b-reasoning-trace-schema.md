@@ -354,7 +354,17 @@ An observation is a recorded fact from external reality. The system vouches for 
 
 ### 4.4 VerificationTrace
 
-Records formal proof attachment — promotes a derived result to verified.
+Records that a proof of a resource's proposition was checked — promotes a derived result to verified.
+
+**Two verifiers produce one, distinguished by `proof_system`, not by class** (eigenius#200, `2026-08-21`): an
+external prover, and the Eigenius kernel itself. A type-checked `JustifiedBy` certificate is a proof term in the
+kernel's own proof system, so a passing `ValidateJustification` mints a `VerificationTrace` exactly as an external
+prover would. Treating the two as different kinds would say by naming what `proof_system` already says.
+
+`derivation_trace` is **`recommends`, not `requires`.** It was required until eigenius#200. A kernel-verified
+`ReasoningSentence` has no `ProgramTrace` to point at — D39 §4.2 satisfies its inherited derivation requirement with
+the certificate field, the certificate being the derivation — so requiring the slot would force that case to point it
+at itself, a fiction to satisfy a schema.
 
 ```json
 {
@@ -367,6 +377,20 @@ Records formal proof attachment — promotes a derived result to verified.
   "urn:eigenius:reflection:timestamp": "2026-04-12T16:00:00Z",
   "urn:eigenius:reflection:epistemic_status": "verified",
   "urn:eigenius:reflection:universe_level": 1
+}
+```
+
+The kernel-verified shape, minted by the reasoning institution when a certificate checks. No `derivation_trace`;
+`proof_term` is the sentence's own IRI, since the certificate lives on the sentence rather than in blob storage:
+
+```json
+{
+  "@id": "urn:eigenius:pub:wrn:concl_wrn_selective:verification",
+  "urn:eigenius:core:is_a": ["urn:eigenius:reflection:VerificationTrace"],
+  "urn:eigenius:reflection:resource": "urn:eigenius:pub:wrn:concl_wrn_selective",
+  "urn:eigenius:reflection:proof_system": "urn:eigenius:kernel",
+  "urn:eigenius:reflection:proof_term": "urn:eigenius:pub:wrn:concl_wrn_selective",
+  "urn:eigenius:reflection:timestamp": "2026-08-21T16:00:00.000Z"
 }
 ```
 
@@ -430,7 +454,7 @@ For deeper traversal (finding all ComponentTraces within a trace tree), the trac
 | **declared** | Asserted by a human as axiom or definition | DeclarationTrace | Core ontology, domain ontologies, program definitions, prompt templates |
 | **observed** | Recorded from external reality with provenance | ObservationTrace | Uploaded documents, sensor readings, API responses, experimental data |
 | **derived** | Computed by a typed program from other resources | ProgramTrace | LLM outputs, extracted entities, generated summaries |
-| **verified** | Carries a machine-checked formal proof | VerificationTrace | Proved theorems, certified computations |
+| **verified** | Carries a machine-checked formal proof | VerificationTrace | Proved theorems, certified computations, kernel-checked `JustifiedBy` certificates |
 
 Each category represents a different epistemic act:
 - **Declared** = "I assert this" — anchored in human thought and intent

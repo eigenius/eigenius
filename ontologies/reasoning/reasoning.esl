@@ -20,8 +20,8 @@
 //   constructors consume the matching `ChainWitness` witness; `app`
 //   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
 //   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
-//   a decomposable structure); `spec_str` and `spec_poly` eliminate a
-//   universal quantifier, over `core:string` and over any domain.
+//   a decomposable structure); `spec_poly` eliminates a universal
+//   quantifier at any domain.
 //
 // **No implication introduction.** No rule PRODUCES `JustifiedBy(_, A -> B)`:
 // `app` yields `B`, `sum_*` yield `P`, `spec_*` yield `P(t)`. An implication
@@ -66,8 +66,8 @@ data witness:IsVerifiedAs : core:string -> Prop -> Prop {
 // ── JustificationTerm ────────────────────────────────────────────────
 //
 // The interlingua. Seven ctors total: four categorical groundings, two
-// composition operators (App, Sum), and universal specialization (SpecStr —
-// shared by both `JustifiedBy.spec_str` and `JustifiedBy.spec_poly`).
+// composition operators (App, Sum), and universal specialization (SpecStr,
+// eliminated by `JustifiedBy.spec_poly`).
 // Adding a constructor is a versioned change.
 
 data reasoning:JustificationTerm {
@@ -78,13 +78,15 @@ data reasoning:JustificationTerm {
     App(reasoning:JustificationTerm, reasoning:JustificationTerm),
     Sum(reasoning:JustificationTerm, reasoning:JustificationTerm),
     // Universal specialization (D39 v2 extension). Pair a
-    // universally-quantified justification term with a specific IRI
-    // value to use as the specialization argument. The matching
-    // `JustifiedBy.spec_str` constructor turns
-    // `JustifiedBy(j, forall x : core:string, P(x))` into
-    // `JustifiedBy(SpecStr(j, t), P(t))`. Monomorphic on
-    // `core:string` for v1; numeric / structural specialization is
-    // future scope tied to the measurement-statistics institution.
+    // universally-quantified justification term with an IRI naming the
+    // instantiation. The matching `JustifiedBy.spec_poly` rule turns
+    // `JustifiedBy(j, forall y : T, P(y))` into
+    // `JustifiedBy(SpecStr(j, tag), P(x))` for any domain `T`.
+    //
+    // The second field is a `core:string` AUDIT TAG, not the instance:
+    // the instance `x : T` is bound on the proof side, so the term
+    // algebra stays first-order and needs no new constructor. The tag
+    // names the instantiation for audit.
     SpecStr(reasoning:JustificationTerm, core:string),
 }
 
@@ -141,24 +143,24 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
         reasoning:JustifiedBy(j2, P) ->
         reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
 
-    // Universal specialization (D39 v2 extension). Given a witness
-    // for a universally-quantified proposition `forall x : core:string,
-    // P(x)`, applying it at a specific IRI `t` yields a witness for
-    // `P(t)`. The kernel's NbE beta-reduces `(forall x, P x)(t)` to
-    // `P[t/x]` so the result type matches downstream consumers
-    // expecting `P(t)`. Monomorphic on `core:string` for v1.
-    spec_str :
-        forall (P : core:string -> Prop,
-                j : reasoning:JustificationTerm,
-                t : core:string) =>
-        reasoning:JustifiedBy(j, forall (x : core:string) => P(x)) ->
-        reasoning:JustifiedBy(reasoning:SpecStr(j, t), P(t)),
-
-    // Universal specialization at ANY domain — the general form of `spec_str`.
+    // Universal specialization (D39 v2 extension) at ANY domain. Given a
+    // witness for a universally-quantified proposition `forall y : T, P(y)`,
+    // applying it at a specific instance `x : T` yields a witness for `P(x)`.
+    // The kernel's NbE beta-reduces `(forall y, P y)(x)` to `P[x/y]` so the
+    // result type matches downstream consumers expecting `P(x)`.
     //
-    // `spec_str` is monomorphic on `core:string`, which is enough for rules quantified over IRIs
-    // but not for rules quantified over the sorts the DCG parser actually produces. A parsed
-    // proposition's arguments are CLASSES (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`),
+    // THE ONLY SPECIALIZATION RULE (eigenius#203). A monomorphic
+    // `spec_str : forall (P : core:string -> Prop, j, t : core:string) => …`
+    // stood beside this one until 2026-08-21. It was strictly subsumed —
+    // `T := core:string`, `x := t`, `tag := t` recovers it exactly, and both
+    // produce the same term `SpecStr(j, tag)` — and it was a trap: it fits
+    // rules quantified over IRIs and silently does not fit rules quantified
+    // over classes, which is the shape the DCG parser produces. Someone
+    // reaching for the obvious-looking name got the wrong rule and found out
+    // at commit. `SpecStr` the CONSTRUCTOR is unaffected and still shared;
+    // `JustificationTerm` stays at seven constructors.
+    //
+    // A parsed proposition's arguments are CLASSES (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`),
     // so a rule shaped
     //
     //     forall (g : Set, a : Set) => <parse shape>(g, a) -> onco:RequiresActivity(g, a)

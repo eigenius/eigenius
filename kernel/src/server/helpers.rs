@@ -28,7 +28,7 @@ use tonic::{Response, Status};
 
 /// Current time in milliseconds since the Unix epoch. Used to stamp
 /// `TaskRecord.{created_at, updated_at}`.
-pub(super) fn now_millis() -> i64 {
+pub fn now_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -37,7 +37,7 @@ pub(super) fn now_millis() -> i64 {
 }
 
 /// Convert milliseconds since epoch to ISO 8601 string.
-pub(super) fn millis_to_iso8601(ms: i64) -> String {
+pub fn millis_to_iso8601(ms: i64) -> String {
     use std::time::Duration;
     let d = Duration::from_millis(ms as u64);
     let secs = d.as_secs();
