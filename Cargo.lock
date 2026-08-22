@@ -2856,8 +2856,8 @@ dependencies = [
 
 [[package]]
 name = "nanoda_lib"
-version = "0.4.8-beta"
-source = "git+https://github.com/ammkrn/nanoda_lib?rev=6d2f037#6d2f03717af89dde5b8906bb957a6a50eeecbb94"
+version = "0.4.15"
+source = "git+https://github.com/ammkrn/nanoda_lib?rev=6ae1f0cd962f081f6c423454c5da729d841236a7#6ae1f0cd962f081f6c423454c5da729d841236a7"
 dependencies = [
  "indexmap 2.14.0",
  "num-bigint",

@@ -20,7 +20,7 @@ description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as
 # (PR #19), which keeps `test_resources/ProjFromProp/export` (our
 # vendored broken-proof fixture) producing the expected `infer_proj
 # prop` panic.
-nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "6d2f037" }
+nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "6ae1f0cd962f081f6c423454c5da729d841236a7" }
 
 # Kernel dep wired in 20a.4: `LeanInstitution` implements
 # `kernel::institution::Institution`; the chain-mirror translator
