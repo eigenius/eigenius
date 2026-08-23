@@ -66,11 +66,18 @@ reseed rather than paying a standalone one.
   only `Gen(j, name)` → `"{name}{j}"`, so no free source name reaches the spliced motive), and the
   arm had no test coverage at all. Closed.
 
+- **#194 (`2026-08-22`).** The sweep found **six** `(Exp::X(..), Val::Sort(_))` arms, not the two the
+  issue named — `SizeSort` was a third instance, with code, comment and inference giving three
+  different answers. Five are **deleted**, not tightened: each was `check_type(ctx, exp)`, which is
+  `check_infer`'s arm minus the universe comparison, so they now fall through to
+  `check_by_inference` and check/infer agree by construction. `SizedPi` stays permissive
+  deliberately — no `check_infer` rule exists, and the probe logged it unconditionally with **zero**
+  workspace hits, so there is no evidence to pick its sort from; reasoning recorded on the arm.
+  Measured 12 probe hits, all `inferred <= expected`. Closed.
+
 #### NEXT
-#194 — the check-vs-infer sweep, with instance 2 already confirmed (`check_type` takes no expected
-type, so the four `Val::Sort(_)` arms at `check/mod.rs:659-673` discard the universe). Step 2 of #92
-(function-typed IHs) waits on #138. Then the remaining
-three design notes, all independent and all writable before any code: N1 positivity criterion +
+Step 2 of #92 (function-typed IHs) waits on #138 — which is now the next code item. Then the
+remaining three design notes, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 
