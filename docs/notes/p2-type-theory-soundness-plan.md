@@ -80,7 +80,7 @@ Three, independent of each other and of every code item. All three can be writte
 | note | settles | blocks |
 |---|---|---|
 | **N1 — positivity criterion + declaration routing** ✱ drafted | §1's fork; the criterion; mutual/nested posture | #92 |
-| **N2 — sized types: wire or delete** | whether #139's solver gets constraint emitters or is removed | #66's costing |
+| **N2 — sized types: wire or delete** ✱ [written](p2-n2-sized-types-wire-or-delete.md) | **delete** the solver; keep the comparison pair | #139, and #66's costing |
 | **N3 — universe polymorphism** | `Exp` representation, whether levels reach ESL surface syntax, migration for persisted terms | #188 |
 
 **#66's answer is not a new note** — it lands in D9 or D19, as the issue's acceptance criteria say.

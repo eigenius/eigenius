@@ -99,10 +99,20 @@ reseed rather than paying a standalone one.
   renamed `__ih_N` → `IH#N` (a ctor argument of that name captured it — third capture defect of the
   session). Track A and Track B are done.
 
+- **N2 written `2026-08-22`** — [p2-n2-sized-types-wire-or-delete.md](p2-n2-sized-types-wire-or-delete.md).
+  Recommends **deleting** the ~390-line Warshall solver, keeping the comparison pair. Three findings:
+  wiring is not "add a caller" (there is no flexible size in the term language to solve for —
+  `FlexId` appears nowhere outside `sized.rs`); **nothing uses sized types at all** (`core:Size` is a
+  compiler built-in, declared in no ontology, and no chain term carries a size form); and
+  `references/miniagda` **does not exist**, so the port's faithfulness cannot be checked.
+  **Correction to the earlier reading of #66**: its option 1 is not expensive because the sized path
+  is onerous — *none* of its three sanctioned recursion forms has a chain user, and neither does the
+  bare-`letrec` hazard. No recursion of any kind is exercised by any chain in this repo, which makes
+  #66 cheap now and expensive later.
+
 #### NEXT
-**N2 — sized types: wire or delete** (#139), which also unblocks #66's costing, since option 1 there
-pushes authors onto the sized-`Match` path and that path needs hand-written sizes while the solver
-has no caller. Then **N3 → #188**, with #213 folded into its reseed. Both are design notes, all independent and all writable before any code: N1 positivity criterion +
+Execute N2's recommendation as **#139** (the deletion), then **#66** with §6's finding, then
+**N3 → #188** with #213 folded into its reseed. N3 is a design note, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 
