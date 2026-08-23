@@ -498,14 +498,27 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             }
             for (branch, (c, a)) in branches.iter().zip(cases.iter()) {
                 let a_val = ctx.eval(a, rho1)?;
+                // The branch's expected type is `Πx:aᶜ. g(c x)` — the motive applied to the
+                // constructor applied to the branch's argument. Building it needs a NAME for that
+                // argument, because the motive is spliced in as an `Exp` (read back from `g`) and
+                // must refer to it.
+                //
+                // eigenius#64: that name was the literal `"__case_arg"`, which is a legal ESL
+                // identifier — `[A-Za-z_][A-Za-z0-9_]*`, see `esl/lexer.rs:485` — so user code
+                // could bind it. The issue proposed `__case_arg_{level}`; that is still a legal
+                // identifier and still forgeable. Using the checker's existing `#` discipline
+                // instead makes the name unforgeable by construction: `#` cannot appear in an ESL
+                // identifier, which is exactly why `gen_val` and `readback`'s fresh variables are
+                // spelled `TC#{level}` and `G#{level}`.
+                //
+                // The prefix must differ from `G#`: `readback_val` below starts generating at
+                // `ctx.rho.len()`, so `G#{ctx.rho.len()}` is a name the motive itself may contain.
+                let arg_name = format!("CB#{}", ctx.rho.len());
                 let g_c = Clos {
-                    patt: Patt::Var("__case_arg".to_string()),
+                    patt: Patt::Var(arg_name.clone()),
                     body: Exp::App(
                         Box::new(readback_val(ctx.rho.len(), &Val::Lam(g.clone()))),
-                        Box::new(Exp::Con(
-                            c.clone(),
-                            Box::new(Exp::Var("__case_arg".to_string())),
-                        )),
+                        Box::new(Exp::Con(c.clone(), Box::new(Exp::Var(arg_name)))),
                     ),
                     env: ctx.rho.clone(),
                 };
@@ -1656,6 +1669,96 @@ mod tests {
             Clos::new(Patt::Unit, Exp::One, Rho::Nil),
         );
         check(&mut ctx(), &pair, &sig).unwrap();
+    }
+
+    /// The `Case`-against-Pi arm still checks when the surrounding context binds the name the
+    /// branch binder uses. **This test does NOT discriminate the eigenius#64 fix** — it passes
+    /// against the old literal `"__case_arg"` too — and that is recorded here on purpose, because
+    /// the obvious reading of eigenius#64 is that a capture was reachable and it was not.
+    ///
+    /// Why not: the motive is spliced in via `readback_val`, and readback is fully normalizing. It
+    /// evaluates under the environment and emits no free source-level name — the only variables it
+    /// mints come from `Neut::Gen(j, name)`, which reads back as `"{name}{j}"` with the level
+    /// always appended (`readback.rs:264`), and `try_readback_fun` likewise evaluates each branch
+    /// before reading it back rather than copying the source `Exp`. So `Exp::Var("__case_arg")`
+    /// could not appear in the spliced motive, and the branch binder had nothing to capture.
+    ///
+    /// The fix is therefore what eigenius#64 says it is — robustness, not a bug fix — and the
+    /// property it buys is pinned by `case_branch_binder_name_is_unforgeable` below. This test is
+    /// kept because the arm had no coverage at all.
+    #[test]
+    fn case_branch_checks_under_a_shadowing_outer_binding() {
+        let sum_ty = Val::Data(
+            vec![
+                ("left".to_string(), Exp::One),
+                ("right".to_string(), Exp::One),
+            ],
+            Rho::Nil,
+        );
+        // The outer binding the motive refers to, and which the branch binder must not capture.
+        let outer = Rho::Nil.extend(Patt::Var("__case_arg".to_string()), Val::One);
+        // Motive: `λ_. __case_arg` — constantly the type `One`, named indirectly.
+        let motive = Clos::new(
+            Patt::Unit,
+            Exp::Var("__case_arg".to_string()),
+            outer.clone(),
+        );
+
+        let case = Exp::Case(vec![
+            crate::nbe::term::Branch {
+                name: "left".to_string(),
+                body: Exp::Lam(Patt::Unit, Box::new(Exp::Unit)),
+            },
+            crate::nbe::term::Branch {
+                name: "right".to_string(),
+                body: Exp::Lam(Patt::Unit, Box::new(Exp::Unit)),
+            },
+        ]);
+
+        let mut ctx = CheckCtx::new(outer, Vec::new());
+        check(&mut ctx, &case, &Val::Pi(Box::new(sum_ty), motive))
+            .expect("each branch checks against `Pi y:One. One`; a captured motive breaks this");
+    }
+
+    /// **eigenius#64 — the minted binder name cannot be written in ESL.**
+    ///
+    /// This is the property the fix actually delivers, and the reason the name is `CB#{level}`
+    /// rather than the `__case_arg_{level}` the issue proposed: `#` is not a legal identifier
+    /// character, so no source program can bind the name, at any scope, ever. `__case_arg_0` is a
+    /// perfectly good ESL identifier and would have left the same latent hazard one rename away.
+    ///
+    /// The `#` discipline is not invented here — `gen_val` mints `TC#{level}` and readback mints
+    /// `G#{level}` for the same reason. The prefixes must stay distinct: `readback_val` starts
+    /// generating at `ctx.rho.len()`, the same level the branch binder is named from, so reusing
+    /// `G#` would collide with the motive's own variables.
+    #[test]
+    fn case_branch_binder_name_is_unforgeable() {
+        // The lexer either rejects the name or splits it — what it must not do is hand back a
+        // single identifier token equal to it.
+        let lexes_as_one_identifier = |name: &str| -> bool {
+            crate::esl::lexer::tokenize(name)
+                .map(|toks| {
+                    toks.iter()
+                        .any(|t| format!("{t:?}").contains(&format!("\"{name}\"")))
+                })
+                .unwrap_or(false)
+        };
+
+        // First: the detector fires on a name that IS writable. Without this the assertion below
+        // would pass against any string, including one that is perfectly forgeable — which is the
+        // failure mode that let the original literal sit here unnoticed.
+        assert!(
+            lexes_as_one_identifier("__case_arg_7"),
+            "eigenius#64's proposed `__case_arg_{{level}}` IS a legal ESL identifier; if this stops \
+             holding the test below no longer discriminates anything"
+        );
+
+        let minted = format!("CB#{}", 7);
+        assert!(
+            !lexes_as_one_identifier(&minted),
+            "`{minted}` must not be writable as an ESL identifier; if it becomes one, the \
+             case-branch binder can be captured and this name has to change"
+        );
     }
 
     #[test]
