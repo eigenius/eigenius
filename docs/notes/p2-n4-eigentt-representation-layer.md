@@ -134,20 +134,55 @@ diagnostic rather than silent admission, and correct the comment to say what is 
 
 ## 5. If it goes ahead
 
+### The ontology
+
 - **Move the declaration, keep the IRI.** `urn:eigenius:eigentt:TypeExpr` declared in
   `core-ontology.json` is legal — the namespace prefix is a naming convention, not a layer
   assertion. That leaves **all 22 chain references and 59 Rust references untouched**. Renaming to
   `core:TypeExpr` would change 81 references and break a widely-referenced IRI for cosmetics.
-- `Axiom` / `Definition` and their four properties stay where they are. They are the higher stratum.
+- **`TypeExpr` references nothing outside `core` except itself.** Checked: its only non-`core:*`
+  reference is `urn:eigenius:eigentt:TypeExpr`, its own self-reference. `Sort` already points at
+  `core:Level`, the literals at `core:string` / `core:integer` / `core:float` / `core:boolean`. So
+  the move introduces no upward reference — it is a relocation, not a rewiring.
+- **Order it after `core:Level`** inside `core-ontology.json`. D47 §211 already establishes that
+  core declarations are order-sensitive.
+- `Axiom` / `Definition` and their four properties stay where they are. They are the higher stratum
+  (§2), and their `class_types [eigentt:TypeExpr]` keeps resolving — a higher layer referencing a
+  lower one.
 - Retype `param_kind` and `type_name` to `data_type core:resource` / `class_types [TypeExpr]`, the
   pattern `reflection:canonical_proposition` and now `core:result_sort` both use.
-- **Rewrite `check_inductive_arg`.** It currently reads `type_name` as a string and dispatches on
-  IRI matching (`wk::STRING => is_string`, …). It must decode a `TypeExpr` and dispatch on the
-  decoded shape. This is the real work of the change and the previous draft of this section omitted
-  it; §4a is why it is also the point of the change.
 - **`TypeExpr` needs a `SizeSort` ctor** — `param_kind` accepts `Size`, and `TypeExpr`'s 19
   constructors have no representation for it.
-- Both string unions disappear, and with them the `param_kind` silent default.
+
+### The code — six sites, three producers and three consumers
+
+The ontology edit is the small half. Each string is written in one place and read in another, and
+every one of those call sites dispatches on string shape:
+
+| site | today | after |
+|---|---|---|
+| `esl/compile.rs:1076,2054` (+`:2087`) — `param_kind` producer | `Value::String(kind)`, from `sort_kind_param_string` or a resolved IRI | emit a `TypeExpr` value |
+| `esl/compile.rs:1145`, `:975` — `type_name` producer | `Value::String(resolved)` / `Value::String(wk::OPTION)` | emit a `TypeExpr` value |
+| `program/ground.rs:849` — `decode_param_kind_str` | six-way string dispatch (`Size`, `Prop`, `Set`, `Type:N`, primitive IRIs, inductive IRI) **with a silent `Sort(1)` default** | `decode_type` and use the `Exp` |
+| `program/ground.rs:1140` — `decode_arg_type` | five-way string dispatch (bare name, self-ref, other inductive, primitive, class) | `decode_type` and use the `Exp` |
+| `validation/rules/inductive.rs` — `check_inductive_arg` | reads `type_name` as a string, IRI-matches, **returns `Ok` on an unparseable one** (§4a) | decode a `TypeExpr` and dispatch on the decoded shape |
+| `esl/print.rs` — the ESL printer | prints the kind back as a keyword or IRI | print the decoded `TypeExpr` |
+
+Two of those six are the defects this note exists for: `decode_param_kind_str`'s silent `Sort(1)`
+and `check_inductive_arg`'s silent `Ok`. Both are consequences of a string that cannot represent
+what it is asked to hold — which is the thesis, twice, at two call sites.
+
+### What it buys
+
+- `data Vec (A : Sort u)` becomes expressible. This is the loose end #188 left: `core:result_sort`
+  was retyped in slice 5b so `data X : Sort u` works, while `param_kind` stayed a string, so a
+  **parameter** still cannot carry a level. TTR record types parameterised over an arbitrary
+  universe want exactly that shape (N3 §5a).
+- A class-typed parameter stops being silently typed `Set` — `Exp::EigonClass(iri)` is just what
+  the decoded `ConstRef` yields, with no special arm needed.
+- Parameter-typed constructor arguments become checkable: a parameter reference decodes to
+  `Exp::Var`, so Rule 16 has a shape to check instead of a string it cannot parse (§4a).
+- Both string unions disappear.
 
 ## 6. Scope
 
