@@ -122,13 +122,17 @@ reseed rather than paying a standalone one.
   described MiniAgda's two constraint systems with a live intra-doc link to the removed one, and the
   user-facing primer §7.6 advertised "the dual-solver pattern" in two places. Both also carried
   dangling `references/miniagda/…` paths — MiniAgda is not vendored at all.
-- **#66 updated `2026-08-22`** with N2 §6, and the decision is still open. Its premise changed: none
-  of its three sanctioned recursion forms has a chain user, and neither does the bare-`letrec`
-  hazard. Cheap to decide now, expensive later.
+- **#66 CLOSED `2026-08-22` as won't implement.** Option 1 is vacuous: **ESL has no `letrec`** —
+  `grep letrec|Drec` over `parser.rs`, `compile.rs`, `ast.rs` returns nothing — and **nothing in
+  production constructs a `Decl::Drec`** (the only two sites are in `check/codata.rs`'s test module).
+  The divergent program is reachable only from Rust, so there is no surface to gate. The kernel's
+  acceptance of a non-terminating `Drec` is a fact about the term language for D9/D19, not an open
+  defect. **Successor question, unfiled:** does `Decl::Drec` earn its place at all? Its stated
+  justification is recursor derivation, which does not use it — same shape as #139. Needs a look at
+  `eval/mod.rs:219` and the codata corecursion tests first.
 
 #### NEXT
-**#66** — take the decision (gate the surface, or accept and document in D9/D19), then
-**N3 → #188** with #213 folded into its reseed. N3 is a design note, all independent and all writable before any code: N1 positivity criterion +
+**N3 → #188** — universe polymorphism, with #213 folded into its reseed. N3 is a design note, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 
