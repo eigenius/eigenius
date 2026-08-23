@@ -4,9 +4,9 @@ Written `2026-08-23` from `c271213`. Arose while implementing
 [#188](https://github.com/eigenius/eigenius/issues/188) but is **not part of it** — universe
 polymorphism needs none of this.
 
-**Answer: yes, and the bootstrap-cycle objection does not hold.** The decoder is hard-coded, not
-schema-driven, so nothing needs a `TypeExpr` value to decode a `TypeExpr` value. What remains is one
-narrower question about the *validator*, in §4.
+**Answer: yes, and nothing blocks it.** The bootstrap-cycle objection does not hold for the decoder
+(hard-coded, not schema-driven) and does not hold for the validator either — §4 settles both. The
+move additionally closes a **fail-open in Rule 16** that the P2 audit missed, §4a.
 
 ## 1. The symptom, twice
 
@@ -84,16 +84,53 @@ The recursion the design *does* worry about is already solved, and by a mechanis
 *"which would risk infinite recursion for mutually-referential inductives"*. A `TypeExpr`-valued
 `type_name` would resolve through the same stub path.
 
-**For the validator, open.** Rule 16 (`validation/rules/inductive.rs:245`) *is* schema-driven — it
-reads the target `InductiveType`'s `ctors` array and checks the value's ctor name and arity against
-it. Validating `TypeExpr`'s own `type_name` values would mean reading `TypeExpr`'s `ctors` to check
-values that are themselves inside `TypeExpr`'s `ctors`. That is not obviously a cycle — the read is
-of a resource, not of a decoded term — but it is the one place to look before committing.
+**For the validator, also no.** Rule 16 (`validation/rules/inductive.rs:245`) *is* schema-driven —
+it reads the target `InductiveType`'s `ctors` array to check a value's ctor name and arity. But its
+recursion is structural on the **value tree**, never on the schema: `check_inductive_value` reads
+`ctors` (a resource lookup, not a validation), matches the ctor, zips `args` against the declared
+`arg_types`, and recurses via `check_inductive_arg` on **each argument value**, with
+`child_path = "{path}.args[{i}]"`. Every step consumes one node of a finite JSON value. The schema
+resource is re-read at each level and never descended into as data.
 
-**The narrow question to settle first:** does Rule 16 terminate when the value under validation is
-part of the very declaration supplying the schema? Answerable by reading `check_inductive_value`'s
-recursion, or by an experiment: give one `InductiveArgType` a `TypeExpr` value and validate the core
-layer.
+So validating `TypeExpr`'s own declaration would read `TypeExpr`'s `ctors` while checking a value
+that happens to live inside `TypeExpr`'s `ctors` — a bounded read, not a loop. Depth is bounded by
+the value's own nesting. **The question this note opened is closed: there is no cycle.**
+
+## 4a. What the retype would close: Rule 16 fails open on parameter-typed arguments
+
+`check_inductive_arg` reads `type_name` as a **string** (`.and_then(Value::as_str).unwrap_or("")`)
+and, when it does not parse as an IRI, **returns `Ok` — admitting the value unchecked**:
+
+```rust
+let type_iri = match Iri::parse(type_name) {
+    Ok(i) => i,
+    Err(_) => return, // Bare parameter name; deferred per v1.
+};
+```
+
+A bare `type_name` is a **type-parameter reference**, so every parameter-typed constructor argument
+of every parametric inductive is admitted without validation. The declarations exist:
+`core:Option.some(A)`, `logic:And.conj(P, Q)`, `logic:Or.inl/inr`.
+
+**Latent, not live — but nearer than the comment suggests.** Measured `2026-08-23`: no `conj`,
+`inl`, `inr` or `Some` values on any committed chain, so nothing is currently mis-validated. The
+deferral's stated premise, *"v1 callers use only monomorphic inductives"*, is half stale: the
+declarations are parametric already, and `closed-class.esl:858` gives English *"but"* the semantics
+`λs₂:Prop. λs₁:Prop. logic:And(s₁, s₂)`. **Any parsed sentence containing "but" produces an `And`
+value**, whose two arguments are typed `P` and `Q`. It is one prose encoding away, not hypothetical.
+
+This is the shape P2 spent its length fixing — the commit gate accepting what it cannot check, with
+no diagnostic. #92 was declarations never reaching the positivity pass; #194 was check mode
+discarding the expected universe; this is Rule 16 discarding the argument type. Each reads as if it
+checks and does not. The audit did not look at Rule 16.
+
+**The retype subsumes it.** A `TypeExpr`-valued `type_name` makes a parameter reference an
+`Exp::Var` — a decodable, checkable shape — instead of a string that fails to parse as an IRI. The
+fail-open exists *because* the slot is stringly typed, which is this note's whole thesis in one call
+site.
+
+Fixing it independently is still worth doing, and is smaller: make the unparseable case produce a
+diagnostic rather than silent admission, and correct the comment to say what is actually true.
 
 ## 5. If it goes ahead
 
@@ -104,6 +141,10 @@ layer.
 - `Axiom` / `Definition` and their four properties stay where they are. They are the higher stratum.
 - Retype `param_kind` and `type_name` to `data_type core:resource` / `class_types [TypeExpr]`, the
   pattern `reflection:canonical_proposition` and now `core:result_sort` both use.
+- **Rewrite `check_inductive_arg`.** It currently reads `type_name` as a string and dispatches on
+  IRI matching (`wk::STRING => is_string`, …). It must decode a `TypeExpr` and dispatch on the
+  decoded shape. This is the real work of the change and the previous draft of this section omitted
+  it; §4a is why it is also the point of the change.
 - **`TypeExpr` needs a `SizeSort` ctor** — `param_kind` accepts `Size`, and `TypeExpr`'s 19
   constructors have no representation for it.
 - Both string unions disappear, and with them the `param_kind` silent default.
