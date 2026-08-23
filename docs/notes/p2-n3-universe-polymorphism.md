@@ -79,24 +79,56 @@ enum Level { Zero, Succ(Box<Level>), Max(Box<Level>, Box<Level>), IMax(Box<Level
 Port `simplify` (`level.rs:55`), `subst_levels` (`:101`), `leq_core` (`:176`) and `leq` (`:229`) from
 nanoda — 288 lines total, and the `IMax` cases in `leq` are the part not worth re-deriving.
 
-## 3. Does the surface get levels? — No, not initially
+## 3. Does the surface get levels? — YES, and it is Lean's syntax
 
-Universe polymorphism has two halves: level *variables* in binders, and level *arguments* at use
-sites (nanoda's `Const(name, levels)`, `expr.rs:445`, with declarations carrying `uparams`,
-`env.rs:39`).
+> **REVISED `2026-08-23`.** This section said *"ESL should not grow level syntax in the first
+> landing"*. That was wrong, and the error is worth naming: I argued from usage counts — 942 of the
+> 944 sort uses are `Prop` or `Set`, so `Sort u` syntax "serves two sites". **That measures the
+> monomorphic present, which is exactly what the feature exists to change.** It counted demand for a
+> feature by counting uses of its absence; the same reasoning would have rejected indexed families
+> because nothing used indices.
+>
+> The concrete consequence: `SortKind` is `Prop | Set | Type(usize)`, and nothing reachable from ESL
+> can construct a `Level::Param` — the only producers are the D47 decoder and a test. So §7's
+> *"declarations carry `uparams`; the elaborator generalises free levels"* has **nothing to
+> generalise**: every authorable level is concrete, `uparams` would be empty on every declaration,
+> and universe polymorphism would be implemented and unreachable from the language. §5a's TTR
+> predicates ranging over types are *authored*, in source, and cannot be written without this.
+>
+> The tell was already in the tree: slice 4 added
+> `a_polymorphic_level_refuses_to_print_rather_than_emitting_garbage`, a test asserting the printer
+> *cannot* print a polymorphic level. I recorded that as a documented limitation. It was evidence the
+> design was incomplete.
 
-**ESL should not grow level syntax in the first landing.** Reasons:
+**Adopt Lean 4's surface syntax** ([reference](https://lean-lang.org/doc/reference/latest/The-Type-System/Universes/)),
+because the numbering already agrees and the alternative is inventing a second spelling for a thing
+the ecosystem has settled.
 
-- The surface today writes `Prop`, `Set`, `Type k` (`esl/compile.rs:1437`), and 942 of the 944 uses
-  are the two monomorphic keywords. Adding `Sort u` syntax serves two sites.
-- Level *inference* at declaration sites covers the actual need: `spec_poly` wants "this rule works
-  at any level", which is a `uparams` list the elaborator can generalise, not something an author
-  should hand-annotate.
-- Surface syntax is the hardest part to reverse. The representation and the algebra can land, be
-  exercised through inference, and grow explicit syntax later if authors need to constrain a level.
+| Lean | Eigenius today | after |
+|---|---|---|
+| `Prop` = `Sort 0` | `Prop` → `Sort(0)` | unchanged |
+| `Type` = `Type 0` = `Sort 1` | **`Set`** → `Sort(1)` | `Set` kept; `Sort 1` also writable |
+| `Type u` = `Sort (u+1)` | `Type k` → `Sort(k+1)` | **already identical** |
+| `Sort u` | *absent* | **added** |
+| `u + n`, `max u v`, `imax u v` | *absent* | **added** |
 
-Concretely: `Level::Param` exists in the representation from day one, declarations gain a `uparams`
-list, and the elaborator generalises free levels at declaration boundaries. No new ESL token.
+`Type k`'s numbering matching Lean's is what makes this additive rather than a renumbering of the 11
+existing `Type k` uses. Keyword collision checked: `Sort` occurs twice in the tree — once in a
+comment in `logic.esl`, once as the English word in a lexicon `form` string — and `max` / `imax`
+occur not at all.
+
+**The one divergence to document rather than fix.** Eigenius's `Set` is Lean's `Type` / `Type 0`. In
+Lean 4 `Set α` is a *library* type for sets, so a reader arriving from Lean will misread `Set` here.
+Renaming it would touch 230 uses for no semantic gain; the correspondence belongs in the ESL guide's
+type-theory primer instead.
+
+**Binder form: `universe u;`, not `.{u}` — initially.** Lean offers both an explicit per-declaration
+binder (`def id.{u} ...`) and a scoped `universe` command, and notes that *"Lean automatically
+instantiates most level parameters"*. ESL is statement-oriented, and `.{` after a qualified name
+(`data lexicon:Cat.{u}`) is the one form that needs real lexer work, since `.` is not an identifier
+character. Take `universe u, v;` first and add explicit use-site instantiation only when inference
+is insufficient — that is the same "add syntax when a consumer needs it" discipline, applied where
+it is actually true rather than as a reason to add none.
 
 ## 4. Migration — smaller than it looks, and the reason is worth checking before relying on it
 
@@ -253,5 +285,5 @@ Two corrections this slice forced:
    `Level::of_nat` at construction, `as_nat()` guards where a site pattern-matched a numeral.
 3. `conv.rs` cumulativity → `Level::leq`; `check_infer`'s `Sort(n) : Sort(n+1)` → `Sort(l.succ())`;
    `infer_dependent_sort`'s two-case Pi rule → `IMax`.
-5. `uparams` on declarations; elaborator generalises free levels. No ESL syntax (§3).
+5. `uparams` on declarations + **the ESL level syntax of §3** — without it nothing can author a `Level::Param` and generalisation has nothing to generalise.
 6. Reseed with **#213** folded in; full gate plus the WRN demo and both parse baselines.
