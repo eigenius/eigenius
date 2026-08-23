@@ -109,6 +109,13 @@ reseed rather than paying a standalone one.
   is onerous — *none* of its three sanctioned recursion forms has a chain user, and neither does the
   bare-`letrec` hazard. No recursion of any kind is exercised by any chain in this repo, which makes
   #66 cheap now and expensive later.
+  **Corrected `2026-08-22` after review**: sized types exist for **codata productivity** first
+  (D19:491 — "required for complete termination story when combining inductive recursion with codata
+  corecursion"), not inductive termination. The productivity site — `check/mod.rs`'s
+  `Lam`-vs-`SizedPi` arm, which registers `j < upper` in the TSO — is a wired user the first draft
+  missed, because it feeds the comparison pair rather than calling it. Recommendation unchanged:
+  productivity works from sizes that are WRITTEN; `solve` infers sizes that are unknown, and there
+  are none.
 
 #### NEXT
 Execute N2's recommendation as **#139** (the deletion), then **#66** with §6's finding, then
