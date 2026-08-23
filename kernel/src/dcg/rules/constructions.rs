@@ -45,7 +45,7 @@ fn generalized_coord(
     depth: usize,
 ) -> Option<Exp> {
     match denote {
-        Exp::Sort(0) => {
+        Exp::Sort(l) if l.is_nat(0) => {
             if std::env::var("EIGENIUS_TRACE_COORD").is_ok()
                 && (matches!(a, Exp::Lam(..)) || matches!(b, Exp::Lam(..)))
             {
@@ -95,7 +95,7 @@ fn but_not_coord(
     layer: &Arc<Layer>,
 ) -> Option<Exp> {
     match denote {
-        Exp::Sort(0) => Some(Exp::InductiveType(
+        Exp::Sort(l) if l.is_nat(0) => Some(Exp::InductiveType(
             and.clone(),
             vec![a.clone(), negate(b.clone(), layer)?],
         )),
@@ -1710,7 +1710,7 @@ mod tests {
         let sigma = Exp::Sig(
             Patt::Var("x".into()),
             Box::new(gene.clone()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
         );
         let mmr_genes = ctor(
             "fwd",

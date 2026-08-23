@@ -95,7 +95,15 @@ pub fn encode_lam_chain(binders: &[(Patt, Exp)], body: &Exp) -> Result<Value, En
 
 fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
     match exp {
-        Exp::Sort(n) => Ok(ctor("Sort", vec![json!(*n as i64)])),
+        Exp::Sort(n) => Ok(ctor(
+            "Sort",
+            vec![json!(n
+                .as_nat()
+                .ok_or_else(|| EncodeError::NotATypeLevelExp(format!(
+                "polymorphic universe level `{n}` — the chain `Sort` ctor still takes a numeral \
+                 (eigenius#188 slice 4 replaces it with an `eigentt:Level` reference)"
+            )))? as i64)],
+        )),
         Exp::Var(name) => Ok(ctor("Var", vec![json!(name)])),
         Exp::App(h, a) => Ok(ctor(
             "App",
@@ -411,7 +419,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             let level = args[0]
                 .as_i64()
                 .ok_or_else(|| wrong_shape("Sort", 0, "expected integer"))?;
-            Ok(Exp::Sort(level as usize))
+            Ok(Exp::sort(level as usize))
         }
         "Var" => {
             expect_arg_count("Var", 1, args)?;
@@ -917,7 +925,7 @@ mod tests {
 
     #[test]
     fn encodes_sort() {
-        let v = encode_type(&Exp::Sort(0)).unwrap();
+        let v = encode_type(&Exp::sort(0)).unwrap();
         assert_eq!(v, Value::Json(ctor_obj("Sort", vec![json!(0)])));
     }
 
@@ -968,7 +976,7 @@ mod tests {
     fn ann_roundtrip() {
         // `(P : Prop)` — the bidirectional annotation round-trips through D47.
         let layer = empty_layer();
-        let original = Exp::Ann(Box::new(Exp::Var("P".to_string())), Box::new(Exp::Sort(0)));
+        let original = Exp::Ann(Box::new(Exp::Var("P".to_string())), Box::new(Exp::sort(0)));
         let encoded = encode_type(&original).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
@@ -1085,7 +1093,7 @@ mod tests {
         // Built from D47 §3.2's worked example.
         let p_var = || Exp::Var("P".to_string());
         let q_var = || Exp::Var("Q".to_string());
-        let prop = || Exp::Sort(0);
+        let prop = || Exp::sort(0);
         let p_to_q = Exp::Arrow(Box::new(p_var()), Box::new(q_var()));
         let q_to_p = Exp::Arrow(Box::new(q_var()), Box::new(p_var()));
         let iff = Exp::Times(Box::new(p_to_q), Box::new(q_to_p));
@@ -1143,9 +1151,9 @@ mod tests {
 
     #[test]
     fn decodes_sort() {
-        let v = encode_type(&Exp::Sort(2)).unwrap();
+        let v = encode_type(&Exp::sort(2)).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
-        assert_eq!(decoded, Exp::Sort(2));
+        assert_eq!(decoded, Exp::sort(2));
     }
 
     #[test]
@@ -1190,7 +1198,7 @@ mod tests {
         // (modulo Arrow→Pi desugaring).
         let p_var = || Exp::Var("P".to_string());
         let q_var = || Exp::Var("Q".to_string());
-        let prop = || Exp::Sort(0);
+        let prop = || Exp::sort(0);
         let p_to_q = Exp::Arrow(Box::new(p_var()), Box::new(q_var()));
         let q_to_p = Exp::Arrow(Box::new(q_var()), Box::new(p_var()));
         let iff = Exp::Times(Box::new(p_to_q), Box::new(q_to_p));
@@ -1281,12 +1289,12 @@ mod tests {
         let ix_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:_:IxClassFamily").unwrap(),
             name: "urn:_:IxClassFamily".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             // Index telescope's type is Sort(1) — indices are types
             // themselves (e.g., the index says "what type am I
             // indexed by"). This keeps the test purely type-level.
-            indices: vec![(Patt::Unit, Exp::Sort(1))],
-            sort: Exp::Sort(1),
+            indices: vec![(Patt::Unit, Exp::sort(1))],
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         // `IxClassFamily Some Other` — both param and index are
@@ -1330,15 +1338,15 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let list_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
             name: "urn:_:List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::InductiveType(
@@ -1347,7 +1355,7 @@ mod tests {
                         name: "urn:_:List".to_string(),
                         params: Vec::new(),
                         indices: Vec::new(),
-                        sort: Exp::Sort(1),
+                        sort: Exp::sort(1),
                         ctors: Vec::new(),
                     }),
                     vec![Exp::Var("A".to_string())],
@@ -1390,10 +1398,10 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "zero".to_string(),
-                typ: Exp::Sort(1),
+                typ: Exp::sort(1),
             }],
         });
         let zero = Exp::InductiveCtor(nat_decl, "zero".to_string(), Vec::new());
@@ -1412,10 +1420,10 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "succ".to_string(),
-                typ: Exp::Sort(1),
+                typ: Exp::sort(1),
             }],
         });
         let succ_x = Exp::InductiveCtor(
@@ -1482,15 +1490,15 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
-                    typ: Exp::Sort(1),
+                    typ: Exp::sort(1),
                 },
                 InductiveCtorDecl {
                     name: "succ".to_string(),
-                    typ: Exp::Sort(1),
+                    typ: Exp::sort(1),
                 },
             ],
         });
@@ -1502,7 +1510,7 @@ mod tests {
                 Patt::Var("n".to_string()),
                 Exp::InductiveType(nat_decl.clone(), Vec::new()),
             )],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let zero = Exp::InductiveCtor(nat_decl.clone(), "zero".to_string(), Vec::new());

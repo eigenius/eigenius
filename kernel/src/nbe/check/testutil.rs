@@ -35,10 +35,10 @@ pub(crate) fn sized_stream_decl() -> Arc<InductiveDecl> {
         name: "SizedStream".to_string(),
         params: vec![
             (Patt::Var("i".to_string()), Exp::SizeSort),
-            (Patt::Var("A".to_string()), Exp::Sort(1)),
+            (Patt::Var("A".to_string()), Exp::sort(1)),
         ],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![],
     })
 }
@@ -59,7 +59,7 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
         name: "Nat".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             InductiveCtorDecl {
                 name: "zero".to_string(),
@@ -86,7 +86,7 @@ pub(crate) fn sized_nat_decl() -> Arc<InductiveDecl> {
         name: "SizedNat".to_string(),
         params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     });
     let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
@@ -99,7 +99,7 @@ pub(crate) fn sized_nat_decl() -> Arc<InductiveDecl> {
         name: "SizedNat".to_string(),
         params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             InductiveCtorDecl {
                 name: "zero".to_string(),
@@ -142,7 +142,7 @@ pub(crate) fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
         name: name.to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     })
 }

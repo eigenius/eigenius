@@ -299,8 +299,8 @@ fn definition_resource(def_iri: &str, opaque: bool) -> Resource {
     // `Exp::Lam` carries no domain, so the encoder needs the annotations supplied separately.
     let encoded_body = eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
         &[
-            (Patt::Var("g".into()), Exp::Sort(1)),
-            (Patt::Var("a".into()), Exp::Sort(1)),
+            (Patt::Var("g".into()), Exp::sort(1)),
+            (Patt::Var("a".into()), Exp::sort(1)),
         ],
         match &body {
             Exp::Lam(_, inner) => match inner.as_ref() {
@@ -323,11 +323,11 @@ fn definition_resource(def_iri: &str, opaque: bool) -> Resource {
         iri("urn:eigenius:eigentt:definition_type"),
         encode_type(&Exp::Pi(
             Patt::Unit,
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(Exp::Pi(
                 Patt::Unit,
-                Box::new(Exp::Sort(1)),
-                Box::new(Exp::Sort(0)),
+                Box::new(Exp::sort(1)),
+                Box::new(Exp::sort(0)),
             )),
         ))
         .unwrap(),
@@ -477,8 +477,8 @@ fn rule24_rejects_a_recursive_definition() {
     // A body that names its own IRI.
     let self_ref = eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
         &[
-            (Patt::Var("g".into()), Exp::Sort(1)),
-            (Patt::Var("a".into()), Exp::Sort(1)),
+            (Patt::Var("g".into()), Exp::sort(1)),
+            (Patt::Var("a".into()), Exp::sort(1)),
         ],
         &app2(
             Exp::EigonAxiom(iri(DEF)),
@@ -504,8 +504,8 @@ fn rule24_rejects_a_body_that_is_not_in_normal_form() {
     // `(λz. kind_of(z)) WRN` — a redex, left unreduced.
     let redex = eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
         &[
-            (Patt::Var("g".into()), Exp::Sort(1)),
-            (Patt::Var("a".into()), Exp::Sort(1)),
+            (Patt::Var("g".into()), Exp::sort(1)),
+            (Patt::Var("a".into()), Exp::sort(1)),
         ],
         &app2(
             ax("urn:eigenius:ontology:prep_of"),
@@ -513,7 +513,7 @@ fn rule24_rejects_a_body_that_is_not_in_normal_form() {
                 Box::new(
                     eigenius_kernel::program::eigentt_type_mirror::decode_type(
                         &eigenius_kernel::program::eigentt_type_mirror::encode_lam_chain(
-                            &[(Patt::Var("z".into()), Exp::Sort(1))],
+                            &[(Patt::Var("z".into()), Exp::sort(1))],
                             &Exp::App(
                                 Box::new(ax("urn:eigenius:ontology:kind_of")),
                                 Box::new(Exp::Var("z".into())),
@@ -552,7 +552,7 @@ fn rule24_rejects_a_body_that_does_not_inhabit_its_declared_type() {
     // Declared `Set -> Set -> Prop`, but the body is a bare sort.
     r.set(
         iri("urn:eigenius:eigentt:definition_body"),
-        encode_type(&Exp::Sort(0)).unwrap(),
+        encode_type(&Exp::sort(0)).unwrap(),
     );
     let errs = definition_errors(r);
     assert!(
@@ -844,7 +844,7 @@ fn definition_body_cannot_escape_checking_by_riding_on_another_class() {
     // A body that Rule 24 would reject (ill-typed), on a resource Rule 24 will never look at.
     smuggler.set(
         iri("urn:eigenius:eigentt:definition_body"),
-        encode_type(&Exp::Sort(0)).unwrap(),
+        encode_type(&Exp::sort(0)).unwrap(),
     );
 
     let errs = Validator::new(layer).validate_resource(&smuggler);

@@ -301,7 +301,7 @@ impl Item {
         if std::env::var("EIGENIUS_TRACE_MISMATCH").is_ok()
             && !matches!(&sem, Exp::Lam(crate::nbe::term::Patt::Var(v), _) if v.starts_with("$anaphor$"))
             && matches!(sem, Exp::Lam(..))
-            && matches!(crate::dcg::category::denote_cat(&cat), Ok(Exp::Sort(0)))
+            && matches!(crate::dcg::category::denote_cat(&cat), Ok(Exp::Sort(ref l)) if l.is_nat(0))
         {
             let shape = match &sem {
                 Exp::Lam(p, b) => format!(

@@ -305,7 +305,7 @@ mod tests {
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         })
     }
@@ -318,7 +318,7 @@ mod tests {
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -332,9 +332,9 @@ mod tests {
         })
     }
 
-    /// Constant motive `λ_. Set`. Applied to anything, returns `Val::Sort(1)`.
+    /// Constant motive `λ_. Set`. Applied to anything, returns `Val::sort(1)`.
     fn const_set_motive() -> Val {
-        Val::Lam(Clos::new(Patt::Unit, Exp::Sort(1), Rho::Nil))
+        Val::Lam(Clos::new(Patt::Unit, Exp::sort(1), Rho::Nil))
     }
 
     /// Walk a `Val::Pi` chain, applying generated variables, and return
@@ -378,7 +378,7 @@ mod tests {
             name: "D".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
                     name: "base".to_string(),
@@ -459,7 +459,10 @@ mod tests {
         let motive = const_set_motive();
         let typ =
             derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive_minor_type");
-        assert!(matches!(typ, Val::Sort(1)), "expected Set, got {typ:?}");
+        assert!(
+            matches!(&typ, Val::Sort(l) if l.is_nat(1)),
+            "expected Set, got {typ:?}"
+        );
     }
 
     #[test]
@@ -472,7 +475,7 @@ mod tests {
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 2, "expected 2 Π binders, got {count}");
         assert!(
-            matches!(body, Val::Sort(1)),
+            matches!(&body, Val::Sort(l) if l.is_nat(1)),
             "expected final body Set, got {body:?}"
         );
     }
@@ -494,7 +497,7 @@ mod tests {
             name: "Tree".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "leaf".to_string(),
@@ -569,15 +572,15 @@ mod tests {
         let list = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -585,7 +588,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -599,16 +602,16 @@ mod tests {
                 },
             ],
         });
-        // Use Val::Sort(1) as the concrete param value (i.e. List(Set)). This
+        // Use Val::sort(1) as the concrete param value (i.e. List(Set)). This
         // suffices for the shape check; element types do not matter for
         // counting Π binders.
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 1, &[Val::Sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 1, &[Val::sort(1)], &motive, &EvalCtx::Pure)
             .expect("derive_minor_type");
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 3, "expected 3 Π binders, got {count}");
         assert!(
-            matches!(body, Val::Sort(1)),
+            matches!(&body, Val::Sort(l) if l.is_nat(1)),
             "expected final body Set, got {body:?}"
         );
     }
@@ -621,22 +624,25 @@ mod tests {
         let list = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(list_ty),
                 ),
             }],
         });
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 0, &[Val::Sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure)
             .expect("derive_minor_type");
-        assert!(matches!(typ, Val::Sort(1)), "expected Set, got {typ:?}");
+        assert!(
+            matches!(&typ, Val::Sort(l) if l.is_nat(1)),
+            "expected Set, got {typ:?}"
+        );
     }
 
     #[test]
@@ -647,7 +653,7 @@ mod tests {
             derive_minor_types(&nat, &[], &motive, &EvalCtx::Pure).expect("derive_minor_types");
         assert_eq!(typs.len(), 2);
         // zero minor: Set
-        assert!(matches!(&typs[0], Val::Sort(1)));
+        assert!(matches!(&&typs[0], Val::Sort(l) if l.is_nat(1)));
         // succ minor: Pi(_, Pi(_, Set))
         let (count, _) = count_pi_chain(typs[1].clone());
         assert_eq!(count, 2);
@@ -658,7 +664,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         // Nat takes no params; passing one should error.
-        let err = derive_minor_type(&nat, 0, &[Val::Sort(1)], &motive, &EvalCtx::Pure).unwrap_err();
+        let err = derive_minor_type(&nat, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure).unwrap_err();
         match err {
             EvalError::InvalidCaseTarget(msg) => assert!(msg.contains("params")),
             other => panic!("expected InvalidCaseTarget, got {other:?}"),
@@ -676,9 +682,9 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let vec_a_unit =
@@ -686,15 +692,15 @@ mod tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(vec_a_unit.clone()),
                     ),
                 },
@@ -702,7 +708,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::One),
@@ -728,7 +734,7 @@ mod tests {
     fn vec_motive() -> Val {
         Val::Lam(Clos::new(
             Patt::Unit,
-            Exp::Lam(Patt::Unit, Box::new(Exp::Sort(1))),
+            Exp::Lam(Patt::Unit, Box::new(Exp::sort(1))),
             Rho::Nil,
         ))
     }
@@ -742,7 +748,7 @@ mod tests {
         let motive = vec_motive();
         // Reducing the minor at evaluation time produces `motive () (nil A)`
         // which (with the const motive `λ _ _. Set`) collapses to `Set`.
-        let typ = derive_minor_type(&decl, 0, &[Val::Sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 0, &[Val::sort(0)], &motive, &EvalCtx::Pure)
             .expect("derive nil minor");
         // The minor type is `Π A:Set. motive () (nil A)` — a Pi over
         // the ctor's value-arg telescope (here just the A binder).
@@ -750,7 +756,7 @@ mod tests {
         match typ {
             Val::Pi(_dom, body_clos) => {
                 let body = body_clos
-                    .apply(Val::Sort(0))
+                    .apply(Val::sort(0))
                     .expect("apply minor body to A");
                 // Wait — the A binder is part of the *param prefix*,
                 // not the ctor's value args. `nil` has no non-param
@@ -764,7 +770,7 @@ mod tests {
             other => {
                 // `motive () (nil A)` with const motive reduces to Sort(1).
                 assert!(
-                    matches!(other, Val::Sort(1)),
+                    matches!(&other, Val::Sort(l) if l.is_nat(1)),
                     "expected Sort(1) (from const motive), got {other:?}"
                 );
             }
@@ -778,7 +784,7 @@ mod tests {
         // The const motive `λ _ _. Set` reduces all `motive () _` to Sort(1).
         let decl = simple_vec_decl();
         let motive = vec_motive();
-        let typ = derive_minor_type(&decl, 1, &[Val::Sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 1, &[Val::sort(0)], &motive, &EvalCtx::Pure)
             .expect("derive cons minor");
         // Verify the minor type starts with a Pi — `cons` has non-param
         // value args (h : 1, x : A, xs : SimpleVec A ()) plus an IH for
@@ -803,7 +809,7 @@ mod tests {
         let zero_typ =
             derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive zero minor");
         assert!(
-            matches!(zero_typ, Val::Sort(1)),
+            matches!(&zero_typ, Val::Sort(l) if l.is_nat(1)),
             "Nat.zero minor should reduce to Sort(1) under const-Set motive; got {zero_typ:?}"
         );
     }

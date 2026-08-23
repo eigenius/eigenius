@@ -715,7 +715,7 @@ impl Compiler {
             name: parent_short_name,
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let arg_exps: Result<Vec<Exp>, EslError> = args
@@ -1434,7 +1434,7 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(match kind {
+            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::sort(match kind {
                 ast::SortKind::Prop => 0,
                 ast::SortKind::Set => 1,
                 ast::SortKind::Type(n) => n + 1,
@@ -1545,7 +1545,7 @@ impl Compiler {
                         name: short_name,
                         params: Vec::new(),
                         indices: Vec::new(),
-                        sort: Exp::Sort(1),
+                        sort: Exp::sort(1),
                         ctors: Vec::new(),
                     });
                     let arg_exps: Result<Vec<Exp>, EslError> = args

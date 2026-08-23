@@ -276,8 +276,8 @@ mod tests {
 
     #[test]
     fn same_proposition_hashes_to_same_key() {
-        let p1 = Exp::Sort(0);
-        let p2 = Exp::Sort(0);
+        let p1 = Exp::sort(0);
+        let p2 = Exp::sort(0);
         let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p1).unwrap();
         let k2 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p2).unwrap();
         assert_eq!(k1, k2);
@@ -286,8 +286,8 @@ mod tests {
 
     #[test]
     fn different_proposition_hashes_differ() {
-        let p_prop = Exp::Sort(0); // Prop
-        let p_set = Exp::Sort(1); // Set
+        let p_prop = Exp::sort(0); // Prop
+        let p_set = Exp::sort(1); // Set
         let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p_prop).unwrap();
         let k2 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p_set).unwrap();
         assert_ne!(k1.prop_hash, k2.prop_hash);
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn different_category_distinct_keys() {
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let k2 = WitnessKey::from_exp(WitnessCategory::Observed, ex_iri(), &p).unwrap();
         assert_ne!(k1, k2);
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn different_iri_distinct_keys() {
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let k2 = WitnessKey::from_exp(WitnessCategory::Declared, nat_iri(), &p).unwrap();
         assert_ne!(k1, k2);
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn from_exp_and_from_encoded_agree() {
-        let p = Exp::Pi(Patt::Unit, Box::new(Exp::Sort(0)), Box::new(Exp::Sort(0)));
+        let p = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::sort(0)));
         let encoded = encode_type(&p).unwrap();
         let k_exp = WitnessKey::from_exp(WitnessCategory::Derived, ex_iri(), &p).unwrap();
         let k_enc = WitnessKey::from_encoded(WitnessCategory::Derived, ex_iri(), &encoded);
@@ -325,7 +325,7 @@ mod tests {
         // kernel/src/layer/witness_index.rs needs WitnessKey: Ord.
         // Just confirm the impl exists by exercising it.
         let mut keys: std::collections::BTreeMap<WitnessKey, ()> = Default::default();
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         keys.insert(k.clone(), ());
         assert!(keys.contains_key(&k));
@@ -337,7 +337,7 @@ mod tests {
     fn val_chain_witness_same_key_definitionally_equal() {
         use crate::nbe::check::eq_nf;
         use crate::nbe::val::Val;
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let k2 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let v1 = Val::ChainWitness(k1);
@@ -352,7 +352,7 @@ mod tests {
     fn val_chain_witness_different_iri_not_equal() {
         use crate::nbe::check::eq_nf;
         use crate::nbe::val::Val;
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let k2 = WitnessKey::from_exp(WitnessCategory::Declared, nat_iri(), &p).unwrap();
         let v1 = Val::ChainWitness(k1);
@@ -367,10 +367,10 @@ mod tests {
     fn val_chain_witness_vs_non_witness_not_equal() {
         use crate::nbe::check::eq_nf;
         use crate::nbe::val::Val;
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let v_witness = Val::ChainWitness(k);
-        let v_other = Val::Sort(0);
+        let v_other = Val::sort(0);
         assert!(
             eq_nf(0, &v_witness, &v_other).is_err(),
             "ChainWitness vs non-witness must not be equal"
@@ -386,7 +386,7 @@ mod tests {
     fn val_chain_witness_readback_panics() {
         use crate::nbe::readback::readback_val;
         use crate::nbe::val::Val;
-        let p = Exp::Sort(0);
+        let p = Exp::sort(0);
         let k = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
         let v = Val::ChainWitness(k);
         // Witnesses never round-trip to surface syntax — readback panics.

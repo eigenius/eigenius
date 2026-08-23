@@ -274,7 +274,7 @@ mod tests {
     fn a_shadowing_binder_stops_substitution() {
         let body = Exp::Sig(
             Patt::Var("x".into()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(v("x")),
         );
         assert_eq!(subst(&body, "x", &cls(WRN)).unwrap(), body);
@@ -296,7 +296,7 @@ mod tests {
     fn substitutes_under_a_non_shadowing_binder() {
         let body = Exp::Sig(
             Patt::Var("y".into()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(v("x")),
         );
         let out = subst(&body, "x", &cls(WRN)).unwrap();
@@ -311,7 +311,7 @@ mod tests {
     fn capture_is_an_error() {
         let body = Exp::Sig(
             Patt::Var("y".into()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(v("x")),
         );
         let err = subst(&body, "x", &v("y")).expect_err("y would be captured");

@@ -40,7 +40,7 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
     };
     match (name.as_str(), args.as_slice()) {
         ("cat_s", [mood, _fin]) => denote_mood(mood), // ⟦S[m,_]⟧ = ⟦m⟧ (fin erased)
-        ("cat_n", [_t, _num]) => Ok(Exp::Sort(1)),    // ⟦N(T)[_]⟧ = Set (type + num erased)
+        ("cat_n", [_t, _num]) => Ok(Exp::sort(1)),    // ⟦N(T)[_]⟧ = Set (type + num erased)
         ("cat_np", [t, _num]) => Ok(t.clone()),       // ⟦NP(T)[_]⟧ = T (num erased)
         // ⟦Group(C)[_,_]⟧ = List C — a coordinated group denotes the member-retaining
         // list over its common supertype C (D63 §8.4 Phase 6, the kernel `List`);
@@ -55,13 +55,13 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         ("cat_coord", [b, _conn]) => Ok(Exp::InductiveType(list_decl(), vec![denote_cat(b)?])),
         // ⟦Q(T)⟧ = T → Prop — a wh-question denotes its answer-property (the
         // predicate the answer must satisfy), over the queried type T (D63 §8.5).
-        ("cat_q", [t]) => Ok(Exp::Arrow(Box::new(t.clone()), Box::new(Exp::Sort(0)))),
+        ("cat_q", [t]) => Ok(Exp::Arrow(Box::new(t.clone()), Box::new(Exp::sort(0)))),
         // ⟦Kind⟧ = Set — a kind-denoting NP denotes a type (the kind as a value of
         // `Set`); the predicate over it is `Set → Prop` (D63 §8.5, kind subjects).
-        ("cat_kind", []) => Ok(Exp::Sort(1)),
+        ("cat_kind", []) => Ok(Exp::sort(1)),
         // ⟦CP⟧ = Prop — an embedded complement clause denotes the embedded proposition
         // (D63 §8.11, clausal complements); a clause-taking verb is `(S\NP)/cat_cp`.
-        ("cat_cp", []) => Ok(Exp::Sort(0)),
+        ("cat_cp", []) => Ok(Exp::sort(0)),
         // ⟦PP[than]⟧ = Entity — the than-phrase supplies the comparison STANDARD, an
         // entity (D63 §8.12, comparatives). `than : cat_pp_than / cat_np(Entity)`.
         ("cat_pp_than", []) => Ok(Exp::EigonClass(
@@ -83,7 +83,7 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             Box::new(Exp::EigonClass(
                 Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
             )),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
         )),
         // ⟦Measure⟧ = Entity → float — a 1-place measure maps an entity to its scalar value on a
         // dimension's opaque float scale (D63 §8.12 phrasal comparatives, d63-comparative-phrasal.md).
@@ -121,7 +121,7 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             };
             Ok(Exp::Pi(
                 patt.clone(),
-                Box::new(Exp::Sort(1)),
+                Box::new(Exp::sort(1)),
                 Box::new(denote_cat(r)?),
             ))
         }
@@ -159,7 +159,7 @@ fn denote_mood(mood: &Exp) -> Result<Exp, String> {
         ));
     };
     match (name.as_str(), args.as_slice()) {
-        ("dcl" | "q", []) => Ok(Exp::Sort(0)), // Prop (polar `q` = the queried Prop)
+        ("dcl" | "q", []) => Ok(Exp::sort(0)), // Prop (polar `q` = the queried Prop)
         ("imp", []) => Err(format!("⟦S[{name}]⟧ deferred to D63 Slice 5")),
         (n, _) => Err(format!("denote_mood: unexpected mood ctor `{n}`")),
     }
@@ -640,7 +640,7 @@ pub fn sentence_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
 /// (`Prop`, `A→Prop`, `A→B→Prop`, …) — the Partee & Rooth conjoinable types.
 pub(crate) fn prop_ending(d: &Exp) -> bool {
     match d {
-        Exp::Sort(0) => true,
+        Exp::Sort(l) if l.is_nat(0) => true,
         Exp::Arrow(_, cod) => prop_ending(cod),
         Exp::Pi(_, _, cod) => prop_ending(cod),
         _ => false,
@@ -1009,7 +1009,7 @@ mod tests {
                 name: "Cat".into(),
                 params: vec![],
                 indices: vec![],
-                sort: Exp::Sort(0),
+                sort: Exp::sort(0),
                 ctors: vec![],
             });
             Exp::InductiveCtor(decl, name.to_string(), args)
@@ -1169,7 +1169,7 @@ mod tests {
             name: "And".into(),
             params: vec![],
             indices: vec![],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![],
         });
         Exp::InductiveType(and, vec![a, b])
@@ -1338,7 +1338,7 @@ mod tests {
         );
         assert_eq!(
             denote_cat(&cat).expect("feature binder denotes"),
-            Exp::Sort(0),
+            Exp::sort(0),
             "the feature binder must be denotation-transparent (⟦·⟧ = Prop)"
         );
     }

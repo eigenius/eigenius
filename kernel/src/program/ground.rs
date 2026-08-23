@@ -173,7 +173,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
     // pre-canonical `String` shape from intermediate resources.
     let data_type_str = match resource.get(&dt_iri).and_then(|v| v.as_iri()) {
         Some(i) => i.as_str().to_string(),
-        None => return Ok(Val::Sort(1)), // Unknown data type
+        None => return Ok(Val::sort(1)), // Unknown data type
     };
 
     match data_type_str.as_str() {
@@ -205,7 +205,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
                 }
             }
 
-            Ok(Val::Sort(1)) // Untyped resource reference
+            Ok(Val::sort(1)) // Untyped resource reference
         }
 
         wk::RESOURCE_ARRAY => {
@@ -226,15 +226,15 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
                     wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
                     wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
                     wk::BOOLEAN => Val::EigonPrimitive(PrimitiveType::Boolean),
-                    _ => Val::Sort(1),
+                    _ => Val::sort(1),
                 }
             } else {
-                Val::Sort(1)
+                Val::sort(1)
             };
             Ok(make_list_type(elem_type))
         }
 
-        _ => Ok(Val::Sort(1)), // Unknown data type
+        _ => Ok(Val::sort(1)), // Unknown data type
     }
 }
 
@@ -250,7 +250,7 @@ fn resolve_array_element_type(
             return Ok(Val::EigonClass(first.clone()));
         }
     }
-    Ok(Val::Sort(1))
+    Ok(Val::sort(1))
 }
 
 /// Make an Option type: Sum(some T | none 1)
@@ -369,7 +369,7 @@ fn resolve_codata_type(
         iri: class_iri.clone(),
         name: short_name.clone(),
         params: params_telescope.clone(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         observations: Vec::new(),
     });
 
@@ -421,7 +421,7 @@ fn resolve_codata_type(
         iri: class_iri.clone(),
         name: short_name,
         params: params_telescope,
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         observations,
     });
     Ok(Val::CodataType {
@@ -576,7 +576,7 @@ fn decode_codata_observation_type(
                     name: "__not_a_real_inductive__".to_string(),
                     params: Vec::new(),
                     indices: Vec::new(),
-                    sort: Exp::Sort(1),
+                    sort: Exp::sort(1),
                     ctors: Vec::new(),
                 });
                 decode_arg_type(class_iri, &dummy, value, layer)
@@ -732,13 +732,13 @@ fn decode_result_sort(
     let sort_iri = Iri::parse(wk::RESULT_SORT).unwrap();
     match resource.get(&sort_iri) {
         Some(Value::String(s)) => match s.as_str() {
-            "Prop" => Ok(Exp::Sort(0)),
-            "Set" => Ok(Exp::Sort(1)),
+            "Prop" => Ok(Exp::sort(0)),
+            "Set" => Ok(Exp::sort(1)),
             other if other.starts_with("Type:") => {
                 let n: usize = other["Type:".len()..].parse().map_err(|_| {
                     format!("inductive type '{class_iri}' has malformed `result_sort` '{other}'")
                 })?;
-                Ok(Exp::Sort(n + 1))
+                Ok(Exp::sort(n + 1))
             }
             other => Err(format!(
                 "inductive type '{class_iri}' has unrecognised `result_sort` '{other}' \
@@ -748,7 +748,7 @@ fn decode_result_sort(
         Some(_) => Err(format!(
             "inductive type '{class_iri}' has non-string `result_sort`"
         )),
-        None => Ok(Exp::Sort(1)),
+        None => Ok(Exp::sort(1)),
     }
 }
 
@@ -829,7 +829,7 @@ fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>
         name,
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     }))
 }
@@ -838,7 +838,7 @@ fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>
 /// to its kernel-side `Exp`. Recognises:
 ///
 /// - `core:Size` (and the bare `Size`) → `Exp::SizeSort` (sized binders).
-/// - `core:Prop` (and bare `Prop`) → `Exp::Sort(0)` (D46 §3).
+/// - `core:Prop` (and bare `Prop`) → `Exp::sort(0)` (D46 §3).
 /// - The four primitive type IRIs `core:string` / `core:integer` /
 ///   `core:float` / `core:boolean` → `Exp::EigonPrimitive(...)`. This
 ///   is what makes value-parameter inductives like D39 §4.1's
@@ -849,16 +849,16 @@ fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>
 /// - An IRI naming a declared inductive → `Exp::InductiveType` with a
 ///   name-only stub, via [`inductive_stub_for`] (eigenius#199).
 ///
-/// Everything else falls through to `Exp::Sort(1)` (Set) — the
+/// Everything else falls through to `Exp::sort(1)` (Set) — the
 /// forward-compat default that preserves pre-D49 decoder behaviour.
 fn decode_param_kind_str(kind_str: &str, layer: &Layer) -> Exp {
     match kind_str {
         s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-        s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
-        "Set" => Exp::Sort(1),
+        s if s.ends_with(":Prop") || s == "Prop" => Exp::sort(0),
+        "Set" => Exp::sort(1),
         s if s.starts_with("Type:") => {
             let n: usize = s["Type:".len()..].parse().unwrap_or(0);
-            Exp::Sort(n + 1)
+            Exp::sort(n + 1)
         }
         wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
         wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
@@ -873,7 +873,7 @@ fn decode_param_kind_str(kind_str: &str, layer: &Layer) -> Exp {
         }) {
             Some(exp) => exp,
             // Forward-compat default, preserving pre-D49 decoder behaviour.
-            None => Exp::Sort(1),
+            None => Exp::sort(1),
         },
     }
 }
@@ -889,11 +889,11 @@ fn decode_param_kind_str(kind_str: &str, layer: &Layer) -> Exp {
 fn decode_index_kind_str(kind_str: &str, layer: &Layer) -> Exp {
     match kind_str {
         s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-        s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
-        "Set" => Exp::Sort(1),
+        s if s.ends_with(":Prop") || s == "Prop" => Exp::sort(0),
+        "Set" => Exp::sort(1),
         s if s.starts_with("Type:") => {
             let n: usize = s["Type:".len()..].parse().unwrap_or(0);
-            Exp::Sort(n + 1)
+            Exp::sort(n + 1)
         }
         wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
         wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
@@ -911,7 +911,7 @@ fn decode_index_kind_str(kind_str: &str, layer: &Layer) -> Exp {
             } else if !kind_str.contains(':') {
                 Exp::Var(kind_str.to_string())
             } else {
-                Exp::Sort(1)
+                Exp::sort(1)
             }
         }
     }
@@ -1475,7 +1475,7 @@ mod tests {
                     kind
                 );
                 assert!(
-                    matches!(decl.sort, Exp::Sort(0)),
+                    matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
                     "result_sort `Prop` must decode to Sort(0); got {:?}",
                     decl.sort
                 );
@@ -1552,7 +1552,7 @@ mod tests {
                 match &decl.ctors[0].typ {
                     Exp::Pi(Patt::Var(pn), dom, body) => {
                         assert_eq!(pn, "A");
-                        assert!(matches!(dom.as_ref(), Exp::Sort(1)));
+                        assert!(matches!(&dom.as_ref(), Exp::Sort(l) if l.is_nat(1)));
                         match body.as_ref() {
                             Exp::InductiveType(d, args) => {
                                 assert_eq!(d.name, "List");
@@ -2173,11 +2173,11 @@ mod tests {
                     decl.indices
                 );
                 match &decl.indices[0].1 {
-                    Exp::Sort(0) => {}
+                    Exp::Sort(l) if l.is_nat(0) => {}
                     other => panic!("index 0: expected Sort(0) for Prop, got {other:?}"),
                 }
                 match &decl.sort {
-                    Exp::Sort(1) => {}
+                    Exp::Sort(l) if l.is_nat(1) => {}
                     other => panic!("expected result Sort(1) for Set, got {other:?}"),
                 }
                 // The ctor body must decode against the stub Arc, not
@@ -2197,23 +2197,11 @@ mod tests {
         // "Type:N"). Without this mapping, JustifiedBy and similar
         // sort-indexed predicates can't round-trip through the codec.
         let layer = build_test_layer();
-        assert!(matches!(
-            decode_param_kind_str("Prop", &layer),
-            Exp::Sort(0)
-        ));
-        assert!(matches!(decode_param_kind_str("Set", &layer), Exp::Sort(1)));
-        assert!(matches!(
-            decode_param_kind_str("Type:0", &layer),
-            Exp::Sort(1)
-        ));
-        assert!(matches!(
-            decode_param_kind_str("Type:2", &layer),
-            Exp::Sort(3)
-        ));
-        assert!(matches!(
-            decode_param_kind_str("Type:7", &layer),
-            Exp::Sort(8)
-        ));
+        assert!(matches!(&decode_param_kind_str("Prop", &layer), Exp::Sort(l) if l.is_nat(0)));
+        assert!(matches!(&decode_param_kind_str("Set", &layer), Exp::Sort(l) if l.is_nat(1)));
+        assert!(matches!(&decode_param_kind_str("Type:0", &layer), Exp::Sort(l) if l.is_nat(1)));
+        assert!(matches!(&decode_param_kind_str("Type:2", &layer), Exp::Sort(l) if l.is_nat(3)));
+        assert!(matches!(&decode_param_kind_str("Type:7", &layer), Exp::Sort(l) if l.is_nat(8)));
     }
 
     #[test]
@@ -2222,26 +2210,17 @@ mod tests {
         // `decode_param_kind_str` plus the bare-name and qualified-IRI
         // paths the index telescope can exercise.
         let layer = build_test_layer();
-        assert!(matches!(
-            decode_index_kind_str("Prop", &layer),
-            Exp::Sort(0)
-        ));
-        assert!(matches!(decode_index_kind_str("Set", &layer), Exp::Sort(1)));
-        assert!(matches!(
-            decode_index_kind_str("Type:0", &layer),
-            Exp::Sort(1)
-        ));
-        assert!(matches!(
-            decode_index_kind_str("Type:5", &layer),
-            Exp::Sort(6)
-        ));
+        assert!(matches!(&decode_index_kind_str("Prop", &layer), Exp::Sort(l) if l.is_nat(0)));
+        assert!(matches!(&decode_index_kind_str("Set", &layer), Exp::Sort(l) if l.is_nat(1)));
+        assert!(matches!(&decode_index_kind_str("Type:0", &layer), Exp::Sort(l) if l.is_nat(1)));
+        assert!(matches!(&decode_index_kind_str("Type:5", &layer), Exp::Sort(l) if l.is_nat(6)));
         // Confirm the bare-name path still resolves to a variable so the
         // new Sort-literal arms don't shadow legitimate index references.
         assert!(matches!(decode_index_kind_str("A", &layer), Exp::Var(ref s) if s == "A"));
         // A class IRI that is NOT an inductive still decodes to
         // `EigonClass` — the fix narrows to declared inductives only.
         assert!(matches!(
-            decode_index_kind_str("urn:eigenius:examples:Animal", &layer),
+            &decode_index_kind_str("urn:eigenius:examples:Animal", &layer),
             Exp::EigonClass(_)
         ));
     }
@@ -2291,8 +2270,6 @@ mod tests {
             Exp::EigonClass(_)
         ));
         assert!(matches!(
-            decode_param_kind_str("urn:eigenius:t:PlainClass", &layer),
-            Exp::Sort(1)
-        ));
+            decode_param_kind_str("urn:eigenius:t:PlainClass", &layer), Exp::Sort(l) if l.is_nat(1)));
     }
 }

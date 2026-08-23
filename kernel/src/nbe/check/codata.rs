@@ -366,7 +366,6 @@ pub fn check_guarded(
 
         // Leaves — no sub-expressions to check.
         Exp::Var(_)
-        | Exp::Sort(1)
         | Exp::Sort(_)
         | Exp::One
         | Exp::Unit
@@ -421,7 +420,7 @@ mod tests {
     #[test]
     fn codata_type_is_a_type() {
         check_type(&mut ctx(), &pair_codata_type()).unwrap();
-        check(&mut ctx(), &pair_codata_type(), &Val::Sort(1)).unwrap();
+        check(&mut ctx(), &pair_codata_type(), &Val::sort(1)).unwrap();
     }
 
     #[test]

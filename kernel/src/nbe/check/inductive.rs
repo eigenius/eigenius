@@ -651,11 +651,12 @@ pub(super) fn check_infer_inductive_rec(
     //    For Prop inductives, singleton-elim (D46 §7) gates large elim:
     //    if `large_elim_admitted(decl)` then any sort is permitted;
     //    otherwise the motive must return Prop (Sort(0)).
-    let codomain_sort = if matches!(decl.sort, Exp::Sort(0)) && !large_elim_admitted(decl) {
-        Exp::Sort(0)
-    } else {
-        Exp::Sort(2)
-    };
+    let codomain_sort =
+        if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(decl) {
+            Exp::sort(0)
+        } else {
+            Exp::sort(2)
+        };
     //    D48/eigenius#138: for an INDEXED family the motive is index-aware —
     //
     //        Π (i₁ : I₁) … (i_m : I_m). D(params)(i₁ … i_m) → Sort
@@ -684,7 +685,7 @@ pub(super) fn check_infer_inductive_rec(
     let motive_typ_exp = motive_type_exp(decl, &params, codomain_sort, ctx.rho.len());
     let motive_typ = ctx.eval(&motive_typ_exp, &motive_rho)?;
     check(ctx, motive, &motive_typ).map_err(|e| {
-        if matches!(decl.sort, Exp::Sort(0)) && !large_elim_admitted(decl) {
+        if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(decl) {
             CheckError::IllFormed(format!(
                 "singleton-elim violation: recursor on `{}` (a Prop with {} \
                  ctor{}, failing the singleton test) requires a Prop-valued \
@@ -842,7 +843,7 @@ pub(super) fn check_match(
 
     // Singleton-elim (D46 §7): a Prop-typed inductive that fails the
     // singleton test cannot be matched into a non-Prop result type.
-    if matches!(decl.sort, Exp::Sort(0))
+    if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))
         && !large_elim_admitted(&decl)
         && !is_propositional_in_ctx(ctx, expected)?
     {
@@ -1024,24 +1025,24 @@ mod tests {
         let self_ref = std::sync::Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let vec_a_unit = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string()), Exp::Unit]);
         std::sync::Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(vec_a_unit.clone()),
                     ),
                 },
@@ -1049,7 +1050,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::One),
@@ -1165,12 +1166,12 @@ mod tests {
             iri: crate::ontology::iri::Iri::parse("urn:test:Shadow").unwrap(),
             name: "Shadow".to_string(),
             // Parameter `A` and index `A` — the same name, deliberately.
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Var("A".to_string()), Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let exp = motive_type_exp(&shadow, &[Val::One], Exp::Sort(2), 0);
+        let exp = motive_type_exp(&shadow, &[Val::One], Exp::sort(2), 0);
         // Peel the single index Π; the body is `Shadow(<param>, <index>) → Sort(2)`.
         let Exp::Pi(_, _, body) = exp else {
             panic!("expected one index binder");
@@ -1203,12 +1204,12 @@ mod tests {
         let anon = std::sync::Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Anon").unwrap(),
             name: "Anon".to_string(),
-            params: vec![(Patt::Unit, Exp::Sort(1))],
+            params: vec![(Patt::Unit, Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let exp = motive_type_exp(&anon, &[Val::One], Exp::Sort(2), 0);
+        let exp = motive_type_exp(&anon, &[Val::One], Exp::sort(2), 0);
         let Exp::Arrow(dom, _) = exp else {
             panic!("no indices, so no Pi: expected `D(param) -> Sort`");
         };
@@ -1233,7 +1234,7 @@ mod tests {
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors,
         }
     }
@@ -1320,12 +1321,12 @@ mod tests {
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![
                 (Patt::Var("x".to_string()), Exp::Var("A".to_string())),
                 (Patt::Var("y".to_string()), Exp::Var("A".to_string())),
             ],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         // refl(a) : Eq A a a — conclusion supplies `a` in both indices.
@@ -1339,7 +1340,7 @@ mod tests {
         );
         let ctor_typ = Exp::Pi(
             Patt::Var("A".to_string()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(Exp::Pi(
                 Patt::Var("a".to_string()),
                 Box::new(Exp::Var("A".to_string())),
@@ -1349,12 +1350,12 @@ mod tests {
         std::sync::Arc::new(crate::nbe::term::InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![
                 (Patt::Var("x".to_string()), Exp::Var("A".to_string())),
                 (Patt::Var("y".to_string()), Exp::Var("A".to_string())),
             ],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
                 name: "refl".to_string(),
                 typ: ctor_typ,
@@ -1386,7 +1387,7 @@ mod tests {
             name: "BadIxProp".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         // Conclusion: BadIxProp () — the index is the constant `()`,
@@ -1404,7 +1405,7 @@ mod tests {
             name: "BadIxProp".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
                 name: "smuggle".to_string(),
                 typ: ctor_typ,
@@ -1453,7 +1454,7 @@ mod tests {
             name: "MentionsIx".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         let index_exp = Exp::Pair(Box::new(Exp::Var("n".to_string())), Box::new(Exp::Unit));
@@ -1468,7 +1469,7 @@ mod tests {
             name: "MentionsIx".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: ctor_typ,
@@ -1493,7 +1494,7 @@ mod tests {
             name: "ShadowIx".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         let conclusion = Exp::InductiveType(self_ref, vec![Exp::Var("n".to_string())]);
@@ -1512,7 +1513,7 @@ mod tests {
             name: "ShadowIx".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: ctor_typ,
@@ -1537,20 +1538,20 @@ mod tests {
             name: "Q".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
             name: "Q".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(Exp::InductiveType(s, vec![Exp::One])),
                 ),
             }],
@@ -1572,7 +1573,7 @@ mod tests {
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -1608,7 +1609,7 @@ mod tests {
 
     /// Constant `λ_. Set` motive — applied to anything yields `Set`.
     fn const_set_motive_exp() -> Exp {
-        Exp::Lam(Patt::Unit, Box::new(Exp::Sort(1)))
+        Exp::Lam(Patt::Unit, Box::new(Exp::sort(1)))
     }
 
     #[test]
@@ -1645,7 +1646,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::Sort(1)]);
+        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::sort(1)]);
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         assert!(check(&mut c, &bogus, &nat_ty).is_err());
     }
@@ -1675,7 +1676,7 @@ mod tests {
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "True".to_string(),
                 typ: bool_ty_exp,
@@ -1718,14 +1719,14 @@ mod tests {
         let list_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(list_ty),
                 ),
             }],
@@ -1772,7 +1773,10 @@ mod tests {
             major: Box::new(Exp::Var("n".to_string())),
         };
         let typ = check_infer(&mut c, &exp).expect("Nat.rec well-typed");
-        assert!(matches!(typ, Val::Sort(1)), "expected Set, got {typ:?}");
+        assert!(
+            matches!(&typ, Val::Sort(l) if l.is_nat(1)),
+            "expected Set, got {typ:?}"
+        );
     }
 
     #[test]
@@ -1842,7 +1846,7 @@ mod tests {
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -1881,7 +1885,7 @@ mod tests {
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
@@ -1891,7 +1895,7 @@ mod tests {
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),

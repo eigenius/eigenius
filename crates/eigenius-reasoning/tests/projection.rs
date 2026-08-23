@@ -45,7 +45,7 @@ fn decl() -> Arc<InductiveDecl> {
         name: "JustificationTerm".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     })
 }

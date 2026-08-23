@@ -536,7 +536,7 @@ mod tests {
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         })
     }
@@ -550,7 +550,7 @@ mod tests {
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -572,15 +572,15 @@ mod tests {
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -588,7 +588,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -614,7 +614,7 @@ mod tests {
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -640,7 +640,7 @@ mod tests {
             name: "Bad".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
@@ -686,7 +686,7 @@ mod tests {
             name: "Foo".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
@@ -733,7 +733,7 @@ mod tests {
             name: "Foo".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
@@ -766,7 +766,7 @@ mod tests {
             name: "Tree".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "node".to_string(),
                 typ: Exp::Pi(Patt::Unit, Box::new(nested), Box::new(tree_ty)),
@@ -784,13 +784,13 @@ mod tests {
             name: "Bogus".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Unit,
                     Box::new(Exp::Var("Nat".to_string())),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                 ),
             }],
         };
@@ -814,14 +814,14 @@ mod tests {
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:P").unwrap(),
             name: "P".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(rec_occ_wrong_param),
@@ -857,7 +857,7 @@ mod tests {
             name: "Neg".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(Patt::Unit, Box::new(disguised_negative), Box::new(neg_ty)),

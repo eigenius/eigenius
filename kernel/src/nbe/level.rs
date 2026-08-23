@@ -51,7 +51,11 @@ use std::fmt;
 /// `Sort(Zero)` is `Prop`, `Sort(Succ(Zero))` is `Set`, and `Sort(Succ^{k+1}(Zero))` is the
 /// surface's `Type k`. [`Level::of_nat`] and [`Level::as_nat`] convert to and from that numeral
 /// form, which is what every monomorphic site uses.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// **`Ord` is deliberately not derived.** A derived order compares the discriminant and then the
+/// fields, which is not the universe order — it would rank `Param("u")` against `Max(..)` by
+/// variant position, and silently satisfy any `<=` a caller wrote. It agrees with the real order
+/// on `Succ`-chains, so such a bug survives every monomorphic test. Use [`Level::leq`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Level {
     /// `Prop`.
     Zero,
@@ -93,6 +97,14 @@ impl Level {
                 _ => return None,
             }
         }
+    }
+
+    /// Whether the level is exactly the numeral `n`.
+    ///
+    /// The pattern-position companion to [`Level::of_nat`]: a site that used to match
+    /// `Sort(1)` becomes `Sort(l) if l.is_nat(1)`.
+    pub fn is_nat(&self, n: usize) -> bool {
+        self.as_nat() == Some(n)
     }
 
     /// `Prop`.

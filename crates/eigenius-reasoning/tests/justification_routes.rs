@@ -100,10 +100,10 @@ fn parsed(gene: &str, activity: &str) -> Exp {
         name: i.local_name().to_string(),
         params: Vec::new(),
         indices: vec![
-            (eigenius_kernel::nbe::term::Patt::Unit, Exp::Sort(1)),
-            (eigenius_kernel::nbe::term::Patt::Unit, Exp::Sort(1)),
+            (eigenius_kernel::nbe::term::Patt::Unit, Exp::sort(1)),
+            (eigenius_kernel::nbe::term::Patt::Unit, Exp::sort(1)),
         ],
-        sort: Exp::Sort(0),
+        sort: Exp::sort(0),
         ctors: Vec::new(),
     });
     Exp::InductiveType(

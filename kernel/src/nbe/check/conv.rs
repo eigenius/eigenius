@@ -149,8 +149,8 @@ pub(super) fn is_syntactically_propositional_type(typ: &Exp) -> bool {
         Exp::Sig(_, dom, body) | Exp::Times(dom, body) => {
             is_syntactically_propositional_type(dom) && is_syntactically_propositional_type(body)
         }
-        Exp::InductiveType(decl, _) => matches!(decl.sort, Exp::Sort(0)),
-        Exp::CodataType(decl, _) => matches!(decl.sort, Exp::Sort(0)),
+        Exp::InductiveType(decl, _) => matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
+        Exp::CodataType(decl, _) => matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
         _ => false,
     }
 }
@@ -213,11 +213,17 @@ pub(super) fn infer_dependent_sort(
             )));
         }
     };
-    if impredicative && n == 0 {
-        Ok(Val::Sort(0))
+    // eigenius#188: `Pi (a : A) (b : B)` lives at `imax (level A) (level B)` and `Sigma` at
+    // `max`. With `usize` levels this was a branch on `n == 0`; with a level that may be a
+    // `Param`, whether the codomain is `Prop` is not known until the parameter is instantiated,
+    // and `IMax` is the term that defers it. `simplify` collapses it back to the old answer
+    // whenever both levels are concrete — `imax m 0 == 0`, `imax m (k+1) == max m (k+1)`.
+    let out = if impredicative {
+        crate::nbe::level::Level::IMax(Box::new(m), Box::new(n))
     } else {
-        Ok(Val::Sort(m.max(n)))
-    }
+        crate::nbe::level::Level::Max(Box::new(m), Box::new(n))
+    };
+    Ok(Val::Sort(out.simplify()))
 }
 
 /// Decide whether `typ` is a propositional type (inhabits `Sort(0)`).
@@ -234,7 +240,7 @@ pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<b
     }
     let typ_exp = readback_val(ctx.rho.len(), typ);
     let typ_sort = check_infer(ctx, &typ_exp)?;
-    Ok(matches!(typ_sort, Val::Sort(0)))
+    Ok(matches!(&typ_sort, Val::Sort(l) if l.is_nat(0)))
 }
 
 /// Three-valued structural fast-path for propositional-type recognition.
@@ -250,8 +256,8 @@ pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<b
 fn is_propositional_type_structural(typ: &Val) -> Option<bool> {
     match typ {
         Val::Id(_, _, _) => Some(true),
-        Val::InductiveType { decl, .. } => Some(matches!(decl.sort, Exp::Sort(0))),
-        Val::CodataType { decl, .. } => Some(matches!(decl.sort, Exp::Sort(0))),
+        Val::InductiveType { decl, .. } => Some(matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))),
+        Val::CodataType { decl, .. } => Some(matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))),
         Val::One
         | Val::Sort(_)
         | Val::EigonClass(_)
@@ -342,10 +348,15 @@ fn subtype_of_inner(
     tso: &crate::nbe::sized_rigid::Tso,
     index_policy: Indices,
 ) -> Result<(), CheckError> {
-    // Universe cumulativity: Sort(m) <: Sort(n) iff m <= n.
+    // Universe cumulativity: `Sort(m) <: Sort(n)` iff `m <= n` in the LEVEL order.
     // D46 §3.2 — Prop ⊆ Set ⊆ Type(1) ⊆ Type(2) ⊆ …
+    //
+    // eigenius#188: this must be `Level::leq`, not `<=`. `Level` deliberately does not derive
+    // `Ord` — the derived order is structural (discriminant, then fields) and is not the universe
+    // order at all: it would rank `Param("u")` against `Max(..)` by variant position. It happens
+    // to agree on `Succ`-chains, which is exactly why the bug would not have shown up in a test.
     if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
-        if m <= n {
+        if m.leq(n) {
             return Ok(());
         } else {
             return Err(CheckError::TypeMismatch(format!(
@@ -422,8 +433,8 @@ mod tests {
         // The codomain `Prop` is in `Sort(1)` (the universe-of-types), not
         // in `Sort(0)` itself, so this Pi lands in `Sort(1)`, not in Prop —
         // confirming the impredicative rule fires only on Prop-codomain.
-        let pi = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(0)));
-        check(&mut ctx(), &pi, &Val::Sort(1)).unwrap();
+        let pi = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::sort(0)));
+        check(&mut ctx(), &pi, &Val::sort(1)).unwrap();
     }
 
     #[test]
@@ -439,11 +450,11 @@ mod tests {
         );
         let outer = Exp::Pi(
             Patt::Var("P".to_string()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
             Box::new(inner),
         );
         // The whole thing lives in Prop — that's the impredicative rule.
-        check(&mut ctx(), &outer, &Val::Sort(0)).unwrap();
+        check(&mut ctx(), &outer, &Val::sort(0)).unwrap();
     }
 
     #[test]
@@ -464,18 +475,18 @@ mod tests {
         // ∀ X : Set. … keeps it in Prop (impredicative on the outer too).
         let false_prop = Exp::Pi(
             Patt::Var("P".to_string()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
             Box::new(Exp::Var("P".to_string())),
         );
         // First check inner is itself in Prop.
-        check(&mut ctx(), &false_prop, &Val::Sort(0)).unwrap();
+        check(&mut ctx(), &false_prop, &Val::sort(0)).unwrap();
         // Then wrap with `∀ (X : Set). False` — also in Prop.
         let outer = Exp::Pi(
             Patt::Var("X".to_string()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(false_prop),
         );
-        check(&mut ctx(), &outer, &Val::Sort(0)).unwrap();
+        check(&mut ctx(), &outer, &Val::sort(0)).unwrap();
     }
 
     #[test]
@@ -485,11 +496,11 @@ mod tests {
         // Mixed → should be rejected when checked against Sort(0).
         let mixed = Exp::Sig(
             Patt::Var("P".to_string()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
             Box::new(Exp::One),
         );
         assert!(
-            check(&mut ctx(), &mixed, &Val::Sort(0)).is_err(),
+            check(&mut ctx(), &mixed, &Val::sort(0)).is_err(),
             "Sigma with a non-Prop component should not check against Prop"
         );
     }
@@ -503,16 +514,16 @@ mod tests {
         // cannot use it directly as a Sigma component.
         let false_p = Exp::Pi(
             Patt::Var("P".to_string()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
             Box::new(Exp::Var("P".to_string())),
         );
         let false_q = Exp::Pi(
             Patt::Var("Q".to_string()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
             Box::new(Exp::Var("Q".to_string())),
         );
         let sig = Exp::Sig(Patt::Unit, Box::new(false_p), Box::new(false_q));
-        check(&mut ctx(), &sig, &Val::Sort(0)).unwrap();
+        check(&mut ctx(), &sig, &Val::sort(0)).unwrap();
     }
 
     #[test]
@@ -520,14 +531,14 @@ mod tests {
         // Prop : Set — both as a check rule (Sort(0) inhabits Sort(1) by
         // the Sort(n) : Sort(n+1) rule) and as a subtype rule (Sort(0) <:
         // Sort(1) by D46 §3.2 cumulativity).
-        check(&mut ctx(), &Exp::Sort(0), &Val::Sort(1)).unwrap();
-        subtype_of(0, &Val::Sort(0), &Val::Sort(1)).unwrap();
+        check(&mut ctx(), &Exp::sort(0), &Val::sort(1)).unwrap();
+        subtype_of(0, &Val::sort(0), &Val::sort(1)).unwrap();
     }
 
     #[test]
     fn sort_strict_cumulativity_set_not_subtype_of_prop() {
         // Sort(1) is NOT a subtype of Sort(0). Catches the wrong direction.
-        assert!(subtype_of(0, &Val::Sort(1), &Val::Sort(0)).is_err());
+        assert!(subtype_of(0, &Val::sort(1), &Val::sort(0)).is_err());
     }
 
     // ---------- D46 §5 — proof irrelevance tests ----------
@@ -538,8 +549,8 @@ mod tests {
         // should be accepted as equal via proof irrelevance — the structural
         // fast-path recognises Val::Id as a propositional type.
         let id_typ = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(Val::Unit));
-        let v1 = Val::Sort(1);
-        let v2 = Val::Sort(2);
+        let v1 = Val::sort(1);
+        let v2 = Val::sort(2);
         def_eq_at_type(&mut ctx(), &v1, &v2, &id_typ).unwrap();
     }
 
@@ -549,8 +560,8 @@ mod tests {
         // as equal — `1` is not propositional (inhabits Sort(1)), so neither
         // the structural fast-path nor the inference path admits irrelevance.
         let one_typ = Val::One;
-        let v1 = Val::Sort(1);
-        let v2 = Val::Sort(2);
+        let v1 = Val::sort(1);
+        let v2 = Val::sort(2);
         assert!(
             def_eq_at_type(&mut ctx(), &v1, &v2, &one_typ).is_err(),
             "non-Prop type should fall through to structural equality"
@@ -566,7 +577,7 @@ mod tests {
             name: "MyProp".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         let typ = Val::InductiveType {
@@ -574,7 +585,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
+        def_eq_at_type(&mut ctx(), &Val::sort(1), &Val::sort(2), &typ).unwrap();
     }
 
     #[test]
@@ -585,7 +596,7 @@ mod tests {
             name: "MyData".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let typ = Val::InductiveType {
@@ -593,7 +604,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
+        assert!(def_eq_at_type(&mut ctx(), &Val::sort(1), &Val::sort(2), &typ).is_err());
     }
 
     #[test]
@@ -606,14 +617,14 @@ mod tests {
         // `Exp::Pi(P, Sort(0), Var(P))`, infer sort, get Sort(0).
         let false_prop_exp = Exp::Pi(
             Patt::Var("P".to_string()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
             Box::new(Exp::Var("P".to_string())),
         );
         let typ = ctx().eval(&false_prop_exp, &Rho::Nil).expect("eval Pi");
         // Sanity: this is a Val::Pi, not a fast-path shape.
         assert!(matches!(typ, Val::Pi(_, _)));
         // Inference path must classify it as propositional.
-        def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
+        def_eq_at_type(&mut ctx(), &Val::sort(1), &Val::sort(2), &typ).unwrap();
     }
 
     #[test]
@@ -622,12 +633,12 @@ mod tests {
         // The inference path must REJECT proof irrelevance here.
         let pi_exp = Exp::Pi(
             Patt::Var("X".to_string()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(Exp::Var("X".to_string())),
         );
         let typ = ctx().eval(&pi_exp, &Rho::Nil).expect("eval Pi");
         assert!(matches!(typ, Val::Pi(_, _)));
-        assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
+        assert!(def_eq_at_type(&mut ctx(), &Val::sort(1), &Val::sort(2), &typ).is_err());
     }
 
     // --- Size-aware subtyping (Phase 11b step 15d, D19 §8.3) ---
@@ -680,7 +691,7 @@ mod tests {
         // must still be equal.
         let decl = sized_stream_decl();
         let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let sup = mk_sized_type(decl, Val::SizeInf, Val::Sort(1));
+        let sup = mk_sized_type(decl, Val::SizeInf, Val::sort(1));
         assert!(
             subtype_of(0, &sub, &sup).is_err(),
             "element type mismatch must be rejected"
@@ -692,7 +703,7 @@ mod tests {
         // Simple non-inductive types fall through to `eq_nf` —
         // equal types accept, mismatched types reject.
         subtype_of(0, &Val::One, &Val::One).expect("1 <: 1");
-        assert!(subtype_of(0, &Val::One, &Val::Sort(1)).is_err());
+        assert!(subtype_of(0, &Val::One, &Val::sort(1)).is_err());
     }
 
     #[test]
@@ -706,7 +717,7 @@ mod tests {
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![],
         });
         let sub = mk_sized_type(decl_a, Val::SizeInf, Val::One);
@@ -765,9 +776,9 @@ mod index_conversion_tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Vec").unwrap(),
             name: "Vec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::InductiveType(nat, Vec::new()))],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         })
     }
@@ -830,7 +841,7 @@ mod index_conversion_tests {
             name: "HasLowIC50".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::EigonPrimitive(PrimitiveType::String))],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         })
     }
@@ -870,7 +881,7 @@ mod index_conversion_tests {
                 (Patt::Unit, Exp::EigonPrimitive(PrimitiveType::String)),
                 (Patt::Unit, Exp::EigonPrimitive(PrimitiveType::String)),
             ],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         let at = |a: &str, b: &str| Val::InductiveType {
@@ -924,7 +935,7 @@ mod index_conversion_tests {
             name: "Box".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let box_unit = Exp::InductiveType(self_ref, vec![Exp::Unit]);
@@ -933,7 +944,7 @@ mod index_conversion_tests {
             name: "Box".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: box_unit,
@@ -963,11 +974,11 @@ mod index_conversion_tests {
             iri: crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").unwrap(),
             name: "And".to_string(),
             params: vec![
-                (Patt::Var("P".into()), Exp::Sort(0)),
-                (Patt::Var("Q".into()), Exp::Sort(0)),
+                (Patt::Var("P".into()), Exp::sort(0)),
+                (Patt::Var("Q".into()), Exp::sort(0)),
             ],
             indices: Vec::new(),
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         })
     }

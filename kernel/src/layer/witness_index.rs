@@ -566,7 +566,7 @@ mod tests {
     fn build_witness_index_emits_declared_for_declaration_trace() {
         let mut b = LayerBuilder::new("test", None);
         let target = "urn:eigenius:example:thing";
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
         b.add_resource(declaration_trace(
@@ -605,7 +605,7 @@ mod tests {
         // witness is admitted at any proposition. Probe the two hashes a caller could plausibly
         // present: the sort the target would carry, and `Asserts`'s own absence.
         let probe =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &Exp::Sort(0)).unwrap();
+            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &Exp::sort(0)).unwrap();
         assert!(
             !layer_admits_witness(&layer, &probe),
             "nothing is admitted when canonical_proposition is absent and Asserts is unavailable"
@@ -619,7 +619,7 @@ mod tests {
         // the witness key admitted by A succeeds (parent-chain walk).
         let mut a = LayerBuilder::new("parent", None);
         let target = "urn:eigenius:example:thing";
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         a.add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
         a.add_resource(declaration_trace(
@@ -639,7 +639,7 @@ mod tests {
         );
 
         // Lookup of a witness that doesn't exist anywhere correctly misses.
-        let other_prop = Exp::Sort(1);
+        let other_prop = Exp::sort(1);
         let other_key =
             WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &other_prop).unwrap();
         assert!(
@@ -724,7 +724,7 @@ mod tests {
         // differs from what the default would produce.
         let core_layer = layer_with_core_ontology();
         let target = "urn:eigenius:example:explicit";
-        let explicit_prop = Exp::Sort(0); // Prop sort
+        let explicit_prop = Exp::sort(0); // Prop sort
 
         let mut user = LayerBuilder::new("user", Some(core_layer.clone()));
         user.add_resource(target_resource_with_canonical_prop(target, &explicit_prop))
@@ -766,7 +766,7 @@ mod tests {
     /// resources, so pin it against every class the emitters can fire on.
     #[test]
     fn witness_candidate_predicate_covers_every_emitting_class() {
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         assert!(
             is_witness_candidate(&declaration_trace(
                 "urn:eigenius:example:t",
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn skip_hint_short_circuits_the_lookup() {
         let target = "urn:eigenius:example:thing";
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         let mut b = LayerBuilder::new("test", None);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
@@ -838,25 +838,25 @@ mod tests {
         use crate::program::eigentt_type_mirror::decode_type;
 
         let layer = layer_with_core_ontology();
-        let s = || Exp::Sort(0);
+        let s = || Exp::sort(0);
         let cls = |i: &str| Exp::EigonClass(iri(i));
 
         let cases: Vec<(&str, Exp)> = vec![
             ("bare sort", s()),
-            ("Set", Exp::Sort(1)),
+            ("Set", Exp::sort(1)),
             (
                 "arrow — the negation shape",
                 Exp::Arrow(Box::new(s()), Box::new(s())),
             ),
             (
                 "pi with a named binder",
-                Exp::Pi(Patt::Var("x".into()), Box::new(Exp::Sort(1)), Box::new(s())),
+                Exp::Pi(Patt::Var("x".into()), Box::new(Exp::sort(1)), Box::new(s())),
             ),
             (
                 "sigma — the `exists` binder",
                 Exp::Sig(
                     Patt::Var("x0".into()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(s()),
                 ),
             ),
@@ -921,7 +921,7 @@ mod tests {
     /// symmetric one (neither admits). Nothing that resolves today stops resolving.
     #[test]
     fn lam_bearing_propositions_cannot_round_trip_on_either_side() {
-        let lam = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::Sort(0)));
+        let lam = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::sort(0)));
         assert!(
             encode_type(&lam).is_err(),
             "a bare Lam must not encode — decode cannot recover its domain"
@@ -943,7 +943,7 @@ mod tests {
     fn synthesize_chain_witness_succeeds_when_admitted() {
         let mut b = LayerBuilder::new("test", None);
         let target = "urn:eigenius:example:thing";
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
         b.add_resource(declaration_trace(
@@ -969,7 +969,7 @@ mod tests {
     fn synthesize_chain_witness_fails_with_diagnostic_when_missing() {
         let layer = LayerBuilder::new("test", None).build(LayerStorage::in_memory());
         let target_iri = iri("urn:eigenius:example:unfounded");
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         let err = synthesize_chain_witness(&layer, WitnessCategory::Declared, &target_iri, &prop)
             .expect_err("witness must miss when nothing admits it");
         // Diagnostic shape — names the predicate family, the IRI, what
@@ -990,7 +990,7 @@ mod tests {
     fn synthesize_chain_witness_walks_parent_chain() {
         let mut parent = LayerBuilder::new("parent", None);
         let target = "urn:eigenius:example:thing";
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         parent
             .add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
@@ -1026,7 +1026,7 @@ mod tests {
         // emission path — the predecessor injected a key through a test-only `OnceLock` setter
         // because it predated D54 emission.
         let target = "urn:eigenius:example:proof";
-        let prop = Exp::Sort(0);
+        let prop = Exp::sort(0);
         let verified_key =
             WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
 

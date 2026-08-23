@@ -529,7 +529,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
         name: asserts_iri.local_name().to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(0),
+        sort: Exp::sort(0),
         ctors: Vec::new(),
     });
     let prop_exp = Exp::InductiveType(stub_decl, vec![Exp::LitString(target_iri_str.to_string())]);

@@ -28,11 +28,16 @@ pub type Name = String;
 pub enum Exp {
     /// Lambda: λ p. e
     Lam(Patt, Box<Exp>),
-    /// Universe at a specific level: Sort(n).
-    /// `Sort(0) = Prop`, `Sort(1) = Set` (the universe of small types),
-    /// `Sort(n+1)` corresponds to the former `Type(n)` for `n >= 1`.
-    /// Typing rule: `Sort(n) : Sort(n+1)`. See D46 §3.
-    Sort(usize),
+    /// Universe at a level: `Sort(l)`.
+    ///
+    /// `Sort(Zero) = Prop`, `Sort(Succ(Zero)) = Set`, and `Sort(Succ^{k+1}(Zero))` is the
+    /// surface's `Type k`. Typing rule: `Sort(l) : Sort(Succ(l))`. See D46 §3.
+    ///
+    /// Carried a `usize` until eigenius#188. A [`Level`](crate::nbe::level::Level) may also be a
+    /// `Max`, an `IMax` or a `Param`, which is what lets one declaration serve every rung instead
+    /// of one declaration per rung — each of which was a bootstrap edit and a reseed. Sites that
+    /// only ever see concrete levels read them back with `Level::as_nat`.
+    Sort(crate::nbe::level::Level),
     /// Dependent function type: Π p : A. B
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
@@ -516,6 +521,15 @@ impl Patt {
 // --- Convenience constructors ---
 
 impl Exp {
+    /// `Sort` at the numeral level `n` — `sort(0)` is `Prop`, `sort(1)` is `Set`.
+    ///
+    /// The ergonomic constructor for the monomorphic case, which is 942 of the 944 sort uses in
+    /// the tree. A polymorphic sort is built with `Exp::Sort(Level::Param(..))` or one of the
+    /// other [`Level`](crate::nbe::level::Level) forms directly.
+    pub fn sort(n: usize) -> Exp {
+        Exp::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
     /// Non-dependent function type: A → B
     pub fn arrow(a: Exp, b: Exp) -> Exp {
         Exp::Pi(Patt::Unit, Box::new(a), Box::new(b))
@@ -568,23 +582,23 @@ fn build_list_decl() -> Arc<InductiveDecl> {
         name: "List".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     });
     let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
         iri: list_iri,
         name: "List".to_string(),
-        params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             // nil : Π A:Set. List A
             InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(list_a_typ.clone()),
                 ),
             },
@@ -593,7 +607,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
                 name: "cons".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(Exp::Var("A".to_string())),
@@ -628,23 +642,23 @@ fn build_option_decl() -> Arc<InductiveDecl> {
         name: "Option".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     });
     let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
         iri: option_iri,
         name: "Option".to_string(),
-        params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             // none : Π A:Set. Option A
             InductiveCtorDecl {
                 name: "none".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(option_a_typ.clone()),
                 ),
             },
@@ -653,7 +667,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
                 name: "some".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(Exp::Var("A".to_string())),
@@ -689,7 +703,7 @@ mod tests {
 
     #[test]
     fn arrow_desugars_to_pi() {
-        let t = Exp::arrow(Exp::One, Exp::Sort(1));
+        let t = Exp::arrow(Exp::One, Exp::sort(1));
         assert!(matches!(t, Exp::Pi(Patt::Unit, _, _)));
     }
 
@@ -709,7 +723,7 @@ mod tests {
     fn list_uses_canonical_inductive() {
         // Phase 11b step 6: Exp::list() now produces an inductive
         // type application backed by the canonical List declaration.
-        let t = Exp::list(Exp::Sort(1));
+        let t = Exp::list(Exp::sort(1));
         match t {
             Exp::InductiveType(decl, params) => {
                 assert_eq!(decl.name, "List");
@@ -717,7 +731,7 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "nil");
                 assert_eq!(decl.ctors[1].name, "cons");
                 assert_eq!(params.len(), 1);
-                assert!(matches!(params[0], Exp::Sort(1)));
+                assert!(matches!(&params[0], Exp::Sort(l) if l.is_nat(1)));
             }
             other => panic!("expected InductiveType, got {other:?}"),
         }

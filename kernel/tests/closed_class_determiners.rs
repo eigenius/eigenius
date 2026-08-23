@@ -1167,7 +1167,7 @@ fn pied_piping_relative_threads_the_antecedent_into_the_fronted_preposition() {
         // Kernel-gated to Prop.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
         let ty = check_infer(&mut ctx, forest[0].sem()).expect("type-checks");
-        assert_eq!(readback_val(0, &ty), Exp::Sort(0), "inhabits Prop: {s}");
+        assert_eq!(readback_val(0, &ty), Exp::sort(0), "inhabits Prop: {s}");
     }
     // Restrictive (non-pied) relative still parses — no regression.
     assert!(
@@ -1302,7 +1302,7 @@ fn non_restrictive_relative_is_a_separate_assertion() {
     // Each parse still inhabits Prop (kernel-gated).
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("type-checks");
-    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "inhabits Prop");
+    assert_eq!(readback_val(0, &ty), Exp::sort(0), "inhabits Prop");
 
     // Regression: the RESTRICTIVE relative (no comma) still Σ-refines the noun (not conjoined).
     assert!(
@@ -1670,7 +1670,7 @@ fn assert_parses_to_prop(sentence: &str) {
             .unwrap_or_else(|e| panic!("'{sentence}' must type-check: {e}"));
         assert_eq!(
             readback_val(0, &ty),
-            Exp::Sort(0),
+            Exp::sort(0),
             "'{sentence}' must inhabit Prop"
         );
     }
@@ -2344,7 +2344,7 @@ fn clausal_complement_parses_intensionally() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("clausal sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a report clause denotes Prop"
     );
     match forest[0].sem() {
@@ -2391,7 +2391,7 @@ fn conditional_if_builds_native_implication() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("conditional sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a conditional denotes Prop"
     );
     // Native implication is a FUNCTION TYPE (`Exp::Pi` — NbE normalizes the non-dependent
@@ -2418,7 +2418,7 @@ fn contrastive_but_maps_to_conjunction() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("but sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a but-clause denotes Prop"
     );
     let conjuncts = and_conjuncts(forest[0].sem())
@@ -2593,7 +2593,7 @@ fn resolve_open_substitutes_an_antecedent_and_re_gates() {
     let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the resolved parse denotes Prop"
     );
 
@@ -3045,7 +3045,7 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
     let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the resolved parse denotes Prop"
     );
     // The binding AUDIT records what the kernel accepted (D67 §3).
@@ -3911,7 +3911,7 @@ fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
     let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the live-resolved parse denotes Prop"
     );
 }
@@ -3952,7 +3952,7 @@ fn comparative_compares_degrees() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("comparative sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "comparative denotes Prop"
     );
     assert!(
@@ -4013,7 +4013,7 @@ fn phrasal_comparative_compares_measure_degrees() {
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("phrasal comparative sem type-checks");
-    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
+    assert_eq!(readback_val(0, &ty), Exp::sort(0), "denotes Prop");
 
     // `less` (degree-LESS over cat_measure) parses over the same machinery. `fewer` is now count-only
     // (over cat_n, added in A2), so `*fewer dependence` is ungrammatical (asserted in the A2 test).
@@ -4054,7 +4054,7 @@ fn cardinality_comparative_over_a_count_noun() {
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, fewer[0].sem()).expect("cardinality sem type-checks");
-    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
+    assert_eq!(readback_val(0, &ty), Exp::sort(0), "denotes Prop");
 
     // more (x has MORE than y): gt(card(T,x), card(T,y)).
     let more = index.parse("HeLa affects more genes than MSH2", &PluralS);
@@ -4106,7 +4106,7 @@ fn adjectival_comparative_and_nominal_share_one_scale() {
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, more_adj[0].sem()).expect("adjectival comparative type-checks");
-    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
+    assert_eq!(readback_val(0, &ty), Exp::sort(0), "denotes Prop");
 
     // nominal: "HeLa affects greater dependence on BRCA1 than MSH2" → the SAME term (A4 unification).
     let greater_noun = index.parse(
@@ -4209,7 +4209,7 @@ fn pp_adjunct_adds_an_opaque_conjunct() {
     let ty = check_infer(&mut ctx, p.sem()).expect("PP-adjunct sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "PP-adjunct clause denotes Prop"
     );
 }
@@ -4828,7 +4828,7 @@ fn polar_question_parses_to_a_queried_prop() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("polar sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a polar question denotes Prop"
     );
 }
@@ -4918,7 +4918,7 @@ fn copula_with_predicative_adjective_parses() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("copula sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the predication denotes Prop"
     );
 }
@@ -4984,7 +4984,7 @@ fn predicate_nominal_parses_to_is_a() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("predicate-nominal sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a predicate nominal denotes Prop"
     );
     // Structure: is_a(hela, CellLine) = App(App(ontology:is_a, hela), CellLine).
@@ -5045,7 +5045,7 @@ fn verbal_negation_parses() {
     assert_eq!(forest.len(), 1, "exactly one verbal-negation parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("negation sem type-checks");
-    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "negation denotes Prop");
+    assert_eq!(readback_val(0, &ty), Exp::sort(0), "negation denotes Prop");
     assert!(
         is_negation(forest[0].sem()),
         "sem is ¬(…) = … → logic:False, got {:?}",
@@ -5088,7 +5088,7 @@ fn progressive_auxiliary_parses() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("progressive sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "progressive denotes Prop"
     );
 }
@@ -5117,7 +5117,7 @@ fn short_passive_parses_with_existential_agent() {
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("passive sem type-checks");
-    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "passive denotes Prop");
+    assert_eq!(readback_val(0, &ty), Exp::sort(0), "passive denotes Prop");
     // The agent is existentially closed — impredicative ∃ is `∀C:Prop. (…→C) → C`,
     // i.e. the sem is a Π/→ whose ultimate codomain is the bound `C` (a Var), not a
     // bare predicate application. (Distinguishes it from the active "affects".)
@@ -5153,7 +5153,7 @@ fn modal_can_wraps_the_proposition_in_possible() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("modal sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a modal claim denotes Prop"
     );
     assert_eq!(
@@ -5193,7 +5193,7 @@ fn future_conditional_deontic_modals_each_wrap_their_own_opaque_operator() {
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
         let ty = check_infer(&mut ctx, forest[0].sem())
             .unwrap_or_else(|e| panic!("`{modal}` sem type-checks: {e}"));
-        assert_eq!(readback_val(0, &ty), Exp::Sort(0), "`{modal}` denotes Prop");
+        assert_eq!(readback_val(0, &ty), Exp::sort(0), "`{modal}` denotes Prop");
         assert_eq!(
             modal_head(forest[0].sem()).as_deref(),
             Some(op),
@@ -5230,7 +5230,7 @@ fn agentive_long_passive_parses_with_the_by_agent() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("agentive passive type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "agentive passive denotes Prop"
     );
     // Unlike the short passive (an impredicative ∃ = Π/→), the agent is supplied, so the

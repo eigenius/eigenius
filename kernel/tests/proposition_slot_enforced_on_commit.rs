@@ -178,7 +178,7 @@ fn integer_literal_claim_is_rejected_by_the_commit() {
 /// is not a claim.
 #[test]
 fn a_type_in_the_proposition_slot_is_rejected_by_the_commit() {
-    let errors = rejection_errors(encode_type(&Exp::Sort(0)).expect("Prop encodes"), "a type");
+    let errors = rejection_errors(encode_type(&Exp::sort(0)).expect("Prop encodes"), "a type");
     assert!(
         errors
             .iter()

@@ -185,7 +185,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                     name: name_of_iri,
                     params: Vec::new(),
                     indices: Vec::new(),
-                    sort: Exp::Sort(1),
+                    sort: Exp::sort(1),
                     ctors: Vec::new(),
                 });
                 let sub_args: Result<Vec<Exp>, String> = type_args_arr

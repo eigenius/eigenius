@@ -80,7 +80,7 @@ fn asserts_prop(content_iri: &str) -> Exp {
         name: asserts_iri.local_name().to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(0),
+        sort: Exp::sort(0),
         ctors: Vec::new(),
     });
     Exp::InductiveType(decl, vec![Exp::LitString(content_iri.to_string())])

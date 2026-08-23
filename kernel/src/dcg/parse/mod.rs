@@ -1329,7 +1329,7 @@ mod tests {
                 name: Name::from(local),
                 params: Vec::new(),
                 indices: Vec::new(),
-                sort: Exp::Sort(0),
+                sort: Exp::sort(0),
                 ctors: Vec::new(),
             })
         }

@@ -100,7 +100,7 @@ fn morphy() -> MorphyLemmatizer {
 /// Whether a parse's sem kernel-gates to a `Prop` (the felicity confirmation).
 fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(layer));
-    matches!(check_infer(&mut ctx, sem), Ok(ty) if readback_val(0, &ty) == Exp::Sort(0))
+    matches!(check_infer(&mut ctx, sem), Ok(ty) if readback_val(0, &ty) == Exp::sort(0))
 }
 
 /// How many of a forest's parses gate to a `Prop`.

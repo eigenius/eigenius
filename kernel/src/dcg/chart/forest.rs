@@ -271,8 +271,8 @@ pub(crate) fn cat_shape(e: &Exp) -> String {
         Exp::Arrow(a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
         Exp::Pi(_, a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
         Exp::Var(_) => "_".to_string(),
-        Exp::Sort(0) => "Prop".to_string(),
-        Exp::Sort(1) => "Set".to_string(),
+        Exp::Sort(l) if l.is_nat(0) => "Prop".to_string(),
+        Exp::Sort(l) if l.is_nat(1) => "Set".to_string(),
         // Sems (a leaf's `sem`, not a cat) collapse — we only shape categories.
         _ => "_".to_string(),
     }
@@ -333,8 +333,8 @@ pub(crate) fn cat_key(e: &Exp) -> String {
         Exp::Arrow(a, b) => format!("{} → {}", cat_key(a), cat_key(b)),
         Exp::Pi(_, a, b) => format!("{} → {}", cat_key(a), cat_key(b)),
         Exp::Var(n) => n.clone(),
-        Exp::Sort(0) => "Prop".to_string(),
-        Exp::Sort(1) => "Set".to_string(),
+        Exp::Sort(l) if l.is_nat(0) => "Prop".to_string(),
+        Exp::Sort(l) if l.is_nat(1) => "Set".to_string(),
         _ => "_".to_string(),
     }
 }
@@ -388,7 +388,7 @@ mod tests {
             name: "And".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         });
         let s_cat = ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])]);

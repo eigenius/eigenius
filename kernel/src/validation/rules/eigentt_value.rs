@@ -140,7 +140,9 @@ impl Validator {
         // type. A slot that asserts something must hold a term whose type is
         // `Prop` — `Sort(0)`. `Sort(1)` is a type, not a claim; a literal's
         // type is not a universe at all.
-        if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str()) && !matches!(inferred, Val::Sort(0)) {
+        if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str())
+            && !matches!(&inferred, Val::Sort(l) if l.is_nat(0))
+        {
             return vec![ValidationError {
                 resource_id: res_id.clone(),
                 property: Some(prop_iri.clone()),
@@ -163,9 +165,12 @@ impl Validator {
 /// term rather than a statement.
 fn describe_inhabited(ty: &Val) -> String {
     match ty {
-        Val::Sort(0) => "Prop = Sort(0)".to_string(),
-        Val::Sort(1) => "Set = Sort(1)".to_string(),
-        Val::Sort(n) => format!("Type({}) = Sort({n})", n - 1),
+        Val::Sort(l) if l.is_nat(0) => "Prop = Sort(0)".to_string(),
+        Val::Sort(l) if l.is_nat(1) => "Set = Sort(1)".to_string(),
+        Val::Sort(n) => match n.as_nat() {
+            Some(k) if k >= 1 => format!("Type({}) = Sort({n})", k - 1),
+            _ => format!("Sort({n})"),
+        },
         other => {
             let readback = format!("{:?}", readback_val(0, other));
             let shown: String = readback.chars().take(160).collect();
@@ -314,7 +319,7 @@ mod tests {
         // `Prop` itself is a perfectly good `eigentt:TypeExpr` — it passes in
         // the unconstrained `test:tx` slot above — but it inhabits `Set`, so
         // it asserts nothing.
-        let encoded = encode_type(&Exp::Sort(0)).unwrap();
+        let encoded = encode_type(&Exp::sort(0)).unwrap();
         let errs = errors_for_claim(encoded);
         assert_eq!(errs.len(), 1, "`Prop` asserts nothing; got {errs:?}");
         assert!(matches!(
@@ -355,7 +360,7 @@ mod tests {
         // a literal both belong there. Guards against step 3 being widened to
         // the whole range, which would reject every `eigentt:axiom_statement`
         // and `lexicon:cat` on the chain.
-        for exp in [Exp::Sort(1), Exp::LitInt(7)] {
+        for exp in [Exp::sort(1), Exp::LitInt(7)] {
             let chain = chain_with_eigentt_prop();
             let mut top = LayerBuilder::new("tx", Some(chain));
             let encoded = encode_type(&exp).unwrap();
@@ -374,7 +379,7 @@ mod tests {
         let chain = chain_with_eigentt_prop();
         let mut top = LayerBuilder::new("ok", Some(chain));
         // `Prop` (Sort(0)) is a valid type expression that type-checks.
-        let encoded = encode_type(&Exp::Sort(0)).unwrap();
+        let encoded = encode_type(&Exp::sort(0)).unwrap();
         top.add_resource(holder_with_tx("urn:eigenius:test:ok", encoded))
             .unwrap();
         let layer = Arc::new(top.build(LayerStorage::in_memory()));

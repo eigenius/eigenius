@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn map_two_elements() -> Result<(), EvalError> {
         // Map(λx. x, [Unit, Set]) → [Unit, Set]
-        let list = cons_list(vec![Val::Unit, Val::Sort(1)]);
+        let list = cons_list(vec![Val::Unit, Val::sort(1)]);
         let rho = Rho::Nil.extend(Patt::Var("lst".to_string()), list);
         let exp = Exp::Map(Box::new(id_lam()), Box::new(Exp::Var("lst".to_string())));
         let v = eval(&exp, &rho)?;
@@ -173,7 +173,7 @@ mod tests {
             Val::List(items) => {
                 assert_eq!(items.len(), 2);
                 assert!(matches!(items[0], Val::Unit));
-                assert!(matches!(items[1], Val::Sort(1)));
+                assert!(matches!(&items[1], Val::Sort(l) if l.is_nat(1)));
             }
             other => panic!("expected List, got {other:?}"),
         }
@@ -312,8 +312,8 @@ mod tests {
             Exp::Lam(Patt::Unit, Box::new(Exp::Var("acc".to_string()))),
             Rho::Nil,
         ));
-        let result = eval_reduce(f, Val::Sort(1), lst, &EvalCtx::Pure).expect("eval_reduce");
-        assert!(matches!(result, Val::Sort(1)));
+        let result = eval_reduce(f, Val::sort(1), lst, &EvalCtx::Pure).expect("eval_reduce");
+        assert!(matches!(&result, Val::Sort(l) if l.is_nat(1)));
     }
 
     #[test]

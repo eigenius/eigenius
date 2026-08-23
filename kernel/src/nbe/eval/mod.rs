@@ -188,7 +188,7 @@ pub(crate) fn eval_impl<T: Tracer>(
     let ev = |e: &Exp| -> Result<(Val, T::Node), EvalError> { eval_impl::<T>(e, rho, ctx) };
 
     match exp {
-        Exp::Sort(n) => Ok((Val::Sort(*n), T::leaf())),
+        Exp::Sort(n) => Ok((Val::Sort(n.clone()), T::leaf())),
         Exp::One => Ok((Val::One, T::leaf())),
         Exp::Unit => Ok((Val::Unit, T::leaf())),
 
@@ -967,8 +967,8 @@ mod tests {
 
     #[test]
     fn eval_set() -> Result<(), EvalError> {
-        let v = eval(&Exp::Sort(1), &Rho::Nil)?;
-        assert!(matches!(v, Val::Sort(1)));
+        let v = eval(&Exp::sort(1), &Rho::Nil)?;
+        assert!(matches!(&v, Val::Sort(l) if l.is_nat(1)));
         Ok(())
     }
 
@@ -997,7 +997,7 @@ mod tests {
     #[test]
     fn eval_pair() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Sort(1))),
+            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         assert!(matches!(v, Val::Pair(_, _)));
@@ -1009,7 +1009,7 @@ mod tests {
         let v = eval(
             &Exp::Fst(Box::new(Exp::Pair(
                 Box::new(Exp::Unit),
-                Box::new(Exp::Sort(1)),
+                Box::new(Exp::sort(1)),
             ))),
             &Rho::Nil,
         )?;
@@ -1022,11 +1022,11 @@ mod tests {
         let v = eval(
             &Exp::Snd(Box::new(Exp::Pair(
                 Box::new(Exp::Unit),
-                Box::new(Exp::Sort(1)),
+                Box::new(Exp::sort(1)),
             ))),
             &Rho::Nil,
         )?;
-        assert!(matches!(v, Val::Sort(1)));
+        assert!(matches!(&v, Val::Sort(l) if l.is_nat(1)));
         Ok(())
     }
 
@@ -1429,7 +1429,7 @@ mod tests {
         // Phase 10c: PropAccess where the target evaluates to a non-resource
         // Val should return Val::Unit instead of panicking.
         let ctx = io_ctx();
-        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Sort(1));
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::sort(1));
         let exp = Exp::PropAccess(
             Box::new(Exp::Var("x".to_string())),
             Iri::parse("urn:eigenius:test:prop").unwrap(),
@@ -1448,11 +1448,11 @@ mod tests {
         // Phase 10c: Arrow/Times should produce identical results to Pi/Sig
         // with Patt::Unit, but without the re-recursion overhead.
         let arrow_val = eval(
-            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         let pi_val = eval(
-            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         // Both should be Val::Pi
@@ -1463,11 +1463,11 @@ mod tests {
         assert!(matches!(pi_val, Val::Pi(_, _)), "Pi should produce Val::Pi");
 
         let times_val = eval(
-            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Times(Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         let sig_val = eval(
-            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         assert!(

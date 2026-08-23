@@ -297,7 +297,7 @@ mod tests {
             name: "Foo".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "base".to_string(),
@@ -310,7 +310,7 @@ mod tests {
                         Patt::Var("f".to_string()),
                         Box::new(Exp::Pi(
                             Patt::Unit,
-                            Box::new(Exp::Sort(1)),
+                            Box::new(Exp::sort(1)),
                             Box::new(foo_ty.clone()),
                         )),
                         Box::new(foo_ty.clone()),
@@ -319,10 +319,10 @@ mod tests {
             ],
         });
 
-        // Constant motive `λ_. Set`, so a fully applied minor reduces to `Val::Sort(1)`.
+        // Constant motive `λ_. Set`, so a fully applied minor reduces to `Val::sort(1)`.
         let motive = Val::Lam(crate::nbe::val::Clos::new(
             Patt::Unit,
-            Exp::Sort(1),
+            Exp::sort(1),
             Rho::Nil,
         ));
 
@@ -347,10 +347,10 @@ mod tests {
 
         // 2. Does iota apply exactly that many? A minor of arity 2 returning `Sort(1)`: too few
         //    applications leaves a `Val::Lam`, too many applies `Sort(1)` to something and errors.
-        let base_minor = Val::Sort(1);
+        let base_minor = Val::sort(1);
         let rall_minor = Val::Lam(crate::nbe::val::Clos::new(
             Patt::Unit,
-            Exp::Lam(Patt::Unit, Box::new(Exp::Sort(1))),
+            Exp::Lam(Patt::Unit, Box::new(Exp::sort(1))),
             Rho::Nil,
         ));
         // The constructor argument: `λ_. Foo.base`, a value of type `Set -> Foo`.
@@ -370,7 +370,7 @@ mod tests {
         )
         .expect("iota_reduce over `rall`");
         assert!(
-            matches!(result, Val::Sort(1)),
+            matches!(&result, Val::Sort(l) if l.is_nat(1)),
             "iota applied exactly the {arity} argument(s) the minor's type declares, leaving the \
              minor's body; got {result:?}"
         );
@@ -395,7 +395,7 @@ mod tests {
             name: "Foo".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "base".to_string(),
@@ -467,7 +467,7 @@ mod tests {
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -483,7 +483,7 @@ mod tests {
         let false_minor = Val::Con("no".to_string(), Box::new(Val::Unit));
         let result = iota_reduce(
             &bool_decl,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[true_minor, false_minor],
             "True",
             &[],
@@ -522,7 +522,7 @@ mod tests {
 
         let result = iota_reduce(
             &nat,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[zero_minor, succ_minor],
             "succ",
             &[nat_n(&nat, 1)],
@@ -552,7 +552,7 @@ mod tests {
             name: "Tree".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "leaf".to_string(),
@@ -607,7 +607,7 @@ mod tests {
         // two IHs are distinguishable. iota takes the outer ctor's args.
         let result = iota_reduce(
             &tree,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[leaf_minor, node_minor],
             "node",
             &[node(leaf.clone(), leaf.clone()), leaf],
@@ -638,15 +638,15 @@ mod tests {
         let list_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -654,7 +654,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -706,7 +706,7 @@ mod tests {
         };
         let result = iota_reduce(
             &list_decl,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[nil_minor, cons_minor],
             "cons",
             &three_args,
@@ -738,7 +738,7 @@ mod tests {
             .extend(Patt::Var("succ_min".to_string()), succ_minor);
         let exp = Exp::InductiveRec {
             decl: nat.clone(),
-            motive: Box::new(Exp::Sort(1)),
+            motive: Box::new(Exp::sort(1)),
             minors: vec![
                 Exp::Var("zero_min".to_string()),
                 Exp::Var("succ_min".to_string()),
@@ -760,9 +760,9 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let vec_a_unit =
@@ -770,15 +770,15 @@ mod tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(vec_a_unit.clone()),
                     ),
                 },
@@ -786,7 +786,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::One),

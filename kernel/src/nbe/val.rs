@@ -36,10 +36,9 @@ pub enum Val {
     Con(Name, Box<Val>),
     /// Unit value
     Unit,
-    /// Universe at a specific level: Sort(n).
-    /// `Sort(0) = Prop`, `Sort(1) = Set`, `Sort(n+1)` was `Type(n)` for `n >= 1`.
-    /// See D46 §3.
-    Sort(usize),
+    /// Universe at a level: `Sort(l)`. See [`Exp::Sort`](crate::nbe::term::Exp::Sort) —
+    /// `Sort(Zero) = Prop`, `Sort(Succ(Zero)) = Set`. Carried a `usize` until eigenius#188.
+    Sort(crate::nbe::level::Level),
     /// Dependent function type: Π(A, x.B)
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
@@ -306,6 +305,12 @@ impl Clos {
 // --- Operations on values (reference lines 147-163) ---
 
 impl Val {
+    /// `Sort` at the numeral level `n` — `sort(0)` is `Prop`, `sort(1)` is `Set`.
+    /// See [`Exp::sort`](crate::nbe::term::Exp::sort).
+    pub fn sort(n: usize) -> Val {
+        Val::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
     /// Function application: (λ f) v = f * v; (fun ...) ($c v) = ...; neutral app
     pub fn app(self, v: Val) -> Result<Val, EvalError> {
         self.app_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
@@ -492,15 +497,15 @@ mod tests {
 
     #[test]
     fn vfst_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::sort(1)));
         assert!(matches!(p.vfst()?, Val::Unit));
         Ok(())
     }
 
     #[test]
     fn vsnd_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
-        assert!(matches!(p.vsnd()?, Val::Sort(1)));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::sort(1)));
+        assert!(matches!(&p.vsnd()?, Val::Sort(l) if l.is_nat(1)));
         Ok(())
     }
 
