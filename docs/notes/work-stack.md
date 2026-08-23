@@ -157,7 +157,7 @@ reseed rather than paying a standalone one.
   strata — the term language, and `Axiom`/`Definition` which consume it — so moving `TypeExpr` down
   separates rather than breaks. **One question left open**: Rule 16 is schema-driven, so validating
   `TypeExpr`'s own `type_name` values reads `TypeExpr`'s `ctors`; settle termination before
-  committing. **Explicitly NOT part of #188** and not to be folded into its reseed.
+  committing. **Not part of #188** — separate change, own gate — but it SHOULD ride #188's reseed if ready in time: batching is cheaper, and the validator question surfaces in a 2s bootstrap test, not mid-reseed.
 - **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
   ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
 

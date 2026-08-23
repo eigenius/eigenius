@@ -112,9 +112,26 @@ layer.
 
 **Not part of #188.** Universe polymorphism needed `core:Level`, which is done. It does not need
 `param_kind` or `type_name` retyped; only the sort case of `param_kind` would benefit, and that is
-what made this look like #188 work when it is not.
+what made this look like #188 work when it is not. Keep it a separate change with its own gate.
 
-Do **not** fold this into the #188 reseed as a matter of convenience. It is a change to what `core`
-is, it wants its own gate, and #188 is already carrying two core-layer moves. The cost of a separate
-reseed is real but bounded; the cost of discovering a validator cycle inside a reseed that is also
-carrying universe polymorphism is not.
+**But it SHOULD ride #188's reseed if it is ready in time.** An earlier draft of this section said
+the opposite, and the reasoning was wrong twice over:
+
+- *"The open validator question could surface mid-reseed."* It cannot. Rule 16 validates the
+  embedded ontology set in `cargo test -p eigenius-kernel --lib bootstrap`, ~2s. A retype that makes
+  it diverge or reject fails there, on a green-tree check. A reseed only runs against an
+  already-green tree; risk attaches to the change, not to the reseed step.
+- *"Folding it in trades a bounded cost for an unbounded one."* Hand-waving with no mechanism. A
+  reseed is a fixed cost — ~40 minutes plus the snapshot, the demo artifacts and both parse
+  baselines. A change landing before it is carried free; a change landing after buys a **second**
+  reseed. Batching is cheaper, which is precisely why #188's slice 5 was sequenced before the
+  reseed, citing #196 — which paid two reseeds by discovering a second bootstrap edit after the
+  first had gone.
+
+The one real consideration is weaker and about attribution, not cost: the parse baselines and demo
+artifacts are **measurements**, and two structural changes in one reseed make a drifted baseline
+ambiguous. That does not justify a second reseed — #188 already moves `core` twice, the baselines
+are re-derived once regardless, and attribution is recoverable by re-running a gate.
+
+**So the gate is readiness, not sequencing:** settle §4's validator question, land the change with
+its own green gate, and if that happens before the reseed runs, it rides along.
