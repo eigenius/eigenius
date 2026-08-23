@@ -170,10 +170,30 @@ pub fn compile_file_with_context(
     }
 
     // Register level variables (eigenius#188). File-scoped like namespaces.
+    //
+    // A duplicate is REJECTED, not absorbed (eigenius#219). `declared_universes` is a set, so
+    // `universe u u;` and `universe u; universe u;` both used to insert twice and compile — the
+    // second insert silently did nothing. nanoda asserts the same thing at declaration admission
+    // (`no_dupes_all_params`, `references/nanoda_lib/src/tc.rs:167`), where the stakes are higher:
+    // its `uparams` is a per-declaration ORDERED LIST used for level substitution, and a duplicate
+    // there makes substitution ambiguous. Here it is only redundant. It is still a mistake, and
+    // slice 5c added the `universe` form without the companion check.
+    let mut universe_errors: Vec<EslError> = Vec::new();
     for u in &file.universes {
         for n in &u.names {
-            compiler.declared_universes.insert(n.clone());
+            if !compiler.declared_universes.insert(n.clone()) {
+                universe_errors.push(EslError::compiler(
+                    Some(u.pos.clone()),
+                    format!(
+                        "level variable `{n}` is declared more than once — a `universe` \
+                         declaration introduces each name exactly once"
+                    ),
+                ));
+            }
         }
+    }
+    if !universe_errors.is_empty() {
+        return Err(universe_errors);
     }
 
     // First pass: collect every declared inductive constructor in the
@@ -3565,6 +3585,39 @@ mod tests {
             "{head}\naxiom p:d : forall (T : Sort u) => T -> T;"
         ))
         .expect_err("an undeclared level must not auto-bind");
+    }
+
+    /// **eigenius#219 — a level variable may not be declared twice.**
+    ///
+    /// `declared_universes` is a set, so both spellings of a duplicate used to insert twice and
+    /// compile, the second insert silently doing nothing. nanoda asserts the same at declaration
+    /// admission (`no_dupes_all_params`, `references/nanoda_lib/src/tc.rs:167`), where the stakes
+    /// are higher — its `uparams` is an ordered list used for level substitution and a duplicate
+    /// makes substitution ambiguous. Here it is merely redundant, and still a mistake.
+    ///
+    /// eigenius#188 slice 5c added the `universe` form without this check.
+    #[test]
+    fn a_level_variable_may_not_be_declared_twice() {
+        let head = r#"namespace p = "urn:eigenius:p";"#;
+
+        for dup in [
+            "universe u u;",           // twice in one declaration
+            "universe u; universe u;", // twice across declarations
+        ] {
+            let e = crate::esl::compile(&format!("{head}\n{dup}"))
+                .expect_err("a duplicate level variable must be rejected");
+            let msg = e[0].to_string();
+            assert!(
+                msg.contains("`u` is declared more than once"),
+                "the diagnostic must name the offending variable: {msg}"
+            );
+        }
+
+        // The non-duplicate forms still compile — the check must not reject distinct names.
+        crate::esl::compile(&format!("{head}\nuniverse u v;"))
+            .expect("distinct level variables in one declaration are fine");
+        crate::esl::compile(&format!("{head}\nuniverse u; universe v;"))
+            .expect("distinct level variables across declarations are fine");
     }
 
     /// **eigenius#188 — a declaration's own sort can be POLYMORPHIC.**

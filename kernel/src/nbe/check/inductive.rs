@@ -1017,7 +1017,7 @@ fn check_ctor_type(
     walk_ctor_telescope(
         ctx,
         &ctor.typ,
-        decl.params.len(),
+        &decl.params,
         0,
         &decl_level,
         in_prop,
@@ -1032,7 +1032,7 @@ fn check_ctor_type(
 fn walk_ctor_telescope(
     ctx: &mut CheckCtx,
     cursor: &Exp,
-    n_params: usize,
+    params: &[(Patt, Exp)],
     idx: usize,
     decl_level: &crate::nbe::level::Level,
     in_prop: bool,
@@ -1040,7 +1040,31 @@ fn walk_ctor_telescope(
 ) -> Result<(), CheckError> {
     match cursor {
         Exp::Pi(patt, dom, body) => {
+            let n_params = params.len();
             let dom_level = super::ensure_infers_as_sort(ctx, dom)?;
+            // Parameter prefix: each binder must be DEFINITIONALLY EQUAL to the declared
+            // parameter. Port of nanoda's `assert_def_eq(binder_type, local_param)`
+            // (`references/nanoda_lib/src/inductive.rs:892`), which runs before its loop starts.
+            //
+            // For the positional `core:arg_types` path this holds by construction —
+            // `program::ground::build_ctor_type` assembles the prefix FROM `decl.params`. It is
+            // `core:ctor_type` that needs it: there the whole Π chain is AUTHORED, so
+            // `data D(A : Set) { mk : forall (A : Prop) => … }` was admitted with the constructor
+            // and the declaration disagreeing about what `A` is (eigenius#219).
+            if idx < n_params {
+                let declared = &params[idx].1;
+                let a = ctx.eval(dom, &ctx.rho)?;
+                let b = ctx.eval(declared, &ctx.rho)?;
+                if super::conv::eq_nf(ctx.rho.len(), &a, &b).is_err() {
+                    return Err(CheckError::IllFormed(format!(
+                        "constructor `{who}` parameter #{idx} is declared `{:?}` but the \
+                         declaration's parameter is `{:?}` — a constructor's parameter prefix \
+                         must match its inductive's",
+                        readback_val(ctx.rho.len(), &a),
+                        readback_val(ctx.rho.len(), &b),
+                    )));
+                }
+            }
             if idx >= n_params && !in_prop && !dom_level.leq(decl_level) {
                 return Err(CheckError::IllFormed(format!(
                     "constructor `{who}` argument #{} ({patt:?}) is too large for its inductive: \
@@ -1055,15 +1079,7 @@ fn walk_ctor_telescope(
             let gen = gen_val(&ctx.rho);
             let dom_val = ctx.eval(dom, &ctx.rho)?;
             let mut inner = ctx.extend(patt, &dom_val, &gen)?;
-            walk_ctor_telescope(
-                &mut inner,
-                body,
-                n_params,
-                idx + 1,
-                decl_level,
-                in_prop,
-                who,
-            )
+            walk_ctor_telescope(&mut inner, body, params, idx + 1, decl_level, in_prop, who)
         }
         conclusion => super::check_type(ctx, conclusion),
     }

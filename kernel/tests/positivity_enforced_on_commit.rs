@@ -235,3 +235,43 @@ fn a_prop_may_store_an_argument_from_any_universe() {
         "`Prop` is impredicative — a proposition may quantify over any universe; got: {errors:?}"
     );
 }
+
+/// **A constructor's parameter prefix must match its inductive's (eigenius#219).**
+///
+/// Port of nanoda's `assert_def_eq(binder_type, local_param)`
+/// (`references/nanoda_lib/src/inductive.rs:892`), which runs over the parameter prefix before its
+/// constructor loop begins.
+///
+/// This only bites on the `core:ctor_type` path — the typed constructor form `mk : <type-expr>`,
+/// where the author writes the whole Π chain including the parameters. The positional
+/// `core:arg_types` form builds its prefix FROM `core:type_params`, so it agrees by construction
+/// and could never have disagreed.
+///
+/// Measured before it rejected anything: zero prefix disagreements across the bootstrap chain and
+/// the whole workspace.
+#[test]
+fn constructor_parameter_prefix_disagreeing_with_the_declaration_is_rejected() {
+    let errors = validate_esl(
+        r#"
+        namespace probe = "urn:eigenius:probe";
+
+        data probe:Box(A : Set) {
+            mk : forall (A : Prop) => A -> probe:Box(A),
+        }
+    "#,
+    );
+    let hits: Vec<&(ValidationRule, String)> = errors
+        .iter()
+        .filter(|(r, _)| *r == ValidationRule::InductiveDeclInadmissible)
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "`data Box(A : Set)` with `mk : forall (A : Prop) => ...` must be rejected; got: {errors:?}"
+    );
+    assert!(
+        hits[0].1.contains("parameter prefix") || hits[0].1.contains("parameter #0"),
+        "the diagnostic must say WHICH parameter disagrees: {}",
+        hits[0].1
+    );
+}

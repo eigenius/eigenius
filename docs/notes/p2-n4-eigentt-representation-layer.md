@@ -302,10 +302,13 @@ The fix is one token: `JustifiedBy : … -> Type 2`. A certificate's TYPE moves 
 VALUES do not change, and nothing checks `JustifiedBy(j, p)` against a fixed sort — the full suite
 is green with no other edit. **This adds `reasoning` as a FIFTH moved layer.**
 
-**Still not ported: the parameter-prefix agreement check.** nanoda `assert_def_eq`s each prefix
+**The parameter-prefix agreement check is ported too, in #219.** nanoda `assert_def_eq`s each prefix
 binder against the declared parameter (`:892`). EigenTT's `build_ctor_type` builds the prefix FROM
-`decl.params`, so it agrees by construction — but a `core:ctor_type` payload is authored
-independently and could disagree. Separate hole, own measurement, not in this change.
+`decl.params`, so the positional path agrees by construction — but a `core:ctor_type` payload
+carries an AUTHOR-WRITTEN prefix, which is what the ESL typed constructor form `mk : <type-expr>`
+emits. Measured first: zero disagreements across the bootstrap and the whole workspace. Now enforced
+in the same walk, so nanoda's `check_ctor` is fully ported bar the mutual/nested handling that
+belongs to #20 / #21.
 
 ## 6. Scope
 
