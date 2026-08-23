@@ -75,9 +75,19 @@ reseed rather than paying a standalone one.
   workspace hits, so there is no evidence to pick its sort from; reasoning recorded on the arm.
   Measured 12 probe hits, all `inferred <= expected`. Closed.
 
+- **#138 (`2026-08-22`).** Motive is index-aware: `Π (i₁:I₁) … (i_m:I_m). D(params)(i₁…i_m) → Sort`,
+  result at the major's own indices. nanoda settled the direction (`mk_motive_dep` /
+  `mk_minors1group` both read one `local_indices`), so the motive moved to meet the minors.
+  **Watch the name hygiene**: building the motive type as an `Exp` put the burden on names, and the
+  first version let an index binder capture a same-named parameter — domain `D(idx, idx)` instead of
+  `D(param, idx)`, returning `Ok` because a constant motive checks against either. Fixed by reading
+  parameters back from values and naming index binders `IDX#{k}`. Closed; **#69 unblocked**.
+
 #### NEXT
-Step 2 of #92 (function-typed IHs) waits on #138 — which is now the next code item. Then the
-remaining three design notes, all independent and all writable before any code: N1 positivity criterion +
+**#69** (no-confusion) is unblocked — it derives against the eliminator, which now has a well-typed
+form for indexed families. Its own trigger still governs: nothing in tree wants constructor-
+distinctness reasoning yet, so check that before building it. Step 2 of #92 (function-typed IHs) is
+also unblocked. Then the remaining three design notes, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 
