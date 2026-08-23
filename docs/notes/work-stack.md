@@ -41,6 +41,13 @@ Three design notes, all independent and all writable before any code: N1 positiv
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 
+**Port from `references/nanoda_lib` wherever there is a counterpart** (plan §3) — positivity,
+the index-aware motive, the whole level algebra. It also answers #138 outright: nanoda's motive and
+minor premises both read one `local_indices`, so they cannot disagree, and the fix is to move the
+motive onto `derive_minor_types`' convention. **The pin moved to `6ae1f0c` and every citation is
+stale** — `positivity.rs` still cites `f58f2f6` at `:24`, `:129`, `:584`, and the line numbers in #92
+and #188 predate the repin.
+
 #### GOTCHAS
 - **#213 first, before any bootstrap edit.** Iterating on `lexicon-ontology.esl` while every
   whitespace change costs a reseed is exactly what it removes.
