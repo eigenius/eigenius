@@ -24,7 +24,23 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug)]
 pub struct File {
     pub namespaces: Vec<NamespaceDecl>,
+    /// Level variables bound by `universe` declarations (eigenius#188), in source order.
+    ///
+    /// File-scoped like `namespace`, and for the same reason: a level variable is a name that has
+    /// to be introduced before it is meaningful. Without this, `Sort u` auto-binds on first use —
+    /// Lean's `autoBound` behaviour — and a typo (`Sort v` for `Sort u`) silently becomes a second,
+    /// unrelated parameter instead of an error.
+    pub universes: Vec<UniverseDecl>,
     pub declarations: Vec<Declaration>,
+}
+
+/// `universe u v;` — binds one or more level variables for the rest of the file.
+///
+/// Follows Lean's `universe ident ident*` (space-separated), with ESL's statement terminator.
+#[derive(Debug)]
+pub struct UniverseDecl {
+    pub names: Vec<String>,
+    pub pos: Position,
 }
 
 /// A namespace alias: `namespace core = "urn:eigenius:core";`

@@ -111,6 +111,8 @@ pub enum TokenKind {
     TypeKw,
     /// `Sort` — the general sort form (eigenius#188).
     SortKw,
+    /// `universe` — binds level variables (eigenius#188).
+    Universe,
     /// D37 §3.3 — `=>` returns/produces. Used in `lambda` bodies
     /// (after the parameter list) and inline `merge_comorphism`
     /// bodies. Distinct from `Arrow` (`->`) which separates the
@@ -541,6 +543,8 @@ impl<'a> Lexer<'a> {
             // two `Sort` occurrences in the tree are a comment and an English word inside a
             // lexicon `form` string literal, neither of which the lexer sees as an identifier.
             "Sort" => TokenKind::SortKw,
+            // eigenius#188 — `universe u v;` binds level variables for the rest of the file.
+            "universe" => TokenKind::Universe,
             // Literals
             "true" => TokenKind::BoolLit(true),
             "false" => TokenKind::BoolLit(false),

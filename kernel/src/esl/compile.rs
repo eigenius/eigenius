@@ -30,29 +30,55 @@ use std::collections::BTreeMap;
 ///
 /// `Add(l, n)` becomes `n` iterated `Succ`s, which is what `l + n` means; the kernel has no
 /// offset form because `Succ` composes.
-fn lower_level(l: &ast::LevelExpr) -> crate::nbe::level::Level {
+fn lower_level(
+    l: &ast::LevelExpr,
+    declared: &std::collections::BTreeSet<String>,
+    pos: &crate::esl::error::Position,
+) -> Result<crate::nbe::level::Level, EslError> {
     use crate::nbe::level::Level;
-    match l {
+    Ok(match l {
         ast::LevelExpr::Num(n) => Level::of_nat(*n),
-        ast::LevelExpr::Var(v) => Level::Param(v.clone()),
-        ast::LevelExpr::Add(inner, n) => (0..*n).fold(lower_level(inner), |acc, _| acc.succ()),
-        ast::LevelExpr::Max(a, b) => Level::Max(Box::new(lower_level(a)), Box::new(lower_level(b))),
-        ast::LevelExpr::IMax(a, b) => {
-            Level::IMax(Box::new(lower_level(a)), Box::new(lower_level(b)))
+        ast::LevelExpr::Var(v) => {
+            if !declared.contains(v) {
+                return Err(EslError::compiler(
+                    Some(pos.clone()),
+                    format!(
+                        "universe level `{v}` is not declared — add `universe {v};` to this file. \
+                         An undeclared level variable is not auto-bound (eigenius#188): silently \
+                         minting one turns a typo into a second, unrelated universe."
+                    ),
+                ));
+            }
+            Level::Param(v.clone())
         }
-    }
+        ast::LevelExpr::Add(inner, n) => {
+            (0..*n).fold(lower_level(inner, declared, pos)?, |acc, _| acc.succ())
+        }
+        ast::LevelExpr::Max(a, b) => Level::Max(
+            Box::new(lower_level(a, declared, pos)?),
+            Box::new(lower_level(b, declared, pos)?),
+        ),
+        ast::LevelExpr::IMax(a, b) => Level::IMax(
+            Box::new(lower_level(a, declared, pos)?),
+            Box::new(lower_level(b, declared, pos)?),
+        ),
+    })
 }
 
 /// The kernel level a `SortKind` denotes. `Prop` is `0`, `Set` is `1`, `Type l` is `l + 1`
 /// (Lean's numbering), and `Sort l` is `l`.
-fn sort_kind_level(k: &ast::SortKind) -> crate::nbe::level::Level {
+fn sort_kind_level(
+    k: &ast::SortKind,
+    declared: &std::collections::BTreeSet<String>,
+    pos: &crate::esl::error::Position,
+) -> Result<crate::nbe::level::Level, EslError> {
     use crate::nbe::level::Level;
-    match k {
+    Ok(match k {
         ast::SortKind::Prop => Level::of_nat(0),
         ast::SortKind::Set => Level::of_nat(1),
-        ast::SortKind::Type(l) => lower_level(l).succ(),
-        ast::SortKind::Sort(l) => lower_level(l),
-    }
+        ast::SortKind::Type(l) => lower_level(l, declared, pos)?.succ(),
+        ast::SortKind::Sort(l) => lower_level(l, declared, pos)?,
+    })
 }
 
 /// A declaration's own sort, as the `core:Level` value `core:result_sort` now carries
@@ -89,9 +115,13 @@ fn sort_kind_param_string(
     }
 }
 
-fn sort_kind_result_value(k: &ast::SortKind) -> Value {
-    Value::Json(crate::program::eigentt_type_mirror::encode_level_json(
-        &sort_kind_level(k),
+fn sort_kind_result_value(
+    k: &ast::SortKind,
+    declared: &std::collections::BTreeSet<String>,
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    Ok(Value::Json(
+        crate::program::eigentt_type_mirror::encode_level_json(&sort_kind_level(k, declared, pos)?),
     ))
 }
 
@@ -141,6 +171,13 @@ pub fn compile_file_with_context(
     // Register namespace aliases.
     for ns in &file.namespaces {
         compiler.namespaces.insert(ns.alias.clone(), ns.uri.clone());
+    }
+
+    // Register level variables (eigenius#188). File-scoped like namespaces.
+    for u in &file.universes {
+        for n in &u.names {
+            compiler.declared_universes.insert(n.clone());
+        }
     }
 
     // First pass: collect every declared inductive constructor in the
@@ -311,6 +348,13 @@ pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String
 
 struct Compiler {
     namespaces: BTreeMap<String, String>,
+    /// Level variables bound by `universe` declarations in this file (eigenius#188).
+    ///
+    /// A `Sort u` whose `u` is not in here is an ERROR, not a fresh parameter. Lean's
+    /// `autoBound` would silently mint one, which turns a typo — `Sort v` for `Sort u` — into a
+    /// second unrelated universe rather than a diagnostic. Level variables are cheap to declare
+    /// and expensive to get silently wrong, so the binding is required.
+    declared_universes: std::collections::BTreeSet<String>,
     /// Per-file constructor index. Two views over the same set of
     /// chain-resident + in-file ctors:
     ///
@@ -580,6 +624,7 @@ impl Compiler {
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
+            declared_universes: std::collections::BTreeSet::new(),
             ctors_by_iri: std::collections::BTreeSet::new(),
             ctors_by_short_name: BTreeMap::new(),
             macros: BTreeMap::new(),
@@ -1500,7 +1545,11 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(sort_kind_level(kind))),
+            ast::TypeExpr::Sort { kind, pos } => Ok(Exp::Sort(sort_kind_level(
+                kind,
+                &self.declared_universes,
+                pos,
+            )?)),
             // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_json`. Both paths
             // are live: `axiom X : T` lowers through here, `type_expr(...)` in a resource
             // property through the JSON encoder.
@@ -2096,7 +2145,10 @@ impl Compiler {
         // eigenius#72 Layer 2 — explicit result sort. Encoded as a
         // string; the decoder parses it back into `Exp::Sort(n)`.
         if let Some(sort) = &decl.result_sort {
-            r.set(iri(wk::RESULT_SORT), sort_kind_result_value(sort));
+            r.set(
+                iri(wk::RESULT_SORT),
+                sort_kind_result_value(sort, &self.declared_universes, &decl.name.pos)?,
+            );
         }
 
         let parent_iri_str = self.resolve(&decl.name)?;
@@ -3564,6 +3616,49 @@ fn stamp_declared(resource: &mut Resource) {
 
 #[cfg(test)]
 mod tests {
+    /// **eigenius#188 — a level variable must be declared with `universe`.**
+    ///
+    /// Lean's `autoBound` mints an undeclared level parameter on first use. That is the wrong
+    /// trade here: level variables are cheap to declare and expensive to get silently wrong,
+    /// because a typo — `Sort v` where `Sort u` was meant — becomes a SECOND, unrelated universe
+    /// rather than an error, and the declaration still compiles and commits.
+    ///
+    /// Follows Lean's `universe ident ident*` otherwise: space-separated, ESL's semicolon.
+    #[test]
+    fn a_level_variable_must_be_declared() {
+        let head = r#"namespace core = "urn:eigenius:core";
+                      namespace p = "urn:eigenius:probe";"#;
+
+        // Declared — compiles, in a type expression and as a declaration's own sort.
+        for body in [
+            "universe u; axiom p:a : forall (T : Sort u) => T -> T;",
+            "universe u v; axiom p:b : forall (T : Sort (max u v)) => T -> T;",
+            "universe u; data p:D : Sort u { mk : p:D }",
+            "universe u; data p:E : Type u + 1 { mk : p:E }",
+        ] {
+            crate::esl::compile(&format!("{head}\n{body}"))
+                .unwrap_or_else(|e| panic!("`{body}` must compile: {e:?}"));
+        }
+
+        // Undeclared — rejected, with the name and a fix in the message.
+        let e = crate::esl::compile(&format!(
+            "{head}\nuniverse u; axiom p:c : forall (T : Sort v) => T -> T;"
+        ))
+        .expect_err("`Sort v` with only `u` declared must be rejected");
+        let msg = e[0].to_string();
+        assert!(msg.contains("`v` is not declared"), "{msg}");
+        assert!(
+            msg.contains("universe v;"),
+            "the message should say the fix: {msg}"
+        );
+
+        // And with NO universe declaration at all — the auto-bound case.
+        crate::esl::compile(&format!(
+            "{head}\naxiom p:d : forall (T : Sort u) => T -> T;"
+        ))
+        .expect_err("an undeclared level must not auto-bind");
+    }
+
     /// **eigenius#188 — a declaration's own sort can be POLYMORPHIC.**
     ///
     /// `core:result_sort` was a string (`"Prop"` / `"Set"` / `"Type:N"`), so `data X : Sort u`
@@ -3604,6 +3699,7 @@ mod tests {
             let src = format!(
                 r#"namespace core = "urn:eigenius:core";
                    namespace p = "urn:eigenius:probe";
+                   universe u v;
                    data p:D : {sort_src} {{ mk : p:D }}"#
             );
             let rs = crate::esl::compile(&src)

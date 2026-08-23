@@ -73,6 +73,12 @@ pub struct Namespaces {
     /// prefix (IRI up to the last `:`) → alias
     by_prefix: BTreeMap<String, String>,
     taken: BTreeSet<String>,
+    /// Level-variable names emitted while printing (eigenius#188).
+    ///
+    /// Recorded for the same reason as the aliases above: since a level variable must be bound by
+    /// a `universe` declaration, printed source that mentions one does not recompile without it.
+    /// Collecting them as they are printed keeps the preamble exact rather than hand-maintained.
+    universes: BTreeSet<String>,
 }
 
 impl Namespaces {
@@ -126,7 +132,18 @@ impl Namespaces {
         for (alias, prefix) in by_alias {
             let _ = writeln!(out, "namespace {alias} = \"{prefix}\";");
         }
+        // eigenius#188 — bind every level variable the body mentions. Without this, printed
+        // source carrying `Sort u` does not recompile: a level variable is not auto-bound.
+        if !self.universes.is_empty() {
+            let names: Vec<&str> = self.universes.iter().map(String::as_str).collect();
+            let _ = writeln!(out, "universe {};", names.join(" "));
+        }
         out
+    }
+
+    /// Record a level variable the printer is about to emit.
+    fn note_universe(&mut self, name: &str) {
+        self.universes.insert(name.to_string());
     }
 }
 
@@ -284,7 +301,7 @@ impl Printer<'_> {
     ///
     /// Parenthesised whenever it is not an atom, because the level sits after `Sort` / `Type` and
     /// `max u v + 1` would otherwise reparse with the wrong shape.
-    fn print_level(&self, v: &Value, path: &str) -> Result<String, PrintError> {
+    fn print_level(&mut self, v: &Value, path: &str) -> Result<String, PrintError> {
         if let Some(n) = level_as_nat(v) {
             return Ok(n.to_string());
         }
@@ -304,10 +321,14 @@ impl Printer<'_> {
                 .ok_or_else(|| self.err("universe level is missing an argument", path))
         };
         match name {
-            "Param" => Ok(arg(0)?
-                .as_str()
-                .ok_or_else(|| self.err("`Param` level takes a name", path))?
-                .to_string()),
+            "Param" => {
+                let n = arg(0)?
+                    .as_str()
+                    .ok_or_else(|| self.err("`Param` level takes a name", path))?
+                    .to_string();
+                self.ns.note_universe(&n);
+                Ok(n)
+            }
             // A `Succ` over a non-numeral base: `l + 1`, accumulated so `Succ(Succ(u))` is `u + 2`
             // rather than `(u + 1) + 1`.
             "Succ" => {
@@ -324,18 +345,18 @@ impl Printer<'_> {
                         .and_then(|a| a.first())
                         .ok_or_else(|| self.err("`Succ` level takes a base", path))?;
                 }
-                Ok(format!("({} + {n})", self.print_level(cur, path)?))
+                let base = cur.clone();
+                Ok(format!("({} + {n})", self.print_level(&base, path)?))
             }
-            "Max" => Ok(format!(
-                "(max {} {})",
-                self.print_level(arg(0)?, path)?,
-                self.print_level(arg(1)?, path)?
-            )),
-            "IMax" => Ok(format!(
-                "(imax {} {})",
-                self.print_level(arg(0)?, path)?,
-                self.print_level(arg(1)?, path)?
-            )),
+            "Max" | "IMax" => {
+                // Bind the arguments before recursing: `arg` borrows `args`, and `print_level`
+                // needs `&mut self` to record level variables into the preamble.
+                let (a0, a1) = (arg(0)?.clone(), arg(1)?.clone());
+                let l = self.print_level(&a0, path)?;
+                let r = self.print_level(&a1, path)?;
+                let op = if name == "Max" { "max" } else { "imax" };
+                Ok(format!("({op} {l} {r})"))
+            }
             other => Err(self.err(
                 format!("`{other}` is not an eigentt:Level constructor"),
                 path,

@@ -184,11 +184,13 @@ impl<'a> Parser<'a> {
 
     fn parse_file(&mut self) -> Result<File, EslError> {
         let mut namespaces = Vec::new();
+        let mut universes = Vec::new();
         let mut declarations = Vec::new();
 
         while !self.at_eof() {
             match self.peek() {
                 TokenKind::Namespace => namespaces.push(self.parse_namespace()?),
+                TokenKind::Universe => universes.push(self.parse_universe()?),
                 TokenKind::Class => declarations.push(Declaration::Class(self.parse_class()?)),
                 TokenKind::Property => {
                     declarations.push(Declaration::Property(self.parse_property()?))
@@ -233,6 +235,7 @@ impl<'a> Parser<'a> {
 
         Ok(File {
             namespaces,
+            universes,
             declarations,
         })
     }
@@ -248,6 +251,20 @@ impl<'a> Parser<'a> {
         let uri = self.expect_string()?;
         self.expect_semicolon()?;
         Ok(NamespaceDecl { alias, uri, pos })
+    }
+
+    /// `universe u v;` — bind level variables for the rest of the file (eigenius#188).
+    ///
+    /// Space-separated, as in Lean (`universe ident ident*`), terminated with ESL's semicolon.
+    fn parse_universe(&mut self) -> Result<crate::esl::ast::UniverseDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Universe)?;
+        let mut names = vec![self.expect_ident()?];
+        while matches!(self.peek(), TokenKind::Ident(_)) {
+            names.push(self.expect_ident()?);
+        }
+        self.expect_semicolon()?;
+        Ok(crate::esl::ast::UniverseDecl { names, pos })
     }
 
     // --- Class ---
