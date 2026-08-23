@@ -537,7 +537,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // `SizeSort` is a type — admit it against `Set` / `Type(n)`
         // the same way Pi and Sigma are. Concrete size values —
         // `SizeInf` and `SizeSucc(_)` — inhabit `Val::SizeSort`.
-        (Exp::SizeSort, Val::Sort(1)) | (Exp::SizeSort, Val::Sort(_)) => Ok(()),
         (Exp::SizeInf, Val::SizeSort) => Ok(()),
         (Exp::SizeSucc(s), Val::SizeSort) => check(ctx, s, &Val::SizeSort),
 
@@ -571,9 +570,21 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
 
         // Bounded size Pi against Set/Type — delegate to `check_type`
         // so the TSO hypothesis-insertion logic runs exactly once.
-        (Exp::SizedPi { .. }, Val::Sort(1)) | (Exp::SizedPi { .. }, Val::Sort(_)) => {
-            check_type(ctx, exp)
-        }
+        // `SizedPi` is the ONE type-former with no `check_infer` rule, so this arm cannot be
+        // deleted the way its five neighbours were (eigenius#194): falling through to
+        // `check_by_inference` would reach `CannotInfer` and make a bounded size Pi unusable in
+        // every checking position. It stays, and it stays permissive — `Val::Sort(_)` admits
+        // `SizedPi : Prop`, which is almost certainly wrong, since a sized Pi over a non-Prop
+        // codomain is not a proposition.
+        //
+        // Not tightened here because there is nothing to tighten it AGAINST: picking a sort for
+        // `SizedPi` is a design decision (does it follow Pi's `max`/impredicative rule with a
+        // `SizeSort` domain? then every sized Pi lands at `Sort(2)` and nothing may check one
+        // against `Set`), and eigenius#136 is the precedent for what happens when a one-line arm
+        // change turns out to be one. Measured `2026-08-22`: instrumented to log every time this
+        // arm is reached, the full workspace produced ZERO hits — no test checks a `SizedPi`
+        // against a sort at all, so there is no evidence to design the rule from either.
+        (Exp::SizedPi { .. }, Val::Sort(_)) => check_type(ctx, exp),
 
         // Sum type against Set
         (Exp::Data(summands), Val::Sort(1)) => {
@@ -669,21 +680,19 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             )))
         }
 
-        // Codata type formation: codata { ... } : Set
-        (Exp::Codata(_), Val::Sort(1)) => check_type(ctx, exp),
-        (Exp::Codata(_), Val::Sort(_)) => check_type(ctx, exp),
-        // Parameterised codata — applied codata type expression.
-        (Exp::CodataType(_, _), Val::Sort(1)) | (Exp::CodataType(_, _), Val::Sort(_)) => {
-            check_type(ctx, exp)
-        }
-
-        // Inductive type formation (Phase 11b, D19).
-        (Exp::Inductive(_), Val::Sort(1)) | (Exp::InductiveType(_, _), Val::Sort(1)) => {
-            check_type(ctx, exp)
-        }
-        (Exp::Inductive(_), Val::Sort(_)) | (Exp::InductiveType(_, _), Val::Sort(_)) => {
-            check_type(ctx, exp)
-        }
+        // `Codata`, `CodataType`, `Inductive` and `InductiveType` against a universe had explicit
+        // arms here until eigenius#194. Each read `(Exp::X(..), Val::Sort(_)) => check_type(ctx,
+        // exp)` — matching EVERY universe and then discarding it, because `check_type` takes no
+        // expected type. They were `Ok(())` with extra steps, and they admitted `codata {…} : Prop`
+        // and a `Set`-level inductive standing where a proposition is expected.
+        //
+        // They are gone rather than tightened. `check_infer`'s arm for each of these constructors
+        // is `check_type(ctx, exp)?` followed by returning the sort — so the check arms were
+        // inference minus the universe comparison, not a different judgement. Falling through to
+        // `check_by_inference` runs the same `check_type` and then compares under `subtype_of`,
+        // which is where cumulativity already lives. Check and infer now agree by construction:
+        // there is no second rule to keep in sync, which is the property #137, #191 and #209 each
+        // lost in a different arm.
 
         // Constructor application against an inductive type — Phase 11b
         // step 5 checking mode. Parameters come from the expected type;
@@ -1585,6 +1594,84 @@ mod tests {
             format!("{err:?}").contains("universe stratification"),
             "expected a universe-stratification diagnostic, got: {err:?}"
         );
+    }
+
+    // ── eigenius#194: the `Val::Sort(_)` wildcard arms are gone ──────────────
+    //
+    // `Codata`, `CodataType`, `Inductive` and `InductiveType` each had an arm matching EVERY
+    // universe and delegating to `check_type`, which takes no expected type — so the universe was
+    // discarded. They now fall through to `check_by_inference`, which compares under `subtype_of`.
+    // These four tests pin both directions of that comparison.
+
+    /// A declaration-carrying inductive at the given sort, with no constructors.
+    fn ind_at(name: &str, sort: usize) -> Exp {
+        Exp::Inductive(std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
+            name: name.to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(sort),
+            ctors: Vec::new(),
+        }))
+    }
+
+    /// `data D : Set` standing where a proposition is expected. `JustifiedBy(j, P)`,
+    /// `reflection:canonical_proposition` and everything else Rule 21 checks take a `Prop` in that
+    /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
+    #[test]
+    fn a_set_level_inductive_does_not_inhabit_prop() {
+        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::Sort(0))
+            .expect_err("`data D : Set` must not check against `Prop`");
+    }
+
+    /// The other half, and the reason the fix is a deletion rather than a `m >= 1` guard: a
+    /// `Prop`-sorted inductive — `logic:And`, `reasoning:JustifiedBy`, the witness predicates —
+    /// must still check against `Set` by cumulativity. Nine of the twelve probe hits measured on
+    /// `2026-08-22` were exactly this shape, so a guard written the obvious way would have broken
+    /// them.
+    #[test]
+    fn a_prop_level_inductive_still_inhabits_set_and_above() {
+        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::Sort(1))
+            .expect("`data D : Prop` inhabits `Set` by cumulativity");
+        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::Sort(2))
+            .expect("...and every universe above it");
+        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::Sort(2))
+            .expect("`data D : Set` inhabits `Type 1` — the other three probe hits");
+    }
+
+    /// `codata { … }` is at `Set` per `check_infer`, so it is not a proposition either.
+    #[test]
+    fn a_codata_type_does_not_inhabit_prop() {
+        let cd = Exp::Codata(Vec::new());
+        check(&mut ctx(), &cd, &Val::Sort(0)).expect_err("`codata { } : Prop` must be rejected");
+        check(&mut ctx(), &cd, &Val::Sort(1)).expect("`codata { } : Set` is the inference rule");
+    }
+
+    /// The invariant the deletion buys, stated directly: for these constructors `check` accepts
+    /// exactly what `check_infer` + `subtype_of` accepts, because it now IS that path. A future
+    /// arm re-added above `check_by_inference` would break this before it broke a chain.
+    #[test]
+    fn check_and_infer_agree_on_type_former_universes() {
+        for (exp, label) in [
+            (ind_at("P", 0), "inductive at Prop"),
+            (ind_at("S", 1), "inductive at Set"),
+            (Exp::Codata(Vec::new()), "codata"),
+        ] {
+            let inferred = match check_infer(&mut ctx(), &exp).expect("inferable") {
+                Val::Sort(k) => k,
+                other => panic!("{label}: expected a sort, got {other:?}"),
+            };
+            for m in 0..4usize {
+                let checked = check(&mut ctx(), &exp, &Val::Sort(m)).is_ok();
+                assert_eq!(
+                    checked,
+                    inferred <= m,
+                    "{label}: check against Sort({m}) = {checked}, but inference gives \
+                     Sort({inferred}) and cumulativity says {}",
+                    inferred <= m
+                );
+            }
+        }
     }
 
     /// The rule the fix installs: a ground Eigon type inhabits `Set` and, by
