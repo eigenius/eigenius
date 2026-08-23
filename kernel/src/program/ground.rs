@@ -549,12 +549,9 @@ fn decode_codata_observation_type(
                 // with a never-matching dummy inductive stub (its
                 // name can't collide with any real inductive, so
                 // its self-ref branch never fires).
-                let type_name = r
-                    .get(&Iri::parse(wk::TYPE_NAME).unwrap())
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "InductiveArgType missing `type_name`".to_string())?;
+                let type_name = arg_type_head(r)?;
                 if type_name.contains(':') {
-                    if let Ok(parsed) = Iri::parse(type_name) {
+                    if let Ok(parsed) = Iri::parse(&type_name) {
                         if parsed == *class_iri {
                             let type_args_arr = match r.get(&Iri::parse(wk::TYPE_ARGS).unwrap()) {
                                 Some(Value::Array(a)) => a.clone(),
@@ -704,11 +701,22 @@ fn decode_indices(
                 ));
             }
         };
-        let kind_str = match pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) {
-            Some(Value::String(s)) => s.as_str(),
-            _ => "urn:eigenius:core:Set",
+        // An index kind is a `eigentt:TypeExpr`, decoded exactly like a parameter kind — the two
+        // telescopes are the same shape and the ESL compiler emits them through the same code.
+        //
+        // This read used to be `Some(Value::String(s)) => s, _ => "urn:eigenius:core:Set"`, and the
+        // default was not a forward-compat courtesy: `urn:eigenius:core:Set` is not a declared
+        // resource, so it decoded to `EigonClass(core:Set)` — a class type nothing can inhabit.
+        // Every index kind that failed to be a string got it silently, and nothing noticed because
+        // nothing type-checked the telescope. `check_type`'s `Exp::Inductive` arm now does
+        // (`check_inductive_decl_telescopes`), and the first thing it reported was
+        // `reasoning:JustifiedBy.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
+        let Some(kind_value) = pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) else {
+            return Err(format!(
+                "inductive type '{class_iri}' index '{name}' missing `param_kind`"
+            ));
         };
-        let kind_exp = decode_index_kind_str(kind_str, layer);
+        let kind_exp = decode_param_kind(kind_value, class_iri, layer)?;
         // Anonymous-index encoding: the ESL parser uses "_" as the
         // sentinel name. Honour the encoding by emitting `Patt::Unit`.
         let patt = if name == "_" {
@@ -780,11 +788,12 @@ fn decode_params(
                 ))
             }
         };
-        let kind_str = match pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) {
-            Some(Value::String(s)) => s.as_str(),
-            _ => "urn:eigenius:core:Set",
+        // Absent `param_kind` still defaults to `Set`, as it always has. What is gone is the
+        // silent default for a kind that was PRESENT and unrecognised (eigenius#188 / N4).
+        let kind_exp = match pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) {
+            Some(v) => decode_param_kind(v, class_iri, layer)?,
+            None => Exp::sort(1),
         };
-        let kind_exp = decode_param_kind_str(kind_str, layer);
         params.push((Patt::Var(name), kind_exp));
     }
     Ok(params)
@@ -799,9 +808,9 @@ fn decode_params(
 /// deliberately do NOT recurse into `resolve_inductive_type` for the target,
 /// which would loop on mutually-referential declarations.
 ///
-/// Three decoders reach for this — `decode_arg_type` (constructor argument
-/// types), `decode_index_kind_str` (index telescope) and
-/// `decode_param_kind_str` (parameter telescope). They used to disagree:
+/// Two decoders reach for this — `decode_arg_type` (constructor argument
+/// types) and `decode_param_kind` (parameter AND index telescopes, which are
+/// one path since eigenius#188). Three of them used to disagree:
 /// only the first consulted the chain, so an inductive named as a
 /// constructor argument decoded to `Exp::InductiveType` while the *same*
 /// inductive named as an index kind decoded to `Exp::EigonClass`. That
@@ -829,87 +838,20 @@ fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>
     }))
 }
 
-/// Map a chain-side `param_kind` string from a `core:type_params` entry
-/// to its kernel-side `Exp`. Recognises:
+/// Decode an `InductiveParam`'s kind from its `core:param_kind` value (eigenius#188 / N4).
 ///
-/// - `core:Size` (and the bare `Size`) → `Exp::SizeSort` (sized binders).
-/// - `core:Prop` (and bare `Prop`) → `Exp::sort(0)` (D46 §3).
-/// - The four primitive type IRIs `core:string` / `core:integer` /
-///   `core:float` / `core:boolean` → `Exp::EigonPrimitive(...)`. This
-///   is what makes value-parameter inductives like D39 §4.1's
-///   `Asserts(iri) : Prop` decodable — the `iri` parameter is typed
-///   at `core:string` and the chain-resident declaration carries that
-///   IRI verbatim.
+/// This was `decode_param_kind_str`, a six-way dispatch over a STRING — `Size`, `Prop`, `Set`,
+/// `Type:N`, the primitive IRIs, an inductive IRI — **with a silent fallthrough to `Sort(1)`**.
+/// That default typed a class-typed parameter `Set`, which accepts anything: the parameter looked
+/// checked and was not. The string could not carry a level variable either, so `data Vec (A : Sort u)`
+/// was inexpressible.
 ///
-/// - An IRI naming a declared inductive → `Exp::InductiveType` with a
-///   name-only stub, via [`inductive_stub_for`] (eigenius#199).
-///
-/// Everything else falls through to `Exp::sort(1)` (Set) — the
-/// forward-compat default that preserves pre-D49 decoder behaviour.
-fn decode_param_kind_str(kind_str: &str, layer: &Layer) -> Exp {
-    match kind_str {
-        s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-        s if s.ends_with(":Prop") || s == "Prop" => Exp::sort(0),
-        "Set" => Exp::sort(1),
-        s if s.starts_with("Type:") => {
-            let n: usize = s["Type:".len()..].parse().unwrap_or(0);
-            Exp::sort(n + 1)
-        }
-        wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
-        wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
-        wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
-        wk::BOOLEAN => Exp::EigonPrimitive(PrimitiveType::Boolean),
-        // A parameter typed by a declared inductive (eigenius#199).
-        // Before this arm such a kind fell through to `Sort(1)`, so the
-        // parameter was silently typed `Set` — strictly worse than the
-        // index telescope's `EigonClass`, since `Set` accepts anything.
-        other => match Iri::parse(other).ok().and_then(|i| {
-            inductive_stub_for(&i, layer).map(|stub| Exp::InductiveType(stub, Vec::new()))
-        }) {
-            Some(exp) => exp,
-            // Forward-compat default, preserving pre-D49 decoder behaviour.
-            None => Exp::sort(1),
-        },
-    }
-}
-
-/// Index-kind variant of [`decode_param_kind_str`]. Adds the bare-name
-/// → `Exp::Var(name)` path the ESL compiler uses for index telescopes
-/// whose entries reference a parameter by name (e.g. `data Eq(A) : A
-/// -> A -> Prop` records the index kind as `"A"` — a bare name —
-/// rather than a fully-qualified IRI). Any fully-qualified IRI flows
-/// through the param-kind matcher; un-`urn:`-prefixed names that
-/// don't parse as IRIs and aren't bare names fall through to
-/// `Sort(1)` as a forward-compat default.
-fn decode_index_kind_str(kind_str: &str, layer: &Layer) -> Exp {
-    match kind_str {
-        s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-        s if s.ends_with(":Prop") || s == "Prop" => Exp::sort(0),
-        "Set" => Exp::sort(1),
-        s if s.starts_with("Type:") => {
-            let n: usize = s["Type:".len()..].parse().unwrap_or(0);
-            Exp::sort(n + 1)
-        }
-        wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
-        wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
-        wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
-        wk::BOOLEAN => Exp::EigonPrimitive(PrimitiveType::Boolean),
-        _ => {
-            if let Ok(iri) = Iri::parse(kind_str) {
-                // A declared inductive decodes to `InductiveType`, matching
-                // what its inhabitants infer to and what `decode_arg_type`
-                // has always produced for the same IRI (eigenius#199).
-                match inductive_stub_for(&iri, layer) {
-                    Some(stub) => Exp::InductiveType(stub, Vec::new()),
-                    None => Exp::EigonClass(iri),
-                }
-            } else if !kind_str.contains(':') {
-                Exp::Var(kind_str.to_string())
-            } else {
-                Exp::sort(1)
-            }
-        }
-    }
+/// The kind is a type expression and now says so. Every case the string encoded is a `TypeExpr`
+/// constructor, and `decode_type` already dispatches all of them — including the `ConstRef`
+/// resolution that distinguishes a primitive from an inductive from a class.
+fn decode_param_kind(value: &Value, class_iri: &Iri, layer: &Layer) -> Result<Exp, String> {
+    crate::program::eigentt_type_mirror::decode_type(value, layer)
+        .map_err(|e| format!("inductive type '{class_iri}' has a malformed `core:param_kind`: {e}"))
 }
 
 fn decode_ctors(
@@ -1057,7 +999,7 @@ enum DecodedArg {
 /// Decode a constructor-arg resource into a `DecodedArg`.
 ///
 /// Binder-shaped resources carry `binder_name`; everything else is
-/// positional. A binder whose kind is `core:Size`/`Size` and that
+/// positional. A binder whose kind is `Size` and that
 /// additionally carries `binder_bound` emits `SizedBinder`;
 /// otherwise it emits `PiBinder` (used for size-polymorphic args
 /// without a bound).
@@ -1121,6 +1063,51 @@ fn decode_bare_size_ref(s: &str) -> Exp {
     }
 }
 
+/// The head reference an `InductiveArgType`'s `core:type_name` names, as the bare dispatch key the
+/// decoders key on: a parameter name, an IRI, or `"Size"` for the size sort.
+///
+/// eigenius#188 / N4 retyped `core:type_name` from a string to an `eigentt:TypeExpr`. The HEAD is
+/// read out rather than the value decoded whole, because `core:type_args` is a SEPARATE property —
+/// an applied type is `type_name` + `type_args`, not one `App` spine — and because a
+/// self-reference must resolve to the in-construction declaration's stub rather than being looked
+/// up in a layer that does not yet contain it.
+///
+/// Both consumers call this: [`decode_arg_type`] for constructor arguments and
+/// `decode_codata_observation_type` for a parameterised reference in an observation type. The
+/// second read `type_name` as a `Value::String` until this function existed, so it reported
+/// "missing `type_name`" for every codata observation once the property stopped being a string.
+pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, String> {
+    let value = r
+        .get(&Iri::parse(wk::TYPE_NAME).unwrap())
+        .ok_or_else(|| "InductiveArgType missing `type_name`".to_string())?;
+    let head = match value {
+        Value::Json(j) => j,
+        other => {
+            return Err(format!(
+                "InductiveArgType `type_name` must be an eigentt:TypeExpr value, got {other:?}"
+            ))
+        }
+    };
+    let ctor = head
+        .get("ctor")
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| "InductiveArgType `type_name` has no ctor".to_string())?;
+    let arg0 = || -> Option<&str> { head.get("args")?.as_array()?.first()?.as_str() };
+    match ctor {
+        "Var" => Ok(arg0()
+            .ok_or_else(|| "`Var` type_name takes a name".to_string())?
+            .to_string()),
+        "SizeSort" => Ok("Size".to_string()),
+        "ConstRef" => Ok(arg0()
+            .ok_or_else(|| "`ConstRef` type_name takes an IRI".to_string())?
+            .to_string()),
+        other => Err(format!(
+            "InductiveArgType `type_name` head `{other}` is not a type reference — expected \
+             `Var`, `ConstRef` or `SizeSort`"
+        )),
+    }
+}
+
 /// Decode one `InductiveArgType` resource to its `Exp`.
 ///
 /// Cases driven by the encoded `type_name`:
@@ -1147,10 +1134,8 @@ fn decode_arg_type(
         Value::Embedded(r) => r.as_ref(),
         _ => return Err("InductiveArgType must be embedded".to_string()),
     };
-    let type_name = match r.get(&Iri::parse(wk::TYPE_NAME).unwrap()) {
-        Some(Value::String(s)) => s.as_str(),
-        _ => return Err("InductiveArgType missing `type_name`".to_string()),
-    };
+    let owned_name = arg_type_head(r)?;
+    let type_name: &str = &owned_name;
     let type_args_arr = match r.get(&Iri::parse(wk::TYPE_ARGS).unwrap()) {
         Some(Value::Array(a)) => a.as_slice(),
         None => &[],
@@ -1518,13 +1503,58 @@ mod tests {
     }
 
     #[test]
+    fn universe_polymorphic_parameter_kind_survives_the_round_trip() {
+        // The loose end eigenius#188 left, and the reason N4 retyped `core:param_kind`. Slice 5b
+        // made `data X : Sort u` work by retyping `core:result_sort` to a `core:Level`; a
+        // PARAMETER's kind stayed a string, whose grammar was `"Prop" | "Set" | "Type:N"` and could
+        // not spell a level variable, so `data Vec (A : Sort u)` was rejected by the compiler.
+        //
+        // The assertion is on the decoded kernel term, not on the emitted JSON: the parameter's
+        // kind must come back as `Sort(Param("u"))`. A `Sort(_)` match would pass against the old
+        // silent `Sort(1)` default, so it pins the level itself.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            universe u;
+
+            data ex:Box(A : Sort u) {
+                wrap(A),
+            }
+            "#,
+        );
+        let box_iri = Iri::parse("urn:eigenius:example:Box").unwrap();
+        let val = resolve_class_type(&box_iri, &layer).expect("resolve Box");
+        let Val::InductiveType { decl, .. } = val else {
+            panic!("expected Val::InductiveType");
+        };
+        assert_eq!(decl.params.len(), 1);
+        assert!(matches!(&decl.params[0].0, Patt::Var(n) if n == "A"));
+        match &decl.params[0].1 {
+            Exp::Sort(l) => assert_eq!(l, &crate::nbe::level::Level::Param("u".to_string())),
+            other => panic!("expected a polymorphic Sort as the param kind, got {other:?}"),
+        }
+        // `wrap`'s type is `Π A : Sort u. Π _ : A. Box(A)` — the parameter binder carries the same
+        // polymorphic sort, so the level reaches the constructor telescope too.
+        match &decl.ctors[0].typ {
+            Exp::Pi(Patt::Var(pn), dom, _) => {
+                assert_eq!(pn, "A");
+                assert!(
+                    matches!(dom.as_ref(), Exp::Sort(l) if l == &crate::nbe::level::Level::Param("u".to_string()))
+                );
+            }
+            other => panic!("expected Pi for wrap, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn resolve_list_parametric_inductive_from_esl() {
         let layer = build_layer_with_esl(
             r#"
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:List(A : core:Set) {
+            data ex:List(A : Set) {
                 nil,
                 cons(A, ex:List(A)),
             }
@@ -1587,7 +1617,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:SizedNat(i : core:Size) {
+            data ex:SizedNat(i : Size) {
                 zero,
                 succ(ex:SizedNat(i)),
             }
@@ -1619,7 +1649,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:SizedNat(i : core:Size) {
+            data ex:SizedNat(i : Size) {
                 zero,
                 succ({j < i}, ex:SizedNat(j)),
             }
@@ -1685,7 +1715,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:SizedNat(i : core:Size) {
+            data ex:SizedNat(i : Size) {
                 zero,
                 succ({j < i}, ex:SizedNat(j)),
             }
@@ -1741,7 +1771,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            codata ex:SizedBox(i : core:Size, A : core:Set) {
+            codata ex:SizedBox(i : Size, A : Set) {
                 get : A;
                 shrink : {j < i} -> A;
             }
@@ -1812,7 +1842,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            codata ex:SizedBox(i : core:Size, A : core:Set) {
+            codata ex:SizedBox(i : Size, A : Set) {
                 get : A;
                 shrink : {j < i} -> A;
             }
@@ -1866,7 +1896,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            codata ex:Stream(A : core:Set, i : core:Size) {
+            codata ex:Stream(A : Set, i : Size) {
                 head : A;
                 tail : {j < i} -> ex:Stream(A, j);
             }
@@ -1959,12 +1989,12 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:SizedNat(i : core:Size) {
+            data ex:SizedNat(i : Size) {
                 zero,
                 succ({j < i}, ex:SizedNat(j)),
             }
 
-            codata ex:Container(A : core:Set) {
+            codata ex:Container(A : Set) {
                 get : A;
             }
             "#,
@@ -2007,7 +2037,7 @@ mod tests {
     #[test]
     fn sized_types_end_to_end_esl_to_check() {
         // End-to-end exercise (Phase 11b step 15i):
-        //   1. ESL source declares `data ex:SizedNat(i : core:Size)`
+        //   1. ESL source declares `data ex:SizedNat(i : Size)`
         //      with `zero` and `succ(ex:SizedNat(i))` constructors.
         //   2. Layer-build + ground resolution yields an
         //      `InductiveDecl` whose one parameter has `Exp::SizeSort`.
@@ -2032,7 +2062,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:SizedNat(i : core:Size) {
+            data ex:SizedNat(i : Size) {
                 zero,
                 succ(ex:SizedNat(i)),
             }
@@ -2093,7 +2123,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:SizedBox(i : core:Size) {
+            data ex:SizedBox(i : Size) {
                 mk(ex:SizedBox(Inf)),
             }
             "#,
@@ -2184,6 +2214,27 @@ mod tests {
         }
     }
 
+    fn probe_iri() -> Iri {
+        Iri::parse("urn:eigenius:t:Probe").unwrap()
+    }
+
+    /// Build a `core:param_kind` value the way the compiler now does (eigenius#188 / N4).
+    fn kind_val(j: serde_json::Value) -> Value {
+        Value::Json(j)
+    }
+
+    fn const_ref(iri: &str) -> Value {
+        kind_val(serde_json::json!({"ctor": "ConstRef", "args": [iri]}))
+    }
+
+    fn sort_kind(n: usize) -> Value {
+        let mut lvl = serde_json::json!({"ctor": "Zero", "args": []});
+        for _ in 0..n {
+            lvl = serde_json::json!({"ctor": "Succ", "args": [lvl]});
+        }
+        kind_val(serde_json::json!({"ctor": "Sort", "args": [lvl]}))
+    }
+
     #[test]
     fn decode_param_kind_str_maps_sort_literals() {
         // D39 §5 / D49 ChainWitness predicates need the kernel decoder
@@ -2192,32 +2243,21 @@ mod tests {
         // "Type:N"). Without this mapping, JustifiedBy and similar
         // sort-indexed predicates can't round-trip through the codec.
         let layer = build_test_layer();
-        assert!(matches!(&decode_param_kind_str("Prop", &layer), Exp::Sort(l) if l.is_nat(0)));
-        assert!(matches!(&decode_param_kind_str("Set", &layer), Exp::Sort(l) if l.is_nat(1)));
-        assert!(matches!(&decode_param_kind_str("Type:0", &layer), Exp::Sort(l) if l.is_nat(1)));
-        assert!(matches!(&decode_param_kind_str("Type:2", &layer), Exp::Sort(l) if l.is_nat(3)));
-        assert!(matches!(&decode_param_kind_str("Type:7", &layer), Exp::Sort(l) if l.is_nat(8)));
-    }
-
-    #[test]
-    fn decode_index_kind_str_maps_sort_literals() {
-        // Index-kind variant — same Sort-literal coverage as
-        // `decode_param_kind_str` plus the bare-name and qualified-IRI
-        // paths the index telescope can exercise.
-        let layer = build_test_layer();
-        assert!(matches!(&decode_index_kind_str("Prop", &layer), Exp::Sort(l) if l.is_nat(0)));
-        assert!(matches!(&decode_index_kind_str("Set", &layer), Exp::Sort(l) if l.is_nat(1)));
-        assert!(matches!(&decode_index_kind_str("Type:0", &layer), Exp::Sort(l) if l.is_nat(1)));
-        assert!(matches!(&decode_index_kind_str("Type:5", &layer), Exp::Sort(l) if l.is_nat(6)));
-        // Confirm the bare-name path still resolves to a variable so the
-        // new Sort-literal arms don't shadow legitimate index references.
-        assert!(matches!(decode_index_kind_str("A", &layer), Exp::Var(ref s) if s == "A"));
-        // A class IRI that is NOT an inductive still decodes to
-        // `EigonClass` — the fix narrows to declared inductives only.
-        assert!(matches!(
-            &decode_index_kind_str("urn:eigenius:examples:Animal", &layer),
-            Exp::EigonClass(_)
-        ));
+        assert!(
+            matches!(&decode_param_kind(&sort_kind(0), &probe_iri(), &layer).unwrap(), Exp::Sort(l) if l.is_nat(0))
+        );
+        assert!(
+            matches!(&decode_param_kind(&sort_kind(1), &probe_iri(), &layer).unwrap(), Exp::Sort(l) if l.is_nat(1))
+        );
+        assert!(
+            matches!(&decode_param_kind(&sort_kind(1), &probe_iri(), &layer).unwrap(), Exp::Sort(l) if l.is_nat(1))
+        );
+        assert!(
+            matches!(&decode_param_kind(&sort_kind(3), &probe_iri(), &layer).unwrap(), Exp::Sort(l) if l.is_nat(3))
+        );
+        assert!(
+            matches!(&decode_param_kind(&sort_kind(8), &probe_iri(), &layer).unwrap(), Exp::Sort(l) if l.is_nat(8))
+        );
     }
 
     #[test]
@@ -2229,6 +2269,10 @@ mod tests {
         // all the way to `Sort(1)`. Since a value of that inductive
         // infers to `InductiveType`, the index form could never be
         // satisfied — `reasoning:JustifiedBy`'s type was unwritable.
+        //
+        // eigenius#188 / N4: index and parameter kinds are now decoded by ONE function, so the
+        // two can no longer disagree by construction. The assertions below kept their pairing
+        // anyway — they pin the #199 fact, and a future split would fail them.
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let mut builder = LayerBuilder::new("core", None);
         for r in eigon_json::parse_document(core_json).unwrap() {
@@ -2248,23 +2292,39 @@ mod tests {
         }
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
-        match decode_index_kind_str("urn:eigenius:t:Term", &layer) {
+        match decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap() {
             Exp::InductiveType(decl, args) => {
                 assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term");
                 assert!(args.is_empty());
             }
             other => panic!("index kind naming an inductive decoded to {other:?}"),
         }
-        match decode_param_kind_str("urn:eigenius:t:Term", &layer) {
+        match decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap() {
             Exp::InductiveType(decl, _) => assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term"),
             other => panic!("param kind naming an inductive decoded to {other:?}"),
         }
-        // A non-inductive class keeps its previous decoding on both paths.
         assert!(matches!(
-            decode_index_kind_str("urn:eigenius:t:PlainClass", &layer),
+            decode_param_kind(
+                &const_ref("urn:eigenius:t:PlainClass"),
+                &probe_iri(),
+                &layer
+            )
+            .unwrap(),
             Exp::EigonClass(_)
         ));
+        // eigenius#188 / N4 — a class-typed PARAMETER decodes to `EigonClass`, matching the index
+        // path. This assertion read `Exp::Sort(l) if l.is_nat(1)` with the comment "A
+        // non-inductive class keeps its previous decoding on both paths" — pinning the silent
+        // fallthrough that typed such a parameter `Set`, which accepts anything. The two paths
+        // agree now; they did not before.
         assert!(matches!(
-            decode_param_kind_str("urn:eigenius:t:PlainClass", &layer), Exp::Sort(l) if l.is_nat(1)));
+            decode_param_kind(
+                &const_ref("urn:eigenius:t:PlainClass"),
+                &probe_iri(),
+                &layer
+            )
+            .unwrap(),
+            Exp::EigonClass(_)
+        ));
     }
 }

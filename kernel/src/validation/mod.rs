@@ -119,12 +119,21 @@ pub enum ValidationRule {
     /// arities before the resource lands on the chain.
     LambdaTypeMismatch,
 
-    /// A `core:InductiveType` declaration has a constructor that is not strictly positive —
-    /// typically the inductive appearing in the DOMAIN of an argument's function type. Such a
-    /// declaration admits a fixpoint that inhabits every proposition, so admitting one onto a
-    /// chain makes every later validation against that chain unsound. Rule 23,
-    /// `rules::positivity.rs`. See eigenius#92.
-    NonPositiveInductive,
+    /// A `core:InductiveType` declaration is not admissible to the kernel — it fails
+    /// `check_type`'s `Exp::Inductive` arm. That arm enforces three things, and this variant does
+    /// not distinguish them, deliberately: naming them here would be a second definition of
+    /// "admissible" to drift from the kernel's.
+    ///
+    /// - **Strict positivity.** A constructor with the inductive in the DOMAIN of an argument's
+    ///   function type admits a fixpoint that inhabits every proposition, so admitting one onto a
+    ///   chain makes every later validation against that chain unsound.
+    /// - **Telescope well-typedness.** Every parameter kind, index kind and constructor-argument
+    ///   type is itself a type, in the scope of the binders before it.
+    /// - **Constructor conclusions.** Each constructor ends in an application of its own
+    ///   declaration to the right parameters and index expressions (D48 Phase B).
+    ///
+    /// Rule 23, `rules::inductive_decl.rs`. See eigenius#92, eigenius#188.
+    InductiveDeclInadmissible,
     /// An `eigentt:TypeExpr`-valued property carries a term that fails to
     /// decode through the D47 codec — a malformed tree, an unresolved
     /// `ConstRef`, or a `CtorApp` to an unknown ctor. The single decode
@@ -331,9 +340,9 @@ impl Validator {
         // non-recursive, is stored in normal form, and inhabits its declared type.
         errors.extend(self.check_definition_well_formedness(resource, &res_id));
 
-        // Rule 23 (eigenius#92): an inductive DECLARATION is strictly positive. Runs on the
-        // resource rather than on a property value — the declaration is the resource.
-        errors.extend(self.check_inductive_positivity(resource, &res_id));
+        // Rule 23 (eigenius#92): an inductive DECLARATION is admissible to the kernel. Runs on
+        // the resource rather than on a property value — the declaration is the resource.
+        errors.extend(self.check_inductive_declaration(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*
@@ -1068,10 +1077,9 @@ fn is_option_of_class(value: &Value, class_iri: &str) -> bool {
     if !resource.is_instance_of(&inductive_arg_type) {
         return false;
     }
-    let Some(name_value) = resource.get(&iri(wk::TYPE_NAME)) else {
-        return false;
-    };
-    let Some(name_str) = name_value.as_iri_str() else {
+    // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188), so the referenced IRI is the
+    // value's HEAD, not the value itself.
+    let Ok(name_str) = crate::program::ground::arg_type_head(resource) else {
         return false;
     };
     if name_str != wk::OPTION {
@@ -2332,7 +2340,11 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
         );
-        r.set(iri(wk::TYPE_NAME), Value::String(wk::OPTION.to_string()));
+        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        r.set(
+            iri(wk::TYPE_NAME),
+            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::OPTION]})),
+        );
         r.set(
             iri(wk::TYPE_ARGS),
             Value::Array(vec![Value::ResourceRef(iri(class_iri))]),

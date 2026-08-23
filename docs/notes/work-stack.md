@@ -164,12 +164,48 @@ reseed rather than paying a standalone one.
 - **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
   ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
 
+- **N4 LANDED `2026-08-23`.** `eigentt:TypeExpr` moved into `core-ontology.json` (IRI unchanged),
+  `SizeSort` ctor added, `param_kind` and `type_name` retyped, 85 values migrated by script with the
+  equivalence guard, manifest re-pinned on **five** layers (the four predicted, plus `reasoning`),
+  full gate green (185 test binaries, clippy, fmt). **The reseed is the only thing left.**
+
+  N4 estimated **six** code sites; there were **fifteen**, and the nine extra were all silent
+  readers — code that read the property as a `Value::String`, got `None`, and carried on. Three
+  head-readers had been written by the time the suite was green; they are now one
+  `program::ground::arg_type_head`. The Julia mirror generator's two readers had **passing tests
+  throughout**, because their fixtures build the property by hand and kept writing strings.
+
+  Four defects the retype surfaced, none of them caused by it:
+  - **Every index kind on every chain decoded to `EigonClass(core:Set)`** — `decode_indices` had
+    `_ => "urn:eigenius:core:Set"` as its fallback, and that IRI is not a declared resource.
+  - **`check_type`'s fallback was `check(a, &Val::sort(1))`** — "is a type" spelled as "inhabits
+    `Set`", so `T : Type 1` was not a type. Now `ensure_sort(infer(a))` (nanoda `tc.rs:244`). Same
+    defect as the `Level` `Ord` derive: a universe comparison written as a constant.
+  - **`check_type`'s `Exp::Inductive` arm never type-checked the telescope** — nanoda gets it free
+    because a declaration is one Π-chain `Expr`. Now `check_inductive_decl_telescopes`, and Rule 23
+    routes the declaration through `check_type` rather than calling `check_positivity` directly, so
+    it is one gate and not a re-listing (renamed `rules/inductive_decl.rs`,
+    `InductiveDeclInadmissible`).
+  - **nanoda's ctor-argument universe constraint** (`inductive.rs:904`) is ported as well, after
+    the #194/#92 probe protocol: logged first, and the whole workspace produced **one** violating
+    declaration. `reasoning:JustifiedBy` was at `Type 0` while `spec_poly` binds `T : Type 1`
+    (`Sort 2`, so the argument sits at `Sort 3`) — and `spec_poly`'s own comment had predicted the
+    fix ("a rule quantifying over `Type 1` domains would need `Type 2`") while the declaration
+    contradicted it. One-token edit to `Type 2`; **`reasoning` becomes a fifth moved layer.** Still
+    unported: nanoda's parameter-prefix `assert_def_eq` (`:892`), which only bites on the
+    independently-authored `core:ctor_type` path.
+  - **The three telescope producers had drifted** — the codata-param site used `var_value` where the
+    other two used `bare_kind_value`. One `Compiler::lower_kind` now serves all three.
+
+  `core:Set` and `core:Size` were written in ESL fixtures as if they were resources. Neither is
+  declared on any chain; `wk::SET_KIND` / `wk::SIZE_KIND` were unreferenced residue and are deleted.
+
 #### NEXT
-P2's design notes are all written and every code item is closed. Remaining open: **#188** (held, see
-N3) and **#213** (folds into #188's reseed, or stands alone if something else forces one). The
-package is otherwise done — all independent and all writable before any code: N1 positivity criterion +
-declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
-#194) need no design input and can run alongside.
+**The reseed.** Every code item in P2 is closed and N4 has landed; `scripts/reseed-lexicon-db.sh
+--umls-all` then `build-alignment-snapshot.sh` is the remaining gate, covering #188's core moves, N4
+and **#213** in one pass. After it: the WRN demo and both parse baselines, then **#217** (the
+decompiler flattens `data` to `resource`) — which wants a document-level ESL round-trip test first,
+since the existing round-trip suite is entirely term-level.
 
 **Port from `references/nanoda_lib` wherever there is a counterpart** (plan §3) — positivity,
 the index-aware motive, the whole level algebra. It also answers #138 outright: nanoda's motive and

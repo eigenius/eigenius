@@ -210,15 +210,15 @@ pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
 pub const ARG_NAME: &str = "urn:eigenius:core:arg_name";
 pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
 pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";
-pub const SET_KIND: &str = "urn:eigenius:core:Set";
 /// Index telescope on an inductive-type resource (eigenius#72 Layer 2 /
 /// D48). Array of `InductiveParam` resources, parallel to `type_params`
 /// but for the indices that vary per constructor. Absent or empty for
 /// non-indexed declarations (the default).
 pub const INDICES: &str = "urn:eigenius:core:indices";
 /// Result sort of an inductive type former (eigenius#72 Layer 2).
-/// String of the form `"Prop"`, `"Set"`, or `"Type:N"` (with N a
-/// non-negative integer). Absent defaults to `"Set"`.
+/// A `core:Level` tree — `Zero` / `Succ` / `Max` / `IMax` / `Param` —
+/// so `data X : Sort u` is expressible (eigenius#188). Absent defaults
+/// to `Succ(Zero)`, the level of `Set`.
 pub const RESULT_SORT: &str = "urn:eigenius:core:result_sort";
 /// Typed-ctor full Π-telescope encoded via the D47 type-fragment codec
 /// (eigenius#72 Layer 2). Present on `InductiveCtor` resources that
@@ -227,11 +227,6 @@ pub const RESULT_SORT: &str = "urn:eigenius:core:result_sort";
 /// `arg_types`. Required for ctors of indexed inductives (the
 /// positional form cannot express conclusion indices).
 pub const CTOR_TYPE: &str = "urn:eigenius:core:ctor_type";
-/// Sized-type parameter kind (Phase 11b step 15h): inductive/codata
-/// parameters typed at `Size` — the sort of size values — resolve to
-/// `Exp::SizeSort` in the kernel, enabling bounded-binder-driven
-/// termination/productivity checking.
-pub const SIZE_KIND: &str = "urn:eigenius:core:Size";
 
 // --- Institution-realisation vocabulary (D14) ---
 
@@ -369,8 +364,10 @@ pub const ARROW_DOMAIN: &str = "urn:eigenius:core:arrow_domain";
 /// Codomain of a `TypeArrow`.
 pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
 
-/// Kind of a size-binder arrow's bound variable. Qualified-name
-/// string ("urn:eigenius:core:Size" or bare "Size").
+/// Kind of a size-binder arrow's bound variable. A name string — the size sort is `"Size"`.
+/// (`urn:eigenius:core:Size` is still ACCEPTED by the decoder's `:Size` suffix match, but it names
+/// no resource on any chain and nothing emits it; see eigenius#188. This property was not retyped
+/// to an `eigentt:TypeExpr` along with `core:param_kind` / `core:type_name`.)
 pub const BINDER_KIND: &str = "urn:eigenius:core:binder_kind";
 /// Body of a size-binder arrow — embedded TypeExpr resource or
 /// string.

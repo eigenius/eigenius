@@ -1010,6 +1010,168 @@ pub(super) fn check_match(
     Ok(())
 }
 
+/// Type-check a declaration's telescopes: every parameter kind, every index kind, and every
+/// constructor-argument type must itself be a type, in the context of the binders before it.
+///
+/// **Why this was missing.** In `references/nanoda_lib` a declaration is a single `Expr` — a Π
+/// chain — so `check_declar_info` (`src/tc.rs:165`) infers its type and `ensure_sort`s the result,
+/// and `check_ctor` (`src/inductive.rs:881`) walks the constructor's Π chain calling
+/// `ensure_infers_as_sort` on each binder domain (`:900`). Both checks come free from the Π typing
+/// rule. EigenTT fused the telescope into structured `params` / `indices` / `ctors` fields, and the
+/// `Exp::Inductive` arm ran positivity and conclusion validation over those fields without ever
+/// applying the Π rule to them. A parameter kind or constructor argument type that was not a type
+/// at all — an unbound variable, an unresolvable reference, a term of the wrong sort — was admitted.
+///
+/// This is the same shape of omission the `Exp::InductiveType` arm documents for a type former's
+/// ARGUMENTS: a node that displaced an application spine, and did not re-implement the check the
+/// spine performed.
+///
+/// The two telescopes are checked as one Π chain each, so the domain rule does the work:
+///
+/// - the **type former**, `Π params. Π indices. sort` — a parameter kind is checked with the
+///   parameters before it in scope, and an index kind with all parameters in scope;
+/// - each **constructor**, whose `typ` is already the full `Π params. Π args. Self(params)` chain
+///   that [`build_ctor_type`] assembles, so its argument types are checked with the parameters and
+///   the preceding arguments in scope.
+///
+/// Constructor arguments are checked in the parameters' scope, NOT the indices' — a constructor
+/// supplies index VALUES in its conclusion rather than binding index variables, which is what
+/// [`validate_indexed_ctor_conclusions`] checks.
+///
+/// [`build_ctor_type`]: crate::program::ground
+pub(super) fn check_inductive_decl_telescopes(
+    ctx: &mut CheckCtx,
+    decl: &InductiveDecl,
+) -> Result<(), CheckError> {
+    let former = decl
+        .params
+        .iter()
+        .chain(decl.indices.iter())
+        .rev()
+        .fold(decl.sort.clone(), |acc, (patt, typ)| {
+            Exp::Pi(patt.clone(), Box::new(typ.clone()), Box::new(acc))
+        });
+    super::check_type(ctx, &former).map_err(|e| {
+        CheckError::IllFormed(format!(
+            "inductive `{}`: parameter/index telescope is not well-typed: {e}",
+            decl.name
+        ))
+    })?;
+
+    for ctor in &decl.ctors {
+        check_ctor_type(ctx, decl, ctor).map_err(|e| {
+            CheckError::IllFormed(format!("constructor `{}.{}`: {e}", decl.name, ctor.name))
+        })?;
+    }
+    Ok(())
+}
+
+/// Walk one constructor's Π-telescope, checking each binder domain is a type and — past the
+/// parameter prefix — that its sort is no larger than the inductive's own.
+///
+/// Port of `check_ctor` (`references/nanoda_lib/src/inductive.rs:881` at `6ae1f0c`). That function
+/// does four things in one walk; EigenTT does two of them elsewhere and one here:
+///
+/// | nanoda | here |
+/// |---|---|
+/// | param prefix `assert_def_eq(binder_type, local_param)` (`:892`) | **not ported** — see below |
+/// | `ensure_infers_as_sort(binder_type)` (`:900`) | this walk |
+/// | `is_zero \|\| leq(s, block_codom)` (`:904`) | this walk |
+/// | `check_positivity1` (`:909`) | `nbe::positivity::check_positivity` |
+/// | `is_valid_ind_app` on the conclusion (`:915`) | [`validate_indexed_ctor_conclusions`] |
+///
+/// **The universe constraint is what stops the paradox.** An inductive at `Sort n` whose
+/// constructor stores something from `Sort m` with `m > n` lets a large type be smuggled into a
+/// small one, and Girard's paradox follows. `Prop` is the exception, and it is the impredicativity
+/// `Prop` is *for*: a proposition may quantify over anything without leaving `Prop`, because it has
+/// no computational content to smuggle. That is nanoda's `st.is_zero ||` — `is_zero(l)` being
+/// `leq(l, Zero)` (`src/level.rs:264`).
+///
+/// **The parameter prefix is exempt**, and this is not an oversight in the port: nanoda strips it
+/// first (`:888-897`) and only then starts checking. `List (A : Type u) : Type u` would be rejected
+/// by its own rule if `A` were checked, since `A : Type u` puts `A`'s sort at `u+1`. Parameters are
+/// uniform across every constructor and are not stored by any of them.
+///
+/// **Not ported: the parameter-prefix agreement check.** nanoda `assert_def_eq`s each prefix binder
+/// against the declared parameter. EigenTT's `build_ctor_type` constructs the prefix FROM
+/// `decl.params`, so it agrees by construction — but a `core:ctor_type` payload is authored
+/// independently and could disagree. That is a separate hole with its own measurement, and it is
+/// not in this change.
+fn check_ctor_type(
+    ctx: &mut CheckCtx,
+    decl: &InductiveDecl,
+    ctor: &crate::nbe::term::InductiveCtorDecl,
+) -> Result<(), CheckError> {
+    let decl_level = match &decl.sort {
+        Exp::Sort(l) => l.clone(),
+        other => {
+            return Err(CheckError::IllFormed(format!(
+                "declaration's result sort must be a Sort, got {other:?}"
+            )))
+        }
+    };
+    // `is_zero` — the impredicative-`Prop` exemption. `leq(l, Zero)`, so `imax u 0` counts too.
+    let in_prop = decl_level.leq(&crate::nbe::level::Level::zero());
+
+    walk_ctor_telescope(
+        ctx,
+        &ctor.typ,
+        decl.params.len(),
+        0,
+        &decl_level,
+        in_prop,
+        &format!("{}.{}", decl.name, ctor.name),
+    )
+}
+
+/// One binder of [`check_ctor_type`]'s walk. Recursive rather than iterative so the context
+/// extension is the same shape as `check_type`'s own Π arm — each binder is checked in a context
+/// that ends when the binder does.
+#[allow(clippy::too_many_arguments)]
+fn walk_ctor_telescope(
+    ctx: &mut CheckCtx,
+    cursor: &Exp,
+    n_params: usize,
+    idx: usize,
+    decl_level: &crate::nbe::level::Level,
+    in_prop: bool,
+    who: &str,
+) -> Result<(), CheckError> {
+    match cursor {
+        Exp::Pi(patt, dom, body) => {
+            let dom_level = super::ensure_infers_as_sort(ctx, dom)?;
+            if idx >= n_params && !in_prop && !dom_level.leq(decl_level) {
+                return Err(CheckError::IllFormed(format!(
+                    "constructor `{who}` argument #{} ({patt:?}) is too large for its inductive: \
+                     the argument's type is at `Sort({:?})`, but `{who}`'s declaration is at \
+                     `Sort({:?})`. An inductive may not store something from a universe above its \
+                     own — raise the declaration's result sort, or lower the argument.",
+                    idx - n_params,
+                    dom_level.simplify(),
+                    decl_level.simplify()
+                )));
+            }
+            let gen = gen_val(&ctx.rho);
+            let dom_val = ctx.eval(dom, &ctx.rho)?;
+            let mut inner = ctx.extend(patt, &dom_val, &gen)?;
+            walk_ctor_telescope(
+                &mut inner,
+                body,
+                n_params,
+                idx + 1,
+                decl_level,
+                in_prop,
+                who,
+            )
+        }
+        // A size binder carries `SizeSort`, not a `Sort`, so the universe constraint does not apply
+        // to it, and a size binder never appears in the parameter prefix. Delegate the rest of the
+        // chain — including the binder's TSO hypothesis — to `check_type`.
+        Exp::SizedPi { .. } => super::check_type(ctx, cursor),
+        conclusion => super::check_type(ctx, conclusion),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

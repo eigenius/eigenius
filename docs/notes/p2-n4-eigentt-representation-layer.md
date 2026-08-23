@@ -154,23 +154,62 @@ diagnostic rather than silent admission, and correct the comment to say what is 
 - **`TypeExpr` needs a `SizeSort` ctor** — `param_kind` accepts `Size`, and `TypeExpr`'s 19
   constructors have no representation for it.
 
-### The code — six sites, three producers and three consumers
+### The code — the site count was wrong
 
-The ontology edit is the small half. Each string is written in one place and read in another, and
-every one of those call sites dispatches on string shape:
+The estimate below was **six sites, three producers and three consumers**. The build found
+**fifteen**, and the four it missed are the interesting ones, because each was a *silent* reader:
+code that read `type_name` or `param_kind` as a `Value::String`, got `None`, and carried on.
 
-| site | today | after |
+| site | role | found by |
 |---|---|---|
-| `esl/compile.rs:1076,2054` (+`:2087`) — `param_kind` producer | `Value::String(kind)`, from `sort_kind_param_string` or a resolved IRI | emit a `TypeExpr` value |
-| `esl/compile.rs:1145`, `:975` — `type_name` producer | `Value::String(resolved)` / `Value::String(wk::OPTION)` | emit a `TypeExpr` value |
-| `program/ground.rs:849` — `decode_param_kind_str` | six-way string dispatch (`Size`, `Prop`, `Set`, `Type:N`, primitive IRIs, inductive IRI) **with a silent `Sort(1)` default** | `decode_type` and use the `Exp` |
-| `program/ground.rs:1140` — `decode_arg_type` | five-way string dispatch (bare name, self-ref, other inductive, primitive, class) | `decode_type` and use the `Exp` |
-| `validation/rules/inductive.rs` — `check_inductive_arg` | reads `type_name` as a string, IRI-matches, **returns `Ok` on an unparseable one** (§4a) | decode a `TypeExpr` and dispatch on the decoded shape |
-| `esl/print.rs` — the ESL printer | prints the kind back as a keyword or IRI | print the decoded `TypeExpr` |
+| `esl/compile.rs` — codata params, data params, data indices | producer | in the estimate |
+| `esl/compile.rs` — `compile_ctor_binder`, `compile_ctor_arg_type`, the `Option` site | producer | in the estimate |
+| `program/ground.rs` — `decode_param_kind` | consumer | in the estimate |
+| `program/ground.rs` — `decode_arg_type` | consumer | in the estimate |
+| `validation/rules/inductive.rs` — `check_inductive_arg` (Rule 16) | consumer | in the estimate |
+| `esl/print.rs` — the printer | consumer | in the estimate |
+| **`program/ground.rs` — `decode_indices`** | consumer | bootstrap |
+| **`program/ground.rs` — `decode_codata_observation_type`** | consumer | test suite |
+| **`program/expr.rs` — `decode_program_type`** | consumer | test suite |
+| **`validation/mod.rs` — `is_option_of_class`** | consumer | test suite |
+| **`crates/eigenius-julia/src/mirror_gen.rs` ×2** | consumer | grep, after the suite went green |
 
-Two of those six are the defects this note exists for: `decode_param_kind_str`'s silent `Sort(1)`
-and `check_inductive_arg`'s silent `Ok`. Both are consequences of a string that cannot represent
-what it is asked to hold — which is the thesis, twice, at two call sites.
+The Julia pair is the one worth pausing on: **its tests passed the whole time.** They build the
+`InductiveArgType` fixture by hand, so they kept writing strings and kept reading them. A green
+suite said nothing about whether the generator worked on a real chain declaration, and would not
+have said anything until someone ran it. Hand-built fixtures for a property whose encoding is
+changing are not evidence.
+
+**Three head-readers had already been written by the time the suite was green** — one in
+`decode_arg_type`, one in Rule 16 (`type_name_head`), one about to be written for the codata path.
+That is N1 §3's shape exactly, so the reader is now a single `program::ground::arg_type_head`, and
+all five consumers call it.
+
+### Four defects the retype surfaced, none of them anticipated here
+
+1. **Every index kind on every chain was `EigonClass(core:Set)`.** `decode_indices` read
+   `core:param_kind` as `Some(Value::String(s))` with `_ => "urn:eigenius:core:Set"` as the
+   fallback. `urn:eigenius:core:Set` is not a declared resource — it decoded to a class type nothing
+   can inhabit. Once the producer emitted a `TypeExpr`, the fallback fired for *every* index, and
+   `reasoning:JustifiedBy.declared` failed with `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
+   Before the retype, the same fallback fired for every index whose `param_kind` was absent, silently.
+2. **`check_type`'s fallback was `check(a, &Val::sort(1))`** — "is a type" spelled as "inhabits
+   `Set`". `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`;
+   checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Now `ensure_sort(infer(a))`
+   (`references/nanoda_lib/src/tc.rs:244`). Same defect as the `Level` `Ord` derive removed earlier
+   in #188: a universe comparison written as a constant.
+3. **The D47 codec had no size form at all.** Not `SizeSort`, `SizedPi`, `SizeInf` or `SizeSucc`. A
+   `Size` kind used to travel as the literal string `"Size"` and never entered the codec. `SizeSort`
+   is now encoded and decoded; the other three still are not, and nothing on any chain carries one
+   (N2 §3).
+4. **The three telescope producers had already drifted.** The codata-param site called `var_value`
+   where the data-param and index sites called `bare_kind_value`, so a `Size`-kinded codata
+   parameter lowered to `Var("Size")` — a reference to a binder that does not exist. One
+   `Compiler::lower_kind` now serves all three.
+
+`core:Set` and `core:Size` were being written in ESL fixtures as though they were resources. Neither
+is declared on any chain; `wk::SET_KIND` and `wk::SIZE_KIND` were unreferenced residue of the string
+encoding and are deleted. The sorts are spelled `Set` and `Size`.
 
 ### What it buys
 
@@ -214,6 +253,60 @@ the new form and assert it yields the same `Exp` the old string yielded. The mig
 **iff** old-decode and new-decode agree, which is a property a test can hold, not a claim to
 believe. Same discipline as the round-trip tests.
 
+## 5a. The open-term question, and where it landed
+
+`param_kind` and `type_name` values are **open terms** — they name the declaration's own
+parameters. `core:Option`'s `some(value : A)` encodes as `Var("A")`, and `A` is bound by `Option`'s
+parameter list. Rule 21 (`check_type_expr_well_typed`) type-checks every `eigentt:TypeExpr`-valued
+property as a **closed** term, so the retype made it report `unbound variable in type context: A`
+for a value that is well-formed where it lives. Every other TypeExpr-valued property —
+`canonical_proposition`, `axiom_statement`, `definition_type` — carries a closed term. These two do
+not, and §5 did not anticipate it.
+
+**Resolved by giving the check a binding context — supplied by the rule that owns the telescope.**
+Rule 21 declines these two properties, and Rule 23 routes the whole `core:InductiveType` resource
+through `check_type`'s `Exp::Inductive` arm, which now type-checks the type former
+`Π params. Π indices. sort` and each constructor's full `Π params. Π args. Self(params)` chain
+(`check_inductive_decl_telescopes`). Every value of these two properties is a domain in one of
+those Π chains, so the Π typing rule checks each in the scope of the binders before it. That is
+strictly stronger than what Rule 21 could have established, and it is the relationship
+`eigentt:definition_body` already has with Rule 24.
+
+**The arm was not doing this before.** `Exp::Inductive` ran `check_positivity` and
+`validate_indexed_ctor_conclusions` over the declaration's structured fields and never applied the
+Π rule to them, so a parameter kind or constructor argument type that was not a type at all was
+admitted. `references/nanoda_lib` gets the check for free — a declaration there is a single Π-chain
+`Expr`, so `check_declar_info` (`src/tc.rs:165`) inferring its type checks every parameter kind, and
+`check_ctor` (`src/inductive.rs:881`) walks the constructor chain calling `ensure_infers_as_sort` on
+each binder domain (`:900`). EigenTT fused the telescope into structured fields and did not
+re-implement the check they displaced — the same omission the `Exp::InductiveType` arm documents for
+a type former's *arguments*.
+
+**The constructor-argument universe constraint is ported too.** nanoda's `check_ctor` requires each
+argument's sort to be `≤` the inductive's unless the inductive is in `Prop` (`src/inductive.rs:904`,
+with `is_zero(l)` = `leq(l, Zero)`, `src/level.rs:264`). An inductive at `Sort n` storing something
+from `Sort m > n` smuggles a large type into a small one and Girard's paradox follows; `Prop` is
+exempt because a proposition has no computational content to smuggle. The parameter prefix is
+exempt as well — nanoda strips it before the loop starts (`:888-897`), and it must, or
+`List (A : Type u) : Type u` would reject itself.
+
+**Measured before it rejected anything**, per the #194 / #92 protocol: the check logged instead of
+failing, and the whole workspace produced **one violating declaration** —
+`reasoning:JustifiedBy.spec_poly`, three of its arguments. `JustifiedBy` was declared at `Type 0`
+and binds `T : Type 1`; `Type 1` is `Sort 2`, so that argument sits at `Sort 3`. **`spec_poly`'s own
+comment had predicted it** — *"a rule quantifying over `Type 1` domains would need `Type 2`, and so
+on up the ladder"* — while the declaration said `Type 0`. Nothing enforced it, so the two sat
+contradicting each other in the same file.
+
+The fix is one token: `JustifiedBy : … -> Type 2`. A certificate's TYPE moves up a universe, its
+VALUES do not change, and nothing checks `JustifiedBy(j, p)` against a fixed sort — the full suite
+is green with no other edit. **This adds `reasoning` as a FIFTH moved layer.**
+
+**Still not ported: the parameter-prefix agreement check.** nanoda `assert_def_eq`s each prefix
+binder against the declared parameter (`:892`). EigenTT's `build_ctor_type` builds the prefix FROM
+`decl.params`, so it agrees by construction — but a `core:ctor_type` payload is authored
+independently and could disagree. Separate hole, own measurement, not in this change.
+
 ## 6. Scope
 
 **Folded into P2 on `eigentt-improvements`** (maintainer decision, `2026-08-23`). It is still a
@@ -244,17 +337,37 @@ its own green gate, and if that happens before the reseed runs, it rides along.
 
 ## 7. Exit gate
 
-- `TypeExpr` declared in `core-ontology.json`, ordered after `core:Level`; removed from
+- ✔ `TypeExpr` declared in `core-ontology.json`, ordered after `core:Level`; removed from
   `eigentt-type-fragment.json`; **IRI unchanged**, so no reference in any chain or crate moves.
-- `param_kind` and `type_name` are `data_type core:resource` / `class_types [TypeExpr]`.
-- `TypeExpr` has a `SizeSort` ctor.
-- All six code sites (§5) produce and consume `TypeExpr` values; no site dispatches on a kind
-  string.
-- **`decode_param_kind_str`'s silent `Sort(1)` default is gone**, and `check_inductive_arg` no
-  longer returns `Ok` for an unparseable `type_name` (§4a). A parameter reference decodes to
-  `Exp::Var` and is checked.
-- `data Vec (A : Sort u)` compiles, with a test — the loose end #188 left.
-- The 89 hand-authored values are migrated, each guarded by the old-decode/new-decode equivalence
-  check.
-- Manifest moves on **four** layers: `core`, `eigentt-type-fragment`, `formulas`, `lean-expressions`.
-- `cargo test --workspace`, `clippy -D warnings`, `fmt` clean; then the reseed this rides (§6).
+- ✔ `param_kind` and `type_name` are `data_type core:resource` / `class_types [TypeExpr]`.
+- ✔ `TypeExpr` has a `SizeSort` ctor, and the D47 codec encodes and decodes it (it had no size form
+  at all — §5).
+- ✔ All **fifteen** code sites (§5) produce and consume `TypeExpr` values; no site dispatches on a
+  kind string. The five consumers share one head-reader, `program::ground::arg_type_head`.
+- ✔ **`decode_param_kind_str`'s silent `Sort(1)` default is gone** — the function is deleted, as is
+  `decode_index_kind_str` — and `check_inductive_arg` no longer returns `Ok` for an unparseable
+  `type_name` (§4a), nor `.unwrap_or_default()`s it into a report naming a parameter that does not
+  exist. A parameter reference decodes to `Exp::Var` and is checked.
+- ✔ `data Vec (A : Sort u)` compiles, with a test —
+  `universe_polymorphic_parameter_kind_survives_the_round_trip` (`program/ground.rs`), which pins
+  the decoded kind as `Sort(Param("u"))` rather than `Sort(_)`, because `Sort(_)` would have passed
+  against the old silent `Sort(1)` default. The telescope check has its own commit-path test,
+  `parameter_kind_referring_to_a_later_parameter_is_rejected_at_commit`.
+- ✔ The hand-authored values are migrated by `scripts/migrations/188-type-name-to-typeexpr.py`,
+  each guarded by the old-decode/new-decode equivalence check — **85 values across 3 files**, not
+  the 89 across 4 estimated in §5: `eigentt-type-fragment.json`'s 29 are `eigentt:type_expr` values,
+  a different property, and were never in scope.
+- ✔ Manifest moves on **five** layers: the four predicted (`core`, `eigentt-type-fragment`,
+  `formulas`, `lean-expressions`) plus **`reasoning`**, which was not predicted — the
+  constructor-argument universe constraint (§5a) forced `reasoning:JustifiedBy` from `Type 0` to
+  `Type 2`. Re-pinned in `kernel/tests/bootstrap_manifest_pinned.rs`.
+- ✔ Rule 21 declines `param_kind` / `type_name`, and Rule 23 — renamed from a positivity rule to
+  `check_inductive_declaration`, `rules/inductive_decl.rs` — routes the declaration through
+  `check_type`, which type-checks both telescopes (§5a).
+- ✔ `cargo test --workspace` (185 binaries, 0 failed), `clippy -D warnings`, `fmt` clean.
+- Then the reseed this rides (§6).
+
+> **LANDED `2026-08-23`.** All of the above except the reseed. Manifest re-pinned on the four
+> layers. The build's findings are in §5 and §5a; two of them — `check_type`'s `Sort(1)` fallback
+> and `decode_indices`' `EigonClass(core:Set)` default — were latent defects the retype exposed
+> rather than caused.

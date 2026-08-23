@@ -495,9 +495,9 @@ impl CtorDecl {
 pub enum CtorArg {
     /// `cons(A, List(A))` — positional, anonymous binder.
     Positional(CtorArgType),
-    /// `succ(j : core:Size, ex:Nat(j))` — named binder with kind.
+    /// `succ(j : Size, ex:Nat(j))` — named binder with kind.
     /// The optional `bound` encodes a `< upper` clause; when the
-    /// kind is `core:Size` and `bound` is present, this compiles to
+    /// kind is `Size` and `bound` is present, this compiles to
     /// `Exp::SizedPi { upper, body }` and introduces a TSO
     /// hypothesis in the constructor's telescope.
     Named {

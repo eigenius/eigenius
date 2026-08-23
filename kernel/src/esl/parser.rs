@@ -82,12 +82,15 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<String, EslError> {
-        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`).
-        // The eigenius#72 sort-literal keywords (Prop, Set, Type) are also
-        // accepted because the core ontology has resources at IRIs like
-        // `urn:eigenius:core:Set` whose local name parses as the keyword
-        // token. Same applies to `axiom` / `forall` which a user might
-        // happen to use as a name fragment.
+        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`), because a
+        // keyword is a fine LOCAL NAME for a resource — `axiom` and `forall` are the ones a user is
+        // most likely to reach for.
+        //
+        // The sort keywords (Prop, Set, Type, Sort) are accepted on the same footing and nothing
+        // more. An earlier version of this comment justified them by claiming the core ontology
+        // declares resources at IRIs like `urn:eigenius:core:Set`; it does not, and no chain ever
+        // has. A qualified `core:Set` in a kind position is a reference to nothing, and the D47
+        // decoder rejects it as an unresolved `ConstRef` — the sort is written `Set`.
         let name = match self.peek().clone() {
             TokenKind::Ident(name) => name,
             TokenKind::Namespace => "namespace".to_string(),
@@ -925,7 +928,7 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::Codata)?;
         let name = self.parse_qualified_name()?;
 
-        // Optional type parameters, e.g. `(i : core:Size, A : core:Set)`.
+        // Optional type parameters, e.g. `(i : Size, A : Set)`.
         let params = if self.at(&TokenKind::LParen) {
             self.parse_data_params()?
         } else {
@@ -3542,7 +3545,7 @@ mod tests {
     fn data_list_parametric_with_self_reference() {
         let file = parse_str(
             r#"
-            data ex:List(A : core:Set) {
+            data ex:List(A : Set) {
                 nil,
                 cons(A, ex:List(A)),
             }
@@ -3554,10 +3557,13 @@ mod tests {
                 assert_eq!(d.name.name, "List");
                 assert_eq!(d.params.len(), 1);
                 assert_eq!(d.params[0].name, "A");
-                match &d.params[0].kind {
-                    IndexKind::Named(qn) => assert_eq!(qn.name, "Set"),
-                    other => panic!("expected Named param kind, got {other:?}"),
-                }
+                // `Set` is the SORT keyword, so it parses as `IndexKind::Sort`. This test used to
+                // write `A : core:Set` and pin `IndexKind::Named("Set")` — a reference to
+                // `urn:eigenius:core:Set`, which no chain declares (eigenius#188).
+                assert!(matches!(
+                    &d.params[0].kind,
+                    IndexKind::Sort(crate::esl::ast::SortKind::Set)
+                ));
                 assert_eq!(d.ctors.len(), 2);
                 assert_eq!(d.ctors[0].name(), "nil");
                 assert!(d.ctors[0].args().is_empty());
@@ -3595,7 +3601,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Nat(i : core:Size) {
+            data ex:Nat(i : Size) {
                 zero,
                 succ({j < i}, ex:Nat(j)),
             }
@@ -3626,15 +3632,18 @@ mod tests {
 
     #[test]
     fn data_ctor_bounded_size_binder_explicit_kind() {
-        // `{j : core:Size < i}` — same as implicit-kind form.
+        // `{j : Size < i}` — the explicit-kind form, which parses to the same AST the implicit
+        // `{j < i}` form synthesizes. The fixture used to write `core:Size` and this test pinned
+        // `namespace == Some("core")`; that IRI names no resource on any chain and the D47 decoder
+        // rejects it, so the sort is spelled `Size` (eigenius#188).
         let file = parse_str(
             r#"
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Nat(i : core:Size) {
+            data ex:Nat(i : Size) {
                 zero,
-                succ({j : core:Size < i}, ex:Nat(j)),
+                succ({j : Size < i}, ex:Nat(j)),
             }
             "#,
         )
@@ -3645,7 +3654,7 @@ mod tests {
                     name, kind, bound, ..
                 } => {
                     assert_eq!(name, "j");
-                    assert_eq!(kind.namespace.as_deref(), Some("core"));
+                    assert!(kind.namespace.is_none());
                     assert_eq!(kind.name, "Size");
                     assert_eq!(bound.as_ref().unwrap().name, "i");
                 }
@@ -3657,14 +3666,14 @@ mod tests {
 
     #[test]
     fn data_ctor_unbounded_named_binder() {
-        // `{A : core:Set}` — unbounded Pi binder, kind Set.
+        // `{A : Set}` — unbounded Pi binder, kind Set.
         let file = parse_str(
             r#"
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
             data ex:Wrap {
-                mk({A : core:Set}, A),
+                mk({A : Set}, A),
             }
             "#,
         )
@@ -3693,7 +3702,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Vec(A : core:Set) : core:Nat -> Set {
+            data ex:Vec(A : Set) : core:Nat -> Set {
                 nil : ex:Vec(A, ex:zero),
                 cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
             }
@@ -3726,7 +3735,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Eq(A : core:Set) : A -> A -> Prop {
+            data ex:Eq(A : Set) : A -> A -> Prop {
                 refl : forall (a : A) => ex:Eq(A, a, a),
             }
             "#,
@@ -3755,7 +3764,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Bad(A : core:Set) : core:Nat -> core:Nat {
+            data ex:Bad(A : Set) : core:Nat -> core:Nat {
                 mk : ex:Bad(A, ex:zero, ex:zero),
             }
             "#,

@@ -147,11 +147,9 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 // directly with a name-only stub decl and recursively-
                 // decoded args; the type checker resolves the stub
                 // by name at use time.
-                let type_name = match r.get(&Iri::parse(wk::TYPE_NAME).unwrap()) {
-                    Some(Value::String(s)) => s.clone(),
-                    Some(Value::ResourceRef(i)) => i.as_str().to_string(),
-                    _ => return Err("InductiveArgType missing `type_name`".to_string()),
-                };
+                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188); the referenced type
+                // is its head. Shares `arg_type_head` with `program::ground`'s two readers.
+                let type_name = crate::program::ground::arg_type_head(r)?;
                 let class_iri = Iri::parse(&type_name).map_err(|e| {
                     format!("InductiveArgType type_name '{type_name}' invalid IRI: {e}")
                 })?;

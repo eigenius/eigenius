@@ -97,6 +97,32 @@ impl Validator {
             return vec![];
         }
 
+        // `core:param_kind` and `core:type_name` are fragments of a declaration TELESCOPE, not
+        // closed terms, and this rule has no telescope. `core:Option`'s `some(value : A)` names the
+        // declaration's own parameter `A`, so checking it here reports `unbound variable in type
+        // context: A` for a value that is perfectly well-formed where it lives.
+        //
+        // They are not going unchecked, and the coverage is exact rather than approximate: Rule 23
+        // (`rules::inductive_decl.rs`) routes the whole `core:InductiveType` resource through
+        // `check_type`'s `Exp::Inductive` arm, which checks the type former `Π params. Π indices.
+        // sort` and each constructor's full `Π params. Π args. Self(params)` chain. Every value of
+        // these two properties is a domain in one of those Π chains, so each is checked by the Π
+        // typing rule — in the scope of the binders before it, which is the scope it was written
+        // in. That is strictly stronger than what this rule could establish, and it is the same
+        // relationship `eigentt:definition_body` has with Rule 24 above.
+        //
+        // The coverage holds because `core:InductiveParam` and `core:InductiveArgType` occur ONLY
+        // as embedded resources under a `core:InductiveType` — they carry no `@id` and nothing
+        // references them. An instance of either reachable any other way would be unchecked; no
+        // chain has one, and Rule 23 skips a declaration it cannot decode, which is the shape that
+        // would produce one.
+        if matches!(
+            prop_iri.as_str(),
+            "urn:eigenius:core:param_kind" | "urn:eigenius:core:type_name"
+        ) {
+            return vec![];
+        }
+
         // (1) Decode the D47-encoded tree. Malformed trees, unresolved
         // ConstRefs, and unknown CtorApps surface here.
         let exp = match decode_type(value, &self.layer) {

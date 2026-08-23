@@ -34,8 +34,8 @@ pub use error::CheckError;
 pub use hooks::CheckHooks;
 pub use inductive::large_elim_admitted;
 use inductive::{
-    check_inductive_ctor_args, check_infer_inductive_rec, check_match,
-    validate_indexed_ctor_conclusions,
+    check_inductive_ctor_args, check_inductive_decl_telescopes, check_infer_inductive_rec,
+    check_match, validate_indexed_ctor_conclusions,
 };
 
 use crate::layer::Layer;
@@ -332,6 +332,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // the right `params ++ indices` shape and each index expression
         // type-checks against its declared telescope type.
         Exp::Inductive(decl) => {
+            check_inductive_decl_telescopes(ctx, decl)?;
             crate::nbe::positivity::check_positivity(decl)?;
             validate_indexed_ctor_conclusions(ctx, decl)
         }
@@ -361,7 +362,47 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // just accept, matching `InductiveType`'s behaviour.
         Exp::CodataType(_, _) => Ok(()),
 
-        a => check(ctx, a, &Val::sort(1)),
+        // "Is a type" means the INFERRED type is a sort — any sort. Port of `ensure_sort`
+        // (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`), which `check_declar_info` (`:165`)
+        // applies to a declaration's ascribed type and `check_ctor` applies to every constructor
+        // binder domain as `ensure_infers_as_sort` (`src/inductive.rs:900`).
+        //
+        // This was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits `Set`". The
+        // hardcoded 1 made every type ABOVE `Set` unusable in any position routed through here:
+        // `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+        // which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the
+        // wrong way for this — it lets a SMALLER type be used where a larger one is wanted, and the
+        // question here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord`
+        // derive removed earlier in eigenius#188: a universe comparison written as a constant.
+        a => ensure_infers_as_sort(ctx, a).map(|_| ()),
+    }
+}
+
+/// The LEVEL of the sort an expression inhabits, or an error if it does not inhabit a sort — i.e.
+/// if it is not a type. Port of `ensure_sort` (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`),
+/// which `check_declar_info` (`:165`) applies to a declaration's ascribed type and `check_ctor`
+/// applies to every constructor binder domain as `ensure_infers_as_sort`
+/// (`src/inductive.rs:900`).
+///
+/// [`check_type`]'s fallback was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits
+/// `Set`". The hardcoded 1 made every type ABOVE `Set` unusable in any position routed through
+/// there: `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+/// which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the wrong
+/// way for this — it lets a SMALLER type be used where a larger one is wanted, and the question
+/// here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord` derive removed
+/// earlier in eigenius#188: a universe comparison written as a constant.
+///
+/// The level is returned rather than discarded because the constructor-argument universe
+/// constraint needs it ([`check_ctor_type`]).
+pub(super) fn ensure_infers_as_sort(
+    ctx: &mut CheckCtx,
+    e: &Exp,
+) -> Result<crate::nbe::level::Level, CheckError> {
+    match check_infer(ctx, e)? {
+        Val::Sort(l) => Ok(l),
+        other => Err(CheckError::IllFormed(format!(
+            "expected a type, but `{e:?}` has type `{other:?}`"
+        ))),
     }
 }
 

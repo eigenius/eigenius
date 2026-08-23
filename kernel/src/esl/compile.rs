@@ -88,33 +88,6 @@ fn sort_kind_level(
 /// so `data X : Sort u` had to be rejected and nothing validated the string's shape. Emitting the
 /// same `core:Level` tree every other level uses removes both problems: one representation, and
 /// the validator checks it against the ctor schema like any other inductive value.
-/// An inductive PARAMETER's kind, which travels as a string in `core:param_kind` — a different
-/// property from `core:result_sort`, and not retyped by eigenius#188. A level variable in a
-/// parameter kind is rejected here for the same reason `result_sort` used to reject one: the
-/// string grammar cannot express it. Retyping this property is the same shape of change as
-/// `result_sort` and has not been done.
-fn sort_kind_param_string(
-    k: &ast::SortKind,
-    pos: &crate::esl::error::Position,
-) -> Result<String, EslError> {
-    match k {
-        ast::SortKind::Prop => Ok("Prop".to_string()),
-        ast::SortKind::Set => Ok("Set".to_string()),
-        ast::SortKind::Type(ast::LevelExpr::Num(n)) => Ok(format!("Type:{n}")),
-        ast::SortKind::Sort(ast::LevelExpr::Num(0)) => Ok("Prop".to_string()),
-        ast::SortKind::Sort(ast::LevelExpr::Num(1)) => Ok("Set".to_string()),
-        ast::SortKind::Sort(ast::LevelExpr::Num(n)) => Ok(format!("Type:{}", n - 1)),
-        other => Err(EslError::compiler(
-            Some(pos.clone()),
-            format!(
-                "an inductive parameter's kind must be a concrete level, got `{other}` — \
-                 `core:param_kind` is a string on the chain (eigenius#188 retyped \
-                 `core:result_sort` but not this one)"
-            ),
-        )),
-    }
-}
-
 fn sort_kind_result_value(
     k: &ast::SortKind,
     declared: &std::collections::BTreeSet<String>,
@@ -123,6 +96,29 @@ fn sort_kind_result_value(
     Ok(Value::Json(
         crate::program::eigentt_type_mirror::encode_level_json(&sort_kind_level(k, declared, pos)?),
     ))
+}
+
+/// A resolved IRI as a `ConstRef` value, for sites that already hold the string.
+fn const_ref_value(iri: &str) -> Value {
+    Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [iri]}))
+}
+
+/// A bare type-parameter name as a `Var` value.
+fn var_value(name: &str) -> Value {
+    Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
+}
+
+/// A bare (unqualified) kind name as a `TypeExpr` value.
+///
+/// `Size` is the one bare name that is not a parameter reference — it is the size sort, which
+/// `decode_param_kind_str` has always special-cased. Everything else unqualified is a reference
+/// to a type parameter in scope.
+fn bare_kind_value(name: &str) -> Value {
+    if name == "Size" || name.ends_with(":Size") {
+        Value::Json(serde_json::json!({"ctor": "SizeSort", "args": []}))
+    } else {
+        var_value(name)
+    }
 }
 
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
@@ -839,6 +835,47 @@ impl Compiler {
         Ok(Exp::InductiveCtor(stub, ctor_name.to_string(), arg_exps?))
     }
 
+    /// Lower a `data` / `codata` parameter or index KIND to its `eigentt:TypeExpr` value.
+    ///
+    /// One function for all three telescope sites — `codata` params, `data` params, `data`
+    /// indices. They were three copies of this match, and the copies had already drifted: the
+    /// `codata` param site called `var_value` where the other two called `bare_kind_value`, so a
+    /// `Size`-kinded codata parameter lowered to `Var("Size")` — a reference to a binder that does
+    /// not exist — instead of `SizeSort`. Nothing caught it, because nothing type-checked a
+    /// declaration's telescope until `check_inductive_decl_telescopes`.
+    ///
+    /// A bare name is a reference to an earlier parameter when one is in scope, and otherwise the
+    /// size sort or a namespace-resolved IRI. A sort keyword is `Sort(level)`, so `Sort u` works
+    /// wherever a kind is written (eigenius#188); this was a canonical STRING — `"Prop"` / `"Set"`
+    /// / `"Type:N"` — which could not carry a level variable.
+    fn lower_kind(
+        &self,
+        kind: &ast::IndexKind,
+        param_names: &std::collections::HashSet<&str>,
+        pos: &crate::esl::error::Position,
+    ) -> Result<Value, EslError> {
+        Ok(match kind {
+            ast::IndexKind::Named(qn) => {
+                if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                    var_value(&qn.name)
+                } else if qn.namespace.is_none() && qn.name == "Size" {
+                    // `Size` is the sort of size values, not a chain-resident class — the ESL
+                    // surface spells it as a bare name and the compiler is where it becomes a
+                    // sort. See `docs/notes/p2-n2-sized-types-wire-or-delete.md` §3.
+                    Value::Json(serde_json::json!({"ctor": "SizeSort", "args": []}))
+                } else {
+                    const_ref_value(&self.resolve(qn)?)
+                }
+            }
+            ast::IndexKind::Sort(sk) => Value::Json(serde_json::json!({
+                "ctor": "Sort",
+                "args": [crate::program::eigentt_type_mirror::encode_level_json(
+                    &sort_kind_level(sk, &self.declared_universes, pos)?
+                )],
+            })),
+        })
+    }
+
     /// Resolve a qualified name to a full IRI string.
     fn resolve(&self, qn: &ast::QualifiedName) -> Result<String, EslError> {
         match &qn.namespace {
@@ -1017,7 +1054,7 @@ impl Compiler {
         let option_arg = {
             let mut ar = Resource::new_embedded();
             set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-            ar.set(iri(wk::TYPE_NAME), Value::String(wk::OPTION.to_string()));
+            ar.set(iri(wk::TYPE_NAME), const_ref_value(wk::OPTION));
             ar.set(iri(wk::TYPE_ARGS), Value::Array(vec![class_value.clone()]));
             Value::Embedded(Box::new(ar))
         };
@@ -1104,21 +1141,8 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                // A parameter's kind is a qualified-name class (possibly an
-                // earlier parameter in scope) or a sort literal — the latter
-                // for Lean-style sort-parametrized inductives (`And (P : Prop,
-                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
-                let kind = match &p.kind {
-                    ast::IndexKind::Named(qn) => {
-                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                            qn.name.clone()
-                        } else {
-                            self.resolve(qn)?
-                        }
-                    }
-                    ast::IndexKind::Sort(sk) => sort_kind_param_string(sk, &p.pos)?,
-                };
-                pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                let kind = self.lower_kind(&p.kind, &param_names, &p.pos)?;
+                pr.set(iri(wk::PARAM_KIND), kind);
                 Ok(Value::Embedded(Box::new(pr)))
             })
             .collect();
@@ -1187,7 +1211,7 @@ impl Compiler {
                 } else {
                     let mut ar = Resource::new_embedded();
                     set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-                    ar.set(iri(wk::TYPE_NAME), Value::String(resolved));
+                    ar.set(iri(wk::TYPE_NAME), const_ref_value(&resolved));
                     let arg_values: Result<Vec<Value>, EslError> = args
                         .iter()
                         .map(|a| self.compile_type_expr(a, scope))
@@ -2086,21 +2110,8 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                // A parameter's kind is a qualified-name class (possibly an
-                // earlier parameter in scope) or a sort literal — the latter
-                // for Lean-style sort-parametrized inductives (`And (P : Prop,
-                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
-                let kind = match &p.kind {
-                    ast::IndexKind::Named(qn) => {
-                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                            qn.name.clone()
-                        } else {
-                            self.resolve(qn)?
-                        }
-                    }
-                    ast::IndexKind::Sort(sk) => sort_kind_param_string(sk, &p.pos)?,
-                };
-                pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                let kind = self.lower_kind(&p.kind, &param_names, &p.pos)?;
+                pr.set(iri(wk::PARAM_KIND), kind);
                 Ok(Value::Embedded(Box::new(pr)))
             })
             .collect();
@@ -2119,23 +2130,8 @@ impl Compiler {
                     let mut pr = Resource::new_embedded();
                     set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                     pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                    let kind = match &p.kind {
-                        ast::IndexKind::Named(qn) => {
-                            if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                                qn.name.clone()
-                            } else {
-                                self.resolve(qn)?
-                            }
-                        }
-                        // Sort literals encode as canonical strings the
-                        // kernel's `decode_param_kind_str` recognises:
-                        // "Prop" → Sort(0), "Set" → Sort(1), "Type:N"
-                        // → Sort(N+1). Needed for D39 §5's JustifiedBy
-                        // and ChainWitness predicates whose intermediate
-                        // index kinds are themselves sorts.
-                        ast::IndexKind::Sort(sk) => sort_kind_param_string(sk, &p.pos)?,
-                    };
-                    pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                    let kind = self.lower_kind(&p.kind, &param_names, &p.pos)?;
+                    pr.set(iri(wk::PARAM_KIND), kind);
                     Ok(Value::Embedded(Box::new(pr)))
                 })
                 .collect();
@@ -2249,14 +2245,14 @@ impl Compiler {
         let type_name = if arg.name.namespace.is_none() {
             let n = arg.name.name.as_str();
             if params.contains(n) || n == "Inf" || n == "Size" {
-                arg.name.name.clone()
+                bare_kind_value(&arg.name.name)
             } else {
-                self.resolve(&arg.name)?
+                const_ref_value(&self.resolve(&arg.name)?)
             }
         } else {
-            self.resolve(&arg.name)?
+            const_ref_value(&self.resolve(&arg.name)?)
         };
-        ar.set(iri(wk::TYPE_NAME), Value::String(type_name));
+        ar.set(iri(wk::TYPE_NAME), type_name);
 
         let type_args: Result<Vec<Value>, EslError> = arg
             .params
@@ -2295,14 +2291,14 @@ impl Compiler {
         let kind_str = if kind.namespace.is_none() {
             let n = kind.name.as_str();
             if scope.contains(n) || n == "Inf" || n == "Size" {
-                kind.name.clone()
+                bare_kind_value(n)
             } else {
-                self.resolve(kind)?
+                const_ref_value(&self.resolve(kind)?)
             }
         } else {
-            self.resolve(kind)?
+            const_ref_value(&self.resolve(kind)?)
         };
-        ar.set(iri(wk::TYPE_NAME), Value::String(kind_str));
+        ar.set(iri(wk::TYPE_NAME), kind_str);
         ar.set(iri(wk::TYPE_ARGS), Value::Array(Vec::new()));
         ar.set(iri(wk::BINDER_NAME), Value::String(name.to_string()));
 
@@ -3737,6 +3733,18 @@ mod tests {
     use crate::esl;
     use crate::ontology::eigon_json;
 
+    /// The `eigentt:TypeExpr` value a reference to `iri` encodes to. `core:type_name` and
+    /// `core:param_kind` carried a bare IRI STRING until eigenius#188 retyped both to
+    /// `eigentt:TypeExpr`; these two helpers keep the assertions readable.
+    fn const_ref_json(target: &str) -> Value {
+        Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [target]}))
+    }
+
+    /// The `eigentt:TypeExpr` value a reference to the type parameter `name` encodes to.
+    fn var_json(name: &str) -> Value {
+        Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
+    }
+
     fn compile_esl(input: &str) -> Vec<Resource> {
         esl::compile(input).unwrap()
     }
@@ -4865,10 +4873,8 @@ mod tests {
             _ => panic!("arg type must be embedded"),
         };
         assert_eq!(
-            succ_arg
-                .get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("urn:eigenius:example:Nat")
+            succ_arg.get(&iri("urn:eigenius:core:type_name")),
+            Some(&const_ref_json("urn:eigenius:example:Nat"))
         );
     }
 
@@ -4882,7 +4888,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:List(A : core:Set) {
+            data ex:List(A : Set) {
                 nil,
                 cons(A, ex:List(A)),
             }
@@ -4890,7 +4896,7 @@ mod tests {
         );
         let r = &resources[0];
 
-        // One param, name=A, kind=core:Set.
+        // One param, name=A, kind=`Sort(Succ(Zero))` — the sort `Set`.
         let params = match r.get(&iri("urn:eigenius:core:type_params")) {
             Some(Value::Array(a)) => a,
             _ => panic!("type_params must be an array"),
@@ -4906,9 +4912,11 @@ mod tests {
             Some("A")
         );
         assert_eq!(
-            p.get(&iri("urn:eigenius:core:param_kind"))
-                .and_then(|v| v.as_str()),
-            Some("urn:eigenius:core:Set")
+            p.get(&iri("urn:eigenius:core:param_kind")),
+            Some(&Value::Json(serde_json::json!({
+                "ctor": "Sort",
+                "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}],
+            })))
         );
 
         // cons ctor: first arg is bare "A", second is parametric List(A).
@@ -4932,9 +4940,8 @@ mod tests {
             _ => panic!("arg must be embedded"),
         };
         assert_eq!(
-            arg0.get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("A")
+            arg0.get(&iri("urn:eigenius:core:type_name")),
+            Some(&var_json("A"))
         );
         let arg0_args = match arg0.get(&iri("urn:eigenius:core:type_args")) {
             Some(Value::Array(a)) => a,
@@ -4948,9 +4955,8 @@ mod tests {
             _ => panic!("arg must be embedded"),
         };
         assert_eq!(
-            arg1.get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("urn:eigenius:example:List")
+            arg1.get(&iri("urn:eigenius:core:type_name")),
+            Some(&const_ref_json("urn:eigenius:example:List"))
         );
         let arg1_args = match arg1.get(&iri("urn:eigenius:core:type_args")) {
             Some(Value::Array(a)) => a,
@@ -4962,10 +4968,8 @@ mod tests {
             _ => panic!("type arg must be embedded"),
         };
         assert_eq!(
-            arg1_a
-                .get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("A")
+            arg1_a.get(&iri("urn:eigenius:core:type_name")),
+            Some(&var_json("A"))
         );
     }
 
@@ -4989,13 +4993,13 @@ mod tests {
                 succ(ex:Nat),
             }
 
-            data ex:Vec(A : core:Set) : core:Nat -> Set {
+            data ex:Vec(A : Set) : core:Nat -> Set {
                 nil  : ex:Vec(A, ex:zero),
                 cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
             }
 
             axiom ex:vec_inhabits_nat_length :
-                forall (A : core:Set, n : core:Nat) => ex:Vec(A, n) -> ex:Nat
+                forall (A : Set, n : core:Nat) => ex:Vec(A, n) -> ex:Nat
             note: "Every Vec carries a Nat-valued length implicit in its index."
 
             program ex:identity : ex:Nat -> ex:Nat {
@@ -5085,7 +5089,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Vec(A : core:Set) : core:Nat -> Set {
+            data ex:Vec(A : Set) : core:Nat -> Set {
                 nil : ex:Vec(A, ex:zero),
                 cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
             }
@@ -5113,14 +5117,8 @@ mod tests {
                     Some("_")
                 );
                 assert_eq!(
-                    entry
-                        .get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
-                        .and_then(|v| if let Value::String(s) = v {
-                            Some(s.as_str())
-                        } else {
-                            None
-                        }),
-                    Some("urn:eigenius:core:Nat")
+                    entry.get(&Iri::parse(wk_local::PARAM_KIND).unwrap()),
+                    Some(&const_ref_json("urn:eigenius:core:Nat"))
                 );
             }
             other => panic!("expected `core:indices` array, got {other:?}"),
@@ -5168,7 +5166,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Eq(A : core:Set) : A -> A -> Prop {
+            data ex:Eq(A : Set) : A -> A -> Prop {
                 refl : forall (a : A) => ex:Eq(A, a, a),
             }
             "#,
@@ -5186,13 +5184,8 @@ mod tests {
                 other => panic!("expected embedded, got {other:?}"),
             };
             assert_eq!(
-                pr.get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
-                    .and_then(|v| if let Value::String(s) = v {
-                        Some(s.as_str())
-                    } else {
-                        None
-                    }),
-                Some("A"),
+                pr.get(&Iri::parse(wk_local::PARAM_KIND).unwrap()),
+                Some(&var_json("A")),
                 "param-typed index should keep bare param name as kind"
             );
         }
@@ -5305,10 +5298,11 @@ mod tests {
 
     #[test]
     fn compile_data_indexed_emits_sort_literal_index_kinds() {
-        // D39 §5 / D49 ChainWitness path: when an intermediate index is
-        // a Sort literal (Prop / Set / Type N), the compiler must emit
-        // the kind string the kernel's `decode_param_kind_str` recognises
-        // ("Prop" → Sort(0), "Set" → Sort(1), "Type:N" → Sort(N+1)).
+        // D39 §5 / D49 ChainWitness path: when an intermediate index is a sort literal
+        // (Prop / Set / Type N), the compiler emits `Sort(level)`. This asserted the canonical
+        // STRINGS "Prop" / "Set" / "Type:2" that `decode_param_kind_str` recognised; eigenius#188
+        // retyped `core:param_kind` to `eigentt:TypeExpr` so a level VARIABLE is expressible, and
+        // the string grammar could not carry one.
         use crate::ontology::well_known as wk_local;
 
         let resources = compile_esl(
@@ -5330,17 +5324,21 @@ mod tests {
         };
         assert_eq!(arr.len(), 3);
 
-        let kind_strings: Vec<String> = arr
+        let kinds: Vec<Value> = arr
             .iter()
             .map(|v| match v {
-                Value::Embedded(e) => match e.get(&param_kind_iri) {
-                    Some(Value::String(s)) => s.clone(),
-                    other => panic!("expected string kind, got {other:?}"),
-                },
+                Value::Embedded(e) => e.get(&param_kind_iri).expect("index has a kind").clone(),
                 other => panic!("expected embedded index, got {other:?}"),
             })
             .collect();
-        assert_eq!(kind_strings, vec!["Prop", "Set", "Type:2"]);
+        let sort_json = |n: usize| {
+            let mut lvl = serde_json::json!({"ctor": "Zero", "args": []});
+            for _ in 0..n {
+                lvl = serde_json::json!({"ctor": "Succ", "args": [lvl]});
+            }
+            Value::Json(serde_json::json!({"ctor": "Sort", "args": [lvl]}))
+        };
+        assert_eq!(kinds, vec![sort_json(0), sort_json(1), sort_json(3)]);
 
         assert_eq!(result_sort_nat(r), Some(4));
     }
@@ -5900,7 +5898,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:project";
 
-            data ex:Option(A : core:Set) {
+            data ex:Option(A : Set) {
                 none,
                 some(A),
             }
@@ -6457,7 +6455,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace eg   = "urn:eigenius:test:macro";
 
-            data eg:Pair(A : core:Set, B : core:Set) {
+            data eg:Pair(A : Set, B : Set) {
                 Both(A, B),
             }
 

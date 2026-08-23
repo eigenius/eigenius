@@ -128,6 +128,13 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::Times(a, b) => encode_type_json(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
         Exp::One => Ok(ctor("One", vec![])),
+        // The sort of size values. Reachable through `core:param_kind` / `core:type_name` since
+        // eigenius#188 retyped both to `eigentt:TypeExpr`; before that a `Size` kind travelled as
+        // the literal string `"Size"` and never entered this codec, which is why no size form was
+        // here. The other size forms (`SizedPi`, `SizeInf`, `SizeSucc`) are still absent — they
+        // reach the chain through `core:arg_types`' positional encoding, not through a TypeExpr
+        // value, and nothing on any chain carries one (N2 §3).
+        Exp::SizeSort => Ok(ctor("SizeSort", vec![])),
         Exp::Id(ty, x, y) => Ok(ctor(
             "Id",
             vec![
@@ -513,6 +520,10 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         "One" => {
             expect_arg_count("One", 0, args)?;
             Ok(Exp::One)
+        }
+        "SizeSort" => {
+            expect_arg_count("SizeSort", 0, args)?;
+            Ok(Exp::SizeSort)
         }
         "Pi" => {
             expect_arg_count("Pi", 3, args)?;

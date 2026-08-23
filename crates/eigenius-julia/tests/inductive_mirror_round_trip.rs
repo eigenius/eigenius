@@ -87,9 +87,12 @@ impl NatChain {
             Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_ARG_TYPE))]),
         );
         succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
+        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
-            Value::String("urn:eigenius:test:Nat".into()),
+            Value::Json(serde_json::json!({
+                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+            })),
         );
 
         let mut succ = Resource::new(iri("urn:eigenius:test:Nat:succ"));

@@ -319,12 +319,26 @@ impl Validator {
         }
 
         for (i, (arg_value, arg_type_decl)) in args_array.iter().zip(arg_types.iter()).enumerate() {
-            let type_name = arg_type_decl
-                .get(&iri(wk::TYPE_NAME))
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            // eigenius#188 / N4: `type_name` is an `eigentt:TypeExpr` value, so the type this
+            // dispatches on is the value's HEAD.
             let child_path = format!("{path}.args[{i}]");
-            self.check_inductive_arg(arg_value, type_name, child_path, res_id, out);
+            let type_name = match crate::program::ground::arg_type_head(arg_type_decl) {
+                Ok(n) => n,
+                Err(e) => {
+                    // An argument whose declared type cannot be read is not an argument this rule
+                    // can pass. It read `.unwrap_or_default()` here, which turned an unreadable
+                    // `type_name` into the empty string and then into a "typed by the parameter
+                    // ``" report naming a parameter that does not exist.
+                    out.push(ValidationError {
+                        resource_id: res_id.clone(),
+                        property: None,
+                        rule: ValidationRule::InductiveValueMismatch,
+                        message: format!("{child_path}: {e}"),
+                    });
+                    continue;
+                }
+            };
+            self.check_inductive_arg(arg_value, &type_name, child_path, res_id, out);
         }
     }
 
@@ -342,12 +356,32 @@ impl Validator {
         res_id: &Option<Iri>,
         out: &mut Vec<ValidationError>,
     ) {
-        // Try to parse as IRI and resolve. If it doesn't parse or
-        // doesn't resolve, treat as an unbound parameter name and
-        // skip (v1 deferral).
+        // A bare name is a type-PARAMETER reference. Parameter-aware checking — instantiating the
+        // parameter from the value's own type arguments — is genuinely not built, so this cannot
+        // check the value. It says so instead of returning `Ok`.
+        //
+        // Until eigenius#188 this arm was `Err(_) => return` with the comment "deferred per v1;
+        // v1 callers use only monomorphic inductives". That premise was half true: the
+        // DECLARATIONS are parametric — `core:Option.some(A)`, `logic:And.conj(P, Q)`,
+        // `logic:Or.inl/inr` — and `closed-class.esl` gives English "but" the semantics
+        // `λs₂. λs₁. logic:And(s₁, s₂)`, so any parsed sentence containing "but" produces an
+        // `And` value whose arguments are typed `P` and `Q`. Silent admission was one prose
+        // encoding from mattering.
         let type_iri = match Iri::parse(type_name) {
             Ok(i) => i,
-            Err(_) => return, // Bare parameter name; deferred per v1.
+            Err(_) => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::InductiveValueMismatch,
+                    message: format!(
+                        "{path}: argument is typed by the parameter `{type_name}`, which this \
+                         rule cannot check — parameter-aware validation is not built. The value \
+                         is NOT validated (eigenius#188 / N4)."
+                    ),
+                });
+                return;
+            }
         };
 
         // Primitive type IRIs are well-known; check inline.
@@ -663,7 +697,13 @@ mod tests {
                     Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
                 ),
                 (wk::ARG_NAME, Value::String("pred".into())),
-                (wk::TYPE_NAME, Value::String("urn:eigenius:test:Nat".into())),
+                // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+                (
+                    wk::TYPE_NAME,
+                    Value::Json(serde_json::json!({
+                        "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+                    })),
+                ),
             ],
         );
         let succ_ctor = make_resource(
