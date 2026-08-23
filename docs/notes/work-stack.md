@@ -33,8 +33,12 @@ residue = #138 / #69 / #139). Branch `eigentt-improvements` from `6744c9a`.
 already exists (`kernel/src/nbe/positivity.rs`, called from `check/mod.rs:335`); the ESL declaration
 path never reaches it. Routing it in unchanged **rejects the bootstrap** — `cat_forall`,
 `cat_fin_forall`, `cat_num_forall` (`ontologies/lexicon/lexicon-ontology.esl:271,280,281`) are
-higher-order positive, the shape `positivity.rs:507` pins as rejected. Extend the criterion (makes
-#138 a prerequisite of #92) or re-represent the category algebra (bootstrap edit, reseed).
+higher-order positive, the shape `positivity.rs:507` pins as rejected. **Working hypothesis `2026-08-22`: arm 1**, extend the criterion — scoped in
+[p2-n1-positivity-criterion.md](p2-n1-positivity-criterion.md). Kernel-only, no reseed, `lexicon:Cat`
+unchanged. N1 §5 may split it in two: the current restriction looks like a *completeness* limit, not
+a soundness one, because `derive_minor_type` and `iota_reduce_impl` filter on the same predicate and
+would skip a higher-order argument identically. Verify that by construction in the first commit — it
+decides whether #92 lands before or after #138.
 
 #### NEXT
 Three design notes, all independent and all writable before any code: N1 positivity criterion +

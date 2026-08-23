@@ -27,7 +27,9 @@ residue = #138 / #69 / #139).
 
 ## 1. The decision that shapes the package: #92's fork
 
-Everything about sequencing turns on this, so it is settled first and in writing.
+**Working hypothesis, adopted `2026-08-22`: arm 1.** Scoped in
+[p2-n1-positivity-criterion.md](p2-n1-positivity-criterion.md); the consequences are folded into the
+sections below. Everything about sequencing turns on this, so it is settled first and in writing.
 
 **The pass exists.** `kernel/src/nbe/positivity.rs` implements strict positivity following nanoda's
 `check_positivity1`, and `check_type` calls it at `check/mod.rs:335` on the `Exp::Inductive` arm.
@@ -50,9 +52,13 @@ ontologies/lexicon/lexicon-ontology.esl:281   cat_num_forall : (lexicon:Num -> l
 `(A -> Self) -> Self` are sound and should be retained"* — and the probe that prompted it was
 `cat_forall`'s shape, accepted only because the pass never ran.
 
-**Arm 1 — extend the criterion.** Admit higher-order positive occurrences, which requires the
-recursor to build induction hypotheses for them. That is the same machinery gap #138 names for
-indices, so this arm makes **#138 a prerequisite of #92**. No bootstrap edit, no reseed.
+**Arm 1 — extend the criterion (ADOPTED, provisionally).** Admit higher-order positive occurrences.
+No bootstrap edit, no reseed; `lexicon:Cat` stays as declared. N1 §5 finds this may split into two
+independently landable steps — widen the criterion and route declarations through the pass, then add
+function-typed induction hypotheses — because `derive_minor_type` and `iota_reduce_impl` filter on
+the *same* predicate and would skip a higher-order argument identically, making the current
+restriction a completeness limit rather than a soundness one. If that agreement is confirmed, #92
+step 1 lands before #138 and the two tracks do not fully serialize.
 
 **Arm 2 — keep the criterion, re-represent categories.** Rewrite the polymorphic-category algebra
 (D63 §8.2) without higher-order constructors. Touches the parser's category representation, is a
@@ -73,7 +79,7 @@ Three, independent of each other and of every code item. All three can be writte
 
 | note | settles | blocks |
 |---|---|---|
-| **N1 — positivity criterion + declaration routing** | §1's fork; the criterion; mutual/nested posture | #92 |
+| **N1 — positivity criterion + declaration routing** ✱ drafted | §1's fork; the criterion; mutual/nested posture | #92 |
 | **N2 — sized types: wire or delete** | whether #139's solver gets constraint emitters or is removed | #66's costing |
 | **N3 — universe polymorphism** | `Exp` representation, whether levels reach ESL surface syntax, migration for persisted terms | #188 |
 
@@ -147,7 +153,7 @@ substitute for N1 deciding it.
 | 3 | #194 | none | every `check` arm compared against `check_infer` for the same `Exp` ctor, each permissive one tightened or justified in a comment; the four `Val::Sort(_)` arms at `check/mod.rs:659-673` resolved | **maybe** — see §5 |
 | 4 | N1, N2, N3 | — | notes merged | no |
 | 5 | #138 | none | a well-typed `InductiveRec` over an indexed family exists as a test — none does today | no |
-| 6 | #92 | N1 | ESL `data` declarations reach `check_positivity`; a negative-occurrence declaration is rejected through `Validator::validate()`, which is the path #92's probe took; bootstrap still loads | **arm 2 only** |
+| 6 | #92 | N1 | ESL `data` declarations reach `check_positivity`; a negative-occurrence declaration is rejected through `Validator::validate()`, which is the path #92's probe took; bootstrap still loads with its three higher-order constructors unchanged | no, under arm 1 |
 | 7 | #69 | none | discrimination (`zero ≠ succ n`) and injectivity clauses generated per inductive and usable from a dependent match | no |
 | 8 | #139 | N2 | either constraint emitters call `solve` from the check path, or the unreachable half is deleted and the comparison pair stands alone as the sized-types surface | no |
 | 9 | #66 | N2 | decision recorded in D9/D19; if gating, ESL rejects bare `Drec` outside the sanctioned forms with tests; if documenting, an `#[ignore]`d divergence test plus a user-facing note | no |
@@ -162,8 +168,9 @@ puts the follow-through at reseed, re-point snapshot pins, re-record LLM draws t
 `EXPECTED`. Step 6 arm 2 iterates on `lexicon-ontology.esl`, which is the file in this package least
 likely to be right in one pass.
 
-Items that move the manifest: **#92 under arm 2** (lexicon), **#188** (chain-format change by
-construction). **#194 is the uncertain one** — it reads as kernel-only, but #136 is the precedent
+Items that move the manifest: **#188** (chain-format change by construction) — and #92 only under
+arm 2, which §1 has provisionally set aside, so under the working hypothesis #92 is kernel-only and
+owes no reseed. **#194 is the uncertain one** — it reads as kernel-only, but #136 is the precedent
 where a one-line arm change forced an ontology edit and a reseed, because `spec_poly` depended on
 the leniency being removed.
 
