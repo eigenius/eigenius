@@ -160,7 +160,7 @@ reseed rather than paying a standalone one.
   §4a records what the retype closes — **Rule 16 fails open on parameter-typed arguments**,
   returning `Ok` for any `type_name` that is not an IRI, i.e. every parameter-typed ctor arg of
   `logic:And` / `logic:Or` / `core:Option`. Latent (no such values on a chain) but one prose
-  encoding away: closed-class gives *"but"* the semantics `logic:And(s₁, s₂)`. **Not part of #188** — separate change, own gate — but it SHOULD ride #188's reseed if ready in time: batching is cheaper, and the validator question surfaces in a 2s bootstrap test, not mid-reseed.
+  encoding away: closed-class gives *"but"* the semantics `logic:And(s₁, s₂)`. **Folded into P2 on this branch** (`2026-08-23`), own gate (§7), rides #188's reseed. **89 hand-authored values** across four JSON ontologies migrate by one-shot script, each guarded by an old-decode/new-decode equivalence check — decompile-then-recompile cannot do it because `eigenius decompile` flattens `data` to `resource` (**#217**, filed, not a prerequisite). The retype cannot be scoped: `core:type_name` is one property, so the Lean mirror's 36 values are in scope and **four** layers move.
 - **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
   ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
 

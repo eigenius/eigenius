@@ -184,11 +184,41 @@ what it is asked to hold — which is the thesis, twice, at two call sites.
   `Exp::Var`, so Rule 16 has a shape to check instead of a string it cannot parse (§4a).
 - Both string unions disappear.
 
+### Migrating the hand-authored values — 89 of them, by script
+
+ESL-declared inductives re-encode at bootstrap, so they are free. Hand-authored JSON is not:
+
+| file | `type_name` / `param_kind` strings |
+|---|---|
+| `ontologies/lean/lean-expressions.eigon.json` | 36 |
+| `ontologies/eigentt/eigentt-type-fragment.json` | 29 |
+| `ontologies/core/core-ontology.json` | 13 |
+| `ontologies/formulas/formulas-ontology.json` | 11 |
+| **total** | **89** |
+
+**The retype cannot be scoped to `core` + `eigentt`.** `core:type_name` is one property with one
+`data_type`; changing it changes its contract for every `InductiveArgType` on every chain. So the
+Lean mirror's 36 are in scope whether or not D30 is otherwise touched, and `lean` and `formulas`
+layers move along with `core` and `eigentt` — four layers, not two.
+
+**Do it with a one-shot script, not by hand and not via the compiler.** Decompile-then-recompile is
+the obvious mechanism and does not work: `eigenius decompile` flattens a `data` declaration into a
+generic `resource` block, so recompiling never reaches `compile_data` and the old string survives
+(eigenius#217). Fixing the decompiler is worth doing and is **not** a prerequisite here.
+
+The script walks each `type_name` / `param_kind` string and rewrites it to the value the new encoder
+would produce — the mapping is `decode_param_kind_str`'s dispatch inverted, written once.
+
+**Guard it with an equivalence check rather than trusting it.** For every rewritten value, decode
+the new form and assert it yields the same `Exp` the old string yielded. The migration is correct
+**iff** old-decode and new-decode agree, which is a property a test can hold, not a claim to
+believe. Same discipline as the round-trip tests.
+
 ## 6. Scope
 
-**Not part of #188.** Universe polymorphism needed `core:Level`, which is done. It does not need
-`param_kind` or `type_name` retyped; only the sort case of `param_kind` would benefit, and that is
-what made this look like #188 work when it is not. Keep it a separate change with its own gate.
+**Folded into P2 on `eigentt-improvements`** (maintainer decision, `2026-08-23`). It is still a
+distinct change from #188 with its own gate (§7) — universe polymorphism needed `core:Level` and has
+it — but it lands on the same branch and rides the same reseed.
 
 **But it SHOULD ride #188's reseed if it is ready in time.** An earlier draft of this section said
 the opposite, and the reasoning was wrong twice over:
@@ -211,3 +241,20 @@ are re-derived once regardless, and attribution is recoverable by re-running a g
 
 **So the gate is readiness, not sequencing:** settle §4's validator question, land the change with
 its own green gate, and if that happens before the reseed runs, it rides along.
+
+## 7. Exit gate
+
+- `TypeExpr` declared in `core-ontology.json`, ordered after `core:Level`; removed from
+  `eigentt-type-fragment.json`; **IRI unchanged**, so no reference in any chain or crate moves.
+- `param_kind` and `type_name` are `data_type core:resource` / `class_types [TypeExpr]`.
+- `TypeExpr` has a `SizeSort` ctor.
+- All six code sites (§5) produce and consume `TypeExpr` values; no site dispatches on a kind
+  string.
+- **`decode_param_kind_str`'s silent `Sort(1)` default is gone**, and `check_inductive_arg` no
+  longer returns `Ok` for an unparseable `type_name` (§4a). A parameter reference decodes to
+  `Exp::Var` and is checked.
+- `data Vec (A : Sort u)` compiles, with a test — the loose end #188 left.
+- The 89 hand-authored values are migrated, each guarded by the old-decode/new-decode equivalence
+  check.
+- Manifest moves on **four** layers: `core`, `eigentt-type-fragment`, `formulas`, `lean-expressions`.
+- `cargo test --workspace`, `clippy -D warnings`, `fmt` clean; then the reseed this rides (§6).
