@@ -117,8 +117,17 @@ reseed rather than paying a standalone one.
   productivity works from sizes that are WRITTEN; `solve` infers sizes that are unknown, and there
   are none.
 
+- **#139 CLOSED `2026-08-22`** (`e1a404a`). Solver deleted, `sized.rs` 1047 → 410 lines; comparison
+  pair and its 32 tests untouched. The deletion exposed two stale docs, both fixed: `sized_rigid.rs`
+  described MiniAgda's two constraint systems with a live intra-doc link to the removed one, and the
+  user-facing primer §7.6 advertised "the dual-solver pattern" in two places. Both also carried
+  dangling `references/miniagda/…` paths — MiniAgda is not vendored at all.
+- **#66 updated `2026-08-22`** with N2 §6, and the decision is still open. Its premise changed: none
+  of its three sanctioned recursion forms has a chain user, and neither does the bare-`letrec`
+  hazard. Cheap to decide now, expensive later.
+
 #### NEXT
-Execute N2's recommendation as **#139** (the deletion), then **#66** with §6's finding, then
+**#66** — take the decision (gate the surface, or accept and document in D9/D19), then
 **N3 → #188** with #213 folded into its reseed. N3 is a design note, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.

@@ -16,7 +16,7 @@ already done at filing-time-plus-fixes and have been closed (#191, #71, #22).
 | ~~A~~ | ~~#92 — declarations never reach the positivity pass~~ | **closed `2026-08-22`** — both steps |
 | ~~B~~ | ~~#138 — recursor motive is not index-aware~~ | **closed `2026-08-22`** |
 | ~~B~~ | ~~#69 — no-confusion generation~~ | **won't implement `2026-08-22`** |
-| B | #139 — size-constraint solver has no caller | indexed families |
+| ~~B~~ | ~~#139 — size-constraint solver has no caller~~ | **closed `2026-08-22`** — deleted per N2 |
 | C | #66 — bare `Decl::Drec` escape hatch | totality |
 | ~~C~~ | ~~#64 — literal `"__case_arg"`~~ | **closed `2026-08-22`** |
 | D | #188 — universe polymorphism | the universe ladder |
@@ -168,7 +168,7 @@ substitute for N1 deciding it.
 | 5 ✔ | #138 | none | a well-typed `InductiveRec` over an indexed family exists as a test — none does today | no |
 | 6 ✔✔ | #92 (both steps) | N1 | ESL `data` declarations reach `check_positivity`; a negative-occurrence declaration is rejected through `Validator::validate()`, which is the path #92's probe took; bootstrap still loads with its three higher-order constructors unchanged | no, under arm 1 |
 | ~~7~~ | ~~#69~~ | — | **closed won't-implement `2026-08-22`** — see §3 | — |
-| 8 | #139 | N2 | either constraint emitters call `solve` from the check path, or the unreachable half is deleted and the comparison pair stands alone as the sized-types surface | no |
+| 8 ✔ | #139 | N2 | either constraint emitters call `solve` from the check path, or the unreachable half is deleted and the comparison pair stands alone as the sized-types surface | no |
 | 9 | #66 | N2 | decision recorded in D9/D19; if gating, ESL rejects bare `Drec` outside the sanctioned forms with tests; if documenting, an `#[ignore]`d divergence test plus a user-facing note | no |
 | 10 | #188 | N3 | level algebra, `leq`, `uparams`, codec round-trip, persisted terms still decode | **yes** |
 
