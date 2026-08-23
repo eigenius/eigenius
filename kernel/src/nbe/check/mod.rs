@@ -453,8 +453,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         (Exp::Unit, Val::One) => Ok(()),
 
         // One against Set (One is a type)
-        (Exp::One, Val::Sort(l)) if l.is_nat(1) => Ok(()),
-
         // Impredicative Pi: when the codomain is in Prop, the whole Pi
         // is in Prop regardless of the domain's universe level. D46 §4.1.
         // The domain may be at any level (including Type(n) for arbitrary n);
@@ -475,21 +473,17 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             check(&mut inner, b, &Val::sort(0))
         }
 
-        // Pi type against Set
-        (Exp::Pi(p, a, b), Val::Sort(l)) | (Exp::Sig(p, a, b), Val::Sort(l)) if l.is_nat(1) => {
-            check(ctx, a, &Val::sort(1))?;
-            let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
-            check(&mut inner, b, &Val::sort(1))
-        }
-
-        // Sum type against Set
-        (Exp::Data(summands), Val::Sort(l)) if l.is_nat(1) => {
-            for s in summands {
-                check(ctx, &s.typ, &Val::sort(1))?;
-            }
-            Ok(())
-        }
+        // The `Set`-level counterparts of the two arms above are ABSENT, deliberately. They were
+        // `(Exp::Pi | Exp::Sig, Val::Sort(l)) if l.is_nat(1)`, `(Exp::One, ..)` and
+        // `(Exp::Data(..), ..)`, each re-deriving at `Set` what `check_infer` already computes, and
+        // each testing the expected sort for EQUALITY with `Set` rather than letting subtyping
+        // decide. `check_infer` has a rule for all three forms, so they fall through to
+        // `check_by_inference` and check/infer agree by construction (eigenius#220, disposing of
+        // them the way eigenius#194 disposed of five siblings).
+        //
+        // The `Prop` arms above are NOT of that kind and stay: impredicativity is a genuine typing
+        // rule, not a fast path — `Pi (x:A). B` inhabits `Prop` when `B` does, whatever universe
+        // `A` lives in, and inference expresses that as `imax`.
 
         // Declaration
         (Exp::Dec(d, e), t) => {
@@ -1013,6 +1007,25 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::Sig(patt, a, b) => {
             // Sigma is predicative — always max(m, n).
             infer_dependent_sort(ctx, patt, a, b, /*impredicative=*/ false)
+        }
+        // A sum type `Sum(c₁ A₁ | … | cₙ Aₙ)` lives at `max` of its summands' levels — predicative,
+        // like `Sig`, and for the same reason: a sum stores one of its summands, so it cannot be
+        // smaller than the largest of them. The `max` identity is `Zero`, so an empty sum is at
+        // `Prop` — the empty type is a proposition.
+        //
+        // eigenius#220: `check` had the ONLY rule for this form, `(Exp::Data(..), Val::Sort(l)) if
+        // l.is_nat(1)`, which checked each summand against `Set` exactly. A sum of `Type 1`
+        // summands was unwritable, and a `Set` sum checked against `Type 1` was rejected where
+        // cumulativity says it should pass. With an inference rule the narrow arm is deleted rather
+        // than widened, so `check` and `check_infer` agree by construction — the same disposal
+        // eigenius#194 applied to five sibling arms.
+        Exp::Data(summands) => {
+            let mut level = crate::nbe::level::Level::zero();
+            for summand in summands {
+                let l = ensure_infers_as_sort(ctx, &summand.typ)?;
+                level = crate::nbe::level::Level::Max(Box::new(level), Box::new(l)).simplify();
+            }
+            Ok(Val::Sort(level))
         }
         Exp::Arrow(a, b) => {
             let pi = Exp::Pi(Patt::Unit, a.clone(), b.clone());
@@ -1680,6 +1693,62 @@ mod tests {
             },
         ]);
         check(&mut ctx(), &data, &Val::sort(1)).unwrap();
+    }
+
+    #[test]
+    fn sum_of_large_summands_is_checkable() {
+        // eigenius#220. `check` had the only rule for `Exp::Data`, and it required the sum AND
+        // every summand to be at `Set` exactly. A sum storing a `Type 1` was therefore unwritable:
+        // there was no inference fallback to rescue it, unlike the `Exp::One` arm beside it.
+        //
+        // `Sum(a (Type 1) | b Set)` lives at `max(Sort 2, Sort 1)`'s successor structure — each
+        // summand's TYPE is inferred, so `Type 1` (`Sort 2`) contributes level 3 and `Set`
+        // (`Sort 1`) contributes 2, giving `Sort 3`.
+        let data = Exp::Data(vec![
+            crate::nbe::term::Summand {
+                name: "a".to_string(),
+                typ: Exp::sort(2),
+            },
+            crate::nbe::term::Summand {
+                name: "b".to_string(),
+                typ: Exp::sort(1),
+            },
+        ]);
+        let inferred = check_infer(&mut ctx(), &data).expect("a sum of large summands has a type");
+        assert!(
+            matches!(&inferred, Val::Sort(l) if l.is_nat(3)),
+            "expected Sort(3) = max(3, 2); got {inferred:?}"
+        );
+        check(&mut ctx(), &data, &Val::sort(3)).expect("and checks against its own sort");
+    }
+
+    #[test]
+    fn small_sum_checks_against_a_larger_sort_by_cumulativity() {
+        // The other half of eigenius#220: `Sum(a 1 | b 1)` is at `Set`, and `Set ⊆ Type 1`, so it
+        // must check against `Type 1`. The deleted arm's `l.is_nat(1)` guard rejected this — it
+        // tested the expected sort for EQUALITY with `Set` rather than letting subtyping decide.
+        let data = Exp::Data(vec![
+            crate::nbe::term::Summand {
+                name: "a".to_string(),
+                typ: Exp::One,
+            },
+            crate::nbe::term::Summand {
+                name: "b".to_string(),
+                typ: Exp::One,
+            },
+        ]);
+        check(&mut ctx(), &data, &Val::sort(1)).expect("at Set");
+        check(&mut ctx(), &data, &Val::sort(2)).expect("and at Type 1 by cumulativity");
+    }
+
+    #[test]
+    fn an_empty_sum_is_a_proposition() {
+        // `max` over no summands is its identity, `Zero` — so the empty type is at `Prop`.
+        let inferred = check_infer(&mut ctx(), &Exp::Data(vec![])).expect("empty sum has a type");
+        assert!(
+            matches!(&inferred, Val::Sort(l) if l.is_nat(0)),
+            "the empty sum is uninhabited, hence a proposition; got {inferred:?}"
+        );
     }
 
     #[test]
