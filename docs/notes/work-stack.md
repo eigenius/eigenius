@@ -200,6 +200,31 @@ reseed rather than paying a standalone one.
   `core:Set` and `core:Size` were written in ESL fixtures as if they were resources. Neither is
   declared on any chain; `wk::SET_KIND` / `wk::SIZE_KIND` were unreferenced residue and are deleted.
 
+#### FAST-FOLLOW (after the reseed, alongside #217)
+Filed `2026-08-23`. All four are residue of this package, and the accounting is worth stating
+plainly: **this repo has no third-party code**, so "pre-existing defect" means "written here in an
+earlier session". #220 is sharper than that — the `Sort(1)` fallback survived eigenius#188's OWN
+`usize`→`Level` migration, two days before it was found.
+
+- **[#217](https://github.com/eigenius/eigenius/issues/217)** — `eigenius decompile` flattens `data`
+  to `resource`, so inductives do not round-trip. Wants a document-level ESL round-trip test first:
+  the existing suite is entirely term-level, which is why this was invisible.
+- **[#218](https://github.com/eigenius/eigenius/issues/218)** — sized types are half-migrated:
+  `SizedPi`/`SizeInf`/`SizeSucc` absent from the D47 codec, `core:binder_kind` still a string that
+  matches the non-resource `urn:eigenius:core:Size`, `Size` an identifier where `Set`/`Prop`/`Type`
+  are keywords. `needs:decision` — N2 §3's "nothing declares a sized type" makes *deleting* the
+  half as coherent an ending as closing it, and nobody has called it.
+- **[#219](https://github.com/eigenius/eigenius/issues/219)** — two unported declaration-admission
+  checks: nanoda's parameter-prefix `assert_def_eq` (`inductive.rs:892`, bites only on the
+  independently-authored `core:ctor_type` path) and `no_dupes_all_params` (`tc.rs:167`) — the
+  latter introduced by slice 5c, which added `universe` declarations without it. A lint, not a
+  soundness hole; the ticket says so rather than overclaiming.
+- **[#220](https://github.com/eigenius/eigenius/issues/220)** — hardcoded universe constants
+  survived the `usize`→`Level` migration. Carries the full `is_nat(<literal>)` sweep so it is not
+  redone: `is_nat(0)` is legitimate throughout, `is_nat(1)` is test assertions plus one redundant
+  arm plus **one real defect** — `Exp::Data` is checkable only against `Set`, and unlike the `One`
+  arm it has no `check_infer` fallback to rescue it.
+
 #### NEXT
 **The reseed.** Every code item in P2 is closed and N4 has landed; `scripts/reseed-lexicon-db.sh
 --umls-all` then `build-alignment-snapshot.sh` is the remaining gate, covering #188's core moves, N4
