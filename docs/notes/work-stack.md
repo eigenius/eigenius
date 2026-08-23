@@ -47,8 +47,21 @@ ontology except #188, and fixing #213 itself moves all 21 manifest lines at once
 `current_manifest()`'s output at seed time), so it owes one reseed to adopt. Fold it into #188's
 reseed rather than paying a standalone one.
 
+#### DONE
+- **#92 step 1 (`2026-08-22`).** Criterion widened to classical strict positivity; `RecArgShape`
+  (`nbe/positivity.rs`) is now the single definition of "recursive occurrence", consumed by
+  positivity, `recursor::derive_minor_type` and `eval::iota_reduce_impl`;
+  `InductiveDecl::is_direct_recursive_ref` removed. **Rule 23** (`validation/rules/positivity.rs`)
+  routes `core:InductiveType` declarations through `check_positivity` at commit — the edge that was
+  missing, since `check_positivity` only ever ran on the TERM form and ESL `data` never produces
+  one. Measured before enforcing: 42 declarations on the bootstrap, 42 admitted, 0 decode failures,
+  exactly the three predicted higher-order ctors. Revert-checked: without the rule,
+  `Validator::validate()` returns `[]` for `(Bad -> boolean) -> Bad`, reproducing #92's symptom.
+  Manifest unmoved, no reseed.
+
 #### NEXT
-Three design notes, all independent and all writable before any code: N1 positivity criterion +
+Step 2 of #92 (function-typed IHs) waits on #138. Then the remaining
+three design notes, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 

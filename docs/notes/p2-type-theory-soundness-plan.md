@@ -13,7 +13,7 @@ already done at filing-time-plus-fixes and have been closed (#191, #71, #22).
 |---|---|---|
 | prerequisite | #213 — manifest hashes raw bytes | before any bootstrap edit |
 | A | #194 — check mode more permissive than inference | the gate fails open |
-| A | #92 — declarations never reach the positivity pass | the gate fails open |
+| A | #92 — declarations never reach the positivity pass | the gate fails open — **step 1 done `2026-08-22`** |
 | B | #138 — recursor motive is not index-aware | indexed families |
 | B | #69 — no-confusion generation | indexed families |
 | B | #139 — size-constraint solver has no caller | indexed families |
@@ -153,7 +153,7 @@ substitute for N1 deciding it.
 | 3 | #194 | none | every `check` arm compared against `check_infer` for the same `Exp` ctor, each permissive one tightened or justified in a comment; the four `Val::Sort(_)` arms at `check/mod.rs:659-673` resolved | **maybe** — see §5 |
 | 4 | N1, N2, N3 | — | notes merged | no |
 | 5 | #138 | none | a well-typed `InductiveRec` over an indexed family exists as a test — none does today | no |
-| 6 | #92 | N1 | ESL `data` declarations reach `check_positivity`; a negative-occurrence declaration is rejected through `Validator::validate()`, which is the path #92's probe took; bootstrap still loads with its three higher-order constructors unchanged | no, under arm 1 |
+| 6 ✔ | #92 step 1 | N1 | ESL `data` declarations reach `check_positivity`; a negative-occurrence declaration is rejected through `Validator::validate()`, which is the path #92's probe took; bootstrap still loads with its three higher-order constructors unchanged | no, under arm 1 |
 | 7 | #69 | none | discrimination (`zero ≠ succ n`) and injectivity clauses generated per inductive and usable from a dependent match | no |
 | 8 | #139 | N2 | either constraint emitters call `solve` from the check path, or the unreachable half is deleted and the comparison pair stands alone as the sized-types surface | no |
 | 9 | #66 | N2 | decision recorded in D9/D19; if gating, ESL rejects bare `Drec` outside the sanctioned forms with tests; if documenting, an `#[ignore]`d divergence test plus a user-facing note | no |

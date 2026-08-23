@@ -31,10 +31,12 @@
 //! arguments — matching the iota-reduction order in
 //! [`eval::iota_reduce`](super::eval).
 //!
-//! Restricted to the same fragment as the positivity checker and iota
-//! reduction: direct recursive arguments only (no higher-order, no
-//! nested). Higher-order recursion would need IHs of function type
-//! (`Π x:T. C(arg(x))`); deferred until those features land together.
+//! Restricted to DIRECT recursive arguments — `positivity::RecArgShape::is_direct`. Since
+//! eigenius#92 the positivity checker admits higher-order positive arguments too, which this
+//! function deliberately still skips: no IH binder is emitted for one, and
+//! `eval::iota_reduce_impl` applies none, so the minor's type and the reduction agree. The
+//! generalization is an IH of function type (`Π x:T. C(arg x)`), landing here and in iota
+//! together, after eigenius#138.
 //!
 //! Used by Phase 11b step 5 (type checking for `Exp::InductiveRec`) to
 //! verify that user-supplied minors have the right type.
@@ -175,9 +177,20 @@ pub fn derive_minor_type(
     let recursive_indices: Vec<usize> = arg_specs
         .iter()
         .enumerate()
-        .filter(
-            |(_, a)| matches!(a, MinorArg::Value { typ, .. } if decl.is_direct_recursive_ref(typ)),
-        )
+        .filter(|(_, a)| {
+            // eigenius#92: `positivity::recursive_arg_shape` is the ONE definition of "this
+            // argument is a recursive occurrence"; iota consults the same function so the
+            // minor's binders and the reduction's applications cannot drift apart.
+            //
+            // `is_direct()` restricts this to `D(params)(indices)`. A higher-order positive
+            // argument `(a : A) → D(…)` is admitted by positivity but skipped here — no IH
+            // binder — and skipped identically by iota, so the two still agree. Lifting the
+            // guard means emitting `Π a:A. motive idx… (arg a)` here and `λ a. rec (arg a)`
+            // there, in one change, after eigenius#138.
+            matches!(a, MinorArg::Value { typ, .. }
+                if crate::nbe::positivity::recursive_arg_shape(decl, typ)
+                    .is_some_and(|s| s.is_direct()))
+        })
         .map(|(i, _)| i)
         .collect();
     for (rec_pos, &arg_idx) in recursive_indices.iter().enumerate().rev() {

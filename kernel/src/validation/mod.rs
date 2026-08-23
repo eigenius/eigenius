@@ -125,6 +125,12 @@ pub enum ValidationRule {
     /// generalizes the former canonical-proposition-only check, so malformed
     /// propositions are rejected at commit and never silently absent the
     /// corresponding `ChainWitness`.
+    /// A `core:InductiveType` declaration has a constructor that is not strictly positive —
+    /// typically the inductive appearing in the DOMAIN of an argument's function type. Such a
+    /// declaration admits a fixpoint that inhabits every proposition, so admitting one onto a
+    /// chain makes every later validation against that chain unsound. Rule 23,
+    /// `rules::positivity.rs`. See eigenius#92.
+    NonPositiveInductive,
     TypeExprMalformed,
     /// An `eigentt:TypeExpr`-valued property decodes but does not type-check
     /// against the chain — the Semantic Felicity Condition (e.g. a predicate
@@ -323,6 +329,10 @@ impl Validator {
         // Rule 24: `eigentt:Definition` well-formedness (D66 slice 2) — decodes, is
         // non-recursive, is stored in normal form, and inhabits its declared type.
         errors.extend(self.check_definition_well_formedness(resource, &res_id));
+
+        // Rule 23 (eigenius#92): an inductive DECLARATION is strictly positive. Runs on the
+        // resource rather than on a property value — the declaration is the resource.
+        errors.extend(self.check_inductive_positivity(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*

@@ -7,6 +7,14 @@ Note N1 of the [P2 plan](p2-type-theory-soundness-plan.md) §2. Settles
 declared; make the kernel admit what it already relies on, rather than rewriting the parser's
 category algebra to fit a criterion narrower than the type theory requires.
 
+> **STEP 1 LANDED `2026-08-22`.** Criterion widened, `RecArgShape` introduced and consumed by all
+> three sites, `is_direct_recursive_ref` removed, Rule 23 (`validation/rules/positivity.rs`) routes
+> `core:InductiveType` declarations through `check_positivity` at commit. Measured first: 42
+> declarations on the bootstrap chain, 42 admitted, 0 decode failures, and exactly the three
+> predicted higher-order constructors (`Cat.cat_forall`, `Cat.cat_fin_forall`,
+> `Cat.cat_num_forall`, one binder each). The manifest did not move — no reseed. Step 2
+> (function-typed IHs) remains, after #138.
+
 ## 1. What is actually wrong
 
 The positivity pass exists and is correct; it is **not reachable from the path that matters**.

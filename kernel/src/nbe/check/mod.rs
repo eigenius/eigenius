@@ -55,7 +55,7 @@ use std::sync::Arc;
 /// cache for resolved class types.
 ///
 /// Design follows nanoda_lib's `TypeChecker` pattern
-/// (`references/nanoda_lib/src/tc.rs` @ pinned commit `f58f2f6`): a
+/// (`references/nanoda_lib/src/tc.rs` @ pinned commit `6ae1f0c`): a
 /// single struct carrying mutable state (cache) plus immutable
 /// environment through all checker calls. The cache is scoped per
 /// type-check invocation — fresh per call, no cross-check invalidation

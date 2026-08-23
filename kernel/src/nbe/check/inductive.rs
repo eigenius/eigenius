@@ -1150,7 +1150,7 @@ mod tests {
     /// docs/notes/nbe-reorganization-analysis.md §4): singleton-elim
     /// Case B requires each non-Prop ctor arg to *be* one of the
     /// conclusion's indices (set membership, matching nanoda's
-    /// `large_elim_test_aux` @ f58f2f6) — an index that merely
+    /// `large_elim_test_aux`, `inductive.rs:937` @ `6ae1f0c`) — an index that merely
     /// *mentions* the arg does not determine it, so large elim is not
     /// admitted.
     #[test]

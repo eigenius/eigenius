@@ -15,39 +15,142 @@
 //! Strict positivity checker for inductive types (Phase 11b step 3, D19 §5).
 //!
 //! Verifies that every constructor of an inductive declaration is strictly
-//! positive in the inductive being defined: the inductive may appear only
-//! as the head of a constructor argument's type (a direct recursive
-//! reference such as `List A`) or in the constructor's result, never
-//! under a nested Π.
+//! positive in the inductive being defined: `I` may appear as the head of a
+//! constructor argument's type, possibly behind a Π telescope whose domains
+//! are all `I`-free, and in the constructor's result — never to the left of
+//! an arrow.
 //!
 //! The algorithm follows nanoda_lib's `check_positivity1`
-//! (`references/nanoda_lib/src/inductive.rs:666-787` @ pinned commit
-//! `f58f2f6`) restricted to the fragment that the Phase 11b iota
-//! reduction can actually eliminate — direct recursive arguments only.
+//! (`references/nanoda_lib/src/inductive.rs:758` @ pinned commit `6ae1f0c`,
+//! with `which_valid_ind_app` `:867` and `is_rec_argument` `:1082`).
+//!
+//! [`recursive_arg_shape`] is the single definition of *"this constructor
+//! argument is a recursive occurrence"*, and it is deliberately shared:
+//! `recursor::derive_minor_type` and `eval::iota_reduce_impl` consume it too.
+//! Widening the criterion here without widening those is how the halves of an
+//! eliminator come to disagree — which is exactly eigenius#138's defect in a
+//! different pair of functions.
 //!
 //! ### Accepted
 //! - `Nat { zero : Nat, succ : Nat → Nat }`
 //! - `List(A : Set) { nil : List(A), cons : A → List(A) → List(A) }`
 //! - Constructors that do not mention the inductive at all (zero-arity
 //!   or fully parametric constructors).
+//! - **Higher-order positive occurrence (eigenius#92)** —
+//!   `Foo { mk : (Nat → Foo) → Foo }`, and the shape the bootstrap needs,
+//!   `lexicon:Cat { cat_forall : Num → (Set → Cat) → Cat }`. `Cat` occurs
+//!   only in the codomain of the argument's Π telescope, never in a domain.
+//!
+//!   This module rejected that shape until eigenius#92, on the grounds that
+//!   Phase 11b's iota reduction cannot construct the corresponding induction
+//!   hypothesis and that accepting it "would create a soundness gap". **The
+//!   reading was wrong, and correcting it is what let eigenius#92 land ahead
+//!   of eigenius#138.** Both sites that would build the hypothesis consume
+//!   [`recursive_arg_shape`], and both currently skip an argument whose
+//!   `binders` are non-empty — so the minor's type carries no IH binder and
+//!   iota applies none. Nothing is derived that is not also discharged. The
+//!   eliminator is *weaker* for such an argument (no induction through it),
+//!   which is incompleteness, not unsoundness. Pinned by
+//!   `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`
+//!   (`nbe/eval/iota.rs`). Generalizing the IH to `Π a:A. C(arg a)` is the
+//!   follow-on, after eigenius#138.
 //!
 //! ### Rejected
 //! - **Negative occurrence** — `Bad { mk : (Bad → Nat) → Bad }`. The
-//!   inductive appears as the domain of a function inside a binder.
-//! - **Higher-order positive occurrence** — `Foo { mk : (Nat → Foo) → Foo }`.
-//!   Strictly positive in the classical sense, but Phase 11b's iota
-//!   reduction cannot construct the corresponding induction hypothesis;
-//!   accepting it here would create a soundness gap.
+//!   inductive appears in the DOMAIN of an argument's Π telescope. This is
+//!   the case the whole module exists to stop, and it is what separates it
+//!   from the higher-order positive case above.
 //! - **Nested occurrence** — `Tree { node : List(Tree) → Tree }`. The
-//!   inductive appears inside another inductive's parameters.
+//!   inductive appears inside another inductive's parameters (eigenius#21).
+//! - **Occurrence in its own indices** — a recursive occurrence whose index
+//!   arguments mention the inductive.
 //! - **Wrong result type** — constructor whose Π-telescope ends in
 //!   anything other than an application of the parent inductive.
 //! - **Non-uniform parameters** — a recursive occurrence or conclusion
 //!   that instantiates a declaration parameter to anything other than
 //!   the parameter variable itself (`P(A) { mk : P(1) → P(A) }`,
 //!   `Q(A) { mk : Q(1) }`). Port of nanoda_lib's `ctor_app_params_ok`.
+//!
+//! ### Not handled
+//! Mutual (eigenius#20) and nested (eigenius#21) declarations. The walk takes
+//! a single `decl`; nanoda threads `all_inductives_incl_specialized` through
+//! it instead. Making [`recursive_arg_shape`] take a block is then a
+//! signature change rather than a redesign.
 
 use crate::nbe::term::{Decl, Exp, InductiveDecl, Patt};
+
+/// How a constructor argument mentions the inductive being declared.
+///
+/// The single definition of *"this argument is a recursive occurrence"*, shared by the three sites
+/// that need it — this module (which admits the argument), `recursor::derive_minor_type` (which
+/// emits an induction-hypothesis binder for it) and `eval::iota_reduce_impl` (which applies one).
+/// Before eigenius#92 each site asked `InductiveDecl::is_direct_recursive_ref` separately, so
+/// widening the criterion in one place and not the others would have made the eliminator's halves
+/// disagree — eigenius#138's defect, in a different pair of functions.
+///
+/// Borrows throughout: `iota_reduce_impl` calls this per constructor argument on every reduction.
+#[derive(Debug)]
+pub struct RecArgShape<'a> {
+    /// Π binders standing in front of the occurrence. **Empty for a direct recursive argument**
+    /// (`D(params)(indices)`); non-empty for a higher-order positive one
+    /// (`(a : A) → D(params)(indices)`, with `D` absent from every `A`).
+    pub binders: Vec<(&'a Patt, &'a Exp)>,
+    /// The occurrence's own arguments: the parameter prefix followed by the indices.
+    pub args: &'a [Exp],
+}
+
+impl RecArgShape<'_> {
+    /// A direct recursive argument — no binders in front of the occurrence.
+    ///
+    /// The eliminator's two halves currently handle **only** this case. Both skip a higher-order
+    /// argument, consistently, so the minor's type and the iota reduction still agree; see the
+    /// module docs. Removing this guard is the follow-on to eigenius#138, and it must be removed
+    /// from `derive_minor_type` and `iota_reduce_impl` in the same change.
+    pub fn is_direct(&self) -> bool {
+        self.binders.is_empty()
+    }
+}
+
+/// Classify a constructor argument type as an occurrence of `decl`, or not.
+///
+/// Returns `None` when the argument does not mention `decl` at all, and when it mentions it in a
+/// position this fragment does not admit — a negative occurrence, a nested one, or an occurrence in
+/// the recursive application's own indices. `None` therefore means *"not a recursive argument"*,
+/// which is what the eliminator sites want; [`check_arg_positivity`] separately distinguishes
+/// *"I-free, fine"* from *"mentions I illegally, reject"* and produces the diagnostic.
+///
+/// Follows nanoda's `is_rec_argument` (`references/nanoda_lib/src/inductive.rs:1082` @ `6ae1f0c`).
+pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<RecArgShape<'a>> {
+    let mut binders: Vec<(&'a Patt, &'a Exp)> = Vec::new();
+    let mut cursor = typ;
+    loop {
+        match cursor {
+            // A Π in front of the occurrence is admissible only when the inductive does not appear
+            // in its DOMAIN. `I` in a domain is the negative occurrence — the thing positivity
+            // exists to stop — and it is the only difference between `(Nat → I) → I` (fine) and
+            // `(I → Nat) → I` (unsound).
+            Exp::Pi(patt, dom, body) => {
+                if has_ind_occurrence(decl, dom) {
+                    return None;
+                }
+                binders.push((patt, dom));
+                cursor = body;
+            }
+            Exp::InductiveType(d, args) if d.iri == decl.iri => {
+                // An occurrence inside its own index arguments is not something the eliminator can
+                // build a hypothesis for; rejected here and diagnosed by `check_arg_positivity`.
+                let n_params = decl.params.len();
+                if args.len() < n_params
+                    || args[n_params..].iter().any(|a| has_ind_occurrence(decl, a))
+                {
+                    return None;
+                }
+                return Some(RecArgShape { binders, args });
+            }
+            _ => return None,
+        }
+    }
+}
 
 /// Validate every constructor of `decl` for strict positivity.
 ///
@@ -126,7 +229,7 @@ fn shadow_patt(param_refs: &mut [Option<String>], patt: &Patt) {
 /// Check that the parameter prefix of an application of `decl` passes
 /// the declaration parameters through unchanged: argument #i must be
 /// the (unshadowed) parameter variable itself. Port of nanoda_lib's
-/// `ctor_app_params_ok` (inductive.rs @ f58f2f6) — without this, a
+/// `ctor_app_params_ok` (inductive.rs @ `6ae1f0c`) — without this, a
 /// recursive occurrence like `P(1)` inside `P(A)` derives an induction
 /// hypothesis `C(arg)` with `arg : P(1)` against a motive
 /// `C : P(A) → Sort`, and a conclusion like `Q(1)` gives the ctor a
@@ -159,12 +262,12 @@ fn check_params_uniform(
 ///
 /// Three cases, in order:
 /// 1. The type does not mention the inductive at all → accept (non-recursive arg).
-/// 2. The type is a direct application `Exp::InductiveType(decl, args)`
-///    with full arity, the parameter prefix passed through unchanged,
-///    and no inductive occurrence in the index arguments → accept
-///    (direct recursive arg; Phase 11b iota produces one IH per such arg).
-/// 3. Otherwise the inductive appears either under a Π or nested inside
-///    another inductive — reject.
+/// 2. [`recursive_arg_shape`] classifies it as an occurrence — either direct,
+///    `D(params)(indices)`, or higher-order positive, `(a : A) → D(params)(indices)` with `D`
+///    absent from every domain (eigenius#92) — and the parameter prefix passes through
+///    unchanged → accept.
+/// 3. Otherwise the inductive appears in a domain, nested inside another inductive, or in the
+///    occurrence's own indices — reject, with a diagnostic naming which.
 fn check_arg_positivity(
     decl: &InductiveDecl,
     ctor_name: &str,
@@ -174,45 +277,94 @@ fn check_arg_positivity(
     if !has_ind_occurrence(decl, arg_typ) {
         return Ok(());
     }
-    if let Exp::InductiveType(d, args) = arg_typ {
-        if d.iri == decl.iri {
-            let n_params = decl.params.len();
-            let n_indices = decl.indices.len();
-            if args.len() != n_params + n_indices {
-                return Err(format!(
-                    "constructor `{}.{ctor_name}`: recursive occurrence of `{}` \
-                     must apply {} parameter(s) + {} index/indices, got {} argument(s)",
-                    decl.name,
-                    decl.name,
-                    n_params,
-                    n_indices,
-                    args.len()
-                ));
-            }
-            check_params_uniform(
-                decl,
-                ctor_name,
-                &args[..n_params],
-                param_refs,
-                "a recursive occurrence",
-            )?;
-            for arg in &args[n_params..] {
-                if has_ind_occurrence(decl, arg) {
-                    return Err(format!(
-                        "non-positive occurrence: constructor `{}.{ctor_name}` has a \
-                         nested inductive use of `{}` inside its own indices",
-                        decl.name, decl.name
-                    ));
+    if let Some(shape) = recursive_arg_shape(decl, arg_typ) {
+        let n_params = decl.params.len();
+        let n_indices = decl.indices.len();
+        if shape.args.len() != n_params + n_indices {
+            return Err(format!(
+                "constructor `{}.{ctor_name}`: recursive occurrence of `{}` \
+                 must apply {} parameter(s) + {} index/indices, got {} argument(s)",
+                decl.name,
+                decl.name,
+                n_params,
+                n_indices,
+                shape.args.len()
+            ));
+        }
+        // Binders standing in front of the occurrence shadow parameter names for the
+        // uniformity check: inside `(A : Set) → D(A)` the `A` in `D(A)` is the BINDER's
+        // `A`, not the declaration parameter of that name, so uniformity is unsatisfiable
+        // through it. Applying the same shadowing rule the ctor telescope uses.
+        let mut local_refs = param_refs.to_vec();
+        for (patt, _) in &shape.binders {
+            shadow_patt(&mut local_refs, patt);
+        }
+        return check_params_uniform(
+            decl,
+            ctor_name,
+            &shape.args[..n_params],
+            &local_refs,
+            "a recursive occurrence",
+        );
+    }
+    // `recursive_arg_shape` returned `None` on a type that DOES mention the inductive, so the
+    // occurrence is in a position this fragment does not admit. Name which one — the three
+    // are different mistakes and a reader who gets "not a direct recursive position" for a
+    // negative occurrence learns nothing about why it is unsound.
+    Err(match classify_bad_occurrence(decl, arg_typ) {
+        BadOccurrence::Negative => format!(
+            "non-positive occurrence: constructor `{}.{ctor_name}` has `{}` in the DOMAIN \
+             of an argument's function type. A negative occurrence admits a fixpoint that \
+             inhabits every proposition; `(A -> {}) -> {}` is fine, `({} -> A) -> {}` is not",
+            decl.name, decl.name, decl.name, decl.name, decl.name, decl.name
+        ),
+        BadOccurrence::InOwnIndices => format!(
+            "non-positive occurrence: constructor `{}.{ctor_name}` has a nested inductive \
+             use of `{}` inside its own indices",
+            decl.name, decl.name
+        ),
+        BadOccurrence::Nested => format!(
+            "non-positive occurrence: constructor `{}.{ctor_name}` mentions inductive `{}` \
+             nested inside another type's arguments (eigenius#21 — nested inductives need \
+             the specialize/unspecialize pass and are not supported)",
+            decl.name, decl.name
+        ),
+    })
+}
+
+/// Which inadmissible position an occurrence sits in — for diagnostics only.
+enum BadOccurrence {
+    /// `I` left of an arrow: the unsound case.
+    Negative,
+    /// `I` inside the index arguments of a recursive occurrence of `I`.
+    InOwnIndices,
+    /// `I` inside some other type's arguments (`List(I)`), or any other shape.
+    Nested,
+}
+
+/// Distinguish the three rejection cases so the error can say which one applies.
+fn classify_bad_occurrence(decl: &InductiveDecl, typ: &Exp) -> BadOccurrence {
+    let mut cursor = typ;
+    loop {
+        match cursor {
+            Exp::Pi(_, dom, body) => {
+                if has_ind_occurrence(decl, dom) {
+                    return BadOccurrence::Negative;
                 }
+                cursor = body;
             }
-            return Ok(());
+            Exp::InductiveType(d, args) if d.iri == decl.iri => {
+                let n_params = decl.params.len();
+                let tail = args.get(n_params..).unwrap_or(&[]);
+                return if tail.iter().any(|a| has_ind_occurrence(decl, a)) {
+                    BadOccurrence::InOwnIndices
+                } else {
+                    BadOccurrence::Nested
+                };
+            }
+            _ => return BadOccurrence::Nested,
         }
     }
-    Err(format!(
-        "non-positive occurrence: constructor `{}.{ctor_name}` mentions inductive `{}` \
-         outside of a direct recursive position",
-        decl.name, decl.name
-    ))
 }
 
 /// The constructor's result type must be a direct application of the
@@ -503,9 +655,27 @@ mod tests {
         assert!(err.contains("non-positive"), "unexpected error: {err}");
     }
 
+    /// **eigenius#92 — a higher-order POSITIVE occurrence is admitted.**
+    ///
+    /// This test read `rejects_higher_order_positive` until eigenius#92. The inversion is the
+    /// substance of that issue, so the reason is recorded rather than the assertion silently
+    /// flipping: `(Nat → Foo) → Foo` is strictly positive in the classical sense — `Foo` occurs
+    /// only in the CODOMAIN — and the criterion that rejected it was narrower than the type
+    /// theory requires. It is the shape the bootstrap needs (`lexicon:Cat`'s `cat_forall`,
+    /// `cat_fin_forall`, `cat_num_forall`), so wiring the pass into the declaration path with the
+    /// old criterion would have rejected `ontologies/lexicon/lexicon-ontology.esl`.
+    ///
+    /// The eliminator does not yet build an induction hypothesis for such an argument, so `Foo`
+    /// admits no induction through `mk`. That is a completeness limit, not a soundness one — see
+    /// the module docs and
+    /// `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota` in
+    /// `nbe/eval/iota.rs`, which pins that both halves of the eliminator skip it consistently.
+    ///
+    /// `rejects_negative_occurrence` and `rejects_disguised_inductive_negative_occurrence` are the
+    /// other side of this line and still pass unchanged: `(Foo → Nat) → Foo` stays rejected.
     #[test]
-    fn rejects_higher_order_positive() {
-        // Foo : (Nat → Foo) → Foo  — strictly positive but beyond Phase 11b iota
+    fn accepts_higher_order_positive() {
+        // Foo : (Nat → Foo) → Foo  — Foo only in the codomain
         let s = self_ref("Foo");
         let foo_ty = Exp::InductiveType(s, Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
@@ -528,8 +698,58 @@ mod tests {
                 ),
             }],
         };
-        let err = check_positivity(&decl).expect_err("Foo should be rejected");
-        assert!(err.contains("non-positive"), "unexpected error: {err}");
+        check_positivity(&decl).expect("`(Nat -> Foo) -> Foo` is strictly positive");
+
+        // And the shape is classified as recursive-but-not-direct, which is what keeps the two
+        // eliminator halves in step: both consult `is_direct` and both skip it.
+        let arg_typ = match &decl.ctors[0].typ {
+            Exp::Pi(_, dom, _) => (**dom).clone(),
+            other => panic!("expected a Pi ctor type, got {other:?}"),
+        };
+        let shape = recursive_arg_shape(&decl, &arg_typ).expect("recursive occurrence");
+        assert_eq!(
+            shape.binders.len(),
+            1,
+            "one binder in front of the occurrence"
+        );
+        assert!(
+            !shape.is_direct(),
+            "higher-order, so not a direct recursive arg"
+        );
+    }
+
+    /// The negative counterpart, spelled next to its positive twin because the ONLY difference is
+    /// which side of the arrow `Foo` sits on, and that difference is the whole of positivity.
+    #[test]
+    fn rejects_negative_occurrence_in_the_same_shape() {
+        // Foo : (Foo → Nat) → Foo  — Foo in the DOMAIN
+        let s = self_ref("Foo");
+        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let nat_ty = Exp::Var("Nat".to_string());
+        let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
+            name: "Foo".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: Exp::Pi(
+                    Patt::Unit,
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(foo_ty.clone()),
+                        Box::new(nat_ty),
+                    )),
+                    Box::new(foo_ty),
+                ),
+            }],
+        };
+        let err = check_positivity(&decl).expect_err("`(Foo -> Nat) -> Foo` must be rejected");
+        assert!(
+            err.contains("DOMAIN"),
+            "the diagnostic should name the domain, not just say non-positive: {err}"
+        );
     }
 
     #[test]
@@ -581,7 +801,7 @@ mod tests {
     /// occurrence that instantiates the block parameter to something
     /// other than the parameter itself is rejected, matching nanoda's
     /// `is_valid_ind_app`/`ctor_app_params_ok` (inductive.rs:691 @
-    /// f58f2f6). Without the check, the derived IH for such an arg is
+    /// `6ae1f0c`). Without the check, the derived IH for such an arg is
     /// `C(arg)` with `arg : P(1)` against a motive `C : P(A) → Sort`.
     #[test]
     fn rejects_param_mismatch_in_recursive_arg() {

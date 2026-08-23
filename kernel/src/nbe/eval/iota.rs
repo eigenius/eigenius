@@ -31,10 +31,11 @@ use std::sync::Arc;
 /// constructor sub-values or producing a blocked `Neut::NtRec` for
 /// neutrals.
 ///
-/// Higher-order recursive arguments (e.g. `(Nat → I) → I`) are rejected
-/// elsewhere by the positivity checker (Phase 11b step 4) — here they
-/// would simply fail the recursive-arg-type check and produce an
-/// arity-mismatch error.
+/// Higher-order recursive arguments (e.g. `(Nat → I) → I`) are ADMITTED by the positivity
+/// checker since eigenius#92 and skipped here: no induction hypothesis is applied for one, and
+/// `recursor::derive_minor_type` emits no binder for one, so the minor's declared arity and the
+/// arity applied here still match. Pinned by
+/// `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota` below.
 pub(super) fn iota_reduce_impl<T: Tracer>(
     decl: &Arc<crate::nbe::term::InductiveDecl>,
     motive: &Val,
@@ -85,7 +86,11 @@ pub(super) fn iota_reduce_impl<T: Tracer>(
     // Then apply an induction hypothesis for each recursive argument,
     // in the order the recursive arguments appear.
     for (arg, arg_typ) in args.iter().zip(arg_types.iter()) {
-        if decl.is_direct_recursive_ref(arg_typ) {
+        // eigenius#92: one definition of "recursive occurrence", shared with
+        // `recursor::derive_minor_type` — see its filter for why `is_direct` is the guard and
+        // what lifting it entails.
+        if crate::nbe::positivity::recursive_arg_shape(decl, arg_typ).is_some_and(|s| s.is_direct())
+        {
             let (ih, ih_node) = build_recursor_ih::<T>(decl, motive, minors, arg, ctx)?;
             nodes.push(ih_node);
             let (next, node) = result.app_impl::<T>(ih, T::leaf(), ctx)?;

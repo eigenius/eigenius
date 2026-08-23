@@ -28,6 +28,7 @@ pub(super) mod inductive;
 pub(super) mod is_a;
 pub(super) mod length;
 pub(super) mod pattern;
+pub(super) mod positivity;
 pub(super) mod range;
 pub(super) mod reference_integrity;
 pub(super) mod type_check;
