@@ -28,7 +28,7 @@ use crate::nbe::eval::EvalCtx;
 use crate::nbe::readback::readback_val;
 use crate::nbe::recursor::derive_minor_types;
 use crate::nbe::term::{Exp, InductiveDecl, Patt};
-use crate::nbe::val::{Clos, Val};
+use crate::nbe::val::Val;
 use std::sync::Arc;
 
 /// Singleton-elimination admissibility test for a Prop-typed inductive
@@ -612,8 +612,9 @@ pub(super) fn check_inductive_ctor_args(
     Ok(actual_result)
 }
 
-/// Type-check an `Exp::InductiveRec` application and return its result
-/// type `motive(major)`.
+/// Type-check an `Exp::InductiveRec` application and return its result type
+/// `motive idx₁ … idx_m major`, at the major's own indices (eigenius#138). For a non-indexed
+/// declaration the index list is empty and this is the familiar `motive(major)`.
 pub(super) fn check_infer_inductive_rec(
     ctx: &mut CheckCtx,
     decl: &Arc<InductiveDecl>,
@@ -623,12 +624,12 @@ pub(super) fn check_infer_inductive_rec(
 ) -> Result<Val, CheckError> {
     // 1. Major must inhabit the inductive being eliminated.
     let major_typ = check_infer(ctx, major)?;
-    let (major_decl, params) = match &major_typ {
+    let (major_decl, params, major_indices) = match &major_typ {
         Val::InductiveType {
             decl: d,
             params: p,
-            indices: _,
-        } => (d.clone(), p.clone()),
+            indices: idx,
+        } => (d.clone(), p.clone(), idx.clone()),
         other => {
             return Err(CheckError::ExpectedInductive(format!(
                 "InductiveRec on `{}`: major has type {:?}, expected an inductive type",
@@ -655,15 +656,33 @@ pub(super) fn check_infer_inductive_rec(
     } else {
         Exp::Sort(2)
     };
-    let motive_dom = Val::InductiveType {
-        decl: decl.clone(),
-        params: params.clone(),
-        indices: Vec::new(),
-    };
-    let motive_typ = Val::Pi(
-        Box::new(motive_dom),
-        Clos::new(Patt::Unit, codomain_sort, Rho::Nil),
-    );
+    //    D48/eigenius#138: for an INDEXED family the motive is index-aware —
+    //
+    //        Π (i₁ : I₁) … (i_m : I_m). D(params)(i₁ … i_m) → Sort
+    //
+    //    an `(m+1)`-ary Π, not the unary `D(params) → Sort` this built before. The two halves of
+    //    the recursor disagreed about exactly this: `derive_minor_types` has always applied the
+    //    motive to the constructor's conclusion indices AND the constructor value
+    //    (`recursor.rs`), so for any non-empty index telescope no motive could satisfy both and
+    //    `Exp::InductiveRec` over an indexed family had no well-typed form. nanoda settles the
+    //    direction — `mk_motive_dep` (`references/nanoda_lib/src/inductive.rs:1058` @ `6ae1f0c`)
+    //    builds the motive by abstracting a Π telescope over `local_indices` before the major, and
+    //    `mk_minors1group` (`:1161`) folds that same motive over the ctor's applied indices. Both
+    //    read one `local_indices`, so they cannot drift; the fix is to move the motive onto the
+    //    minors' convention, not the reverse.
+    //
+    //    Built as an `Exp` and evaluated with the declaration's PARAMETERS bound in the
+    //    environment, because an index telescope's types may reference parameters by name
+    //    (`Vec(A : Set) : Nat → Set` is the trivial case; a telescope mentioning `A` is not). The
+    //    environment carries that dependency without a substitution pass. Non-indexed
+    //    declarations produce an empty telescope and the expression degenerates to the previous
+    //    unary shape exactly.
+    let mut motive_rho = ctx.rho.clone();
+    for ((patt, _), val) in decl.params.iter().zip(params.iter()) {
+        motive_rho = motive_rho.extend(patt.clone(), val.clone());
+    }
+    let motive_typ_exp = motive_type_exp(decl, &params, codomain_sort, ctx.rho.len());
+    let motive_typ = ctx.eval(&motive_typ_exp, &motive_rho)?;
     check(ctx, motive, &motive_typ).map_err(|e| {
         if matches!(decl.sort, Exp::Sort(0)) && !large_elim_admitted(decl) {
             CheckError::IllFormed(format!(
@@ -694,9 +713,74 @@ pub(super) fn check_infer_inductive_rec(
         check(ctx, minor, expected_typ)?;
     }
 
-    // 4. Result: motive(major).
+    // 4. Result: `motive idx₁ … idx_m major`, at the MAJOR's own indices (eigenius#138). For a
+    //    non-indexed declaration `major_indices` is empty and this is the previous `motive(major)`.
+    if major_indices.len() != decl.indices.len() {
+        return Err(CheckError::TypeMismatch(format!(
+            "InductiveRec on `{}`: major's type carries {} index/indices but `{}` declares {}",
+            decl.name,
+            major_indices.len(),
+            decl.name,
+            decl.indices.len()
+        )));
+    }
     let major_val = ctx.eval(major, &ctx.rho)?;
-    motive_val.app(major_val).map_err(CheckError::from)
+    let mut result = motive_val;
+    for idx in major_indices {
+        result = result.app(idx).map_err(CheckError::from)?;
+    }
+    result.app(major_val).map_err(CheckError::from)
+}
+
+/// Build the motive's type for a recursor on `decl` at concrete `params`:
+///
+/// ```text
+/// Π (i₁ : I₁) … (i_m : I_m). D(params)(i₁ … i_m) → codomain_sort
+/// ```
+///
+/// Returned as an `Exp` for the caller to evaluate in an environment where the declaration's
+/// parameter names are bound — an index telescope's types may reference parameters by name, and
+/// the environment carries that dependency without a substitution pass. `level` is the caller's
+/// current de Bruijn level, used to read back the parameter values.
+///
+/// **Two name-hygiene decisions, both load-bearing (eigenius#138).**
+///
+/// Parameters enter the domain application as `readback_val` of their VALUES, not as
+/// `Exp::Var(param_name)`. Referencing them by name is wrong twice over: an index binder sharing a
+/// parameter's name captures the reference — `data D (A : Set) : (A : One) → Set` produced the
+/// domain `D(idx, idx)` instead of `D(param, idx)`, silently, because the index Π wraps the body —
+/// and an anonymous parameter binder has no name to reference at all, so the slot got filled with
+/// a placeholder that type-checked as the wrong thing. Reading back the value sidesteps both:
+/// there is no name to capture.
+///
+/// Index binders are named `IDX#{k}` rather than the declaration's own binder names. `#` cannot
+/// occur in an ESL identifier (`esl/lexer.rs:485`), so an index binder cannot capture a parameter
+/// name referenced by a LATER index's type. Same discipline as `gen_val`'s `TC#` and readback's
+/// `G#`, and distinct from both so the three cannot collide.
+fn motive_type_exp(
+    decl: &Arc<InductiveDecl>,
+    params: &[Val],
+    codomain_sort: Exp,
+    level: usize,
+) -> Exp {
+    let index_names: Vec<String> = (0..decl.indices.len())
+        .map(|k| format!("IDX#{k}"))
+        .collect();
+    let mut dom_args: Vec<Exp> = params.iter().map(|p| readback_val(level, p)).collect();
+    dom_args.extend(index_names.iter().map(|n| Exp::Var(n.clone())));
+    decl.indices.iter().zip(index_names.iter()).rev().fold(
+        Exp::Arrow(
+            Box::new(Exp::InductiveType(decl.clone(), dom_args)),
+            Box::new(codomain_sort),
+        ),
+        |body, ((_, idx_typ), name)| {
+            Exp::Pi(
+                Patt::Var(name.clone()),
+                Box::new(idx_typ.clone()),
+                Box::new(body),
+            )
+        },
+    )
 }
 
 /// Type-check `match scrutinee { arm₁; arm₂; … }` against an expected
@@ -931,6 +1015,213 @@ mod tests {
 
     use crate::nbe::check::testutil::*;
     use crate::nbe::check::*;
+    // ---------- eigenius#138 — the recursor motive is index-aware ----------
+
+    /// `SimpleVec(A : Set) : One → Set` with `nil` and `cons` — one index, so the motive must be
+    /// binary. Mirrors the fixture the iota tests use (`nbe/eval/iota.rs`), which exercised
+    /// REDUCTION over an indexed family while type-checking one was impossible.
+    fn simple_vec() -> std::sync::Arc<InductiveDecl> {
+        let self_ref = std::sync::Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let vec_a_unit = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string()), Exp::Unit]);
+        std::sync::Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "nil".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(vec_a_unit.clone()),
+                    ),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "cons".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::One),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(Exp::Var("A".to_string())),
+                                Box::new(Exp::Pi(
+                                    Patt::Unit,
+                                    Box::new(vec_a_unit.clone()),
+                                    Box::new(vec_a_unit),
+                                )),
+                            )),
+                        )),
+                    ),
+                },
+            ],
+        })
+    }
+
+    /// `nil(One) : SimpleVec(One, unit)`, annotated — a parameterised constructor application
+    /// has no inferable type, so the major needs one supplied.
+    fn vec_nil_at_one(decl: &std::sync::Arc<InductiveDecl>) -> Exp {
+        Exp::Ann(
+            // No args: in checking mode the parameter comes from the expected type, so `nil`'s
+            // argument list is its NON-parameter arguments, of which it has none.
+            Box::new(Exp::InductiveCtor(decl.clone(), "nil".to_string(), vec![])),
+            Box::new(Exp::InductiveType(decl.clone(), vec![Exp::One, Exp::Unit])),
+        )
+    }
+
+    /// Nest `n` anonymous lambdas around `body`.
+    fn lams(n: usize, body: Exp) -> Exp {
+        (0..n).fold(body, |acc, _| Exp::Lam(Patt::Unit, Box::new(acc)))
+    }
+
+    /// **The gate for eigenius#138: an `InductiveRec` over an indexed family type-checks.**
+    ///
+    /// Before this, none could. `check_infer_inductive_rec` checked the motive against a UNARY
+    /// `D(params) → Sort` with the index list hard-coded empty, while `derive_minor_types` applied
+    /// the motive to the constructor's conclusion indices *and* the constructor value — an
+    /// `(m+1)`-ary application. For any non-empty index telescope the two could not both be
+    /// satisfied, so `Exp::InductiveRec` over `SimpleVec` had no well-typed form at all. The iota
+    /// tests reduced such terms; nothing could produce one that checked.
+    ///
+    /// The motive here is the constant `λ_idx. λ_v. One`, so every minor's type collapses to `One`
+    /// (or a Π chain ending in it) and the recursor's result type is `One`.
+    #[test]
+    fn inductive_rec_over_an_indexed_family_type_checks() {
+        let decl = simple_vec();
+        let rec = Exp::InductiveRec {
+            decl: decl.clone(),
+            // λ_idx. λ_v. One
+            motive: Box::new(lams(2, Exp::One)),
+            minors: vec![
+                // nil: no non-parameter arguments, so the minor IS `motive unit (nil A)` = `One`.
+                Exp::Unit,
+                // cons: (idx : One) (a : A) (xs : Vec A unit) (ih : motive unit xs) → One.
+                lams(4, Exp::Unit),
+            ],
+            // `nil(One)` : `SimpleVec(One, unit)` — an indexed major. Annotated because a
+            // parameterised constructor has no inferable type on its own.
+            major: Box::new(vec_nil_at_one(&decl)),
+        };
+        let result = check_infer(&mut ctx(), &rec)
+            .expect("an InductiveRec over an indexed family must type-check");
+        assert!(
+            matches!(result, Val::One),
+            "the constant motive makes the result type `One`; got {result:?}"
+        );
+    }
+
+    /// The motive that used to be REQUIRED is now rejected: a unary `λ_v. One` does not have the
+    /// `(m+1)`-ary shape a one-index family needs.
+    ///
+    /// **This test does not discriminate the fix on its own** — the term was rejected before it
+    /// too, just for a different reason. Pre-eigenius#138 the unary motive passed step 2 and the
+    /// MINORS then failed, because `derive_minor_types` was already applying the motive to the
+    /// conclusion indices; now the motive itself fails, with `Sort(1) ≠ Pi(…)`. Same verdict,
+    /// different cause, so the discriminating test is
+    /// `inductive_rec_over_an_indexed_family_type_checks` above, which fails against the old code.
+    ///
+    /// It earns its place guarding the other direction: the fix would regress silently if someone
+    /// made the motive check accept BOTH arities, and then the disagreement would come back as
+    /// leniency instead of an error.
+    #[test]
+    fn a_unary_motive_is_rejected_for_an_indexed_family() {
+        let decl = simple_vec();
+        let rec = Exp::InductiveRec {
+            decl: decl.clone(),
+            motive: Box::new(lams(1, Exp::One)),
+            minors: vec![Exp::Unit, lams(4, Exp::Unit)],
+            major: Box::new(vec_nil_at_one(&decl)),
+        };
+        check_infer(&mut ctx(), &rec)
+            .expect_err("a unary motive does not have the (m+1)-ary shape the minors need");
+    }
+
+    /// **The motive's domain must name the PARAMETER in the parameter slot, even when an index
+    /// binder shares the parameter's name.**
+    ///
+    /// Caught while writing eigenius#138's fix, not by a failing test: the first version built the
+    /// domain application as `Exp::Var(param_name)`, and the index Π binders wrap that body — so
+    /// for `data D (A : Set) : (A : One) → Set` the parameter reference resolved to the INDEX
+    /// binder and the motive's domain came out `D(idx, idx)` instead of `D(param, idx)`. It went
+    /// unnoticed because a constant motive checks against either, so the recursor still returned
+    /// `Ok`. A wrong domain silently accepted is the worst shape this defect could take.
+    ///
+    /// `motive_type_exp` reads parameters back from their VALUES, so there is no name to capture,
+    /// and names index binders `IDX#{k}`, which no ESL source can spell.
+    #[test]
+    fn motive_domain_is_not_captured_by_a_shadowing_index_binder() {
+        let shadow = std::sync::Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Shadow").unwrap(),
+            name: "Shadow".to_string(),
+            // Parameter `A` and index `A` — the same name, deliberately.
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Var("A".to_string()), Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let exp = motive_type_exp(&shadow, &[Val::One], Exp::Sort(2), 0);
+        // Peel the single index Π; the body is `Shadow(<param>, <index>) → Sort(2)`.
+        let Exp::Pi(_, _, body) = exp else {
+            panic!("expected one index binder");
+        };
+        let Exp::Arrow(dom, _) = *body else {
+            panic!("expected `D(...) -> Sort`");
+        };
+        let Exp::InductiveType(_, args) = *dom else {
+            panic!("expected an applied inductive domain");
+        };
+        assert_eq!(args.len(), 2, "one parameter + one index");
+        assert_eq!(
+            args[0],
+            Exp::One,
+            "the parameter slot must carry the PARAMETER value (`One`), not the index binder; \
+             got {:?}",
+            args[0]
+        );
+        assert_ne!(
+            args[0], args[1],
+            "parameter and index must not collapse to the same variable"
+        );
+    }
+
+    /// An anonymous parameter binder has no name to reference — the first version emitted a
+    /// placeholder into the parameter slot, which is a wrong type rather than a diagnostic.
+    /// Reading the value back has nothing to do with binder names, so this case is not special.
+    #[test]
+    fn motive_domain_handles_an_anonymous_parameter_binder() {
+        let anon = std::sync::Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Anon").unwrap(),
+            name: "Anon".to_string(),
+            params: vec![(Patt::Unit, Exp::Sort(1))],
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let exp = motive_type_exp(&anon, &[Val::One], Exp::Sort(2), 0);
+        let Exp::Arrow(dom, _) = exp else {
+            panic!("no indices, so no Pi: expected `D(param) -> Sort`");
+        };
+        let Exp::InductiveType(_, args) = *dom else {
+            panic!("expected an applied inductive domain");
+        };
+        assert_eq!(
+            args,
+            vec![Exp::One],
+            "the parameter value, not a placeholder"
+        );
+    }
+
     // ---------- D46 §7 — singleton-elim tests ----------
 
     fn mk_prop_decl(
