@@ -225,12 +225,38 @@ earlier session". #220 is sharper than that — the `Sort(1)` fallback survived 
   arm plus **one real defect** — `Exp::Data` is checkable only against `Set`, and unlike the `One`
   arm it has no `check_infer` fallback to rescue it.
 
+#### RESEED — DONE `2026-08-23`
+Timings in [reseed-timings-2026-08-23.md](reseed-timings-2026-08-23.md).
+
+| step | result |
+|---|---|
+| `reseed-lexicon-db.sh --umls-all` | **34 m 40 s**, 9,439,633 resources, 35 loads, 0 errors → `wordnet-umls-2026-08-23` |
+| `build-alignment-snapshot.sh` | 40,357 entries redefined from 38,389 merges, 0 errors → `wordnet-umls-aligned-2026-08-23` |
+| `measure-parse-rate.sh` (live reranker) | coverage **PASS**, expected-hits **62/62**, invalid-selected **0**, skeletons 170→**168**, readings 613→617 |
+| `demo/wrn-helicase/run.sh` | **56 Holds, 0 Fails, 0 errors**, all 6 steps incl. every wrapped-R warrant |
+
+**The WRN demo is where the P2 gate was actually exercised outside the bootstrap.** The lexicon
+chains contain zero `data` declarations, so Rule 23 returned at its first line for all 9.4 M
+resources. The WRN corpus declares **46** inductives, and they are the shape that matters:
+`data onco:TopDifferentialDependency : core:string -> core:string -> Prop` — an INDEX telescope of
+`core:string`, which is precisely where `decode_indices`' `_ => "urn:eigenius:core:Set"` fallback
+lived. Before the fix those indices decoded to `EigonClass(core:Set)`, a class nothing can inhabit.
+All 46 admitted. All end in `Prop`, so the constructor-argument universe constraint takes its
+impredicative exemption on every one — exercised as *not firing*, which is correct behaviour.
+
+**Parse gate: one red, accepted as noise (user decision `2026-08-23`).** `reading_correct`
+29/40 vs the tracked 30. Traced to two units flipping — one wrong→correct, one correct→wrong — and
+**both had byte-identical candidate sets** (8 and 24 candidates, unchanged). The regressed unit
+differs in a single WordNet sense of *impairment* (`n00403334` the act → `n14561618` the state);
+`cancer`, `exhibit` and `DNA Repair Pathway` are identical. `structure_correct_diagnostic` is 33/40,
+exactly the baseline. Two flips in 40 is the ~5 % the baseline records for temperature-0 live draws.
+**baseline.json was NOT updated** — it says update deliberately, never to make a red run go green,
+and a single live draw cannot distinguish noise from regression either way. Settling it properly
+means 2–3 more live draws to establish the band on this snapshot.
+
 #### NEXT
-**The reseed.** Every code item in P2 is closed and N4 has landed; `scripts/reseed-lexicon-db.sh
---umls-all` then `build-alignment-snapshot.sh` is the remaining gate, covering #188's core moves, N4
-and **#213** in one pass. After it: the WRN demo and both parse baselines, then **#217** (the
-decompiler flattens `data` to `resource`) — which wants a document-level ESL round-trip test first,
-since the existing round-trip suite is entirely term-level.
+**Fast-follow: #217–#220** (above). Then P2 closes out: every code item is done, N4 has landed, and the reseed above cleared it —
+including **#213**, which rode the same reseed as planned.
 
 **Port from `references/nanoda_lib` wherever there is a counterpart** (plan §3) — positivity,
 the index-aware motive, the whole level algebra. It also answers #138 outright: nanoda's motive and

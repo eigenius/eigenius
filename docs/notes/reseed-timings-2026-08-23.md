@@ -73,3 +73,24 @@ through `check_type`'s changed default arm.
 **To actually measure the gate**, the population is inductive declarations and the bootstrap has 42 —
 a ~2 s test, not a 35-minute reseed. The telescope walk is a full `check_type` per declaration where
 it was `check_positivity` alone, so it is not free; it is invisible at this scale.
+
+## 4. Where the gate WAS exercised: the WRN demo
+
+`demo/wrn-helicase/run.sh`, run after this reseed on a clean volume: **56 `Holds`, 0 `Fails`,
+0 errors**, all six steps including every wrapped-R warrant.
+
+Unlike the lexicon chains it loads **46 inductive declarations** (`experiments/publications/wrn-helicase`,
+the `onco:` predicates), and they are the shape that matters:
+
+```
+data onco:TopDifferentialDependency : core:string -> core:string -> Prop
+```
+
+An INDEX telescope of `core:string` — precisely where `decode_indices`' `_ => "urn:eigenius:core:Set"`
+fallback lived (§1). Before the fix those indices decoded to `EigonClass(core:Set)`, a class type
+nothing can inhabit. All 46 admitted through the new gate.
+
+All 46 conclude in `Prop`, so the constructor-argument universe constraint takes its impredicative
+exemption on every one. The constraint is therefore exercised as *not firing*, which is correct
+behaviour rather than a coverage hole — but it means the only chain-resident declaration that has
+ever tripped it is still `reasoning:JustifiedBy`.
