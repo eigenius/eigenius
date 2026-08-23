@@ -67,7 +67,7 @@ pub(super) fn shape_result(
         // Handle aggregate expressions specially
         let value = match &item.expression {
             Expression::Aggregate { op, .. } => {
-                let agg_key = format!("__agg_{op:?}");
+                let agg_key = format!("AGG#{op:?}");
                 binding.get(&agg_key).cloned().unwrap_or(Value::Integer(0))
             }
             _ => eval_expression(&item.expression, binding, layer, runtime)

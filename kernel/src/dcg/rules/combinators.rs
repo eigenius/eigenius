@@ -1964,7 +1964,7 @@ fn sem_arity(sem: &Exp) -> Option<usize> {
         v = g
             .apply(crate::nbe::val::Val::Nt(crate::nbe::val::Neut::Gen(
                 n,
-                format!("__arity{n}"),
+                format!("AR#{n}_"),
             )))
             .ok()?;
         n += 1;

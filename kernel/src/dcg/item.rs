@@ -263,7 +263,7 @@ fn sem_arity_of(sem: &Exp) -> Option<usize> {
         v = g
             .apply(crate::nbe::val::Val::Nt(crate::nbe::val::Neut::Gen(
                 n,
-                format!("__ar{n}"),
+                format!("AR#{n}_"),
             )))
             .ok()?;
         n += 1;

@@ -590,7 +590,7 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     // freely (Baldridge's `skillfully` is `(s\◁np)/▷(s\◁np)`, both slashes permutative).
     let m_all = mode_value(layer, MODE_ALL)?;
 
-    let nvar = Exp::Var("__adv_num".to_string());
+    let nvar = Exp::Var("ADV#num".to_string());
     let clause = |feat: Exp| {
         ctor(
             "bwd",
@@ -604,7 +604,7 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
 
     // 1. Forward pre-modifier — the clause feature is BOUND, so the adverb hands back whatever it
     //    consumed (`adj`, `pred`, `fin`, …) instead of collapsing it to one value.
-    let bound = clause(Exp::Var("__adv_fin".to_string()));
+    let bound = clause(Exp::Var("ADV#fin".to_string()));
     let fwd_mod = ctor("fwd", vec![m_all.clone(), bound.clone(), bound]);
 
     // 2. Backward VP modifier — verbal only; returns the `fin` it accepts, so nothing to bind.

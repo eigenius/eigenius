@@ -132,7 +132,7 @@ pub fn derive_minor_type(
         .enumerate()
         .map(|(i, a)| match a.patt() {
             Patt::Var(n) => n.clone(),
-            _ => format!("__a_{i}"),
+            _ => format!("A#{i}"),
         })
         .collect();
     let arg_var_exps: Vec<Exp> = arg_names.iter().map(|n| Exp::Var(n.clone())).collect();
@@ -352,6 +352,104 @@ mod tests {
                 other => return (count, other),
             }
         }
+    }
+
+    /// **eigenius#92 step 2 — the IH binder cannot capture a constructor argument.**
+    ///
+    /// The minor's shape is `Π args… Π ihs… motive (c args…)`, so the IH binders wrap a conclusion
+    /// that refers to the constructor's arguments BY NAME. The IH binder used to be
+    /// `__ih_{rec_pos}` — a legal ESL identifier — so a constructor argument of that name was
+    /// shadowed, and the conclusion `motive (c __ih_0 …)` picked up the induction hypothesis
+    /// instead of the argument. A wrong term in the conclusion, silently, with no diagnostic.
+    ///
+    /// `step : (__ih_0 : One) → D → D` is that constructor. The recursive second argument produces
+    /// one IH, which under the old name was also `__ih_0` and sat innermost.
+    ///
+    /// A constant motive cannot see the difference, so the motive here is `λx. Id(D, x, x)` — it
+    /// puts its argument in the result, letting the test read which variable reached the
+    /// constructor application. The binder is now `IH#{rec_pos}`, and `#` cannot occur in an ESL
+    /// identifier (`esl/lexer.rs:485`).
+    #[test]
+    fn ih_binder_does_not_capture_a_constructor_argument() {
+        let s = self_ref("D");
+        let d_ty = Exp::InductiveType(s, Vec::new());
+        let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:D").unwrap(),
+            name: "D".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "base".to_string(),
+                    typ: d_ty.clone(),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "step".to_string(),
+                    // (__ih_0 : One) -> D -> D
+                    typ: Exp::Pi(
+                        Patt::Var("__ih_0".to_string()),
+                        Box::new(Exp::One),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(d_ty.clone()),
+                            Box::new(d_ty.clone()),
+                        )),
+                    ),
+                },
+            ],
+        });
+
+        // motive = λx. Id(D, x, x) — surfaces its argument in the result type.
+        let motive = Val::Lam(Clos::new(
+            Patt::Var("x".to_string()),
+            Exp::Id(
+                Box::new(d_ty),
+                Box::new(Exp::Var("x".to_string())),
+                Box::new(Exp::Var("x".to_string())),
+            ),
+            Rho::Nil,
+        ));
+
+        let minor = derive_minor_type(&decl, 1, &[], &motive, &EvalCtx::Pure)
+            .expect("derive_minor_type for `step`");
+
+        // Walk the three binders — the `One` argument, the recursive `D` argument, the IH —
+        // applying a distinguishable value to each, and read back the conclusion.
+        let mut cursor = minor;
+        let mut applied = Vec::new();
+        while let Val::Pi(_, clos) = cursor {
+            let n = applied.len() + 1;
+            let gen = Val::Nt(crate::nbe::val::Neut::Gen(n, format!("arg{n}_")));
+            applied.push(gen.clone());
+            cursor = clos.apply(gen).expect("apply pi clos");
+        }
+        assert_eq!(applied.len(), 3, "two ctor args plus one IH");
+
+        // Conclusion is `Id(D, step a b, step a b)`; pull out the constructor application.
+        let body = readback_val(0, &cursor);
+        let Exp::Id(_, lhs, _) = body else {
+            panic!("motive is `λx. Id(D, x, x)`, so the conclusion is an Id; got {body:?}")
+        };
+        let Exp::InductiveCtor(_, ctor, ctor_args) = *lhs else {
+            panic!("the Id's endpoint is the constructor application")
+        };
+        assert_eq!(ctor, "step");
+        assert_eq!(ctor_args.len(), 2);
+        // The FIRST binder — the `One` argument named `__ih_0` — must be what reaches the
+        // constructor's first slot. Under the old binder name the THIRD (the IH) did.
+        assert_eq!(
+            ctor_args[0],
+            readback_val(0, &applied[0]),
+            "the constructor's `__ih_0` argument must be the one declared, not the induction \
+             hypothesis that shadowed it; got {:?}",
+            ctor_args[0]
+        );
+        assert_ne!(
+            ctor_args[0],
+            readback_val(0, &applied[2]),
+            "the IH must not appear in the constructor application"
+        );
     }
 
     #[test]
