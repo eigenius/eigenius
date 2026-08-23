@@ -31,6 +31,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use crate::ontology::well_known as wk;
 use serde_json::Value;
 
 /// A term the printer cannot express in ESL, with the path to the offending node.
@@ -815,6 +816,21 @@ fn print_resource(
         names.push(format!("{c_ns}:{c_local}"));
     }
 
+    // An inductive DECLARATION has its own surface form, and printing it as a `resource` block
+    // does not round-trip: the text recompiles through the resource path, never reaching
+    // `compile_data`, so the constructor telescope is not reconstructed (eigenius#217).
+    //
+    // In practice it did not even get that far — `core:ctors` holds embedded `InductiveCtor`
+    // resources, and `print_property_value` has no surface for those, so decompiling ANY inductive
+    // failed outright with "no ESL surface for property value". Measured over the shipped
+    // ontologies: 5 of 5 inductives failed; every other resource printed.
+    if classes
+        .iter()
+        .any(|c| c.as_str() == Some(wk::INDUCTIVE_TYPE))
+    {
+        return print_data(obj, &id_ns, &id_local, ns, path, layout);
+    }
+
     let mut out = format!("resource {id_ns}:{id_local} : {} {{\n", names.join(", "));
     for (k, v) in obj {
         if k == "@id" || k == IS_A {
@@ -829,6 +845,187 @@ fn print_resource(
     }
     out.push_str("}\n");
     Ok(out)
+}
+
+/// Print a `core:InductiveType` resource as the `data` declaration it came from.
+///
+/// Inverts `esl::compile`'s `compile_data`: the parameter telescope from `core:type_params`, the
+/// index telescope from `core:indices`, the result sort from `core:result_sort`, and each
+/// constructor from `core:ctors` — positional (`core:arg_types`) or typed (`core:ctor_type`),
+/// whichever the resource carries, matching the two forms the compiler emits.
+fn print_data(
+    obj: &serde_json::Map<String, Value>,
+    id_ns: &str,
+    id_local: &str,
+    ns: &mut Namespaces,
+    path: &str,
+    layout: Layout,
+) -> Result<String, PrintError> {
+    let bad = |m: String| PrintError {
+        message: m,
+        path: path.to_string(),
+    };
+
+    let telescope = |key: &str, ns: &mut Namespaces| -> Result<Vec<String>, PrintError> {
+        let Some(arr) = obj.get(key).and_then(Value::as_array) else {
+            return Ok(Vec::new());
+        };
+        arr.iter()
+            .map(|entry| {
+                let e = entry
+                    .as_object()
+                    .ok_or_else(|| bad(format!("`{key}` entry is not a resource")))?;
+                let name = e
+                    .get(wk::PARAM_NAME)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| bad(format!("`{key}` entry has no `param_name`")))?;
+                let kind = e
+                    .get(wk::PARAM_KIND)
+                    .ok_or_else(|| bad(format!("`{key}` entry has no `param_kind`")))?;
+                Ok(format!("{name} : {}", print_kind(kind, ns, path)?))
+            })
+            .collect()
+    };
+
+    let params = telescope(wk::TYPE_PARAMS, ns)?;
+    let indices = telescope(wk::INDICES, ns)?;
+
+    // `core:result_sort` is a `core:Level` tree; absent defaults to `Set` (`Succ(Zero)`).
+    let result = match obj.get(wk::RESULT_SORT) {
+        Some(v) => sort_text(v, ns, path)?,
+        None => "Set".to_string(),
+    };
+
+    let mut header = format!("data {id_ns}:{id_local}");
+    if !params.is_empty() {
+        let _ = write!(header, "({})", params.join(", "));
+    }
+    // The header's type is `index₁ -> … -> resultSort`. It is omitted only when there are no
+    // indices AND the result is the `Set` default, which is what `compile_data` assumes.
+    if !indices.is_empty() || result != "Set" {
+        let mut chain: Vec<String> = indices
+            .iter()
+            .map(|p| p.rsplit(" : ").next().unwrap_or(p).to_string())
+            .collect();
+        chain.push(result);
+        let _ = write!(header, " : {}", chain.join(" -> "));
+    }
+
+    let ctors = obj
+        .get(wk::CTORS)
+        .and_then(Value::as_array)
+        .map_or(&[][..], |a| a);
+    let mut lines = Vec::with_capacity(ctors.len());
+    for (i, c) in ctors.iter().enumerate() {
+        let cpath = format!("{path}.ctors[{i}]");
+        let co = c
+            .as_object()
+            .ok_or_else(|| bad(format!("`ctors[{i}]` is not a resource")))?;
+        let name = co
+            .get(wk::CTOR_NAME)
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad(format!("`ctors[{i}]` has no `ctor_name`")))?;
+        if let Some(ct) = co.get(wk::CTOR_TYPE) {
+            // Typed form: the whole Π chain is one D47 term.
+            lines.push(format!(
+                "    {name} : {},",
+                print_type_expr_with(ct, ns, layout, 4)?
+            ));
+        } else {
+            let args = co
+                .get(wk::ARG_TYPES)
+                .and_then(Value::as_array)
+                .map_or(&[][..], |a| a);
+            if args.is_empty() {
+                lines.push(format!("    {name},"));
+            } else {
+                let rendered: Vec<String> = args
+                    .iter()
+                    .map(|a| print_arg_type(a, ns, &cpath))
+                    .collect::<Result<_, _>>()?;
+                lines.push(format!("    {name}({}),", rendered.join(", ")));
+            }
+        }
+    }
+    Ok(format!("{header} {{\n{}\n}}\n", lines.join("\n")))
+}
+
+/// An `InductiveArgType` as constructor-argument source: `type_name` applied to `type_args`.
+fn print_arg_type(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
+    let o = v.as_object().ok_or_else(|| PrintError {
+        message: "constructor argument is not a resource".into(),
+        path: path.to_string(),
+    })?;
+    let head = o.get(wk::TYPE_NAME).ok_or_else(|| PrintError {
+        message: "constructor argument has no `type_name`".into(),
+        path: path.to_string(),
+    })?;
+    let head = print_kind(head, ns, path)?;
+    let args = o
+        .get(wk::TYPE_ARGS)
+        .and_then(Value::as_array)
+        .map_or(&[][..], |a| a);
+    if args.is_empty() {
+        return Ok(head);
+    }
+    let rendered: Vec<String> = args
+        .iter()
+        .map(|a| print_arg_type(a, ns, path))
+        .collect::<Result<_, _>>()?;
+    Ok(format!("{head}({})", rendered.join(", ")))
+}
+
+/// A kind or type reference — the `eigentt:TypeExpr` head that `Compiler::lower_kind` produced.
+/// Inverts it: `Var` is a bare parameter name, `ConstRef` a qualified IRI, `Sort` a sort keyword.
+fn print_kind(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
+    let bad = |m: &str| PrintError {
+        message: m.to_string(),
+        path: path.to_string(),
+    };
+    let o = v.as_object().ok_or_else(|| bad("kind is not a TypeExpr"))?;
+    let ctor = o
+        .get("ctor")
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad("kind has no ctor"))?;
+    let arg0 = || {
+        o.get("args")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+    };
+    match ctor {
+        "Var" => Ok(arg0()
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad("`Var` takes a name"))?
+            .to_string()),
+        "ConstRef" => {
+            let iri = arg0()
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("`ConstRef` takes an IRI"))?;
+            let (a, b) = ns.split(iri).map_err(|m| bad(&m))?;
+            Ok(format!("{a}:{b}"))
+        }
+        "Sort" => sort_text(arg0().ok_or_else(|| bad("`Sort` takes a level"))?, ns, path),
+        other => Err(bad(&format!("`{other}` is not a kind"))),
+    }
+}
+
+/// A `core:Level` as the sort keyword the surface spells it with: `Prop`, `Set`, `Type n`, or
+/// `Sort <level>` when the level is not a numeral.
+fn sort_text(level: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
+    if let Some(n) = level_as_nat(level) {
+        return Ok(match n {
+            0 => "Prop".to_string(),
+            1 => "Set".to_string(),
+            n => format!("Type {}", n - 1),
+        });
+    }
+    let mut p = Printer {
+        ns,
+        scope: Vec::new(),
+        reserved: BTreeSet::new(),
+        layout: Layout::Flat,
+    };
+    Ok(format!("Sort {}", p.print_level(level, path)?))
 }
 
 fn print_property_value(
