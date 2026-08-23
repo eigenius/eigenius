@@ -69,7 +69,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "\
 core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
-eigentt-type-fragment:24ac3b6365ae2d81a1ff9c192f3f1774fb9261b042625ea6958cfef73ce5c3fb
+eigentt-type-fragment:9e683d518466eaa88ab6279ba7bed5ad8c9a8ffbe590253d12e82de029fe3499
 program:224bb234a8651afdeb5144dca0e609afded5a633dd6495f4ae588e44bf855d4e
 reflection:c4c613c9b8391371f6c3346c2248f79f846ae674f5022b629665eee556cdb9a8
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf

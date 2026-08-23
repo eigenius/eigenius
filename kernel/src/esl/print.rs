@@ -581,17 +581,14 @@ pub fn print_value_term(
     Ok(format!("{alias}:{ctor}({})", parts.join(", ")))
 }
 
-/// Read a `Sort`'s level argument as a numeral, accepting both encodings.
+/// Read a `Sort`'s level argument as a numeral.
 ///
-/// Since eigenius#188 the argument is an `eigentt:Level` tree, so `Set` arrives as
-/// `Succ(Zero)`. The bare-integer arm is the pre-#188 form, which persisted stores still carry
-/// and `program::eigentt_type_mirror::decode_level_json` still accepts.
+/// Since eigenius#188 the argument is an `eigentt:Level` tree, so `Set` arrives as `Succ(Zero)`.
+/// The pre-#188 bare integer is NOT accepted: retyping the ctor moved the bootstrap manifest, so
+/// every store carrying the old form had to be reseeded, and a reseed re-encodes from source.
 ///
 /// `None` for a level that is not a closed `Succ`-chain — there is no ESL surface syntax for one.
 fn level_as_nat(v: &Value) -> Option<u64> {
-    if let Some(n) = v.as_u64() {
-        return Some(n);
-    }
     let obj = v.as_object()?;
     let mut n = 0u64;
     let mut cur = obj;

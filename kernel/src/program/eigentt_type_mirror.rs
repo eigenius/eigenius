@@ -253,22 +253,18 @@ fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
     }
 }
 
-/// Decode an `eigentt:Level` value tree, **accepting the pre-eigenius#188 bare integer**.
+/// Decode an `eigentt:Level` value tree.
 ///
-/// The legacy arm is deliberate and permanent, not a migration window. Terms encoded before
-/// slice 4 carry `{"ctor": "Sort", "args": [1]}`, and they live on persisted stores this
-/// repository does not contain — the chain sources here re-encode from ESL at bootstrap, a served
-/// RocksDB store does not. One arm costs nothing and removes the need to rewrite history; without
-/// it every such store fails to decode a `Sort`, and the reseed becomes mandatory rather than
-/// merely owed.
+/// **There is no legacy arm for the pre-eigenius#188 bare integer, deliberately.** One was written
+/// and removed: retyping `Sort`'s argument moves the bootstrap manifest, every persisted store
+/// then fails to resume with `ManifestDrift`, and the reseed that answers it rewrites the chain
+/// from source with this encoder. So no term in the old form can ever reach this function — the
+/// arm was a compatibility layer for a state that cannot occur.
 fn decode_level_json(v: &serde_json::Value) -> Result<crate::nbe::level::Level, DecodeError> {
     use crate::nbe::level::Level;
-    if let Some(n) = v.as_u64() {
-        return Ok(Level::of_nat(n as usize));
-    }
     let obj = v
         .as_object()
-        .ok_or_else(|| wrong_shape("Sort", 0, "expected a Level value or a numeral"))?;
+        .ok_or_else(|| wrong_shape("Sort", 0, "expected an eigentt:Level value"))?;
     let name = obj
         .get("ctor")
         .and_then(|c| c.as_str())
@@ -1039,23 +1035,6 @@ mod tests {
         assert_eq!(decoded, Exp::Sort(l));
     }
 
-    /// **The legacy numeral still decodes.** Terms committed before eigenius#188 carry
-    /// `{"ctor": "Sort", "args": [1]}`, and they sit on persisted stores this repository does not
-    /// contain. Without this arm every such store fails to decode a `Sort` and the reseed stops
-    /// being optional. Pinned so a later tidy-up does not quietly drop it.
-    #[test]
-    fn decodes_the_pre_188_numeral_form() {
-        let layer = empty_layer();
-        for n in 0..4usize {
-            let legacy = Value::Json(ctor_obj("Sort", vec![json!(n)]));
-            assert_eq!(
-                decode_type(&legacy, &layer).unwrap(),
-                Exp::sort(n),
-                "legacy `Sort({n})` must decode to the same level as the tree form"
-            );
-        }
-    }
-
     // --- eigenius#71 / D49 — literal Exp variants ---
 
     #[test]
@@ -1148,7 +1127,10 @@ mod tests {
             ctor_obj("LitInt", vec![json!(42)]),
             ctor_obj("LitString", vec![json!("s")]),
             ctor_obj("LitFloat", vec![json!(1.5)]),
-            ctor_obj("Sort", vec![json!(1)]),
+            ctor_obj(
+                "Sort",
+                vec![ctor_obj("Succ", vec![ctor_obj("Zero", vec![])])],
+            ),
             ctor_obj("UnitVal", vec![]),
         ] {
             decode_type(&Value::Json(pre_existing.clone()), &layer)

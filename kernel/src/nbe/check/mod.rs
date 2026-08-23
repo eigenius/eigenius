@@ -1496,7 +1496,7 @@ mod tests {
 
     /// eigenius#136 — `Set : Set` is rejected in checking mode.
     ///
-    /// Until this was fixed, `(Exp::Sort(_), Val::sort(1))` admitted every
+    /// Until this was fixed, `(Exp::Sort(_), Val::Sort(1))` admitted every
     /// universe against `Set`, so `Set : Set` type-checked and Girard's
     /// paradox was expressible in a term the commit gate (Rule 21) checks.
     #[test]
@@ -4031,7 +4031,7 @@ mod tests {
         };
 
         // A genuine Prop argument must still pass. (`Exp::One` is NOT one — it inhabits `Sort(1)`
-        // per the `(Exp::One, Val::sort(1))` arm — so this needs a parameterless inductive in
+        // per the `(Exp::One, Val::Sort(l)) if l.is_nat(1)` arm — so this needs a parameterless inductive in
         // `Sort(0)`.)
         let prop_decl = InductiveDecl {
             iri: Iri::parse("urn:eigenius:test:TrueP").unwrap(),

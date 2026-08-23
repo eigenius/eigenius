@@ -211,7 +211,7 @@ fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
         "ctor": "Ann",
         "args": [
             {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]},
-            {"ctor": "Sort", "args": [0]}
+            {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}
         ]
     }));
     let errors = rejection_errors(annotated, "a class annotated as Prop");

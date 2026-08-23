@@ -244,7 +244,7 @@ fn renamed_binders_do_not_capture() {
     // exists G#0 : Set => x0(G#0)   — `x0` is free, and is the printer's first choice of name.
     let term = serde_json::json!({"ctor": "Sig", "args": [
         "G#0",
-        {"ctor": "Sort", "args": [1]},
+        {"ctor": "Sort", "args": [level_tree(1)]},
         {"ctor": "App", "args": [{"ctor": "Var", "args": ["x0"]}, {"ctor": "Var", "args": ["G#0"]}]},
     ]});
     let printed = print_type_expr(&term, &mut Namespaces::new()).expect("prints");
@@ -336,8 +336,8 @@ fn sorts_round_trip_in_every_position() {
     for level in [0u64, 1, 2, 7] {
         // eigenius#188: `Sort`'s argument is an `eigentt:Level` tree — `Set` is `Succ(Zero)`,
         // not `1`. Built here the way the encoder builds it, so the comparison below is against
-        // the encoding a fresh compile produces. The legacy numeral form is exercised separately
-        // by `legacy_numeral_sorts_still_round_trip`.
+        // the encoding a fresh compile produces. There is no numeral form to test: retyping the
+        // ctor moved the manifest, and the reseed that forced re-encodes every term from source.
         let s = serde_json::json!({"ctor": "Sort", "args": [level_tree(level)]});
         let cases = [
             ("bare", s.clone()),
@@ -403,34 +403,6 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
         }
     }
     Err("no rt:term".into())
-}
-
-/// **The pre-eigenius#188 numeral encoding still round-trips.**
-///
-/// Persisted stores carry `{"ctor": "Sort", "args": [1]}` and do not re-encode from source the
-/// way this repository's chains do. The printer reads it (`level_as_nat`'s integer arm) and the
-/// codec decodes it, so such a term still prints to `Set` and recompiles — into the TREE form,
-/// which is the point: reading the old encoding is supported, writing it is not.
-#[test]
-fn legacy_numeral_sorts_still_round_trip() {
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
-    let layer = ctx.head();
-    for (level, expected) in [(0u64, "Prop"), (1, "Set"), (2, "Type 1")] {
-        let legacy = serde_json::json!({"ctor": "Sort", "args": [level]});
-        let mut ns = Namespaces::new();
-        let printed = print_type_expr(&legacy, &mut ns).expect("legacy numeral prints");
-        assert_eq!(
-            printed, expected,
-            "legacy `Sort({level})` prints as the surface keyword"
-        );
-        let back = wrap_and_compile(&printed, &ns, layer)
-            .unwrap_or_else(|e| panic!("legacy `Sort({level})` must recompile: {e}"));
-        assert_eq!(
-            back,
-            serde_json::json!({"ctor": "Sort", "args": [level_tree(level)]}),
-            "recompiling the legacy form yields the tree form"
-        );
-    }
 }
 
 /// A polymorphic level has no ESL surface syntax (N3 §3), so printing must FAIL loudly rather

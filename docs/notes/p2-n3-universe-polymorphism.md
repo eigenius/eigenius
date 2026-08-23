@@ -115,10 +115,12 @@ So migration has two parts:
    `eigentt:Level` reference. That is a bootstrap-ontology edit — the manifest moves, and a reseed is
    owed. **Fold #213 into that reseed** (the plan's §5): it is the one bootstrap-touching item left
    in P2, and #213 costs a reseed of its own to adopt.
-2. **Already-persisted terms must still decode.** The repo has none, but the served RocksDB stores
-   are not in the repo. **Verify against a snapshot before committing to a decode strategy** — the
-   cheap answer is for the decoder to accept a bare integer as `Succ^n(Zero)` alongside the new
-   form, which costs one arm and removes the question.
+2. ~~**Already-persisted terms must still decode.**~~ **Withdrawn `2026-08-23`.** There is no
+   backwards-compatibility problem to solve: retyping the ctor moves the manifest, every persisted
+   store then fails to resume with `ManifestDrift`, and **the reseed that answers it rewrites the
+   chain from source**. No term in the old encoding can survive to be read by the new code, so a
+   legacy decode arm is a compatibility layer for a state that cannot occur. One was written and
+   removed.
 
 ## 5. What this buys, and the honest counterweight
 
@@ -220,8 +222,7 @@ unexpected shape should not take down the commit gate.
 
 **Slice 4 — the chain inductive and the codec (`2026-08-23`).** `eigentt:Level` declared in the
 eigentt bootstrap layer with the five constructors; `TypeExpr`'s `Sort` argument retyped from
-`core:integer` to it. `encode_level_json` / `decode_level_json` in the D47 codec, the decoder
-accepting the pre-#188 bare integer permanently. Manifest moved on exactly one layer,
+`core:integer` to it. `encode_level_json` / `decode_level_json` in the D47 codec. Manifest moved on exactly one layer,
 `eigentt-type-fragment`; **#213 rides that reseed**.
 
 Two corrections this slice forced:
@@ -229,7 +230,9 @@ Two corrections this slice forced:
 - **§4's "no chain source carries an encoded sort" measured the wrong thing.** It grepped committed
   JSON; the bootstrap ontologies carry `type_expr(...)` in ESL, which is encoded at build time.
   Retyping the ctor failed Rule 16 across `lexicon`, `closed-class` and others immediately. Those
-  terms re-encode from source so nothing had to be rewritten — but the surface was not zero.
+  terms re-encode from source so nothing had to be rewritten — but the surface was not zero. That
+  same fact is why §4's second bullet was withdrawn: a reseed rewrites the chain, so nothing in the
+  old encoding survives.
 - **§3's "no ESL syntax" has a sharper edge than stated.** A polymorphic level cannot be printed as
   source at all. The printer now fails loudly rather than emitting `Sort(Succ(Zero))` ctors that
   reparse into nothing, and `a_polymorphic_level_refuses_to_print_rather_than_emitting_garbage`
@@ -237,6 +240,12 @@ Two corrections this slice forced:
   and a polymorphic term is **chain-writable and source-unwritable**. Nothing on a chain today is
   affected, since every level is a numeral — but slice 5 introduces the first terms that cannot
   round-trip through ESL, and that is a constraint on it rather than a surprise to discover.
+- **A legacy decode arm was written and removed** (`2026-08-23`, on review). The reasoning that
+  produced it — served stores carry the old form and do not re-encode — ignored that the manifest
+  move makes those stores unresumable, so the reseed is not optional and it rewrites the chain.
+  This is the "bridge on top of a design already concluded" shape the project posture names; the
+  giveaway was calling it "permanent rather than a migration window" while the state it served
+  could not arise.
 
 **Remaining slices**, in order:
 
