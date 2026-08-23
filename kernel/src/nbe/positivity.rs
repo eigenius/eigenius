@@ -44,16 +44,18 @@
 //!   This module rejected that shape until eigenius#92, on the grounds that
 //!   Phase 11b's iota reduction cannot construct the corresponding induction
 //!   hypothesis and that accepting it "would create a soundness gap". **The
-//!   reading was wrong, and correcting it is what let eigenius#92 land ahead
-//!   of eigenius#138.** Both sites that would build the hypothesis consume
-//!   [`recursive_arg_shape`], and both currently skip an argument whose
-//!   `binders` are non-empty — so the minor's type carries no IH binder and
-//!   iota applies none. Nothing is derived that is not also discharged. The
-//!   eliminator is *weaker* for such an argument (no induction through it),
-//!   which is incompleteness, not unsoundness. Pinned by
-//!   `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`
-//!   (`nbe/eval/iota.rs`). Generalizing the IH to `Π a:A. C(arg a)` is the
-//!   follow-on, after eigenius#138.
+//!   reading was wrong**: the two sites that build the hypothesis both consume
+//!   [`recursive_arg_shape`], so they skipped such an argument identically —
+//!   a *missing* hypothesis, not a wrong one, which is incompleteness rather
+//!   than unsoundness. That is what let eigenius#92's routing land ahead of
+//!   eigenius#138.
+//!
+//!   Since step 2 the hypothesis exists: `derive_minor_type` emits
+//!   `Π b₁:B₁ … B_k. C(idx…) (arg b₁ … b_k)` and `iota_reduce_impl` supplies
+//!   `λ b₁ … b_k. rec … (arg b₁ … b_k)`, so induction THROUGH a reflexive
+//!   argument computes. Pinned by
+//!   `higher_order_positive_arg_gets_a_function_typed_ih_in_both_sites` and
+//!   `iota_recurses_through_a_higher_order_argument` (`nbe/eval/iota.rs`).
 //!
 //! ### Rejected
 //! - **Negative occurrence** — `Bad { mk : (Bad → Nat) → Bad }`. The
@@ -102,10 +104,11 @@ pub struct RecArgShape<'a> {
 impl RecArgShape<'_> {
     /// A direct recursive argument — no binders in front of the occurrence.
     ///
-    /// The eliminator's two halves currently handle **only** this case. Both skip a higher-order
-    /// argument, consistently, so the minor's type and the iota reduction still agree; see the
-    /// module docs. Removing this guard is the follow-on to eigenius#138, and it must be removed
-    /// from `derive_minor_type` and `iota_reduce_impl` in the same change.
+    /// Both halves of the eliminator handle either case since eigenius#92 step 2, but they build
+    /// DIFFERENT shapes: a direct argument gets `C(idx…) arg`, a higher-order one gets
+    /// `Π b₁:B₁ … B_k. C(idx…) (arg b₁ … b_k)`. `derive_minor_type` and `iota_reduce_impl` branch
+    /// on this together — changing one without the other is what makes an eliminator's halves
+    /// disagree (eigenius#138 was that defect in a different pair of functions).
     pub fn is_direct(&self) -> bool {
         self.binders.is_empty()
     }
@@ -665,11 +668,10 @@ mod tests {
     /// `cat_fin_forall`, `cat_num_forall`), so wiring the pass into the declaration path with the
     /// old criterion would have rejected `ontologies/lexicon/lexicon-ontology.esl`.
     ///
-    /// The eliminator does not yet build an induction hypothesis for such an argument, so `Foo`
-    /// admits no induction through `mk`. That is a completeness limit, not a soundness one — see
-    /// the module docs and
-    /// `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota` in
-    /// `nbe/eval/iota.rs`, which pins that both halves of the eliminator skip it consistently.
+    /// Step 1 admitted the declaration while the eliminator still skipped such an argument — a
+    /// completeness limit, not a soundness one, since both halves skipped it identically. Step 2
+    /// gave it a function-typed induction hypothesis, so induction through `mk` now computes; see
+    /// `iota_recurses_through_a_higher_order_argument` in `nbe/eval/iota.rs`.
     ///
     /// `rejects_negative_occurrence` and `rejects_disguised_inductive_negative_occurrence` are the
     /// other side of this line and still pass unchanged: `(Foo → Nat) → Foo` stays rejected.

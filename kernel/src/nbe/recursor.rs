@@ -31,12 +31,11 @@
 //! arguments — matching the iota-reduction order in
 //! [`eval::iota_reduce`](super::eval).
 //!
-//! Restricted to DIRECT recursive arguments — `positivity::RecArgShape::is_direct`. Since
-//! eigenius#92 the positivity checker admits higher-order positive arguments too, which this
-//! function deliberately still skips: no IH binder is emitted for one, and
-//! `eval::iota_reduce_impl` applies none, so the minor's type and the reduction agree. The
-//! generalization is an IH of function type (`Π x:T. C(arg x)`), landing here and in iota
-//! together, after eigenius#138.
+//! A recursive argument may be DIRECT (`D(params)(idx…)`) or HIGHER-ORDER POSITIVE
+//! (`(b₁:B₁) → … → D(params)(idx…)`, eigenius#92). Both contribute an IH; the higher-order one's
+//! is itself a Π — `Π b₁:B₁ … B_k. C(idx…) (arg b₁ … b_k)`. `positivity::recursive_arg_shape` is
+//! the single classifier, shared with `eval::iota_reduce_impl`, so the binders emitted here and
+//! the applications made there cannot drift apart.
 //!
 //! Used by Phase 11b step 5 (type checking for `Exp::InductiveRec`) to
 //! verify that user-supplied minors have the right type.
@@ -179,41 +178,68 @@ pub fn derive_minor_type(
         .enumerate()
         .filter(|(_, a)| {
             // eigenius#92: `positivity::recursive_arg_shape` is the ONE definition of "this
-            // argument is a recursive occurrence"; iota consults the same function so the
+            // argument is a recursive occurrence"; iota consults the same function, so the
             // minor's binders and the reduction's applications cannot drift apart.
             //
-            // `is_direct()` restricts this to `D(params)(indices)`. A higher-order positive
-            // argument `(a : A) → D(…)` is admitted by positivity but skipped here — no IH
-            // binder — and skipped identically by iota, so the two still agree. Lifting the
-            // guard means emitting `Π a:A. motive idx… (arg a)` here and `λ a. rec (arg a)`
-            // there, in one change, after eigenius#138.
+            // Step 2 removed the `is_direct()` guard that stood here: a higher-order positive
+            // argument now contributes an IH too, of FUNCTION type. See the loop below.
             matches!(a, MinorArg::Value { typ, .. }
-                if crate::nbe::positivity::recursive_arg_shape(decl, typ)
-                    .is_some_and(|s| s.is_direct()))
+                if crate::nbe::positivity::recursive_arg_shape(decl, typ).is_some())
         })
         .map(|(i, _)| i)
         .collect();
     for (rec_pos, &arg_idx) in recursive_indices.iter().enumerate().rev() {
         let arg_var = arg_var_exps[arg_idx].clone();
-        // D48: the IH type for `arg : D(params)(arg_idx_1, ..., arg_idx_m)`
-        // is `motive arg_idx_1 ... arg_idx_m arg`. For non-indexed decls
-        // `arg_idx_*` is empty, recovering the pre-D48 `motive arg` shape.
         let arg_typ = match &arg_specs[arg_idx] {
             MinorArg::Value { typ, .. } => typ.clone(),
             MinorArg::Size { .. } => unreachable!("size args aren't recursive"),
         };
-        let arg_idx_exps: Vec<Exp> = match &arg_typ {
-            Exp::InductiveType(_, all_args) if all_args.len() >= n_params => {
-                all_args[n_params..].to_vec()
-            }
-            _ => Vec::new(),
-        };
+        let shape = crate::nbe::positivity::recursive_arg_shape(decl, &arg_typ)
+            .expect("`recursive_indices` filtered on exactly this");
+
+        // The occurrence's binders (eigenius#92 step 2). Empty for a DIRECT recursive argument
+        // `D(params)(idx…)`, non-empty for a higher-order positive one
+        // `(b₁ : B₁) → … → (b_k : B_k) → D(params)(idx…)`.
+        //
+        // A named binder keeps its declared name, because the occurrence's index expressions are
+        // written against it — `(b : Nat) → D(params)(f b)` refers to `b`. An anonymous binder
+        // (`Nat → D`, the common shape) gets `HB#{rec_pos}_{j}`: the IH has to APPLY `arg` to it,
+        // which needs a name, and `#` cannot occur in an ESL identifier, so nothing the
+        // declaration could name collides with it.
+        let binder_names: Vec<String> = shape
+            .binders
+            .iter()
+            .enumerate()
+            .map(|(j, (patt, _))| match patt {
+                Patt::Var(n) => n.clone(),
+                _ => format!("HB#{rec_pos}_{j}"),
+            })
+            .collect();
+
+        // D48: `motive idx₁ … idx_m` at the occurrence's own indices. These sit INSIDE the
+        // binders above, since an index expression may mention them.
+        let arg_idx_exps: Vec<Exp> = shape.args[n_params.min(shape.args.len())..].to_vec();
         let motive_at_arg_indices = arg_idx_exps.iter().fold(motive_exp.clone(), |acc, i| {
             Exp::App(Box::new(acc), Box::new(i.clone()))
         });
-        let ih_typ = Exp::App(Box::new(motive_at_arg_indices), Box::new(arg_var));
+        // `arg b₁ … b_k` — for a direct argument this is just `arg`.
+        let applied_arg = binder_names.iter().fold(arg_var, |acc, n| {
+            Exp::App(Box::new(acc), Box::new(Exp::Var(n.clone())))
+        });
+        let mut ih_typ = Exp::App(Box::new(motive_at_arg_indices), Box::new(applied_arg));
+        // Wrap `Π b₁:B₁ … Π b_k:B_k.` around it, outermost first.
+        for ((_, b_typ), name) in shape.binders.iter().zip(binder_names.iter()).rev() {
+            ih_typ = Exp::Pi(
+                Patt::Var(name.clone()),
+                Box::new((*b_typ).clone()),
+                Box::new(ih_typ),
+            );
+        }
         body_exp = Exp::Pi(
-            Patt::Var(format!("__ih_{rec_pos}")),
+            // `IH#{rec_pos}`, not the former `__ih_{rec_pos}`: the IH type mentions the
+            // constructor's argument names, so a constructor argument named `__ih_0` captured
+            // them. Same discipline as `gen_val`'s `TC#` and readback's `G#`.
+            Patt::Var(format!("IH#{rec_pos}")),
             Box::new(ih_typ),
             Box::new(body_exp),
         );
