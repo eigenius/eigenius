@@ -3,9 +3,17 @@
 Note N3 of the [P2 plan](p2-type-theory-soundness-plan.md) §2. Settles the design questions
 [#188](https://github.com/eigenius/eigenius/issues/188) defers. Written `2026-08-22` from `67e781f`.
 
-**Recommendation: do not build it yet — the trigger has not fired — but the three design questions
-are settled here so that when it does, the answer is not re-derived.** The representation question in
-particular is already decided by a precedent nobody has noticed.
+> **SUPERSEDED `2026-08-22`: BUILD IT.** The maintainer directed that #188 proceed on §5a's
+> reasoning — Cooper's TTR is coming and uses universe polymorphism, so the ladder will be climbed
+> rather than stepped on twice. §6's hold no longer applies; §§2-4 and §7 stand as the design, and
+> §5's counterweight stands as the honest cost. Build log at the bottom.
+>
+> The original recommendation follows, kept because its measurements are the baseline the work is
+> judged against.
+
+**Recommendation (superseded): do not build it yet — the trigger has not fired — but the three design
+questions are settled here so that when it does, the answer is not re-derived.** The representation
+question in particular is already decided by a precedent nobody has noticed.
 
 ## 1. The trigger, measured
 
@@ -190,3 +198,33 @@ representation independently.
 - One reseed, shared with **#213**.
 - `cargo test --workspace`, `clippy -D warnings`, `fmt`, plus the WRN demo and both parse baselines
   on the reseeded snapshot.
+
+
+---
+
+## 8. Build log
+
+**Slice 1 — the level algebra (`2026-08-22`).** `kernel/src/nbe/level.rs`: `Level` with nanoda's five
+constructors, plus `of_nat` / `as_nat` as the numeral bridge every monomorphic site will use.
+`simplify`, `combining`, `subst`, `leq` / `leq_core` / `leq_imax_by_cases` ported from
+`references/nanoda_lib/src/level.rs` @ `6ae1f0c`, citations pinned. Pure module, no dependency on
+`Exp`/`Val`, so it lands before anything else moves.
+
+The load-bearing test is `agrees_with_integer_comparison_on_numerals`: on closed numeral levels
+`Level::leq` must agree with `m <= n` exactly, since that is what the 942 monomorphic sort uses in the
+tree rely on. 14 tests; kernel lib green at 1779.
+
+Deliberate divergence from nanoda: no hash-consing (levels here are tiny and owned rather than
+arena-interned), and `leq_core`'s unreachable arm returns `false` where nanoda `panic!`s — an
+unexpected shape should not take down the commit gate.
+
+**Remaining slices**, in order:
+
+2. `Exp::Sort(Level)` / `Val::Sort(Level)` — the mechanical change across ~509 non-test sites.
+   `Level::of_nat` at construction, `as_nat()` guards where a site pattern-matched a numeral.
+3. `conv.rs` cumulativity → `Level::leq`; `check_infer`'s `Sort(n) : Sort(n+1)` → `Sort(l.succ())`;
+   `infer_dependent_sort`'s two-case Pi rule → `IMax`.
+4. D47 codec + the `eigentt:Level` chain inductive; decoder accepts the legacy integer. Bootstrap
+   edit — manifest moves.
+5. `uparams` on declarations; elaborator generalises free levels. No ESL syntax (§3).
+6. Reseed with **#213** folded in; full gate plus the WRN demo and both parse baselines.

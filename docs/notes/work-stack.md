@@ -132,7 +132,7 @@ reseed rather than paying a standalone one.
   `eval/mod.rs:219` and the codata corecursion tests first.
 
 - **N3 written `2026-08-22`** — [p2-n3-universe-polymorphism.md](p2-n3-universe-polymorphism.md).
-  **Recommends HOLDING #188.** Its own trigger — "a second level bump is proposed" — is measured and
+  ~~Recommended holding #188~~ — **SUPERSEDED `2026-08-22`: building it**, on the Cooper/TTR reasoning (§5a). §§2-4 and §7 are the design; build log in §8. Its own trigger — "a second level bump is proposed" — is measured and
   has not fired: `Prop` 712 uses, `Set` 230, **`Type 1` exactly 2** (spec_poly's binder and
   `data lexicon:Cat`), **`Type 2` zero** (the one textual hit is a comment describing the ladder).
   The three design questions are settled anyway so they are not re-derived: representation mirrors
