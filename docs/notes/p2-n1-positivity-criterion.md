@@ -13,7 +13,8 @@ category algebra to fit a criterion narrower than the type theory requires.
 > declarations on the bootstrap chain, 42 admitted, 0 decode failures, and exactly the three
 > predicted higher-order constructors (`Cat.cat_forall`, `Cat.cat_fin_forall`,
 > `Cat.cat_num_forall`, one binder each). The manifest did not move — no reseed. Step 2
-> (function-typed IHs) remains, after #138.
+> **STEP 2 LANDED `2026-08-22`** (`098e858`), after #138: both halves build the function-typed
+> hypothesis, and induction through a reflexive argument computes. #92 is closed.
 
 ## 1. What is actually wrong
 
