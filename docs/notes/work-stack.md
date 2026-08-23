@@ -131,8 +131,22 @@ reseed rather than paying a standalone one.
   justification is recursor derivation, which does not use it — same shape as #139. Needs a look at
   `eval/mod.rs:219` and the codata corecursion tests first.
 
+- **N3 written `2026-08-22`** — [p2-n3-universe-polymorphism.md](p2-n3-universe-polymorphism.md).
+  **Recommends HOLDING #188.** Its own trigger — "a second level bump is proposed" — is measured and
+  has not fired: `Prop` 712 uses, `Set` 230, **`Type 1` exactly 2** (spec_poly's binder and
+  `data lexicon:Cat`), **`Type 2` zero** (the one textual hit is a comment describing the ladder).
+  The three design questions are settled anyway so they are not re-derived: representation mirrors
+  **`lean:LeanLevel`**, which already carries nanoda's five ctors (Zero/Succ/Max/IMax/Param) on the
+  chain — a precedent nobody had noticed, and the reason a future Lean externalization becomes a fold
+  rather than a special case; **no ESL syntax** initially, level inference via `uparams` instead;
+  migration is small (**zero encoded `Sort` terms in any repo chain**) but needs a snapshot check,
+  and the decoder should accept the legacy integer. **Watch condition:** #159/D74 may make #188 its
+  prerequisite, which is a better reason to build it than the ladder.
+
 #### NEXT
-**N3 → #188** — universe polymorphism, with #213 folded into its reseed. N3 is a design note, all independent and all writable before any code: N1 positivity criterion +
+P2's design notes are all written and every code item is closed. Remaining open: **#188** (held, see
+N3) and **#213** (folds into #188's reseed, or stands alone if something else forces one). The
+package is otherwise done — all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 

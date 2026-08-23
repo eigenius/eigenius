@@ -81,7 +81,7 @@ Three, independent of each other and of every code item. All three can be writte
 |---|---|---|
 | **N1 — positivity criterion + declaration routing** ✱ drafted | §1's fork; the criterion; mutual/nested posture | #92 |
 | **N2 — sized types: wire or delete** ✱ [written](p2-n2-sized-types-wire-or-delete.md) | **delete** the solver; keep the comparison pair | #139, and #66's costing |
-| **N3 — universe polymorphism** | `Exp` representation, whether levels reach ESL surface syntax, migration for persisted terms | #188 |
+| **N3 — universe polymorphism** ✱ [written](p2-n3-universe-polymorphism.md) | mirror `lean:LeanLevel`; **no** ESL syntax initially; decoder accepts the legacy integer. **HOLD** — trigger measured, has not fired | #188 |
 
 **#66's answer is not a new note** — it lands in D9 or D19, as the issue's acceptance criteria say.
 It cannot be written before N2: option 1 (restrict the surface to the sanctioned recursion forms)
