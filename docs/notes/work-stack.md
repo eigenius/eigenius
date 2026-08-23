@@ -147,6 +147,20 @@ reseed rather than paying a standalone one.
   level algebra to mirror is already on the chain as `lean:LeanLevel`, and choosing a different one
   there would be expensive to unpick.
 
+- **N4 written `2026-08-23`** — [p2-n4-eigentt-representation-layer.md](p2-n4-eigentt-representation-layer.md),
+  *should the EigenTT term representation move to core?* **Yes**, and the bootstrap-cycle objection
+  does not hold: the D47 decoder dispatches on hard-coded ctor names, so nothing needs a `TypeExpr`
+  value to decode one. Root cause of a recurring symptom — `core` owns the inductive metamodel but
+  not the term language, so every type-valued slot there degrades to a string (`result_sort`, fixed
+  by #188; `param_kind`, silently types a class-typed parameter `Set`; `type_name`, correct only
+  because it has the `EigonClass` arm `param_kind` lacks). `eigentt-type-fragment` bundles two
+  strata — the term language, and `Axiom`/`Definition` which consume it — so moving `TypeExpr` down
+  separates rather than breaks. **One question left open**: Rule 16 is schema-driven, so validating
+  `TypeExpr`'s own `type_name` values reads `TypeExpr`'s `ctors`; settle termination before
+  committing. **Explicitly NOT part of #188** and not to be folded into its reseed.
+- **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
+  ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
+
 #### NEXT
 P2's design notes are all written and every code item is closed. Remaining open: **#188** (held, see
 N3) and **#213** (folds into #188's reseed, or stands alone if something else forces one). The
