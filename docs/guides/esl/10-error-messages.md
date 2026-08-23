@@ -62,7 +62,7 @@ Parser errors are the most common in practice because the surface grammar is str
 
 The parser was expecting a specific token shape. Frequent causes:
 
-- Forgot a `{` opening a class body, property body, program body, or `data`/`codata` block.
+- Forgot a `{` opening a class body, property body, program body, or `data` block.
 - Missing `;` between `let` bindings or between observations.
 - Missing `,` in a comma list (parameters, ctor args, recommends list, etc.).
 - Wrong keyword case — `Construct` is title-case, `class`/`property`/etc. are lowercase.
@@ -117,7 +117,7 @@ The expanded IRI failed parsing. Check the namespace base URI and the local name
 [Compiler] bare name 'X' has no namespace and no in-scope binding
 ```
 
-A bare identifier in a position that expects a qualified name was used without a binding. Usually means a class or component name was expected; either declare it locally (with a `data`/`codata`/`class`) or qualify it with `ns:X`.
+A bare identifier in a position that expects a qualified name was used without a binding. Usually means a class or component name was expected; either declare it locally (with a `data`/`class`) or qualify it with `ns:X`.
 
 **Field name needs namespace qualifier**
 
@@ -192,14 +192,6 @@ The kernel tried to resolve an `EigonClass(iri)` but the IRI isn't in the layer.
 ```
 
 A property IRI used in a class's `requires`/`recommends` (or in a `Construct` field) isn't in the layer. Usually a typo — check the property declaration.
-
-**Sized constructor: argument not strictly below upper bound**
-
-```
-[Check] InductiveCtor 'SizedNat.succ': size argument 'i' is not strictly below upper bound 'i'
-```
-
-You're applying a sized constructor with a size argument that doesn't satisfy the bounded-binder constraint. The constructor's signature requires `j < i`; you supplied `i` directly. Provide a strictly smaller size variable, or use the unbounded form if termination doesn't matter (which is rare).
 
 **Recursive call not on a smaller size**
 

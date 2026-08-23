@@ -28,7 +28,6 @@ pub enum TokenKind {
     Property,
     Resource,
     Program,
-    Codata,
     Data,
     /// D37 §3.3 — `merge_comorphism <iri> for <class> { … }`.
     MergeComorphism,
@@ -71,7 +70,6 @@ pub enum TokenKind {
     Construct,
     Map,
     Reduce,
-    Corecord,
     /// D37 §3.1 — `lambda x : T => body` (the typed, English-word
     /// form). Distinct from `Backslash` (`\`) and `Lambda` (`λ`),
     /// which produce the untyped lambda surface used in `program`
@@ -501,7 +499,6 @@ impl<'a> Lexer<'a> {
             "property" => TokenKind::Property,
             "resource" => TokenKind::Resource,
             "program" => TokenKind::Program,
-            "codata" => TokenKind::Codata,
             "data" => TokenKind::Data,
             // D37 §3.3 — typed merge witness declaration.
             "merge_comorphism" => TokenKind::MergeComorphism,
@@ -523,7 +520,6 @@ impl<'a> Lexer<'a> {
             "Construct" => TokenKind::Construct,
             "map" => TokenKind::Map,
             "reduce" => TokenKind::Reduce,
-            "corecord" => TokenKind::Corecord,
             // D37 §3.1, §3.5 — typed lambda literal + Pi type expr.
             // Distinct from `\` / `λ` (Backslash / Lambda tokens),
             // which produce the untyped lambda surface.
@@ -602,14 +598,13 @@ mod tests {
     #[test]
     fn top_level_keywords() {
         assert_eq!(
-            kinds("namespace class property resource program codata"),
+            kinds("namespace class property resource program"),
             vec![
                 TokenKind::Namespace,
                 TokenKind::Class,
                 TokenKind::Property,
                 TokenKind::Resource,
                 TokenKind::Program,
-                TokenKind::Codata,
             ]
         );
     }
@@ -617,14 +612,13 @@ mod tests {
     #[test]
     fn expression_keywords() {
         assert_eq!(
-            kinds("let case Construct map reduce corecord"),
+            kinds("let case Construct map reduce"),
             vec![
                 TokenKind::Let,
                 TokenKind::Case,
                 TokenKind::Construct,
                 TokenKind::Map,
                 TokenKind::Reduce,
-                TokenKind::Corecord,
             ]
         );
     }

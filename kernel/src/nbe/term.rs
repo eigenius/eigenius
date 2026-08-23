@@ -144,28 +144,6 @@ pub enum Exp {
     /// Construct a typed resource: Construct(class_iri, [(prop_iri, expr), ...])
     Construct(Iri, Vec<(Iri, Box<Exp>)>),
 
-    // --- Codata (D11, Phase 9b-i) ---
-    /// Codata type declaration: codata { obs₁ : T₁; obs₂ : T₂; ... }
-    ///
-    /// Dual of `Data`: defines a type by its observations rather than
-    /// its constructors. The canonical example is
-    /// `codata Stream A { head : A; tail : Stream A }`.
-    Codata(Vec<Observation>),
-    /// Codata value (copattern definition): corecord { obs₁ = e₁; obs₂ = e₂; ... }
-    ///
-    /// A corecord binds each observation to a body expression. The body
-    /// is evaluated lazily, once per observation, in the corecord's
-    /// captured environment. Productivity (each observation terminates)
-    /// should be checked by a guardedness pass before running untrusted
-    /// code; the evaluator itself does not enforce it.
-    CoRecord(Vec<CoField>),
-    /// Observation on a codata value: e.obs
-    ///
-    /// Picks the named field from a `CoRecord` and evaluates its body,
-    /// or produces a blocked neutral if `e` is not yet a concrete
-    /// corecord.
-    Observe(Box<Exp>, Name),
-
     // --- Map/Reduce (Phase 11a) ---
     /// Map: apply a function to each element of a list.
     /// `Map(f, collection)` — type: `(A → B) → List A → List B`.
@@ -214,42 +192,6 @@ pub enum Exp {
         arms: Vec<MatchArm>,
     },
 
-    // --- Sized types (Phase 11b step 14, D19 §8) ---
-    /// `SizeSort` — the sort of size expressions. Inhabited by
-    /// `SizeInf` and applications of `SizeSucc`. Itself a type
-    /// (`SizeSort : Type(1)`).
-    ///
-    /// Sizes are used as termination/productivity indices on
-    /// inductive and coinductive types: `List(A, i)` denotes a
-    /// list-at-size-i, where `i` strictly decreases on each
-    /// recursive call (inductives) or strictly increases on each
-    /// observation (codata). This step lands the primitives only;
-    /// constraint generation against inductives is Phase 11b step 15.
-    SizeSort,
-    /// `SizeSucc(s)` — successor of a size: the next size strictly
-    /// larger than `s`. The smallest enclosing size for a value
-    /// produced by one constructor application.
-    SizeSucc(Box<Exp>),
-    /// `SizeInf` — the unbounded ("infinity") size. Used when no
-    /// size discipline is enforced; sized inductive/coinductive
-    /// definitions degenerate to the unsized form when their size
-    /// argument is `SizeInf`.
-    SizeInf,
-
-    /// Applied codata type expression: `C(p₁, …, pₙ)` where `C` is
-    /// declared by an `Arc<CodataDecl>` and the `Vec<Exp>` supplies
-    /// the type arguments (including size arguments). Parallels
-    /// `Exp::InductiveType`.
-    ///
-    /// Observation types inside the referenced decl may contain
-    /// further `Exp::CodataType` values — in particular,
-    /// self-references of the form `Exp::CodataType(self_ref_stub,
-    /// new_args)` where `self_ref_stub` is an `Arc<CodataDecl>`
-    /// whose only load-bearing field is its name (PartialEq on
-    /// CodataDecl compares by name, so the stub unifies with the
-    /// full declaration at evaluation time).
-    CodataType(Arc<CodataDecl>, Vec<Exp>),
-
     /// Cross-institution translation via a declared comorphism (D14 §9.3).
     ///
     /// `comorphism_iri` identifies a `Comorphism` resource indexed by
@@ -278,26 +220,6 @@ pub enum Exp {
         comorphism_iri: Iri,
         source: Box<Exp>,
         target_iri: Option<Iri>,
-    },
-
-    /// Bounded size Π-type: `Π {i < upper}. body` — the function
-    /// type of a sized function that takes a size argument strictly
-    /// smaller than `upper`.
-    ///
-    /// The binder `patt` has type `SizeSort` implicitly; the hypothesis
-    /// `patt < upper` is registered in the type-checker's rigid
-    /// hypothesis tracker (TSO) when `body` is checked. Applying a
-    /// value of this type to a size `i` requires proving
-    /// `size_lt(i, upper)` — either structurally (`i = SizeSucc(..)`
-    /// making ∞-absorption trivial) or via the hypothesis chain.
-    ///
-    /// `upper` must normalise to a rigid size variable or `SizeInf`
-    /// — the TSO can only track hypotheses rooted at rigid nodes.
-    /// Composite upper bounds like `{i < ŝ j}` are rejected in v1.
-    SizedPi {
-        patt: Patt,
-        upper: Box<Exp>,
-        body: Box<Exp>,
     },
 }
 
@@ -347,20 +269,6 @@ pub struct Summand {
 /// A branch of a Case expression: constructor name with body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
-    pub name: Name,
-    pub body: Exp,
-}
-
-/// A declared observation on a codata type: obs : T.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Observation {
-    pub name: Name,
-    pub typ: Exp,
-}
-
-/// A copattern definition in a corecord: obs = e.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CoField {
     pub name: Name,
     pub body: Exp,
 }
@@ -466,37 +374,6 @@ impl PartialEq for InductiveDecl {
 // that premise was gone, leaving a second definition of "recursive occurrence" for the two halves
 // of the eliminator to drift apart on. Replaced by `nbe::positivity::recursive_arg_shape`, which
 // all three sites now consult.
-
-/// Coinductive (codata) declaration — the parameterised analogue of
-/// the anonymous [`Exp::Codata`] form. Admits type parameters
-/// (including `Size` parameters for sized codata) and supports
-/// self-references in observation types via
-/// [`Exp::CodataType`] with a name-only stub `Arc<CodataDecl>`.
-///
-/// `PartialEq` is name-based — mirrors `InductiveDecl`. This is what
-/// lets an observation type declared as `Stream(A, j)` (encoded as
-/// `Exp::CodataType(stub, …)`) unify with the full declaration when
-/// the full decl is looked up through any `Arc<CodataDecl>` reference
-/// with the same name.
-#[derive(Debug, Clone)]
-pub struct CodataDecl {
-    /// Stable chain-resident identifier (gh #75). See [`InductiveDecl::iri`]
-    /// for the discipline; same role here.
-    pub iri: Iri,
-    /// Human-readable short name. Diagnostics only.
-    pub name: Name,
-    /// Parameter telescope shared by every observation.
-    pub params: Vec<(Patt, Exp)>,
-    /// Universe of the type former.
-    pub sort: Exp,
-    pub observations: Vec<Observation>,
-}
-
-impl PartialEq for CodataDecl {
-    fn eq(&self, other: &Self) -> bool {
-        self.iri == other.iri
-    }
-}
 
 /// A single constructor within an `InductiveDecl`.
 #[derive(Debug, Clone, PartialEq)]

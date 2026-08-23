@@ -80,11 +80,13 @@ ontology (core)      core:CodataType, core:Observation, core:observation_name,
 
 ## 4. Design docs that stop describing the implementation
 
-- **D11 (Codata, Streams, and Resumable Execution)** — `Status: Implemented (Phase 9b)`. §2, §3, §4,
-  §5.1 and §6 are codata; §5.3/§5.4 (persistent task state, concurrent tasks) are the trace/task
-  parts and **survive**, because they never depended on codata. D11 needs its status corrected and
-  the codata sections marked retired — not deletion, since the document is the record of what was
-  built and why.
+- **D11 (Codata, Streams, and Resumable Execution) — DEPRECATED** (user, `2026-08-23`). Its status
+  was `Implemented (Phase 9b)`. §2, §3, §4, §5.1 and §6 are codata and become a record of something
+  the platform no longer has. The document is **not deleted**: it is the account of what was built
+  and why, and deleting it would destroy the only written reason the machinery existed.
+  §5.3/§5.4 (persistent task state, concurrent tasks) describe the trace/task subsystem, which is
+  live and never depended on codata — the deprecation header must say so explicitly, or the next
+  reader will assume tasks went with it.
 - **D19 §8** — the sized-types sections, including `:491`'s decisions-table row.
 - Eight further design docs mention codata in passing and need a sweep for claims that stop being
   true.

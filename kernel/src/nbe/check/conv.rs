@@ -117,7 +117,6 @@ pub fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
         Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
             args.iter().any(|a| exp_mentions_var(a, name))
         }
-        Exp::CodataType(_, args) => args.iter().any(|a| exp_mentions_var(a, name)),
         // For other Exp variants (Sort, One, Unit, Set, primitives,
         // EigonClass, etc.) there's no Var inside to find.
         _ => false,
@@ -150,7 +149,6 @@ pub(super) fn is_syntactically_propositional_type(typ: &Exp) -> bool {
             is_syntactically_propositional_type(dom) && is_syntactically_propositional_type(body)
         }
         Exp::InductiveType(decl, _) => matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
-        Exp::CodataType(decl, _) => matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
         _ => false,
     }
 }
@@ -257,59 +255,9 @@ fn is_propositional_type_structural(typ: &Val) -> Option<bool> {
     match typ {
         Val::Id(_, _, _) => Some(true),
         Val::InductiveType { decl, .. } => Some(matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))),
-        Val::CodataType { decl, .. } => Some(matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))),
-        Val::One
-        | Val::Sort(_)
-        | Val::EigonClass(_)
-        | Val::EigonPrimitive(_)
-        | Val::SizeSort
-        | Val::Codata(_, _) => Some(false),
+        Val::One | Val::Sort(_) | Val::EigonClass(_) | Val::EigonPrimitive(_) => Some(false),
         _ => None,
     }
-}
-
-/// Subtyping check: admits `sub <: super` (Phase 11b step 15d, D19 §8.3).
-///
-/// Calls [`subtype_of_with_hyps`] with an empty TSO — use this variant
-/// when you don't have bounded size hypotheses to bring to bear.
-pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), CheckError> {
-    subtype_of_with_hyps(level, sub, super_, &crate::nbe::sized_rigid::Tso::new())
-}
-
-/// Subtyping check consulting a TSO of rigid size hypotheses.
-///
-/// Current scope is exactly the sized-types relaxation — everywhere
-/// else subtyping degenerates to equality (`eq_nf`). The relaxation:
-///
-/// For a pair of applied inductive types `I(p₁ … pₙ)(i₁ … iₘ)` with
-/// identical declarations, each **parameter** is compared position-wise:
-/// - positions whose declared type is `SizeSort` are compared with
-///   [`crate::nbe::sized::size_le_with_hyps`] — `sub_pᵢ ≤ sup_pᵢ`
-///   suffices, with the TSO consulted for neutral entailment;
-/// - all other positions must be definitionally equal (`eq_nf`).
-///
-/// **Indices are invariant** and must be definitionally equal position-wise
-/// (D48; eigenius#137). The relaxation above is the sized-types subtyping
-/// discipline for the parameter telescope only — an index is what
-/// distinguishes `Vec A 0` from `Vec A 1`, so a subtyping rule there would
-/// identify types the family exists to keep apart.
-///
-/// This is what makes `T(s) <: T(ŝ s) <: T(∞)` admissible — the
-/// driving motivation for sized types. With `tso` populated from
-/// bounded binders in scope, `T(i) <: T(j)` also becomes admissible
-/// whenever `i ≤ j` is entailed by the hypothesis chain.
-///
-/// Codata (`Val::Codata`) is structurally identical and will benefit
-/// once sized codata arrives; it falls through to `eq_nf` today
-/// because the checker doesn't yet thread size parameters onto
-/// `Codata` value shapes.
-pub fn subtype_of_with_hyps(
-    level: usize,
-    sub: &Val,
-    super_: &Val,
-    tso: &crate::nbe::sized_rigid::Tso,
-) -> Result<(), CheckError> {
-    subtype_of_inner(level, sub, super_, tso, Indices::Compare)
 }
 
 /// Whether [`subtype_of_inner`] compares the index telescope of two
@@ -326,6 +274,23 @@ enum Indices {
     DeferToCaller,
 }
 
+/// Subtyping check: admits `sub <: super`.
+///
+/// Two rules, and after eigenius#218 that is all of them:
+///
+/// - **Universe cumulativity** — `Sort(m) <: Sort(n)` iff `m ≤ n` in the LEVEL order
+///   (D46 §3.2, Prop ⊆ Set ⊆ Type(1) ⊆ …).
+/// - **Everything else is definitional equality** (`eq_nf`), position-wise for an applied
+///   inductive's parameters and indices alike.
+///
+/// It used to take a `Tso` of rigid size hypotheses, and the parameter telescope was
+/// COVARIANT at `SizeSort` positions — `T(s) <: T(ŝ s) <: T(∞)`, the driving motivation for
+/// sized types (D19 §8.3). Sized types are gone (#218), so no parameter position is covariant
+/// any more and parameters are invariant exactly as indices always were (eigenius#137).
+pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), CheckError> {
+    subtype_of_inner(level, sub, super_, Indices::Compare)
+}
+
 /// Constructor-site subtyping: [`subtype_of_with_hyps`] with the index
 /// telescope left to the caller.
 ///
@@ -336,16 +301,14 @@ pub(super) fn subtype_of_deferring_indices(
     level: usize,
     sub: &Val,
     super_: &Val,
-    tso: &crate::nbe::sized_rigid::Tso,
 ) -> Result<(), CheckError> {
-    subtype_of_inner(level, sub, super_, tso, Indices::DeferToCaller)
+    subtype_of_inner(level, sub, super_, Indices::DeferToCaller)
 }
 
 fn subtype_of_inner(
     level: usize,
     sub: &Val,
     super_: &Val,
-    tso: &crate::nbe::sized_rigid::Tso,
     index_policy: Indices,
 ) -> Result<(), CheckError> {
     // Universe cumulativity: `Sort(m) <: Sort(n)` iff `m <= n` in the LEVEL order.
@@ -378,20 +341,8 @@ fn subtype_of_inner(
     ) = (sub, super_)
     {
         if d1 == d2 && p1.len() == p2.len() && p1.len() == d1.params.len() && i1.len() == i2.len() {
-            for (i, (sub_p, sup_p)) in p1.iter().zip(p2.iter()).enumerate() {
-                let decl_param_ty = &d1.params[i].1;
-                if matches!(decl_param_ty, Exp::SizeSort) {
-                    if !crate::nbe::sized::size_le_with_hyps(sub_p, sup_p, tso) {
-                        return Err(CheckError::TypeMismatch(format!(
-                            "size subtyping failed at param {i}: \
-                             {:?} ≰ {:?}",
-                            readback_val(level, sub_p),
-                            readback_val(level, sup_p),
-                        )));
-                    }
-                } else {
-                    eq_nf(level, sub_p, sup_p)?;
-                }
+            for (sub_p, sup_p) in p1.iter().zip(p2.iter()) {
+                eq_nf(level, sub_p, sup_p)?;
             }
             // Indices are invariant (eigenius#137). Before this loop the
             // function returned right after the parameter telescope, so
@@ -644,54 +595,13 @@ mod tests {
     // --- Size-aware subtyping (Phase 11b step 15d, D19 §8.3) ---
 
     #[test]
-    fn subtype_sized_finite_to_inf_admitted() {
-        // SizedStream(ŝ ∞, A) is blocked by ∞-absorption (∞ stays ∞).
-        // Use a neutral size to get a real "finite-side-of-∞" value.
-        let decl = sized_stream_decl();
-        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "i".into()));
-        let sub = mk_sized_type(decl.clone(), neut.clone(), Val::One);
-        let sup = mk_sized_type(decl, Val::SizeInf, Val::One);
-        subtype_of(0, &sub, &sup).expect("T(i) <: T(∞)");
-    }
-
-    #[test]
-    fn subtype_sized_inf_to_finite_rejected() {
-        let decl = sized_stream_decl();
-        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "i".into()));
-        let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let sup = mk_sized_type(decl, neut, Val::One);
-        assert!(
-            subtype_of(0, &sub, &sup).is_err(),
-            "T(∞) <: T(i) must be rejected"
-        );
-    }
-
-    #[test]
-    fn subtype_sized_step_rule_admitted() {
-        // T(i) <: T(ŝ i) admitted by the right-step rule on sizes.
-        let decl = sized_stream_decl();
-        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "i".into()));
-        let sub = mk_sized_type(decl.clone(), neut.clone(), Val::One);
-        let sup = mk_sized_type(decl, Val::SizeSucc(Box::new(neut)), Val::One);
-        subtype_of(0, &sub, &sup).expect("T(i) <: T(ŝ i)");
-    }
-
-    #[test]
-    fn subtype_sized_same_inf_reflexive() {
-        let decl = sized_stream_decl();
-        let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let sup = mk_sized_type(decl, Val::SizeInf, Val::One);
-        subtype_of(0, &sub, &sup).expect("T(∞) <: T(∞) reflexive");
-    }
-
-    #[test]
-    fn subtype_non_size_parameter_still_requires_equality() {
+    fn subtype_parameters_require_equality() {
         // Sized stream parameters disagree on the element type —
         // size_le only relaxes size positions, so the other position
         // must still be equal.
-        let decl = sized_stream_decl();
-        let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let sup = mk_sized_type(decl, Val::SizeInf, Val::sort(1));
+        let decl = two_param_decl();
+        let sub = mk_two_param(decl.clone(), Val::One, Val::One);
+        let sup = mk_two_param(decl, Val::One, Val::sort(1));
         assert!(
             subtype_of(0, &sub, &sup).is_err(),
             "element type mismatch must be rejected"
@@ -711,7 +621,7 @@ mod tests {
         // Two inductive types with different names: the sized-subtyping
         // branch is skipped (decls differ), and `eq_nf` correctly
         // rejects them.
-        let decl_a = sized_stream_decl();
+        let decl_a = two_param_decl();
         let decl_b = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:OtherStream").unwrap(),
             name: "OtherStream".to_string(),
@@ -720,42 +630,9 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![],
         });
-        let sub = mk_sized_type(decl_a, Val::SizeInf, Val::One);
-        let sup = mk_sized_type(decl_b, Val::SizeInf, Val::One);
+        let sub = mk_two_param(decl_a, Val::One, Val::One);
+        let sup = mk_two_param(decl_b, Val::One, Val::One);
         assert!(subtype_of(0, &sub, &sup).is_err());
-    }
-
-    #[test]
-    fn check_var_with_finite_size_against_inf_expected_succeeds() {
-        // End-to-end: a variable `x : SizedStream(i, One)` checks
-        // against the expected type `SizedStream(∞, One)`.
-        //
-        // This exercises the `check()` fallthrough at line ~388 —
-        // it infers `x`'s type from gamma, then calls subtype_of
-        // against the expected type. Without sized subtyping this
-        // would fail (neutral `i` ≠ SizeInf syntactically).
-        let decl = sized_stream_decl();
-
-        // Bind `i : SizeSort`, then `x : SizedStream(i, One)`.
-        let i_val = gen_val(&Rho::Nil); // Val::Nt(Gen(0, _))
-        let rho1 = Rho::Nil.extend(Patt::Var("i".to_string()), i_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("i".to_string()),
-            &Val::SizeSort,
-            &i_val,
-        )
-        .unwrap();
-
-        let sub_stream = mk_sized_type(decl.clone(), i_val, Val::One);
-        let x_val = gen_val(&rho1); // Val::Nt(Gen(1, _))
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &sub_stream, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let expected = mk_sized_type(decl, Val::SizeInf, Val::One);
-        check(&mut c, &Exp::Var("x".to_string()), &expected)
-            .expect("x : SizedStream(i, 1) should check against SizedStream(∞, 1)");
     }
 }
 

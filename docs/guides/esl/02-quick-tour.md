@@ -53,44 +53,6 @@ The whole body compiles to a kernel `Exp::Lam(input, Exp::Let(summary, Exp::App(
 
 Source: [`compile_simple_program`](../../../kernel/src/esl/compile.rs), [`compile_program_with_let_and_construct`](../../../kernel/src/esl/compile.rs), [`compile_component_shorthand`](../../../kernel/src/esl/compile.rs).
 
-## 2.3. Sized inductive type with bounded binder
-
-Inductive types are declared with `data`. Constructors take positional arguments; for sized inductives, a brace-delimited **bounded binder** `{j < i}` declares a size variable strictly smaller than the parent's size.
-
-```esl
-namespace core = "urn:eigenius:core";
-namespace ex   = "urn:eigenius:example";
-
-data ex:SizedNat(i : core:Size) {
-    zero,
-    succ({j < i}, ex:SizedNat(j)),
-}
-```
-
-`SizedNat(i)` is the type of natural numbers of size at most `i`. The `succ` constructor introduces a fresh size `j` strictly less than `i`, and recurses on `SizedNat(j)`. The kernel decodes the constructor's telescope to `Π i : Size. SizedPi { j < i }. Π _ : SizedNat(j). SizedNat(i)` — the `SizedPi` is the bounded-binder form that powers termination checking ([D19 §2–7](../../design/d19-inductive-types.md)).
-
-Without bounded binders, `succ(SizedNat(i))` would type-check trivially but the kernel could not prove termination of recursion. The `{j < i}` form is what lets the kernel verify that recursive calls strictly decrease ([D19 §3](../../design/d19-inductive-types.md)).
-
-Source: [`sized_nat_with_bounded_binder_decodes_to_sized_pi`](../../../kernel/src/program/ground.rs), [`compile_data_nat_non_parametric`](../../../kernel/src/esl/compile.rs).
-
-## 2.4. Self-referential sized codata stream
-
-Coinductive types are declared with `codata`. Each observation has a name and a type; observation types may use bounded binders the same way constructor arguments do.
-
-```esl
-namespace core = "urn:eigenius:core";
-namespace ex   = "urn:eigenius:example";
-
-codata ex:Stream(A : core:Set, i : core:Size) {
-    head : A;
-    tail : {j < i} -> ex:Stream(A, j);
-}
-```
-
-`Stream(A, i)` is a stream of `A` values whose continuation is bounded by size `i`. `head : A` is a direct observation. `tail : {j < i} -> ex:Stream(A, j)` says "give me a strictly smaller size `j` and you can observe a `Stream(A, j)`". The recursive reference to `ex:Stream(A, j)` is the canonical self-referential codata pattern from [D19 §8.2](../../design/d19-inductive-types.md).
-
-Source: [`self_referential_sized_stream_from_esl`](../../../kernel/src/program/ground.rs), [`compile_codata_declaration`](../../../kernel/src/esl/compile.rs).
-
 ## 2.5. Component call with trailing config block
 
 When a component takes structured configuration in addition to the runtime input, you can pass it as a trailing brace block.
@@ -145,6 +107,6 @@ Without the index, the same call falls through to component dispatch and fails a
 
 ---
 
-These six examples cover the full surface area: ontology declarations (2.1), expression-language programs (2.2), sized inductive types (2.3), coinductive types (2.4), component dispatch (2.5), institution dispatch (2.6). The chapters that follow drill into each.
+These examples cover the full surface area: ontology declarations (2.1), expression-language programs (2.2), component dispatch, institution dispatch. The chapters that follow drill into each.
 
 Next: **[3. Lexical structure →](03-lexical-structure.md)**

@@ -98,29 +98,16 @@ pub fn derive_minor_type(
     let mut current = &ctor.typ;
     let mut params_to_skip = decl.params.len();
     let mut arg_specs: Vec<MinorArg> = Vec::new();
-    loop {
-        match current {
-            Exp::Pi(patt, dom, body) => {
-                if params_to_skip > 0 {
-                    params_to_skip -= 1;
-                } else {
-                    arg_specs.push(MinorArg::Value {
-                        patt: patt.clone(),
-                        typ: (**dom).clone(),
-                    });
-                }
-                current = body;
-            }
-            Exp::SizedPi { patt, upper, body } => {
-                // Size binders never appear in the param prefix.
-                arg_specs.push(MinorArg::Size {
-                    patt: patt.clone(),
-                    upper: (**upper).clone(),
-                });
-                current = body;
-            }
-            _ => break,
+    while let Exp::Pi(patt, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            arg_specs.push(MinorArg::Value {
+                patt: patt.clone(),
+                typ: (**dom).clone(),
+            });
         }
+        current = body;
     }
 
     // Pick a stable, fresh variable name for each non-param arg. We
@@ -192,7 +179,6 @@ pub fn derive_minor_type(
         let arg_var = arg_var_exps[arg_idx].clone();
         let arg_typ = match &arg_specs[arg_idx] {
             MinorArg::Value { typ, .. } => typ.clone(),
-            MinorArg::Size { .. } => unreachable!("size args aren't recursive"),
         };
         let shape = crate::nbe::positivity::recursive_arg_shape(decl, &arg_typ)
             .expect("`recursive_indices` filtered on exactly this");
@@ -255,11 +241,6 @@ pub fn derive_minor_type(
             MinorArg::Value { typ, .. } => {
                 Exp::Pi(binder_patt, Box::new(typ.clone()), Box::new(body_exp))
             }
-            MinorArg::Size { upper, .. } => Exp::SizedPi {
-                patt: binder_patt,
-                upper: Box::new(upper.clone()),
-                body: Box::new(body_exp),
-            },
         };
     }
 
@@ -282,13 +263,12 @@ pub fn derive_minor_type(
 #[derive(Debug, Clone)]
 enum MinorArg {
     Value { patt: Patt, typ: Exp },
-    Size { patt: Patt, upper: Exp },
 }
 
 impl MinorArg {
     fn patt(&self) -> &Patt {
         match self {
-            MinorArg::Value { patt, .. } | MinorArg::Size { patt, .. } => patt,
+            MinorArg::Value { patt, .. } => patt,
         }
     }
 }
@@ -790,7 +770,7 @@ mod tests {
         // value args (h : 1, x : A, xs : SimpleVec A ()) plus an IH for
         // the recursive xs, so the outer shape must be a binder.
         assert!(
-            matches!(typ, Val::Pi(_, _) | Val::SizedPi(_, _)),
+            matches!(typ, Val::Pi(_, _)),
             "cons minor must be a Pi (has non-param args); got {typ:?}"
         );
     }

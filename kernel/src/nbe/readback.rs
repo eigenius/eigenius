@@ -21,7 +21,7 @@
 
 use crate::nbe::env::Rho;
 use crate::nbe::eval::EvalError;
-use crate::nbe::term::{CoField, Exp, Name, Observation, Patt, Summand};
+use crate::nbe::term::{Exp, Name, Patt, Summand};
 use crate::nbe::val::{Neut, Val};
 
 /// Readback a value to a normal-form expression — **asserting the value is well-typed**.
@@ -136,37 +136,6 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         Val::EigonPrimitive(p) => Exp::EigonPrimitive(*p),
         Val::ResourceVal(r) => Exp::EigonResource(r.clone()),
 
-        // Codata (D11, Phase 9b-i)
-        // Types can be read back safely — observation type expressions
-        // terminate under evaluation like any other type expression.
-        Val::Codata(observations, rho) => Exp::Codata(
-            observations
-                .iter()
-                .map(|(name, typ)| {
-                    let v = crate::nbe::eval::eval(typ, rho)?;
-                    Ok(Observation {
-                        name: name.clone(),
-                        typ: try_readback_val(level, &v)?,
-                    })
-                })
-                .collect::<Result<Vec<_>, EvalError>>()?,
-        ),
-        // Corecord values use a *conservative* readback: emit the
-        // original syntactic field bodies without evaluating them.
-        // Evaluating could diverge for streams (tail -> next corecord
-        // -> tail -> ...). Under this scheme, two corecords are
-        // definitionally equal only if their field bodies are
-        // syntactically identical — sound but incomplete. See D11 §3.
-        Val::CoRecord(fields, _rho) => Exp::CoRecord(
-            fields
-                .iter()
-                .map(|(name, body)| CoField {
-                    name: name.clone(),
-                    body: body.clone(),
-                })
-                .collect(),
-        ),
-
         // Map/Reduce (Phase 11a)
         Val::List(items) => {
             // Read back as nested Con("cons", Pair(head, ...)) terminated by Con("nil", Unit)
@@ -200,14 +169,6 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
                 .map(|p| try_readback_val(level, p))
                 .collect::<Result<Vec<_>, EvalError>>()?,
         ),
-        // Parameterised codata types (D19 §8, self-referential codata).
-        Val::CodataType { decl, params } => Exp::CodataType(
-            decl.clone(),
-            params
-                .iter()
-                .map(|p| try_readback_val(level, p))
-                .collect::<Result<Vec<_>, EvalError>>()?,
-        ),
         Val::InductiveVal {
             decl,
             ctor_name,
@@ -226,18 +187,6 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         Val::LitFloat(f) => Exp::LitFloat(*f),
         Val::LitBool(b) => Exp::LitBool(*b),
 
-        // Sized types (Phase 11b step 14, D19 §8).
-        Val::SizeSort => Exp::SizeSort,
-        Val::SizeSucc(s) => Exp::SizeSucc(Box::new(try_readback_val(level, s)?)),
-        Val::SizeInf => Exp::SizeInf,
-        Val::SizedPi(upper, g) => {
-            let gen = gen_val(level);
-            Exp::SizedPi {
-                patt: gen_patt(level),
-                upper: Box::new(try_readback_val(level, upper)?),
-                body: Box::new(try_readback_val(level + 1, &g.apply(gen)?)?),
-            }
-        }
         // D49 §8 — `ChainWitness` values are opaque, kernel-internal
         // proof-of-existence markers admitted by the per-Layer witness
         // index. They never appear in surface syntax, so readback into
@@ -288,9 +237,6 @@ pub fn try_readback_neut(level: usize, neut: &Neut) -> Result<Exp, EvalError> {
         Neut::PropAccess(k, prop) => {
             Exp::PropAccess(Box::new(try_readback_neut(level, k)?), prop.clone())
         }
-
-        // Codata (D11, Phase 9b-i)
-        Neut::Observe(k, obs) => Exp::Observe(Box::new(try_readback_neut(level, k)?), obs.clone()),
 
         // Map/Reduce (Phase 11a)
         Neut::NtMap(f, k) => Exp::Map(
@@ -489,45 +435,6 @@ mod tests {
 
     // --- Codata readback tests (D11, Phase 9b-i) ---
 
-    #[test]
-    fn readback_codata_type() {
-        let v = Val::Codata(
-            vec![
-                ("head".to_string(), Exp::One),
-                ("tail".to_string(), Exp::One),
-            ],
-            Rho::Nil,
-        );
-        let e = readback_val(0, &v);
-        assert!(matches!(e, Exp::Codata(_)));
-        if let Exp::Codata(obs) = e {
-            assert_eq!(obs.len(), 2);
-            assert_eq!(obs[0].name, "head");
-            assert_eq!(obs[1].name, "tail");
-        }
-    }
-
-    #[test]
-    fn readback_corecord_conservative() {
-        // Conservative readback: body exprs are emitted as-is,
-        // without evaluating. This avoids divergence on stream
-        // corecords.
-        let v = Val::CoRecord(
-            vec![
-                ("head".to_string(), Exp::Unit),
-                ("tail".to_string(), Exp::Var("self".to_string())),
-            ],
-            Rho::Nil,
-        );
-        let e = readback_val(0, &v);
-        assert!(matches!(e, Exp::CoRecord(_)));
-        if let Exp::CoRecord(fields) = e {
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].body, Exp::Unit);
-            assert_eq!(fields[1].body, Exp::Var("self".to_string()));
-        }
-    }
-
     // --- Map/Reduce readback tests (Phase 11a) ---
 
     #[test]
@@ -564,16 +471,5 @@ mod tests {
         ));
         let e = readback_val(0, &v);
         assert!(matches!(e, Exp::Reduce(_, _, _)));
-    }
-
-    #[test]
-    fn readback_observe_neutral() {
-        // (neut).obs → Observe(neut_readback, obs)
-        let v = Val::Nt(Neut::Observe(
-            Box::new(Neut::Gen(0, "x".to_string())),
-            "head".to_string(),
-        ));
-        let e = readback_val(0, &v);
-        assert!(matches!(e, Exp::Observe(_, ref s) if s == "head"));
     }
 }

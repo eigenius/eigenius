@@ -335,10 +335,8 @@ fn decode_json(
 ///
 /// Same peel as the kernel type-checker's `peel_ctor_telescope`
 /// (`kernel/src/nbe/check/inductive.rs`), which is private to that
-/// module. The one difference is `Exp::SizedPi`: the checker collects
-/// size binders as arguments, and this decoder rejects them, because
-/// they occupy no slot in the chain value's `args` array and skipping
-/// one would misalign every argument after it.
+/// module. It used to differ on `Exp::SizedPi`, which occupied no slot in the chain value's
+/// `args` array; sized types are gone (eigenius#218) and the two peels now agree exactly.
 fn ctor_arg_types<'a>(
     decl: &'a InductiveDecl,
     ctor: &'a InductiveCtorDecl,
@@ -363,23 +361,9 @@ fn ctor_arg_types<'a>(
     }
 
     let mut domains = Vec::new();
-    loop {
-        match cursor {
-            Exp::Pi(_, dom, body) => {
-                domains.push(dom.as_ref());
-                cursor = body;
-            }
-            // A `Size` binder is a type-level argument with no slot in
-            // the chain value's `args` array. Silently skipping it
-            // would misalign every following argument, so report.
-            Exp::SizedPi { patt, .. } => {
-                return Err(malformed(format!(
-                    "sized binder `{patt:?}` in the argument telescope is not \
-                     representable in a D32 §3.7 chain value"
-                )));
-            }
-            _ => break,
-        }
+    while let Exp::Pi(_, dom, body) = cursor {
+        domains.push(dom.as_ref());
+        cursor = body;
     }
     Ok(domains)
 }

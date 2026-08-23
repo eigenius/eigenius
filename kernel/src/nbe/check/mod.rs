@@ -17,7 +17,6 @@
 //! Ported from `Main.hs` lines 289-378 in the EigenTT reference.
 //! Uses NbE (eval + readback) for type equality checking.
 
-mod codata;
 mod conv;
 mod error;
 mod hooks;
@@ -26,10 +25,8 @@ mod inductive;
 mod testutil;
 mod witness;
 
-pub use codata::{check_guarded, lookup_codata_observation};
-use codata::{collect_pattern_names, resolve_full_codata_decl};
 use conv::infer_dependent_sort;
-pub use conv::{def_eq_at_type, eq_nf, exp_mentions_var, subtype_of, subtype_of_with_hyps};
+pub use conv::{def_eq_at_type, eq_nf, exp_mentions_var, subtype_of};
 pub use error::CheckError;
 pub use hooks::CheckHooks;
 pub use inductive::large_elim_admitted;
@@ -68,15 +65,6 @@ pub struct CheckCtx {
     pub layer: Option<Arc<Layer>>,
     /// Per-check memoization of resolved class types, keyed by class IRI string.
     type_cache: BTreeMap<String, Val>,
-    /// Rigid size hypotheses accumulated from bounded size binders
-    /// (`SizedPi { patt, upper, body }`). Keyed by the level of the
-    /// bound size variable (which doubles as its rigid-id): the TSO
-    /// records `bound_level < upper_rigid_level` (or distance 0 against
-    /// `∞`'s sentinel) when the checker crosses a `SizedPi` in a type.
-    ///
-    /// Consulted by [`subtype_of`] and any direct size-comparison
-    /// site via [`crate::nbe::sized::size_le_with_hyps`].
-    pub size_tso: crate::nbe::sized_rigid::Tso,
     /// institution index — derived view of the layer chain. When
     /// attached together with `institution_runtime`,
     /// `Constraint::Institution` predicates dispatch through
@@ -101,7 +89,6 @@ impl CheckCtx {
             gamma,
             layer: None,
             type_cache: BTreeMap::new(),
-            size_tso: crate::nbe::sized_rigid::Tso::new(),
             institution_index: None,
             institution_runtime: None,
             hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
@@ -115,7 +102,6 @@ impl CheckCtx {
             gamma,
             layer: Some(layer),
             type_cache: BTreeMap::new(),
-            size_tso: crate::nbe::sized_rigid::Tso::new(),
             institution_index: None,
             institution_runtime: None,
             hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
@@ -179,7 +165,6 @@ impl CheckCtx {
             gamma: gamma1,
             layer: self.layer.clone(),
             type_cache: self.type_cache.clone(),
-            size_tso: self.size_tso.clone(),
             institution_index: self.institution_index.clone(),
             institution_runtime: self.institution_runtime.clone(),
             hooks: self.hooks.clone(),
@@ -238,13 +223,6 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, CheckError> 
             // Extend context with the recursive variable and check body
             let mut inner = ctx.extend(patt, &t, &gen)?;
             check(&mut inner, body, &t)?;
-            // Guardedness: if the recursive body constructs a corecord,
-            // verify every corecursive reference appears under a
-            // constructor/lambda/app — not at the bare head of an
-            // observation. D11 §3 "productivity."
-            let mut forbidden: std::collections::HashSet<&str> = std::collections::HashSet::new();
-            collect_pattern_names(patt, &mut forbidden);
-            check_guarded(body, &forbidden)?;
             // Re-evaluate with the recursive binding
             let v = ctx.eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))?;
             up_gamma(&ctx.gamma, patt, &t, &v).map_err(CheckError::from)
@@ -263,42 +241,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
             let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
             check_type(&mut inner, b)
         }
-        // Bounded size Π-type: `{i < upper}. body`. The upper bound
-        // must be a rigid size variable or `∞`. Crossing the binder
-        // registers `i_level + 1 ≤ upper_level` as a hypothesis in
-        // the TSO so subsequent size comparisons in `body` can use
-        // the strict-decrease fact.
-        Exp::SizedPi { patt, upper, body } => {
-            check(ctx, upper, &Val::SizeSort)?;
-            let upper_val = ctx.eval(upper, &ctx.rho)?;
-            let new_level = ctx.rho.len();
-            let i_val = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(patt, &Val::SizeSort, &i_val)?;
-            match &upper_val {
-                Val::SizeInf => {
-                    // No hypothesis: i ≤ ∞ holds structurally.
-                }
-                Val::Nt(crate::nbe::val::Neut::Gen(upper_level, _)) => {
-                    inner
-                        .size_tso
-                        .insert(new_level as u32, 1, *upper_level as u32);
-                }
-                other => {
-                    return Err(CheckError::IllFormed(format!(
-                        "SizedPi: upper bound must normalise to a rigid size variable \
-                         or ∞ — got {:?}",
-                        readback_val(ctx.rho.len(), other)
-                    )));
-                }
-            }
-            check_type(&mut inner, body)
-        }
         Exp::Sort(_) | Exp::One => Ok(()),
-        // `SizeSort` is a type (at the first universe above `Set`).
-        // Phase 11b step 14 treats it as a distinguished sort so
-        // sized-type parameter annotations (`i : SizeSort`) can
-        // be written without further infrastructure.
-        Exp::SizeSort => Ok(()),
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
             check_type(ctx, a)?;
@@ -308,22 +251,6 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         }
         // Eigenius ground types are always valid types
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(()),
-
-        // Codata type declaration: each observation's type must be a type.
-        // Observation names must be distinct.
-        Exp::Codata(observations) => {
-            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-            for obs in observations {
-                if !seen.insert(obs.name.as_str()) {
-                    return Err(CheckError::IllFormed(format!(
-                        "duplicate observation name in codata type: '{}'",
-                        obs.name
-                    )));
-                }
-                check_type(ctx, &obs.typ)?;
-            }
-            Ok(())
-        }
 
         // Inductive type forms (Phase 11b, D19; D48 indices).
         // The introduction form runs the strict-positivity checker
@@ -356,11 +283,6 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // sentence whose only readings were ill-typed. The coordination rule now uses POINTWISE
         // conjunction (`λk. And(f(k), g(k))`), so `And` receives `Prop`s and the terms type-check.
         Exp::InductiveType(decl, args) => check_inductive_type_args(ctx, decl, args),
-        // Applied codata type. Admitted as a type when the decl is
-        // already known valid; the declaration-site validation runs
-        // at ingest time via the ground resolver. We conservatively
-        // just accept, matching `InductiveType`'s behaviour.
-        Exp::CodataType(_, _) => Ok(()),
 
         // "Is a type" means the INFERRED type is a sort — any sort. Port of `ensure_sort`
         // (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`), which `check_declar_info` (`:165`)
@@ -466,47 +388,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             check(&mut inner, e, &g.apply(gen)?)
         }
 
-        // Lambda against a bounded size Π (Phase 11b step 15f).
-        //
-        // This is the productivity-via-typing arm: when a corecord
-        // observation has type `{j < upper}. body_ty`, its field body
-        // is typically `λ j. …`, and that lambda must type-check with
-        // `j < upper` registered as a hypothesis in the TSO. The body
-        // under this hypothesis can then reference sized inductive or
-        // coinductive values at size `j`, and recursive calls on the
-        // corecord itself — required by type to produce a result at
-        // size `j < outer-size` — are automatically size-decreasing.
-        //
-        // Productivity of sized corecords falls out of typing: any
-        // recursive call that could make the observation infinite-loop
-        // would have to produce a value at size ≥ outer, which the
-        // size-aware subtyping rejects.
-        (Exp::Lam(p, e), Val::SizedPi(upper, g)) => {
-            let new_level = ctx.rho.len();
-            let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &Val::SizeSort, &gen)?;
-            match upper.as_ref() {
-                Val::SizeInf => {
-                    // Upper is ∞: size arg is unconstrained; no hypothesis.
-                }
-                Val::Nt(crate::nbe::val::Neut::Gen(upper_level, _)) => {
-                    inner
-                        .size_tso
-                        .insert(new_level as u32, 1, *upper_level as u32);
-                }
-                other => {
-                    // Shouldn't arise — a well-formed SizedPi value
-                    // always carries a rigid or ∞ upper. Fail loudly
-                    // rather than silently accept an unsound hypothesis.
-                    return Err(CheckError::IllFormed(format!(
-                        "SizedPi: upper bound must be rigid size var or ∞ — got {:?}",
-                        readback_val(ctx.rho.len(), other),
-                    )));
-                }
-            }
-            check(&mut inner, e, &g.apply(gen)?)
-        }
-
         // Pair against Sigma type
         (Exp::Pair(e1, e2), Val::Sig(t, g)) => {
             check(ctx, e1, t)?;
@@ -574,13 +455,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // One against Set (One is a type)
         (Exp::One, Val::Sort(l)) if l.is_nat(1) => Ok(()),
 
-        // Sized types (Phase 11b step 14, D19 §8).
-        // `SizeSort` is a type — admit it against `Set` / `Type(n)`
-        // the same way Pi and Sigma are. Concrete size values —
-        // `SizeInf` and `SizeSucc(_)` — inhabit `Val::SizeSort`.
-        (Exp::SizeInf, Val::SizeSort) => Ok(()),
-        (Exp::SizeSucc(s), Val::SizeSort) => check(ctx, s, &Val::SizeSort),
-
         // Impredicative Pi: when the codomain is in Prop, the whole Pi
         // is in Prop regardless of the domain's universe level. D46 §4.1.
         // The domain may be at any level (including Type(n) for arbitrary n);
@@ -609,24 +483,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             check(&mut inner, b, &Val::sort(1))
         }
 
-        // Bounded size Pi against Set/Type — delegate to `check_type`
-        // so the TSO hypothesis-insertion logic runs exactly once.
-        // `SizedPi` is the ONE type-former with no `check_infer` rule, so this arm cannot be
-        // deleted the way its five neighbours were (eigenius#194): falling through to
-        // `check_by_inference` would reach `CannotInfer` and make a bounded size Pi unusable in
-        // every checking position. It stays, and it stays permissive — `Val::Sort(_)` admits
-        // `SizedPi : Prop`, which is almost certainly wrong, since a sized Pi over a non-Prop
-        // codomain is not a proposition.
-        //
-        // Not tightened here because there is nothing to tighten it AGAINST: picking a sort for
-        // `SizedPi` is a design decision (does it follow Pi's `max`/impredicative rule with a
-        // `SizeSort` domain? then every sized Pi lands at `Sort(2)` and nothing may check one
-        // against `Set`), and eigenius#136 is the precedent for what happens when a one-line arm
-        // change turns out to be one. Measured `2026-08-22`: instrumented to log every time this
-        // arm is reached, the full workspace produced ZERO hits — no test checks a `SizedPi`
-        // against a sort at all, so there is no evidence to design the rule from either.
-        (Exp::SizedPi { .. }, Val::Sort(_)) => check_type(ctx, exp),
-
         // Sum type against Set
         (Exp::Data(summands), Val::Sort(l)) if l.is_nat(1) => {
             for s in summands {
@@ -643,7 +499,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
                 gamma: gamma1,
                 layer: ctx.layer.clone(),
                 type_cache: ctx.type_cache.clone(),
-                size_tso: ctx.size_tso.clone(),
                 institution_index: ctx.institution_index.clone(),
                 institution_runtime: ctx.institution_runtime.clone(),
                 hooks: ctx.hooks.clone(),
@@ -770,63 +625,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // are validated here.
         (Exp::Match { scrutinee, arms }, expected) => check_match(ctx, scrutinee, arms, expected),
 
-        // Corecord against a codata type: each field's body must have
-        // the corresponding observation's type, and every declared
-        // observation must be covered.
-        (Exp::CoRecord(fields), Val::Codata(observations, rho1)) => {
-            let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-            let obs_names: Vec<&str> = observations.iter().map(|(n, _)| n.as_str()).collect();
-            if field_names != obs_names {
-                return Err(CheckError::IllFormed(format!(
-                    "corecord fields {:?} do not match codata observations {:?}",
-                    field_names, obs_names
-                )));
-            }
-            for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
-                let t = ctx.eval(obs_typ, rho1)?;
-                check(ctx, &field.body, &t)?;
-            }
-            Ok(())
-        }
-
-        // Corecord against a parameterised codata type (D19 self-ref
-        // path). Same flow as the anonymous variant, but the
-        // observations come from `decl.observations` and each
-        // observation's type is evaluated in an environment where
-        // the decl's type parameters are bound to the applied
-        // `params`. This is what lets a self-referential observation
-        // like `tail : Stream(A, j)` resolve to the concrete codata
-        // type when the corecord is checked against `Stream(A_val, i)`.
-        (Exp::CoRecord(fields), Val::CodataType { decl, params }) => {
-            // Self-references inside observation types evaluate to
-            // `Val::CodataType { stub_decl, params }` where the stub
-            // has empty observations. Rehydrate the full decl from
-            // the layer when we encounter a stub — analogous to how
-            // `resolve_class_cached` threads EigonClass references.
-            let full_decl = resolve_full_codata_decl(ctx, decl)?;
-            let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-            let obs_names: Vec<&str> = full_decl
-                .observations
-                .iter()
-                .map(|o| o.name.as_str())
-                .collect();
-            if field_names != obs_names {
-                return Err(CheckError::IllFormed(format!(
-                    "corecord fields {:?} do not match codata observations {:?}",
-                    field_names, obs_names
-                )));
-            }
-            let mut obs_env = Rho::Nil;
-            for ((patt, _), val) in full_decl.params.iter().zip(params.iter()) {
-                obs_env = obs_env.extend(patt.clone(), val.clone());
-            }
-            for (field, obs) in fields.iter().zip(full_decl.observations.iter()) {
-                let t = ctx.eval(&obs.typ, &obs_env)?;
-                check(ctx, &field.body, &t)?;
-            }
-            Ok(())
-        }
-
         // EigonResource against a class type — **intensional** inhabitation (#91):
         // the resource inhabits `sup` iff one of its declared `is_a` classes is a
         // (reflexive-transitive) subclass of `sup`, via the single foundation
@@ -902,7 +700,7 @@ fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckE
             }
         }
     }
-    subtype_of_with_hyps(ctx.rho.len(), &t1, t, &ctx.size_tso)
+    subtype_of(ctx.rho.len(), &t1, t)
 }
 
 /// Is `e` the `ontology:kind_of` nominalization axiom (Chierchia's ∩, `Set -> Entity`)?
@@ -948,22 +746,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
 
         Exp::App(e1, e2) => {
             let t1 = check_infer(ctx, e1)?;
-            // Sized function application: `f(i)` where `f : {i < upper}. body`.
-            // The argument must be a size strictly below `upper`, verified
-            // via `size_lt_with_hyps` against the current TSO so bounded
-            // binders in scope contribute entailment.
-            if let Val::SizedPi(upper, g) = &t1 {
-                check(ctx, e2, &Val::SizeSort)?;
-                let arg_val = ctx.eval(e2, &ctx.rho)?;
-                if !crate::nbe::sized::size_lt_with_hyps(&arg_val, upper, &ctx.size_tso) {
-                    return Err(CheckError::TypeMismatch(format!(
-                        "SizedPi application: argument {:?} is not strictly below upper bound {:?}",
-                        readback_val(ctx.rho.len(), &arg_val),
-                        readback_val(ctx.rho.len(), upper),
-                    )));
-                }
-                return g.apply(arg_val).map_err(CheckError::from);
-            }
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
             Ok(g.apply(ctx.eval(e2, &ctx.rho)?)?)
@@ -991,24 +773,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let t = check_infer(ctx, e)?;
             let prop_name = prop.local_name();
 
-            // Codata observation — same lookup that Exp::Observe does.
-            if let Val::Codata(observations, rho1) = &t {
-                for (name, typ) in observations {
-                    if name == prop_name {
-                        return ctx.eval(typ, rho1).map_err(CheckError::from);
-                    }
-                }
-                return Err(CheckError::IllFormed(format!(
-                    "observation '{}' not found in codata type {:?}",
-                    prop_name,
-                    readback_val(ctx.rho.len(), &t)
-                )));
-            }
-            if let Val::CodataType { decl, params } = &t {
-                let full_decl = resolve_full_codata_decl(ctx, decl)?;
-                return lookup_codata_observation(&full_decl, params, prop_name, ctx.rho.len());
-            }
-
             // Fall back to the existing Sigma / resource behaviour.
             find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
                 CheckError::IllFormed(format!(
@@ -1017,34 +781,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                     readback_val(ctx.rho.len(), &t)
                 ))
             })
-        }
-
-        // Codata observation type inference: e.obs has type T where
-        // `obs : T` appears in the inferred codata type of e.
-        Exp::Observe(e, obs) => {
-            let t = check_infer(ctx, e)?;
-            match &t {
-                Val::Codata(observations, rho1) => {
-                    for (name, typ) in observations {
-                        if name == obs {
-                            return ctx.eval(typ, rho1).map_err(CheckError::from);
-                        }
-                    }
-                    Err(CheckError::IllFormed(format!(
-                        "observation '{}' not found in codata type {:?}",
-                        obs,
-                        readback_val(ctx.rho.len(), &t)
-                    )))
-                }
-                Val::CodataType { decl, params } => {
-                    let full_decl = resolve_full_codata_decl(ctx, decl)?;
-                    lookup_codata_observation(&full_decl, params, obs, ctx.rho.len())
-                }
-                other => Err(CheckError::ExpectedCodata(format!(
-                    "observation target is not a codata value: {:?}",
-                    readback_val(ctx.rho.len(), other)
-                ))),
-            }
         }
 
         // --- Eigenius extension: 7 inference rules (D18 §6, issue #12 item 2) ---
@@ -1264,16 +1000,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 .to_string(),
         )),
 
-        // Sized types (Phase 11b step 14). `SizeSort` is itself a
-        // type at universe 1; `SizeInf` and `SizeSucc(_)` inhabit
-        // `SizeSort`.
-        Exp::SizeSort => Ok(Val::sort(2)),
-        Exp::SizeInf => Ok(Val::SizeSort),
-        Exp::SizeSucc(s) => {
-            check(ctx, s, &Val::SizeSort)?;
-            Ok(Val::SizeSort)
-        }
-
         // Universe inference for type-formers (D46 §3-§4). These rules
         // let `is_propositional_in_ctx` decide propositionality via
         // type inference for any well-formed type expression.
@@ -1346,14 +1072,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitBool(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Boolean,
         )),
-        Exp::Codata(_) => {
-            check_type(ctx, exp)?;
-            Ok(Val::sort(1))
-        }
-        Exp::CodataType(decl, _) => {
-            check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
-        }
         Exp::Inductive(decl) => {
             check_type(ctx, exp)?;
             ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
@@ -1684,14 +1402,6 @@ mod tests {
             .expect("`data D : Set` inhabits `Type 1` — the other three probe hits");
     }
 
-    /// `codata { … }` is at `Set` per `check_infer`, so it is not a proposition either.
-    #[test]
-    fn a_codata_type_does_not_inhabit_prop() {
-        let cd = Exp::Codata(Vec::new());
-        check(&mut ctx(), &cd, &Val::sort(0)).expect_err("`codata { } : Prop` must be rejected");
-        check(&mut ctx(), &cd, &Val::sort(1)).expect("`codata { } : Set` is the inference rule");
-    }
-
     /// The invariant the deletion buys, stated directly: for these constructors `check` accepts
     /// exactly what `check_infer` + `subtype_of` accepts, because it now IS that path. A future
     /// arm re-added above `check_by_inference` would break this before it broke a chain.
@@ -1700,7 +1410,6 @@ mod tests {
         for (exp, label) in [
             (ind_at("P", 0), "inductive at Prop"),
             (ind_at("S", 1), "inductive at Set"),
-            (Exp::Codata(Vec::new()), "codata"),
         ] {
             let inferred = match check_infer(&mut ctx(), &exp).expect("inferable") {
                 Val::Sort(k) => k,
@@ -2355,410 +2064,6 @@ mod tests {
         let mut c = ctx();
         let field = find_sigma_field(&mut c, &dog_type, "name");
         assert!(field.is_none(), "no layer → should not resolve");
-    }
-
-    // --- Sized types primitives (Phase 11b step 14) ---
-
-    #[test]
-    fn size_sort_is_a_type() {
-        // SizeSort checks as a type (Type(1)).
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        check_type(&mut c, &Exp::SizeSort).expect("SizeSort should be a type");
-    }
-
-    #[test]
-    fn size_inf_inhabits_size_sort() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        check(&mut c, &Exp::SizeInf, &Val::SizeSort).expect("SizeInf : SizeSort");
-    }
-
-    #[test]
-    fn size_succ_of_inf_inhabits_size_sort() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let exp = Exp::SizeSucc(Box::new(Exp::SizeInf));
-        check(&mut c, &exp, &Val::SizeSort).expect("SizeSucc(SizeInf) : SizeSort");
-    }
-
-    #[test]
-    fn size_sort_inferred_at_type_1() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let typ = check_infer(&mut c, &Exp::SizeSort).expect("infer SizeSort");
-        assert!(matches!(&typ, Val::Sort(l) if l.is_nat(2)));
-    }
-
-    #[test]
-    fn size_inf_inferred_at_size_sort() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let typ = check_infer(&mut c, &Exp::SizeInf).expect("infer SizeInf");
-        assert!(matches!(typ, Val::SizeSort));
-    }
-
-    #[test]
-    fn size_succ_requires_size_sort_argument() {
-        // SizeSucc applied to a non-size expression should fail.
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let bogus = Exp::SizeSucc(Box::new(Exp::sort(1)));
-        assert!(check(&mut c, &bogus, &Val::SizeSort).is_err());
-    }
-
-    // --- End-to-end sized Nat (Phase 11b step 15d capstone) ---
-    //
-    // Builds a sized Nat inductive and exercises the full pipeline:
-    // constructor type-checking with size parameter binding,
-    // ∞-absorption collapsing `↑ ∞` to `∞`, and subtyping-aware
-    // result-type verification.
-    //
-    // **Known limitation of the encoding.** This is a Lean-style
-    // declaration: the constructor's first binder is *identified*
-    // with the outer inductive index (both named `i`). Agda-style
-    // sized types treat the inductive's index and the constructor's
-    // local predecessor size as *separate* variables, unifying them
-    // at the call site (i.e. solving `↑ i_pred = outer_index` for
-    // `i_pred`). Without that unification — or bounded binders, which
-    // would let us write `succ : {j < i}. SizedNat j → SizedNat i` —
-    // the `succ` constructor below only type-checks at outer size
-    // `∞` (via ∞-absorption collapsing `↑ ∞` to `∞`). At finite outer
-    // sizes `k` the model forces `i = k` and the declared result
-    // `SizedNat (↑ k)` fails the `↑ k ≤ k` subtype check.
-    //
-    // These tests therefore exercise the ∞-end of the sized lattice.
-    // Real size-tracking termination awaits bounded binders and/or
-    // implicit-arg solving in a later step.
-
-    fn snat_ty(decl: Arc<InductiveDecl>, size: Val) -> Val {
-        Val::InductiveType {
-            decl,
-            params: vec![size],
-            indices: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn sized_nat_type_at_inf_is_a_type() {
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let ty = Exp::InductiveType(decl, vec![Exp::SizeInf]);
-        check_type(&mut c, &ty).expect("SizedNat(∞) is a valid type");
-    }
-
-    #[test]
-    fn sized_nat_zero_at_inf() {
-        // `zero` at expected SizedNat(∞) type-checks. After binding
-        // i = ∞, the result is SizedNat(∞) — matches expected exactly.
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        check(&mut c, &zero, &snat_ty(decl, Val::SizeInf)).expect("zero : SizedNat(∞)");
-    }
-
-    #[test]
-    fn sized_nat_succ_zero_at_inf() {
-        // `succ(zero) : SizedNat(∞)`. Critical: `succ`'s declared result
-        // is `SizedNat(↑ i)`. After binding i = ∞, the result evaluates
-        // to `SizedNat(↑ ∞)` which ∞-absorption collapses to
-        // `SizedNat(∞)`. So the subtype check on the constructor's
-        // result trivially succeeds.
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        let one = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![zero]);
-        check(&mut c, &one, &snat_ty(decl, Val::SizeInf)).expect("succ zero : SizedNat(∞)");
-    }
-
-    #[test]
-    fn sized_nat_two_at_inf() {
-        // Nested: `succ(succ(zero)) : SizedNat(∞)`.
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        let one = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![zero]);
-        let two = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![one]);
-        check(&mut c, &two, &snat_ty(decl, Val::SizeInf)).expect("2 : SizedNat(∞)");
-    }
-
-    #[test]
-    fn sized_nat_succ_lifts_into_inf_via_subtyping() {
-        // `x : SizedNat(j)`, check `succ(x) : SizedNat(∞)`.
-        // succ produces SizedNat(↑ j); subtyping ↑j ≤ ∞ permits it.
-        let decl = sized_nat_decl();
-        let j_val = gen_val(&Rho::Nil);
-        let rho1 = Rho::Nil.extend(Patt::Var("j".to_string()), j_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("j".to_string()),
-            &Val::SizeSort,
-            &j_val,
-        )
-        .unwrap();
-        let snat_j = snat_ty(decl.clone(), j_val);
-        let x_val = gen_val(&rho1);
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &snat_j, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let succ_x = Exp::InductiveCtor(
-            decl.clone(),
-            "succ".to_string(),
-            vec![Exp::Var("x".to_string())],
-        );
-        check(&mut c, &succ_x, &snat_ty(decl, Val::SizeInf))
-            .expect("succ x : SizedNat(∞) via subtyping");
-    }
-
-    #[test]
-    fn sized_nat_succ_mismatch_rejected() {
-        // `x : SizedNat(j)` neutral, check `succ(x) : SizedNat(j)`.
-        // Applied param binds the ctor's local `i := j`, so succ's
-        // declared result `SizedNat (↑ i)` evaluates to SizedNat(↑ j);
-        // subtyping requires `↑ j ≤ j` which fails without a
-        // hypothesis. Must be rejected — validates that the new
-        // result-type check in `check_inductive_ctor_args` actually
-        // fires for a mismatched sized constructor.
-        let decl = sized_nat_decl();
-        let j_val = gen_val(&Rho::Nil);
-        let rho1 = Rho::Nil.extend(Patt::Var("j".to_string()), j_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("j".to_string()),
-            &Val::SizeSort,
-            &j_val,
-        )
-        .unwrap();
-        let snat_j = snat_ty(decl.clone(), j_val.clone());
-        let x_val = gen_val(&rho1);
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &snat_j, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let succ_x = Exp::InductiveCtor(
-            decl.clone(),
-            "succ".to_string(),
-            vec![Exp::Var("x".to_string())],
-        );
-        assert!(
-            check(&mut c, &succ_x, &snat_ty(decl, j_val)).is_err(),
-            "succ x must not check against SizedNat(j) — result is ↑j, not j"
-        );
-    }
-
-    #[test]
-    fn check_var_with_inf_size_against_finite_expected_fails() {
-        // Dual: `x : SizedStream(∞, One)` cannot be checked against
-        // `SizedStream(i, One)` — ∞ ≰ i for an unconstrained rigid i.
-        let decl = sized_stream_decl();
-
-        let i_val = gen_val(&Rho::Nil);
-        let rho1 = Rho::Nil.extend(Patt::Var("i".to_string()), i_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("i".to_string()),
-            &Val::SizeSort,
-            &i_val,
-        )
-        .unwrap();
-
-        let sup_stream = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let x_val = gen_val(&rho1);
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &sup_stream, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let expected = mk_sized_type(decl, i_val, Val::One);
-        assert!(
-            check(&mut c, &Exp::Var("x".to_string()), &expected).is_err(),
-            "x : SizedStream(∞, 1) must not check against SizedStream(i, 1)"
-        );
-    }
-
-    // --- Bounded size binders (Phase 11b step 15e) ---
-    //
-    // Exercise `Exp::SizedPi` end-to-end: type formation, application
-    // with a strictly-smaller size argument, rejection of oversized
-    // applications, and subtyping-under-hypothesis via the TSO.
-
-    #[test]
-    fn sized_pi_at_inf_is_a_type() {
-        // `{j < ∞}. One` is a valid type.
-        let exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::SizeInf),
-            body: Box::new(Exp::One),
-        };
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        check_type(&mut c, &exp).expect("{j < ∞}. 1 is a type");
-    }
-
-    #[test]
-    fn sized_pi_at_rigid_var_is_a_type() {
-        // Under `i : SizeSort`, `{j < i}. One` is a valid type.
-        let (mut c, _) = ctx_with_size_var("i");
-        let exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(Exp::One),
-        };
-        check_type(&mut c, &exp).expect("{j < i}. 1 is a type");
-    }
-
-    #[test]
-    fn sized_pi_non_rigid_upper_rejected() {
-        // `{j < ŝ i}. One` must be rejected — the upper bound is
-        // not a rigid size variable or ∞.
-        let (mut c, _) = ctx_with_size_var("i");
-        let exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::SizeSucc(Box::new(Exp::Var("i".to_string())))),
-            body: Box::new(Exp::One),
-        };
-        let err = check_type(&mut c, &exp).unwrap_err().to_string();
-        assert!(
-            err.contains("rigid size variable"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn sized_pi_app_with_strict_smaller_size_succeeds() {
-        // `f : {j < i}. 1`. Applying to a size strictly below `i`
-        // succeeds. Use `ŝ i`? No — that's GREATER than i. We need
-        // something below i, which means ∞-absorption doesn't help.
-        // Simplest: hoist `f` to type `{j < ∞}. 1`, then apply at `i`.
-        let (c, i_val) = ctx_with_size_var("i");
-
-        let f_val = gen_val(&c.rho);
-        let f_ty = Val::SizedPi(
-            Box::new(Val::SizeInf),
-            Clos {
-                patt: Patt::Unit,
-                body: Exp::One,
-                env: Rho::Nil,
-            },
-        );
-        let rho2 = c
-            .rho
-            .clone()
-            .extend(Patt::Var("f".to_string()), f_val.clone());
-        let gamma2 = up_gamma(&c.gamma, &Patt::Var("f".to_string()), &f_ty, &f_val).unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
-        c2.size_tso = c.size_tso.clone();
-
-        // f(i) — i is a size, and i < ∞ trivially.
-        let app = Exp::App(
-            Box::new(Exp::Var("f".to_string())),
-            Box::new(Exp::Var("i".to_string())),
-        );
-        let result_ty = check_infer(&mut c2, &app).expect("f(i) : 1");
-        eq_nf(c2.rho.len(), &result_ty, &Val::One).expect("result is 1");
-        drop(i_val);
-    }
-
-    #[test]
-    fn sized_pi_app_with_equal_size_rejected() {
-        // `f : {j < i}. 1`. Applying at `i` violates `i < i`.
-        // Build the context by check_type-ing the SizedPi (which
-        // registers no hypothesis since f's domain is inside the
-        // binder, not outer scope).
-        let (c, i_val) = ctx_with_size_var("i");
-
-        // f's type: {j < i}. 1
-        let f_ty_exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(Exp::One),
-        };
-        let f_ty = eval(&f_ty_exp, &c.rho).expect("eval f_ty");
-        let f_val = gen_val(&c.rho);
-        let rho2 = c
-            .rho
-            .clone()
-            .extend(Patt::Var("f".to_string()), f_val.clone());
-        let gamma2 = up_gamma(&c.gamma, &Patt::Var("f".to_string()), &f_ty, &f_val).unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
-
-        // f(i) must be rejected: i < i is false.
-        let app = Exp::App(
-            Box::new(Exp::Var("f".to_string())),
-            Box::new(Exp::Var("i".to_string())),
-        );
-        let err = check_infer(&mut c2, &app).unwrap_err().to_string();
-        assert!(
-            err.contains("not strictly below"),
-            "unexpected error: {err}"
-        );
-        drop(i_val);
-    }
-
-    #[test]
-    fn sized_pi_hypothesis_witnesses_sized_subtyping() {
-        // The payoff test. Given `i : SizeSort` and we're inside a
-        // `{j < i}. body`, a variable of type `SizedStream(j, 1)`
-        // must check against expected `SizedStream(i, 1)` via
-        // `j ≤ i` derived from the TSO hypothesis.
-        //
-        // We can't directly observe the TSO state from a check() call
-        // without entering a SizedPi binder, so this test descends
-        // into a `check_type` for a SizedPi whose body references
-        // a sized inductive — which gives us the entailment in the
-        // `body` position via the subtype_of fallthrough.
-        let decl = sized_stream_decl();
-
-        // Outer: bind i : SizeSort.
-        let (c, i_val) = ctx_with_size_var("i");
-
-        // Body of the SizedPi: Π x : SizedStream(j, 1). SizedStream(i, 1).
-        // Inside, we have `j < i` as hypothesis. A variable
-        // `x : SizedStream(j, 1)` used where `SizedStream(i, 1)` is
-        // expected will go through the fallthrough → subtype_of,
-        // which consults the TSO and sees `j ≤ i`.
-        let body = Exp::Pi(
-            Patt::Var("x".to_string()),
-            Box::new(Exp::InductiveType(
-                decl.clone(),
-                vec![Exp::Var("j".to_string()), Exp::One],
-            )),
-            Box::new(Exp::InductiveType(
-                decl.clone(),
-                vec![Exp::Var("i".to_string()), Exp::One],
-            )),
-        );
-        let outer = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(body),
-        };
-
-        // Type-formation succeeds — both SizedStream(j, 1) and
-        // SizedStream(i, 1) are types in the extended ctx.
-        let mut c = c;
-        check_type(&mut c, &outer).expect("SizedPi type with inductive body type-checks");
-        drop((decl, i_val));
-    }
-
-    #[test]
-    fn sized_pi_hypothesis_lets_variable_cross_size_boundary() {
-        // End-to-end: `{j < i}. SizedStream(j, 1) → SizedStream(i, 1)`
-        // treated as a function type. We check a lambda `λ x. x`
-        // against this type — the body uses x : SizedStream(j, 1)
-        // where the codomain expects SizedStream(i, 1). The subtype
-        // check has TSO hypothesis `j < i` in scope.
-        let decl = sized_stream_decl();
-        let (mut c, _i_val) = ctx_with_size_var("i");
-
-        let sized_stream_j =
-            Exp::InductiveType(decl.clone(), vec![Exp::Var("j".to_string()), Exp::One]);
-        let sized_stream_i =
-            Exp::InductiveType(decl.clone(), vec![Exp::Var("i".to_string()), Exp::One]);
-        let fn_ty_exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(Exp::Pi(
-                Patt::Var("x".to_string()),
-                Box::new(sized_stream_j),
-                Box::new(sized_stream_i),
-            )),
-        };
-        check_type(&mut c, &fn_ty_exp)
-            .expect("{j < i}. SizedStream(j, 1) → SizedStream(i, 1) is a type");
     }
 
     // --- D14 §9.2: institution-registered decision procedures ---

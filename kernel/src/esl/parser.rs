@@ -204,9 +204,6 @@ impl<'a> Parser<'a> {
                 TokenKind::Program => {
                     declarations.push(Declaration::Program(self.parse_program()?))
                 }
-                TokenKind::Codata => {
-                    declarations.push(Declaration::Codata(self.parse_codata()?))
-                }
                 TokenKind::Data => declarations.push(Declaration::Data(self.parse_data()?)),
                 TokenKind::MergeComorphism => declarations.push(Declaration::MergeComorphism(
                     self.parse_merge_comorphism()?,
@@ -228,7 +225,7 @@ impl<'a> Parser<'a> {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom, def, macro), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, data, merge_comorphism, text_index, vector_index, axiom, def, macro), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -921,51 +918,6 @@ impl<'a> Parser<'a> {
     }
 
     // --- Codata ---
-
-    /// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }`
-    fn parse_codata(&mut self) -> Result<CodataDecl, EslError> {
-        let pos = self.current_pos();
-        self.expect(&TokenKind::Codata)?;
-        let name = self.parse_qualified_name()?;
-
-        // Optional type parameters, e.g. `(i : Size, A : Set)`.
-        let params = if self.at(&TokenKind::LParen) {
-            self.parse_data_params()?
-        } else {
-            Vec::new()
-        };
-
-        self.expect(&TokenKind::LBrace)?;
-
-        let mut observations = Vec::new();
-        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            let obs_pos = self.current_pos();
-            let obs_name = self.expect_ident()?;
-            self.expect(&TokenKind::Colon)?;
-            let typ = self.parse_type_expr()?;
-            self.expect_semicolon()?;
-            observations.push(ObservationDecl {
-                name: obs_name,
-                typ,
-                pos: obs_pos,
-            });
-        }
-        self.expect(&TokenKind::RBrace)?;
-
-        if observations.is_empty() {
-            return Err(EslError::parser(
-                Some(pos.clone()),
-                "codata type must declare at least one observation".to_string(),
-            ));
-        }
-
-        Ok(CodataDecl {
-            name,
-            params,
-            observations,
-            pos,
-        })
-    }
 
     /// Parse a type expression (Phase 11b step 15h.3).
     ///
@@ -2084,7 +2036,6 @@ impl<'a> Parser<'a> {
             TokenKind::Let => self.parse_let(),
             TokenKind::Case => self.parse_case(),
             TokenKind::Match => self.parse_match(),
-            TokenKind::Corecord => self.parse_corecord(),
             TokenKind::Backslash | TokenKind::Lambda => self.parse_lambda(),
             // D37 §3.1 — typed lambda literal `lambda x : T => body`.
             // Distinct from the untyped `\x -> e` / `λx -> e` forms
@@ -2183,32 +2134,6 @@ impl<'a> Parser<'a> {
         // defensive).
         let _ = outer_pos;
         Ok(expr)
-    }
-
-    /// `corecord { head = e1; tail = e2 }`
-    fn parse_corecord(&mut self) -> Result<Expr, EslError> {
-        let pos = self.current_pos();
-        self.expect(&TokenKind::Corecord)?;
-        self.expect(&TokenKind::LBrace)?;
-
-        let mut fields = Vec::new();
-        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            let name = self.expect_ident()?;
-            self.expect(&TokenKind::Eq)?;
-            let body = self.parse_expr()?;
-            self.expect_semicolon()?;
-            fields.push(CoField { name, body });
-        }
-        self.expect(&TokenKind::RBrace)?;
-
-        if fields.is_empty() {
-            return Err(EslError::parser(
-                Some(pos.clone()),
-                "corecord must have at least one field".to_string(),
-            ));
-        }
-
-        Ok(Expr::CoRecord { fields, pos })
     }
 
     /// `case e { A -> e1; B -> e2 }`
@@ -4162,18 +4087,17 @@ mod tests {
         let file = parse_str(
             r#"
             namespace ex = "urn:ex";
-            codata ex:F {
-                run : pi a : ex:A, b : ex:A => ex:A;
-            }
+            axiom ex:f : pi a : ex:A, b : ex:A => ex:A;
             "#,
         )
         .unwrap();
-        let codata = match &file.declarations[0] {
-            Declaration::Codata(c) => c,
-            _ => panic!("expected codata"),
+        // Hosted in a codata observation until eigenius#218; the SUBJECT is the `pi` type-
+        // expression syntax, so the test moved to another host rather than going with codata.
+        let axiom = match &file.declarations[0] {
+            Declaration::Axiom(a) => a,
+            other => panic!("expected axiom, got {other:?}"),
         };
-        let obs_type = &codata.observations[0].typ;
-        match obs_type {
+        match &axiom.statement {
             TypeExpr::Pi {
                 params, codomain, ..
             } => {

@@ -910,7 +910,6 @@ impl Compiler {
             ast::Declaration::Property(p) => self.compile_property(p),
             ast::Declaration::Resource(r) => self.compile_resource(r),
             ast::Declaration::Program(p) => self.compile_program(p),
-            ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
             ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
             // D52 §12 — macros are pure compile-time expansion
@@ -1112,67 +1111,6 @@ impl Compiler {
         Ok(current)
     }
 
-    // --- Codata ---
-
-    fn compile_codata(&self, decl: &ast::CodataDecl) -> Result<Vec<Resource>, EslError> {
-        use crate::ontology::well_known as wk;
-        let id = self.resolve_iri(&decl.name)?;
-        let mut r = Resource::new(id);
-
-        r.set(
-            iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::String(
-                "urn:eigenius:core:CodataType".to_string(),
-            )]),
-        );
-        r.set(
-            iri("urn:eigenius:core:short_name"),
-            Value::String(decl.name.name.clone()),
-        );
-
-        // Type parameters (Phase 11b step 15h.3) — same shape as
-        // `data`'s params so the decoder can reuse `decode_params`.
-        let param_names: std::collections::HashSet<&str> =
-            decl.params.iter().map(|p| p.name.as_str()).collect();
-        let params: Result<Vec<Value>, EslError> = decl
-            .params
-            .iter()
-            .map(|p| {
-                let mut pr = Resource::new_embedded();
-                set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
-                pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                let kind = self.lower_kind(&p.kind, &param_names, &p.pos)?;
-                pr.set(iri(wk::PARAM_KIND), kind);
-                Ok(Value::Embedded(Box::new(pr)))
-            })
-            .collect();
-        r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
-
-        let mut observations = Vec::new();
-        for obs in &decl.observations {
-            let type_value = self.compile_type_expr(&obs.typ, &param_names)?;
-            let mut obs_r = Resource::new_embedded();
-            set_is_a(&mut obs_r, "urn:eigenius:core:Observation");
-            obs_r.set(
-                iri("urn:eigenius:core:observation_name"),
-                Value::String(obs.name.clone()),
-            );
-            obs_r.set(iri("urn:eigenius:core:observation_type"), type_value);
-            observations.push(Value::Embedded(Box::new(obs_r)));
-        }
-        r.set(
-            iri("urn:eigenius:core:observations"),
-            Value::Array(observations),
-        );
-
-        stamp_declared(&mut r);
-        Ok(vec![r])
-    }
-
-    /// Compile a type expression to a `Value` — either a plain string
-    /// (for simple Ref types — preserves backward compat with the
-    /// pre-15h.3 String IRI shape) or an embedded resource (for
-    /// Arrow/BinderArrow/parameterised Ref).
     fn compile_type_expr(
         &self,
         typ: &ast::TypeExpr,
@@ -1740,17 +1678,13 @@ impl Compiler {
                 // (upper bound for sized) is currently ignored — sized
                 // axiom statements need a follow-on.
                 let kind_str = self.resolve(kind)?;
-                let dom = if kind_str.ends_with(":Size") || kind_str == "Size" {
-                    Exp::SizeSort
-                } else {
-                    let iri_val = Iri::parse(&kind_str).map_err(|e| {
-                        EslError::compiler(
-                            Some(typ.pos().clone()),
-                            format!("invalid kind IRI `{kind_str}`: {e}"),
-                        )
-                    })?;
-                    Exp::EigonClass(iri_val)
-                };
+                let iri_val = Iri::parse(&kind_str).map_err(|e| {
+                    EslError::compiler(
+                        Some(typ.pos().clone()),
+                        format!("invalid kind IRI `{kind_str}`: {e}"),
+                    )
+                })?;
+                let dom = Exp::EigonClass(iri_val);
                 let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
                 inner_scope.insert(name.as_str());
                 let body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
@@ -3224,28 +3158,6 @@ impl Compiler {
                 Ok(r)
             }
 
-            ast::Expr::CoRecord { fields, .. } => {
-                let mut r = Resource::new_embedded();
-                set_is_a(&mut r, "urn:eigenius:program:CoRecord");
-                let mut cofields = Vec::new();
-                for f in fields {
-                    let body_r = self.compile_expr(&f.body)?;
-                    let mut cf = Resource::new_embedded();
-                    set_is_a(&mut cf, "urn:eigenius:program:CoField");
-                    cf.set(
-                        iri("urn:eigenius:program:observation_name"),
-                        Value::String(f.name.clone()),
-                    );
-                    cf.set(
-                        iri("urn:eigenius:program:body"),
-                        Value::Embedded(Box::new(body_r)),
-                    );
-                    cofields.push(Value::Embedded(Box::new(cf)));
-                }
-                r.set(iri("urn:eigenius:program:cofields"), Value::Array(cofields));
-                Ok(r)
-            }
-
             ast::Expr::Match {
                 scrutinee,
                 returning,
@@ -4357,125 +4269,6 @@ mod tests {
     }
 
     #[test]
-    fn compile_codata_declaration() {
-        // A codata type with two observations, one referencing itself.
-        let resources = compile_esl(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            codata ex:IntStream {
-                head : core:integer;
-                tail : ex:IntStream;
-            }
-        "#,
-        );
-        assert_eq!(resources.len(), 1);
-        let r = &resources[0];
-        assert_eq!(r.id().unwrap().as_str(), "urn:eigenius:example:IntStream");
-        let is_a = r.is_a();
-        assert_eq!(is_a[0].as_str(), "urn:eigenius:core:CodataType");
-        assert_eq!(
-            r.get(&iri("urn:eigenius:core:short_name"))
-                .unwrap()
-                .as_str(),
-            Some("IntStream")
-        );
-
-        // Observations array
-        let observations = r
-            .get(&iri("urn:eigenius:core:observations"))
-            .expect("observations property");
-        let arr = match observations {
-            Value::Array(a) => a,
-            _ => panic!("observations must be an array"),
-        };
-        assert_eq!(arr.len(), 2);
-
-        // First observation: head -> core:integer
-        let head = match &arr[0] {
-            Value::Embedded(r) => r.as_ref(),
-            _ => panic!("observation must be embedded"),
-        };
-        assert_eq!(
-            head.get(&iri("urn:eigenius:core:observation_name"))
-                .unwrap()
-                .as_str(),
-            Some("head")
-        );
-        assert_eq!(
-            head.get(&iri("urn:eigenius:core:observation_type"))
-                .unwrap()
-                .as_str(),
-            Some("urn:eigenius:core:integer")
-        );
-
-        // Second observation: tail -> ex:IntStream (self-reference)
-        let tail = match &arr[1] {
-            Value::Embedded(r) => r.as_ref(),
-            _ => panic!("observation must be embedded"),
-        };
-        assert_eq!(
-            tail.get(&iri("urn:eigenius:core:observation_name"))
-                .unwrap()
-                .as_str(),
-            Some("tail")
-        );
-        assert_eq!(
-            tail.get(&iri("urn:eigenius:core:observation_type"))
-                .unwrap()
-                .as_str(),
-            Some("urn:eigenius:example:IntStream")
-        );
-    }
-
-    #[test]
-    fn compile_corecord_expression() {
-        let resources = compile_esl(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            program ex:mk_pair : ex:Unit -> ex:Pair {
-                corecord {
-                    fst = 1;
-                    snd = 2;
-                }
-            }
-        "#,
-        );
-        let r = &resources[0];
-        let body = r
-            .get(&iri("urn:eigenius:program:body"))
-            .unwrap()
-            .as_embedded()
-            .unwrap();
-        // Body should be a CoRecord
-        assert_eq!(body.is_a()[0].as_str(), "urn:eigenius:program:CoRecord");
-
-        let cofields = body
-            .get(&iri("urn:eigenius:program:cofields"))
-            .expect("cofields");
-        let arr = match cofields {
-            Value::Array(a) => a,
-            _ => panic!("cofields must be array"),
-        };
-        assert_eq!(arr.len(), 2);
-
-        let fst = match &arr[0] {
-            Value::Embedded(r) => r.as_ref(),
-            _ => panic!("cofield must be embedded"),
-        };
-        assert_eq!(fst.is_a()[0].as_str(), "urn:eigenius:program:CoField");
-        assert_eq!(
-            fst.get(&iri("urn:eigenius:program:observation_name"))
-                .unwrap()
-                .as_str(),
-            Some("fst")
-        );
-    }
-
-    #[test]
     fn compile_full_file() {
         let input = r#"
             namespace core = "urn:eigenius:core";
@@ -4671,27 +4464,6 @@ mod tests {
         assert!(
             has_declared_resource(r),
             "ESL program should have DeclaredResource in is_a"
-        );
-        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
-    }
-
-    #[test]
-    fn esl_codata_stamped_declared_resource() {
-        let resources = compile_esl(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            codata ex:Stream {
-                head : core:integer;
-                tail : ex:Stream;
-            }
-        "#,
-        );
-        let r = &resources[0];
-        assert!(
-            has_declared_resource(r),
-            "ESL codata should have DeclaredResource in is_a"
         );
         assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }

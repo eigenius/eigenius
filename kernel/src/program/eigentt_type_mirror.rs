@@ -128,13 +128,6 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::Times(a, b) => encode_type_json(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
         Exp::One => Ok(ctor("One", vec![])),
-        // The sort of size values. Reachable through `core:param_kind` / `core:type_name` since
-        // eigenius#188 retyped both to `eigentt:TypeExpr`; before that a `Size` kind travelled as
-        // the literal string `"Size"` and never entered this codec, which is why no size form was
-        // here. The other size forms (`SizedPi`, `SizeInf`, `SizeSucc`) are still absent — they
-        // reach the chain through `core:arg_types`' positional encoding, not through a TypeExpr
-        // value, and nothing on any chain carries one (N2 §3).
-        Exp::SizeSort => Ok(ctor("SizeSort", vec![])),
         Exp::Id(ty, x, y) => Ok(ctor(
             "Id",
             vec![
@@ -181,13 +174,6 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             // here produced decoder-incompatible short-name shapes for
             // chain-resolved decls and silently broke the witness-
             // index hash equality on Phase 9's synthesize path.
-            let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
-            for arg in args {
-                current = ctor("App", vec![current, encode_type_json(arg)?]);
-            }
-            Ok(current)
-        }
-        Exp::CodataType(decl, args) => {
             let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
             for arg in args {
                 current = ctor("App", vec![current, encode_type_json(arg)?]);
@@ -521,10 +507,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             expect_arg_count("One", 0, args)?;
             Ok(Exp::One)
         }
-        "SizeSort" => {
-            expect_arg_count("SizeSort", 0, args)?;
-            Ok(Exp::SizeSort)
-        }
         "Pi" => {
             expect_arg_count("Pi", 3, args)?;
             let name = arg_string("Pi", 0, &args[0])?;
@@ -587,10 +569,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                 Exp::InductiveType(decl, mut existing) => {
                     existing.push(arg);
                     Ok(Exp::InductiveType(decl, existing))
-                }
-                Exp::CodataType(decl, mut existing) => {
-                    existing.push(arg);
-                    Ok(Exp::CodataType(decl, existing))
                 }
                 Exp::InductiveCtor(decl, name, mut existing) => {
                     // D48 / eigenius#71: CtorApp via App-currying. The
@@ -895,7 +873,6 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
     let class_iri = wk::iri(wk::CLASS);
     let datatype_iri = wk::iri(wk::DATA_TYPE);
     let inductive_iri = wk::iri(wk::INDUCTIVE_TYPE);
-    let codata_iri = wk::iri(wk::CODATA_TYPE);
     // D46 §10 axiom IRI — an opaque chain-resident `eigentt:Axiom`
     // resource. Its registered type is looked up at `check_infer`
     // time via the layer's cached `axiom_env`; here we just emit the
@@ -948,16 +925,8 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
                     .unwrap_or_else(|_| Iri::parse("urn:_:unknown").unwrap())],
             }),
         }
-    } else if class_iris.contains(&codata_iri) {
-        // Codata decl resolution lives under ground.rs as resolve_codata_type
-        // (it's similar in shape). For now, leave as a stub error if no
-        // axiom under test needs it — extend when a use case arrives.
-        Err(DecodeError::ConstRefWrongClass {
-            iri,
-            found_classes: class_iris,
-        })
     } else {
-        // A resolved resource that is none of axiom/class/inductive/codata/datatype — a plain
+        // A resolved resource that is none of axiom/class/inductive/datatype — a plain
         // term-level *individual* (an `Entity` value). The dual of the encode-side `EigonResource →
         // ConstRef` arm: a proposition may reference a named individual (`hela`). A misuse in a *type*
         // position is caught downstream by the type-checker — the same deferral `EigonClass`/

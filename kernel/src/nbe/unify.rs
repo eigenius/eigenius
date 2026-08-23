@@ -361,7 +361,6 @@ fn meta_occurs(meta: MetaId, val: &Val) -> bool {
                 || indices.iter().any(|i| meta_occurs(meta, i))
         }
         Val::InductiveVal { args, .. } => args.iter().any(|a| meta_occurs(meta, a)),
-        Val::CodataType { params, .. } => params.iter().any(|p| meta_occurs(meta, p)),
         Val::List(items) => items.iter().any(|v| meta_occurs(meta, v)),
         _ => false,
     }
@@ -371,9 +370,7 @@ fn meta_occurs_neut(meta: MetaId, n: &Neut) -> bool {
     match n {
         Neut::Meta(id, spine) => *id == meta || spine.iter().any(|v| meta_occurs(meta, v)),
         Neut::App(k, v) => meta_occurs_neut(meta, k) || meta_occurs(meta, v),
-        Neut::Fst(k) | Neut::Snd(k) | Neut::PropAccess(k, _) | Neut::Observe(k, _) => {
-            meta_occurs_neut(meta, k)
-        }
+        Neut::Fst(k) | Neut::Snd(k) | Neut::PropAccess(k, _) => meta_occurs_neut(meta, k),
         Neut::NtFun(_, _, k) => meta_occurs_neut(meta, k),
         Neut::NtMap(f, k) => meta_occurs(meta, f) || meta_occurs_neut(meta, k),
         Neut::NtReduce(f, acc, k) => {

@@ -141,33 +141,16 @@ fn extract_ctor_arg_types<'a>(
     decl: &crate::nbe::term::InductiveDecl,
     ctor_typ: &'a Exp,
 ) -> Vec<&'a Exp> {
-    // Sentinel for size-binder positions — these carry a size value
-    // at runtime but aren't recursive occurrences, so iota-reduction
-    // treats them the same as non-inductive value args (skip IH).
-    // Use `SizeSort` itself as the stand-in domain type; only
-    // `InductiveDecl::is_direct_recursive_ref` inspects these entries
-    // and `SizeSort` is never a recursive reference.
-    static SIZE_SORT: Exp = Exp::SizeSort;
     let mut types = Vec::new();
     let mut current = ctor_typ;
     let mut params_to_skip = decl.params.len();
-    loop {
-        match current {
-            Exp::Pi(_, dom, body) => {
-                if params_to_skip > 0 {
-                    params_to_skip -= 1;
-                } else {
-                    types.push(dom.as_ref());
-                }
-                current = body;
-            }
-            Exp::SizedPi { body, .. } => {
-                // Size binders never appear in the param prefix.
-                types.push(&SIZE_SORT);
-                current = body;
-            }
-            _ => break,
+    while let Exp::Pi(_, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            types.push(dom.as_ref());
         }
+        current = body;
     }
     types
 }

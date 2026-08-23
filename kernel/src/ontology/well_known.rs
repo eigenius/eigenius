@@ -200,7 +200,6 @@ pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
 pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
 pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
-pub const CODATA_TYPE: &str = "urn:eigenius:core:CodataType";
 pub const CTORS: &str = "urn:eigenius:core:ctors";
 pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
 pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";

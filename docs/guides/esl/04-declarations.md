@@ -1,6 +1,6 @@
 # 4. Declarations
 
-ESL's top-level declaration forms are `namespace`, `class`, `property`, `resource`, `axiom`, `def`, `text_index`, `vector_index`, `data`, `codata`, `program`, and `macro`. Each compiles to one or more Eigon-JSON resources (except `macro`, which is compile-time only); the section for each form below shows the syntax, the emitted resource shape, and the kernel mapping.
+ESL's top-level declaration forms are `namespace`, `class`, `property`, `resource`, `axiom`, `def`, `text_index`, `vector_index`, `data`, `program`, and `macro`. Each compiles to one or more Eigon-JSON resources (except `macro`, which is compile-time only); the section for each form below shows the syntax, the emitted resource shape, and the kernel mapping.
 
 The AST type for the file root is [`ast::File`](../../../kernel/src/esl/ast.rs):
 
@@ -381,37 +381,6 @@ You don't author the `core:EigenTTType` value directly — the compiler produces
 
 Source: [`parse_data_index_telescope`](../../../kernel/src/esl/parser.rs), [`compile_data`](../../../kernel/src/esl/compile.rs), [`decode_indices` and `decode_result_sort`](../../../kernel/src/program/ground.rs).
 
-### Sized — bounded binders
-
-```esl
-data ex:SizedNat(i : core:Size) {
-    zero,
-    succ({j < i}, ex:SizedNat(j)),
-}
-```
-
-The `{j < i}` form is a **bounded binder**: it introduces a fresh size variable `j` strictly less than `i`. The constructor's full kernel telescope becomes:
-
-```
-Π i : Size. SizedPi { j < i }. Π _ : SizedNat(j). SizedNat(i)
-```
-
-The `SizedPi { j < i }` binder is the form that powers the kernel's termination check ([D19 §3](../../design/d19-inductive-types.md)). Without it, recursion on `SizedNat` would not be guaranteed to terminate.
-
-Three bounded-binder shapes are accepted ([`ast::CtorArg::Named`](../../../kernel/src/esl/ast.rs)):
-
-```esl
-{j < i}                  // shorthand for {j : core:Size < i}
-{j : core:Size}          // unbounded — no upper limit
-{j : core:Size < i}      // explicit kind + bound
-```
-
-**Constructor IRIs.** Each constructor gets its own resource at `<parent_iri>:<ctor_name>` — e.g., `urn:eigenius:example:SizedNat:succ`. This makes constructors first-class graph entities that EigenQL can query.
-
-**Positivity.** Recursive references must appear in strictly positive positions ([D19 §6](../../design/d19-inductive-types.md), [`positivity.rs`](../../../kernel/src/nbe/positivity.rs)). The compiler doesn't enforce positivity itself; the type checker rejects non-positive declarations when they're loaded.
-
-Source: [`compile_data`](../../../kernel/src/esl/compile.rs), [`compile_ctor_arg_type`](../../../kernel/src/esl/compile.rs), [`compile_ctor_binder`](../../../kernel/src/esl/compile.rs), [`decode_arg_type` and `decode_ctor_arg`](../../../kernel/src/program/ground.rs).
-
 ## 4.5a. Multi-class `data` declarations — marker classes (D52 §12 #8)
 
 A comma-separated list of qualified-name classes after the result-sort clause (or after the name, when no result-sort clause is present) decorates the emitted inductive-type resource with additional `is_a` membership:
@@ -477,57 +446,6 @@ data ex:Color, ex:Enumerable {
 ```
 
 Source: [`parse_data` (parser entry point)](../../../kernel/src/esl/parser.rs), [`compile_data` (extras → is_a)](../../../kernel/src/esl/compile.rs).
-
-## 4.6. `codata` — coinductive types
-
-Coinductive types are dual to inductives: instead of being built from constructors, they're consumed via observations. A `codata` declaration lists the observations and their result types.
-
-### Non-parametric
-
-```esl
-codata ex:IntStream {
-    head : core:integer;
-    tail : ex:IntStream;
-}
-```
-
-Two observations: `head` returns an integer, `tail` returns another `IntStream`.
-
-### Parametric
-
-```esl
-codata ex:Stream(A : core:Set) {
-    head : A;
-    tail : ex:Stream(A);
-}
-```
-
-Parameterised by element type `A`.
-
-### Sized — productivity by typing
-
-```esl
-codata ex:Stream(A : core:Set, i : core:Size) {
-    head : A;
-    tail : {j < i} -> ex:Stream(A, j);
-}
-```
-
-The `tail` observation has a function-typed shape: `{j < i} -> ex:Stream(A, j)`. To consume `tail` you supply a strictly smaller size `j` and observe the continuation at that smaller size. The kernel uses this to verify productivity of corecursive definitions — every observation chain eventually terminates because sizes strictly decrease ([D19 §8](../../design/d19-inductive-types.md)).
-
-Observation types are written in the **`TypeExpr` sublanguage** ([`ast::TypeExpr`](../../../kernel/src/esl/ast.rs)):
-
-| Form | Compiles to |
-|---|---|
-| `Name` or `Name(arg, ...)` | `Exp::Pi`/parameterised type ref |
-| `A -> B` | Non-dependent `Exp::Pi(_, A, B)` |
-| `{j : K} -> body` | `Exp::Pi(j, K, body)` |
-| `{j < i} -> body` | `Exp::SizedPi { j, upper: i, body }` |
-| `{j : core:Size < i} -> body` | `Exp::SizedPi { j, upper: i, body }` (explicit kind) |
-
-**Self-references.** A codata observation type may mention the enclosing codata by IRI applied to fresh args (`ex:Stream(A, j)`). The compiler emits an `Exp::CodataType` that carries the self-reference, completing what [D19 §8.2](../../design/d19-inductive-types.md) calls the *parameterised self-referential codata pattern*.
-
-Source: [`compile_codata`](../../../kernel/src/esl/compile.rs), [`compile_type_expr`](../../../kernel/src/esl/compile.rs), [`resolve_codata_type` and `decode_codata_observation_type`](../../../kernel/src/program/ground.rs).
 
 ## 4.7. `program`
 

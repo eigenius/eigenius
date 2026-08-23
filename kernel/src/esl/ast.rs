@@ -66,7 +66,6 @@ pub enum Declaration {
     Property(PropertyDecl),
     Resource(ResourceDecl),
     Program(ProgramDecl),
-    Codata(CodataDecl),
     Data(DataDecl),
     /// D37 §3.3 — `merge_comorphism <iri> for <class> { … }`.
     /// Lowers to a `MergeComorphism` resource carrying
@@ -326,18 +325,6 @@ pub struct ProgramDecl {
 #[derive(Debug)]
 pub enum ProgramAttribute {
     Description(String),
-}
-
-/// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }` —
-/// optionally parameterised `codata ex:Stream(i : Size, A : Set) { … }`.
-#[derive(Debug)]
-pub struct CodataDecl {
-    pub name: QualifiedName,
-    /// Type parameters: `(A : Set, i : Size, ...)`. Empty for
-    /// non-parametric codata — the legacy shape.
-    pub params: Vec<DataParam>,
-    pub observations: Vec<ObservationDecl>,
-    pub pos: Position,
 }
 
 /// `data ex:List(A : Set) { nil, cons(A, List(A)) }` —
@@ -935,11 +922,6 @@ pub enum Expr {
     },
     /// `"hello"`, `42`, `true`
     Literal { value: LiteralValue, pos: Position },
-    /// `corecord { obs = e1; ... }`
-    ///
-    /// Values are ordered — the order must match the declared
-    /// observations of the target codata type.
-    CoRecord { fields: Vec<CoField>, pos: Position },
 
     /// `match expr [returning <motive>] { ctor -> body; ctor(x, y) -> body; ... }`
     /// (Phase 11b step 11–12, D19 §10; extended in eigenius#72 Layer 3).
@@ -981,13 +963,6 @@ pub struct MatchArm {
     pub bindings: Vec<String>,
     pub body: Expr,
     pub pos: Position,
-}
-
-/// A single copattern definition in a corecord: `obs = body`.
-#[derive(Debug)]
-pub struct CoField {
-    pub name: String,
-    pub body: Expr,
 }
 
 /// A literal value in expression position.

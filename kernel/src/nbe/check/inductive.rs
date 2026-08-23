@@ -86,34 +86,17 @@ fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: us
     let mut current = ctor_typ;
     let mut remaining_params = num_params;
     let mut non_param_args: Vec<(String, &Exp)> = Vec::new();
-    loop {
-        match current {
-            Exp::Pi(patt, dom, body) => {
-                if remaining_params > 0 {
-                    remaining_params -= 1;
-                } else {
-                    let name = match patt {
-                        Patt::Var(n) => n.clone(),
-                        _ => String::new(),
-                    };
-                    non_param_args.push((name, dom));
-                }
-                current = body;
-            }
-            Exp::SizedPi { body, .. } => {
-                // SizedPi binders may appear in the parameter prefix
-                // (size-indexed inductives). Skip those; reject any
-                // SizedPi appearing as a regular ctor argument since
-                // sizes are not propositional and don't constitute
-                // "appearing in conclusion" for Case B.
-                if remaining_params == 0 {
-                    return false;
-                }
-                remaining_params -= 1;
-                current = body;
-            }
-            _ => break,
+    while let Exp::Pi(patt, dom, body) = current {
+        if remaining_params > 0 {
+            remaining_params -= 1;
+        } else {
+            let name = match patt {
+                Patt::Var(n) => n.clone(),
+                _ => String::new(),
+            };
+            non_param_args.push((name, dom));
         }
+        current = body;
     }
     // Extract the conclusion's index expressions (trailing
     // `num_indices` args of the `Exp::InductiveType(_, all_args)`).
@@ -161,7 +144,6 @@ fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: us
 #[derive(Debug, Clone)]
 enum CtorArg {
     Value { patt: Patt, typ: Exp },
-    Size { patt: Patt, upper: Exp },
 }
 
 /// Peel a constructor's Π-telescope past the parameter prefix,
@@ -319,10 +301,6 @@ fn ctx_with_param_and_arg_binders(
                 let gen = gen_val(&c.rho);
                 current = Some(c.extend(patt, &typ_val, &gen)?);
             }
-            CtorArg::Size { patt, .. } => {
-                let gen = gen_val(&c.rho);
-                current = Some(c.extend(patt, &Val::SizeSort, &gen)?);
-            }
         }
     }
     // If neither the param prefix nor the ctor args extended the ctx
@@ -338,29 +316,16 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
     let mut args: Vec<CtorArg> = Vec::new();
     let mut remaining = params_to_skip;
     let mut current = ctor_typ;
-    loop {
-        match current {
-            Exp::Pi(patt, dom, body) => {
-                if remaining > 0 {
-                    remaining -= 1;
-                } else {
-                    args.push(CtorArg::Value {
-                        patt: patt.clone(),
-                        typ: (**dom).clone(),
-                    });
-                }
-                current = body;
-            }
-            Exp::SizedPi { patt, upper, body } => {
-                // Size binders appear only after the param prefix.
-                args.push(CtorArg::Size {
-                    patt: patt.clone(),
-                    upper: (**upper).clone(),
-                });
-                current = body;
-            }
-            _ => break,
+    while let Exp::Pi(patt, dom, body) = current {
+        if remaining > 0 {
+            remaining -= 1;
+        } else {
+            args.push(CtorArg::Value {
+                patt: patt.clone(),
+                typ: (**dom).clone(),
+            });
         }
+        current = body;
     }
     (args, current)
 }
@@ -476,31 +441,6 @@ pub(super) fn check_inductive_ctor_args(
                 };
                 arg_env = arg_env.extend(patt.clone(), arg_val);
             }
-            CtorArg::Size { patt, upper } => {
-                let arg_exp = user_arg.ok_or_else(|| {
-                    format!(
-                        "InductiveCtor `{}.{ctor_name}`: sized arg {i} cannot be elided",
-                        decl.name
-                    )
-                })?;
-                // Bounded size arg: user's expression must be a
-                // size value strictly below the upper bound
-                // (evaluated in `arg_env` so it can reference the
-                // inductive's size parameter).
-                check(ctx, arg_exp, &Val::SizeSort)?;
-                let upper_val = ctx.eval(upper, &arg_env)?;
-                let arg_val = ctx.eval(arg_exp, &ctx.rho)?;
-                if !crate::nbe::sized::size_lt_with_hyps(&arg_val, &upper_val, &ctx.size_tso) {
-                    return Err(CheckError::IllFormed(format!(
-                        "InductiveCtor `{}.{ctor_name}`: size argument {:?} is not \
-                         strictly below upper bound {:?}",
-                        decl.name,
-                        readback_val(ctx.rho.len(), &arg_val),
-                        readback_val(ctx.rho.len(), &upper_val),
-                    )));
-                }
-                arg_env = arg_env.extend(patt.clone(), arg_val);
-            }
         }
     }
 
@@ -553,18 +493,14 @@ pub(super) fn check_inductive_ctor_args(
     // Parameter telescope only — the index telescope is settled by the D48
     // Phase D unification below, which can instantiate metavariables that
     // `subtype_of_with_hyps`'s definitional index comparison would reject.
-    subtype_of_deferring_indices(
-        ctx.rho.len(),
-        &actual_result,
-        &expected_result,
-        &ctx.size_tso,
-    )
-    .map_err(|err| {
-        CheckError::TypeMismatch(format!(
-            "InductiveCtor `{}.{ctor_name}`: result type mismatch ({err})",
-            decl.name
-        ))
-    })?;
+    subtype_of_deferring_indices(ctx.rho.len(), &actual_result, &expected_result).map_err(
+        |err| {
+            CheckError::TypeMismatch(format!(
+                "InductiveCtor `{}.{ctor_name}`: result type mismatch ({err})",
+                decl.name
+            ))
+        },
+    )?;
 
     // D48 Phase D — index unification. For indexed inductives
     // (`decl.indices` non-empty), unify each actual conclusion index
@@ -894,7 +830,6 @@ pub(super) fn check_match(
             gamma: ctx.gamma.clone(),
             layer: ctx.layer.clone(),
             type_cache: ctx.type_cache.clone(),
-            size_tso: ctx.size_tso.clone(),
             institution_index: ctx.institution_index.clone(),
             institution_runtime: ctx.institution_runtime.clone(),
             hooks: ctx.hooks.clone(),
@@ -905,40 +840,6 @@ pub(super) fn check_match(
                     let arg_typ_val = ctx.eval(typ, &arg_env)?;
                     let gen = gen_val(&arm_ctx.rho);
                     arm_ctx = arm_ctx.extend(binding, &arg_typ_val, &gen)?;
-                    arg_env = arg_env.extend(patt.clone(), gen);
-                }
-                CtorArg::Size { patt, upper } => {
-                    // The constructor's bounded size binder exposes
-                    // the predecessor size in the arm's scope, with
-                    // `bound_size < upper` available as a TSO
-                    // hypothesis. This is what lets a recursive call
-                    // on the destructured sub-value type-check at a
-                    // strictly-smaller size — i.e. termination via
-                    // pattern-match on a sized inductive.
-                    let upper_val = ctx.eval(upper, &arg_env)?;
-                    let new_level = arm_ctx.rho.len();
-                    let gen = gen_val(&arm_ctx.rho);
-                    arm_ctx = arm_ctx.extend(binding, &Val::SizeSort, &gen)?;
-                    match &upper_val {
-                        Val::SizeInf => {
-                            // `{j < ∞}` in a ctor adds no hypothesis
-                            // — anything is below ∞ structurally.
-                        }
-                        Val::Nt(crate::nbe::val::Neut::Gen(upper_level, _)) => {
-                            arm_ctx
-                                .size_tso
-                                .insert(new_level as u32, 1, *upper_level as u32);
-                        }
-                        _ => {
-                            return Err(CheckError::IllFormed(format!(
-                                "match arm `{}.{}`: constructor's bounded size binder upper \
-                                 must be rigid or ∞, got {:?}",
-                                decl.name,
-                                ctor.name,
-                                readback_val(ctx.rho.len(), &upper_val),
-                            )));
-                        }
-                    }
                     arg_env = arg_env.extend(patt.clone(), gen);
                 }
             }
@@ -1164,10 +1065,6 @@ fn walk_ctor_telescope(
                 who,
             )
         }
-        // A size binder carries `SizeSort`, not a `Sort`, so the universe constraint does not apply
-        // to it, and a size binder never appears in the parameter prefix. Delegate the rest of the
-        // chain — including the binder's TSO hypothesis — to `check_type`.
-        Exp::SizedPi { .. } => super::check_type(ctx, cursor),
         conclusion => super::check_type(ctx, conclusion),
     }
 }
@@ -2037,192 +1934,4 @@ mod tests {
     // introduces `j < i` as a TSO hypothesis in the arm — the
     // hypothesis that lets recursive calls on `n` type-check as
     // strictly-decreasing.
-
-    fn sized_nat_with_sized_pi_decl() -> Arc<InductiveDecl> {
-        // SizedNatP(i : SizeSort) with
-        //   zero : Π i:SizeSort. SizedNatP i
-        //   succ : Π i:SizeSort. {j < i}. SizedNatP j → SizedNatP i
-        let self_ref = Arc::new(InductiveDecl {
-            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNatP").unwrap(),
-            name: "SizedNatP".to_string(),
-            params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
-            indices: Vec::new(),
-            sort: Exp::sort(1),
-            ctors: Vec::new(),
-        });
-        let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
-        let snat_j = Exp::InductiveType(self_ref, vec![Exp::Var("j".to_string())]);
-        Arc::new(InductiveDecl {
-            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNatP").unwrap(),
-            name: "SizedNatP".to_string(),
-            params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
-            indices: Vec::new(),
-            sort: Exp::sort(1),
-            ctors: vec![
-                InductiveCtorDecl {
-                    name: "zero".to_string(),
-                    typ: Exp::Pi(
-                        Patt::Var("i".to_string()),
-                        Box::new(Exp::SizeSort),
-                        Box::new(snat_i.clone()),
-                    ),
-                },
-                InductiveCtorDecl {
-                    name: "succ".to_string(),
-                    typ: Exp::Pi(
-                        Patt::Var("i".to_string()),
-                        Box::new(Exp::SizeSort),
-                        Box::new(Exp::SizedPi {
-                            patt: Patt::Var("j".to_string()),
-                            upper: Box::new(Exp::Var("i".to_string())),
-                            body: Box::new(Exp::Pi(Patt::Unit, Box::new(snat_j), Box::new(snat_i))),
-                        }),
-                    ),
-                },
-            ],
-        })
-    }
-
-    #[test]
-    fn sized_nat_p_succ_at_inf_with_equal_predecessor() {
-        // Under expected type `SizedNatP ∞`, check
-        // `succ(size=∞, n=zero)`. The outer param `i=∞` is provided
-        // by the expected type; user supplies only the non-param
-        // args (size + value). size_lt(∞, ∞) holds via ∞-absorption.
-        let decl = sized_nat_with_sized_pi_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        let succ_inf =
-            Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![Exp::SizeInf, zero]);
-        let ty = Val::InductiveType {
-            decl,
-            params: vec![Val::SizeInf],
-            indices: Vec::new(),
-        };
-        check(&mut c, &succ_inf, &ty).expect("succ(∞, zero) : SizedNatP ∞");
-    }
-
-    #[test]
-    fn sized_nat_p_succ_with_non_decreasing_size_rejected() {
-        // Under `i : SizeSort` and expected `SizedNatP i`, the
-        // expression `succ(size=i, n=zero)` must be rejected: the
-        // predecessor size `i` is not strictly below the outer `i`.
-        let decl = sized_nat_with_sized_pi_decl();
-        let (mut c, i_val) = ctx_with_size_var("i");
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        let bad = Exp::InductiveCtor(
-            decl.clone(),
-            "succ".to_string(),
-            vec![Exp::Var("i".to_string()), zero],
-        );
-        let ty = Val::InductiveType {
-            decl,
-            params: vec![i_val],
-            indices: Vec::new(),
-        };
-        let err = check(&mut c, &bad, &ty).unwrap_err().to_string();
-        assert!(
-            err.contains("not strictly below"),
-            "expected size-bound error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn sized_nat_p_match_arm_sees_hypothesis() {
-        // The key termination-by-typing test.
-        //
-        // Given `i : SizeSort` and `x : SizedNatP(i)`, match on x.
-        // In the `succ(j, n)` arm:
-        //   - `j : SizeSort` is a fresh rigid with TSO `j < i`
-        //   - `n : SizedNatP(j)` (strictly smaller inductive)
-        //
-        // The arm body checks `n : SizedNatP(i)` — which requires
-        // `SizedNatP(j) <: SizedNatP(i)`, i.e. `j ≤ i`. From the
-        // TSO hypothesis `j < i`, subtyping derives `j ≤ i`. ✓
-        //
-        // Without the hypothesis, this subtyping fails.
-        let decl = sized_nat_with_sized_pi_decl();
-        let (c, i_val) = ctx_with_size_var("i");
-
-        let snatp_i = Val::InductiveType {
-            decl: decl.clone(),
-            params: vec![i_val.clone()],
-            indices: Vec::new(),
-        };
-        let x_val = gen_val(&c.rho);
-        let rho2 = c
-            .rho
-            .clone()
-            .extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&c.gamma, &Patt::Var("x".to_string()), &snatp_i, &x_val).unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
-
-        // match x { zero => x; succ(j, n) => n }
-        // Expected type: SizedNatP(i). Both arms must produce that.
-        // succ arm bindings are (j, n) — the non-param ctor args.
-        // `j : SizeSort` gets TSO hypothesis `j < i`; `n : SizedNatP(j)`.
-        // The arm body is `n`, which under subtyping lifts into
-        // SizedNatP(i) via the hypothesis.
-        let match_exp = Exp::Match {
-            scrutinee: Box::new(Exp::Var("x".to_string())),
-            arms: vec![
-                crate::nbe::term::MatchArm {
-                    ctor_name: "zero".to_string(),
-                    bindings: vec![],
-                    body: Exp::Var("x".to_string()),
-                },
-                crate::nbe::term::MatchArm {
-                    ctor_name: "succ".to_string(),
-                    bindings: vec![Patt::Var("j".to_string()), Patt::Var("n".to_string())],
-                    body: Exp::Var("n".to_string()),
-                },
-            ],
-        };
-        check(&mut c2, &match_exp, &snatp_i)
-            .expect("match arm with succ(j, n) uses hypothesis j < i to lift n into SizedNatP(i)");
-    }
-
-    #[test]
-    fn sized_nat_p_match_arm_without_hypothesis_usage_still_typechecks() {
-        // The OLD `sized_nat_decl` (plain Pi, no SizedPi) gives
-        // `succ` a single non-param arg of type `SizedNat(i)` —
-        // i.e. the predecessor shares the outer size, no decrease.
-        // Matching still type-checks trivially: the `n` binding in
-        // `succ(n)` has type SizedNat(i) = expected. This doesn't
-        // exercise hypothesis entailment (there's no SizedPi in the
-        // ctor) but verifies the old path still works after the
-        // refactor that introduced `CtorArg`.
-        let decl = sized_nat_decl();
-        let (c, i_val) = ctx_with_size_var("i");
-
-        let snat_i = Val::InductiveType {
-            decl: decl.clone(),
-            params: vec![i_val],
-            indices: Vec::new(),
-        };
-        let x_val = gen_val(&c.rho);
-        let rho2 = c
-            .rho
-            .clone()
-            .extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&c.gamma, &Patt::Var("x".to_string()), &snat_i, &x_val).unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
-
-        let match_exp = Exp::Match {
-            scrutinee: Box::new(Exp::Var("x".to_string())),
-            arms: vec![
-                crate::nbe::term::MatchArm {
-                    ctor_name: "zero".to_string(),
-                    bindings: vec![],
-                    body: Exp::Var("x".to_string()),
-                },
-                crate::nbe::term::MatchArm {
-                    ctor_name: "succ".to_string(),
-                    bindings: vec![Patt::Var("n".to_string())],
-                    body: Exp::Var("n".to_string()),
-                },
-            ],
-        };
-        check(&mut c2, &match_exp, &snat_i).expect("old-style sized Nat match still works");
-    }
 }

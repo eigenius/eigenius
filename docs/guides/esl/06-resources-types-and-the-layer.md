@@ -10,9 +10,9 @@ This chapter explains how that bridge works mechanically and why it shapes every
 
 The two worlds are:
 
-**The resource graph.** Eigon resources stored in immutable layers. Every `Class`, `Property`, `InductiveType`, `CodataType` declared in ESL becomes a resource here. Resources have IRIs, properties, and `is_a` lists. They're queryable through EigenQL, persistable through the storage layer, traceable through trace stores.
+**The resource graph.** Eigon resources stored in immutable layers. Every `Class`, `Property`, `InductiveType` declared in ESL becomes a resource here. Resources have IRIs, properties, and `is_a` lists. They're queryable through EigenQL, persistable through the storage layer, traceable through trace stores.
 
-**The type theory.** A EigenTT kernel ([D19 §3](../../design/d19-inductive-types.md)) with Π-types, Σ-types, inductive types, coinductive types, sized types, identity types, universes, and normalisation-by-evaluation. The kernel doesn't know about resources directly — it works with `Exp` (terms) and `Val` (values).
+**The type theory.** A EigenTT kernel ([D19 §3](../../design/d19-inductive-types.md)) with Π-types, Σ-types, inductive types, identity types, universes, and normalisation-by-evaluation. The kernel doesn't know about resources directly — it works with `Exp` (terms) and `Val` (values).
 
 The two worlds talk through one specific kernel construct: **`Exp::EigonClass(iri)`**. When the type-checker encounters an `EigonClass(iri)`, it doesn't try to interpret it abstractly — it calls into the layer, finds the resource at that IRI, and constructs a `Val` from what it finds. That call lives in [`resolve_class_type`](../../../kernel/src/program/ground.rs).
 
@@ -32,9 +32,8 @@ fn collect_properties(class_iri: &Iri, layer: &Layer)
 `resolve_class_type` is the entry point. Given a class IRI:
 
 1. **Primitive shortcut.** If the IRI is one of `core:string`, `core:integer`, `core:float`, `core:boolean`, `core:json`, return the corresponding `Val::EigonPrimitive`.
-2. **Codata shortcut.** If the resource at the IRI has `is_a: [CodataType]`, route to `resolve_codata_type` and build a `Val::CodataType`.
-3. **Inductive shortcut.** If the resource has `is_a: [InductiveType]`, route to `resolve_inductive_type` and build a `Val::InductiveType`.
-4. **Class — collect properties.** Otherwise, walk `requires` and `recommends` (transitively through `subclass_of`) via `collect_properties`. For each required property, resolve its type via `resolve_property_type`. Wrap recommended-property types in `Option`. Build a `Val::Sigma` chain from the resulting `(prop_iri, type)` pairs.
+2. **Inductive shortcut.** If the resource has `is_a: [InductiveType]`, route to `resolve_inductive_type` and build a `Val::InductiveType`.
+3. **Class — collect properties.** Otherwise, walk `requires` and `recommends` (transitively through `subclass_of`) via `collect_properties`. For each required property, resolve its type via `resolve_property_type`. Wrap recommended-property types in `Option`. Build a `Val::Sigma` chain from the resulting `(prop_iri, type)` pairs.
 
 `resolve_property_type` reads a property's `data_type` and turns it into a `Val`. Primitives become `EigonPrimitive`. Resource references become `EigonClass(class_iri)` (the type of "any resource of class `class_iri`") if `class_types` is set, or `Val::Set` (the universe of types) if untyped. Arrays wrap the element type in a `List` type.
 
@@ -53,7 +52,6 @@ Concrete declaration → resource shape → kernel value:
 | `property p : ex:Other_Class` | `Property` with `data_type: core:resource`, `class_types: [Other_Class]` | `Val::EigonClass(Other_Class)` |
 | `property p : core:value_array { element_type = core:integer }` | `Property` with `data_type: core:value_array` | `Val::List(Integer)` |
 | `data D(params) { ctor(args) }` | `InductiveType` + `InductiveCtor` resources | `Val::InductiveType { decl, params: [] }` |
-| `codata D(params) { obs : T }` | `CodataType` resource with `observations` array | `Val::CodataType { decl, params: [] }` |
 | `resource r : C { p = v }` | Resource with `is_a: [C]` and properties | A value inhabiting `Val::EigonClass(C)` (the corresponding Σ-tuple) |
 | `program P : I -> O = body` | Resource of class `Program` carrying body | A `Val::Lam(closure)` of type `Pi(_ : I_val, O_val)` |
 
@@ -208,7 +206,7 @@ class ex:Person {
 
 When the kernel resolves `ex:Person` as a type:
 
-1. `resolve_class_type("urn:eigenius:example:Person", layer)` finds the resource, sees no inductive/codata `is_a`, falls through to the class path.
+1. `resolve_class_type("urn:eigenius:example:Person", layer)` finds the resource, sees no inductive `is_a`, falls through to the class path.
 2. `collect_properties` walks `requires` (`[ex:name, ex:age]`) and `recommends` (`[ex:email]`).
 3. For each required property, `resolve_property_type` is called:
    - `ex:name` → `Val::EigonPrimitive(String)`

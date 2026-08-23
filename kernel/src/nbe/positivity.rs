@@ -472,21 +472,9 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         Exp::PropAccess(e, _) => has_ind_occurrence(decl, e),
         Exp::Template(_, refs) => refs.iter().any(|(_, t)| has_ind_occurrence(decl, t)),
         Exp::Construct(_, fields) => fields.iter().any(|(_, e)| has_ind_occurrence(decl, e)),
-        Exp::Codata(observations) => observations
-            .iter()
-            .any(|o| has_ind_occurrence(decl, &o.typ)),
-        // A parameterised codata application at an inductive arg
-        // position must recurse into any param that carries a
-        // recursive occurrence, exactly like `Exp::InductiveType`.
-        // The codata decl itself is never recursive into the
-        // enclosing inductive (different sort), so we skip the
-        // decl.name check and scan args only.
-        Exp::CodataType(_, args) => args.iter().any(|a| has_ind_occurrence(decl, a)),
         // Cross-institution translation — scan the source
         // expression; the comorphism IRI is opaque.
         Exp::InstitutionInvoke { source, .. } => has_ind_occurrence(decl, source),
-        Exp::CoRecord(fields) => fields.iter().any(|f| has_ind_occurrence(decl, &f.body)),
-        Exp::Observe(e, _) => has_ind_occurrence(decl, e),
         Exp::Map(f, c) => has_ind_occurrence(decl, f) || has_ind_occurrence(decl, c),
         Exp::Reduce(f, i, c) => {
             has_ind_occurrence(decl, f)
@@ -496,17 +484,6 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         Exp::Match { scrutinee, arms } => {
             has_ind_occurrence(decl, scrutinee)
                 || arms.iter().any(|a| has_ind_occurrence(decl, &a.body))
-        }
-
-        // Size primitives are over a disjoint sort and can never
-        // contain inductive occurrences.
-        Exp::SizeSucc(s) => has_ind_occurrence(decl, s),
-        Exp::SizeSort | Exp::SizeInf => false,
-        // SizedPi is a binder; recurse into both the upper bound and
-        // body. The upper bound is a size and can't carry an inductive
-        // occurrence, but `body` may.
-        Exp::SizedPi { upper, body, .. } => {
-            has_ind_occurrence(decl, upper) || has_ind_occurrence(decl, body)
         }
 
         Exp::Var(_)
