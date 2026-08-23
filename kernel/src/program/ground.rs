@@ -729,25 +729,20 @@ fn decode_result_sort(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
 ) -> Result<Exp, String> {
+    // eigenius#188: `result_sort` is a `core:Level` value, not a string. The old grammar —
+    // `"Prop"` / `"Set"` / `"Type:N"`, parsed by hand here — could not express a level VARIABLE,
+    // so `data X : Sort u` was inexpressible and nothing validated the string's shape. Decoding
+    // through the same codec as every other level means one representation and one validator.
     let sort_iri = Iri::parse(wk::RESULT_SORT).unwrap();
     match resource.get(&sort_iri) {
-        Some(Value::String(s)) => match s.as_str() {
-            "Prop" => Ok(Exp::sort(0)),
-            "Set" => Ok(Exp::sort(1)),
-            other if other.starts_with("Type:") => {
-                let n: usize = other["Type:".len()..].parse().map_err(|_| {
-                    format!("inductive type '{class_iri}' has malformed `result_sort` '{other}'")
-                })?;
-                Ok(Exp::sort(n + 1))
-            }
-            other => Err(format!(
-                "inductive type '{class_iri}' has unrecognised `result_sort` '{other}' \
-                 (expected `Prop`, `Set`, or `Type:N`)"
-            )),
-        },
-        Some(_) => Err(format!(
-            "inductive type '{class_iri}' has non-string `result_sort`"
+        Some(Value::Json(j)) => crate::program::eigentt_type_mirror::decode_level_json(j)
+            .map(Exp::Sort)
+            .map_err(|e| format!("inductive type '{class_iri}' has malformed `result_sort`: {e}")),
+        Some(other) => Err(format!(
+            "inductive type '{class_iri}' has a `result_sort` that is not a core:Level value: \
+             {other:?}"
         )),
+        // Absent defaults to `Set`, as it always has.
         None => Ok(Exp::sort(1)),
     }
 }

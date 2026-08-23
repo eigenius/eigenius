@@ -55,16 +55,19 @@ fn sort_kind_level(k: &ast::SortKind) -> crate::nbe::level::Level {
     }
 }
 
-/// A declaration's own sort travels the chain as a STRING (`core:result_sort`), so a level
-/// variable has nowhere to live there yet. Reject it with the reason rather than encoding a level
-/// expression into a string that `decode_result_sort` would then have to parse back.
+/// A declaration's own sort, as the `core:Level` value `core:result_sort` now carries
+/// (eigenius#188).
 ///
-/// Type EXPRESSIONS are unaffected — `forall (T : Sort u, ...)` inside an axiom lowers through
-/// `lower_type_expr` to an `Exp::Sort(Level::Param(..))` and encodes as an `eigentt:Level` tree.
-/// That is where eigenius#188's first consumers are (`spec_poly`, and the TTR predicates of N3
-/// §5a); polymorphic *declaration* sorts need `result_sort` to become a Level-valued property,
-/// which is its own change.
-fn sort_kind_result_string(
+/// This was a string — `"Prop"` / `"Set"` / `"Type:N"` — which could not express a level VARIABLE,
+/// so `data X : Sort u` had to be rejected and nothing validated the string's shape. Emitting the
+/// same `core:Level` tree every other level uses removes both problems: one representation, and
+/// the validator checks it against the ctor schema like any other inductive value.
+/// An inductive PARAMETER's kind, which travels as a string in `core:param_kind` — a different
+/// property from `core:result_sort`, and not retyped by eigenius#188. A level variable in a
+/// parameter kind is rejected here for the same reason `result_sort` used to reject one: the
+/// string grammar cannot express it. Retyping this property is the same shape of change as
+/// `result_sort` and has not been done.
+fn sort_kind_param_string(
     k: &ast::SortKind,
     pos: &crate::esl::error::Position,
 ) -> Result<String, EslError> {
@@ -78,13 +81,18 @@ fn sort_kind_result_string(
         other => Err(EslError::compiler(
             Some(pos.clone()),
             format!(
-                "a declaration's result sort must be a concrete level, got `{other:?}` — \
-                 `core:result_sort` is a string on the chain, so a level VARIABLE has nowhere to \
-                 live there yet (eigenius#188). Polymorphic levels work inside type expressions, \
-                 e.g. `forall (T : Sort u, ...)`."
+                "an inductive parameter's kind must be a concrete level, got `{other}` — \
+                 `core:param_kind` is a string on the chain (eigenius#188 retyped \
+                 `core:result_sort` but not this one)"
             ),
         )),
     }
+}
+
+fn sort_kind_result_value(k: &ast::SortKind) -> Value {
+    Value::Json(crate::program::eigentt_type_mirror::encode_level_json(
+        &sort_kind_level(k),
+    ))
 }
 
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
@@ -1063,7 +1071,7 @@ impl Compiler {
                             self.resolve(qn)?
                         }
                     }
-                    ast::IndexKind::Sort(sk) => sort_kind_result_string(sk, &p.pos)?,
+                    ast::IndexKind::Sort(sk) => sort_kind_param_string(sk, &p.pos)?,
                 };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
@@ -2041,7 +2049,7 @@ impl Compiler {
                             self.resolve(qn)?
                         }
                     }
-                    ast::IndexKind::Sort(sk) => sort_kind_result_string(sk, &p.pos)?,
+                    ast::IndexKind::Sort(sk) => sort_kind_param_string(sk, &p.pos)?,
                 };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
@@ -2076,7 +2084,7 @@ impl Compiler {
                         // → Sort(N+1). Needed for D39 §5's JustifiedBy
                         // and ChainWitness predicates whose intermediate
                         // index kinds are themselves sorts.
-                        ast::IndexKind::Sort(sk) => sort_kind_result_string(sk, &p.pos)?,
+                        ast::IndexKind::Sort(sk) => sort_kind_param_string(sk, &p.pos)?,
                     };
                     pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                     Ok(Value::Embedded(Box::new(pr)))
@@ -2088,8 +2096,7 @@ impl Compiler {
         // eigenius#72 Layer 2 — explicit result sort. Encoded as a
         // string; the decoder parses it back into `Exp::Sort(n)`.
         if let Some(sort) = &decl.result_sort {
-            let sort_str = sort_kind_result_string(sort, &decl.name.pos)?;
-            r.set(iri(wk::RESULT_SORT), Value::String(sort_str));
+            r.set(iri(wk::RESULT_SORT), sort_kind_result_value(sort));
         }
 
         let parent_iri_str = self.resolve(&decl.name)?;
@@ -3557,6 +3564,79 @@ fn stamp_declared(resource: &mut Resource) {
 
 #[cfg(test)]
 mod tests {
+    /// **eigenius#188 — a declaration's own sort can be POLYMORPHIC.**
+    ///
+    /// `core:result_sort` was a string (`"Prop"` / `"Set"` / `"Type:N"`), so `data X : Sort u`
+    /// had to be rejected: a level variable has no spelling in that grammar. Retyping the
+    /// property to a `core:Level` value — the same representation every other level uses — makes
+    /// it as writable as `data X : Set`, and lets the validator check it against the ctor schema
+    /// instead of nothing checking the string at all.
+    ///
+    /// The algebra lives in CORE rather than beside `eigentt:TypeExpr` because `core:Asserts`
+    /// carries a `result_sort`, and a lower layer cannot reference a higher one.
+    #[test]
+    fn a_declaration_sort_may_be_polymorphic() {
+        let cases = [
+            (
+                "Set",
+                serde_json::json!({"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}),
+            ),
+            (
+                "Sort u",
+                serde_json::json!({"ctor": "Param", "args": ["u"]}),
+            ),
+            (
+                "Sort (max u v)",
+                serde_json::json!({"ctor": "Max", "args": [
+                    {"ctor": "Param", "args": ["u"]},
+                    {"ctor": "Param", "args": ["v"]},
+                ]}),
+            ),
+            (
+                "Sort (imax u v)",
+                serde_json::json!({"ctor": "IMax", "args": [
+                    {"ctor": "Param", "args": ["u"]},
+                    {"ctor": "Param", "args": ["v"]},
+                ]}),
+            ),
+        ];
+        for (sort_src, expected) in cases {
+            let src = format!(
+                r#"namespace core = "urn:eigenius:core";
+                   namespace p = "urn:eigenius:probe";
+                   data p:D : {sort_src} {{ mk : p:D }}"#
+            );
+            let rs = crate::esl::compile(&src)
+                .unwrap_or_else(|e| panic!("`data p:D : {sort_src}` must compile: {e:?}"));
+            let got = rs[0]
+                .get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
+                .expect("result_sort present");
+            let Value::Json(j) = got else {
+                panic!("result_sort must be a Level value, got {got:?}")
+            };
+            assert_eq!(j, &expected, "`{sort_src}` lowers to the wrong level");
+        }
+    }
+
+    /// The numeral a `core:result_sort` Level value denotes, for tests that used to compare it
+    /// against `"Prop"` / `"Set"` / `"Type:N"` (eigenius#188 retyped it to a `core:Level`).
+    fn result_sort_nat(r: &Resource) -> Option<usize> {
+        let v = r.get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())?;
+        let Value::Json(j) = v else { return None };
+        let mut n = 0usize;
+        let mut cur = j;
+        loop {
+            match cur.get("ctor")?.as_str()? {
+                "Zero" => return Some(n),
+                "Succ" => {
+                    n += 1;
+                    cur = cur.get("args")?.as_array()?.first()?;
+                }
+                _ => return None,
+            }
+        }
+    }
+
     use super::*;
     use crate::esl;
     use crate::ontology::eigon_json;
@@ -4841,15 +4921,7 @@ mod tests {
                 .is_some(),
             "Vec should carry core:indices"
         );
-        assert_eq!(
-            vec.get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
-                .and_then(|v| if let Value::String(s) = v {
-                    Some(s.as_str())
-                } else {
-                    None
-                }),
-            Some("Set")
-        );
+        assert_eq!(result_sort_nat(vec), Some(1));
 
         // Layer 1: axiom resource is an eigentt:Axiom with statement +
         // justification.
@@ -4959,15 +5031,7 @@ mod tests {
         }
 
         // Result sort — explicitly `Set`.
-        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
-        assert_eq!(
-            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
-                Some(s.as_str())
-            } else {
-                None
-            }),
-            Some("Set")
-        );
+        assert_eq!(result_sort_nat(r), Some(1));
 
         // Both ctors should carry `core:ctor_type`, none should carry
         // `core:arg_types` (typed form bypasses arg_types entirely).
@@ -5037,15 +5101,7 @@ mod tests {
             );
         }
         // Result sort should be `Prop`.
-        assert_eq!(
-            r.get(&Iri::parse(wk_local::RESULT_SORT).unwrap())
-                .and_then(|v| if let Value::String(s) = v {
-                    Some(s.as_str())
-                } else {
-                    None
-                }),
-            Some("Prop")
-        );
+        assert_eq!(result_sort_nat(r), Some(0));
     }
 
     #[test]
@@ -5190,15 +5246,7 @@ mod tests {
             .collect();
         assert_eq!(kind_strings, vec!["Prop", "Set", "Type:2"]);
 
-        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
-        assert_eq!(
-            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
-                Some(s.as_str())
-            } else {
-                None
-            }),
-            Some("Type:3")
-        );
+        assert_eq!(result_sort_nat(r), Some(4));
     }
 
     #[test]
@@ -5221,9 +5269,8 @@ mod tests {
             r.get(&indices_iri).is_none(),
             "non-indexed data should omit `core:indices`"
         );
-        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
         assert!(
-            r.get(&sort_iri).is_none(),
+            r.get(&Iri::parse(wk_local::RESULT_SORT).unwrap()).is_none(),
             "non-indexed data without explicit `: Set` should omit `core:result_sort`"
         );
     }

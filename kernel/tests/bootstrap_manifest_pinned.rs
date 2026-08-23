@@ -31,6 +31,16 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
+//! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
+//! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
+//! move: `core:Asserts` carries a `result_sort`, so the property is used inside `core` itself, and
+//! a lower layer cannot reference a higher one — the same constraint that stopped `eigentt:Level`
+//! reusing `lean:LeanLevel`. One algebra now serves both `result_sort` and `eigentt:TypeExpr`'s
+//! `Sort` ctor, and `data X : Sort u` is expressible where the string grammar could not spell a
+//! level variable. `core` moving revalidates every layer above it; both reseeds fold into one,
+//! since none has run since the first move.
+//!
 //! IT FIRED FOR eigenius#188 (`2026-08-23`), on ONE layer, `eigentt-type-fragment`: the
 //! `TypeExpr` `Sort` constructor's argument changed from `core:integer` to a new
 //! `eigentt:Level` inductive (Zero/Succ/Max/IMax/Param), so a universe level can be a `Max`,
@@ -68,8 +78,8 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "\
-core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
-eigentt-type-fragment:9e683d518466eaa88ab6279ba7bed5ad8c9a8ffbe590253d12e82de029fe3499
+core:2069508694585321fc035cb6b442f27459a06ddd50b1fd9e77d542cb1444609d
+eigentt-type-fragment:68d5552fb2901a845e5a09fa19d4ceb11d7152e19d251562b5bdc76591e124f6
 program:224bb234a8651afdeb5144dca0e609afded5a633dd6495f4ae588e44bf855d4e
 reflection:c4c613c9b8391371f6c3346c2248f79f846ae674f5022b629665eee556cdb9a8
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf

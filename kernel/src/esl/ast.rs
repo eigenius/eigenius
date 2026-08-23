@@ -695,6 +695,18 @@ pub enum SortKind {
     Sort(LevelExpr),
 }
 
+impl std::fmt::Display for SortKind {
+    /// The surface spelling, for diagnostics.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SortKind::Prop => write!(f, "Prop"),
+            SortKind::Set => write!(f, "Set"),
+            SortKind::Type(l) => write!(f, "Type {l}"),
+            SortKind::Sort(l) => write!(f, "Sort {l}"),
+        }
+    }
+}
+
 impl std::fmt::Display for LevelExpr {
     /// The surface spelling, so `result_sort` strings and diagnostics round-trip.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

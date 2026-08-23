@@ -242,7 +242,7 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
 /// or `Param` survives the round trip instead of being unrepresentable. Numerals encode as the
 /// `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than `1` and is the
 /// price of one ctor able to carry every level rather than one declaration per rung.
-fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
+pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
     use crate::nbe::level::Level;
     match l {
         Level::Zero => ctor("Zero", vec![]),
@@ -260,7 +260,9 @@ fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
 /// then fails to resume with `ManifestDrift`, and the reseed that answers it rewrites the chain
 /// from source with this encoder. So no term in the old form can ever reach this function — the
 /// arm was a compatibility layer for a state that cannot occur.
-fn decode_level_json(v: &serde_json::Value) -> Result<crate::nbe::level::Level, DecodeError> {
+pub(crate) fn decode_level_json(
+    v: &serde_json::Value,
+) -> Result<crate::nbe::level::Level, DecodeError> {
     use crate::nbe::level::Level;
     let obj = v
         .as_object()

@@ -594,11 +594,79 @@
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
+    "@id": "urn:eigenius:core:Level",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Level",
+    "urn:eigenius:core:description": "A universe level. Carried by core:result_sort (an inductive type's own sort) and by eigentt:TypeExpr's `Sort` ctor. Five constructors: `Zero` (Prop), `Succ`, `Max`, `IMax` and `Param`. `IMax` is the impredicative-Pi rule held open: `imax l r` is `Zero` when `r` is `Zero` and `max l r` otherwise, which cannot be decided while `r` is a `Param`. Mirrors urn:eigenius:lean:LeanLevel's five constructors, deliberately: the Lean mirror already carried this algebra, and an isomorphic shape makes the sort translation a fold rather than a special case that only covers the monomorphic fragment. ONE divergence: `Param` takes a core:string where LeanLevel takes a lean:LeanName. Lean's Name is hierarchical (anonymous / string / numeric components) because it identifies declarations; a level parameter here needs only an identifier, and EigenTT has no Name type to borrow. The translation to LeanLevel therefore wraps the string in a single-component Name rather than being the identity on that argument. Declared in CORE rather than beside TypeExpr because core:result_sort needs it and core:Asserts uses that property — a lower layer cannot reference a higher one. One algebra serves both. See eigenius#188 and docs/notes/p2-n3-universe-polymorphism.md.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Zero",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Succ",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "base",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:Level"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Max",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:Level"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:Level"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "IMax",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:Level"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:Level"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Param",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      }
+    ]
+  },
+  {
     "@id": "urn:eigenius:core:result_sort",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce (e.g. `Prop`, `Set`). A string naming the sort.",
+    "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce — a core:Level value. Carried a STRING (`Prop` / `Set` / `Type:N`) until eigenius#188; that grammar could not express a level VARIABLE, so `data X : Sort u` was inexpressible, and nothing validated the string's shape. Now an inductive value like any other: the validator checks it against core:Level's ctor schema, and `data X : Sort (max u v)` is as writable as `data X : Set`.",
     "urn:eigenius:core:short_name": "result_sort",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Level"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
@@ -705,7 +773,7 @@
         "urn:eigenius:core:param_kind": "urn:eigenius:core:string"
       }
     ],
-    "urn:eigenius:core:result_sort": "Prop",
+    "urn:eigenius:core:result_sort": {"ctor": "Zero", "args": []},
     "urn:eigenius:core:ctors": []
   },
 
