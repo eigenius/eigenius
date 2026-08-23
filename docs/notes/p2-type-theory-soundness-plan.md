@@ -53,12 +53,12 @@ ontologies/lexicon/lexicon-ontology.esl:281   cat_num_forall : (lexicon:Num -> l
 `cat_forall`'s shape, accepted only because the pass never ran.
 
 **Arm 1 — extend the criterion (ADOPTED, provisionally).** Admit higher-order positive occurrences.
-No bootstrap edit, no reseed; `lexicon:Cat` stays as declared. N1 §5 finds this may split into two
-independently landable steps — widen the criterion and route declarations through the pass, then add
-function-typed induction hypotheses — because `derive_minor_type` and `iota_reduce_impl` filter on
-the *same* predicate and would skip a higher-order argument identically, making the current
-restriction a completeness limit rather than a soundness one. If that agreement is confirmed, #92
-step 1 lands before #138 and the two tracks do not fully serialize.
+No bootstrap edit, no reseed; `lexicon:Cat` stays as declared. **N1 §5, verified `2026-08-22`**, splits
+it into two independently landable steps: widen the criterion and route declarations through the pass,
+then add function-typed induction hypotheses. `derive_minor_type` and `iota_reduce_impl` filter on the
+*same* predicate and skip a higher-order argument identically, so the current restriction is a
+completeness limit, not a soundness one. **Step 1 lands before #138**; step 2 after it. The tracks do
+not serialize.
 
 **Arm 2 — keep the criterion, re-represent categories.** Rewrite the polymorphic-category algebra
 (D63 §8.2) without higher-order constructors. Touches the parser's category representation, is a
@@ -148,7 +148,7 @@ substitute for N1 deciding it.
 
 | # | item | design input | exit gate | manifest moves? |
 |---|---|---|---|---|
-| 1 | #213 | none | a comment-only edit and a JSON reformat both leave the manifest unchanged; `bootstrap_manifest_pinned.rs` and its doc comment updated to the new behaviour | no |
+| 1 | #213 | none | a comment-only edit and a JSON reformat both leave the manifest unchanged; `bootstrap_manifest_pinned.rs` and its doc comment updated to the new behaviour | **yes, once** — see §5 |
 | 2 | #64 | none | no literal `"__case_arg"` in `check/mod.rs`; suite unchanged; a test binding that identifier still checks | no |
 | 3 | #194 | none | every `check` arm compared against `check_infer` for the same `Exp` ctor, each permissive one tightened or justified in a comment; the four `Val::Sort(_)` arms at `check/mod.rs:659-673` resolved | **maybe** — see §5 |
 | 4 | N1, N2, N3 | — | notes merged | no |
@@ -161,7 +161,22 @@ substitute for N1 deciding it.
 
 ## 5. Reseed accounting
 
-**#213 first, and the reason is this package specifically.** `current_manifest`
+**#213 costs one reseed to land, and adopting arm 1 weakened its case for going first.** Two
+corrections to the §4 table's original reading:
+
+1. **Changing the hash function moves every layer.** The stored manifest is the byte value
+   `current_manifest()` produced at seed time, and `bootstrap_persistent` compares the new code's
+   output against it. Canonicalising before hashing changes all 21 lines at once, so every existing
+   store drifts and one reseed is owed to adopt it. That is a cost of fixing #213, not an argument
+   against it — but the table said "no" and was wrong.
+2. **Under arm 1, no P2 item edits a bootstrap ontology except #188.** The original case for #213
+   going first was that arm 2 would iterate on `lexicon-ontology.esl`. Arm 1 removes that exposure,
+   so #213 is no longer a prerequisite of this package in the sense §0 claims. It keeps its
+   independent value — it fired twice as a false positive on `2026-08-22` and it discourages
+   improving comments in TCB files — and the cheap sequencing is to **fold it into #188's reseed**
+   rather than pay a standalone one. Do it earlier only if something else forces a reseed first.
+
+**The original argument, for the record.** `current_manifest`
 (`kernel/src/bootstrap/mod.rs:652`) hashes each bootstrap ontology's raw source bytes, so
 reindenting or rewrapping a comment forces a full reseed — the pinned-manifest test's own message
 puts the follow-through at reseed, re-point snapshot pins, re-record LLM draws that miss, repin

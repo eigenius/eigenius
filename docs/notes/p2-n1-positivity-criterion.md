@@ -87,6 +87,11 @@ nanoda builds both from one `local_indices` — `mk_motive_dep` `inductive.rs:10
 
 ## 5. The finding that changes the sequencing
 
+> **VERIFIED `2026-08-22`.** `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`
+> (`kernel/src/nbe/eval/iota.rs`) passes: for `Foo { base : Foo, rall : (Set → Foo) → Foo }` the
+> derived minor for `rall` has **one** binder — the constructor argument, no IH — and iota applies
+> exactly one. The staged reading below holds.
+
 `positivity.rs`'s module doc says admitting a higher-order positive occurrence *"would create a
 soundness gap"*, because iota cannot construct the induction hypothesis. **The evidence says
 otherwise, and the difference is worth a paragraph because it decides whether arm 1 can be staged.**
@@ -97,10 +102,11 @@ skip it identically: the minor's declared type would carry no IH binder, and iot
 The two halves agree. The failure mode is a **missing** induction hypothesis, not a wrong one — an
 eliminator too weak to do induction through that argument, which is incompleteness, not unsoundness.
 
-That is a claim to **verify before relying on**, not to assume. The check is cheap and belongs in the
-first commit: declare a reflexive inductive, derive its minors, iota-reduce a constructor application,
-and assert the derived minor type and the reduction still agree. If they do, arm 1 splits into two
-independently landable steps:
+That claim was **verified before being relied on**, not assumed: the test declares a reflexive
+inductive, derives its minors, iota-reduces a constructor application, and asserts the arity the
+minor's type declares is the arity iota applies. Too few applications would leave a `Val::Lam`; too
+many would apply `Sort(1)` to something and error. It reports 1 and 1. Arm 1 therefore splits into
+two independently landable steps:
 
 1. **Widen the criterion and route declarations through the pass.** Closes #92. The bootstrap keeps
    its three constructors, and the eliminator is weaker for them than for direct recursion — a
@@ -108,15 +114,20 @@ independently landable steps:
 2. **Function-typed IHs in the minor derivation and iota.** Makes induction through a reflexive
    argument possible.
 
-If instead the two halves are found to disagree, step 1 cannot ship alone and #92 waits on the full
-eliminator work — which is the reading that makes #138 a hard prerequisite.
+The test stays as the pin. If a later change teaches one site about higher-order arguments and not
+the other, the arities stop matching and it fails — which is #138's defect in a different pair of
+functions, caught at the moment it is introduced rather than by a proof that will not type-check
+months later.
+
+`positivity.rs`'s module doc is wrong on this point and should be corrected in the same commit that
+widens the criterion: the restriction buys completeness of the eliminator, not soundness.
 
 ## 6. Consequences for the package
 
-- **#138 first either way.** Step 2 above rewrites `derive_minor_type`'s IH construction, which is the
-  same function #138 fixes; doing them in the other order means writing the IH generalization twice.
-  Under the staged reading, #92 step 1 can land before #138 — the plan's suggested order does not
-  have to serialize entirely.
+- **#92 step 1 lands before #138.** With the agreement verified, widening the criterion and routing
+  declarations through the pass is independent of the eliminator, so Track A does not serialize behind
+  Track B. **Step 2 comes after #138** — it rewrites `derive_minor_type`'s IH construction, the same
+  function #138 fixes, and doing them in the other order writes the IH generalization twice.
 - **No reseed from #92.** Arm 1 is kernel-only. The bootstrap ontologies are untouched, the manifest
   does not move, and the package's reseed accounting reduces to #188 (certain) and #194 (uncertain,
   on #136's precedent).
@@ -142,8 +153,8 @@ decision that would be expensive to reverse when #20 is picked up.
 
 ## 8. Open questions
 
-1. **Do `derive_minor_type` and `iota_reduce_impl` agree on a skipped higher-order argument?** §5. The
-   answer decides whether #92 lands in one step or two. Verify by construction, first commit.
+1. ~~**Do `derive_minor_type` and `iota_reduce_impl` agree on a skipped higher-order argument?**~~
+   **Answered `2026-08-22`: yes.** §5. #92 lands in two steps, the first before #138.
 2. **Does anything eliminate `lexicon:Cat` with `InductiveRec` today?** If the parser only constructs
    `Cat` values and matches them, the weaker eliminator from §5 step 1 costs nothing at all in
    practice. Unmeasured.
@@ -158,4 +169,6 @@ decision that would be expensive to reverse when #20 is picked up.
   took, not just through `check`.
 - The bootstrap loads, with `cat_forall`, `cat_fin_forall` and `cat_num_forall` unchanged.
 - `positivity.rs` cites `6ae1f0c` and its line numbers are correct.
-- The §5 agreement check exists as a test, whichever way it comes out.
+- ✔ The §5 agreement check exists as a test —
+  `higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`, `nbe/eval/iota.rs`.
+- `positivity.rs`'s "soundness gap" doc comment corrected to say completeness.

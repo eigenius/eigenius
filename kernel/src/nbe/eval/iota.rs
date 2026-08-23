@@ -194,6 +194,117 @@ mod tests {
     use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt};
     use crate::nbe::val::{Neut, Val};
     use std::sync::Arc;
+    /// **eigenius#92 · P2·N1 §5 — the minor derivation and iota agree on a HIGHER-ORDER
+    /// positive argument: both skip it.**
+    ///
+    /// `positivity.rs`'s module doc says admitting `Foo { mk : (Set → Foo) → Foo }` *"would create a
+    /// soundness gap"* because iota cannot construct the induction hypothesis. The two sites that
+    /// would have to construct it — `recursor::derive_minor_type` and `iota_reduce_impl` — filter on
+    /// the SAME predicate, `InductiveDecl::is_direct_recursive_ref`, so they skip such an argument
+    /// identically: the minor's type carries no IH binder and iota applies none. Nothing is derived
+    /// that is not also discharged.
+    ///
+    /// That makes the current restriction a **completeness** limit, not a soundness one — the
+    /// eliminator cannot do induction through a reflexive argument, which is weaker, not wrong. The
+    /// consequence is scheduling: eigenius#92 can widen the positivity criterion and route ESL
+    /// declarations through the pass WITHOUT first generalizing the eliminator, so it need not wait
+    /// on eigenius#138.
+    ///
+    /// This test pins that agreement so the staging argument cannot rot. If a later change teaches
+    /// one site about higher-order arguments and not the other, the arity stops matching and this
+    /// fails — which is exactly eigenius#138's defect in a different pair of functions.
+    ///
+    /// The shape under test is `lexicon:Cat`'s, minus the parameter:
+    /// `cat_fin_forall : (lexicon:Fin -> lexicon:Cat) -> lexicon:Cat`.
+    #[test]
+    fn higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota() {
+        // inductive Foo { base : Foo, rall : (Set -> Foo) -> Foo }
+        let s = ind_self_ref("Foo");
+        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
+            name: "Foo".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "base".to_string(),
+                    typ: foo_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "rall".to_string(),
+                    // (Set -> Foo) -> Foo
+                    typ: Exp::Pi(
+                        Patt::Var("f".to_string()),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::Sort(1)),
+                            Box::new(foo_ty.clone()),
+                        )),
+                        Box::new(foo_ty.clone()),
+                    ),
+                },
+            ],
+        });
+
+        // Constant motive `λ_. Set`, so a fully applied minor reduces to `Val::Sort(1)`.
+        let motive = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Sort(1),
+            Rho::Nil,
+        ));
+
+        // 1. How many binders does the minor derivation ask for?
+        let minor_ty =
+            crate::nbe::recursor::derive_minor_type(&foo, 1, &[], &motive, &EvalCtx::Pure)
+                .expect("derive_minor_type for `rall`");
+        let mut arity = 0usize;
+        let mut cursor = minor_ty;
+        while let Val::Pi(_, clos) = cursor {
+            arity += 1;
+            cursor = clos
+                .apply(Val::Nt(Neut::Gen(arity, format!("v{arity}"))))
+                .expect("apply pi clos");
+        }
+        assert_eq!(
+            arity, 1,
+            "`rall` has ONE constructor argument and no IH binder: the higher-order argument is \
+             not recognised as recursive by `is_direct_recursive_ref`. An IH binder here would \
+             mean the derivation had been widened without widening iota."
+        );
+
+        // 2. Does iota apply exactly that many? A minor of arity 1 returning `Sort(1)`: too few
+        //    applications leaves a `Val::Lam`, too many applies `Sort(1)` to something and errors.
+        let base_minor = Val::Sort(1);
+        let rall_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Sort(1),
+            Rho::Nil,
+        ));
+        // The constructor argument: `λ_. Foo.base`, a value of type `Set -> Foo`.
+        let arg = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Rho::Nil,
+        ));
+
+        let result = iota_reduce(
+            &foo,
+            &motive,
+            &[base_minor, rall_minor],
+            "rall",
+            &[arg],
+            &EvalCtx::Pure,
+        )
+        .expect("iota_reduce over `rall` — an extra IH application would error here");
+        assert!(
+            matches!(result, Val::Sort(1)),
+            "iota applied exactly the {arity} argument(s) the minor's type declares, leaving the \
+             minor's body; got {result:?}"
+        );
+    }
+
     #[test]
     fn iota_zero_arity_constructor() {
         // inductive Bool { True, False }

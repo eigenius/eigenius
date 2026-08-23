@@ -35,10 +35,17 @@ path never reaches it. Routing it in unchanged **rejects the bootstrap** — `ca
 `cat_fin_forall`, `cat_num_forall` (`ontologies/lexicon/lexicon-ontology.esl:271,280,281`) are
 higher-order positive, the shape `positivity.rs:507` pins as rejected. **Working hypothesis `2026-08-22`: arm 1**, extend the criterion — scoped in
 [p2-n1-positivity-criterion.md](p2-n1-positivity-criterion.md). Kernel-only, no reseed, `lexicon:Cat`
-unchanged. N1 §5 may split it in two: the current restriction looks like a *completeness* limit, not
-a soundness one, because `derive_minor_type` and `iota_reduce_impl` filter on the same predicate and
-would skip a higher-order argument identically. Verify that by construction in the first commit — it
-decides whether #92 lands before or after #138.
+unchanged. N1 §5 splits it in two, **verified `2026-08-22`**: the current restriction is a *completeness* limit,
+not a soundness one — `derive_minor_type` and `iota_reduce_impl` filter on the same predicate and skip
+a higher-order argument identically (pinned by
+`higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`, `nbe/eval/iota.rs`). So
+**#92 step 1 — widen the criterion, route ESL declarations through the pass — lands BEFORE #138**;
+step 2 (function-typed IHs) after it.
+
+**#213 is no longer this package's prerequisite.** Under arm 1 nothing here edits a bootstrap
+ontology except #188, and fixing #213 itself moves all 21 manifest lines at once (the stored value is
+`current_manifest()`'s output at seed time), so it owes one reseed to adopt. Fold it into #188's
+reseed rather than paying a standalone one.
 
 #### NEXT
 Three design notes, all independent and all writable before any code: N1 positivity criterion +
