@@ -679,11 +679,53 @@ pub struct AliasBinding {
 }
 
 /// Sort literals recognised in type expressions (eigenius#72).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SortKind {
+    /// `Prop` — `Sort 0`.
     Prop,
+    /// `Set` — `Sort 1`.
+    ///
+    /// This is Lean's `Type` (= `Type 0`). The names diverge and the levels do not; Lean's `Set`
+    /// is a library type for sets, so a reader arriving from Lean will misread this one. Kept
+    /// because renaming touches 230 uses for no semantic gain — see N3 §3.
     Set,
-    Type(usize),
+    /// `Type <level>` — `Sort (level + 1)`, the same numbering Lean uses.
+    Type(LevelExpr),
+    /// `Sort <level>` — the general form (eigenius#188).
+    Sort(LevelExpr),
+}
+
+impl std::fmt::Display for LevelExpr {
+    /// The surface spelling, so `result_sort` strings and diagnostics round-trip.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LevelExpr::Num(n) => write!(f, "{n}"),
+            LevelExpr::Var(v) => write!(f, "{v}"),
+            LevelExpr::Add(l, n) => write!(f, "{l} + {n}"),
+            LevelExpr::Max(l, r) => write!(f, "max {l} {r}"),
+            LevelExpr::IMax(l, r) => write!(f, "imax {l} {r}"),
+        }
+    }
+}
+
+/// A universe level as written in ESL (eigenius#188).
+///
+/// Surface syntax follows Lean 4 — see
+/// <https://lean-lang.org/doc/reference/latest/The-Type-System/Universes/>. Lowered to
+/// [`crate::nbe::level::Level`] by the compiler; `Add` becomes iterated `Succ`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LevelExpr {
+    /// A numeral: `0`, `1`, …
+    Num(usize),
+    /// A level variable, bound by a `universe` declaration.
+    Var(String),
+    /// `l + n`.
+    Add(Box<LevelExpr>, usize),
+    /// `max l r`.
+    Max(Box<LevelExpr>, Box<LevelExpr>),
+    /// `imax l r` — `0` when `r` is `0`, `max l r` otherwise. The impredicative-Pi rule, held
+    /// open while `r` is a variable.
+    IMax(Box<LevelExpr>, Box<LevelExpr>),
 }
 
 impl TypeExpr {

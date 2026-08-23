@@ -101,6 +101,7 @@ impl<'a> Parser<'a> {
             TokenKind::Map => "map".to_string(),
             TokenKind::Reduce => "reduce".to_string(),
             TokenKind::Prop => "Prop".to_string(),
+            TokenKind::SortKw => "Sort".to_string(),
             TokenKind::SetKw => "Set".to_string(),
             TokenKind::TypeKw => "Type".to_string(),
             TokenKind::Axiom => "axiom".to_string(),
@@ -999,7 +1000,11 @@ impl<'a> Parser<'a> {
         // eigenius#72 — sort literals at the head of a type
         // expression: `Prop`, `Set`, or `Type N`. May then be
         // followed by `-> ...` (an arrow whose domain is a sort).
-        if self.at(&TokenKind::Prop) || self.at(&TokenKind::SetKw) || self.at(&TokenKind::TypeKw) {
+        if self.at(&TokenKind::Prop)
+            || self.at(&TokenKind::SetKw)
+            || self.at(&TokenKind::TypeKw)
+            || self.at(&TokenKind::SortKw)
+        {
             let sort = self.parse_sort_literal()?;
             if self.at(&TokenKind::Arrow) {
                 self.advance();
@@ -1098,29 +1103,95 @@ impl<'a> Parser<'a> {
         }
         if self.at(&TokenKind::TypeKw) {
             self.advance();
-            let level = match self.peek().clone() {
-                TokenKind::IntLit(n) if n >= 0 => {
-                    self.advance();
-                    n as usize
-                }
-                other => {
-                    return Err(EslError::parser(
-                        Some(self.current_pos()),
-                        format!(
-                            "expected non-negative integer level after `Type`, found {other:?}"
-                        ),
-                    ));
-                }
-            };
+            let level = self.parse_level_expr("Type")?;
             return Ok(TypeExpr::Sort {
                 kind: crate::esl::ast::SortKind::Type(level),
                 pos,
             });
         }
+        // eigenius#188 — Lean's general form. `Sort l` is the universe at level `l`; `Prop`,
+        // `Set` and `Type k` are the abbreviations above.
+        if self.at(&TokenKind::SortKw) {
+            self.advance();
+            let level = self.parse_level_expr("Sort")?;
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Sort(level),
+                pos,
+            });
+        }
         Err(EslError::parser(
             Some(pos),
-            "expected a sort literal (Prop, Set, or Type N)".to_string(),
+            "expected a sort literal (Prop, Set, Type <level>, or Sort <level>)".to_string(),
         ))
+    }
+
+    /// Parse a universe level expression (eigenius#188), following Lean 4's grammar:
+    ///
+    /// ```text
+    /// level ::= <numeral> | <ident> | max level level | imax level level
+    ///         | level + <numeral> | ( level )
+    /// ```
+    ///
+    /// `max` and `imax` are CONTEXTUAL — they are ordinary identifiers everywhere else, and are
+    /// only read as operators in level position. That avoids reserving two common words across
+    /// the whole language for a form that appears only after `Sort` / `Type`.
+    fn parse_level_expr(&mut self, after: &str) -> Result<crate::esl::ast::LevelExpr, EslError> {
+        use crate::esl::ast::LevelExpr;
+        let mut lhs = self.parse_level_atom(after)?;
+        // `l + n` — left-associative, numeral offsets only, as in Lean.
+        while self.at(&TokenKind::Plus) {
+            self.advance();
+            match self.peek().clone() {
+                TokenKind::IntLit(n) if n >= 0 => {
+                    self.advance();
+                    lhs = LevelExpr::Add(Box::new(lhs), n as usize);
+                }
+                other => {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!("`+` in a universe level takes a numeral, found {other:?}"),
+                    ));
+                }
+            }
+        }
+        Ok(lhs)
+    }
+
+    fn parse_level_atom(&mut self, after: &str) -> Result<crate::esl::ast::LevelExpr, EslError> {
+        use crate::esl::ast::LevelExpr;
+        match self.peek().clone() {
+            TokenKind::IntLit(n) if n >= 0 => {
+                self.advance();
+                Ok(LevelExpr::Num(n as usize))
+            }
+            TokenKind::LParen => {
+                self.advance();
+                let inner = self.parse_level_expr(after)?;
+                self.expect(&TokenKind::RParen)?;
+                Ok(inner)
+            }
+            TokenKind::Ident(name) if name == "max" || name == "imax" => {
+                self.advance();
+                let l = self.parse_level_atom(after)?;
+                let r = self.parse_level_atom(after)?;
+                Ok(if name == "max" {
+                    LevelExpr::Max(Box::new(l), Box::new(r))
+                } else {
+                    LevelExpr::IMax(Box::new(l), Box::new(r))
+                })
+            }
+            TokenKind::Ident(name) => {
+                self.advance();
+                Ok(LevelExpr::Var(name))
+            }
+            other => Err(EslError::parser(
+                Some(self.current_pos()),
+                format!(
+                    "expected a universe level after `{after}` — a numeral, a level variable, \
+                     `max l r`, `imax l r`, or `(l + n)`; found {other:?}"
+                ),
+            )),
+        }
     }
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
@@ -3731,7 +3802,10 @@ mod tests {
                     IndexKind::Sort(SortKind::Prop) => {}
                     other => panic!("expected Sort(Prop), got {other:?}"),
                 }
-                assert_eq!(d.result_sort, Some(SortKind::Type(0)));
+                assert_eq!(
+                    d.result_sort,
+                    Some(SortKind::Type(crate::esl::ast::LevelExpr::Num(0)))
+                );
             }
             _ => panic!("expected data"),
         }
@@ -3759,9 +3833,12 @@ mod tests {
                 assert!(matches!(d.indices[1].kind, IndexKind::Sort(SortKind::Set)));
                 assert!(matches!(
                     d.indices[2].kind,
-                    IndexKind::Sort(SortKind::Type(2))
+                    IndexKind::Sort(SortKind::Type(crate::esl::ast::LevelExpr::Num(2)))
                 ));
-                assert_eq!(d.result_sort, Some(SortKind::Type(3)));
+                assert_eq!(
+                    d.result_sort,
+                    Some(SortKind::Type(crate::esl::ast::LevelExpr::Num(3)))
+                );
             }
             _ => panic!("expected data"),
         }

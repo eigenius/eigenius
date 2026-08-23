@@ -109,6 +109,8 @@ pub enum TokenKind {
     /// eigenius#72 — sort literal `Type` (followed by an integer level
     /// in `Type N` parses; `Type 0` is `Sort(1)`, `Type N` is `Sort(N+1)`).
     TypeKw,
+    /// `Sort` — the general sort form (eigenius#188).
+    SortKw,
     /// D37 §3.3 — `=>` returns/produces. Used in `lambda` bodies
     /// (after the parameter list) and inline `merge_comorphism`
     /// bodies. Distinct from `Arrow` (`->`) which separates the
@@ -535,6 +537,10 @@ impl<'a> Lexer<'a> {
             "Prop" => TokenKind::Prop,
             "Set" => TokenKind::SetKw,
             "Type" => TokenKind::TypeKw,
+            // eigenius#188 — Lean's general sort form, `Sort <level>`. Safe to reserve: the only
+            // two `Sort` occurrences in the tree are a comment and an English word inside a
+            // lexicon `form` string literal, neither of which the lexer sees as an identifier.
+            "Sort" => TokenKind::SortKw,
             // Literals
             "true" => TokenKind::BoolLit(true),
             "false" => TokenKind::BoolLit(false),

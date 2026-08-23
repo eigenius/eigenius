@@ -405,18 +405,54 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
     Err("no rt:term".into())
 }
 
-/// A polymorphic level has no ESL surface syntax (N3 §3), so printing must FAIL loudly rather
-/// than emit `Sort(Succ(Zero))`-style ctors that reparse into nothing — which is what the
-/// printer did before it learned the encoding.
+/// **Polymorphic levels round-trip through ESL** (eigenius#188, N3 §3 as revised).
+///
+/// This test asserted the OPPOSITE until the surface syntax landed: that the printer refuses a
+/// polymorphic level, recorded as a documented limitation. It was evidence the design was
+/// incomplete — without syntax nothing can author a `Level::Param`, so `uparams` would have had
+/// nothing to generalise and universe polymorphism would have been unreachable from the language.
+///
+/// The forms are Lean 4's: `Sort u`, `Sort (max u v)`, `Sort (imax u v)`, `Sort (u + 1)`.
 #[test]
-fn a_polymorphic_level_refuses_to_print_rather_than_emitting_garbage() {
-    let poly = serde_json::json!({"ctor": "Sort", "args": [{"ctor": "Param", "args": ["u"]}]});
-    let mut ns = Namespaces::new();
-    let err = print_type_expr(&poly, &mut ns)
-        .expect_err("a `Param` level has no surface syntax and must not print");
-    let msg = format!("{err:?}");
-    assert!(
-        msg.contains("universe level") || msg.contains("numeral"),
-        "the diagnostic should say WHY it cannot print: {msg}"
-    );
+fn polymorphic_levels_round_trip_through_esl() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let param = |n: &str| serde_json::json!({"ctor": "Param", "args": [n]});
+    let cases = [
+        ("Sort u", param("u")),
+        (
+            "Sort (max u v)",
+            serde_json::json!({"ctor": "Max", "args": [param("u"), param("v")]}),
+        ),
+        (
+            "Sort (imax u v)",
+            serde_json::json!({"ctor": "IMax", "args": [param("u"), param("v")]}),
+        ),
+        (
+            "Sort (u + 2)",
+            serde_json::json!({"ctor": "Succ", "args": [
+                {"ctor": "Succ", "args": [param("u")]}
+            ]}),
+        ),
+    ];
+    for (expected_source, level) in cases {
+        let term = serde_json::json!({"ctor": "Sort", "args": [level]});
+        let mut ns = Namespaces::new();
+        let printed = print_type_expr(&term, &mut ns).expect("a polymorphic level prints");
+        assert_eq!(printed, expected_source, "surface spelling");
+        let back = wrap_and_compile(&printed, &ns, layer)
+            .unwrap_or_else(|e| panic!("`{printed}` must recompile: {e}"));
+        assert_eq!(back, term, "`{printed}` must round-trip to the same level");
+    }
+}
+
+/// The abbreviations stay abbreviations: a numeral level prints as `Prop` / `Set` / `Type k`,
+/// never as the general `Sort n` form, so the 942 monomorphic uses in the tree print as written.
+#[test]
+fn numeral_levels_still_print_as_the_abbreviations() {
+    for (n, expected) in [(0u64, "Prop"), (1, "Set"), (2, "Type 1"), (4, "Type 3")] {
+        let term = serde_json::json!({"ctor": "Sort", "args": [level_tree(n)]});
+        let printed = print_type_expr(&term, &mut Namespaces::new()).expect("prints");
+        assert_eq!(printed, expected);
+    }
 }

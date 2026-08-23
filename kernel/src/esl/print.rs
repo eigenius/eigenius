@@ -279,6 +279,70 @@ impl Printer<'_> {
         out
     }
 
+    /// Print an `eigentt:Level` tree in ESL's level syntax (eigenius#188), which is Lean 4's:
+    /// numerals, variables, `l + n`, `max l r`, `imax l r`.
+    ///
+    /// Parenthesised whenever it is not an atom, because the level sits after `Sort` / `Type` and
+    /// `max u v + 1` would otherwise reparse with the wrong shape.
+    fn print_level(&self, v: &Value, path: &str) -> Result<String, PrintError> {
+        if let Some(n) = level_as_nat(v) {
+            return Ok(n.to_string());
+        }
+        let obj = v
+            .as_object()
+            .ok_or_else(|| self.err("universe level is not a Level value", path))?;
+        let name = obj
+            .get("ctor")
+            .and_then(Value::as_str)
+            .ok_or_else(|| self.err("universe level has no ctor", path))?;
+        let args = obj
+            .get("args")
+            .and_then(Value::as_array)
+            .ok_or_else(|| self.err("universe level has no args", path))?;
+        let arg = |i: usize| -> Result<&Value, PrintError> {
+            args.get(i)
+                .ok_or_else(|| self.err("universe level is missing an argument", path))
+        };
+        match name {
+            "Param" => Ok(arg(0)?
+                .as_str()
+                .ok_or_else(|| self.err("`Param` level takes a name", path))?
+                .to_string()),
+            // A `Succ` over a non-numeral base: `l + 1`, accumulated so `Succ(Succ(u))` is `u + 2`
+            // rather than `(u + 1) + 1`.
+            "Succ" => {
+                let mut n = 0u64;
+                let mut cur = v;
+                while let Some(o) = cur.as_object() {
+                    if o.get("ctor").and_then(Value::as_str) != Some("Succ") {
+                        break;
+                    }
+                    n += 1;
+                    cur = o
+                        .get("args")
+                        .and_then(Value::as_array)
+                        .and_then(|a| a.first())
+                        .ok_or_else(|| self.err("`Succ` level takes a base", path))?;
+                }
+                Ok(format!("({} + {n})", self.print_level(cur, path)?))
+            }
+            "Max" => Ok(format!(
+                "(max {} {})",
+                self.print_level(arg(0)?, path)?,
+                self.print_level(arg(1)?, path)?
+            )),
+            "IMax" => Ok(format!(
+                "(imax {} {})",
+                self.print_level(arg(0)?, path)?,
+                self.print_level(arg(1)?, path)?
+            )),
+            other => Err(self.err(
+                format!("`{other}` is not an eigentt:Level constructor"),
+                path,
+            )),
+        }
+    }
+
     fn go(&mut self, v: &Value, ctx: Prec, path: &str, ind: usize) -> Result<String, PrintError> {
         // Composite forms are the only ones with anywhere to break; everything else is an atom
         // whose flat rendering is the only rendering.
@@ -350,16 +414,15 @@ impl Printer<'_> {
                 Some(1) => Ok("Set".into()),
                 // `Type n` is `Sort(n + 1)` — kernel/src/esl/compile.rs, SortKind::Type.
                 Some(n) => Ok(format!("Type {}", n - 1)),
-                // eigenius#188: `Sort` carries an `eigentt:Level`, which may be a `Max`, `IMax`
-                // or `Param`. ESL has `Prop` / `Set` / `Type k` and deliberately grew no syntax
-                // for the rest (N3 §3), so a polymorphic level cannot be printed as source. This
-                // errors rather than emitting `Sort(Succ(Zero))`, which is what an earlier
-                // version did — the ctors are not macros, so the output reparsed into nothing.
-                None => Err(self.err(
-                    "universe level is not a numeral — ESL has `Prop` / `Set` / `Type k` and no \
-                     syntax for `Max` / `IMax` / `Param` levels (eigenius#188, N3 §3)",
-                    path,
-                )),
+                // eigenius#188: a polymorphic level prints in the general form, `Sort <level>`.
+                // The numeral cases above stay on the abbreviations so the 942 monomorphic uses
+                // in the tree print exactly as they are written.
+                None => {
+                    let l = args
+                        .first()
+                        .ok_or_else(|| self.err("`Sort` needs a level", path))?;
+                    Ok(format!("Sort {}", self.print_level(l, path)?))
+                }
             },
 
             "LitString" => Ok(format!("\"{}\"", escape(&str_arg(0)?))),

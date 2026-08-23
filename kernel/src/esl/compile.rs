@@ -26,6 +26,67 @@ use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
 
 /// Compile an ESL AST to Eigon-JSON resources.
+/// Lower an ESL level expression to a kernel [`Level`](crate::nbe::level::Level) (eigenius#188).
+///
+/// `Add(l, n)` becomes `n` iterated `Succ`s, which is what `l + n` means; the kernel has no
+/// offset form because `Succ` composes.
+fn lower_level(l: &ast::LevelExpr) -> crate::nbe::level::Level {
+    use crate::nbe::level::Level;
+    match l {
+        ast::LevelExpr::Num(n) => Level::of_nat(*n),
+        ast::LevelExpr::Var(v) => Level::Param(v.clone()),
+        ast::LevelExpr::Add(inner, n) => (0..*n).fold(lower_level(inner), |acc, _| acc.succ()),
+        ast::LevelExpr::Max(a, b) => Level::Max(Box::new(lower_level(a)), Box::new(lower_level(b))),
+        ast::LevelExpr::IMax(a, b) => {
+            Level::IMax(Box::new(lower_level(a)), Box::new(lower_level(b)))
+        }
+    }
+}
+
+/// The kernel level a `SortKind` denotes. `Prop` is `0`, `Set` is `1`, `Type l` is `l + 1`
+/// (Lean's numbering), and `Sort l` is `l`.
+fn sort_kind_level(k: &ast::SortKind) -> crate::nbe::level::Level {
+    use crate::nbe::level::Level;
+    match k {
+        ast::SortKind::Prop => Level::of_nat(0),
+        ast::SortKind::Set => Level::of_nat(1),
+        ast::SortKind::Type(l) => lower_level(l).succ(),
+        ast::SortKind::Sort(l) => lower_level(l),
+    }
+}
+
+/// A declaration's own sort travels the chain as a STRING (`core:result_sort`), so a level
+/// variable has nowhere to live there yet. Reject it with the reason rather than encoding a level
+/// expression into a string that `decode_result_sort` would then have to parse back.
+///
+/// Type EXPRESSIONS are unaffected — `forall (T : Sort u, ...)` inside an axiom lowers through
+/// `lower_type_expr` to an `Exp::Sort(Level::Param(..))` and encodes as an `eigentt:Level` tree.
+/// That is where eigenius#188's first consumers are (`spec_poly`, and the TTR predicates of N3
+/// §5a); polymorphic *declaration* sorts need `result_sort` to become a Level-valued property,
+/// which is its own change.
+fn sort_kind_result_string(
+    k: &ast::SortKind,
+    pos: &crate::esl::error::Position,
+) -> Result<String, EslError> {
+    match k {
+        ast::SortKind::Prop => Ok("Prop".to_string()),
+        ast::SortKind::Set => Ok("Set".to_string()),
+        ast::SortKind::Type(ast::LevelExpr::Num(n)) => Ok(format!("Type:{n}")),
+        ast::SortKind::Sort(ast::LevelExpr::Num(0)) => Ok("Prop".to_string()),
+        ast::SortKind::Sort(ast::LevelExpr::Num(1)) => Ok("Set".to_string()),
+        ast::SortKind::Sort(ast::LevelExpr::Num(n)) => Ok(format!("Type:{}", n - 1)),
+        other => Err(EslError::compiler(
+            Some(pos.clone()),
+            format!(
+                "a declaration's result sort must be a concrete level, got `{other:?}` — \
+                 `core:result_sort` is a string on the chain, so a level VARIABLE has nowhere to \
+                 live there yet (eigenius#188). Polymorphic levels work inside type expressions, \
+                 e.g. `forall (T : Sort u, ...)`."
+            ),
+        )),
+    }
+}
+
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
     compile_file_with_institutions(file, None)
 }
@@ -1002,11 +1063,7 @@ impl Compiler {
                             self.resolve(qn)?
                         }
                     }
-                    ast::IndexKind::Sort(sk) => match sk {
-                        ast::SortKind::Prop => "Prop".to_string(),
-                        ast::SortKind::Set => "Set".to_string(),
-                        ast::SortKind::Type(n) => format!("Type:{n}"),
-                    },
+                    ast::IndexKind::Sort(sk) => sort_kind_result_string(sk, &p.pos)?,
                 };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
@@ -1213,7 +1270,8 @@ impl Compiler {
                 let s = match kind {
                     ast::SortKind::Prop => "Prop".to_string(),
                     ast::SortKind::Set => "Set".to_string(),
-                    ast::SortKind::Type(n) => format!("Type({n})"),
+                    ast::SortKind::Type(l) => format!("Type({l})"),
+                    ast::SortKind::Sort(l) => format!("Sort({l})"),
                 };
                 Ok(Value::String(s))
             }
@@ -1434,11 +1492,7 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::sort(match kind {
-                ast::SortKind::Prop => 0,
-                ast::SortKind::Set => 1,
-                ast::SortKind::Type(n) => n + 1,
-            })),
+            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(sort_kind_level(kind))),
             // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_json`. Both paths
             // are live: `axiom X : T` lowers through here, `type_expr(...)` in a resource
             // property through the JSON encoder.
@@ -1987,11 +2041,7 @@ impl Compiler {
                             self.resolve(qn)?
                         }
                     }
-                    ast::IndexKind::Sort(sk) => match sk {
-                        ast::SortKind::Prop => "Prop".to_string(),
-                        ast::SortKind::Set => "Set".to_string(),
-                        ast::SortKind::Type(n) => format!("Type:{n}"),
-                    },
+                    ast::IndexKind::Sort(sk) => sort_kind_result_string(sk, &p.pos)?,
                 };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
@@ -2026,11 +2076,7 @@ impl Compiler {
                         // → Sort(N+1). Needed for D39 §5's JustifiedBy
                         // and ChainWitness predicates whose intermediate
                         // index kinds are themselves sorts.
-                        ast::IndexKind::Sort(sk) => match sk {
-                            ast::SortKind::Prop => "Prop".to_string(),
-                            ast::SortKind::Set => "Set".to_string(),
-                            ast::SortKind::Type(n) => format!("Type:{n}"),
-                        },
+                        ast::IndexKind::Sort(sk) => sort_kind_result_string(sk, &p.pos)?,
                     };
                     pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                     Ok(Value::Embedded(Box::new(pr)))
@@ -2041,12 +2087,8 @@ impl Compiler {
 
         // eigenius#72 Layer 2 — explicit result sort. Encoded as a
         // string; the decoder parses it back into `Exp::Sort(n)`.
-        if let Some(sort) = decl.result_sort {
-            let sort_str = match sort {
-                ast::SortKind::Prop => "Prop".to_string(),
-                ast::SortKind::Set => "Set".to_string(),
-                ast::SortKind::Type(n) => format!("Type:{n}"),
-            };
+        if let Some(sort) = &decl.result_sort {
+            let sort_str = sort_kind_result_string(sort, &decl.name.pos)?;
             r.set(iri(wk::RESULT_SORT), Value::String(sort_str));
         }
 
