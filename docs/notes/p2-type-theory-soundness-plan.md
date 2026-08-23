@@ -18,7 +18,7 @@ already done at filing-time-plus-fixes and have been closed (#191, #71, #22).
 | B | #69 — no-confusion generation | indexed families |
 | B | #139 — size-constraint solver has no caller | indexed families |
 | C | #66 — bare `Decl::Drec` escape hatch | totality |
-| C | #64 — literal `"__case_arg"` | hygiene |
+| ~~C~~ | ~~#64 — literal `"__case_arg"`~~ | **closed `2026-08-22`** |
 | D | #188 — universe polymorphism | the universe ladder |
 | dormant | #20 mutual, #21 nested | inputs to §1's decision only |
 
@@ -149,7 +149,7 @@ substitute for N1 deciding it.
 | # | item | design input | exit gate | manifest moves? |
 |---|---|---|---|---|
 | 1 | #213 | none | a comment-only edit and a JSON reformat both leave the manifest unchanged; `bootstrap_manifest_pinned.rs` and its doc comment updated to the new behaviour | **yes, once** — see §5 |
-| 2 | #64 | none | no literal `"__case_arg"` in `check/mod.rs`; suite unchanged; a test binding that identifier still checks | no |
+| 2 ✔ | #64 | none | no literal `"__case_arg"` in `check/mod.rs`; suite unchanged; a test binding that identifier still checks | no |
 | 3 | #194 | none | every `check` arm compared against `check_infer` for the same `Exp` ctor, each permissive one tightened or justified in a comment; the four `Val::Sort(_)` arms at `check/mod.rs:659-673` resolved | **maybe** — see §5 |
 | 4 | N1, N2, N3 | — | notes merged | no |
 | 5 | #138 | none | a well-typed `InductiveRec` over an indexed family exists as a test — none does today | no |

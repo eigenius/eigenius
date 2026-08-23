@@ -59,8 +59,17 @@ reseed rather than paying a standalone one.
   `Validator::validate()` returns `[]` for `(Bad -> boolean) -> Bad`, reproducing #92's symptom.
   Manifest unmoved, no reseed.
 
+- **#64 (`2026-08-22`).** Case-branch binder renamed `__case_arg` → `CB#{level}`, using the
+  checker's existing `#` discipline (`TC#`/`G#`) rather than the issue's `__case_arg_{level}`, which
+  is still a legal ESL identifier and therefore still forgeable. Two findings recorded on the tests:
+  the collision the issue describes is **not reachable today** (readback is normalizing and mints
+  only `Gen(j, name)` → `"{name}{j}"`, so no free source name reaches the spliced motive), and the
+  arm had no test coverage at all. Closed.
+
 #### NEXT
-Step 2 of #92 (function-typed IHs) waits on #138. Then the remaining
+#194 — the check-vs-infer sweep, with instance 2 already confirmed (`check_type` takes no expected
+type, so the four `Val::Sort(_)` arms at `check/mod.rs:659-673` discard the universe). Step 2 of #92
+(function-typed IHs) waits on #138. Then the remaining
 three design notes, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
