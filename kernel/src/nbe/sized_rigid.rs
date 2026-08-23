@@ -14,24 +14,25 @@
 
 //! Rigid-variable hypothesis tracker for sized types (Phase 11b step 15b).
 //!
-//! Direct port of MiniAgda's [`TreeShapedOrder.hs`](../../../references/miniagda/src/TreeShapedOrder.hs).
-//! Complements the meta-resolution solver in [`sized`](super::sized)
-//! with a specialised data structure for tracking strict inequalities
-//! between *rigid* size variables — the hypotheses a type checker
-//! accumulates as it walks through size-parameter binders.
+//! Port of MiniAgda's `TreeShapedOrder.hs` — a specialised structure for tracking strict
+//! inequalities between *rigid* size variables, the hypotheses a type checker accumulates as it
+//! walks through size-parameter binders. (MiniAgda is not vendored under `references/`; the port
+//! cannot be diffed against its source. See the primer's §7.6 references for the paper.)
 //!
-//! ## Why a separate structure from [`sized`]
+//! ## Only one of MiniAgda's two constraint systems is here
 //!
-//! MiniAgda runs two cooperating constraint systems (documented in
-//! `TCM.hs:755` and neighbours):
+//! MiniAgda runs two cooperating systems (documented at `TCM.hs:755` and neighbours):
 //!
-//! 1. [`sized`] (Warshall) — meta-variable resolution. Constraints
-//!    always involve at least one flexible (meta) endpoint. The
-//!    output is a solution assigning size expressions to each meta.
-//! 2. This module (TSO) — rigid-only hypothesis tracking. Accumulated
-//!    as `addSizeRel v_i n v_j` calls (`TCM.hs:755`) meaning
-//!    `v_i + n ≤ v_j`. Stored as a forest of upside-down trees where
-//!    each child→parent link carries a non-negative distance.
+//! 1. **Warshall — meta-variable resolution.** Constraints always involve at least one flexible
+//!    (meta) endpoint; the output assigns a size expression to each meta. Eigenius ported this
+//!    into [`sized`](super::sized) and **removed it again on `2026-08-22`** (eigenius#139): it
+//!    never had a caller, and could not acquire one, because the term language has no flexible
+//!    size to solve for. See that module's header.
+//! 2. **This module (TSO) — rigid-only hypothesis tracking.** Accumulated as `addSizeRel v_i n
+//!    v_j` calls (`TCM.hs:755`) meaning `v_i + n ≤ v_j`. Stored as a forest of upside-down trees
+//!    where each child→parent link carries a non-negative distance. This is the half that is
+//!    wired: `check`'s `(Exp::Lam, Val::SizedPi)` arm populates it, and
+//!    [`sized`](super::sized)'s `_with_hyps` comparisons consult it.
 //!
 //! This structure is used to answer:
 //! - **Entailment queries**: is a queried inequality `v_a + k ≤ v_b`
