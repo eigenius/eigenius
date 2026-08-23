@@ -140,8 +140,12 @@ reseed rather than paying a standalone one.
   chain — a precedent nobody had noticed, and the reason a future Lean externalization becomes a fold
   rather than a special case; **no ESL syntax** initially, level inference via `uparams` instead;
   migration is small (**zero encoded `Sort` terms in any repo chain**) but needs a snapshot check,
-  and the decoder should accept the legacy integer. **Watch condition:** #159/D74 may make #188 its
-  prerequisite, which is a better reason to build it than the ladder.
+  and the decoder should accept the legacy integer. **Watch conditions**, neither in #188: the **TTR work** (Cooper, *From Perception to Communication* —
+  already a cited anchor in D18/D61/D62; **TTR uses universe polymorphism**, and stratified predicates
+  over record types are exactly what a fixed rung cannot express) is the likeliest trigger; #159/D74
+  may also make #188 its prerequisite. Whoever starts the TTR work should read N3 §2 first — the
+  level algebra to mirror is already on the chain as `lean:LeanLevel`, and choosing a different one
+  there would be expensive to unpick.
 
 #### NEXT
 P2's design notes are all written and every code item is closed. Remaining open: **#188** (held, see

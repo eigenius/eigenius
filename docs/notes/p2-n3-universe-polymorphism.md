@@ -124,13 +124,49 @@ the chain inductive, and declaration/use-site plumbing — 509 non-test referenc
 `Val::Sort` across 12+ modules is the blast radius, and Rule 21 puts the result on the commit gate.
 That is the largest single change in P2, in service of a ladder with two rungs occupied.
 
+## 5a. The trigger that is actually likely: Cooper's TTR
+
+**Recorded from the maintainer, `2026-08-22`:** Eigenius will likely incorporate techniques from
+Cooper's *From Perception to Communication* ([`cooper2023perception`], D18 §9 / D61 §10 / D62 §3),
+and **TTR uses universe polymorphism.** That is a named trigger, and it is a better predictor than
+the ladder count in §1.
+
+TTR is already load-bearing in the design docs rather than aspirational. D18's "ontology-as-types"
+resolution cites it directly — *"Cooper's TTR is records-first, with a record type's labelled
+fields-of-types matching an Eigenius class's required/recommended properties exactly"* — and the
+`eigentt:TypeExpr` chain mirror already makes types first-class chain objects, which is the half of
+TTR's types-as-objects stance Eigenius has. What it lacks is the other half: **quantifying over
+those types at arbitrary level.**
+
+Why that lands squarely on this issue. TTR stratifies — types of types, and predicates that range
+over them. A predicate over record types is a statement at the level above whatever the record types
+inhabit, and a *general* statement about them cannot be written at a fixed rung. Under
+`Exp::Sort(usize)` each rung is a separate declaration, and every rung above `Set` is a bootstrap
+edit plus a reseed — the cost #136/#187 paid once to move `spec_poly` from `Set` to `Type 1`. That
+is precisely the cost universe polymorphism removes, and TTR is the first thing on the roadmap that
+would pay it repeatedly rather than once.
+
+**What this does not justify.** Building ahead of the TTR work would be speculative: the shape of
+what Eigenius takes from Cooper is not settled, and taking *records-first* without taking
+*stratification* is a coherent outcome that needs no polymorphism at all. §6's hold stands. What
+changes is that the watch condition is now specific and expected rather than hypothetical, and the
+signature to watch for is concrete:
+
+> **the first TTR construct that needs a predicate ranging over types, or the second declaration
+> that would sit above `Set`.** Either is the bump; the second is the one §1 measures for.
+
+Whoever starts the TTR work should read §2 before choosing a sort representation for it — the level
+algebra to mirror is already on the chain, and picking a different one there would be expensive to
+unpick.
+
 ## 6. Recommendation
 
 **Hold #188. Do not implement on the current evidence.** Record on the issue that the trigger is
 measured and has not fired, so the next reader does not re-measure it.
 
-Land it when *either*:
+Land it when *any* of:
 
+- **the TTR work starts needing it** (§5a) — the likeliest path, and the one to watch;
 - a second level bump is actually proposed — a rule or declaration that needs `Type 2`; **or**
 - **#159/D74 makes it cheaper than the alternative.** Externalize-and-check has to translate EigenTT
   sorts into Lean's `Level`. With `Exp::Sort(usize)` that translation is a special case that works
@@ -138,7 +174,9 @@ Land it when *either*:
   path lands first, universe polymorphism may arrive as its prerequisite rather than on its own
   trigger — and that is a better reason to build it than the ladder is.
 
-The second condition is the one to watch, and it is not in #188 today.
+None of the three is in #188 today. The first is the likeliest and the one that would arrive with a
+design of its own attached, so the useful discipline is to read §2 before that design fixes a sort
+representation independently.
 
 ## 7. Exit gate, when it is picked up
 
