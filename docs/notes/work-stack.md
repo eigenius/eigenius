@@ -83,11 +83,19 @@ reseed rather than paying a standalone one.
   `D(param, idx)`, returning `Ok` because a constant motive checks against either. Fixed by reading
   parameters back from values and naming index binders `IDX#{k}`. Closed; **#69 unblocked**.
 
+- **#69 closed `2026-08-22` as won't implement.** #138 unblocked its eliminator; assessing it then
+  showed three unbuilt kernel features behind it and no consumer — `IdJ` carries no motive
+  (`check/mod.rs:1105` ignores `_c`; deferred to "Phase 10b" higher-order unification), no
+  heterogeneous equality exists for the indexed case its trigger names, and generated lemmas have
+  nowhere to live. Also **nanoda does not have `noConfusion`** (grep-verified): it generates
+  recursors and `Quot`, both kernel constructions, while `noConfusion` is a frontend definition —
+  the issue's pointer at nanoda as "the inductive elaboration this would extend" was wrong.
+  **Raise `IdJ`'s motive first if revisited.**
+
 #### NEXT
-**#69** (no-confusion) is unblocked — it derives against the eliminator, which now has a well-typed
-form for indexed families. Its own trigger still governs: nothing in tree wants constructor-
-distinctness reasoning yet, so check that before building it. Step 2 of #92 (function-typed IHs) is
-also unblocked. Then the remaining three design notes, all independent and all writable before any code: N1 positivity criterion +
+Step 2 of #92 (function-typed IHs) — unblocked by #138, and the one with a live consumer: it is what
+makes `lexicon:Cat` inductively eliminable rather than merely declarable. Then the remaining three
+design notes, all independent and all writable before any code: N1 positivity criterion +
 declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
 #194) need no design input and can run alongside.
 
