@@ -9,11 +9,10 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **NO ENTRY IS ACTIVE (`2026-08-20`).** D71 met its gate, which empties the parser-pipeline spine
-> that has been the top of this stack since `2026-08-11`. The next active item is a decision, not an
-> inheritance: entries (1) and (2) below are the pre-D71 spine and were assessed on `2026-08-19` as
-> largely implemented-or-obsolete, so promoting one by position would be wrong. The live candidates,
-> none of them started:
+> **ACTIVE: entry 1 (`2026-08-22`), pushed onto the empty stack.** The parser-pipeline spine emptied
+> on `2026-08-20` when D71 met its gate; entries (2) and (3) below are the pre-D71 spine, assessed on
+> `2026-08-19` as largely implemented-or-obsolete, so neither was promoted by position. P2 was picked
+> up instead. The two candidates that were live and stay unstarted:
 >
 > - **D71 residue** — §14's four open questions (source transport, draw commit granularity, pruning
 >   policy, the prefix-replay measurement) and §11's human-override loop, which the §9 draws-on-branch
@@ -21,7 +20,37 @@ any detour.
 > - **D61 faithfulness** — the half that D71 §10 reserved the institution shape for, and the only
 >   thing in the tree that still earns it.
 
-### 1. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
+### 1. [p2-type-theory-soundness-plan.md](p2-type-theory-soundness-plan.md) — **P2 · type-theory soundness**
+Tracker [#215](https://github.com/eigenius/eigenius/issues/215). What EigenTT wrongly admits, and what
+it cannot yet express: nine issues in four tracks, plus #213 as a prerequisite.
+
+#### STATUS
+Scoping done `2026-08-22`; no code yet. Three issues closed during scoping because they were already
+fixed — #191 (in #193), #71 (done but the deliberately-deferred `Exp::Con`), #22 (delivered by D48,
+residue = #138 / #69 / #139). Branch `eigentt-improvements` from `6744c9a`.
+
+**The gating decision is #92's fork** (plan §1) and it is not a code question. The positivity pass
+already exists (`kernel/src/nbe/positivity.rs`, called from `check/mod.rs:335`); the ESL declaration
+path never reaches it. Routing it in unchanged **rejects the bootstrap** — `cat_forall`,
+`cat_fin_forall`, `cat_num_forall` (`ontologies/lexicon/lexicon-ontology.esl:271,280,281`) are
+higher-order positive, the shape `positivity.rs:507` pins as rejected. Extend the criterion (makes
+#138 a prerequisite of #92) or re-represent the category algebra (bootstrap edit, reseed).
+
+#### NEXT
+Three design notes, all independent and all writable before any code: N1 positivity criterion +
+declaration routing, N2 sized types wire-or-delete, N3 universe polymorphism. Steps 1–3 (#213, #64,
+#194) need no design input and can run alongside.
+
+#### GOTCHAS
+- **#213 first, before any bootstrap edit.** Iterating on `lexicon-ontology.esl` while every
+  whitespace change costs a reseed is exactly what it removes.
+- **Measure before tightening** (#194, #92): instrument to log without rejecting, run the suites,
+  count. Precedent 356 / 0 (#137) and 204,703 / all `Sort(1)` (#191); #136 is the case where a
+  one-line arm change became a design decision plus a reseed.
+- **#196's batching plan was written and then not followed**, and the batch paid two reseeds. If
+  #194 turns out to need an ontology edit, hold it until #92's arm is known.
+
+### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity ✓ → performance (HERE).** Phase 3 closed by selection rather
 than by the multiplicity reduction this note planned for it — see STATUS. The performance work
@@ -94,7 +123,7 @@ out for this corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note*
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 Phase 1 is done (reshape, pipeline, grader, ingestion, D47 codec). Of **Phase 2** — "refactor the
 LLM parts out into the orchestrator; the served gRPC path" — two of three parts landed via D71, and
 not in the shape this note predicts:
@@ -118,7 +147,7 @@ Also remaining: **grading-phase gaps** (Citation grade-climb; graded-props over 
   felicity pruning. Cheapest first lever is the **mass-shim precision fixes**
   (d63-parse-gap-closure.md §6): spurious `mass` readings inflate BOTH reading count (median
   105/unit, capped at 256) AND parse time (up to 930 s/unit). `pos_prune` is the other untested
-  lever (see entry 1).
+  lever (see entry 2).
 
 - **`LayerTopology` resource fetch is uncapped.** `include_resources: true` emits one proto node per
   resource in the layer with no bound, so drilling into a lexicon layer is unbounded. Found during
