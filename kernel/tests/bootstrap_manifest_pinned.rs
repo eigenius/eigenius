@@ -31,6 +31,14 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR eigenius#188 (`2026-08-23`), on ONE layer, `eigentt-type-fragment`: the
+//! `TypeExpr` `Sort` constructor's argument changed from `core:integer` to a new
+//! `eigentt:Level` inductive (Zero/Succ/Max/IMax/Param), so a universe level can be a `Max`,
+//! an `IMax` or a `Param` instead of only a numeral. The decoder still accepts the old numeral
+//! form — `decodes_the_pre_188_numeral_form` pins that — so a persisted store's terms remain
+//! readable; what it cannot survive is this manifest move, which is why the reseed is owed
+//! regardless. **eigenius#213 rides along with that reseed** rather than paying its own.
+//!
 //! IT FIRED ON THE D73 CLOSE-OUT (`2026-08-22`): two layers, `program` (eigenius#210 declared
 //! `program:components:RunRuntimeScript`, which D56 §7 added to the kernel's REMOTE_COMPONENTS
 //! and never declared here, so the kernel could dispatch a component no chain could reference)
@@ -61,7 +69,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "\
 core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
-eigentt-type-fragment:5dfce7f7508be045308e77049ea01f749b0e3d84315709dd3be0a5e8187a8577
+eigentt-type-fragment:24ac3b6365ae2d81a1ff9c192f3f1774fb9261b042625ea6958cfef73ce5c3fb
 program:224bb234a8651afdeb5144dca0e609afded5a633dd6495f4ae588e44bf855d4e
 reflection:c4c613c9b8391371f6c3346c2248f79f846ae674f5022b629665eee556cdb9a8
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf

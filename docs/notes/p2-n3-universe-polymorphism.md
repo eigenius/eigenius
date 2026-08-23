@@ -218,13 +218,31 @@ Deliberate divergence from nanoda: no hash-consing (levels here are tiny and own
 arena-interned), and `leq_core`'s unreachable arm returns `false` where nanoda `panic!`s — an
 unexpected shape should not take down the commit gate.
 
+**Slice 4 — the chain inductive and the codec (`2026-08-23`).** `eigentt:Level` declared in the
+eigentt bootstrap layer with the five constructors; `TypeExpr`'s `Sort` argument retyped from
+`core:integer` to it. `encode_level_json` / `decode_level_json` in the D47 codec, the decoder
+accepting the pre-#188 bare integer permanently. Manifest moved on exactly one layer,
+`eigentt-type-fragment`; **#213 rides that reseed**.
+
+Two corrections this slice forced:
+
+- **§4's "no chain source carries an encoded sort" measured the wrong thing.** It grepped committed
+  JSON; the bootstrap ontologies carry `type_expr(...)` in ESL, which is encoded at build time.
+  Retyping the ctor failed Rule 16 across `lexicon`, `closed-class` and others immediately. Those
+  terms re-encode from source so nothing had to be rewritten — but the surface was not zero.
+- **§3's "no ESL syntax" has a sharper edge than stated.** A polymorphic level cannot be printed as
+  source at all. The printer now fails loudly rather than emitting `Sort(Succ(Zero))` ctors that
+  reparse into nothing, and `a_polymorphic_level_refuses_to_print_rather_than_emitting_garbage`
+  pins it. So the asymmetry is: reading the old numeral encoding is supported, writing it is not;
+  and a polymorphic term is **chain-writable and source-unwritable**. Nothing on a chain today is
+  affected, since every level is a numeral — but slice 5 introduces the first terms that cannot
+  round-trip through ESL, and that is a constraint on it rather than a surprise to discover.
+
 **Remaining slices**, in order:
 
 2. `Exp::Sort(Level)` / `Val::Sort(Level)` — the mechanical change across ~509 non-test sites.
    `Level::of_nat` at construction, `as_nat()` guards where a site pattern-matched a numeral.
 3. `conv.rs` cumulativity → `Level::leq`; `check_infer`'s `Sort(n) : Sort(n+1)` → `Sort(l.succ())`;
    `infer_dependent_sort`'s two-case Pi rule → `IMax`.
-4. D47 codec + the `eigentt:Level` chain inductive; decoder accepts the legacy integer. Bootstrap
-   edit — manifest moves.
 5. `uparams` on declarations; elaborator generalises free levels. No ESL syntax (§3).
 6. Reseed with **#213** folded in; full gate plus the WRN demo and both parse baselines.

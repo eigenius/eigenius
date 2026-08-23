@@ -345,12 +345,21 @@ impl Printer<'_> {
             // `Type` and its level. `sorts_round_trip_in_every_position` in
             // kernel/tests/esl_round_trip.rs pins that — the parser wants `Type 1`, and an earlier
             // `Type(1)` here printed source that would not reparse at all.
-            "Sort" => match args.first().and_then(Value::as_u64) {
+            "Sort" => match args.first().and_then(level_as_nat) {
                 Some(0) => Ok("Prop".into()),
                 Some(1) => Ok("Set".into()),
                 // `Type n` is `Sort(n + 1)` — kernel/src/esl/compile.rs, SortKind::Type.
                 Some(n) => Ok(format!("Type {}", n - 1)),
-                None => Err(self.err("`Sort` needs a level", path)),
+                // eigenius#188: `Sort` carries an `eigentt:Level`, which may be a `Max`, `IMax`
+                // or `Param`. ESL has `Prop` / `Set` / `Type k` and deliberately grew no syntax
+                // for the rest (N3 §3), so a polymorphic level cannot be printed as source. This
+                // errors rather than emitting `Sort(Succ(Zero))`, which is what an earlier
+                // version did — the ctors are not macros, so the output reparsed into nothing.
+                None => Err(self.err(
+                    "universe level is not a numeral — ESL has `Prop` / `Set` / `Type k` and no \
+                     syntax for `Max` / `IMax` / `Param` levels (eigenius#188, N3 §3)",
+                    path,
+                )),
             },
 
             "LitString" => Ok(format!("\"{}\"", escape(&str_arg(0)?))),
@@ -572,6 +581,32 @@ pub fn print_value_term(
     Ok(format!("{alias}:{ctor}({})", parts.join(", ")))
 }
 
+/// Read a `Sort`'s level argument as a numeral, accepting both encodings.
+///
+/// Since eigenius#188 the argument is an `eigentt:Level` tree, so `Set` arrives as
+/// `Succ(Zero)`. The bare-integer arm is the pre-#188 form, which persisted stores still carry
+/// and `program::eigentt_type_mirror::decode_level_json` still accepts.
+///
+/// `None` for a level that is not a closed `Succ`-chain — there is no ESL surface syntax for one.
+fn level_as_nat(v: &Value) -> Option<u64> {
+    if let Some(n) = v.as_u64() {
+        return Some(n);
+    }
+    let obj = v.as_object()?;
+    let mut n = 0u64;
+    let mut cur = obj;
+    loop {
+        match cur.get("ctor").and_then(Value::as_str)? {
+            "Zero" => return Some(n),
+            "Succ" => {
+                n = n.checked_add(1)?;
+                cur = cur.get("args")?.as_array()?.first()?.as_object()?;
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// D47 constructor names — the closed set [`print_type_expr`] understands.
 ///
 /// Used to tell the two dialects apart when walking a document: a term carrying a ctor outside
@@ -580,6 +615,14 @@ pub fn print_value_term(
 const D47_CTORS: &[&str] = &[
     "Lam",
     "Sort",
+    // eigenius#188 — `Sort`'s argument is an `eigentt:Level` tree, so its constructors are part
+    // of the D47 dialect too. Without them a term containing any sort is classified non-D47 and
+    // printed by the generic `alias:Ctor(...)` printer, whose output does not reparse.
+    "Zero",
+    "Succ",
+    "Max",
+    "IMax",
+    "Param",
     "Pi",
     "Sig",
     "One",

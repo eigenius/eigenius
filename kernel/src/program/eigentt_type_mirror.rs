@@ -95,15 +95,7 @@ pub fn encode_lam_chain(binders: &[(Patt, Exp)], body: &Exp) -> Result<Value, En
 
 fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
     match exp {
-        Exp::Sort(n) => Ok(ctor(
-            "Sort",
-            vec![json!(n
-                .as_nat()
-                .ok_or_else(|| EncodeError::NotATypeLevelExp(format!(
-                "polymorphic universe level `{n}` — the chain `Sort` ctor still takes a numeral \
-                 (eigenius#188 slice 4 replaces it with an `eigentt:Level` reference)"
-            )))? as i64)],
-        )),
+        Exp::Sort(n) => Ok(ctor("Sort", vec![encode_level_json(n)])),
         Exp::Var(name) => Ok(ctor("Var", vec![json!(name)])),
         Exp::App(h, a) => Ok(ctor(
             "App",
@@ -241,6 +233,96 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         // inductives via Exp::InductiveCtor; anonymous Sum ctors don't
         // arise in axiom statements today. Add when a consumer needs it.
         other => Err(EncodeError::NotATypeLevelExp(format!("{other:?}"))),
+    }
+}
+
+/// Encode a universe level as an `eigentt:Level` value tree (eigenius#188).
+///
+/// The chain ctor took a bare integer until slice 4; it now takes a `Level`, so a `Max`, `IMax`
+/// or `Param` survives the round trip instead of being unrepresentable. Numerals encode as the
+/// `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than `1` and is the
+/// price of one ctor able to carry every level rather than one declaration per rung.
+fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
+    use crate::nbe::level::Level;
+    match l {
+        Level::Zero => ctor("Zero", vec![]),
+        Level::Succ(a) => ctor("Succ", vec![encode_level_json(a)]),
+        Level::Max(a, b) => ctor("Max", vec![encode_level_json(a), encode_level_json(b)]),
+        Level::IMax(a, b) => ctor("IMax", vec![encode_level_json(a), encode_level_json(b)]),
+        Level::Param(n) => ctor("Param", vec![json!(n)]),
+    }
+}
+
+/// Decode an `eigentt:Level` value tree, **accepting the pre-eigenius#188 bare integer**.
+///
+/// The legacy arm is deliberate and permanent, not a migration window. Terms encoded before
+/// slice 4 carry `{"ctor": "Sort", "args": [1]}`, and they live on persisted stores this
+/// repository does not contain — the chain sources here re-encode from ESL at bootstrap, a served
+/// RocksDB store does not. One arm costs nothing and removes the need to rewrite history; without
+/// it every such store fails to decode a `Sort`, and the reseed becomes mandatory rather than
+/// merely owed.
+fn decode_level_json(v: &serde_json::Value) -> Result<crate::nbe::level::Level, DecodeError> {
+    use crate::nbe::level::Level;
+    if let Some(n) = v.as_u64() {
+        return Ok(Level::of_nat(n as usize));
+    }
+    let obj = v
+        .as_object()
+        .ok_or_else(|| wrong_shape("Sort", 0, "expected a Level value or a numeral"))?;
+    let name = obj
+        .get("ctor")
+        .and_then(|c| c.as_str())
+        .ok_or(DecodeError::MissingCtor)?;
+    let args = obj
+        .get("args")
+        .and_then(|a| a.as_array())
+        .ok_or(DecodeError::MissingArgs)?;
+    let arity = |n: usize| -> Result<(), DecodeError> {
+        if args.len() == n {
+            Ok(())
+        } else {
+            Err(wrong_shape(
+                "Sort",
+                0,
+                &format!("`{name}` takes {n} argument(s), got {}", args.len()),
+            ))
+        }
+    };
+    match name {
+        "Zero" => {
+            arity(0)?;
+            Ok(Level::Zero)
+        }
+        "Succ" => {
+            arity(1)?;
+            Ok(Level::Succ(Box::new(decode_level_json(&args[0])?)))
+        }
+        "Max" => {
+            arity(2)?;
+            Ok(Level::Max(
+                Box::new(decode_level_json(&args[0])?),
+                Box::new(decode_level_json(&args[1])?),
+            ))
+        }
+        "IMax" => {
+            arity(2)?;
+            Ok(Level::IMax(
+                Box::new(decode_level_json(&args[0])?),
+                Box::new(decode_level_json(&args[1])?),
+            ))
+        }
+        "Param" => {
+            arity(1)?;
+            let n = args[0]
+                .as_str()
+                .ok_or_else(|| wrong_shape("Sort", 0, "`Param` takes a string name"))?;
+            Ok(Level::Param(n.to_string()))
+        }
+        other => Err(wrong_shape(
+            "Sort",
+            0,
+            &format!("`{other}` is not an eigentt:Level constructor"),
+        )),
     }
 }
 
@@ -416,10 +498,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
     match ctor {
         "Sort" => {
             expect_arg_count("Sort", 1, args)?;
-            let level = args[0]
-                .as_i64()
-                .ok_or_else(|| wrong_shape("Sort", 0, "expected integer"))?;
-            Ok(Exp::sort(level as usize))
+            Ok(Exp::Sort(decode_level_json(&args[0])?))
         }
         "Var" => {
             expect_arg_count("Var", 1, args)?;
@@ -925,8 +1004,56 @@ mod tests {
 
     #[test]
     fn encodes_sort() {
+        // eigenius#188: `Sort`'s argument is an `eigentt:Level` tree, not a numeral. `Prop` is
+        // `Zero`; `Set` is `Succ(Zero)`.
         let v = encode_type(&Exp::sort(0)).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("Sort", vec![json!(0)])));
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj("Sort", vec![ctor_obj("Zero", vec![])]))
+        );
+        let v = encode_type(&Exp::sort(1)).unwrap();
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj(
+                "Sort",
+                vec![ctor_obj("Succ", vec![ctor_obj("Zero", vec![])])]
+            ))
+        );
+    }
+
+    /// **A polymorphic level survives the round trip** — the point of eigenius#188. Under the
+    /// numeral encoding a `Max`, `IMax` or `Param` was simply unrepresentable on the chain.
+    #[test]
+    fn round_trips_a_polymorphic_level() {
+        use crate::nbe::level::Level;
+        let l = Level::IMax(
+            Box::new(Level::Param("u".to_string())),
+            Box::new(Level::Max(
+                Box::new(Level::Param("v".to_string())),
+                Box::new(Level::of_nat(1)),
+            )),
+        );
+        let layer = empty_layer();
+        let encoded = encode_type(&Exp::Sort(l.clone())).unwrap();
+        let decoded = decode_type(&encoded, &layer).unwrap();
+        assert_eq!(decoded, Exp::Sort(l));
+    }
+
+    /// **The legacy numeral still decodes.** Terms committed before eigenius#188 carry
+    /// `{"ctor": "Sort", "args": [1]}`, and they sit on persisted stores this repository does not
+    /// contain. Without this arm every such store fails to decode a `Sort` and the reseed stops
+    /// being optional. Pinned so a later tidy-up does not quietly drop it.
+    #[test]
+    fn decodes_the_pre_188_numeral_form() {
+        let layer = empty_layer();
+        for n in 0..4usize {
+            let legacy = Value::Json(ctor_obj("Sort", vec![json!(n)]));
+            assert_eq!(
+                decode_type(&legacy, &layer).unwrap(),
+                Exp::sort(n),
+                "legacy `Sort({n})` must decode to the same level as the tree form"
+            );
+        }
     }
 
     // --- eigenius#71 / D49 — literal Exp variants ---

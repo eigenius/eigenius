@@ -1,5 +1,72 @@
 [
   {
+    "@id": "urn:eigenius:eigentt:Level",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Level",
+    "urn:eigenius:core:description": "A universe level, as carried by eigentt:TypeExpr's `Sort` ctor. Five constructors: `Zero` (Prop), `Succ`, `Max`, `IMax` and `Param`. `IMax` is the impredicative-Pi rule held open: `imax l r` is `Zero` when `r` is `Zero` and `max l r` otherwise, which cannot be decided while `r` is a `Param`. Mirrors urn:eigenius:lean:LeanLevel one constructor for one, deliberately: the Lean mirror already carried this algebra, and an isomorphic shape makes the sort translation a fold rather than a special case that only covers the monomorphic fragment. See eigenius#188 and docs/notes/p2-n3-universe-polymorphism.md.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Zero",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Succ",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "base",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:Level"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Max",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:Level"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:Level"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "IMax",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:Level"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:Level"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Param",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      }
+    ]
+  },
+  {
     "@id": "urn:eigenius:eigentt:TypeExpr",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "TypeExpr",
@@ -12,7 +79,7 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "level",
-            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:Level"
           }
         ]
       },

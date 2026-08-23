@@ -315,6 +315,15 @@ fn pretty_layout_changes_only_whitespace() {
 /// non-negative integer level after `Type`, found LParen`) — so no term carrying a universe above
 /// `Set` could be decompiled into source that reparses. `Prop` (`Sort 0`) and `Set` (`Sort 1`) are
 /// spelled as single tokens and were unaffected, which is exactly why a corpus that only uses
+/// `Succ^n(Zero)` as the encoder emits it (eigenius#188).
+fn level_tree(n: u64) -> serde_json::Value {
+    let mut v = serde_json::json!({"ctor": "Zero", "args": []});
+    for _ in 0..n {
+        v = serde_json::json!({"ctor": "Succ", "args": [v]});
+    }
+    v
+}
+
 /// those two did not catch it.
 #[test]
 fn sorts_round_trip_in_every_position() {
@@ -325,7 +334,11 @@ fn sorts_round_trip_in_every_position() {
     // 0 → `Prop`, 1 → `Set`, 2 and up → `Type n`. Both spellings, so the test would still hold if
     // the boundary moved.
     for level in [0u64, 1, 2, 7] {
-        let s = serde_json::json!({"ctor": "Sort", "args": [level]});
+        // eigenius#188: `Sort`'s argument is an `eigentt:Level` tree — `Set` is `Succ(Zero)`,
+        // not `1`. Built here the way the encoder builds it, so the comparison below is against
+        // the encoding a fresh compile produces. The legacy numeral form is exercised separately
+        // by `legacy_numeral_sorts_still_round_trip`.
+        let s = serde_json::json!({"ctor": "Sort", "args": [level_tree(level)]});
         let cases = [
             ("bare", s.clone()),
             (
@@ -390,4 +403,48 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
         }
     }
     Err("no rt:term".into())
+}
+
+/// **The pre-eigenius#188 numeral encoding still round-trips.**
+///
+/// Persisted stores carry `{"ctor": "Sort", "args": [1]}` and do not re-encode from source the
+/// way this repository's chains do. The printer reads it (`level_as_nat`'s integer arm) and the
+/// codec decodes it, so such a term still prints to `Set` and recompiles — into the TREE form,
+/// which is the point: reading the old encoding is supported, writing it is not.
+#[test]
+fn legacy_numeral_sorts_still_round_trip() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    for (level, expected) in [(0u64, "Prop"), (1, "Set"), (2, "Type 1")] {
+        let legacy = serde_json::json!({"ctor": "Sort", "args": [level]});
+        let mut ns = Namespaces::new();
+        let printed = print_type_expr(&legacy, &mut ns).expect("legacy numeral prints");
+        assert_eq!(
+            printed, expected,
+            "legacy `Sort({level})` prints as the surface keyword"
+        );
+        let back = wrap_and_compile(&printed, &ns, layer)
+            .unwrap_or_else(|e| panic!("legacy `Sort({level})` must recompile: {e}"));
+        assert_eq!(
+            back,
+            serde_json::json!({"ctor": "Sort", "args": [level_tree(level)]}),
+            "recompiling the legacy form yields the tree form"
+        );
+    }
+}
+
+/// A polymorphic level has no ESL surface syntax (N3 §3), so printing must FAIL loudly rather
+/// than emit `Sort(Succ(Zero))`-style ctors that reparse into nothing — which is what the
+/// printer did before it learned the encoding.
+#[test]
+fn a_polymorphic_level_refuses_to_print_rather_than_emitting_garbage() {
+    let poly = serde_json::json!({"ctor": "Sort", "args": [{"ctor": "Param", "args": ["u"]}]});
+    let mut ns = Namespaces::new();
+    let err = print_type_expr(&poly, &mut ns)
+        .expect_err("a `Param` level has no surface syntax and must not print");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("universe level") || msg.contains("numeral"),
+        "the diagnostic should say WHY it cannot print: {msg}"
+    );
 }

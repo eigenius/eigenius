@@ -5846,9 +5846,9 @@ mod tests {
                 let args = j["args"].as_array().expect("Pi has args");
                 assert_eq!(args[0], serde_json::json!(""));
                 assert_eq!(args[1]["ctor"], "Sort");
-                assert_eq!(args[1]["args"][0], 0);
+                assert_eq!(args[1]["args"][0]["ctor"], "Zero");
                 assert_eq!(args[2]["ctor"], "Sort");
-                assert_eq!(args[2]["args"][0], 0);
+                assert_eq!(args[2]["args"][0]["ctor"], "Zero");
             }
             other => panic!("expected Value::Json, got {other:?}"),
         }
@@ -5883,7 +5883,7 @@ mod tests {
                 assert_eq!(j["ctor"], "Pi");
                 assert_eq!(j["args"][0], "P");
                 assert_eq!(j["args"][1]["ctor"], "Sort");
-                assert_eq!(j["args"][1]["args"][0], 0);
+                assert_eq!(j["args"][1]["args"][0]["ctor"], "Zero");
                 let inner = &j["args"][2];
                 assert_eq!(inner["ctor"], "Pi");
                 assert_eq!(inner["args"][0], "");
@@ -6153,7 +6153,8 @@ mod tests {
                 assert_eq!(j["ctor"], "Pi");
                 assert_eq!(j["args"][0], "A");
                 assert_eq!(j["args"][1]["ctor"], "Sort");
-                assert_eq!(j["args"][1]["args"][0], 1);
+                assert_eq!(j["args"][1]["args"][0]["ctor"], "Succ");
+                assert_eq!(j["args"][1]["args"][0]["args"][0]["ctor"], "Zero");
                 let inner = &j["args"][2];
                 assert_eq!(inner["ctor"], "Pi");
                 assert_eq!(inner["args"][1]["ctor"], "Var");
@@ -6190,7 +6191,8 @@ mod tests {
             assert_eq!(j["ctor"], "Pi");
             assert_eq!(j["args"][0], "A");
             assert_eq!(j["args"][1]["ctor"], "Sort");
-            assert_eq!(j["args"][1]["args"][0], 1);
+            assert_eq!(j["args"][1]["args"][0]["ctor"], "Succ");
+            assert_eq!(j["args"][1]["args"][0]["args"][0]["ctor"], "Zero");
         }
     }
 
