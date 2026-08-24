@@ -880,9 +880,67 @@ classes, and 7b is the type that carries the resulting claim into the term langu
 What remains is not a decision but the unification: the validator checks satisfaction field-wise, the
 kernel would check it type-wise, and Seam B's work is making those one thing.
 
-**Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
-universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
-#188's level machinery. It can be taken up on its own schedule.
+### Q4 — the soundness half is done; the representation half is #188's trigger again
+
+**What is already built.** The Prop restriction on large elimination is implemented and ported
+against nanoda's `large_elim_test_aux`: `large_elim_admitted` (`check/inductive.rs:36-125`) is D46
+§7 singleton-elim, Case A (zero constructors — `False`, `Asserts(iri)`) and Case B (one constructor
+whose every non-parameter argument is propositional *or* is one of the conclusion's index
+expressions, membership not mere mention). The soundness question — may a `Prop` inductive eliminate
+into `Type` — is answered.
+
+**What is not.** The motive's codomain is a constant:
+
+```rust
+let codomain_sort =
+    if <decl is Prop> && !large_elim_admitted(decl) { Exp::sort(0) } else { Exp::sort(2) };
+```
+
+and its doc comment claims `Sort(2)` admits "Set, Type(n) all … via cumulativity". **That is false
+for `Type(n)` with n ≥ 1.** A motive returning `Sort(k)` has type `I → Sort(k+1)`, and the recursor
+demands `I → Sort(2)`, so only `k ∈ {0,1}` pass:
+
+| motive returns | its type | admitted? |
+|---|---|---|
+| `Sort(0)` = Prop | `Sort(1)` | yes |
+| `Sort(1)` = Set | `Sort(2)` | yes |
+| `Sort(2)` = Type 1 | `Sort(3)` | **no** |
+| `Sort(3)` | `Sort(4)` | **no** |
+
+Pinned by `large_elimination_is_capped_at_set_not_type_n` (`nbe/level.rs`). **The effective ceiling
+is Set.** No recursor in the system can eliminate into `Type 1` or above.
+
+**This is #188's original trigger in a second location** — a level fixed at a concrete constant that
+does not generalise, where raising it is an edit rather than an instantiation. `reasoning:spec_poly`
+was the first.
+
+**Options.**
+
+| | option | consequence |
+|---|---|---|
+| 4a | leave it pinned at `Sort(2)` | ceiling stays at Set; no recursor eliminates into `Type 1`+ |
+| 4b | bump the constant | moves the ceiling; this is precisely the ladder #188 exists to escape — "one bump per level, each a bootstrap ontology edit and a reseed" |
+| 4c | **motive codomain becomes a level parameter** — `I.rec.{u}`, motive `I(params) → Sort u` | Lean/nanoda's shape; needs `Const(iri, levels)` (Q3) and declaration-level uparams (#188's residual) |
+| 4d | infer the motive's level per elimination site, no parameter on the recursor | avoids uparams for recursors specifically |
+
+**The framework discriminates 4c from 4d.** §6.1 argued a constraint is level-generic *without*
+parameters because it is only ever **checked** at concrete orders, never instantiated. A recursor is
+not like that: it is a term, it is applied, it appears inside other terms, and it must have a type
+independently of any use site. It must therefore be *instantiated*, which requires a parameter.
+**4c.** That is a derivation from §6.1's own criterion, not an appeal to the reference
+implementation.
+
+**4c preserves the existing gate unchanged.** The current two-way choice between `sort(0)` and
+`sort(2)` becomes a choice between *`u` pinned to 0* and *`u` free* — `large_elim_admitted` keeps its
+exact meaning and its exact call site. The soundness work does not have to be revisited; only the
+representation changes.
+
+**Consistency with Q5.** Inductives are one of the two kinds the framework says will emit a
+`universe` declaration. A recursor carrying `{u}` is exactly that case, so 4c is what makes Q5's
+surviving syntax load-bearing rather than vestigial.
+
+**Sequencing.** 4c is gated on Q3 and #188's residual, so Q4 is no longer independent — it was
+independent only while the answer was "pick a constant".
 
 ### Q5 — ANSWERED: it survives, it is already built, and the framework narrows its scope
 
@@ -929,7 +987,7 @@ now constrained on one side by Q2. Q4 is parallelisable. Q5 falls out of Q3.
 | Q1 | environment interface | **answered** — `check` + `conv`, not `eval` |
 | Q2 | δ-policy | **answered** per kind; inductives deferred into Q3 |
 | Q3 | `EigonClass` as `Const`? | **answered conditionally** — 5→1, but the chain Q8→Q6→Q3 assumes Seam B lands. If the record model does not land, Q3 reverts to the A/B/C analysis. |
-| Q4 | recursor elimination universe | **untouched** |
+| Q4 | recursor elimination universe | **soundness done** (D46 §7 singleton-elim); representation open — motive pinned at `Sort(2)`, ceiling is Set. Options enumerated; 4c indicated. |
 | Q5 | `universe u v;` in ESL | **answered** — already implemented end to end; forced by round-trip. The framework shrinks who emits one to axioms and inductives. No work. |
 | Q6 | `check_infer` of a class reference | **answered** (§6.3) |
 | Q7 | what `Construct` returns | **decided** — 7b |

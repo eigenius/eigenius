@@ -476,3 +476,34 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod recursor_elimination_ceiling {
+    use super::Level;
+
+    /// The recursor motive's codomain is hard-coded to `Sort(2)`
+    /// (`check/inductive.rs:589-594`), whose doc comment claims "any sort body is
+    /// admitted via cumulativity (Set, Type(n) all inhabit Sort(2))".
+    ///
+    /// That claim is false for `Type(n)` with n ≥ 1. A motive returning `Sort(k)`
+    /// has type `I → Sort(k+1)`, and the recursor demands `I → Sort(2)`, so only
+    /// `k ∈ {0, 1}` — Prop and Set — pass. The effective elimination ceiling is
+    /// **Set**, not `Type(n)`.
+    ///
+    /// See D75 §8 Q4. This pins current behaviour; it should fail once the motive
+    /// codomain becomes a level parameter.
+    #[test]
+    fn large_elimination_is_capped_at_set_not_type_n() {
+        let demanded = Level::of_nat(2);
+        let accepts = |k: usize| Level::of_nat(k + 1).leq(&demanded);
+
+        assert!(accepts(0), "Prop-valued motive must be admitted");
+        assert!(accepts(1), "Set-valued motive must be admitted");
+        assert!(
+            !accepts(2),
+            "a Type 1 (= Sort(2)) valued motive is REJECTED — the ceiling is Set. \
+             The doc comment at check/inductive.rs:585-587 claims otherwise."
+        );
+        assert!(!accepts(3), "and everything above it");
+    }
+}
