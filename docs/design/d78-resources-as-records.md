@@ -578,10 +578,18 @@ production path and clippy failed the build on dead code. They are now `#[cfg(te
 as the parity oracle — the second of §6.0's three implementations is gone, and the build says so
 rather than the prose.
 
-**Status: complete in the kernel.** Four gate tests: field-set parity over every resource in the core
+**Status: complete, gate met.** Four unit gates — field-set parity over every resource in the core
 ontology and in the animals example, verdict parity over core, and a conditional requirement still
-firing through the record path (§1.3 case (a)). **Full-chain parity over 9.4M resources is not
-covered by these** — it needs the reseeded store, and remains the outstanding half of this gate.
+firing through the record path (§1.3 case (a)).
+
+**Full-chain parity discharged `2026-08-24`** by a `--umls-all` reseed from `4ba900a`:
+**9,439,633 resources, 35 loads, 0 errors** — the baseline count exactly, against a zero-error
+baseline, which makes the check exhaustive rather than sampled. See
+`docs/notes/reseed-timings-2026-08-24.md`.
+
+Cost is **inconclusive and recorded as such**: 36 m 13 s against a baseline that was itself measured
+twice on one commit at 34 m 40 s and 36 m 29 s. This run sits inside that spread. The memo's bound is
+established by test rather than by the clock.
 
 **Where a divergence would come from**, in likelihood order: `recommends` no longer contributing
 fields (§1.1); conditional requirements evaluated through the record rather than chained into
