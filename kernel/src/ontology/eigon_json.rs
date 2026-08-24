@@ -221,6 +221,26 @@ fn parse_value(value: &serde_json::Value, property: &str) -> Result<Value, Parse
             // for `data_type: core:json` and `core:inductive`
             // property values where the wire shape is a tagged dict
             // tree, not a typed Resource. D32 §3.7.
+            //
+            // **The property's `data_type` would settle this exactly, and is not available here.**
+            // `core:resource` means embedded, `core:json` means opaque; no shape test is needed if
+            // the declaration can be read. But `bootstrap::load_layer` calls `parse_document` with
+            // `parent: None` on `core-ontology.json` — the parse that CREATES `core:data_type` and
+            // `core:json` — so at the first and most important call site there is no chain to
+            // consult. That is why this module has no `Layer` dependency at all, and why the
+            // discrimination is structural rather than schema-driven.
+            //
+            // The printer must therefore use this same predicate rather than a schema lookup, even
+            // though `eigenius decompile` does have a chain: a schema-aware printer paired with a
+            // shape-based reader would disagree, which is worse than both being approximate.
+            //
+            // **`any` is weaker than it should be** — a Resource's keys are ALL property IRIs
+            // (Rule 22 §c requires every key to resolve to a declared `core:Property`), so `all`
+            // is the tighter test and would classify `{"a:b": 1, "plain": 2}` correctly as JSON
+            // where `any` calls it a Resource. Changing it is a reader-semantics change that
+            // could reclassify existing data, so it is measured and filed rather than done here:
+            // across every shipped ontology, experiment and demo there are 5 object-valued
+            // `core:json` instances and **none** has an IRI-shaped key, so the two agree today.
             let any_iri_key = obj.keys().any(|k| k == "@id" || Iri::parse(k).is_ok());
             if any_iri_key {
                 let resource = parse_embedded_resource(value, property)?;
