@@ -1,18 +1,14 @@
 # TTR as the model for classes — and what it says about universe polymorphism
 
-Read from the vendored formal appendix, `references/publications/Cooper-2023-TTR-appendix-1.pdf`
-(Cooper 2023, Appendices A1–A11), plus Cooper's CSTFRS 2021 workshop paper *"So what's all this
-structure good for?"*. Written `2026-08-23`.
+Sources, all vendored: `references/publications/Cooper-2023-TTR-chaper-1.pdf` (Chapter 1, the
+usage) and `Cooper-2023-TTR-appendix-1.pdf` (Appendices A1–A11, the formalisation), plus Cooper's
+CSTFRS 2021 workshop paper *"So what's all this structure good for?"*. Written `2026-08-23`.
 
-Two findings, one of which corrects a premise this repository acted on.
+Chapter 1 and the appendix answer different questions and neither is sufficient alone: the appendix
+gives the formal system, the chapter gives the notation actually used, and §1 below turns on the gap
+between them.
 
 ## 1. Universe polymorphism: the formal system does not have it, the working notation assumes it
-
-> **CORRECTED `2026-08-23`, after reading Chapter 1 §1.4.3.3.** The first version of this section
-> concluded flatly that "TTR does not use universe polymorphism" and that #188's remaining half had
-> therefore lost its justification. That was right about the formal system and **wrong as a guide to
-> what an implementation needs**. Both readings are kept below, because the difference between them
-> is the whole point.
 
 A10 ("The type `Type` and stratification") defines an intensional system of complex types as a
 family of quadruples **indexed by the natural numbers**, with:
@@ -47,9 +43,7 @@ whole of what TTR's universe treatment needs.
 But the **second half** — declaration-level `uparams` and level arguments at ~583 reference sites —
 has now lost its stated justification. The TTR trigger is already satisfied by what shipped.
 
-### What Chapter 1 adds, and why it reverses the conclusion
-
-Two things the appendix alone does not convey.
+### The working notation
 
 **Cooper identifies `Typeⁿ` with Martin-Löf universes outright** (Ch. 1, fn. 2):
 
@@ -83,12 +77,13 @@ resolve it to an order, and there are two options:
 Cooper's construction is (1) in the metatheory and reads like (2) on the page. An implementation
 that wants his notation needs (2).
 
-### So where does this leave #188
+### What this means for #188
 
-**The trigger stands, restated.** Not "Cooper uses universe polymorphism" — he does not, formally —
-but "TTR's working notation is level-implicit, and an implementation of it needs either polymorphism
-or per-site concrete orders". That is a real motivation and it is the one to record, because it is
-the one that survives reading the source.
+N3 §5a records the trigger as "Cooper is using universe polymorphism". The accurate statement is
+narrower and stronger: **TTR's working notation is level-implicit, and an implementation of it needs
+either polymorphism or a concrete order per site.** Option (1) means a chain-resident record type
+usable at two orders must be restated once per order in the ontology; that is the cost polymorphism
+removes.
 
 EigenTT today is stricter than Cooper's *working* system and matches his *formal* one: it has
 `Sort(l) : Sort(Succ(l))`, never `Type : Type`. Nothing in the current chain writes a level-generic
@@ -144,14 +139,13 @@ Chapter 1 §1.4.3.5 defines it and gives the syntactic criterion:
 More fields ⇒ subtype. And the relation is **modal** — it must hold in every possibility of a modal
 system (§1.4.3.5, A9), so it is necessary rather than contingent on one model.
 
-**What this does NOT show about Eigenius.** It is tempting to conclude that `subclass_of` is an
-unchecked assertion, since `SUBCLASS_OF_CLASS` only verifies the referent is a `core:Class` and no
-rule compares property sets. Probed directly: `class ex:Pup : ex:Dog { }` where `Dog` requires two
-properties and `Pup` declares none **validates clean** — but `resolve_class_type` returns *the same
-Σ-type* for both, because `collect_properties` walks `subclass_of` transitively. Field inclusion
-holds **by construction**, not by luck. There is no hole here.
+In Eigenius field inclusion holds **by construction**: `collect_properties` walks `subclass_of`
+transitively, so a declared subclass inherits its parent's `requires` and its resolved type contains
+the parent's fields. `class ex:Pup : ex:Dog { }` with `Dog` requiring two properties and `Pup`
+declaring none resolves to the *same* Σ-type as `Dog`. No rule compares property sets because none
+needs to.
 
-**What it does show.** The two systems get the relation from opposite directions:
+The two systems get the relation from opposite directions:
 
 | | Eigenius | TTR |
 |---|---|---|
@@ -185,9 +179,7 @@ representation change, it changes what "is a" means chain-wide.
 
 **Sequencing.** #188's remaining half proposes level arguments on five `Exp` variants, two of which
 (`EigonClass`, `EigonAxiom`) this analysis says should become one record/`Const` former. Building
-polymorphism onto shapes we intend to collapse is still the wrong order — but that is now an
-argument about ORDER, not about whether to build it at all. §1 no longer says the justification
-fails; it says the justification is different from the one recorded in N3 §5a.
+polymorphism onto shapes we intend to collapse is the wrong order.
 
 **The consolidation question splits cleanly.** The class half has a reference (TTR) and a
 demonstrable defect. The inductive half (`InductiveType` / `InductiveCtor` / `InductiveRec`, fused
