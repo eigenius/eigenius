@@ -189,11 +189,27 @@ impl fmt::Display for ValidationError {
 /// `Layer` should wrap in `Arc::new`.
 pub struct Validator {
     pub(crate) layer: Arc<Layer>,
+    /// D78 Phase D — class IRI → the field set its record demands.
+    ///
+    /// Routing membership through `resolve_class_type` is the unification: one
+    /// definition of "what does `C` require", shared with the kernel instead of
+    /// re-walked here. But that call reads back and re-evaluates a telescope,
+    /// which is far heavier than the `BTreeSet` union it replaces, and the pass
+    /// runs over 9.4M resources. Caching per **class** rather than per resource
+    /// is what keeps the unification affordable: ~894 distinct classes against
+    /// millions of instances.
+    ///
+    /// Sound for the same reason `RESOLVE_MEMO` is: the chain is immutable for
+    /// the duration of a pass.
+    class_fields: std::cell::RefCell<std::collections::BTreeMap<Iri, BTreeSet<Iri>>>,
 }
 
 impl Validator {
     pub fn new(layer: Arc<Layer>) -> Self {
-        Self { layer }
+        Self {
+            layer,
+            class_fields: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        }
     }
 
     /// Validate all resources in this layer.
@@ -212,6 +228,85 @@ impl Validator {
         errors
     }
 
+    /// D78 §5 — the field set clause 8 tests against, for this resource.
+    ///
+    /// The class constraints' fields (transitive over `subclass_of`), plus the
+    /// conditional requirements whose `when_property` matches this resource's
+    /// values. `recommends` contributes nothing (§1.1): it names properties that
+    /// may be absent, and *if present, well typed* is Rule 3's job for any
+    /// property regardless of class.
+    ///
+    /// This is the same set the two prior walks produced —
+    /// `collect_effective_properties` chained with `evaluate_conditional_requires`
+    /// — reached through one definition rather than two. `shadow_required_fields`
+    /// asserts the agreement in tests.
+    fn effective_record_fields(&self, class_refs: &[&Iri], resource: &Resource) -> BTreeSet<Iri> {
+        let mut fields: BTreeSet<Iri> = BTreeSet::new();
+        for class_iri in class_refs {
+            fields.extend(self.record_fields_of(class_iri));
+        }
+        let (conditional, _) = self.evaluate_conditional_requires(class_refs, resource);
+        fields.extend(conditional);
+        fields
+    }
+
+    /// The field set of one class's record, cached per class.
+    ///
+    /// An unresolvable class contributes nothing: Rule 14 and Rule 22 report the
+    /// dangling reference, and reporting it twice as a missing-property error
+    /// would be noise.
+    fn record_fields_of(&self, class_iri: &Iri) -> BTreeSet<Iri> {
+        if let Some(hit) = self.class_fields.borrow().get(class_iri) {
+            return hit.clone();
+        }
+        let fields = match crate::program::ground::resolve_class_type(class_iri, &self.layer) {
+            Ok(crate::nbe::val::Val::Record(fs, _)) => {
+                fs.iter().map(|(i, _, _)| i.clone()).collect()
+            }
+            // Primitives and inductives resolve to something other than a
+            // record and demand no fields of an instance.
+            Ok(_) | Err(_) => BTreeSet::new(),
+        };
+        self.class_fields
+            .borrow_mut()
+            .insert(class_iri.clone(), fields.clone());
+        fields
+    }
+
+    /// The **pre-D78 path**, kept callable for the Phase D parity gate.
+    ///
+    /// This is the independent transitive walk the unification replaced:
+    /// `collect_effective_properties` chained with `evaluate_conditional_requires`,
+    /// never touching `resolve_class_type`. `effective_record_fields` now goes
+    /// through the kernel's record instead, so the two are genuinely different
+    /// code paths and comparing them is a real check rather than a tautology.
+    ///
+    /// Phase D's obligation is **verdict parity** — identical output,
+    /// resource for resource, before and after.
+    #[cfg(test)]
+    pub(crate) fn shadow_required_fields(
+        &self,
+        class_refs: &[&Iri],
+        resource: &Resource,
+    ) -> BTreeSet<Iri> {
+        let (required_props, _) = self.collect_effective_properties(class_refs);
+        let (conditional_required, _) = self.evaluate_conditional_requires(class_refs, resource);
+        required_props
+            .into_iter()
+            .chain(conditional_required)
+            .collect()
+    }
+
+    /// Test-only accessor for the unified path, so the gate can compare them.
+    #[cfg(test)]
+    pub(crate) fn record_required_fields(
+        &self,
+        class_refs: &[&Iri],
+        resource: &Resource,
+    ) -> BTreeSet<Iri> {
+        self.effective_record_fields(class_refs, resource)
+    }
+
     /// Validate a single resource.
     pub fn validate_resource(&self, resource: &Resource) -> Vec<ValidationError> {
         let mut errors = Vec::new();
@@ -225,17 +320,17 @@ impl Validator {
         // class. (See `rules::is_a` for the full story.)
         errors.extend(self.check_missing_is_a(resource, &res_id));
 
-        // Collect effective requires/recommends from all classes + ancestors
-        let (required_props, _recommended_props) = self.collect_effective_properties(&class_refs);
-
-        // Also collect conditional requirements
-        let (conditional_required, _conditional_recommended) =
-            self.evaluate_conditional_requires(&class_refs, resource);
-
-        let all_required: BTreeSet<Iri> = required_props
-            .into_iter()
-            .chain(conditional_required)
-            .collect();
+        // D78 Phase D — the required field set is the **effective record** for
+        // this resource: clause 8's `⟨ℓ, a⟩ ∈ r` obligation, read off one
+        // definition instead of an independent transitive walk.
+        //
+        // Conditional requirements are discharged here rather than carried as
+        // dependent fields, which is D78 §1.3 case (a): with the resource in
+        // hand the condition is decided against its values before clause 8 is
+        // applied, so no dependent machinery is needed. Case (b) — the class
+        // type standing alone — is the one that needs the telescope, and M1
+        // measured it as unexercised.
+        let all_required = self.effective_record_fields(&class_refs, resource);
 
         // Rule 1+2: Required properties (including inherited)
         for req_iri in &all_required {
@@ -2786,5 +2881,111 @@ mod tests {
             shape_violations.is_empty(),
             "untyped binders should pass (only present-but-wrong slots are flagged); got {shape_violations:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod phase_d_parity {
+    //! D78 Phase D gate — the unified membership path must agree with the walk
+    //! it replaced, resource for resource.
+    //!
+    //! The two paths are genuinely different: `shadow_required_fields` walks
+    //! `subclass_of` through `collect_effective_properties`; `record_fields_of`
+    //! goes through `resolve_class_type`'s record. Agreement is a real check.
+
+    use super::*;
+    use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::ontology::eigon_json;
+
+    fn core_layer() -> Arc<Layer> {
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    }
+
+    fn animals_layer() -> Arc<Layer> {
+        let doc = include_str!("../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core_layer()));
+        for r in eigon_json::parse_document(doc).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        Arc::new(d.build(LayerStorage::in_memory()))
+    }
+
+    /// Every resource in a layer must get the same required-field set from both
+    /// paths.
+    fn assert_parity(layer: Arc<Layer>, label: &str) -> usize {
+        let v = Validator::new(Arc::clone(&layer));
+        let mut checked = 0;
+        for iri in layer.defined_iris() {
+            let Some(r) = layer.get_resource(iri) else {
+                continue;
+            };
+            let classes = r.is_a();
+            let refs: Vec<&Iri> = classes.iter().collect();
+            let old = v.shadow_required_fields(&refs, &r);
+            let new = v.record_required_fields(&refs, &r);
+            assert_eq!(
+                old, new,
+                "{label}: required-field divergence on {iri}\n  walk:   {old:?}\n  record: {new:?}"
+            );
+            checked += 1;
+        }
+        checked
+    }
+
+    #[test]
+    fn the_core_ontology_agrees_on_every_resource() {
+        let n = assert_parity(core_layer(), "core");
+        assert!(n >= 100, "core has ~120 resources, checked {n}");
+    }
+
+    #[test]
+    fn the_animals_example_agrees_on_every_resource() {
+        // Has instances, not just declarations — so the conditional and
+        // inherited paths are both exercised.
+        let layer = animals_layer();
+        let n = assert_parity(layer, "animals");
+        assert!(n > 0, "animals must have resources");
+    }
+
+    #[test]
+    fn verdicts_are_identical_over_the_core_ontology() {
+        // Field-set parity is the mechanism; verdict parity is the obligation.
+        // Nothing above proves the *errors* match, so assert that directly.
+        let errors = Validator::new(core_layer()).validate();
+        assert!(
+            errors.is_empty(),
+            "the core ontology must still validate clean after Phase D: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_conditional_requirement_still_fires_through_the_record_path() {
+        // D78 §1.3 case (a): the condition is discharged against the resource's
+        // values before clause 8 applies. If the unification dropped that, a
+        // conditionally-required property would stop being demanded.
+        let v = Validator::new(core_layer());
+
+        // `core:Property` carries a ConditionalRequirement: a `resource`-typed
+        // property must declare `class_types`.
+        let mut prop = Resource::new(Iri::parse("urn:t:some_prop").unwrap());
+        prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::RESOURCE).unwrap()),
+        );
+        let classes = prop.is_a();
+        let refs: Vec<&Iri> = classes.iter().collect();
+
+        let old = v.shadow_required_fields(&refs, &prop);
+        let new = v.record_required_fields(&refs, &prop);
+        assert_eq!(old, new, "conditional requirements must survive the switch");
     }
 }

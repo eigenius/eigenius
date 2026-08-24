@@ -2149,9 +2149,10 @@ mod tests {
         // `Resource`.
         //
         // The type does not. `resolve_class_type` is a function of the CLASS
-        // (`ground.rs:37` takes a `&Iri`, not a resource), so it builds its
-        // Σ-chain from `requires` + `recommends` alone. The extra field is in
-        // the value and absent from the type, so `find_sigma_field` misses and
+        // (`ground.rs:37` takes a `&Iri`, not a resource), so its record is built
+        // from `requires` alone — since D78 Phase C; it was a Σ-chain over
+        // `requires` + Option-wrapped `recommends` before. The extra field is in
+        // the value and absent from the type, so the lookup misses and
         // `Exp::PropAccess` reports `IllFormed`.
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;

@@ -557,6 +557,32 @@ and after. 9.4M resources.
 mode — compute both, report on divergence, switch only when the divergence set is empty. Building
 that shadow is part of the phase, not a prerequisite to it.
 
+**A cost the plan did not anticipate.** Routing membership through `resolve_class_type` *is* the
+unification — one definition, shared with the kernel — but that call reads back and re-evaluates a
+telescope, where the walk it replaces is a `BTreeSet` union. Per resource over 9.4M resources that is
+a serious regression, and it is the shape of the O(chain) problems this project has hit before. The
+fix is to cache per **class**, not per resource: ~894 distinct classes against millions of instances.
+`Validator` gains a `class_fields` memo, sound for the same reason `RESOLVE_MEMO` is — the chain is
+immutable for the duration of a pass. **Phase D's gate therefore includes cost, not only verdict
+parity.**
+
+**A shadow that compares a path against itself proves nothing.** The first cut of
+`effective_record_fields` re-walked `collect_effective_properties`, which made the parity assertion a
+tautology. The unified path has to actually go through `resolve_class_type`; only then are
+`shadow_required_fields` (the walk) and `record_required_fields` (the record) two different code
+paths whose agreement is evidence.
+
+**The evidence the unification landed is a compiler error.** With membership routed through the
+record, `collect_effective_properties` and `collect_from_class` became unreachable from the
+production path and clippy failed the build on dead code. They are now `#[cfg(test)]`, surviving only
+as the parity oracle — the second of §6.0's three implementations is gone, and the build says so
+rather than the prose.
+
+**Status: complete in the kernel.** Four gate tests: field-set parity over every resource in the core
+ontology and in the animals example, verdict parity over core, and a conditional requirement still
+firing through the record path (§1.3 case (a)). **Full-chain parity over 9.4M resources is not
+covered by these** — it needs the reseeded store, and remains the outstanding half of this gate.
+
 **Where a divergence would come from**, in likelihood order: `recommends` no longer contributing
 fields (§1.1); conditional requirements evaluated through the record rather than chained into
 `all_required` (§1.3); and the empty-class case, which stops being `Val::One`.
@@ -571,10 +597,24 @@ fields (§1.1); conditional requirements evaluated through the record rather tha
 **Behaviour change: user-visible.** An undeclared property becomes projectable — this is the phase
 that closes D75 §3.8, and the first one an author would notice.
 
-**Gate:** the D75 §3.8 witness
-(`an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected`) **must flip**. It pins
-current behaviour and names D75 §3.8; when projection works, it fails, and that failure is the
-signal. Also closes the local-name projection collision (§9): projection becomes IRI-keyed.
+**Gate — corrected.** An earlier draft said the D75 §3.8 witness
+(`an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected`) **must flip**. Reading
+it shows that is wrong: it asserts `find_sigma_field(Dog, "nickname").is_none()` — projection off the
+**class type** — and that assertion is *permanently correct*. `Dog` does not declare `nickname`, so
+projecting it off `Dog` must fail before and after. A class type is the declared minimum, not the
+whole of what an instance carries.
+
+What Phase E changes is projection off a **resource**. The gate is therefore a new assertion, not a
+flip:
+
+- projecting an undeclared property off a **resource that carries it** — succeeds, at the property's
+  own type `T`, not `Option T`;
+- projecting it off the **class** — still fails.
+
+The existing witness keeps its class-side assertion and gains the resource-side one, so the pair
+states the distinction rather than one replacing the other.
+
+The local-name projection collision is already closed — it landed in Phase C, not here.
 
 ---
 
@@ -601,8 +641,10 @@ Per phase (§7), plus these standing across all of them:
 | `every_shipped_ontology_document_round_trips` | A (new codec arms), and unchanged after |
 | entailment unit tests over non-`subclass_of` constraint sets | B |
 | kernel tests; `Construct`/`PropAccess` blast radius | C |
-| **verdict parity over 9.4M resources**, resource-for-resource | D |
-| D75 §3.8 witness **flips** | E |
+| field-set + verdict parity over the shipped ontologies | D — done |
+| **verdict parity over 9.4M resources** | D — **outstanding**, needs the reseeded store |
+| membership cost does not regress (per-class cache) | D |
+| undeclared property projectable off a **resource**, still not off the **class** | E |
 | local-name projection collision closed | **C**, not E — `PropAccess` already has the IRI |
 | parse gate and WRN demo unchanged | D and E — the two phases that could move them |
 

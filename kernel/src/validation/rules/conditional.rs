@@ -27,6 +27,14 @@ use crate::ontology::well_known as wk;
 
 impl Validator {
     /// Collect effective `requires` and `recommends` from all classes and ancestors.
+    ///
+    /// **Test-only since D78 Phase D.** This was the validator's own transitive
+    /// walk — the second of the three implementations of "what does `C`
+    /// require" that D75 §6.0 identified. Membership now goes through
+    /// `resolve_class_type`'s record, so this survives solely as the oracle the
+    /// Phase D parity gate compares against. That it is no longer reachable from
+    /// the production path is the concrete evidence the unification landed.
+    #[cfg(test)]
     pub(in crate::validation) fn collect_effective_properties(
         &self,
         class_iris: &[&Iri],
@@ -47,6 +55,9 @@ impl Validator {
     }
 
     /// Recursively collect requires/recommends from a class and its ancestors.
+    ///
+    /// Test-only with its caller — see `collect_effective_properties`.
+    #[cfg(test)]
     fn collect_from_class(
         &self,
         class_iri: &Iri,
