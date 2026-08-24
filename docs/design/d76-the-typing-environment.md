@@ -289,9 +289,35 @@ is not `decl`. So if `A`'s constructor mentions `B` and `B`'s mentions `A`, each
 isolation and the cross-type occurrence is not seen as recursive. The reference *resolves* — a layer
 is built before it is validated, so `Layer::resolve` finds the sibling — so this does not fail
 loudly.
-
 Whether that is unsoundness (a non-positive mutual pair admitted) or mere incompleteness is
-**untested**, and it is the first thing to establish if the §6.4 measurement finds an SCC. Recorded
+**untested**, and it is the first thing to establish if a mutual pair is ever written. Recorded as a
+question, not a claim — §6.4 says nothing forces the issue today.
+
+### 6.6 What #20 actually blocks: the kernel's own semantics
+
+The shipped chain has no mutual inductives, but one thing plainly wants them, and it is not
+hypothetical.
+
+`Exp`, `Val` and `Neut` are the kernel's triad:
+
+```
+Val::Nt(Neut)                          Val → Neut
+Neut holds Val in 3 variants           Neut → Val      ← the cycle
+Val::Sig(_, Clos), Clos { body: Exp }  Val → Exp       (one way; Exp does not reference Val)
+```
+
+`{Val, Neut}` is a genuine 2-cycle; `Exp` sits outside it.
+
+**That is why `eigentt:TypeExpr` exists and `eigentt:Val` does not.** `Exp` is self-recursive, so one
+inductive expresses it — and one does, which is what the D47 codec encodes and decodes. `Val` and
+`Neut` need a mutual block, so they are absent. Not an oversight: #20.
+
+**Eigenius mirrors its syntax into the chain and cannot mirror its semantics.** A term is
+chain-resident and inspectable; the value it evaluates to is not expressible. For a system whose core
+ontology is self-describing — `core:Class is_a core:Class` — the self-description stops at `Exp`.
+
+A sharper motivating case than the `Expr/Stmts/Stmt` sketch in #20's body: it is real, it is this
+system's own machinery, and it says what the deferral *costs* rather than what it postpones.
 as a question, not a claim.
 
 ## 7. The consolidation migration
