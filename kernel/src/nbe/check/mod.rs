@@ -765,10 +765,9 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // We dispatch on the inferred type of the target.
         Exp::PropAccess(e, prop) => {
             let t = check_infer(ctx, e)?;
-            let prop_name = prop.local_name();
 
-            // Fall back to the existing Sigma / resource behaviour.
-            find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
+            // D78 §9 — keyed by the full IRI, not `prop.local_name()`.
+            find_record_field(ctx, &t, prop).ok_or_else(|| {
                 CheckError::IllFormed(format!(
                     "property '{}' not found in type {:?}",
                     prop,
@@ -787,16 +786,15 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                     "cannot infer Construct type for '{class_iri}': {e}"
                 ))
             })?;
-            // Check each field against the resolved class type
-            let mut remaining = class_type;
+            // D78 Phase C — a record is flat, so each field is looked up
+            // directly. The Σ-chain needed `advance_sigma` to walk past the
+            // field it had just checked; a record has nothing to walk.
             for (prop_iri, field_exp) in fields {
-                let field_type = find_sigma_field(ctx, &remaining, prop_iri.local_name())
-                    .ok_or_else(|| {
+                let field_type =
+                    find_record_field(ctx, &class_type, prop_iri).ok_or_else(|| {
                         format!("property '{}' not found in class '{}'", prop_iri, class_iri)
                     })?;
                 check(ctx, field_exp, &field_type)?;
-                // Advance through the Sigma chain
-                remaining = advance_sigma(&remaining, prop_iri.local_name(), field_exp, &ctx.rho);
             }
             Ok(Val::EigonClass(class_iri.clone()))
         }
@@ -1108,6 +1106,18 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
 /// fix for issue #12 item 1 (D18 §5).
 fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<Val> {
     match typ {
+        // D78 Phase C — a class resolves to a record, and a record is keyed by
+        // the **full IRI**. This arm is unreachable from `PropAccess`, which
+        // routes through `find_record_field`; it exists for callers that still
+        // hold only a local name, and matches on the binder for them.
+        Val::Record(fields, rho) => {
+            let (_, patt, ty) = fields
+                .iter()
+                .find(|(_, patt, _)| matches!(patt, Patt::Var(n) if n == field_name))?;
+            let _ = patt;
+            eval(ty, rho).ok()
+        }
+        Val::Refine(carrier, _) => find_sigma_field(ctx, carrier, field_name),
         Val::Sig(t, g) => {
             if g.patt == Patt::Var(field_name.to_string()) {
                 // Found — return the field's type
@@ -1129,26 +1139,29 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
     }
 }
 
-/// Advance past one field in a Sigma chain. After `find_sigma_field`
-/// found `field_name`, this returns the rest of the Sigma: applies
-/// the closure with the field's value and recurses.
-fn advance_sigma(typ: &Val, field_name: &str, field_exp: &Exp, rho: &Rho) -> Val {
+/// D78 §9 — look a field up by its **full IRI**.
+///
+/// `find_sigma_field` matches on the binder, which `build_sigma_chain` set to
+/// `prop_iri.local_name()`: two properties sharing a local name across
+/// namespaces were one field to a projection. A record carries the IRI, so this
+/// lookup cannot confuse them.
+///
+/// Forgetting a refinement is safe here for the same reason it is safe in
+/// subtyping — the constraints do not change what fields the carrier has.
+fn find_record_field(ctx: &mut CheckCtx, typ: &Val, field: &Iri) -> Option<Val> {
     match typ {
-        Val::Sig(_, g) => {
-            if g.patt == Patt::Var(field_name.to_string()) {
-                match eval(field_exp, rho).and_then(|v| g.apply(v)) {
-                    Ok(v) => v,
-                    Err(_) => typ.clone(),
-                }
-            } else {
-                let gen = gen_val(&g.env);
-                match g.apply(gen) {
-                    Ok(rest) => advance_sigma(&rest, field_name, field_exp, rho),
-                    Err(_) => typ.clone(),
-                }
-            }
+        Val::Record(fields, rho) => {
+            let (_, _, ty) = fields.iter().find(|(iri, _, _)| iri == field)?;
+            eval(ty, rho).ok()
         }
-        _ => typ.clone(),
+        Val::Refine(carrier, _) => find_record_field(ctx, carrier, field),
+        Val::EigonClass(iri) => {
+            let resolved = ctx.resolve_class_cached(iri).ok()?;
+            find_record_field(ctx, &resolved, field)
+        }
+        // Anonymous pairs still carry only a binder name, so fall back.
+        Val::Sig(..) => find_sigma_field(ctx, typ, field.local_name()),
+        _ => None,
     }
 }
 
@@ -2250,9 +2263,12 @@ mod tests {
             find_sigma_field(&mut c, &folded, "name").is_some(),
             "test setup: check-side δ must be live, or this proves nothing"
         );
+        // D78 Phase C — a record now, not a Σ-chain. The finding is unchanged:
+        // what a class unfolds *to* is not what makes `check` and `eq_nf`
+        // disagree; that they disagree at all is.
         assert!(
-            matches!(unfolded, Val::Sig(_, _)),
-            "test setup: Dog must unfold to a Σ-chain, got {unfolded:?}"
+            matches!(unfolded, Val::Record(..)),
+            "test setup: Dog must unfold to a record, got {unfolded:?}"
         );
 
         assert!(
@@ -2263,7 +2279,8 @@ mod tests {
             eq_nf(0, &folded, &unfolded).is_err(),
             "current behaviour: `eq_nf` does not unfold a class, so a type written folded and the \
              same type produced unfolded do not compare equal. See D75 §3.3 — the δ-policy has to \
-             reconcile this. If this starts passing, conversion has gained δ for classes."
+             reconcile this, by making `check` stop treating its unfolding as definitional equality \
+             rather than by making `eq_nf` unfold. Survived the Σ-chain → record switch unchanged."
         );
     }
 

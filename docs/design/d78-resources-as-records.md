@@ -500,6 +500,25 @@ verdicts are untouched.
 **Gate:** kernel tests. The `Construct`/`PropAccess` path is the blast radius, and M1 (D75 §8a)
 measured it as **unexercised by any shipped ontology** — it lives in the kernel and its tests.
 
+**Status: complete.** Five tests flipped, all of which pinned the old representation, and each was
+updated on its merits rather than as a chore:
+
+| test | why it flipped |
+|---|---|
+| `a_class_with_no_requires_is_val_one_today_and_an_empty_record_after` | **written to flip.** Renamed to `..._is_now_an_empty_record_not_val_one` |
+| `a_class_record_carries_the_same_fields_as_its_sigma_chain` | the Phase A gate is spent — there is no Σ-chain left to compare against. `#[ignore]`d with the reason, succeeded by `a_class_resolves_to_a_record_over_its_requires` |
+| `resolve_dog_class` | asserted `Val::Sig`; now asserts the record's IRI-keyed field list |
+| `readback_class_with_recommends_roundtrips` | guarded a crash caused by `Option`-typed `recommends` fields, which no longer exist; the round-trip is still pinned, and the test now also asserts no recommended-only property is a field |
+| `a_class_and_its_own_unfolding_are_not_definitionally_equal` | setup asserted a Σ-chain. **The finding survived unchanged** — what a class unfolds *to* is not what makes `check` and `eq_nf` disagree |
+
+The last one is the informative one: the δ disagreement (D75 §3.3) is a property of the two surfaces,
+not of the encoding, so changing the encoding did not touch it.
+
+**Also landed here rather than in Phase E:** projection is now keyed by the **full IRI**
+(`find_record_field`), closing the local-name collision §9 records. `PropAccess` has the IRI in hand,
+so carrying local names alongside would have been redundant work to defer a fix by two phases.
+`advance_sigma` is deleted — a flat record has nothing to walk past.
+
 ---
 
 ### Phase D — the validator switches. The risky one.
@@ -560,6 +579,7 @@ Per phase (§7), plus these standing across all of them:
 | kernel tests; `Construct`/`PropAccess` blast radius | C |
 | **verdict parity over 9.4M resources**, resource-for-resource | D |
 | D75 §3.8 witness **flips** | E |
+| local-name projection collision closed | **C**, not E — `PropAccess` already has the IRI |
 | parse gate and WRN demo unchanged | D and E — the two phases that could move them |
 
 The parse gate and the demo are listed only against D and E because A–C change nothing a chain

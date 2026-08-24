@@ -22,7 +22,7 @@
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt, PrimitiveType};
-use crate::nbe::val::{Clos, Val};
+use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
@@ -60,31 +60,43 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
         return resolve_inductive_type(class_iri, resource, layer);
     }
 
-    let (required, recommended) = collect_properties(class_iri, layer)?;
+    // D78 Phase C — the class's constraint is a RECORD over its `requires`.
+    //
+    // Three deletions from the Σ-chain this replaces:
+    //
+    // - **`recommends` no longer contributes a field.** It was Option-wrapped
+    //   into the chain, which says the record *has* a field holding `some x` or
+    //   `none`; a resource that omits the property has no field at all, and only
+    //   absence is what `recommends` describes (D78 §1.1). `Option` survives
+    //   where it belongs — the Julia and Lean mirror generators emit closed
+    //   target-language structs, which do need a nullable slot.
+    // - **No `Val::One` short-circuit for an empty class.** All 749 shipped
+    //   classes with no `requires` resolved to the *same* `Val::One` and were
+    //   definitionally equal to one another; an empty record is per-class
+    //   (D78 §1.2, §5.1).
+    // - **No right-nested Σ.** `build_sigma_chain` bound `local_name()`, so two
+    //   properties sharing a local name across namespaces were one field to a
+    //   projection. A record is keyed by full IRI (D78 §9).
+    let (required, _recommended) = collect_properties(class_iri, layer)?;
 
-    let mut props: Vec<(Iri, Val)> = Vec::new();
-
-    // Required properties — direct types
+    let mut fields: Vec<(Iri, Patt, Exp)> = Vec::new();
     for prop_iri in &required {
         let prop_type = resolve_property_type(prop_iri, layer)?;
-        props.push((prop_iri.clone(), prop_type));
+        // The field's type is closed — a class field's type is a function of the
+        // *property*, never of an earlier field (D78 §4.1) — so reading it back
+        // into an `Exp` loses nothing, and the telescope carries no dependency
+        // until conditional requirements land (D78 §1.3).
+        let ty = crate::nbe::readback::readback_val(0, &prop_type);
+        fields.push((
+            prop_iri.clone(),
+            Patt::Var(prop_iri.local_name().to_string()),
+            ty,
+        ));
     }
 
-    // Recommended properties — wrapped in Option (Sum(some T | none 1))
-    for prop_iri in &recommended {
-        if required.contains(prop_iri) {
-            continue; // Already included as required
-        }
-        let prop_type = resolve_property_type(prop_iri, layer)?;
-        let option_type = make_option_type(prop_type);
-        props.push((prop_iri.clone(), option_type));
-    }
-
-    if props.is_empty() {
-        return Ok(Val::One);
-    }
-
-    build_sigma_chain(&props)
+    let record_exp = Exp::record(fields).map_err(|e| e.to_string())?;
+    crate::nbe::eval::eval(&record_exp, &crate::nbe::env::Rho::Nil)
+        .map_err(|e| format!("could not evaluate class record for '{class_iri}': {e:?}"))
 }
 
 /// D78 §4 — the field set a constraint demands.
@@ -297,22 +309,6 @@ fn resolve_array_element_type(
     Ok(Val::sort(1))
 }
 
-/// Make an Option type: Sum(some T | none 1)
-fn make_option_type(inner: Val) -> Val {
-    // Store the inner type as a value in the environment rather than
-    // round-tripping through readback, which can introduce generated
-    // variable names (e.g. __data_0) that fail to resolve in Rho::Nil.
-    let var_name = "__option_inner".to_string();
-    let rho = Rho::Nil.extend(Patt::Var(var_name.clone()), inner);
-    Val::Data(
-        vec![
-            ("some".to_string(), Exp::Var(var_name)),
-            ("none".to_string(), Exp::One),
-        ],
-        rho,
-    )
-}
-
 /// Make a list type wrapping an element type.
 ///
 /// Wraps the canonical `List(A)` inductive declaration from
@@ -341,26 +337,6 @@ fn make_union_type(iris: &[Iri]) -> Val {
         .map(|iri| (iri.local_name().to_string(), Exp::EigonClass(iri.clone())))
         .collect();
     Val::Data(summands, Rho::Nil)
-}
-
-/// Build a nested Sigma chain from a list of (property_iri, type) pairs.
-fn build_sigma_chain(props: &[(Iri, Val)]) -> Result<Val, String> {
-    if props.is_empty() {
-        return Ok(Val::One);
-    }
-    let (prop_iri, prop_type) = &props[0];
-    let rest_type = build_sigma_chain(&props[1..])?;
-    // Store the rest type in the closure's environment rather than
-    // round-tripping through readback. The rest type doesn't depend on
-    // the current property's value, but we still need a well-formed closure.
-    let rest_var = "__sigma_rest".to_string();
-    let rho = Rho::Nil.extend(Patt::Var(rest_var.clone()), rest_type);
-    let closure = Clos::new(
-        Patt::Var(prop_iri.local_name().to_string()),
-        Exp::Var(rest_var),
-        rho,
-    );
-    Ok(Val::Sig(Box::new(prop_type.clone()), closure))
 }
 
 /// Check whether a resource represents an inductive type declaration
@@ -969,8 +945,19 @@ mod tests {
         let layer = build_test_layer();
         let iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
         let typ = resolve_class_type(&iri, &layer).unwrap();
-        // Dog has 2 required properties (name from Animal, breed from Dog)
-        assert!(matches!(typ, Val::Sig(_, _)));
+        // D78 Phase C — a record now, and keyed by full IRI. Dog requires two
+        // properties: `name`, inherited from Animal, and its own `breed`.
+        match typ {
+            Val::Record(fields, _) => {
+                let keys: Vec<&str> = fields.iter().map(|(i, _, _)| i.as_str()).collect();
+                assert_eq!(
+                    keys,
+                    ["urn:eigenius:example:breed", "urn:eigenius:example:name"],
+                    "canonical order is IRI order for independent fields"
+                );
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1006,40 +993,48 @@ mod tests {
         );
     }
 
-    #[test]
-    fn option_type_has_two_constructors() {
-        let opt = make_option_type(Val::EigonPrimitive(PrimitiveType::String));
-        match opt {
-            Val::Data(summands, _) => {
-                assert_eq!(summands.len(), 2);
-                assert_eq!(summands[0].0, "some");
-                assert_eq!(summands[1].0, "none");
-            }
-            _ => panic!("expected Sum type for Option"),
-        }
-    }
+    // `option_type_has_two_constructors` was removed with `make_option_type` in
+    // D78 Phase C. It asserted that a `recommends` property became an
+    // `Option`-typed field of the class type; under clause 8 a recommended
+    // property is not a field of the constraint at all (D78 §1.1), so there is
+    // no Option to have two constructors. `Option` survives in the Julia and
+    // Lean mirror generators, which emit closed structs and do need a nullable
+    // slot — it is not the class type's business.
 
     #[test]
     fn readback_class_with_recommends_roundtrips() -> Result<(), Box<dyn std::error::Error>> {
-        // This tests the exact path that caused the __data_0 crash:
-        // resolve a class with recommends → readback → re-evaluate
+        // The path that caused the __data_0 crash: resolve a class → readback →
+        // re-evaluate, which is what parse_program does.
+        //
+        // D78 Phase C changed what this produces. `core:Class` recommends
+        // several properties it does not require, and those used to become
+        // `Option`-typed fields — the source of the crash. They are no longer
+        // fields at all (§1.1), so the regression this guards can no longer
+        // arise from `recommends`; the round-trip itself is still worth pinning.
         let layer = build_test_layer();
-        // core:Class has recommends, so it will have Option types
         let iri = Iri::parse(wk::CLASS).unwrap();
         let typ = resolve_class_type(&iri, &layer)?;
 
-        // Readback to expression
         let exp = crate::nbe::readback::readback_val(0, &typ);
-
-        // Re-evaluate — this is what parse_program does, and it used to crash
         let val = crate::nbe::eval::eval(&exp, &Rho::Nil)?;
 
-        // Should still be a Sigma type
-        assert!(
-            matches!(val, Val::Sig(_, _)),
-            "re-evaluated class type should be Sig, got {:?}",
-            val
-        );
+        let (before, after) = match (&typ, &val) {
+            (Val::Record(a, _), Val::Record(b, _)) => (a.len(), b.len()),
+            other => panic!("expected records, got {other:?}"),
+        };
+        assert_eq!(before, after, "the round-trip must preserve the field set");
+
+        // And no recommended-only property is among them.
+        let (required, recommended) = collect_properties(&iri, &layer)?;
+        if let Val::Record(fields, _) = &val {
+            for (f, _, _) in fields {
+                assert!(required.contains(f), "unexpected field {f}");
+                assert!(
+                    !(recommended.contains(f) && !required.contains(f)),
+                    "a recommended-only property must not be a field: {f}"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -1539,6 +1534,9 @@ mod record_agrees_with_sigma_chain {
     }
 
     #[test]
+    #[ignore = "D78 Phase C landed: resolve_class_type returns a record, so there is no Σ-chain \
+                left to compare against. Kept as the record of the Phase A gate that licensed the \
+                switch; `a_class_resolves_to_a_record_over_its_requires` is its successor."]
     fn a_class_record_carries_the_same_fields_as_its_sigma_chain() {
         let layer = build_test_layer();
         let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
@@ -1582,18 +1580,40 @@ mod record_agrees_with_sigma_chain {
     }
 
     #[test]
-    fn a_class_with_no_requires_is_val_one_today_and_an_empty_record_after() {
-        // 749 of 894 shipped classes are in this case (D78 §1.2), and today they
-        // all resolve to the SAME `Val::One` — definitionally equal to each
-        // other. An empty record is per-class instead.
+    fn a_class_with_no_requires_is_now_an_empty_record_not_val_one() {
+        // **Flipped by D78 Phase C, as written to.** 749 of 894 shipped classes
+        // have no `requires` (§1.2). They used to resolve to the *same*
+        // `Val::One` and were definitionally equal to one another; an empty
+        // record is per-class.
         let layer = build_test_layer();
         let any = Iri::parse("urn:eigenius:core:Resource").unwrap();
-        let chain = resolve_class_type(&any, &layer).unwrap();
-        assert!(
-            matches!(chain, Val::One),
-            "an empty class short-circuits to Val::One today (`:83-85`), got {chain:?}"
-        );
-        assert_eq!(Exp::record(vec![]).unwrap(), Exp::Record(vec![]));
+        let resolved = resolve_class_type(&any, &layer).unwrap();
+        match resolved {
+            Val::Record(fields, _) => assert!(
+                fields.is_empty(),
+                "core:Resource requires nothing, so its record is empty; got {fields:?}"
+            ),
+            other => panic!("expected an empty record, not {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_class_resolves_to_a_record_over_its_requires() {
+        // Successor to the Phase A alongside gate: the field set that gate
+        // compared against the Σ-chain is now what `resolve_class_type` returns.
+        let layer = build_test_layer();
+        let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let resolved = resolve_class_type(&dog, &layer).unwrap();
+        let (required, _) = collect_properties(&dog, &layer).unwrap();
+        match resolved {
+            Val::Record(fields, _) => {
+                let keys: std::collections::BTreeSet<Iri> =
+                    fields.iter().map(|(i, _, _)| i.clone()).collect();
+                assert_eq!(keys, required, "the record is exactly the required set");
+                assert!(!keys.is_empty(), "Dog must require something");
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
     }
 }
 
