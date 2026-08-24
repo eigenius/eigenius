@@ -1055,7 +1055,7 @@ mod tests {
     }
 
     // ─── Environment-blindness of proposition identity (see
-    //     docs/notes/ttr-as-the-class-model.md §6.2) ──────────────────────
+    //     docs/design/d75-the-typing-environment.md §3.4) ──────────────────────
 
     /// A class resource requiring the listed properties.
     fn class_requiring(class_iri: &str, requires: &[&str]) -> Resource {
@@ -1135,7 +1135,7 @@ mod tests {
             h1, h2,
             "proposition identity is environment-blind: `Π(x : Dog). Prop` hashes the same \
              after Dog is redefined. This is the current behaviour, not the desired one — see \
-             docs/notes/ttr-as-the-class-model.md §6.2. If this assertion starts failing, the \
+             docs/design/d75-the-typing-environment.md §3.4. If this assertion starts failing, the \
              environment has become part of proposition identity and §6.2 needs revisiting."
         );
     }
@@ -1187,7 +1187,7 @@ mod tests {
             "current behaviour: credit granted under the narrower Dog is still found from a \
              layer where Dog is wider, so `Π(x : Dog). P` is now a stronger claim than the one \
              that earned the credit. Nothing rechecks the proposition against the rebinding. \
-             See docs/notes/ttr-as-the-class-model.md §6.2."
+             See docs/design/d75-the-typing-environment.md §3.4."
         );
     }
 }
