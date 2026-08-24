@@ -975,6 +975,54 @@ mod mutual_positivity_gap {
     /// What stops the gap being exploitable today: an eliminator over the pair
     /// does not exist. `derive_recursor_type` is per-declaration, so there is no
     /// cross-type recursion to smuggle a non-terminating term through.
+    /// **Nothing stops a mutual pair being committed today.** It compiles from
+    /// ESL and validates clean, then sits in the chain uneliminable — no shared
+    /// recursor exists (#20). With `a_cross_type_negative_occurrence_is_not_caught`
+    /// above, a *non-positive* pair commits clean too.
+    ///
+    /// This is the "nothing failed; the wrong thing succeeded" shape. The fix is
+    /// **fail-closed detection**, and the detector is already designed: D76
+    /// Phase A's SCC pass computes exactly "does this layer contain an inductive
+    /// SCC larger than one". Rejecting that with a message naming #20 costs
+    /// nothing once Phase A exists.
+    ///
+    /// Rejecting it is not the Band-Aid CLAUDE.md warns about. That guidance is
+    /// about refusing input *that should be expressible* — papering over a wrong
+    /// AST or grammar. A mutual block should be expressible once #20 is built;
+    /// until then, accepting it and producing something uneliminable is the
+    /// defect. Fail-closed converts silent acceptance into a tracked limitation.
+    #[test]
+    fn a_mutual_pair_commits_clean_today() {
+        let esl = r#"
+namespace core = "urn:eigenius:core";
+namespace t    = "urn:test";
+data t:A { mkA(t:B) }
+data t:B { mkB(t:A) }
+"#;
+        let toks = crate::esl::lexer::tokenize(esl).expect("lexes");
+        let file = crate::esl::parser::parse(&toks).expect("parses");
+        let rs = crate::esl::compile::compile_file(&file).expect("compiles");
+        assert_eq!(rs.len(), 2, "two inductive declarations");
+
+        let core = crate::bootstrap::bootstrap().expect("bootstrap");
+        let mut b = crate::layer::LayerBuilder::new(
+            "mutual-pair",
+            Some(std::sync::Arc::clone(core.head())),
+        );
+        for r in rs {
+            b.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+        let errs = crate::validation::Validator::new(layer).validate();
+
+        assert!(
+            errs.is_empty(),
+            "current behaviour: a mutually-recursive pair validates clean. If this starts \
+             failing, fail-closed detection has landed (D76 §6.5) — check that the diagnostic \
+             names #20, then close this test out. Got: {errs:?}"
+        );
+    }
+
     #[test]
     fn no_eliminator_spans_the_pair() {
         // The kernel has no mutual-block construct at all — the check is that

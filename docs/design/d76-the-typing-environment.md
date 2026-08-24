@@ -336,6 +336,29 @@ blocks are admitted without simultaneous positivity**.
 *representation* — a mutual block the kernel accepts — before its *positivity checking*. **A
 half-done #20 is worse than no #20**, and the sequencing constraint belongs on that issue.
 
+**And the system does not prevent the case from arriving.** `a_mutual_pair_commits_clean_today`:
+
+```
+data t:A { mkA(t:B) }
+data t:B { mkB(t:A) }
+```
+
+compiles from ESL to two resources and validates with **zero errors**. It then sits in the chain
+uneliminable, since no shared recursor exists. With the positivity gap above, a *non-positive* pair
+commits clean too. Nothing failed; the wrong thing succeeded.
+
+**Phase A is the fix, at no extra cost.** The SCC pass (§6.2) computes exactly "is there an inductive
+SCC of size > 1". Rejecting that, with a diagnostic naming #20, turns silent acceptance into a
+tracked limitation — and the detector is being built anyway for ordering.
+
+**This is not the Band-Aid CLAUDE.md warns about.** That guidance is about refusing input *that
+should be expressible*, papering over a wrong AST or grammar. A mutual block *should* be expressible
+once #20 is built; what is wrong today is accepting it and producing something uneliminable.
+Fail-closed states the limitation instead of hiding it — and it is what makes "a half-done #20 is
+worse than none" enforceable rather than advisory.
+
+**So Phase A gains a second gate:** an inductive SCC of size > 1 is rejected, naming #20.
+
 ### 6.6 What #20 actually blocks: the kernel's own semantics
 
 The shipped chain has no mutual inductives, but one thing plainly wants them, and it is not
@@ -415,7 +438,8 @@ ordering.**
 
 **Gate:** the derived order respects every reference edge; it is **canonical under input
 permutation** (shuffle the document, get the same order); cycles are reported, not silently
-linearised. The last one is what §6.5 needs — an inductive SCC is #20's trigger.
+linearised; and **an inductive SCC of size > 1 is rejected with a diagnostic naming #20** (§6.5).
+That last one closes a live hole: today such a pair commits clean and is uneliminable.
 
 **Reusable:** `Exp::record`'s Kahn sort (D78 §1) is the same algorithm on a different graph.
 
