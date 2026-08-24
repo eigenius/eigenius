@@ -1157,10 +1157,16 @@ the tests written during this analysis pin *current* behaviour — the defects �
   B; the synthesis answered Q3 on different grounds.
 - **M3** — **resolved into Q9**, which turned out to be already-shipped behaviour.
 
-**The load-bearing caveat.** Q3, Q6, Q7 and Q8 all rest on the record model. They are answers *given
-Seam B*, not independent of it. Seam B itself has no implementation, no `Val::Record`, and no
-migration of the three existing constraint implementations onto one. The design is settled; the
-question of whether it survives contact with 9.4M resources is not.
+**The load-bearing caveat.** Q3, Q6, Q7 and Q8 all rest on the record model — **as justification, not
+as an implementation dependency.** Corrected `2026-08-24` after building D78 Phase A: the reference
+form and the resolution shape meet at exactly one trait method,
+`CheckHooks::resolve_class(iri, layer) -> Val` (`nbe/check/hooks.rs:37`), reached from
+`resolve_class_cached` (`check/mod.rs:175`). D78 can change what it *returns* (Σ-chain → `Record`)
+without touching the reference; D76 can change the *reference* (`EigonClass` → `Const`) without
+touching the return shape. Q3's argument came through the synthesis; Q3's code change does not need
+records to exist.
+
+The design is settled; whether it survives contact with 9.4M resources is not.
 
 ## 9. What still needs design
 
@@ -1263,7 +1269,22 @@ built the same way today. But:
 `MergeBranches` path carries a soundness hole that nothing currently walks into. Latent, and the
 cheapest of the three to leave latent, because its fix is the one most reshaped by the other two.
 
-**Order: D78 → D76 → D77.**
+**Order: D78 → D76 → D77 — and D78/D76 are interleavable, not sequential.**
+
+Building D78 Phase A established where the two actually touch: **one hard edge in each direction, and
+they meet at one trait method.**
+
+| edge | direction | status |
+|---|---|---|
+| complete `Refine` subtyping needs `Γ_env` in conversion | D78 → D76 | **real**; sound-incomplete rule ships meanwhile (D78 §3.1, D76 §2.1) |
+| Q3's consolidation "rests on the record model" | D76 → D78 | **justification only** — see the caveat in §8a |
+| `CheckHooks::resolve_class` returning `Record` vs Σ-chain | the seam | either side can move independently |
+
+D78's remaining phases (C, D, E) are unblocked. The argument for taking D78 first is unchanged and
+now stronger: it forces **no reseed** and is additive to the chain throughout, where D76 is a
+chain-format change by construction (#188). And D76 does not touch the validator, so D78's Phase D —
+the 9.4M-resource verdict-parity step, the riskiest thing in either document — is not made harder by
+going first.
 
 1. **D78** — establishes the record/constraint model that Q3, Q6, Q7 and Q8 already assume, and
    unifies §6.0's three implementations. M1 (§8a) measured its blast radius: no shipped ontology

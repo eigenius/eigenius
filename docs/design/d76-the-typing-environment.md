@@ -83,6 +83,22 @@ D20 names the missing merge cascade kind **type-checker driven** (`layer/merge/c
 rule-driven half of D77 needs nothing from here (`validation/retroactive.rs` discharges the linear
 form without touching the type checker), but the *designed* backstop is a type-level check and does.
 
+## 2.5 What D76 does **not** need from D78
+
+D78 is not a prerequisite. The two meet at one trait method,
+`CheckHooks::resolve_class(iri, layer) -> Val`, and are otherwise orthogonal:
+
+- **The environment trait** (§3) does not need records.
+- **δ mechanics** does not: Q2 makes classes **opaque**, so δ never unfolds a class and never sees
+  what one resolves to.
+- **Consolidation** (`EigonClass` → `Const`) changes the *reference form*; what the reference resolves
+  to is `resolve_class`'s business and can be a Σ-chain or a `Record` either way. D75 §8a's
+  caveat that Q3 "rests on the record model" is about the **argument** that produced Q3, not a code
+  dependency.
+
+So D76 and D78 can interleave. The only ordering that matters is that D76 is a **chain-format change**
+and D78 is not.
+
 ## 3. What D76 must settle
 
 From D75 §9, unchanged:
