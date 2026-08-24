@@ -318,3 +318,99 @@ This, not the class model, is the first thing to settle. It decides whether leve
 variant or five, and it is prerequisite to both. It needs its own design note: the `Γ_env` shape,
 the δ-policy for conversion, the layer-under-construction question, and whether `EvalCtx` keeps two
 arms at all once the layer moves out of the effectful one.
+
+---
+
+## 6. Where the invariant is already violated
+
+§5 derives the obligation: *a term checked in `Γ_k` must be rechecked in `Γ_n` exactly when a name it
+mentions was rebound between them.* The linear-commit path implements it operationally (Rule 22's
+retroactive scan, scoped to redefinitions). Two other paths do not.
+
+### 6.1 Merge: the checking path and the resolution path are different paths
+
+In a linear chain "rebound between `Γ_k` and `Γ_n`" is well-defined because there is one path. A
+merge layer has two, and a term's checking path need not be its resolution path.
+
+Take LCA defining class `C`; branch A redefines `C`; branch B adds resource `R` whose proposition
+mentions `C`. In `Γ_B`, `R` was checked against `C_LCA`. In the merge `M = [A, B]`, `C` resolves to
+`C_A`. `R` was never below A, so along *its* path `C` was never rebound — and no scan fires.
+
+**Nothing detects this.** `MergeSpan::shared_iris` (`kernel/src/layer/merge/conflict.rs:222-231`) is
+the set **intersection** of the two sides' contributed IRIs, and `classify_conflicts` (`:689`) runs
+the per-IRI classifier over exactly that set. Conflict detection is definition-vs-definition. Here
+`sources_a = {C}`, `sources_b = {R}`, intersection empty, **zero conflicts**. The hazard is a
+*reference* meeting a *redefinition*, which the intersection cannot see.
+
+**Nothing validates it either.** `commit_resolutions_as_merge_layer` copies both sides' bodies
+verbatim (`try_load_resource` → `add_resource`, `resolve.rs:930-962`) and ends
+`builder.build(storage)` → `backend.store_layer(&layer)` (`:1360-1361`) — the `store_layer`-only
+adapter, described at `commit/backend_persister.rs:26` as the one with "no cache, no CAS", used by
+callers without branch semantics. No validation pass runs over the merged layer.
+
+**And the backstop is unimplemented.** Cascade analysis walks "each resolution's drop / rename
+targets" (`cascade.rs:15-27`) — it is resolution-triggered, so with no conflict there is no
+resolution and no cascade. Even with one, D20's type-checker-driven cascade kind is declared and not
+built: *"`InvalidatedSignature` (type-checker driven) and `InvalidatedTrace` (trace-store driven)
+require integration surfaces not yet stood up; they stay in the enum for forward compat."*
+
+Reachable as the `MergeBranches` RPC (`proto/eigenius.proto:120`,
+`server/branches.rs:427`).
+
+### 6.2 Witness credit survives the rebinding
+
+The sharpest form is not "an ill-typed term commits" — it is **a discharged proof obligation stays
+discharged after its meaning changed.**
+
+`hash_stored_proposition` (`kernel/src/layer/witness_index.rs:120`) decodes against the layer before
+hashing, so *definitions* unfold (D66 §4) and a changed definition body changes the hash. Classes and
+axioms do not unfold: `Exp::EigonAxiom` evaluates to `Val::Nt(Neut::EigonAxiom(iri))`
+(`eval/mod.rs:510`), opaque, the IRI being the whole term. A proposition mentioning class `C`
+therefore hashes **identically** before and after `C`'s structure changes. A proof witnessed under
+`Γ_B` is credited under `Γ_M` against a different `C`.
+
+The opacity that §4 identified as a symptom — nothing δ-reduces, so `eq_nf` needs no environment —
+is the same property that makes proposition identity environment-blind here.
+
+### 6.3 The institution protocol types resource shapes, not propositions
+
+An institution's declared contract is an **input class**: `marshal.rs:105-115` resolves it on the
+layer and checks `required_typed_properties` — arity and property shape. EigenTT well-typedness is
+not part of the boundary contract.
+
+On the way out, `build_verdict_resource` (`dispatch.rs:374-388`) copies every non-protected property
+the institution returned onto the chain-committed Verdict verbatim, `r.set(prop_iri.clone(),
+value.clone())`. The comment names the passthrough set explicitly — *"e.g. statistics-institution's
+`canonical_proposition`, computed_statistic, computed_p_value"*. `canonical_proposition` is a
+proposition, crossing the boundary with no kernel check that it is well-typed where it lands.
+
+Rule 16 (`validation/rules/eigentt_value.rs`) does the real work — decode, `check_infer`, require
+`Sort(0)` — but it keys off the property's **declared range** (`class_types ∋ eigentt:TypeExpr`), so
+the obligation exists only where the ontology declares that range, and it runs at layer-validation
+time, not at the protocol boundary. The protocol carries no obligation forcing either. An institution
+that invents a declared property with a non-TypeExpr range can put a proposition in it and no
+type-level check ever applies.
+
+### 6.4 One defect, three symptoms
+
+All three are the environment not being part of the judgment. When `Γ_env` is implicit — inlined into
+terms (§4), carried as an ambient optional "layer" (§5), or replaced by a resource-shape contract
+(6.3) — then "checked" is a fact recorded without recording *checked in what*. Every operation that
+changes the environment without changing the term preserves the record while destroying what it
+recorded.
+
+Under §5's reframe the shape of the fix is forced rather than chosen. "`R` is well-typed" stops being
+a property of `R` and becomes a property of `Γ ⊢ R`. Merge stops being a set union of resources and
+becomes a **pushout of environments**, whose proof obligation — recheck what the pushout rebound — is
+part of taking the pushout, not an optional cascade the user acknowledges. `InvalidatedSignature`
+stops being a forward-compat enum variant and becomes the thing merge *is*. And an institution's
+signature becomes a type in `Γ_env`, so a proposition crossing the boundary is checked because
+crossing is an application, not because someone declared the right range on a property.
+
+### 6.5 Status
+
+Latent, not actively corrupting: the reseed, demo, and parse paths are linear commits, where Rule 22
+covers the case. The exposure is the `MergeBranches` RPC and any institution emitting propositions
+into slots whose declared range is not `eigentt:TypeExpr`. Sequenced behind §5 — a merge-side patch
+before the environment is part of the judgment would be a guard against the symptom, and the guard
+would have to be rewritten once the pushout obligation is what merge computes.
