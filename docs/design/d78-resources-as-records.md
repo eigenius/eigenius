@@ -601,7 +601,15 @@ this is the common case, not an edge.
 
 `Refine(record, S)` with `S` the **whole** `is_a` set removes the choice. That is a concrete argument
 for the constraint *set* on top of the three §3 gives: nesting or a single-class former would both
-have to keep picking.
+have to keep picking. It also means `⋀S ⊨ D` is routinely a **genuine conjunction** — Phase B's
+`conjunction_entails` has a common case waiting on it, not a rare one.
+
+**`resource_record` includes every property, `is_a` among them.** `is_a` is itself a declared
+`core:Property` (`data_type: resource_array`, `class_types: [core:Class]`), so under "everything is a
+Resource" it is a field like any other and its type is `resolve_property_type`'s answer for it. There
+is no redundancy with the refinement: the *field* says the resource has an `is_a` holding an array of
+classes; the *refinement* says which constraints it satisfies. Structure and claim, not the same
+statement twice.
 
 **Behaviour change: user-visible.** An undeclared property becomes projectable — this is the phase
 that closes D75 §3.8, and the first one an author would notice.
