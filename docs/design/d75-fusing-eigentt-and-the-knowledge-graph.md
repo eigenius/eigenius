@@ -619,8 +619,10 @@ the one with a working reference design.
 1. ~~**Witness §3.5 and §3.6.**~~ **Done** — both have tests. The tombstone case turned out to be
    unreachable by ordinary commits (tombstones are written only by D20 §6.2/§6.3 merge resolutions),
    so it needs a nested-merge fixture against a `ConflictKind` that is documented as never raised.
-2. **File the symptoms** under #215 (the type-theory-soundness tracker) so they exist independently
-   of this document.
+2. ~~**File the symptoms** under #215.~~ **Done** — #225 (merge), #226 (institution boundary),
+   #227 (witness credit), #228 (recursor elimination ceiling), plus a tracker comment on #215
+   covering the design-level items (§3.3, §3.7, §3.8, §3.9) and two corrections to statements in
+   that ticket's area.
 3. **The `Γ_env` design decision** — §5's costs are the agenda: the environment's shape, the δ-policy,
    the layer-under-construction question, and whether `EvalCtx` keeps two arms once the layer leaves
    the effectful one.
