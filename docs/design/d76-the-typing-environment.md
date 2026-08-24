@@ -250,12 +250,40 @@ The structure is settled — SCC decomposition, topological order, canonical tie
   inductives, and nothing else. Anything wider needs its own argument, because §6.3 says the general
   case is not available.
 - **Whether Eigenius has any non-singleton SCCs today.** The cheap measurement: build the reference
-  graph over each shipped layer and count SCCs of size > 1. If the answer is zero, prefix-visibility
-  over a topological order is sufficient and the special case can wait for a real trigger.
+  graph over each shipped layer and count SCCs of size > 1.
 
-That measurement now has a sharper question than the earlier draft's "how many declarations
-forward-reference": a forward reference inside a DAG is fine — the sort handles it. **Only a cycle
-needs the special case.**
+That measurement is sharper than the earlier draft's "how many declarations forward-reference": a
+forward reference inside a DAG is fine — the sort handles it. **Only a cycle needs the special case.**
+
+### 6.5 This is eigenius#20, arrived at from the other end
+
+**A non-singleton SCC of inductive declarations *is* a mutual inductive block.** #20 ("Mutual
+inductive types", deferred from D19 §16) asks for the surface syntax and the kernel machinery —
+simultaneous positivity across the block, one recursor per type, cross-type iota. §6 asks what
+happens when a layer's declaration graph has a cycle. Same question:
+
+| | |
+|---|---|
+| **§6** | tells you **where** a mutual block is needed — SCC decomposition finds it, and nothing else in a layer can legitimately cycle (§6.3) |
+| **#20** | is **what to do** when one is found |
+
+Two things follow.
+
+**#20 gains a trigger condition it has lacked since D19.** The issue defers on *"no immediate
+life-science requirement demands mutual inductives"* — an assertion about need. §6.4's measurement
+turns it into a decidable one: **a layer with an inductive SCC of size > 1 requires #20; a layer whose
+declaration graph is a DAG does not.** If the shipped chain has no such SCC, #20 stays deferred *with
+evidence* rather than by assumption, and the SCC count is the alarm that changes that.
+
+**And the escape hatch found in §6.1 is #21's.** nanoda's `temp_declars` is documented as *"used for
+checking nested inductives"*, and #20 records itself as a prerequisite for #21 (nested inductives).
+So the reference's one concession to non-prefix visibility is precisely the #20 → #21 pair, which is
+a second confirmation that the SCC case has exactly one legitimate occupant.
+
+**What this does not say.** §6 does not implement #20 and does not shorten it — the doubled surface
+D19 costed is unchanged. What it supplies is the *detection*: without SCC decomposition, a mutual
+block is a thing an author writes and the kernel meets unprepared; with it, the condition is
+computed before anything is checked.
 
 ## 7. The consolidation migration
 
