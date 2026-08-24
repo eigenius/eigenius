@@ -356,37 +356,141 @@ own comment records quantifying over `Set` *because it needs a kind* — the sha
 would otherwise serve. The absence may reflect that the current encoding is unusable for it rather
 than that the need is absent, and if so this work removes the obstacle rather than a dead feature.
 
-## 7. Build order
+## 7. Phases
 
-1. **`Val::Record`** (§1) with canonical ordering, cycle detection, readback, and the D47 codec arm.
-   No behaviour change yet — build it alongside the Σ-chain and assert **field-set and per-field-type
-   agreement**. Not `eq_nf` equality: a record and a Σ-chain are different types and will never
-   compare equal. The assertion is that the two carry the same `(Iri, type)` pairs, which is what
-   makes step 4 a substitution rather than a rewrite.
-2. **`Val::Refine`** (§3) with its equality, subtyping, readback and codec arms.
-3. **Entailment + its validation rule** (§4). Runs against the existing `subclass_of` declarations, so
-   it is measurable before it is enforced — instrument, log, count, then enforce, per the #194/#92
-   protocol. A shipped ontology that fails entailment is a finding, not a blocker.
-4. **`resolve_class_type` returns a record** and takes a resource (§5).
-5. **The validator's rules become clause-8 evaluation** (§5). The step that unifies the three
-   implementations, and the one to gate hardest: the verdicts must be identical over the full chain
-   before and after.
-6. **`PropAccess` / `Construct` over records**, closing D75 §3.8, with `Construct` returning a
-   `Refine` per 7b.
+Six steps in five phases. The boundaries are drawn where the **risk class changes** — additive, then
+measured, then enforced, then switched — so that each phase has one kind of failure and one kind of
+gate.
 
-Step 3 is where a surprise would surface, and it is cheap to run early — it needs only the entailment
-algorithm, not the record former.
+**D78 is not a chain-format change.** `resolve_class_type` produces a `Val` consumed at check time; a
+stored proposition encodes a class as a bare `ConstRef(iri)` (`eigentt_type_mirror.rs:139`), never as
+its expanded type. So no persisted term contains a Σ-chain and none will contain a record. **No phase
+below forces a reseed except C, and only if a bootstrap ontology has to change.** This is the sharpest
+difference from D76, which #188 states is a chain-format change by construction.
+
+---
+
+### Phase A — additive. Nothing uses it yet.
+
+**Lands:** `Val::Record` with canonical ordering, cycle detection, readback, D47 codec arm (step 1).
+`Val::Refine` with equality, subtyping, readback, codec arm (step 2).
+
+**Behaviour change:** none. The constructs exist; no code path produces them.
+
+**Gate:** full workspace tests unchanged; `every_shipped_ontology_document_round_trips` holds with the
+new codec arms; the alongside-assertion of §7 step 1 — **field-set and per-field-type agreement**
+between a class's record and its Σ-chain, not `eq_nf` equality.
+
+**Reversible:** trivially. Pure addition.
+
+---
+
+### Phase B — measure entailment. Log, do not reject.
+
+**Lands:** the `C ⊨ D` algorithm (§4), instrumented over every `subclass_of` declaration in the
+shipped ontologies and the full chain. No rule, no rejection.
+
+**Gate:** a **count**, not a pass. The #194/#92 protocol — instrument, run, count, then decide.
+
+**What a non-zero count means:** a shipped ontology declares a subclass whose constraint does not
+entail its parent's. That is a finding about the ontology, not a blocker for D78, and it has to be
+triaged before Phase C can enforce.
+
+**This phase is worth running first of all**, ahead of Phase A: it needs only the entailment
+algorithm over declarations, not the record former, and it is where a surprise would surface.
+
+---
+
+### Phase C — enforce entailment.
+
+**Lands:** the validation rule requiring `Pup ⊨ Dog` for every declared `subclass_of`.
+
+**Gate:** the full chain validates.
+
+**⚠ The only reseed risk in D78.** If Phase B's triage requires editing a bootstrap ontology, that
+moves a manifest line and forces a reseed (~35 min plus rebuilding the aligned snapshot and
+re-deriving the demo artifacts). #213 makes drift-on-formatting no longer a false trigger, but a real
+semantic edit still costs the reseed. Batch any other pending bootstrap edits with it.
+
+---
+
+### Phase D — the kernel switches to records.
+
+**Lands:** `resolve_class_type` returns `Val::Record` and takes a **resource** (step 4). Deletes
+`build_sigma_chain`, the `Val::One` empty-class short-circuit, and `make_option_type`'s `recommends`
+use (§5.1).
+
+**Behaviour change:** in the type language only. The validator is still on the old path, so chain
+verdicts are untouched.
+
+**Gate:** kernel tests. The `Construct`/`PropAccess` path is the blast radius, and M1 (D75 §8a)
+measured it as **unexercised by any shipped ontology** — it lives in the kernel and its tests.
+
+---
+
+### Phase E — the validator switches. The risky one.
+
+**Lands:** Rules 1+2 and 3–10 become an evaluation of clause 8 against the record (step 5). This is
+the step that unifies §6.0's three implementations.
+
+**Gate: verdict parity over the full chain.** Output must be identical resource-for-resource, before
+and after. 9.4M resources.
+
+**Mechanism:** the old and new paths must run side by side to be compared, so Phase E needs a shadow
+mode — compute both, report on divergence, switch only when the divergence set is empty. Building
+that shadow is part of the phase, not a prerequisite to it.
+
+**Where a divergence would come from**, in likelihood order: `recommends` no longer contributing
+fields (§1.1); conditional requirements evaluated through the record rather than chained into
+`all_required` (§1.3); and the empty-class case, which stops being `Val::One`.
+
+---
+
+### Phase F — the surface opens.
+
+**Lands:** `PropAccess` and `Construct` over records, with `Construct` returning a `Refine` per 7b
+(step 6).
+
+**Behaviour change: user-visible.** An undeclared property becomes projectable — this is the phase
+that closes D75 §3.8, and the first one an author would notice.
+
+**Gate:** the D75 §3.8 witness
+(`an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected`) **must flip**. It pins
+current behaviour and names D75 §3.8; when projection works, it fails, and that failure is the
+signal. Also closes the local-name projection collision (§9): projection becomes IRI-keyed.
+
+---
+
+### Ordering
+
+```
+B (measure) ──▶ C (enforce) ────┐
+                                ├──▶ D (kernel) ──▶ E (validator) ──▶ F (surface)
+A (additive) ───────────────────┘
+```
+
+A and B are independent and can run in either order or together; **B first is cheapest**, since it
+needs no new type and can invalidate assumptions before any of them are built. C gates D only in the
+sense that a chain failing entailment should not be migrated. E is the only phase touching 9.4M
+resources; F is the only one changing what an author sees.
 
 ## 8. Gates
 
-- Every existing kernel test, unchanged.
-- **Verdict parity over the full chain**: the validator's output before and after step 5 must be
-  identical, resource for resource. This is the step that touches 9.4M resources.
-- `every_shipped_ontology_document_round_trips` — the codec arms of steps 1 and 2 must round-trip.
-- The parse gate and the WRN demo, unchanged.
-- The D75 §3.8 witness (`an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected`)
-  **must flip** at step 6. It pins current behaviour and names D75 §3.8; when the projection works,
-  it fails, and that is the signal.
+Per phase (§7), plus these standing across all of them:
+
+| gate | when |
+|---|---|
+| full workspace tests + clippy clean | every phase |
+| `every_shipped_ontology_document_round_trips` | A (new codec arms), and unchanged after |
+| entailment violation **count** | B — a number, not a pass |
+| full chain validates | C |
+| kernel tests; `Construct`/`PropAccess` blast radius | D |
+| **verdict parity over 9.4M resources**, resource-for-resource | E |
+| D75 §3.8 witness **flips** | F |
+| parse gate and WRN demo unchanged | E and F — the two phases that could move them |
+
+The parse gate and the demo are listed only against E and F because A–D change nothing a chain
+consumer observes.
 
 ## 9. Open
 
