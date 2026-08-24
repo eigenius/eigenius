@@ -2214,6 +2214,60 @@ mod tests {
     }
 
     #[test]
+    fn a_class_and_its_own_unfolding_are_not_definitionally_equal() {
+        // δ is implemented for classes in `check` and absent from `eq_nf`
+        // (D75 §3.3).
+        //
+        // `CheckCtx` carries `layer` + `type_cache` and unfolds an `EigonClass`
+        // to its Σ-chain through `CheckHooks::resolve_class` whenever inference
+        // needs a field. `eq_nf(level, v1, v2)` takes no context at all, so it
+        // compares `Val::EigonClass(iri)` opaquely. The two halves of the
+        // checker therefore disagree about what a class *is*.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let folded = Val::EigonClass(dog.clone());
+        let unfolded = crate::program::ground::resolve_class_type(&dog, &layer).unwrap();
+
+        // The check side does unfold: `find_sigma_field` reaches the fields.
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], std::sync::Arc::clone(&layer));
+        assert!(
+            find_sigma_field(&mut c, &folded, "name").is_some(),
+            "test setup: check-side δ must be live, or this proves nothing"
+        );
+        assert!(
+            matches!(unfolded, Val::Sig(_, _)),
+            "test setup: Dog must unfold to a Σ-chain, got {unfolded:?}"
+        );
+
+        assert!(
+            eq_nf(0, &folded, &folded).is_ok(),
+            "test setup: a class is equal to itself"
+        );
+        assert!(
+            eq_nf(0, &folded, &unfolded).is_err(),
+            "current behaviour: `eq_nf` does not unfold a class, so a type written folded and the \
+             same type produced unfolded do not compare equal. See D75 §3.3 — the δ-policy has to \
+             reconcile this. If this starts passing, conversion has gained δ for classes."
+        );
+    }
+
+    #[test]
     fn find_sigma_field_without_layer_returns_none_for_eigon_class() {
         // Without a layer, EigonClass resolution should fail gracefully
         let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();

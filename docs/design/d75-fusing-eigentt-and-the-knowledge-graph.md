@@ -51,29 +51,29 @@ type.
 Neither seam is a missing feature. Both are the same thing built twice, once well on the graph side
 and once badly on the theory side.
 
-## 2. Evidence for Seam A: there is no Γ_env
+## 2. Evidence for Seam A: Γ_env is half-built, on one surface of three
 
-`EvalCtx` (`kernel/src/nbe/eval/mod.rs:112-123`):
+`EvalCtx` (`kernel/src/nbe/eval/mod.rs:112-123`) puts the layer in the **effectful** arm, beside IO
+and institution dispatch — filing "read a global declaration" as a capability. nanoda resolves
+`Const{name, levels}` against `Env`, purely; the capability framing has no precedent in the
+references.
 
-```rust
-pub enum EvalCtx {
-    Pure,
-    Effectful { layer: Option<Arc<Layer>>, hooks: Arc<dyn EffectHooks> },
-}
-```
+But the kernel is not uniformly without an environment. It has one on **one** of its three surfaces:
 
-The layer sits in the **effectful** arm, beside IO and institution dispatch — filing "read a global
-declaration" as a capability. nanoda resolves `Const{name, levels}` against `Env`, purely; the
-capability framing has no precedent in the references.
+| surface | environment | how |
+|---|---|---|
+| `check` | **partial** | `CheckCtx.layer: Option<Arc<Layer>>` + `type_cache` + `CheckHooks::resolve_class` (`check/mod.rs:60-82`, `check/hooks.rs:34-53`) |
+| `eval` | **none** | `eval_impl` never resolves; the `EvalCtx` layer has one consumer chain-wide, `institution/eval_hooks.rs:1100` |
+| `eq_nf` | **none** | `eq_nf(level: usize, v1: &Val, v2: &Val)` (`check/conv.rs:30`) takes no context at all |
 
-The measurement is stronger than "`Pure` has no layer":
+The `check`-side environment is optional (`resolve_class_cached` errors with *"no layer access in
+pure check mode"*), covers exactly one kind of global (classes), and is keyed by IRI string rather
+than by `(LayerId, Iri)` as the chain's own memo is.
 
-- `kernel/src/nbe/` contains **zero** calls to `.resolve(` and **zero** reads of `ctx.layer()`.
-- The `layer` field has exactly one consumer chain-wide, `institution/eval_hooks.rs:1100`.
-
-So it is not that one arm lacks an environment. **Neither arm supplies one to the kernel.** Terms
-carry their own resolved payloads because there is nothing to look anything up in — and that is why
-there are five ways to reference a global instead of one.
+So the diagnosis is not "the theory has no environment." It is that **the environment was built once,
+partially, for one global, on one surface** — which is why §3.3's two halves of the checker disagree
+about what a class is, and why nothing that runs on the `eval` or `eq_nf` surfaces can see the chain
+at all.
 
 ## 3. The symptoms
 
@@ -124,14 +124,32 @@ residual cannot be done correctly while this holds.
 With a `Γ_env`, the stub is unnecessary: a constructor's type names its inductive by `Const`,
 resolved in the environment, which is what nanoda does.
 
-### 3.3 Conversion is environment-free, so nothing can δ-reduce
+### 3.3 δ exists in `check` and not in `eq_nf`, and they disagree — **witnessed**
 
-`eq_nf(level: usize, v1: &Val, v2: &Val)` (`kernel/src/nbe/check/conv.rs:30`) takes no environment.
-That is sound *only* because nothing unfolds: `Exp::EigonAxiom` evaluates to
-`Val::Nt(Neut::EigonAxiom(iri))` (`eval/mod.rs:510`) — opaque — and inductives carry their
-declaration inline.
+`check` unfolds a class: `find_sigma_field` on a `Val::EigonClass` resolves through
+`CheckHooks::resolve_class` to the Σ-chain whenever inference needs a field. That is δ-reduction,
+performed eagerly and outside conversion.
 
-The absence of `Γ_env` and the absence of δ-reduction are the same fact stated twice.
+`eq_nf(level: usize, v1: &Val, v2: &Val)` takes no context, so it compares `Val::EigonClass(iri)`
+**opaquely**. The two halves of the checker therefore hold different views of what a class is:
+
+```
+eq_nf(EigonClass(Dog), EigonClass(Dog))  → Ok
+eq_nf(EigonClass(Dog), Σ(name, breed))   → Err     // Dog's own unfolding
+```
+
+Witnessed by `a_class_and_its_own_unfolding_are_not_definitionally_equal` (`check/mod.rs`), which
+first asserts check-side δ is live and that `Dog` does unfold to a `Val::Sig`, so the inequality is
+not vacuous.
+
+`Exp::EigonAxiom` is genuinely opaque by design — an axiom is a postulate with nothing to unfold
+(`eval/mod.rs:510`) — and inductives sidestep the question by inlining their declaration. Classes are
+the case where a policy exists on one side and not the other.
+
+The δ-policy is also already **partly fixed elsewhere**: D66 §4 has `decode_type` unfold definitions
+at decode time, and §3.4's proposition hash is taken over the decoded term. Any δ-policy adopted for
+conversion has to agree with that, or the witness index and the conversion checker will disagree
+about when two propositions are the same.
 
 ### 3.4 Proposition identity is environment-blind — **witnessed**
 
@@ -432,15 +450,63 @@ the one place where the current model loses information a resource already carri
 losing soundness. The nominal-vs-structural decision is **not** on this path — record types make
 structural subtyping available without requiring it.
 
-## 8. Open questions
+## 8. Open questions, and the order they resolve in
 
-- Does normalisation consult the layer directly, or is `Γ_env` a projection of it (a name→declaration
-  map built once per pass)? The memo at `mod.rs:678` suggests the latter is already half-built.
-- What is the δ-policy? Eigenius has no transparency annotations today; nanoda/Lean have several.
-- Does `EigonClass` survive consolidation as a distinct variant, or become a `Const` whose resolved
-  resource happens to be a class?
-- Recursor elimination universe — deferred from #188 and untouched here.
-- Whether `universe u v;` survives as ESL surface syntax.
+```
+Q1 environment interface ──▶ Q2 δ-policy ──▶ Q3 EigonClass as Const ──▶ Q5 `universe u v;`
+                                                  ▲
+                                        Seam B ───┘   (what a class unfolds TO)
+
+Q4 recursor elimination universe ── independent ──▶ (#188 level work)
+```
+
+**Q1 — does normalisation consult the layer directly, or is `Γ_env` a projection?**
+Foundational; everything except Q4 is downstream, because Q1 fixes the *signature* every other
+answer is written in. Largely answerable from evidence already in the repo:
+
+- A materialised name→declaration map is the **full-chain-scan antipattern** that has produced OOMs
+  here twice (the `build_axiom_env` `iter_all_resources` scan; the institution-index rebuild). Over a
+  9.4M-resource chain it is not viable.
+- The memo at `mod.rs:678` is **not** a projection — it is a lazy cache keyed by `(LayerId, Iri)`,
+  which is the right shape and already handles shadowing.
+- `CheckHooks` (`check/hooks.rs:34`) is already the abstraction boundary, and already delegates
+  chain-resident resolution out of the pure core.
+
+So the live question is narrower than "direct or projected": it is **what the environment trait is,
+and how it reaches the `eval` and `eq_nf` surfaces**, given that `check` already has a version of it.
+Deliverable: one interface, replacing `CheckCtx.layer` + `type_cache` + `EvalCtx`'s effectful layer.
+
+**Q2 — the δ-policy.** Gated on Q1 (conversion cannot unfold without a lookup). Two constraints are
+already fixed and narrow it:
+
+- §3.3 — classes unfold in `check` and not in `eq_nf`, demonstrably. Whatever the policy is, it must
+  make those two agree.
+- §3.4 / D66 §4 — definitions already unfold at decode time, and the proposition hash is taken over
+  the decoded term. Changing that forks proposition identity, so definition-transparency is
+  effectively pinned.
+
+The open part is therefore transparency *annotations* (Eigenius has none; nanoda/Lean have several)
+and unfolding order — not whether δ exists.
+
+**Q3 — does `EigonClass` survive consolidation, or become a `Const`?** Gated on Q2, and **cross-gated
+on Seam B**. If classes are transparent, `EigonClass` is a `Const` whose resolved resource happens to
+be a class, and it folds into §5's single variant. If they stay opaque, it is a distinct former. Seam
+B changes the question again: if a class resolves to a `Val::Record` rather than a Σ-chain, "unfolds
+to what" has a different answer. This is the first of the five that is a genuine design decision
+rather than a reading of existing evidence.
+
+**Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
+universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
+#188's level machinery. It can be taken up on its own schedule.
+
+**Q5 — does `universe u v;` survive as ESL surface syntax?** The most downstream of the five. It is a
+consequence of Q3: how many `Exp` variants carry levels determines whether declarations need
+user-visible universe parameters at all. Deciding it before Q3 would be deciding surface syntax for a
+representation that has not been chosen.
+
+**Cheapest first.** Q1 and Q2 are mostly *readings* of evidence already in the tree, so they are
+cheap and they unblock the rest. Q3 is where the real deliberation is. Q4 is parallelisable. Q5 falls
+out.
 
 ## 9. References
 
