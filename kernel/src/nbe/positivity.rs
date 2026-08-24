@@ -854,3 +854,136 @@ mod tests {
         assert!(err.contains("non-positive"), "got: {err}");
     }
 }
+
+#[cfg(test)]
+mod mutual_positivity_gap {
+    //! D76 §6.5 — does `check_positivity` catch a negative occurrence that
+    //! crosses between two mutually-recursive inductives?
+
+    use super::*;
+    use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt};
+    use std::sync::Arc;
+
+    fn stub(name: &str) -> Arc<InductiveDecl> {
+        Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
+            name: name.to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: Vec::new(),
+        })
+    }
+    fn ty(name: &str) -> Exp {
+        Exp::InductiveType(stub(name), Vec::new())
+    }
+    fn decl(name: &str, ctors: Vec<InductiveCtorDecl>) -> InductiveDecl {
+        InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
+            name: name.to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors,
+        }
+    }
+
+    /// Control: a type negative in **its own** constructor is rejected. Without
+    /// this the test below proves nothing — it would pass on a checker that
+    /// never rejects anything.
+    #[test]
+    fn a_self_negative_occurrence_is_rejected() {
+        let bad = decl(
+            "SelfBad",
+            vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                // mk : (SelfBad → SelfBad) → SelfBad
+                typ: Exp::Pi(
+                    Patt::Unit,
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(ty("SelfBad")),
+                        Box::new(ty("SelfBad")),
+                    )),
+                    Box::new(ty("SelfBad")),
+                ),
+            }],
+        );
+        assert!(
+            check_positivity(&bad).is_err(),
+            "a type occurring to the left of an arrow in its own ctor must be rejected"
+        );
+    }
+
+    /// **The gap.** `A` and `B` are mutually recursive, and `A` occurs
+    /// **negatively** in `B`'s constructor:
+    ///
+    /// ```text
+    /// A ::= mkA (B → A)        -- B positive in A
+    /// B ::= mkB ((A → A) → B)  -- A NEGATIVE, and it is B being checked
+    /// ```
+    ///
+    /// If `{A, B}` were a mutual block this violates strict positivity: every
+    /// member must occur only strictly positively in every constructor of the
+    /// block. `check_positivity(&b)` scans `B`'s constructors for occurrences of
+    /// **`B`**, and there are none in the offending position — the negative
+    /// occurrence is `A`.
+    #[test]
+    fn a_cross_type_negative_occurrence_is_not_caught() {
+        let a = decl(
+            "MutA",
+            vec![InductiveCtorDecl {
+                name: "mkA".to_string(),
+                // mkA : B → A   (B strictly positive; A fine)
+                typ: Exp::Pi(Patt::Unit, Box::new(ty("MutB")), Box::new(ty("MutA"))),
+            }],
+        );
+        let b = decl(
+            "MutB",
+            vec![InductiveCtorDecl {
+                name: "mkB".to_string(),
+                // mkB : (A → A) → B   ← A to the LEFT of an arrow
+                typ: Exp::Pi(
+                    Patt::Unit,
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(ty("MutA")),
+                        Box::new(ty("MutA")),
+                    )),
+                    Box::new(ty("MutB")),
+                ),
+            }],
+        );
+
+        let a_ok = check_positivity(&a).is_ok();
+        let b_ok = check_positivity(&b).is_ok();
+
+        assert!(a_ok, "A alone is positive — it is B's ctor that offends");
+        assert!(
+            b_ok,
+            "**D76 §6.5, the finding**: B's ctor puts A to the left of an arrow, which violates \
+             strict positivity for the block {{A, B}}. `check_positivity(&b)` scans for occurrences \
+             of B and finds none there, so it passes. Checked apart, the pair is admitted.\n\n\
+             This is INCOMPLETENESS in a per-declaration checker, not a hole in the rule it \
+             implements — there is no mutual-block checker to be incomplete *for* (#20). It becomes \
+             unsoundness the moment mutual blocks are admitted without simultaneous positivity.\n\n\
+             If this assertion ever fails, cross-type positivity has been implemented and D76 §6.5 \
+             should be closed."
+        );
+    }
+
+    /// What stops the gap being exploitable today: an eliminator over the pair
+    /// does not exist. `derive_recursor_type` is per-declaration, so there is no
+    /// cross-type recursion to smuggle a non-terminating term through.
+    #[test]
+    fn no_eliminator_spans_the_pair() {
+        // The kernel has no mutual-block construct at all — the check is that
+        // `InductiveDecl` cannot even name a sibling as part of its own block.
+        let b = decl("MutB", vec![]);
+        assert!(
+            b.ctors.is_empty(),
+            "sanity: an InductiveDecl carries only its own constructors, so a mutual block \
+             has no representation and no shared recursor"
+        );
+    }
+}

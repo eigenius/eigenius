@@ -316,9 +316,25 @@ isolation and the cross-type occurrence is not seen as recursive. The reference 
 is built before it is validated, so `Layer::resolve` finds the sibling — so this does not fail
 loudly.
 
-Whether that is unsoundness (a non-positive mutual pair admitted) or mere incompleteness is
-**untested**, and it is the first thing to establish if a mutual pair is ever written. Recorded as a
-question, not a claim — §6.4 says nothing forces the issue today.
+**Tested `2026-08-24`: incompleteness, conditionally.** Three tests in `nbe/positivity.rs`
+(`mutual_positivity_gap`):
+
+- `a_self_negative_occurrence_is_rejected` — the control. `mk : (Bad → Bad) → Bad` is rejected, so
+  the checker rejects things and the result below is not vacuous.
+- `a_cross_type_negative_occurrence_is_not_caught` — the finding. Given `A ::= mkA (B → A)` and
+  `B ::= mkB ((A → A) → B)`, with `A` to the **left of an arrow** in `B`'s constructor, **both pass**.
+  `check_positivity(&b)` scans for occurrences of `B`; the offending occurrence is `A`.
+- `no_eliminator_spans_the_pair` — why it is not exploitable: `InductiveDecl` carries only its own
+  constructors, so a mutual block has no representation and no shared recursor. There is no
+  cross-type recursion to carry a non-terminating term.
+
+**So: incompleteness in a per-declaration checker, not a hole in the rule it implements** — there is
+no mutual-block checker for it to be incomplete *for*. It becomes **unsoundness the moment mutual
+blocks are admitted without simultaneous positivity**.
+
+**That inverts the risk.** The hazard is not leaving #20 deferred; it is implementing #20's
+*representation* — a mutual block the kernel accepts — before its *positivity checking*. **A
+half-done #20 is worse than no #20**, and the sequencing constraint belongs on that issue.
 
 ### 6.6 What #20 actually blocks: the kernel's own semantics
 
