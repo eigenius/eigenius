@@ -415,7 +415,64 @@ Read a resource as a record type over its actual fields, and:
 - **`subclass_of` stays nominal unless separately decided.** Record types make structural subtyping
   *available*; they do not make it *chosen*. See the deferred note.
 
-## 6. Closing Seam B: what TTR contributes
+## 6. Closing Seam B: a class is a constraint
+
+### 6.0 The diagnosis
+
+**A class is a constraint declaration, not an object sitting in a universe.** That single reading
+dissolves more of §3 than any other move in this document.
+
+Eigenius already implements it — twice, in two places that never meet:
+
+| reading | where | what it does |
+|---|---|---|
+| class as **constraint** | the validator | `conditional.rs` collects effective `requires`/`recommends` transitively from every `is_a` class and its ancestors; Rules 3–10 check each property value against its declaration |
+| class as **Σ-type** | the kernel | `resolve_class_type` folds `requires` + `recommends` into a right-nested `Val::Sigma` |
+
+The first is a complete constraint checker and runs over all 9.4M chain resources. The second is a
+type former and is used only inside EigenTT terms. §3.9's disjointness is exactly this: **the
+constraint reading lives in the validator and the type reading lives in the kernel.**
+
+### 6.1 Why the constraint reading makes classes level-generic
+
+A constraint says: *for any r, r satisfies C iff for each ⟨ℓ, T⟩ in C, ⟨ℓ, a⟩ ∈ r and a : T.* The
+orders come from the **fields' types**, not from C. C is a schema over levels — it does not sit at
+one.
+
+That is the same form as A10, which defines the hierarchy by metatheoretic schemas (`for each n`)
+rather than object-level quantification. §6.3 records that an implementation "cannot defer the
+indices" and must pick a concrete order per site or level variables. **For a constraint that
+dichotomy does not bite**: a constraint is *checked* against resources whose field types have
+concrete orders, so the order is determined per check and never has to appear in the class. Option
+(1)'s restatement cost — a record type usable at two orders must be restated once per order —
+evaporates, because a constraint does not need to *exist* at an order.
+
+So `Exp::EigonClass` being pinned to `Sort(1)` and above (§3.9) is an artifact of the Σ-type reading.
+Under the constraint reading it is not under-specified, it is **mis-specified**: a class was never a
+thing at a level.
+
+And `core:Class is_a core:Class` stops being the `Type : Type` hazard it looks like. It is a resource
+satisfying a constraint that it itself declares — predicate satisfaction, not universe membership. No
+stratification is needed to admit it.
+
+### 6.2 Where this departs from TTR, and where it does not
+
+Cooper does **not** separate "constraint" from "record type" — A11.2 clause 8 makes a record type
+*be* its membership condition:
+
+```
+8. r : R ∪ {⟨ℓ, T⟩}   iff   r : R,  ⟨ℓ, a⟩ ∈ r,  and  a : T
+```
+
+Read as a definition, "the type" and "the constraint" are one thing. What is un-TTR-like is not the
+constraint reading — it is Eigenius's **Σ-chain**, a type that is *not* its membership condition, and
+that is why the two implementations were able to diverge without either being obviously wrong.
+
+So the move is not "adopt constraints instead of TTR types". It is: adopt clause 8, at which point
+the validator's constraint checker and the kernel's type former become the same thing, and the thing
+they become is level-generic.
+
+### 6.3 What TTR contributes
 
 Cooper's appendix is an input, not the frame. Four things it supplies:
 
@@ -450,7 +507,12 @@ So an implementation of his notation must choose: a concrete order per site (a c
 type usable at two orders must be **restated once per order**), or level variables and instantiation.
 **N3 §5a's recorded trigger — "Cooper is using universe polymorphism" — is inaccurate.** The accurate
 statement: TTR's working notation is level-implicit, and an implementation needs polymorphism or a
-concrete order per site. That is a real cost, but it is a different argument from the one on file.
+concrete order per site.
+
+§6.1 is the escape from that dichotomy for classes specifically: a *constraint* is checked at
+concrete orders per site and never instantiated at one, so it pays neither cost. The dichotomy still
+binds for anything genuinely used as a type in a term — which is what the re-scoped M1 (§8 Q3) is
+looking for.
 
 ## 7. Build order
 
@@ -476,10 +538,14 @@ Steps 4–6 are gated on 3. Step 1 gates nothing but decides what step 2 files.
 
 **Seam B**
 
-7. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms.
-8. **`resolve_class_type` becomes a function of a resource**, with the class type as the declared
-   minimum rather than the whole type.
-9. **`PropAccess` / `Construct` over records**, which is what closes §3.8.
+7. **Decide `is_a` vs `:`** (M3, §8 Q3) — whether the validator's constraint checker and the kernel's
+   type former are one relation. §6.0 says they are two implementations of one idea; this step makes
+   that a decision rather than an accident.
+8. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms — clause 8 as
+   the membership rule, which is what unifies the two implementations.
+9. **`resolve_class_type` becomes a function of a resource**, with the class constraint as the
+   declared minimum rather than the whole type.
+10. **`PropAccess` / `Construct` over records**, which is what closes §3.8.
 
 Seam B is gated on nothing in 1–6, and §3.8 is the strongest single argument for starting it: it is
 the one place where the current model loses information a resource already carries, rather than
@@ -574,6 +640,18 @@ Q2 constrains it from one side: classes are δ-**opaque**, so `EigonClass` canno
   Keeps §5's collapse to a single variant.
 - **B — a distinct nominal former retained** beside `Const`. Never resolves in conversion; keeps the
   duplication §3.1 identified.
+- **C — a class is a constraint reference, not a type former at all** (§6.0). Then the question is
+  not which variant carries levels but whether a class belongs in the `Exp` type-former position in
+  the first place. Under §6.1 a constraint is level-generic *without* level parameters, so classes
+  would leave #188's scope entirely rather than contributing one variant or two.
+
+**Option C changes what M1 is for.** M1 was framed as "do classes need levels?", with the answer
+deciding whether keeping a second variant costs #188 anything. Under C the answer is *no, and not
+because nothing needs two orders* — because a constraint is checked at concrete orders per site and
+never instantiated at one. M1 should therefore be re-scoped to ask whether any class is used **as a
+type in a term** (`Construct` / `PropAccess` / D18 ontology-as-types) in a way that the constraint
+reading cannot serve. That is a much narrower search than scanning for two-order usage, and it is
+answerable from the shipped ontologies plus the EigenTT term corpus.
 
 **The current implementation cannot arbitrate this**, per §3.9: `EigonClass` is pinned at `Sort(1)`
 and above regardless of the class, and `is_a` never becomes `:`. Observing what the kernel does today
