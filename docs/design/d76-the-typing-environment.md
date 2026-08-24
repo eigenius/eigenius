@@ -484,20 +484,34 @@ That argument is sound and **not decisive**, because the question is not whether
 
 **Against — keep it distinct**
 
-1. **Opacity becomes unforgeable rather than maintained.** This is the strongest argument and it was
-   not weighed in §6.3. Q2 says classes are δ-**opaque**, and 749 of 894 shipped classes have
-   identical (empty) field sets — so opacity is *the only thing* distinguishing most of the ontology
-   (D78 §1.2). With `Exp::EigonClass` that is structural: the constructor says "do not unfold", and no
-   policy can get it wrong. With `Const` it is a rule someone must keep enforcing.
-2. **Conversion can decide inequality without the environment.** Two `EigonClass` with different IRIs
-   are unequal immediately. Two `Const` with different IRIs must be *resolved* to learn whether either
-   unfolds. §5's fast path covers the equal case; this is the unequal case, and it is the one that
-   pays.
-3. **§6.1's constraint reading.** A class denotes a *predicate*, not a type. If `Const` means "a
-   reference to a declaration that has a type", a class does not fit, and folding conflates two things
-   the theory keeps apart.
-4. **It buys little for #188.** §6.1 argues constraints are level-generic, so a class carries no
-   levels. Folding gets uniformity, not universe-polymorphism progress.
+1. **A class denotes a predicate, not a type** (§6.1). `Const` means *a name for a declaration that
+   has a type and may unfold to a value*. A class has no value to unfold to — it denotes a condition
+   over records. Folding makes `Exp` misdescribe its own domain.
+
+   **D78 has already committed to this distinction in shipped code.** `Refine(Box<Val>,
+   BTreeSet<Iri>)` (`nbe/val.rs:62`) holds the record type as a **`Val`** and the constraints as
+   **`Iri`s**. The type is inhabited; the constraint names are not values at all. A class reference is
+   a name in that second space, and `EigonClass` is what names it.
+
+   *This is the load-bearing argument.* The two below are consequences worth having, not reasons.
+
+2. **Opacity becomes unforgeable rather than maintained.** Q2 makes classes δ-opaque, and 749 of 894
+   shipped classes have identical (empty) field sets, so opacity is the only thing distinguishing most
+   of the ontology (D78 §1.2). `Exp::EigonClass` makes that structural; `Const` makes it a rule
+   someone must keep enforcing.
+
+   **But this is a *guard*, not a reason.** CLAUDE.md: a fix that guards against bad behaviour rather
+   than eliminating it is a Band-Aid. The test is whether the justification survives changed
+   circumstances — build robust transparency annotations and this reason evaporates, and the next
+   person folds `EigonClass` in. Argument 1 does not evaporate.
+
+3. **Conversion can decide inequality without the environment.** Two `EigonClass` with different IRIs
+   are unequal immediately; two `Const` must be resolved to learn whether either unfolds. §5's fast
+   path covers the equal case — this is the unequal case, and the one that pays. A performance
+   consequence of 1, not an independent reason.
+
+4. **It buys little for #188.** Constraints are level-generic (§6.1), so a class carries no levels.
+   Folding gets uniformity, not universe-polymorphism progress.
 
 **The middle option, and why not.** `Const(iri, kind, levels)` with the kind tagged would give one
 variant *and* syntactic opacity. But a tag is a fact about the environment cached in the term, and a
@@ -505,10 +519,10 @@ redefinition can change an IRI's kind — so it needs the same revalidation disc
 merge hazard. That is the inline-the-environment antipattern in miniature, and this document exists
 to remove it.
 
-**Recommendation: keep `EigonClass` distinct**, on argument 1. D75's thesis is that the environment
-belongs in the judgment; it does not follow that every *kind distinction* should be resolved rather
-than written. Opacity is the mechanism holding most of the shipped ontology apart, and making it
-structural costs one enum variant.
+**Recommendation: keep `EigonClass` distinct**, on argument 1 — the categorical one. D75's thesis is
+that the *environment* belongs in the judgment; it does not follow that a *kind distinction* the
+theory makes should be resolved rather than written. And D78's `Refine` already writes it: record
+types are `Val`s, constraints are IRIs.
 
 **This corrects §6.3's conclusion**, which folded `EigonClass` in without weighing what the fold costs
 in enforceability. §6.3's Q3 answer — five variants to one — becomes **five to two**: `Const` for
