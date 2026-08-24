@@ -1,4 +1,4 @@
-# D75 — The typing environment: the layer chain as Γ_env
+# D75 — Fusing EigenTT with the typed knowledge graph
 
 Status: draft. Written `2026-08-24` on `p2-residue`.
 
@@ -9,28 +9,49 @@ order). The subtyping question that note raised is genuinely independent of this
 
 ## 0. The decision
 
-**The kernel's type theory has no global environment.** Every global a term could need is inlined
-into the term. This document argues that the layer chain, with its parent pointers and IRI
-shadowing, already *is* the environment `Γ_env` of the judgment `Γ_env; Γ ⊢ e : T`, and that
-reclassifying it from an effect capability to a component of the judgment is the root fix for six of
-the eight symptoms in §3 — of which #188's residual is one.
+**EigenTT and the knowledge graph were built as two systems that meet at seams, and every defect in
+§3 is a seam failure.** They are not two systems. The graph already supplies what the theory is
+missing, in both directions:
 
-The other two (§3.7, §3.8) have a second root cause: a class's type is built as a Σ-chain from what
-the class declares, so a resource's type is its classes' type and never its own. §6 is where TTR's
-record types bear.
+| | the graph has | the theory does |
+|---|---|---|
+| **Seam A — environment** | a chain of immutable layers, IRI-keyed, innermost-first lookup with shadowing | inline every global into the term; carry the layer as an *effect capability* |
+| **Seam B — records** | resources: sets of IRI-keyed fields, open-world | derive a right-nested `Val::Sigma` from what a *class* declares |
+
+Seam A: the chain **is** `Γ_env` in `Γ_env; Γ ⊢ e : T`. Seam B: a resource **is** a record type in
+Cooper's sense (D62 §3 already says "exactly the Class-as-record-signature Eigenius uses"). The
+theory currently reconstructs both from the wrong side.
+
+Six of §3's eight symptoms are Seam A; two are Seam B. #188's residual is one of the eight.
 
 Nothing here is implemented. §3.4 and §3.8 are witnessed by tests; the rest are read from code.
 
 ## 1. Thesis
 
-A typing judgment names two contexts: the local binders `Γ` and the global environment `Γ_env`.
-EigenTT has the first (`Rho`) and not the second.
+Eigenius is a typed knowledge graph. "Typed" has been taken to mean *there is a type theory in the
+repository*, and the two halves were built to meet at interfaces: the graph stores resources, the
+theory checks terms, and a codec (D47) carries terms across. A term is type-checked; a resource is
+validated; the graph's operations — commit, merge, institution dispatch — move resources.
 
-Without `Γ_env`, "well-typed" is a fact recorded without recording *checked against what*. Every
-operation that changes the environment while leaving the term alone therefore preserves the record
-and destroys what the record meant. That single defect is the generator of §3.
+The claim of this document is that the interface is the defect. The graph is not a store the theory
+reads from; the graph is the theory's **semantics**.
 
-## 2. Evidence: there is no Γ_env
+**Seam A — the chain is the environment.** A typing judgment names two contexts: local binders `Γ`
+and the global environment `Γ_env`. EigenTT has the first (`Rho`) and not the second, so every global
+is inlined into the term. Without `Γ_env`, "well-typed" is a fact recorded without recording *checked
+against what*, and every operation that changes the environment while leaving the term alone
+preserves the record while destroying what it meant.
+
+**Seam B — a resource is a record.** A resource is a set of IRI-keyed fields. That is a record, and
+A11.2 builds record types by set union witnessed by field membership. The kernel instead computes a
+right-nested Σ-chain from a *class's* `requires` + `recommends`, so a resource's type is its classes'
+type and never its own — and the open-world admission the graph grants has no counterpart in the
+type.
+
+Neither seam is a missing feature. Both are the same thing built twice, once well on the graph side
+and once badly on the theory side.
+
+## 2. Evidence for Seam A: there is no Γ_env
 
 `EvalCtx` (`kernel/src/nbe/eval/mod.rs:112-123`):
 
@@ -56,10 +77,9 @@ there are five ways to reference a global instead of one.
 
 ## 3. The symptoms
 
-Six of the eight below follow from §1. Two — §3.7 and §3.8 — have a **second** root cause:
-`resolve_class_type` is a function of the *class*, and builds a Σ-chain where the theory wants a
-record type. They are in this document because they constrain the same code, and because §6's
-material bears on them rather than on the environment thesis.
+Grouped by seam. Every one is a place where the theory reconstructs something the graph already has.
+
+### Seam A — the chain is the environment
 
 ### 3.1 Five reference variants, because each inlines its own environment
 
@@ -192,6 +212,8 @@ carry a proposition that no type-level check ever sees.
 
 **Not yet witnessed.**
 
+### Seam B — a resource is a record
+
 ### 3.7 `resolve_class_type` builds a Σ-chain where the theory wants a record type
 
 A11.2 clauses 7–8 build record types by **set union**, witnessed by field *membership*:
@@ -217,8 +239,8 @@ Two consequences:
   transitively, so a subclass's chain has a different *shape* from its parent's and shares no witness
   with it. Structural subtyping is unavailable to a Σ-chain and free for a record type.
 
-This is the one symptom that is not caused by the missing `Γ_env`. It is included because it
-constrains the same code and because the fix interacts: see the deferred subtyping note.
+See the deferred subtyping note for what changes if the relation is taken structurally rather than
+nominally — that is a separate decision, and this section does not depend on it.
 
 ### 3.8 Open-world validation admits properties the type cannot mention — **witnessed**
 
@@ -261,7 +283,7 @@ So the two halves disagree, and the disagreement is reachable from the surface s
   so an undeclared property is *in* the type: projectable, quantifiable over, and mentionable in a
   proposition the kernel checks. Today it is data the type system cannot talk about.
 
-## 4. The chain and its ancestors are Γ_env
+## 4. Closing Seam A: the chain and its ancestors are Γ_env
 
 `Layer::resolve_uncached` (`kernel/src/layer/mod.rs:713`) walks `parents.first()` innermost-first,
 first hit wins, with `tombstoned_iris` for removal. `resolve_all` (`:780`) returns the whole
@@ -293,7 +315,9 @@ Rule 22's retroactive revalidation, scoped to redefinitions, is currently an ope
 this model it is **derivable** — which is evidence the model is right, and which is what §3.5's merge
 path fails to implement and §3.4's witness index fails to notice.
 
-## 5. What the reframe forces
+## 5. What closing the seams forces
+
+### Seam A
 
 Reclassify `layer` from effect capability to judgment component, and the following stop being
 choices:
@@ -308,6 +332,20 @@ choices:
   checked because crossing is an application — not because someone declared the right range on a
   property.
 
+### Seam B
+
+Read a resource as a record type over its actual fields, and:
+
+- **A resource's type is its own**, not its classes'. `resolve_class_type(&Iri, &Layer)` becomes a
+  function of a resource; the class type is the *declared minimum* the record must satisfy, not the
+  whole of what it is.
+- **Open-world admission becomes a theorem**, by A11.2 clause 8, instead of a validation stance
+  standing beside a closed Σ-chain (§3.8).
+- **Undeclared properties become projectable**, so `PropAccess` and `Construct` stop rejecting fields
+  the graph already carries.
+- **Field order stops mattering.** Union is order-free, so the `BTreeMap`-ordering accident that
+  currently makes the Σ-chain well-defined (§3.7) is no longer load-bearing.
+
 ### What it costs
 
 - **Conversion becomes environment-relative.** `eq_nf` gains `Γ_env` and needs a **δ-policy**: which
@@ -317,8 +355,13 @@ choices:
 - **Which layer is `Γ_env` mid-check is a real decision.** The layer under construction sees its own
   partial contents; nanoda extends `Env` declaration-by-declaration as each is checked. Forward
   references and intra-layer self-reference both turn on this.
+- **Seam B needs a new `Val` former.** A record type is not a Σ-chain; `Val::Record` (or equivalent)
+  is a kernel type addition with its own conversion, readback, and D47 codec arms. The Σ-chain path
+  cannot be reinterpreted in place.
+- **`subclass_of` stays nominal unless separately decided.** Record types make structural subtyping
+  *available*; they do not make it *chosen*. See the deferred note.
 
-## 6. What TTR contributes
+## 6. Closing Seam B: what TTR contributes
 
 Cooper's appendix is an input, not the frame. Four things it supplies:
 
@@ -357,6 +400,11 @@ concrete order per site. That is a real cost, but it is a different argument fro
 
 ## 7. Build order
 
+The two seams are independent. Seam A is the deeper one and gates #188; Seam B gates nothing and is
+the one with a working reference design.
+
+**Seam A**
+
 1. **Witness §3.5 and §3.6.** Both are read from code, not reproduced. §3.5 first — merge is a live
    RPC and the claim "nothing detects this" should be a failing scenario, not a reading. Also check
    the asymmetric **tombstone** case (B tombstones an IRI, A references it): `DeletionConflict` exists
@@ -372,10 +420,17 @@ concrete order per site. That is a real cost, but it is a different argument fro
 
 Steps 4–6 are gated on 3. Step 1 gates nothing but decides what step 2 files.
 
-**§3.7 and §3.8 are not gated on any of it.** Their root cause is the class encoding, not the
-environment, so record types can be taken up independently — and §3.8 is the strongest single
-argument for doing so, since it is the case where the current model actively loses information a
-resource already carries.
+**Seam B**
+
+7. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms.
+8. **`resolve_class_type` becomes a function of a resource**, with the class type as the declared
+   minimum rather than the whole type.
+9. **`PropAccess` / `Construct` over records**, which is what closes §3.8.
+
+Seam B is gated on nothing in 1–6, and §3.8 is the strongest single argument for starting it: it is
+the one place where the current model loses information a resource already carries, rather than
+losing soundness. The nominal-vs-structural decision is **not** on this path — record types make
+structural subtyping available without requiring it.
 
 ## 8. Open questions
 
