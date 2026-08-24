@@ -177,14 +177,46 @@ representation change, it changes what "is a" means chain-wide.
 
 ## 4. What this changes
 
-**Sequencing.** #188's remaining half proposes level arguments on five `Exp` variants, two of which
-(`EigonClass`, `EigonAxiom`) this analysis says should become one record/`Const` former. Building
-polymorphism onto shapes we intend to collapse is the wrong order.
+### Why consolidation is the cheap route to #188's residual
 
-**The consolidation question splits cleanly.** The class half has a reference (TTR) and a
-demonstrable defect. The inductive half (`InductiveType` / `InductiveCtor` / `InductiveRec`, fused
-former-and-arguments) is a nanoda-shaped question, constrained by `EvalCtx::Pure` having no layer to
-resolve a `Const` against — Cooper says nothing about it.
+The residual is expensive for one reason: levels have to go on **five** `Exp` variants, ~583
+construction sites. The five exist for two separable reasons, and TTR bears on both.
+
+**Two of the five are pure duplication.** `EigonClass(Iri)` and `EigonAxiom(Iri)` are the same
+shape — an IRI resolved through the chain — differing only in what the resource turns out to be.
+`EigonAxiom`'s own doc says it "round-trips as `ConstRef(iri)` exactly like `EigonClass`" and that
+eval and readback are identity for both. Merging them is unconditional and owes nothing to TTR:
+138 sites become one variant that carries levels once.
+
+**The other three fuse the former with its application**, which neither reference does. nanoda has
+no applied-inductive node; TTR builds record types by set union (A11.2 cl. 7) and applies functions
+separately. De-fusing to `Const` + `App` would leave levels on **one** variant instead of five.
+
+**What blocks de-fusing is a chain of two constraints, and TTR breaks the second.**
+
+1. `EvalCtx::Pure` has no layer, so a `Const` cannot be resolved during normalisation. That is why
+   the declaration is carried inline as `Arc<InductiveDecl>`.
+2. Inlining forces `PartialEq` on `InductiveDecl` to be **by IRI** — because a constructor's own
+   type contains a *stub* decl (empty params and ctors) that must compare equal to the full one.
+
+Constraint (2) is what makes levels on an inlined decl unsound: `List.{0}` and `List.{1}` carry the
+same IRI and would compare **equal**, identifying exactly the two types polymorphism exists to
+separate.
+
+**A11.4 removes the stub.** Cooper constructs self-referential record types as **fixed points** of a
+dependent record type — `ℱ(𝒯)` for `𝒯 = λr : T₁ . T₂((r))path` — rather than by threading a
+name-compared placeholder. A11.5's unique-identifier notation is the same device Eigenius already
+uses for binder hygiene (`TC#`, `IDX#`, `IH#`): reference by an unforgeable identifier rather than by
+a name that something else could also spell.
+
+With self-reference handled by a fixed point, `PartialEq` no longer has to be by IRI, identity can be
+structural, and levels distinguish instantiations correctly — **whether or not `EvalCtx::Pure` ever
+gets a layer.** That is the load-bearing contribution: TTR does not merely supply a nicer class
+model, it removes the reason for the design that makes #188's residual expensive.
+
+**What remains open.** Constraint (1) still stands: full de-fusion to `Const` + `App` needs a
+decision about whether normalisation may consult a layer. Cooper says nothing about that — it is a
+nanoda-shaped question, and it is separable from the stub problem above.
 
 **What is NOT settled here.** Adopting record types is not a representation swap: `subclass_of` is
 nominal and load-bearing for Rule 22, `class_types` and institution dispatch. Moving to
