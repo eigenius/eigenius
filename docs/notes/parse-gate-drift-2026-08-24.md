@@ -37,6 +37,23 @@ these two runs show, is that the drift also reaches `expected-hits` and `total-s
 `eval-parse-rate.sh` compares them against **pinned single values**, so drift in either direction is
 reported as a REGRESSION with a confident diagnostic attached.
 
+## The deterministic A/B: no code effect
+
+Settled with the instrument the README names — one fixed `ranks.json` (run 1's) replayed on both
+builds, same snapshot, no LLM:
+
+| | code | rankings | expected-hits | total-skeletons | total-readings | replay misses |
+|---|---|---|---|---|---|---|
+| HEAD | D78 Phases A–D (`ca3b956`) | fixed | 61 | 175 | 613 | **0** |
+| control | pre-D78 (`dca5af8`) | fixed | **61** | **175** | **613** | **0** |
+
+**Identical on every metric.** D78 A–D has no effect on the parse forest, and zero misses on both
+sides means it did not change the reranker's candidate list either.
+
+The clinching detail: **the control also prints `expected-hits 62 → 61 REGRESSION`.** Pre-D78 code,
+replaying those rankings, reproduces the same flag against `baseline.json`. The flag tracks *which
+ranking draw the baseline was pinned from*, not any code between `dca5af8` and HEAD.
+
 ## The consequence, and the protocol that already handles it
 
 A live run cannot attribute a change. The README already says so and names the instrument:
@@ -62,3 +79,8 @@ none taken here:
 
 (1) is the smallest change that removes the false positive class entirely. Filed here rather than as
 an issue because it is a decision about the measurement protocol, not a defect with an obvious fix.
+
+**A cheaper half-measure, if a full protocol change is unwanted:** `baseline.json` could store the
+`ranks.json` its numbers were produced from, so a replay against *that* is the comparison
+`eval-parse-rate.sh` makes by default. The recorded rankings already exist for every run; nothing new
+has to be captured.
