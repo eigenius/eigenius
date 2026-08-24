@@ -289,6 +289,7 @@ is not `decl`. So if `A`'s constructor mentions `B` and `B`'s mentions `A`, each
 isolation and the cross-type occurrence is not seen as recursive. The reference *resolves* — a layer
 is built before it is validated, so `Layer::resolve` finds the sibling — so this does not fail
 loudly.
+
 Whether that is unsoundness (a non-positive mutual pair admitted) or mere incompleteness is
 **untested**, and it is the first thing to establish if a mutual pair is ever written. Recorded as a
 question, not a claim — §6.4 says nothing forces the issue today.
