@@ -375,11 +375,126 @@ else in this section is mechanical once it is gone.
 
 ## 8. Phases
 
-Deliberately unwritten. D78's phase structure worked because each phase had one risk class and one
-gate; this document does not yet know enough to draw those lines — §6 is undecided and §5's unfolding
-order wants a measurement. **Write the phases after §6 is settled**, not before.
+Six phases, drawn where the **risk class changes**, as D78's were. Two things make this phasing
+different from D78's and shape every boundary below:
 
-The one thing that can be said now: **Q4/4c is last**, gated on `Const(iri, levels)` existing (§2.2).
+- **It is a chain-format change.** D78 was additive to the chain throughout and forced no reseed
+  (D78 §7). Phase E here rewrites every persisted term containing an inductive reference, and the
+  reseed is mandatory.
+- **The first phase is a new pass, not an inert addition.** D78 opened with "constructs exist, nothing
+  produces them". Here the ordering pass (§6.2a) must land *before* the visibility rule it orders,
+  so Phase A is load-bearing from the moment it exists.
+
+---
+
+### Phase A — derive the declaration order
+
+**Lands:** a dependency-ordering pass over a layer — reference graph, SCC collapse, topological sort,
+IRI tie-break (§6.2). Nothing consumes the order yet.
+
+**Why first.** §6.2a: `LayerBuilder` stores resources in a `BTreeMap<Iri, …>`, so input order is gone
+and `defined_iris()` is alphabetical. A visibility rule built on that order would be determined by
+IRI *spelling* and would not fail loudly. **The sort has to exist before anything depends on
+ordering.**
+
+**Gate:** the derived order respects every reference edge; it is **canonical under input
+permutation** (shuffle the document, get the same order); cycles are reported, not silently
+linearised. The last one is what §6.5 needs — an inductive SCC is #20's trigger.
+
+**Reusable:** `Exp::record`'s Kahn sort (D78 §1) is the same algorithm on a different graph.
+
+---
+
+### Phase B — remove the self-reference stub
+
+**Lands:** a constructor's type refers to its inductive without the empty-`ctors` stub decl, so
+`PartialEq for InductiveDecl` (`term.rs:365`) stops being by-IRI and becomes structural.
+
+**Why second, and why not later.** §7: the stub forces by-IRI equality, which makes `List.{0}` compare
+equal to `List.{1}`, which is what blocks #188's residual. Everything downstream in the migration is
+mechanical once it is gone; nothing downstream is safe while it remains.
+
+**Gate:** structural equality holds; the three stub sites (`term.rs:447`, `check/mod.rs:339`,
+`eval/mod.rs:604`) are gone; existing inductive tests unchanged.
+
+---
+
+### Phase C — the environment interface
+
+**Lands:** `lookup(iri) → Transparent(Val) | Opaque | Absent` replacing `CheckHooks::resolve_class`;
+`CheckCtx.layer: Option<…>` becomes a non-optional environment; the `(LayerId, Iri) → Global` memo,
+sited beside `RESOLVE_MEMO` and `CLASS_FIELDS_MEMO` rather than inside the trait (§4.2).
+
+**Behaviour change:** none intended — `check` already resolves classes; this changes *how* it asks.
+
+**Gate:** verdict parity on the shipped ontologies. **Memo boundedness measured, not assumed** —
+unlike D78's class-keyed memo this one grows with every resolved IRI, which §4.2 flags as the cost
+needing justification.
+
+---
+
+### Phase D — δ in conversion
+
+**Lands:** `eq_nf` / `subtype_of` / `subtype_of_with_hyps` gain the environment — **54 call sites**
+(§3) — with §5's lazy-δ: equal names and levels compare equal *without resolving*.
+
+**This is the phase D78 has been waiting on.** D76 §2.1's parked obligation discharges here, and
+`entailment_beyond_set_inclusion_is_not_yet_decided` must **flip**.
+
+**Gate:** the parked test flips; `a_class_and_its_own_unfolding_are_not_definitionally_equal` is
+**re-examined, not assumed** — Q2 says the reconciliation is to stop `check` treating its unfolding as
+definitional equality, so that test's *class* case should still hold while the mechanism beneath it
+changes. Plus: no resolve on the equal path, asserted by instrumentation rather than by reading.
+
+---
+
+### Phase E — consolidate to `Const`
+
+**Lands:** `Exp::Const(iri, levels)`; `EigonAxiom` and the inductive trio fold into it;
+`InductiveType(decl, args)` → `App(Const(iri), args)`. **606 `Exp` sites, 128 `Val` sites** (§3), plus
+readback and both D47 codec arms.
+
+**⚠ The chain-format change.** Every persisted term containing an inductive reference changes shape.
+**A reseed is mandatory** — not optional as D78's was.
+
+**Gate:** `every_shipped_ontology_document_round_trips`; a full `--umls-all` reseed at
+**9,439,633 resources, 0 errors**; the WRN demo at **56 Holds / 0 Fails**; the parse gate compared by
+`--replay`, never live (see `docs/notes/parse-gate-drift-2026-08-24.md`).
+
+**Open:** whether `EigonClass` folds in too, or stays as the constraint reference D75 §8 Q3 argues
+for. Decide before starting, not during.
+
+---
+
+### Phase F — Q4/4c, the recursor motive
+
+**Lands:** the motive codomain becomes a level parameter, `I.rec.{u}`, replacing the `Sort(2)`
+constant whose ceiling is Set (§2.2).
+
+**Last, and gated on Phase E** — it needs `Const(iri, levels)` to exist.
+
+**Gate:** `large_elimination_is_capped_at_set_not_type_n` must **flip**; `large_elim_admitted` keeps
+its exact meaning and call site, the two-way choice becoming *`u` pinned to 0* vs *`u` free*.
+
+---
+
+### Ordering
+
+```
+A (order) ──▶ B (stub) ──▶ C (interface) ──▶ D (δ in conv) ──▶ E (Const) ──▶ F (4c)
+                                                  │                  │
+                                       unblocks D78 §3.1      reseed required
+```
+
+Strictly sequential, unlike D78 where Seam B's phases had slack. A gates everything because
+visibility is meaningless without it; B gates E because consolidation on by-IRI equality would bake
+in the unsoundness; D is where the parked obligation clears; E is the only phase touching the chain
+format.
+
+**Two tests are the progress markers**, both currently passing and both required to fail:
+`entailment_beyond_set_inclusion_is_not_yet_decided` at D, and
+`large_elimination_is_capped_at_set_not_type_n` at F. They pin limitations rather than semantics, so
+they are self-announcing — if they still pass when the phase is called done, it is not.
 
 ## 9. References
 
