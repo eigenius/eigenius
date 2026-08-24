@@ -443,6 +443,25 @@ That last one closes a live hole: today such a pair commits clean and is unelimi
 
 **Reusable:** `Exp::record`'s Kahn sort (D78 §1) is the same algorithm on a different graph.
 
+**Status: complete** — `kernel/src/layer/declaration_order.rs`, six gate tests.
+
+Two implementation findings worth carrying forward:
+
+- **`layer::supporting`'s reference walker cannot be reused.** It skips `Value::Json`, documented as
+  *"never carries typed-reference semantics here"* — true for its purpose. But an inductive's
+  constructor argument types are D47-encoded JSON
+  (`"type_name": {"ctor": "ConstRef", "args": ["urn:…"]}`), so reusing it would build a graph with
+  **no inductive-to-inductive edges** and the mutual gate would never fire, on precisely the case it
+  exists to catch. This module has its own walker; `a_d47_encoded_reference_is_an_edge` pins it.
+- **The graph covers declarations, not instances** — classes, properties, inductives, data types.
+  Running it over 9.4M lexicon entries would be the O(chain) antipattern again. Bounded by ontology
+  size, like D78's class memo. Pinned by
+  `instances_are_not_declarations_and_do_not_enter_the_graph`.
+
+**Noticed, not chased:** if `layer::supporting` misses D47-encoded references, its supporting-layer
+computation may be too shallow for a resource whose only reference to a lower layer sits inside an
+encoded term. A possible latent defect in a different subsystem.
+
 ---
 
 ### Phase B — remove the self-reference stub
