@@ -592,7 +592,16 @@ fields (§1.1); conditional requirements evaluated through the record rather tha
 ### Phase E — the surface opens.
 
 **Lands:** `PropAccess` and `Construct` over records, with `Construct` returning a `Refine` per 7b
-(step 6).
+(step 6), and `Exp::EigonResource` inferring the resource's **own** record.
+
+**A third thing it fixes, measured `2026-08-24`.** `Exp::EigonResource` currently types a resource by
+`classes.first()` (`nbe/check/mod.rs:803-809`) — one arbitrarily-chosen `is_a`, with the rest
+discarded from the type. **2120 of 2903 shipped resources (73 %) declare more than one `is_a`**, so
+this is the common case, not an edge.
+
+`Refine(record, S)` with `S` the **whole** `is_a` set removes the choice. That is a concrete argument
+for the constraint *set* on top of the three §3 gives: nesting or a single-class former would both
+have to keep picking.
 
 **Behaviour change: user-visible.** An undeclared property becomes projectable — this is the phase
 that closes D75 §3.8, and the first one an author would notice.
