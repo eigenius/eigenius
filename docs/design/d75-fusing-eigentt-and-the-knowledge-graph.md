@@ -939,12 +939,15 @@ field-wise check and the kernel's type-wise check — not the cost of a new pass
 | 10c | **declared authoritative, derived exposed as a view** | structural inclusion computed for alignment suggestions without being authoritative — the "additional, not replacing" option from the deferred note |
 | 10d | **CHOSEN** — declared, with entailment checked | declaring `Pup : Dog` requires Pup's constraint to actually entail Dog's |
 
-**10d is not currently checked, and today nothing needs it.** `collect_properties` walks
-`subclass_of` transitively, so a subclass *inherits* its parent's requirements and entailment holds by
-construction. Under explicit field sets that stops being automatic: nothing compares a subclass's
-property declarations against its parent's, so a subclass could redeclare a property at an
-incompatible type. Verified — no override, conflict, or variance check exists in `is_a.rs`,
-`conditional.rs`, or `ground.rs`.
+**10d is not currently checked, and — corrected `2026-08-24` — nothing will need it *for
+`subclass_of`*.** `collect_properties` walks `subclass_of` transitively, so a subclass inherits its
+parent's requirements and entailment holds by construction. The earlier claim here, that under
+explicit field sets a subclass could redeclare a property at an incompatible type, is **wrong**: a
+field's type is a function of the *property* (`resolve_property_type` takes only a property IRI) and
+`collect_properties_inner` collects IRIs without types, so there is no per-`(class, property)` type to
+redeclare and the variance check is vacuous. See D78 §4.1. The entailment judgment is still needed —
+for `Refine` subtyping between arbitrary `is_a` constraint sets, which have no structural guarantee
+behind them — but not as a rule over `subclass_of` declarations.
 
 **The coupling to decide first.** 9c and 10d are the same stance — *declarations are authoritative
 and checked* — applied to instances and to classes respectively. Choosing it once settles both, and
