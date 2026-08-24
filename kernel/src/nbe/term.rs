@@ -42,6 +42,21 @@ pub enum Exp {
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
     Sig(Patt, Box<Exp>, Box<Exp>),
+    /// Record type: a **named**, canonically-ordered dependent telescope (D78 §1).
+    ///
+    /// Each entry is `(field IRI, binder, field type)`, and a later field's type
+    /// may mention earlier binders — the same dependency `Sig` expresses, but
+    /// keyed by IRI rather than by position.
+    ///
+    /// **Canonical order is an invariant**: the topological order induced by the
+    /// dependency relation, ties broken by IRI. Because `eq_nf` compares by
+    /// readback and syntactic equality, canonical order is what makes two
+    /// spellings of the same field set compare equal without a bespoke
+    /// conversion arm. Build with [`Exp::record`], which establishes it.
+    ///
+    /// Distinct from `Sig`, which survives for *anonymous* pairs (`Exp::Times`).
+    /// Records subsume the class use of `Sig`, not the pair use — D78 §5.1.
+    Record(Vec<(Iri, Patt, Exp)>),
     /// Unit type: 1
     One,
     /// Unit value: ()
@@ -397,6 +412,54 @@ impl Patt {
 
 // --- Convenience constructors ---
 
+/// Why a record could not be built in canonical order (D78 §1).
+///
+/// A cycle is a malformed *class declaration* — the dependency edges come from
+/// `class_types` references and `when_property` conditions, both ontology data —
+/// so the primary gate is a validation rule on the commit path. This type is the
+/// kernel's defence in depth: [`Exp::record`] returns an error rather than
+/// panicking, so a hand-built record cannot smuggle one past.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordError {
+    /// Fields whose types depend on each other, directly or transitively.
+    DependencyCycle(Vec<Iri>),
+    /// The same field IRI appears twice. Union semantics has no reading for this.
+    DuplicateField(Iri),
+    /// Two fields bind the same name, so a later type mentioning it is ambiguous.
+    DuplicateBinder {
+        name: String,
+        first: Iri,
+        second: Iri,
+    },
+}
+
+impl std::fmt::Display for RecordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DependencyCycle(iris) => {
+                let names: Vec<&str> = iris.iter().map(|i| i.as_str()).collect();
+                write!(
+                    f,
+                    "record field dependency cycle among: {}",
+                    names.join(", ")
+                )
+            }
+            Self::DuplicateField(iri) => write!(f, "duplicate record field `{iri}`"),
+            Self::DuplicateBinder {
+                name,
+                first,
+                second,
+            } => write!(
+                f,
+                "fields `{first}` and `{second}` both bind `{name}`; a later field's type \
+                 mentioning it would be ambiguous"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RecordError {}
+
 impl Exp {
     /// `Sort` at the numeral level `n` — `sort(0)` is `Prop`, `sort(1)` is `Set`.
     ///
@@ -405,6 +468,88 @@ impl Exp {
     /// other [`Level`](crate::nbe::level::Level) forms directly.
     pub fn sort(n: usize) -> Exp {
         Exp::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
+    /// Build an [`Exp::Record`] in **canonical order** (D78 §1), or report a
+    /// dependency cycle.
+    ///
+    /// Canonical order is the topological order induced by the dependency
+    /// relation — field `b` follows field `a` when `b`'s type mentions `a`'s
+    /// binder — with ties broken by field IRI. Two properties make it the right
+    /// invariant:
+    ///
+    /// - **Deterministic.** The same field set always yields the same telescope,
+    ///   so `eq_nf`'s readback-and-compare decides record equality with no
+    ///   bespoke conversion arm. This is what D78 §3.7 means by turning the
+    ///   `BTreeMap`-ordering accident into a stated invariant.
+    /// - **Dependency-respecting.** A field never precedes one its type mentions.
+    ///   Sorting by IRI alone would not guarantee this, and rejecting the records
+    ///   where it fails would be a wedge — the dependency is legitimate.
+    ///
+    /// Cycle detection is free: a cycle is exactly a topological sort that cannot
+    /// place every field.
+    pub fn record(fields: Vec<(Iri, Patt, Exp)>) -> Result<Exp, RecordError> {
+        // Binder name → the index that binds it. A field's type depending on an
+        // earlier binder is what induces an edge.
+        let mut binder_of: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for (i, (_, patt, _)) in fields.iter().enumerate() {
+            if let Patt::Var(name) = patt {
+                if let Some(prev) = binder_of.insert(name.clone(), i) {
+                    return Err(RecordError::DuplicateBinder {
+                        name: name.clone(),
+                        first: fields[prev].0.clone(),
+                        second: fields[i].0.clone(),
+                    });
+                }
+            }
+        }
+        let mut seen_iris: std::collections::BTreeSet<&Iri> = std::collections::BTreeSet::new();
+        for (iri, _, _) in &fields {
+            if !seen_iris.insert(iri) {
+                return Err(RecordError::DuplicateField(iri.clone()));
+            }
+        }
+
+        // deps[i] = the set of field indices field i's type depends on.
+        let deps: Vec<std::collections::BTreeSet<usize>> = fields
+            .iter()
+            .map(|(_, _, ty)| {
+                crate::nbe::subst::free_vars(ty)
+                    .iter()
+                    .filter_map(|v| binder_of.get(v).copied())
+                    .collect()
+            })
+            .collect();
+
+        // Kahn's algorithm, choosing the IRI-least ready field at each step so
+        // the result is canonical and not merely valid.
+        let mut placed: Vec<bool> = vec![false; fields.len()];
+        let mut order: Vec<usize> = Vec::with_capacity(fields.len());
+        while order.len() < fields.len() {
+            let next = (0..fields.len())
+                .filter(|&i| !placed[i] && deps[i].iter().all(|d| placed[*d]))
+                .min_by(|&a, &b| fields[a].0.as_str().cmp(fields[b].0.as_str()));
+            match next {
+                Some(i) => {
+                    placed[i] = true;
+                    order.push(i);
+                }
+                None => {
+                    let stuck: Vec<Iri> = (0..fields.len())
+                        .filter(|&i| !placed[i])
+                        .map(|i| fields[i].0.clone())
+                        .collect();
+                    return Err(RecordError::DependencyCycle(stuck));
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(fields.len());
+        for i in order {
+            out.push(fields[i].clone());
+        }
+        Ok(Exp::Record(out))
     }
 
     /// Non-dependent function type: A → B
@@ -639,5 +784,147 @@ mod tests {
         let a = option_decl();
         let b = option_decl();
         assert!(Arc::ptr_eq(&a, &b));
+    }
+}
+
+#[cfg(test)]
+mod record_canonical_order {
+    use super::*;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn v(n: &str) -> Patt {
+        Patt::Var(n.to_string())
+    }
+    /// A field whose type mentions `dep`, if given — the shape that induces a
+    /// dependency edge.
+    fn field(name: &str, binder: &str, dep: Option<&str>) -> (Iri, Patt, Exp) {
+        let ty = match dep {
+            Some(d) => Exp::App(
+                Box::new(Exp::Var("F".into())),
+                Box::new(Exp::Var(d.to_string())),
+            ),
+            None => Exp::sort(1),
+        };
+        (iri(name), v(binder), ty)
+    }
+    fn iris_of(e: &Exp) -> Vec<String> {
+        match e {
+            Exp::Record(fs) => fs.iter().map(|(i, _, _)| i.as_str().to_string()).collect(),
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn independent_fields_sort_by_iri() {
+        let r = Exp::record(vec![
+            field("urn:t:c", "c", None),
+            field("urn:t:a", "a", None),
+            field("urn:t:b", "b", None),
+        ])
+        .unwrap();
+        assert_eq!(iris_of(&r), ["urn:t:a", "urn:t:b", "urn:t:c"]);
+    }
+
+    #[test]
+    fn field_order_is_independent_of_input_order() {
+        // The property that makes `eq_nf`'s readback-and-compare decide record
+        // equality: the same field set always yields the same telescope.
+        let a = Exp::record(vec![
+            field("urn:t:a", "a", None),
+            field("urn:t:b", "b", Some("a")),
+            field("urn:t:c", "c", None),
+        ])
+        .unwrap();
+        let b = Exp::record(vec![
+            field("urn:t:c", "c", None),
+            field("urn:t:b", "b", Some("a")),
+            field("urn:t:a", "a", None),
+        ])
+        .unwrap();
+        assert_eq!(a, b, "the same field set must produce the same record");
+    }
+
+    #[test]
+    fn a_dependency_outranks_iri_order() {
+        // `urn:t:a` depends on `urn:t:z`, so IRI order alone would put it first
+        // and produce an ill-formed telescope. Topological order wins.
+        let r = Exp::record(vec![
+            field("urn:t:a", "a", Some("z")),
+            field("urn:t:z", "z", None),
+        ])
+        .unwrap();
+        assert_eq!(
+            iris_of(&r),
+            ["urn:t:z", "urn:t:a"],
+            "a field must never precede one its type mentions"
+        );
+    }
+
+    #[test]
+    fn ties_among_ready_fields_break_by_iri() {
+        // Both `b` and `c` become ready once `a` is placed; the IRI-least goes
+        // first, so the order is total rather than merely valid.
+        let r = Exp::record(vec![
+            field("urn:t:c", "c", Some("a")),
+            field("urn:t:b", "b", Some("a")),
+            field("urn:t:a", "a", None),
+        ])
+        .unwrap();
+        assert_eq!(iris_of(&r), ["urn:t:a", "urn:t:b", "urn:t:c"]);
+    }
+
+    #[test]
+    fn a_dependency_cycle_is_rejected() {
+        let e = Exp::record(vec![
+            field("urn:t:a", "a", Some("b")),
+            field("urn:t:b", "b", Some("a")),
+        ])
+        .unwrap_err();
+        match e {
+            RecordError::DependencyCycle(iris) => {
+                assert_eq!(iris.len(), 2, "both fields are stuck: {iris:?}");
+            }
+            other => panic!("expected a cycle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_self_dependency_is_a_cycle() {
+        let e = Exp::record(vec![field("urn:t:a", "a", Some("a"))]).unwrap_err();
+        assert!(matches!(e, RecordError::DependencyCycle(_)), "got {e:?}");
+    }
+
+    #[test]
+    fn duplicate_fields_and_binders_are_rejected() {
+        // Union semantics has no reading for a repeated field.
+        let dup_field = Exp::record(vec![
+            field("urn:t:a", "a", None),
+            field("urn:t:a", "b", None),
+        ])
+        .unwrap_err();
+        assert!(
+            matches!(dup_field, RecordError::DuplicateField(_)),
+            "got {dup_field:?}"
+        );
+
+        // Two fields binding one name makes a later mention ambiguous.
+        let dup_binder = Exp::record(vec![
+            field("urn:t:a", "x", None),
+            field("urn:t:b", "x", None),
+        ])
+        .unwrap_err();
+        assert!(
+            matches!(dup_binder, RecordError::DuplicateBinder { .. }),
+            "got {dup_binder:?}"
+        );
+    }
+
+    #[test]
+    fn the_empty_record_is_well_formed() {
+        // 749 of 894 shipped classes have no `requires` (D78 §1.2), so this is
+        // the common case, not an edge case.
+        assert_eq!(Exp::record(vec![]).unwrap(), Exp::Record(vec![]));
     }
 }

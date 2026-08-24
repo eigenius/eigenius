@@ -884,7 +884,7 @@ mod tests {
     use crate::ontology::eigon_json;
     use std::sync::Arc;
 
-    fn build_test_layer() -> Arc<Layer> {
+    pub(super) fn build_test_layer() -> Arc<Layer> {
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
@@ -1438,5 +1438,107 @@ mod tests {
             .unwrap(),
             Exp::EigonClass(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod record_agrees_with_sigma_chain {
+    //! D78 §7 Phase A gate: a class's record and its Σ-chain must carry the same
+    //! `(field, type)` pairs.
+    //!
+    //! Not `eq_nf` equality — a record and a Σ-chain are different types and will
+    //! never compare equal. The assertion is that the two carry the same content,
+    //! which is what makes Phase C a substitution rather than a rewrite.
+
+    use super::tests::build_test_layer;
+    use super::*;
+    use crate::nbe::term::{Exp, Patt};
+
+    /// Flatten a class Σ-chain into `(binder name, field type)` pairs.
+    ///
+    /// Note what this can extract and what it cannot: `build_sigma_chain` binds
+    /// `prop_iri.local_name()` (`:305`), so the **IRI is not recoverable** from
+    /// the chain — the local-name collision D78 §9 records. And its own comment
+    /// at `:299-301` states the rest type does not depend on the current binder,
+    /// so the chain is a flat product wearing Σ clothing.
+    fn sigma_fields(v: &Val) -> Vec<(String, Val)> {
+        let mut out = Vec::new();
+        let mut cur = v.clone();
+        loop {
+            match cur {
+                Val::Sig(t, g) => {
+                    let name = match &g.patt {
+                        Patt::Var(n) => n.clone(),
+                        other => panic!("unexpected Σ binder {other:?}"),
+                    };
+                    out.push((name, *t));
+                    match crate::nbe::eval::eval(&g.body, &g.env) {
+                        Ok(rest) => cur = rest,
+                        Err(e) => panic!("could not walk the chain: {e:?}"),
+                    }
+                }
+                Val::One => break,
+                other => panic!("chain ended in {other:?}, expected Val::One"),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_class_record_carries_the_same_fields_as_its_sigma_chain() {
+        let layer = build_test_layer();
+        let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
+
+        let chain = resolve_class_type(&dog, &layer).unwrap();
+        let from_chain: Vec<String> = sigma_fields(&chain).into_iter().map(|(n, _)| n).collect();
+
+        // Build the record the same collection would produce.
+        let (required, _recommended) = collect_properties(&dog, &layer).unwrap();
+        let fields: Vec<(Iri, Patt, Exp)> = required
+            .iter()
+            .map(|p| {
+                (
+                    p.clone(),
+                    Patt::Var(p.local_name().to_string()),
+                    Exp::sort(1),
+                )
+            })
+            .collect();
+        let record = Exp::record(fields).unwrap();
+        let from_record: Vec<String> = match &record {
+            Exp::Record(fs) => fs
+                .iter()
+                .map(|(i, _, _)| i.local_name().to_string())
+                .collect(),
+            other => panic!("expected a record, got {other:?}"),
+        };
+
+        let mut a = from_chain.clone();
+        let mut b = from_record.clone();
+        a.sort();
+        b.sort();
+        assert_eq!(
+            a, b,
+            "record and Σ-chain must agree on the field set: chain={from_chain:?} record={from_record:?}"
+        );
+        assert!(
+            !a.is_empty(),
+            "Dog must have required fields, or this proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_class_with_no_requires_is_val_one_today_and_an_empty_record_after() {
+        // 749 of 894 shipped classes are in this case (D78 §1.2), and today they
+        // all resolve to the SAME `Val::One` — definitionally equal to each
+        // other. An empty record is per-class instead.
+        let layer = build_test_layer();
+        let any = Iri::parse("urn:eigenius:core:Resource").unwrap();
+        let chain = resolve_class_type(&any, &layer).unwrap();
+        assert!(
+            matches!(chain, Val::One),
+            "an empty class short-circuits to Val::One today (`:83-85`), got {chain:?}"
+        );
+        assert_eq!(Exp::record(vec![]).unwrap(), Exp::Record(vec![]));
     }
 }

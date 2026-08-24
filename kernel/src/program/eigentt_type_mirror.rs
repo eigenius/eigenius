@@ -124,6 +124,22 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
                 encode_type_json(body)?,
             ],
         )),
+        // D78 §1 — a record encodes as a flat list of `[iri, binder, type]`
+        // triples, in the canonical order the term already carries. Decode
+        // rebuilds through `Exp::record`, which re-establishes that order, so a
+        // hand-written or corrupted encoding cannot introduce a non-canonical
+        // one.
+        Exp::Record(fields) => {
+            let mut items = Vec::with_capacity(fields.len());
+            for (iri, patt, ty) in fields {
+                items.push(json!([
+                    iri.as_str(),
+                    binder_name(patt),
+                    encode_type_json(ty)?
+                ]));
+            }
+            Ok(ctor("Record", vec![json!(items)]))
+        }
         Exp::Arrow(a, b) => encode_type_json(&Exp::Pi(Patt::Unit, a.clone(), b.clone())),
         Exp::Times(a, b) => encode_type_json(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
@@ -530,6 +546,62 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                 Patt::Var(name)
             };
             Ok(Exp::Sig(patt, Box::new(dom), Box::new(body)))
+        }
+        "Record" => {
+            expect_arg_count("Record", 1, args)?;
+            let items = args[0]
+                .as_array()
+                .ok_or_else(|| DecodeError::WrongArgShape {
+                    ctor: "Record",
+                    slot: 0,
+                    details: "expected an array of fields".into(),
+                })?;
+            let mut fields = Vec::with_capacity(items.len());
+            for (i, item) in items.iter().enumerate() {
+                let triple = item.as_array().filter(|t| t.len() == 3).ok_or_else(|| {
+                    DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: "field must be [iri, binder, type]".into(),
+                    }
+                })?;
+                let iri_str = triple[0]
+                    .as_str()
+                    .ok_or_else(|| DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: "iri must be a string".into(),
+                    })?;
+                let iri = crate::ontology::iri::Iri::parse(iri_str).map_err(|e| {
+                    DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: format!("bad iri `{iri_str}`: {e}"),
+                    }
+                })?;
+                let name = triple[1]
+                    .as_str()
+                    .ok_or_else(|| DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: "binder must be a string".into(),
+                    })?;
+                let patt = if name.is_empty() {
+                    Patt::Unit
+                } else {
+                    Patt::Var(name.to_string())
+                };
+                fields.push((iri, patt, decode_type_json(&triple[2], ctx)?));
+            }
+            // Rebuild through the canonicalising constructor rather than
+            // trusting the wire order (D78 §1).
+            // Rebuilding through the canonicalising constructor also rejects
+            // cycles and duplicates that the wire form could carry.
+            Exp::record(fields).map_err(|e| DecodeError::WrongArgShape {
+                ctor: "Record",
+                slot: 0,
+                details: e.to_string(),
+            })
         }
         "Lam" => {
             expect_arg_count("Lam", 3, args)?;
@@ -1229,7 +1301,7 @@ mod tests {
 
     // ---------- decoder tests ----------
 
-    fn empty_layer() -> std::sync::Arc<Layer> {
+    pub(super) fn empty_layer() -> std::sync::Arc<Layer> {
         std::sync::Arc::new(
             crate::layer::LayerBuilder::new("decoder-test-empty", None)
                 .build(crate::layer::LayerStorage::in_memory()),
@@ -1625,5 +1697,101 @@ mod tests {
         assert_eq!(j["args"][1]["args"][1]["ctor"], "CtorApp");
         assert_eq!(j["args"][1]["args"][1]["args"][0], "urn:_:Nat");
         assert_eq!(j["args"][1]["args"][1]["args"][1], "zero");
+    }
+}
+
+#[cfg(test)]
+mod record_codec {
+    use super::*;
+    use crate::nbe::term::{Exp, Patt};
+    use crate::ontology::iri::Iri;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn plain(name: &str, binder: &str) -> (Iri, Patt, Exp) {
+        (iri(name), Patt::Var(binder.into()), Exp::sort(1))
+    }
+
+    fn round_trip(e: &Exp) -> Exp {
+        let layer = super::tests::empty_layer();
+        let encoded = encode_type(e).expect("encode");
+        decode_type(&encoded, &layer).expect("decode")
+    }
+
+    fn decode_raw(j: serde_json::Value) -> Result<Exp, DecodeError> {
+        let layer = super::tests::empty_layer();
+        decode_type(&crate::ontology::resource::Value::Json(j), &layer)
+    }
+
+    #[test]
+    fn a_record_round_trips() {
+        let e = Exp::record(vec![plain("urn:t:a", "a"), plain("urn:t:b", "b")]).unwrap();
+        assert_eq!(round_trip(&e), e);
+    }
+
+    #[test]
+    fn an_empty_record_round_trips() {
+        // The common case: 749 of 894 shipped classes have no `requires`.
+        let e = Exp::record(vec![]).unwrap();
+        assert_eq!(round_trip(&e), e);
+    }
+
+    #[test]
+    fn a_dependent_record_round_trips() {
+        let e = Exp::record(vec![
+            plain("urn:t:a", "a"),
+            // Not `Times`/`Arrow`: the encoder normalises those to `Sig`/`Pi`
+            // (`:127-128`), so they would fail this round-trip for reasons that
+            // have nothing to do with records.
+            (
+                iri("urn:t:b"),
+                Patt::Var("b".into()),
+                Exp::App(
+                    Box::new(Exp::Var("F".into())),
+                    Box::new(Exp::Var("a".into())),
+                ),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(round_trip(&e), e);
+    }
+
+    #[test]
+    fn decode_recanonicalises_a_scrambled_wire_order() {
+        // The wire form is not trusted: decoding rebuilds through
+        // `Exp::record`, so a hand-written encoding cannot introduce a
+        // non-canonical order (D78 §1).
+        let scrambled = serde_json::json!({
+            "ctor": "Record",
+            "args": [[
+                ["urn:t:z", "z", {"ctor": "Sort", "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]}],
+                ["urn:t:a", "a", {"ctor": "Sort", "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]}]
+            ]]
+        });
+        let decoded = decode_raw(scrambled).expect("decode");
+        match decoded {
+            Exp::Record(fs) => {
+                let names: Vec<&str> = fs.iter().map(|(i, _, _)| i.as_str()).collect();
+                assert_eq!(names, ["urn:t:a", "urn:t:z"], "decode must canonicalise");
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_a_cycle_the_wire_form_carries() {
+        let cyclic = serde_json::json!({
+            "ctor": "Record",
+            "args": [[
+                ["urn:t:a", "a", {"ctor": "Var", "args": ["b"]}],
+                ["urn:t:b", "b", {"ctor": "Var", "args": ["a"]}]
+            ]]
+        });
+        let err = decode_raw(cyclic).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("cycle"),
+            "a cycle must not decode: {err:?}"
+        );
     }
 }

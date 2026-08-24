@@ -245,6 +245,12 @@ pub(crate) fn eval_impl<T: Tracer>(
             ))
         }
 
+        // D78 §1 — a record type is inert at evaluation, like `Data`: the field
+        // list plus the environment its types are read in. Field types are
+        // evaluated lazily, as the telescope is walked, because field `i`'s type
+        // may mention any earlier binder.
+        Exp::Record(fields) => Ok((Val::Record(fields.clone(), rho.clone()), T::leaf())),
+
         Exp::Sig(p, a, b) => {
             let (a_val, a_node) = ev(a)?;
             Ok((

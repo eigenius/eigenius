@@ -429,6 +429,10 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
             d.iri == decl.iri || d.ctors.iter().any(|c| has_ind_occurrence(decl, &c.typ))
         }
 
+        // D78 §1 — a record's field types are subterms; any occurrence in one
+        // counts, the same as under a Π or Σ.
+        Exp::Record(fields) => fields.iter().any(|(_, _, ty)| has_ind_occurrence(decl, ty)),
+
         Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) => {
             has_ind_occurrence(decl, a) || has_ind_occurrence(decl, b)
         }

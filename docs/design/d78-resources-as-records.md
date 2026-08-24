@@ -30,6 +30,17 @@ can be dropped.
 
 ### What exists already
 
+**The current class Σ-chain is not dependent at all.** `build_sigma_chain`
+(`program/ground.rs:293-310`) stores the rest of the chain in the closure's *environment* under a
+fixed `__sigma_rest` binder and returns `Exp::Var(rest_var)` as the body, with its own comment saying
+*"the rest type doesn't depend on the current property's value"*. So the dependency `Sig` can express
+is unused for classes: the encoding is a flat product wearing Σ clothing.
+
+That is why §1.3's conditional requirements live in the validator. A value-dependent field is not
+merely unexercised in the class type — it is **inexpressible** in it today, so the check had nowhere
+to go but the rule set.
+
+
 `Val::Sig(Box<Val>, Clos)` (`nbe/val.rs:45`) is **already a named dependent telescope**: `Clos.patt`
 carries the field name — which is how `find_sigma_field` matches on `Patt::Var(field_name)` — and
 `Clos.body` + `Clos.env` let a later field's type mention earlier ones. The Σ-chain is not missing

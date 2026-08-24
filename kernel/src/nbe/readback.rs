@@ -113,6 +113,22 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         Val::One => Exp::One,
         Val::Fun(cases, rho) => try_readback_fun(level, cases, rho)?,
         Val::Data(summands, rho) => try_readback_data(level, summands, rho)?,
+        // D78 §1 — walk the telescope, instantiating each binder at a fresh
+        // generic so a later field's type reads back against the same binders it
+        // was written against. Field order is already canonical (`Exp::record`
+        // establishes it), so readback preserves it and `eq_nf`'s syntactic
+        // comparison decides record equality with no bespoke conversion arm.
+        Val::Record(fields, rho) => {
+            let mut out: Vec<(crate::ontology::iri::Iri, Patt, Exp)> = Vec::new();
+            let mut env = rho.clone();
+            for (i, (iri, patt, ty)) in fields.iter().enumerate() {
+                let lvl = level + i;
+                let ty_val = crate::nbe::eval::eval(ty, &env)?;
+                out.push((iri.clone(), gen_patt(lvl), try_readback_val(lvl, &ty_val)?));
+                env = env.extend(patt.clone(), gen_val(lvl));
+            }
+            Exp::Record(out)
+        }
         Val::Nt(k) => try_readback_neut(level, k)?,
 
         // Identity type
@@ -471,5 +487,111 @@ mod tests {
         ));
         let e = readback_val(0, &v);
         assert!(matches!(e, Exp::Reduce(_, _, _)));
+    }
+}
+
+#[cfg(test)]
+mod record_round_trip {
+    use crate::nbe::check::eq_nf;
+    use crate::nbe::env::Rho;
+    use crate::nbe::eval::eval;
+    use crate::nbe::term::{Exp, Patt};
+    use crate::ontology::iri::Iri;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn plain(name: &str, binder: &str) -> (Iri, Patt, Exp) {
+        (iri(name), Patt::Var(binder.into()), Exp::sort(1))
+    }
+    /// A field whose type mentions an earlier binder.
+    fn dependent(name: &str, binder: &str, on: &str) -> (Iri, Patt, Exp) {
+        (
+            iri(name),
+            Patt::Var(binder.into()),
+            Exp::Times(Box::new(Exp::Var(on.into())), Box::new(Exp::sort(1))),
+        )
+    }
+
+    #[test]
+    fn a_record_survives_eval_and_readback() {
+        let e = Exp::record(vec![plain("urn:t:a", "a"), plain("urn:t:b", "b")]).unwrap();
+        let v = eval(&e, &Rho::Nil).unwrap();
+        let back = super::readback_val(0, &v);
+        match back {
+            Exp::Record(fs) => {
+                let names: Vec<&str> = fs.iter().map(|(i, _, _)| i.as_str()).collect();
+                assert_eq!(
+                    names,
+                    ["urn:t:a", "urn:t:b"],
+                    "field keys and order survive"
+                );
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_dependent_field_reads_back_against_its_binder() {
+        // `b`'s type mentions `a`'s binder. Readback instantiates each binder at
+        // a fresh generic, so the mention must survive as a bound occurrence
+        // rather than dangling.
+        let e = Exp::record(vec![plain("urn:t:a", "a"), dependent("urn:t:b", "b", "a")]).unwrap();
+        let v = eval(&e, &Rho::Nil).unwrap();
+        let back = super::readback_val(0, &v);
+        match &back {
+            Exp::Record(fs) => {
+                assert_eq!(fs.len(), 2);
+                let mentions = crate::nbe::subst::free_vars(&fs[1].2);
+                assert!(
+                    !mentions.is_empty(),
+                    "the dependency must survive readback: {:?}",
+                    fs[1].2
+                );
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_order_makes_two_spellings_convertible() {
+        // The payoff of D78 §1's invariant: `eq_nf` compares by readback and
+        // syntactic equality, so the same field set written two ways must
+        // converge with no bespoke conversion arm for records.
+        let a = Exp::record(vec![plain("urn:t:a", "a"), plain("urn:t:b", "b")]).unwrap();
+        let b = Exp::record(vec![plain("urn:t:b", "b"), plain("urn:t:a", "a")]).unwrap();
+        let va = eval(&a, &Rho::Nil).unwrap();
+        let vb = eval(&b, &Rho::Nil).unwrap();
+        assert!(
+            eq_nf(0, &va, &vb).is_ok(),
+            "two spellings of one field set must be convertible"
+        );
+    }
+
+    #[test]
+    fn records_over_different_field_sets_are_not_convertible() {
+        let a = Exp::record(vec![plain("urn:t:a", "a")]).unwrap();
+        let b = Exp::record(vec![plain("urn:t:b", "b")]).unwrap();
+        let va = eval(&a, &Rho::Nil).unwrap();
+        let vb = eval(&b, &Rho::Nil).unwrap();
+        assert!(
+            eq_nf(0, &va, &vb).is_err(),
+            "different field keys must not be convertible"
+        );
+    }
+
+    #[test]
+    fn field_identity_is_the_full_iri_not_the_local_name() {
+        // The collision `find_sigma_field` has today: it projects by
+        // `local_name()`, so these two would be the same field. Keyed by IRI
+        // they are not (D78 §9).
+        let a = Exp::record(vec![plain("urn:eigenius:a:name", "n")]).unwrap();
+        let b = Exp::record(vec![plain("urn:eigenius:b:name", "n")]).unwrap();
+        let va = eval(&a, &Rho::Nil).unwrap();
+        let vb = eval(&b, &Rho::Nil).unwrap();
+        assert!(
+            eq_nf(0, &va, &vb).is_err(),
+            "same local name, different namespace — must not be convertible"
+        );
     }
 }

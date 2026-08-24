@@ -43,6 +43,21 @@ pub enum Val {
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
     Sig(Box<Val>, Clos),
+    /// Record type — the semantic counterpart of [`Exp::Record`] (D78 §1).
+    ///
+    /// A named dependent telescope in canonical order, carried as a flat field
+    /// list plus one shared environment — the same shape [`Val::Data`] uses.
+    ///
+    /// A per-field `Clos` cannot express this: field *i*'s type may mention any
+    /// earlier binder, not just the immediately preceding one, so each closure
+    /// would need an environment that does not exist until the earlier fields
+    /// are known. Sharing one `Rho` and extending it as the telescope is walked
+    /// is what gives full dependency, exactly as `Sig`'s nesting does.
+    ///
+    /// The `Iri` is the field key projection matches on. Keying by IRI rather
+    /// than by local name is what closes the collision `find_sigma_field` has
+    /// today (D78 §9).
+    Record(Vec<(crate::ontology::iri::Iri, Patt, Exp)>, Rho),
     /// Unit type
     One,
     /// Case function (from Sum): maps constructor names to branches
