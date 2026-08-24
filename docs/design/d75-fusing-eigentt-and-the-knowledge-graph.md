@@ -418,6 +418,9 @@ Read a resource as a record type over its actual fields, and:
 - **Field order stops mattering.** Union is order-free, so the `BTreeMap`-ordering accident that
   currently makes the Σ-chain well-defined (§3.7) is no longer load-bearing.
 
+Those are the *consequences*. §6.4 gives the four concrete changes that produce them, and §7's steps
+8–11 are those changes as work items — one list in three registers, deliberately.
+
 ### What it costs
 
 - **Conversion becomes environment-relative.** `eq_nf` gains `Γ_env` and needs a **δ-policy**: which
@@ -562,44 +565,12 @@ precisely §3.9's missing judgment, supplied rather than bolted on.
 with §6.1 — classes need no `uparams` — and it means `Const(iri, levels)` carries levels only for
 declarations that are genuinely polymorphic (inductives, definitions), not for resource references.
 
-*Rule 0 is a policy, not a necessity* — and the policy is keepable. See §6.3b: `core:Resource` is
+*Rule 0 is a policy, not a necessity* — and the policy is keepable. See §6.6: `core:Resource` is
 already a class with no `requires`, so "0 constraints" and "at least one `is_a`" coincide.
 
-### 6.3a How RDF splits what Eigenius fuses
+### 6.4 What adopting clause 8 actually means
 
-The comparison is worth making because RDF faced this exact question and answered it by **separating**
-the two readings rather than reconciling them.
-
-| system | class | constraint | membership |
-|---|---|---|---|
-| **RDFS / OWL** | an extension; `rdfs:Resource` / `owl:Thing` are universal | none — `rdfs:domain`/`rdfs:range` are *inference rules*, not checks | asserted via `rdf:type`, extended by entailment, **never checked** |
-| **SHACL / ShEx** | unchanged from RDFS | a **separate** shape; `sh:targetClass` binds it to a class | asserted; validation is a separate pass over a separate artifact |
-| **Eigenius** | the class **is** the constraint (`requires` / `recommends`) | fused into the class | asserted via `is_a`, **checked at commit** |
-| **TTR** | a record type **is** its membership condition (A11.2 cl. 8) | fused, definitionally | **decided** by the condition |
-
-**The instructive contrast is `rdfs:domain`.** Given `?p rdfs:domain ?C` and a triple `?x ?p ?y`, RDFS
-**infers** `?x rdf:type ?C`. Eigenius's Rule 10 **rejects**. Same data, opposite conclusion: RDF
-widens the subject's type to accommodate the property; Eigenius refuses the property because the
-subject's type does not accommodate it.
-
-That is §3.8 seen from the other side, but the parallel is **narrower than it first looks** and the
-difference is the point:
-
-- **RDF infers class membership.** `?x ?p ?y` with `?p rdfs:domain ?C` yields `?x rdf:type ?C` — a new
-  membership claim, derived from carrying a property.
-- **Seam B infers nothing.** A resource carrying field `p` has a record type that *includes* `p`. No
-  class membership follows, and no `is_a` is added.
-
-Seam B is the weaker, more conservative move: it makes the field **typed** without making the
-resource a member of anything. That is what keeps it compatible with 9c and 10d, where membership
-stays declared and checked. RDF's inference would not be.
-
-**Where Eigenius sits.** It fuses constraint into class like TTR, but asserts membership like RDF and
-then checks the assertion. That hybrid is why §6.0's three implementations diverged: fusing the shape
-into the class means every subsystem needing *either* reading reimplements it, whereas SHACL's split
-gives each subsystem one artifact to consume.
-
-### What "adopting clause 8" actually means
+§6.3 says a resource is a record satisfying 0 or more constraints. This is what that costs in code.
 
 Clause 8 is an **iff**:
 
@@ -636,7 +607,41 @@ consults. That is the whole of it — and it is why retreating to SHACL's split 
 the split gives the three implementations a shared artifact but leaves membership unchecked, which is
 strictly less than Eigenius already has.
 
-### 6.3b Rule 0 and the `Any` class — settled
+### 6.5 How RDF splits what Eigenius fuses
+
+The comparison is worth making because RDF faced this exact question and answered it by **separating**
+the two readings rather than reconciling them.
+
+| system | class | constraint | membership |
+|---|---|---|---|
+| **RDFS / OWL** | an extension; `rdfs:Resource` / `owl:Thing` are universal | none — `rdfs:domain`/`rdfs:range` are *inference rules*, not checks | asserted via `rdf:type`, extended by entailment, **never checked** |
+| **SHACL / ShEx** | unchanged from RDFS | a **separate** shape; `sh:targetClass` binds it to a class | asserted; validation is a separate pass over a separate artifact |
+| **Eigenius** | the class **is** the constraint (`requires` / `recommends`) | fused into the class | asserted via `is_a`, **checked at commit** |
+| **TTR** | a record type **is** its membership condition (A11.2 cl. 8) | fused, definitionally | **decided** by the condition |
+
+**The instructive contrast is `rdfs:domain`.** Given `?p rdfs:domain ?C` and a triple `?x ?p ?y`, RDFS
+**infers** `?x rdf:type ?C`. Eigenius's Rule 10 **rejects**. Same data, opposite conclusion: RDF
+widens the subject's type to accommodate the property; Eigenius refuses the property because the
+subject's type does not accommodate it.
+
+That is §3.8 seen from the other side, but the parallel is **narrower than it first looks** and the
+difference is the point:
+
+- **RDF infers class membership.** `?x ?p ?y` with `?p rdfs:domain ?C` yields `?x rdf:type ?C` — a new
+  membership claim, derived from carrying a property.
+- **Seam B infers nothing.** A resource carrying field `p` has a record type that *includes* `p`. No
+  class membership follows, and no `is_a` is added.
+
+Seam B is the weaker, more conservative move: it makes the field **typed** without making the
+resource a member of anything. That is what keeps it compatible with 9c and 10d, where membership
+stays declared and checked. RDF's inference would not be.
+
+**Where Eigenius sits.** It fuses constraint into class like TTR, but asserts membership like RDF and
+then checks the assertion. That hybrid is why §6.0's three implementations diverged: fusing the shape
+into the class means every subsystem needing *either* reading reimplements it, whereas SHACL's split
+gives each subsystem one artifact to consume.
+
+### 6.6 Rule 0 and the `Any` class — settled
 
 §6.3 flagged that "every resource must declare at least one `is_a` class" (`is_a.rs:15`) contradicts
 the synthesis's "0 or more". It does not, because **the `Any` class already exists**:
@@ -651,7 +656,7 @@ catching omissions and typos — and a genuinely unclassified record satisfies i
 `core:Resource`. No conflict with "0 or more"; the model's zero and the rule's one are the same
 state under two spellings.
 
-### 6.4 What TTR contributes
+### 6.7 What TTR contributes
 
 Cooper's appendix is an input, not the frame. Four things it supplies:
 
@@ -723,14 +728,22 @@ files.
 
 **Seam B**
 
-8. **Decide `is_a` vs `:`** (M3, §8 Q3) — whether the validator's constraint checker and the kernel's
-   type former are one relation. §6.0 says they are two implementations of one idea; this step makes
-   that a decision rather than an accident.
-9. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms — clause 8 as
-   the membership rule, which is what unifies the two implementations.
-10. **`resolve_class_type` becomes a function of a resource**, with the class constraint as the
-   declared minimum rather than the whole type.
-11. **`PropAccess` / `Construct` over records**, which is what closes §3.8.
+These are §6.4's four changes as work items.
+
+8. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms — clause 8 as
+   the membership rule. (§6.4 ¶1.)
+9. **`resolve_class_type` returns that record** rather than a Σ-chain, and becomes a function of a
+   *resource*, with the class constraint as the declared minimum. (§6.4 ¶1, ¶4.)
+10. **The validator's Rules 1+2 and 3–10 become an evaluation of clause 8** against it, replacing the
+    independent walk of `requires`. Same checks, same verdicts, one definition. (§6.4 ¶2.) This is
+    the step that unifies the **three** implementations of §6.0, and the riskiest: two of them run
+    over 9.4M resources.
+11. **`PropAccess` / `Construct` over records**, which closes §3.8, plus 7b's refinement and 10d's
+    entailment check. (§6.4 ¶4.)
+
+The query engine (§6.0's third implementation) keeps its declaration-keyed index unchanged — clause 8
+changes what "satisfies C" *means*, not how membership is enumerated. `is_a` vs `:` needed no step:
+Q9 settled it as 9c, and 9c is already the shipped behaviour.
 
 Seam B is gated on nothing in 1–7, and §3.8 is the strongest single argument for starting it: it is
 the one place where the current model loses information a resource already carries, rather than
@@ -1168,7 +1181,7 @@ Small in surface, and the place the risk actually is. Must settle:
 - **What `InvalidatedSignature` computes** once it stops being a forward-compat variant.
 - Whether merge gains a validation pass at all, or whether the pushout obligation *is* the pass.
 
-### D78 — resources as records (Seam B, steps 8–11)
+### D78 — resources as records (Seam B, steps 8–11 = §6.4)
 
 Must settle:
 
@@ -1188,7 +1201,7 @@ Must settle:
 
 ### Decisions that need no document
 
-- ~~**Rule 0**~~ — **settled in §6.3b.** It survives as curation: `core:Resource` already exists as a
+- ~~**Rule 0**~~ — **settled in §6.6.** It survives as curation: `core:Resource` already exists as a
   class with no `requires`, so "0 constraints" and "at least one `is_a`" are the same state spelled
   two ways.
 - **#228's comment** — the doc comment claiming `Type(n)` inhabits `Sort(2)` is wrong today and can
