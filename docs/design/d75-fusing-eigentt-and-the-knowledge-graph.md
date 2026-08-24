@@ -892,6 +892,53 @@ representation that has not been chosen.
 **Status.** Q1 and Q2 are answered above from evidence in the tree. Q3 is the open design decision,
 now constrained on one side by Q2. Q4 is parallelisable. Q5 falls out of Q3.
 
+## 8a. Status roll-up
+
+**Settled on paper. Nothing here is implemented**, and the tests written during this analysis pin
+*current* behaviour — the defects — not the design.
+
+| | question | status |
+|---|---|---|
+| Q1 | environment interface | **answered** — `check` + `conv`, not `eval` |
+| Q2 | δ-policy | **answered** per kind; inductives deferred into Q3 |
+| Q3 | `EigonClass` as `Const`? | **answered conditionally** — 5→1, but the chain Q8→Q6→Q3 assumes Seam B lands. If the record model does not land, Q3 reverts to the A/B/C analysis. |
+| Q4 | recursor elimination universe | **untouched** |
+| Q5 | `universe u v;` in ESL | **not decided** — now decidable, being downstream of Q3 |
+| Q6 | `check_infer` of a class reference | **answered** (§6.3) |
+| Q7 | what `Construct` returns | **decided** — 7b |
+| Q8 | is a constraint a value | **answered** — yes, it is a resource |
+| Q9 | dispatch key | **decided** — 9c, and already implemented |
+| Q10 | `subclass_of` declared or derived | **decided** — 10d |
+
+**Still open beyond the numbered questions:**
+
+- **Nominal vs structural subtyping.** Deliberately deferred
+  (`docs/notes/nominal-vs-structural-subtyping.md`). 10d *uses* structural inclusion as a check while
+  keeping nominal semantics, so it does not settle whether structural subtyping should also be
+  available as a relation.
+- **Rule 0 — policy or necessity.** "Every resource must declare at least one `is_a` class"
+  contradicts the synthesis's "0 or more". Flagged in §6.3, not decided.
+- **How a record's level is computed.** §6.3 says levels are computed from field types rather than
+  declared. The rule itself (presumably `max` over field levels, with the successor at the type
+  level) is not worked out, nor is its interaction with the currently-pinned `Sort(1)` for classes.
+- **§3.5 (merge) and §3.6 (institution boundary) are argued, not witnessed.** Both are read from
+  code. §3.4 and §3.8 have tests; these do not.
+- **The asymmetric tombstone case at merge** — B tombstones an IRI, A references it. `DeletionConflict`
+  exists as a `ConflictKind`; whether it covers this was never checked.
+
+**Measurements:**
+
+- **M1** (is any class used as a type in a term the constraint reading cannot serve?) — **not run**,
+  and still worth running: it is the check that the synthesis does not break D18 ontology-as-types.
+- **M2** (conversion resolve traffic) — **obsolete**. It existed to choose between Q3's options A and
+  B; the synthesis answered Q3 on different grounds.
+- **M3** — **resolved into Q9**, which turned out to be already-shipped behaviour.
+
+**The load-bearing caveat.** Q3, Q6, Q7 and Q8 all rest on the record model. They are answers *given
+Seam B*, not independent of it. Seam B itself has no implementation, no `Val::Record`, and no
+migration of the three existing constraint implementations onto one. The design is settled; the
+question of whether it survives contact with 9.4M resources is not.
+
 ## 9. References
 
 - `references/publications/Cooper-2023-TTR-chaper-1.pdf` — Ch. 1, the working notation (§1.4.3.3,
