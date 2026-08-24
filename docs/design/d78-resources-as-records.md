@@ -166,6 +166,23 @@ every class inhabits `Set` and above (`check/mod.rs:564-568`).
 This is what D75 §6.1 means by a class being level-generic *without* level parameters: the level is
 read off the fields at each site, never declared and never instantiated.
 
+**The `max` is over an instantiated telescope, not over static types.** A field's type is a `Clos`, so
+for a dependent field `Tᵢ` is a function of earlier fields. The level is computed by walking the
+telescope and **instantiating each closure at a fresh neutral variable** — the same discipline
+`readback` uses — and taking the level of the resulting type:
+
+```
+level(Record[(ℓ₁,C₁) … (ℓₙ,Cₙ)])  at de Bruijn level k:
+    l := 1
+    for i in 1..n:  l := max(l, sort_level(infer(Cᵢ.apply(fresh_var(k + i - 1)))))
+    return l
+```
+
+This is well-defined because **a dependent type's universe does not vary with the value**: `B(x)`
+inhabits one `Sort(l)` for every `x`, so any instantiation gives the same answer and a fresh variable
+is the canonical choice. It is `max`, not `imax` — `imax` belongs to `Π`, where a `Prop` codomain
+collapses the whole type to `Prop`; a record is a Σ-shape and takes the plain maximum.
+
 ## 3. `Val::Refine` — the type 7b returns
 
 ```rust
@@ -198,6 +215,12 @@ flat form wins:
 | subtyping | `Refine(R, S) <: Refine(R′, S′)` iff `R <: R′` and `⋀S ⊨ D` for every `D ∈ S′` |
 | readback | `Exp::Refine(Box<Exp>, BTreeSet<Iri>)` |
 | D47 codec | a `Refine` ctor beside the existing `Sig`/`Pi` arms (`eigentt_type_mirror.rs:111-127`) |
+
+**Cumulativity and forgetting.** `Refine(R, S) : Sort(level(R))` — the constraint set is names, not
+types, so it contributes no level — and by cumulativity it inhabits every sort above. Additionally
+`Refine(R, S) <: R`: **forgetting constraints is always safe**, which is how a refined record flows
+into a context expecting a plain record. The converse is not, and `Refine(R, S) <: Refine(R, S′)` for
+`S′ ⊆ S` follows from the subtyping rule.
 
 **Conjunction entailment `⋀S ⊨ D` is §4's rule unchanged.** A constraint is a field set, so the
 conjunction of `S` has `fields(⋀S) = ⋃_{C∈S} fields(C)`, and §4 applies to that union exactly as it
@@ -338,35 +361,42 @@ algorithm, not the record former.
 
 ## 9. Open
 
-### Omissions — things this document does not mention at all
+### Settled while auditing
 
-**Level computation over dependent fields.** §2 says a record's level is the `max` over its field
-types' levels. That is not a static max: a field's type is a `Clos`, so a dependent field's type is a
-function of earlier fields' *values*, and the max is over an instantiated telescope. §2 states the
-rule as though the types were closed. The rule is probably still right; the computation is not
-stated.
+**Cycle detection lives in a validation rule, with the kernel constructor as defence in depth.** The
+dependency edges come from `class_types` references and `when_property` (§1.3) — both *ontology*
+data — so a cycle is a malformed **class declaration**, detectable at commit with no term in hand.
+That puts the primary gate on the commit path where declarations are already checked. The
+`Val::Record` constructor returns an error rather than panicking, so a hand-built record cannot
+smuggle one past. Detection is free: the topological sort of §1 finds cycles as a by-product.
 
-### Unstated details
+**`find_sigma_field` is replaced by IRI-keyed lookup — and that closes a latent defect.** Today
+`Exp::PropAccess` projects by **local name**: `check/mod.rs:768` takes `prop.local_name()` and
+`find_sigma_field` compares it against `Clos.patt` as `Patt::Var(name)` (`:1112`). So
+`urn:eigenius:a:name` and `urn:eigenius:b:name` are the same field to a projection. `Vec<(Iri, Clos)>`
+is keyed by the full IRI and the collision disappears. Cost is unchanged — a linear scan over a
+field list, where the Σ-walk was also linear, and class field counts are small.
 
-- **Where cycle detection lives.** §1 says a dependency cycle is "caught where the record is built".
-  Kernel invariant, or validation rule? They have different failure surfaces.
-- **What replaces `find_sigma_field`** (`check/mod.rs:1109`), and whether canonical order changes
-  projection cost — a Σ-walk versus a scan over `Vec<(Iri, Clos)>`.
-- **Whether `Refine` participates in cumulativity** — presumably `Refine(R, C) : Sort(level(R))`, but
-  §3 does not say.
+**`Val::Sig` survives.** `Exp::Times` is live in the DCG (`dcg/holes.rs:53,108`,
+`dcg/pretty.rs:101`, `dcg/rules/constructions.rs:1223`) and encodes to an anonymous `Sig`. Records
+are *named* field sets; anonymous pairs are a different construct that records do not subsume. `Sig`
+stays for that use, and the question is answered rather than deferred.
+
+**Level computation** — §2 now states the instantiation rule.
+**`Refine` and cumulativity** — §3 now states it, plus `Refine(R, S) <: R`.
 
 ### Genuinely deferred
 
-- **The empty-record floor** (§2) is argued from proof irrelevance. If `Prop`-valued records are ever
-  wanted, the floor becomes a per-record decision rather than a constant.
-- **Whether a constraint set normalizes to an antichain.** `Refine(R, {Pup, Dog})` with `Pup ⊨ Dog`
-  carries a redundant member. Dropping it would discard a *declared* fact, which 9c/10d keep
-  authoritative, so §3 keeps the set as written and sorted. The consequence is that
-  `Refine(R, {Pup, Dog})` and `Refine(R, {Pup})` have identical inhabitants and are **not equal** —
-  uncomfortable, but exactly what nominal identity means, and what Q2 requires. Left as written; the
-  alternative is a normalization that silently erases declarations.
-- **Whether `Val::Sig` survives** once records exist, or whether the anonymous pair type is its only
-  remaining use.
+**The empty-record floor** (§2). Argued from proof irrelevance, and low-stakes on inspection: a
+record of *proofs* — a conjunction — would want `Prop`, but conjunctions in Eigenius are inductives
+(`Data`), not records. Records are for resources, and resources are not proofs. Revisit only if a
+`Prop`-valued record is ever wanted, at which point the floor becomes a per-record decision rather
+than a constant.
+
+**Antichain normalization** (§3). `Refine(R, {Pup, Dog})` with `Pup ⊨ Dog` keeps the redundant member,
+because dropping it would discard a declared fact that 9c/10d keep authoritative. The consequence —
+that type and `Refine(R, {Pup})` have identical inhabitants and are not equal — is what nominal
+identity means. Revisit only if that inequality causes friction in practice.
 
 ## 10. References
 
