@@ -280,10 +280,19 @@ checking nested inductives"*, and #20 records itself as a prerequisite for #21 (
 So the reference's one concession to non-prefix visibility is precisely the #20 → #21 pair, which is
 a second confirmation that the SCC case has exactly one legitimate occupant.
 
-**What this does not say.** §6 does not implement #20 and does not shorten it — the doubled surface
-D19 costed is unchanged. What it supplies is the *detection*: without SCC decomposition, a mutual
-block is a thing an author writes and the kernel meets unprepared; with it, the condition is
-computed before anything is checked.
+**§6 does not make #20 smaller. It tells you when you need it.** D19's costing — simultaneous
+positivity, one recursor per type, cross-type iota — stands unchanged.
+
+**And the failure mode today may be worse than an error.** `check_positivity(decl)` scans each
+constructor for occurrences of **`decl` itself** (`nbe/positivity.rs:163-168`); a sibling inductive
+is not `decl`. So if `A`'s constructor mentions `B` and `B`'s mentions `A`, each is checked in
+isolation and the cross-type occurrence is not seen as recursive. The reference *resolves* — a layer
+is built before it is validated, so `Layer::resolve` finds the sibling — so this does not fail
+loudly.
+
+Whether that is unsoundness (a non-positive mutual pair admitted) or mere incompleteness is
+**untested**, and it is the first thing to establish if the §6.4 measurement finds an SCC. Recorded
+as a question, not a claim.
 
 ## 7. The consolidation migration
 
