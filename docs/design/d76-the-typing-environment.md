@@ -450,7 +450,8 @@ changes. Plus: no resolve on the equal path, asserted by instrumentation rather 
 
 ### Phase E — consolidate to `Const`
 
-**Lands:** `Exp::Const(iri, levels)`; `EigonAxiom` and the inductive trio fold into it;
+**Lands:** `Exp::Const(iri, levels)`; `EigonAxiom` and the inductive trio fold into it (§8a keeps
+`EigonClass` out);
 `InductiveType(decl, args)` → `App(Const(iri), args)`. **606 `Exp` sites, 128 `Val` sites** (§3), plus
 readback and both D47 codec arms.
 
@@ -461,8 +462,57 @@ readback and both D47 codec arms.
 **9,439,633 resources, 0 errors**; the WRN demo at **56 Holds / 0 Fails**; the parse gate compared by
 `--replay`, never live (see `docs/notes/parse-gate-drift-2026-08-24.md`).
 
-**Open:** whether `EigonClass` folds in too, or stays as the constraint reference D75 §8 Q3 argues
-for. Decide before starting, not during.
+### 8a. `EigonClass` or `Const` — the Phase E decision
+
+D75 moved on this three times: §3.1 folded it in, Q2 refuted transparent folding, option C separated
+it, and §6.3's synthesis folded it back. The synthesis argument was: a class is a resource, a
+reference to a resource is `Const(iri)`, so `EigonClass` is not a distinct kind of *reference*.
+
+That argument is sound and **not decisive**, because the question is not whether a class reference
+*could* be a `Const` — it is whether the kind distinction should be **syntactic or looked-up**.
+
+**For folding in**
+
+1. *"Everything is a Resource"* — the founding principle. `Val::EigonClass(Iri)` sitting beside
+   `Val::ResourceVal(Box<Resource>)` already violates it (D75 §6.3).
+2. **Reference form and resolution shape are orthogonal**, established empirically in D78 Phase A:
+   they meet at one trait method, so `Const(iri)` can resolve to a constraint without the reference
+   being special.
+3. **One lookup path.** `lookup → Transparent | Opaque | Absent` covers every global; a separate
+   variant means conversion has two paths for "a named chain thing".
+4. 127 sites stop being a distinct case.
+
+**Against — keep it distinct**
+
+1. **Opacity becomes unforgeable rather than maintained.** This is the strongest argument and it was
+   not weighed in §6.3. Q2 says classes are δ-**opaque**, and 749 of 894 shipped classes have
+   identical (empty) field sets — so opacity is *the only thing* distinguishing most of the ontology
+   (D78 §1.2). With `Exp::EigonClass` that is structural: the constructor says "do not unfold", and no
+   policy can get it wrong. With `Const` it is a rule someone must keep enforcing.
+2. **Conversion can decide inequality without the environment.** Two `EigonClass` with different IRIs
+   are unequal immediately. Two `Const` with different IRIs must be *resolved* to learn whether either
+   unfolds. §5's fast path covers the equal case; this is the unequal case, and it is the one that
+   pays.
+3. **§6.1's constraint reading.** A class denotes a *predicate*, not a type. If `Const` means "a
+   reference to a declaration that has a type", a class does not fit, and folding conflates two things
+   the theory keeps apart.
+4. **It buys little for #188.** §6.1 argues constraints are level-generic, so a class carries no
+   levels. Folding gets uniformity, not universe-polymorphism progress.
+
+**The middle option, and why not.** `Const(iri, kind, levels)` with the kind tagged would give one
+variant *and* syntactic opacity. But a tag is a fact about the environment cached in the term, and a
+redefinition can change an IRI's kind — so it needs the same revalidation discipline as D75 §3.5's
+merge hazard. That is the inline-the-environment antipattern in miniature, and this document exists
+to remove it.
+
+**Recommendation: keep `EigonClass` distinct**, on argument 1. D75's thesis is that the environment
+belongs in the judgment; it does not follow that every *kind distinction* should be resolved rather
+than written. Opacity is the mechanism holding most of the shipped ontology apart, and making it
+structural costs one enum variant.
+
+**This corrects §6.3's conclusion**, which folded `EigonClass` in without weighing what the fold costs
+in enforceability. §6.3's Q3 answer — five variants to one — becomes **five to two**: `Const` for
+declarations that have types, `EigonClass` for constraints that do not.
 
 ---
 
