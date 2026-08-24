@@ -240,13 +240,50 @@ algorithm, not the record former.
 
 ## 9. Open
 
+### Omissions — things this document does not mention at all
+
+**`recommends`.** §1–§5 treat `requires` as the whole story. `resolve_class_type` today Option-wraps
+recommended properties into the Σ-chain (`program/ground.rs:73-81`), giving a field of type
+`Option T`. **Under clause 8 that is arguably the wrong encoding**: `Option` says the record *has* a
+field holding `some x` or `none`, whereas a resource that simply omits the property has **no field at
+all**, and absence and `none` are different states. What `recommends` actually means is *ℓ may be
+absent; if `⟨ℓ,a⟩ ∈ r` then `a : T`* — a conditional clause, not a field. And open-world already
+delivers exactly that: Rule 3 checks any present property against its declaration regardless of
+class. So `recommends` may reduce to **nothing at the type level**, being documentation plus a rule
+that already fires. Needs deciding before §5's validator step, because it changes what the record
+type contains.
+
+**Conditional requirements.** `evaluate_conditional_requires` produces requirements contingent on
+other property values and chains them into `all_required` (`validation/mod.rs:231-237`). A
+value-dependent requirement is naturally a **dependent field** — which is precisely what A11.6 and
+§1's telescope are for — so this may land cleanly rather than awkwardly. But it is unaddressed, and
+it is on the critical path: Rules 1+2 fold it in today, so §5's clause-8 evaluation has to account
+for it or lose verdicts.
+
+**Level computation over dependent fields.** §2 says a record's level is the `max` over its field
+types' levels. That is not a static max: a field's type is a `Clos`, so a dependent field's type is a
+function of earlier fields' *values*, and the max is over an instantiated telescope. §2 states the
+rule as though the types were closed. The rule is probably still right; the computation is not
+stated.
+
+### Unstated details
+
+- **Where cycle detection lives.** §1 says a dependency cycle is "caught where the record is built".
+  Kernel invariant, or validation rule? They have different failure surfaces.
+- **What replaces `find_sigma_field`** (`check/mod.rs:1109`), and whether canonical order changes
+  projection cost — a Σ-walk versus a scan over `Vec<(Iri, Clos)>`.
+- **Whether `Refine` participates in cumulativity** — presumably `Refine(R, C) : Sort(level(R))`, but
+  §3 does not say.
+
+### Genuinely deferred
+
 - **The empty-record floor** (§2) is argued from proof irrelevance. If `Prop`-valued records are ever
-  wanted, the floor has to become a per-record decision rather than a constant.
-- **`Refine` nesting.** A record satisfying two classes — `is_a` is a list — is `Refine(Refine(R, C), D)`
-  or `Refine(R, {C, D})`. The second is flatter and matches `is_a`'s shape; the first composes more
-  obviously with §3's subtyping rule. Not settled.
-- **Whether `Val::Sig` survives at all** once records exist, or whether the anonymous pair type is the
-  only remaining use.
+  wanted, the floor becomes a per-record decision rather than a constant.
+- **`Refine` nesting.** `is_a` is a list, so a record satisfying two classes is
+  `Refine(Refine(R, C), D)` or `Refine(R, {C, D})`. The second is flatter and matches `is_a`'s shape;
+  the first composes more obviously with §3's subtyping rule.
+- **Whether `Val::Sig` survives** once records exist, or whether the anonymous pair type is its only
+  remaining use.
 
 ## 10. References
 
