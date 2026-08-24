@@ -83,7 +83,7 @@ D20 names the missing merge cascade kind **type-checker driven** (`layer/merge/c
 rule-driven half of D77 needs nothing from here (`validation/retroactive.rs` discharges the linear
 form without touching the type checker), but the *designed* backstop is a type-level check and does.
 
-## 2.5 What D76 does **not** need from D78
+## 2a. What D76 does **not** need from D78
 
 D78 is not a prerequisite. The two meet at one trait method,
 `CheckHooks::resolve_class(iri, layer) -> Val`, and are otherwise orthogonal:
@@ -99,25 +99,151 @@ D78 is not a prerequisite. The two meet at one trait method,
 So D76 and D78 can interleave. The only ordering that matters is that D76 is a **chain-format change**
 and D78 is not.
 
-## 3. What D76 must settle
+## 3. The census
 
-From D75 §9, unchanged:
+Measured `2026-08-24`. These are the numbers the migration is priced against.
 
-- **The trait's signature.** What are the methods; what does a lookup return — `Arc<Resource>`, a
-  `Decl` enum, a `Val`; who owns the `(LayerId, Iri)` memo once two surfaces share it. `CheckHooks`
-  (`nbe/check/hooks.rs:34`) is already the boundary and should absorb the role.
-- **δ mechanics, not δ policy.** Conversion must know a `Const`'s kind *without* resolving on the hot
-  path — the lazy-δ shape, compare IRIs syntactically first and resolve only on mismatch — plus
-  unfolding order when both sides are transparent.
-- **The layer under construction.** During `check` of one declaration, are *later* declarations in the
-  same layer visible? nanoda extends `Env` declaration-by-declaration. Forward references and
-  intra-layer self-reference both turn on this.
-- **The consolidation migration.** How ~583 sites move: `InductiveType(decl, args)` →
-  `App(Const(iri), args)`, what happens to the inlined `Arc<InductiveDecl>` at readback, which D47
-  codec arms change. **Persisted terms change shape, so this is a chain-format change** — unlike D78,
-  which is additive to the chain throughout.
+| variant | `Exp::` sites | `Val::` sites |
+|---|---|---|
+| `EigonClass` | 94 | 33 |
+| `EigonAxiom` | 61 | 1 |
+| `InductiveType` | 176 | 93 |
+| `InductiveCtor` | 241 | 0 |
+| `InductiveRec` | 34 | 1 |
+| **total** | **606** | **128** |
 
-## 4. References
+And the number that prices §4: **54 call sites** of `eq_nf` / `subtype_of` / `subtype_of_with_hyps`.
+That is what gains a parameter when conversion carries `Γ_env` — not the 195 `eval` sites, which Q1
+established do not need one.
+
+`Exp::Const` does not exist today; it is new.
+
+## 4. The environment interface
+
+### 4.1 What it is
+
+`CheckHooks` (`nbe/check/hooks.rs:34`) is already the boundary and already has the right shape — it
+is **stateless**, taking the layer per call so one shared instance serves every `CheckCtx`:
+
+```rust
+pub trait CheckHooks: Send + Sync {
+    fn resolve_class(&self, iri: &Iri, layer: &Arc<Layer>) -> Result<Val, CheckError>;
+    fn synthesize_chain_witness(&self, …, layer: Option<&Arc<Layer>>) -> …;
+}
+```
+
+Two things change:
+
+1. **A general lookup replaces the class-specific one.** `resolve_class` answers one question about
+   one kind of global. What conversion needs is *what kind is this IRI, and if transparent, what does
+   it unfold to*. That is one method returning a small enum, not a `Val`:
+
+   ```rust
+   enum Global { Transparent(Val), Opaque, Absent }
+   fn lookup(&self, iri: &Iri, layer: &Env) -> Global;
+   ```
+
+   `Opaque` is the answer for classes and axioms (§1, Q2) and is what lets conversion stop without
+   materialising anything.
+
+2. **The `Option` goes.** `CheckCtx.layer: Option<Arc<Layer>>` and `resolve_class_cached`'s *"no layer
+   access in pure check mode"* error are what let the three surfaces diverge (§0). An environment is
+   a component of the judgment, so it is not optional — a caller with nothing to resolve against
+   passes an **empty** environment, not `None`.
+
+### 4.2 Who owns the memo
+
+Not the trait. Two memos already exist with the right lifetime and different keys —
+`RESOLVE_MEMO` (`layer/mod.rs:362`, keyed by every resolved IRI) and D78's `CLASS_FIELDS_MEMO`
+(`validation/mod.rs`, keyed by class). Both are thread-locals with RAII scopes, sound because the
+chain is immutable for the duration of a pass.
+
+A third, keyed by `(LayerId, Iri) → Global`, belongs beside them rather than inside `CheckHooks`,
+which must stay stateless to remain shareable. **Boundedness is the design constraint**, not speed:
+D78's memo grows with the ontology's class count; this one would grow with every *resolved* IRI,
+like `RESOLVE_MEMO`, which over a 9.4M chain is the cost that has to be justified rather than
+assumed.
+
+## 5. δ mechanics
+
+Q2 fixed the policy per kind. The mechanism is the open part, and it has one hard requirement:
+**conversion must not resolve on the equal path.**
+
+The lazy-δ shape, which nanoda and Lean both rely on:
+
+```
+conv(Const(a, ls), Const(b, ms)):
+    if a == b && ls ≡ ms      → equal, WITHOUT resolving        ← the hot path
+    else                       → look both up; unfold the transparent ones; recurse
+```
+
+Two consequences:
+
+- **The common case costs one IRI comparison.** Same-name comparison is the overwhelming majority,
+  and it never touches the environment. This is what makes the 54 threaded call sites affordable.
+- **Only a mismatch pays.** Which is also where the answer is actually needed.
+
+**Unfolding order when both sides are transparent** is the remaining choice. Lean unfolds the one with
+greater definition height first; nanoda approximates. Neither is required for correctness — both
+terminate — so this is a performance decision to make with a measurement, not ahead of one.
+
+**What is already fixed and must not be re-opened:** definitions are transparent because
+`decode_type` unfolds them and §3.4's proposition hash is taken over the decoded term (D66 §4);
+classes are opaque because unfolding them makes class identity structural, and 749 of 894 shipped
+classes have identical (empty) field sets.
+
+## 6. The layer under construction
+
+Unanswered since D75 §5, and the one question here with no reference answer that transfers.
+
+nanoda extends `Env` declaration-by-declaration as each is checked, so a declaration sees its
+predecessors and not its successors. Eigenius differs: a layer is **built and then validated**, so
+sibling references already resolve — `Layer::resolve` walks the layer's own content before its
+parents.
+
+So the question is narrower than "what is visible": it is **whether the checker may see a sibling it
+has not yet checked**. Three options, none free:
+
+| | option | consequence |
+|---|---|---|
+| a | the whole layer, unchecked siblings included | forward references work; a declaration can be checked against one that later fails, so a layer's verdict depends on validation order |
+| b | only already-checked declarations | matches nanoda; forward references within a layer stop working, which is a **surface-visible restriction** on ESL |
+| c | two passes — collect signatures, then check bodies | forward references work and nothing is checked against an unchecked type; costs a pass |
+
+(c) is what most real systems land on. It is also the only one that does not trade correctness for
+convenience. **Not decided here** — it wants a count of how many shipped declarations actually
+forward-reference within their layer, which is a cheap measurement nobody has made.
+
+## 7. The consolidation migration
+
+**This is the chain-format change**, and the sharpest difference from D78, which was additive
+throughout (D78 §7).
+
+`InductiveType(decl, args)` → `App(Const(iri), args)`, and the inlined `Arc<InductiveDecl>` stops
+being carried in the term. What that touches:
+
+- **606 `Exp` construction sites and 128 `Val` sites** (§3).
+- **Readback**, which must produce a `Const` rather than reconstructing a decl.
+- **The D47 codec**, both arms — and therefore **every persisted term containing an inductive
+  reference**. A reseed is required; unlike D78's, it is not optional.
+- **`PartialEq` on `InductiveDecl`**, which is by IRI today (`term.rs:365`) because a constructor's
+  type carries a *stub* decl that must compare equal to the full one. With `Const` there is no stub,
+  so equality can be structural — and that is what makes universe levels able to distinguish
+  `List.{0}` from `List.{1}` (D75 §3.2).
+
+**Order within the migration.** The stub is the thing to remove first: it is what forces by-IRI
+equality, which is what makes levels unsound, which is what #188's residual is blocked on. Everything
+else in this section is mechanical once it is gone.
+
+## 8. Phases
+
+Deliberately unwritten. D78's phase structure worked because each phase had one risk class and one
+gate; this document does not yet know enough to draw those lines — §6 is undecided and §5's unfolding
+order wants a measurement. **Write the phases after §6 is settled**, not before.
+
+The one thing that can be said now: **Q4/4c is last**, gated on `Const(iri, levels)` existing (§2.2).
+
+## 9. References
 
 - D75 §2 (the measurement), §4 (the chain as `Γ_env`), §5 (what it forces and costs), §8 Q1–Q4
 - D78 §3.1 (the parked obligation), §7 (why D78 did not wait)
