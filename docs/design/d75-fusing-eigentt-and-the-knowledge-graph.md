@@ -884,10 +884,37 @@ kernel would check it type-wise, and Seam B's work is making those one thing.
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
 #188's level machinery. It can be taken up on its own schedule.
 
-**Q5 — does `universe u v;` survive as ESL surface syntax?** The most downstream of the five. It is a
-consequence of Q3: how many `Exp` variants carry levels determines whether declarations need
-user-visible universe parameters at all. Deciding it before Q3 would be deciding surface syntax for a
-representation that has not been chosen.
+### Q5 — ANSWERED: it survives, it is already built, and the framework narrows its scope
+
+`universe u v;` is implemented end to end and tagged `eigenius#188`: `TokenKind::Universe`
+(`esl/lexer.rs:112,645`), `parse_universe` → `UniverseDecl` (`esl/parser.rs:315-318`), and emission
+via `note_universe` (`esl/print.rs:80,148-157`).
+
+**It is forced by round-trip, not chosen.** The printer's own comment states the reason:
+
+> "a `universe` declaration, printed source that mentions one does not recompile without it."
+
+A term carrying a level parameter must print source that reparses. So the syntax exists because
+`every_shipped_ontology_document_round_trips` requires it, and the question was never really "should
+ESL have this" — it was "will anything emit one".
+
+**Under this framework, three of four kinds will not:**
+
+| declaration | emits a level parameter? | why |
+|---|---|---|
+| classes | **no** | §6.1 — a constraint is level-generic *without* parameters, checked at concrete orders per site |
+| resources generally | **no** | §6.3 — a record's level is computed from its field types |
+| **axioms** | **yes** | a postulated term whose type quantifies over universes |
+| **inductives** | **yes** | genuinely polymorphic — `List.{u}` |
+
+So the framework does not retire the syntax; it **shrinks the surface that needs it** from "every
+chain-resident type former" to "declarations whose types quantify over universes". #188's original
+trigger — `reasoning:spec_poly`'s domain binder raised from `T : Set` to `T : Type 1`, fixed at
+level 1 by hand — is exactly one of those, which is why it motivated the issue in the first place.
+
+**What to do with Q5: nothing.** It needs no decision and no work. The residual is that no ontology
+currently *writes* a `universe` declaration, because nothing can be level-polymorphic until
+`Const(iri, levels)` exists (Q3). Q5 is downstream of Q3 in implementation order, not in design.
 
 **Status.** Q1 and Q2 are answered above from evidence in the tree. Q3 is the open design decision,
 now constrained on one side by Q2. Q4 is parallelisable. Q5 falls out of Q3.
@@ -903,7 +930,7 @@ now constrained on one side by Q2. Q4 is parallelisable. Q5 falls out of Q3.
 | Q2 | δ-policy | **answered** per kind; inductives deferred into Q3 |
 | Q3 | `EigonClass` as `Const`? | **answered conditionally** — 5→1, but the chain Q8→Q6→Q3 assumes Seam B lands. If the record model does not land, Q3 reverts to the A/B/C analysis. |
 | Q4 | recursor elimination universe | **untouched** |
-| Q5 | `universe u v;` in ESL | **not decided** — now decidable, being downstream of Q3 |
+| Q5 | `universe u v;` in ESL | **answered** — already implemented end to end; forced by round-trip. The framework shrinks who emits one to axioms and inductives. No work. |
 | Q6 | `check_infer` of a class reference | **answered** (§6.3) |
 | Q7 | what `Construct` returns | **decided** — 7b |
 | Q8 | is a constraint a value | **answered** — yes, it is a resource |
