@@ -480,6 +480,12 @@ is what keeps the parked obligation cheap.
 **Gate:** unit tests over constructed constraint sets, including the non-`subclass_of` cases that are
 the actual use.
 
+**Status: complete** (`program/ground.rs` — `constraint_fields`, `entails`, `conjunction_entails`).
+7 tests. The load-bearing one is `a_conjunction_entails_what_no_member_does_alone`: neither
+`JustName` nor `JustBreed` covers `Both`, and together they do — the case with no structural
+guarantee behind it. `a_declared_subclass_entails_its_parent_automatically` pins the converse, why
+there is no validation rule.
+
 ---
 
 ### Phase C — the kernel switches to records.

@@ -87,6 +87,60 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
     build_sigma_chain(&props)
 }
 
+/// D78 §4 — the field set a constraint demands.
+///
+/// **`requires` only.** `recommends` contributes nothing at the type level
+/// (D78 §1.1): it names properties that may be absent, and *if present, well
+/// typed* is what Rule 3 already checks for any property regardless of class.
+/// A recommended property is not a field of the constraint.
+///
+/// Transitive: `collect_properties` walks `subclass_of`, so a subclass's field
+/// set includes its ancestors'.
+pub fn constraint_fields(class_iri: &Iri, layer: &Layer) -> Result<BTreeSet<Iri>, String> {
+    Ok(collect_properties(class_iri, layer)?.0)
+}
+
+/// D78 §4 — does `sub` entail `sup`? That is: does every record satisfying
+/// `sub` satisfy `sup`?
+///
+/// `fields(sup) ⊆ fields(sub)`, and **nothing else**. The rule as first drafted
+/// carried a per-field variance clause, `type_sub(ℓ) <: type_sup(ℓ)`; it is
+/// **vacuous** and deliberately absent (D78 §4.1). A field's type is a function
+/// of the *property* — `resolve_property_type` takes only a property IRI, and
+/// `collect_properties_inner` collects IRIs without types — so there is no
+/// per-`(class, property)` type for two constraints to disagree about. Adding
+/// the clause back would be adding a check that cannot fail.
+pub fn entails(sub: &Iri, sup: &Iri, layer: &Layer) -> Result<bool, String> {
+    let needed = constraint_fields(sup, layer)?;
+    let have = constraint_fields(sub, layer)?;
+    Ok(needed.is_subset(&have))
+}
+
+/// D78 §3 — does the **conjunction** of `constraints` entail `sup`?
+///
+/// This is the judgment that earns its place. Over `subclass_of` declarations
+/// entailment is automatic — `collect_properties` walks the relation, so a
+/// declared subclass includes its parent's fields by construction, which is why
+/// D78 ships no validation rule for it. The real use is `Refine` subtyping,
+/// where the two constraint sets come from `is_a` lists and are **not
+/// necessarily related by `subclass_of`**: whether the union of one set's fields
+/// covers another's has no structural guarantee behind it.
+///
+/// A constraint is a field set, so `fields(⋀S) = ⋃_{C∈S} fields(C)` and §4's
+/// rule applies to that union unchanged.
+pub fn conjunction_entails(
+    constraints: &BTreeSet<Iri>,
+    sup: &Iri,
+    layer: &Layer,
+) -> Result<bool, String> {
+    let needed = constraint_fields(sup, layer)?;
+    let mut have: BTreeSet<Iri> = BTreeSet::new();
+    for c in constraints {
+        have.extend(constraint_fields(c, layer)?);
+    }
+    Ok(needed.is_subset(&have))
+}
+
 /// Collect required and recommended properties for a class (including inherited).
 fn collect_properties(
     class_iri: &Iri,
@@ -1540,5 +1594,161 @@ mod record_agrees_with_sigma_chain {
             "an empty class short-circuits to Val::One today (`:83-85`), got {chain:?}"
         );
         assert_eq!(Exp::record(vec![]).unwrap(), Exp::Record(vec![]));
+    }
+}
+
+#[cfg(test)]
+mod entailment {
+    //! D78 §4 / §4.1 — `C ⊨ D` is field-set inclusion, and its real use is the
+    //! **non-`subclass_of`** case.
+
+    use super::tests::build_test_layer;
+    use super::*;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::ontology::well_known as wk;
+
+    fn i(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    /// A class requiring exactly the listed properties, with no `subclass_of`.
+    /// Unrelated by declaration is the point: entailment must decide on fields.
+    fn cls(id: &str, requires: &[&str]) -> Resource {
+        let mut r = Resource::new(i(id));
+        r.set(
+            i(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(i(wk::CLASS))]),
+        );
+        r.set(
+            i(wk::SHORT_NAME),
+            Value::String(id.rsplit(':').next().unwrap().into()),
+        );
+        r.set(i(wk::DESCRIPTION), Value::String("test class".into()));
+        r.set(
+            i(wk::REQUIRES),
+            Value::Array(requires.iter().map(|p| Value::ResourceRef(i(p))).collect()),
+        );
+        r
+    }
+
+    /// Layer with four classes over the animals properties, none related by
+    /// `subclass_of`.
+    fn layer() -> Arc<Layer> {
+        const NAME: &str = "urn:eigenius:example:name";
+        const BREED: &str = "urn:eigenius:example:breed";
+        let mut b = crate::layer::LayerBuilder::new("entailment", Some(build_test_layer()));
+        b.add_resource(cls("urn:t:Both", &[NAME, BREED])).unwrap();
+        b.add_resource(cls("urn:t:JustName", &[NAME])).unwrap();
+        b.add_resource(cls("urn:t:JustBreed", &[BREED])).unwrap();
+        b.add_resource(cls("urn:t:Nothing", &[])).unwrap();
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn a_constraint_entails_itself() {
+        let l = layer();
+        assert!(entails(&i("urn:t:Both"), &i("urn:t:Both"), &l).unwrap());
+    }
+
+    #[test]
+    fn more_fields_entails_fewer_without_any_subclass_declaration() {
+        // The actual use (§4.1): `Both` and `JustName` are unrelated by
+        // `subclass_of`, so nothing structural guarantees this — it is decided
+        // on fields.
+        let l = layer();
+        assert!(entails(&i("urn:t:Both"), &i("urn:t:JustName"), &l).unwrap());
+        assert!(
+            !entails(&i("urn:t:JustName"), &i("urn:t:Both"), &l).unwrap(),
+            "fewer fields must not entail more"
+        );
+    }
+
+    #[test]
+    fn disjoint_constraints_do_not_entail_each_other() {
+        let l = layer();
+        assert!(!entails(&i("urn:t:JustName"), &i("urn:t:JustBreed"), &l).unwrap());
+        assert!(!entails(&i("urn:t:JustBreed"), &i("urn:t:JustName"), &l).unwrap());
+    }
+
+    #[test]
+    fn everything_entails_the_empty_constraint() {
+        // §4.1 — `Any` is the top of the entailment order automatically, with no
+        // declared edge, because `fields(Any) = ∅` is a subset of everything.
+        let l = layer();
+        for c in ["urn:t:Both", "urn:t:JustName", "urn:t:Nothing"] {
+            assert!(
+                entails(&i(c), &i("urn:t:Nothing"), &l).unwrap(),
+                "{c} must entail the empty constraint"
+            );
+        }
+        assert!(
+            entails(&i("urn:t:Both"), &i("urn:eigenius:core:Resource"), &l).unwrap(),
+            "core:Resource is the shipped `Any` and requires nothing"
+        );
+    }
+
+    #[test]
+    fn a_conjunction_entails_what_no_member_does_alone() {
+        // The case with no structural guarantee, and the reason the judgment
+        // exists: neither `JustName` nor `JustBreed` covers `Both`, but together
+        // they do.
+        let l = layer();
+        let both = i("urn:t:Both");
+        assert!(!entails(&i("urn:t:JustName"), &both, &l).unwrap());
+        assert!(!entails(&i("urn:t:JustBreed"), &both, &l).unwrap());
+
+        let pair: BTreeSet<Iri> = [i("urn:t:JustName"), i("urn:t:JustBreed")]
+            .into_iter()
+            .collect();
+        assert!(
+            conjunction_entails(&pair, &both, &l).unwrap(),
+            "fields(⋀S) is the union of the members' fields"
+        );
+    }
+
+    #[test]
+    fn a_declared_subclass_entails_its_parent_automatically() {
+        // Why D78 ships no validation rule over `subclass_of` (§4.1):
+        // `collect_properties` walks the relation, so the inclusion holds by
+        // construction and a rule would always pass.
+        let l = build_test_layer();
+        let dog = i("urn:eigenius:example:Dog");
+        let animal = i("urn:eigenius:example:Animal");
+        assert!(
+            constraint_fields(&animal, &l)
+                .unwrap()
+                .is_subset(&constraint_fields(&dog, &l).unwrap()),
+            "Dog inherits Animal's requirements transitively"
+        );
+        assert!(entails(&dog, &animal, &l).unwrap());
+    }
+
+    #[test]
+    fn recommends_does_not_enter_the_field_set() {
+        // D78 §1.1 — a recommended property is not a field of the constraint.
+        let l = build_test_layer();
+        let class_iri = i(wk::CLASS);
+        let fields = constraint_fields(&class_iri, &l).unwrap();
+        let (required, recommended) = collect_properties(&class_iri, &l).unwrap();
+
+        assert_eq!(
+            fields, required,
+            "constraint_fields is exactly the required set"
+        );
+
+        // `core:Class` recommends `subclass_of`, `requires`, `recommends` and
+        // more, none of which it requires — so the recommended-only set is
+        // non-empty and disjoint from the constraint's fields.
+        let recommended_only: BTreeSet<&Iri> = recommended.difference(&required).collect();
+        assert!(
+            !recommended_only.is_empty(),
+            "core:Class must recommend something it does not require, or this proves nothing"
+        );
+        for r in recommended_only {
+            assert!(
+                !fields.contains(r),
+                "a recommended-only property must not be a constraint field: {r}"
+            );
+        }
     }
 }
