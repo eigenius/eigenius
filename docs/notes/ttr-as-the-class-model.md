@@ -214,11 +214,107 @@ structural, and levels distinguish instantiations correctly — **whether or not
 gets a layer.** That is the load-bearing contribution: TTR does not merely supply a nicer class
 model, it removes the reason for the design that makes #188's residual expensive.
 
-**What remains open.** Constraint (1) still stands: full de-fusion to `Const` + `App` needs a
-decision about whether normalisation may consult a layer. Cooper says nothing about that — it is a
-nanoda-shaped question, and it is separable from the stub problem above.
+**What remains open.** Constraint (1) — whether normalisation may consult a layer. Cooper says
+nothing about it. §5 answers it from a different direction.
 
 **What is NOT settled here.** Adopting record types is not a representation swap: `subclass_of` is
 nominal and load-bearing for Rule 22, `class_types` and institution dispatch. Moving to
 field-inclusion subtyping changes what "is a" means chain-wide. That is the question a follow-on
 note has to open with.
+
+---
+
+## 5. Constraint (1): the chain and its ancestors *are* the environment
+
+### The diagnosis
+
+`EvalCtx` (`kernel/src/nbe/eval/mod.rs:112-123`) is:
+
+```rust
+pub enum EvalCtx {
+    Pure,
+    Effectful { layer: Option<Arc<Layer>>, hooks: Arc<dyn EffectHooks> },
+}
+```
+
+The layer sits inside the *effectful* arm, beside IO and institution dispatch. That places "read a
+global declaration" in the same category as "invoke a component" — but in every standard
+presentation the judgment is `Γ_env; Γ ⊢ e : T`, and `Γ_env` is a **component of the judgment**, not
+a capability. nanoda: `Const{name, levels}` resolves against `Env`, and that is pure.
+
+The measurement is stronger than "`Pure` has no layer":
+
+- `kernel/src/nbe/` contains **zero** calls to `.resolve(` and **zero** reads of `ctx.layer()`.
+- The `layer` field has exactly one consumer chain-wide, `institution/eval_hooks.rs:1100`.
+
+So it is not that one arm lacks an environment. **The NbE core has no notion of a global environment
+at all.** Every global a term could need is inlined into the term. That is the generator of the five
+reference variants: with no `Γ_env` to look anything up in, each variant carries its own resolved
+payload.
+
+### The chain already implements scoped lookup
+
+`Layer::resolve_uncached` (`kernel/src/layer/mod.rs:713`) walks `parents.first()` innermost-first,
+first hit wins, with `tombstoned_iris` for removal. `resolve_all` (`:780`) returns the whole
+shadowing stack. The correspondence needs no construction:
+
+| ML / Rust scope | Layer chain |
+|---|---|
+| binding set of a scope | `defined_iris` |
+| enclosing scope | `parents.first()` |
+| name lookup, innermost first | `resolve` |
+| shadowing | a lower layer's IRI redefined higher |
+| all bindings of a name | `resolve_all` |
+| `Γ_env; Γ ⊢ e : T` | (layer, `Rho`) ⊢ `Exp` : `Val` |
+
+The purity side condition is already asserted in the code. The memo comment at `mod.rs:678-680`
+states that *the chain is immutable within a pass, so `resolve(self, iri)` is a pure function of
+`(self.id, iri)`* — which is exactly the condition under which environment lookup belongs in a pure
+judgment rather than behind a capability.
+
+### What this dissolves
+
+Reclassify `layer` from effect capability to judgment component and constraint (1) is gone:
+`Exp::Const(iri, levels)` becomes resolvable during normalisation. Then
+
+- no need to inline `Arc<InductiveDecl>`,
+- so no self-reference stub — a constructor's type names its inductive by `Const`, resolved in
+  `Γ_env`, which is what nanoda does,
+- so no `PartialEq`-by-IRI, so levels distinguish `List.{0}` from `List.{1}`,
+- so five reference variants collapse to one `Const`.
+
+**The two routes converge.** §4 kills the stub by changing how self-reference is *expressed*
+(A11.4 fixed points). This kills it by making `Const` *resolvable*. The second is the more
+conservative of the two — it introduces no new type-theoretic construction, only moves an existing
+lookup from outside the judgment to inside it — and it is the route nanoda already took.
+
+### What it costs
+
+**Conversion becomes environment-relative.** `eq_nf(level: usize, v1: &Val, v2: &Val)`
+(`kernel/src/nbe/check/conv.rs:30`) takes no environment. That is sound only because nothing
+δ-reduces: `Exp::EigonAxiom` evaluates to `Val::Nt(Neut::EigonAxiom(iri))` (`eval/mod.rs:510`), i.e.
+opaque, and inductives carry their decl inline. Once names resolve, conversion needs `Γ_env` and a
+δ-policy (which declarations unfold, in what order, with what transparency).
+
+**`Val` captures the environment.** A neutral `Const` awaiting unfolding holds an `Arc<Layer>`.
+Immutable and refcounted, but it changes `Val`'s lifetime story.
+
+**Which layer is `Γ_env` mid-check is a real decision.** The layer under construction sees its own
+partial contents; nanoda extends `Env` declaration-by-declaration as each is checked. Forward
+references and intra-layer self-reference both turn on this.
+
+### What it explains
+
+Rule 22's retroactive revalidation scoped to redefinitions is currently an operational rule. Under
+the environment reading it is **derivable**: ML shadowing is benign because old bindings become
+unreachable, whereas here resources in lower layers still *reference* the shadowed IRI and were
+checked against the old binding. A term checked in `Γ_k` must be rechecked in `Γ_n` exactly when a
+name it mentions was rebound between them — which is the rule as implemented. An operational rule
+falling out of the model is evidence the model is the right one.
+
+### Consequence for #188
+
+This, not the class model, is the first thing to settle. It decides whether levels land on one
+variant or five, and it is prerequisite to both. It needs its own design note: the `Γ_env` shape,
+the δ-policy for conversion, the layer-under-construction question, and whether `EvalCtx` keeps two
+arms at all once the layer moves out of the effectful one.
