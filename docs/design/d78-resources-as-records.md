@@ -641,6 +641,42 @@ states the distinction rather than one replacing the other.
 
 The local-name projection collision is already closed — it landed in Phase C, not here.
 
+**Status: complete.** Three changes:
+
+- **`resource_record`** (`program/ground.rs`) — a resource's own record, the union of the fields it
+  actually carries, each at the property's declared type. Every property including `is_a`. A property
+  whose type will not resolve is skipped rather than fatal: Rule 22 §c already rejects an undeclared
+  key at commit, so refusing to type the rest would report one defect twice.
+- **`Exp::EigonResource`** infers `Refine(resource_record(r), r.is_a())` — the resource's own record,
+  refined by **every** class it declares. Falls back to the old `EigonClass(first)` shape when the
+  context has no layer, since pure-mode `check` is a legitimate caller.
+- **`Construct`** returns `Refine(record-of-the-given-fields, {class})` per 7b, rather than the bare
+  class. Returning the class re-imposed the class's type on the instance (§3.8); returning a bare
+  record would drop the nominal claim (D75 §8 Q2).
+
+**Gate met.** `an_undeclared_property_is_projectable_off_the_resource_but_not_off_the_class` asserts
+both halves — `nickname` projects off a `Dog` that carries it, at type `string` rather than
+`Option string`, and still does **not** project off `Dog` itself. Its companion, which pins the class
+side, is unchanged and stays true permanently. `a_resource_carries_every_class_it_declares_not_just_the_first`
+pins the 73 % case: both declared classes survive into the refinement.
+
+**A bug this phase exposed in §3's subtyping.** `Refine(R, S) <: R` — forgetting the constraint set —
+is safe only against a **structural** supertype. Against a **nominal** one, `EigonClass(C)`, the
+constraint set is exactly what makes the record an inhabitant of `C`, and forgetting it discards the
+claim under test. The rule as first written forgot unconditionally, so
+`Construct lexicon:Gene {}` (now `Refine(Record([]), {Gene})`) was compared carrier-first against
+`dep`'s `EigonClass(Gene)` parameter and rejected —
+`type mismatch: Record([]) ≠ EigonClass(Gene)`.
+
+Phase C is what made it reachable: a no-`requires` class used to resolve to `Val::One` and now
+carries an empty record, and **749 of 894 shipped classes have no `requires`**.
+
+The added arm precedes forgetting: `Refine(_, S) <: EigonClass(C)` iff `C ∈ S`. Sound — a record
+satisfying every constraint in `S` with `C ∈ S` satisfies `C`. Membership rather than entailment, for
+the same reason the `Refine <: Refine` arm uses inclusion (§3.1). Caught by
+`felicity_filter_accepts_well_typed_composition` in `kernel/tests/lexicon_validates.rs` — an
+**integration** test, not a unit test.
+
 ---
 
 ### Ordering

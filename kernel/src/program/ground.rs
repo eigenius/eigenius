@@ -99,6 +99,47 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
         .map_err(|e| format!("could not evaluate class record for '{class_iri}': {e:?}"))
 }
 
+/// D78 §5 / Phase E — a resource's **own** record: the union of the fields it
+/// actually carries, each at the property's declared type.
+///
+/// This is what closes D75 §3.8. `resolve_class_type` answers "what does this
+/// class demand", which is the declared *minimum*; this answers "what does this
+/// resource *have*", which is the whole of it. An undeclared property — one the
+/// resource carries that its classes neither require nor recommend — is a field
+/// here and is therefore projectable, where the class type could never mention
+/// it.
+///
+/// **Every property, `is_a` among them.** `is_a` is itself a declared
+/// `core:Property` (`data_type: resource_array`, `class_types: [core:Class]`), so
+/// under "everything is a Resource" it is a field like any other. There is no
+/// redundancy with the refinement that wraps this: the *field* says the resource
+/// has an `is_a` holding an array of classes; the *refinement* says which
+/// constraints it satisfies.
+///
+/// A property whose type cannot be resolved is **skipped rather than fatal**:
+/// Rule 22 §c already rejects an undeclared property key at commit, so a
+/// resource reaching here with one is a chain that failed validation, and
+/// refusing to type the rest of it would report the same defect twice.
+pub fn resource_record(
+    resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
+) -> Result<Val, String> {
+    let mut fields: Vec<(Iri, Patt, Exp)> = Vec::new();
+    for prop_iri in resource.properties().keys() {
+        let Ok(prop_type) = resolve_property_type(prop_iri, layer) else {
+            continue;
+        };
+        fields.push((
+            prop_iri.clone(),
+            Patt::Var(prop_iri.local_name().to_string()),
+            crate::nbe::readback::readback_val(0, &prop_type),
+        ));
+    }
+    let record_exp = Exp::record(fields).map_err(|e| e.to_string())?;
+    crate::nbe::eval::eval(&record_exp, &crate::nbe::env::Rho::Nil)
+        .map_err(|e| format!("could not evaluate the resource record: {e:?}"))
+}
+
 /// D78 §4 — the field set a constraint demands.
 ///
 /// **`requires` only.** `recommends` contributes nothing at the type level

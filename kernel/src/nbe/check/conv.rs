@@ -320,8 +320,40 @@ fn subtype_of_inner(
     // to agree on `Succ`-chains, which is exactly why the bug would not have shown up in a test.
     // ── D78 §3 — refinement subtyping ─────────────────────────────────────
     //
-    // `Refine(R, S) <: R`: forgetting constraints is always safe, which is how a
-    // refined record flows into a context expecting a plain record.
+    // `Refine(R, S) <: EigonClass(C)` when `C ∈ S`.
+    //
+    // **This arm must precede forgetting.** A class reference is a *nominal*
+    // supertype: what makes a refined record an inhabitant of `C` is the
+    // constraint set, not the carrier. Forgetting `S` and comparing `R` against
+    // `EigonClass(C)` discards precisely the claim being tested — and since
+    // Phase C a no-`requires` class carries an empty record, so the comparison
+    // becomes `Record([]) ≠ EigonClass(C)` and a well-typed composition is
+    // rejected. Caught by `felicity_filter_accepts_well_typed_composition`.
+    //
+    // Sound because a record satisfying every constraint in `S`, with `C ∈ S`,
+    // satisfies `C`. Membership rather than entailment for the same reason the
+    // `Refine <: Refine` arm uses inclusion: deciding `⋀S ⊨ C` needs the layer,
+    // which conversion does not have (§3.1, parked as D76 §2.1). Incomplete in
+    // the same direction, never unsound.
+    if let (Val::Refine(_, classes), Val::EigonClass(c)) = (sub, super_) {
+        return if classes.contains(c) {
+            Ok(())
+        } else {
+            Err(CheckError::TypeMismatch(format!(
+                "a record satisfying {{{}}} is not an instance of `{c}` — it does not declare it. \
+                 (Conversion cannot yet decide entailment; see D78 §3.1.)",
+                classes
+                    .iter()
+                    .map(|i| i.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+        };
+    }
+    // `Refine(R, S) <: R`: forgetting constraints is safe when the supertype is
+    // structural — that is how a refined record flows into a plain-record
+    // context. It is *not* safe against a nominal supertype, which the arm above
+    // handles first.
     if let Val::Refine(carrier, _) = sub {
         if !matches!(super_, Val::Refine(..)) {
             return subtype_of_inner(level, carrier, super_, index_policy);

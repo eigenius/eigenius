@@ -796,16 +796,70 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                     })?;
                 check(ctx, field_exp, &field_type)?;
             }
-            Ok(Val::EigonClass(class_iri.clone()))
+            // D78 §3 / 7b — the constructed thing's type is the record of the
+            // fields given, refined by the class it was built against. Returning
+            // the bare class (the prior behaviour) re-imposed the class's type on
+            // the instance, which is D75 §3.8; returning a bare record would drop
+            // the nominal claim, which D75 §8 Q2 forbids.
+            let built: Vec<(Iri, Patt, Exp)> = fields
+                .iter()
+                .map(|(prop_iri, _)| {
+                    let ty = find_record_field(ctx, &class_type, prop_iri)
+                        .map(|v| readback_val(ctx.rho.len(), &v))
+                        .unwrap_or_else(|| Exp::sort(1));
+                    (
+                        prop_iri.clone(),
+                        Patt::Var(prop_iri.local_name().to_string()),
+                        ty,
+                    )
+                })
+                .collect();
+            let record = Exp::record(built)
+                .map_err(|e| CheckError::CannotInfer(e.to_string()))
+                .and_then(|e| {
+                    eval(&e, &Rho::Nil).map_err(|e| CheckError::CannotInfer(format!("{e:?}")))
+                })?;
+            Ok(Val::Refine(
+                Box::new(record),
+                std::iter::once(class_iri.clone()).collect(),
+            ))
         }
 
-        // EigonResource(r): infer class from r.is_a().first()
+        // D78 Phase E — a resource's type is its OWN record, refined by the
+        // whole of its `is_a`.
+        //
+        // This replaces `Val::EigonClass(classes.first())`, which typed a
+        // resource by one arbitrarily-chosen class and discarded the rest.
+        // 2120 of 2903 shipped resources (73 %) declare more than one `is_a`,
+        // so the choice was being made constantly, not rarely.
+        //
+        // Two things change together. The record is the union of the fields the
+        // resource actually carries, so an undeclared property is projectable
+        // (D75 §3.8); and the refinement carries every constraint it claims, so
+        // nothing is dropped.
+        //
+        // Without a layer there is nothing to resolve property types against, so
+        // fall back to the old shape rather than fail — `check` in pure mode is
+        // a legitimate caller (tests that never touch chain resolution).
         Exp::EigonResource(r) => {
             let classes = r.is_a();
-            let class_iri = classes
-                .first()
-                .ok_or_else(|| "EigonResource has no is_a class".to_string())?;
-            Ok(Val::EigonClass(class_iri.clone()))
+            match ctx.layer.as_ref() {
+                Some(layer) => {
+                    let record = crate::program::ground::resource_record(r, layer)
+                        .map_err(CheckError::CannotInfer)?;
+                    if classes.is_empty() {
+                        Ok(record)
+                    } else {
+                        Ok(Val::Refine(Box::new(record), classes.into_iter().collect()))
+                    }
+                }
+                None => {
+                    let class_iri = classes
+                        .first()
+                        .ok_or_else(|| "EigonResource has no is_a class".to_string())?;
+                    Ok(Val::EigonClass(class_iri.clone()))
+                }
+            }
         }
 
         // Template(lit, refs): templates always produce String
@@ -2370,6 +2424,161 @@ mod tests {
             "unfolded: identical field sets ARE definitionally equal — which is why δ for classes \
              would make class identity structural. See D75 §3.3."
         );
+    }
+
+    #[test]
+    fn an_undeclared_property_is_projectable_off_the_resource_but_not_off_the_class() {
+        // **D78 Phase E closes D75 §3.8.** The companion to
+        // `an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected`,
+        // which asserts the class side and stays true forever: a class type is
+        // the declared *minimum*, so projecting a property `Dog` does not
+        // declare must fail off `Dog` before and after.
+        //
+        // What Phase E changes is the resource side. A resource's type is now
+        // the union of the fields it actually carries, so a property its classes
+        // never mention is a field of *its* record — at the property's own type
+        // `T`, not `Option T`.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::ontology::resource::{Resource, Value as RV};
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        let animals = std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        // A perfectly well-formed property that `Dog` neither requires nor
+        // recommends — the open-world case Rule 22 §c admits.
+        let nickname = Iri::parse("urn:eigenius:example:nickname").unwrap();
+        let mut prop = Resource::new(nickname.clone());
+        prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RV::Array(vec![RV::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        prop.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            RV::String("nickname".into()),
+        );
+        prop.set(
+            Iri::parse(wk::DESCRIPTION).unwrap(),
+            RV::String("an informal name".into()),
+        );
+        prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            RV::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+        );
+        let mut top = LayerBuilder::new("nickname", Some(animals));
+        top.add_resource(prop).unwrap();
+        let layer = std::sync::Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        // A Dog that carries it.
+        let mut rex = Resource::new(Iri::parse("urn:eigenius:example:rex").unwrap());
+        rex.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RV::Array(vec![RV::ResourceRef(
+                Iri::parse("urn:eigenius:example:Dog").unwrap(),
+            )]),
+        );
+        rex.set(
+            Iri::parse("urn:eigenius:example:name").unwrap(),
+            RV::String("Rex".into()),
+        );
+        rex.set(
+            Iri::parse("urn:eigenius:example:breed").unwrap(),
+            RV::String("collie".into()),
+        );
+        rex.set(nickname.clone(), RV::String("Rexy".into()));
+
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], std::sync::Arc::clone(&layer));
+
+        // ── the resource side: NOW projectable ──────────────────────────────
+        let rex_type = check_infer(&mut c, &Exp::EigonResource(Box::new(rex.clone())))
+            .expect("a resource must infer a type");
+        let projected = find_record_field(&mut c, &rex_type, &nickname);
+        assert!(
+            projected.is_some(),
+            "D78 Phase E: an undeclared property the resource carries must be projectable off it; \
+             got None from {rex_type:?}"
+        );
+        assert!(
+            !matches!(projected.as_ref().unwrap(), Val::Data(..)),
+            "and at the property's own type, not Option-wrapped: {:?}",
+            projected.unwrap()
+        );
+
+        // Its declared fields project too — the record is the union, not a swap.
+        for declared in ["urn:eigenius:example:name", "urn:eigenius:example:breed"] {
+            assert!(
+                find_record_field(&mut c, &rex_type, &Iri::parse(declared).unwrap()).is_some(),
+                "{declared} must still project"
+            );
+        }
+
+        // ── the class side: STILL not projectable, permanently ──────────────
+        let dog_type = Val::EigonClass(Iri::parse("urn:eigenius:example:Dog").unwrap());
+        assert!(
+            find_record_field(&mut c, &dog_type, &nickname).is_none(),
+            "a class type is the declared minimum — `nickname` must never project off `Dog`"
+        );
+        assert!(
+            find_record_field(
+                &mut c,
+                &dog_type,
+                &Iri::parse("urn:eigenius:example:name").unwrap()
+            )
+            .is_some(),
+            "but Dog's own declared fields must, or this proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_resource_carries_every_class_it_declares_not_just_the_first() {
+        // 73 % of shipped resources declare more than one `is_a`; the prior
+        // inference kept `classes.first()` and dropped the rest.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::ontology::resource::{Resource, Value as RV};
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut r = Resource::new(Iri::parse("urn:t:two_classes").unwrap());
+        r.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RV::Array(vec![
+                RV::ResourceRef(Iri::parse(wk::DECLARED_RESOURCE).unwrap()),
+                RV::ResourceRef(Iri::parse(wk::CLASS).unwrap()),
+            ]),
+        );
+        r.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            RV::String("two".into()),
+        );
+
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        let t = check_infer(&mut c, &Exp::EigonResource(Box::new(r))).unwrap();
+        match t {
+            Val::Refine(_, classes) => {
+                assert_eq!(
+                    classes.len(),
+                    2,
+                    "both declared classes must survive: {classes:?}"
+                );
+            }
+            other => panic!("expected a Refine over both classes, got {other:?}"),
+        }
     }
 
     #[test]

@@ -695,6 +695,51 @@ mod refine_semantics {
     }
 
     #[test]
+    fn a_refinement_flows_into_a_nominal_class_context_by_its_constraint_set() {
+        // D78 Phase E. `Construct C {}` yields `Refine(record, {C})`, and an
+        // inductive constructor's parameter is `EigonClass(C)`. What makes the
+        // one an inhabitant of the other is the **constraint set**, not the
+        // carrier.
+        //
+        // Forgetting the set and comparing carriers is wrong against a *nominal*
+        // supertype, and since Phase C a no-`requires` class carries an empty
+        // record — so the comparison became `Record([]) ≠ EigonClass(C)` and a
+        // well-typed composition was rejected
+        // (`felicity_filter_accepts_well_typed_composition`).
+        let carrier = rec(&["urn:t:a"]);
+        let refined = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
+        let as_class = crate::nbe::val::Val::EigonClass(iri("urn:t:C"));
+
+        assert!(
+            subtype_of(0, &v(&refined), &as_class).is_ok(),
+            "a record declaring C must flow into a context expecting class C"
+        );
+        assert!(
+            subtype_of(
+                0,
+                &v(&refined),
+                &crate::nbe::val::Val::EigonClass(iri("urn:t:Other"))
+            )
+            .is_err(),
+            "but not into a class it does not declare"
+        );
+
+        // The empty carrier is the case that actually broke: 749 of 894 shipped
+        // classes have no `requires`.
+        let empty = Exp::Refine(Box::new(Exp::record(vec![]).unwrap()), set(&["urn:t:C"]));
+        assert!(
+            subtype_of(0, &v(&empty), &as_class).is_ok(),
+            "an empty record declaring C is still an instance of C"
+        );
+
+        // Forgetting still applies against a structural supertype.
+        assert!(
+            subtype_of(0, &v(&refined), &v(&carrier)).is_ok(),
+            "Refine(R, S) <: R must keep working"
+        );
+    }
+
+    #[test]
     fn entailment_beyond_set_inclusion_is_not_yet_decided() {
         // Documents the incompleteness rather than hiding it. `Pup ⊨ Dog` would
         // make `Refine(R, {Pup}) <: Refine(R, {Dog})` legal, but deciding that
