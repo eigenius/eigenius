@@ -582,16 +582,59 @@ the two readings rather than reconciling them.
 widens the subject's type to accommodate the property; Eigenius refuses the property because the
 subject's type does not accommodate it.
 
-That is §3.8 seen from the other side. **RDF already does what Seam B proposes** — a resource's type
-follows from what it actually carries — reaching it by inference where Seam B reaches it by typing.
+That is §3.8 seen from the other side, but the parallel is **narrower than it first looks** and the
+difference is the point:
+
+- **RDF infers class membership.** `?x ?p ?y` with `?p rdfs:domain ?C` yields `?x rdf:type ?C` — a new
+  membership claim, derived from carrying a property.
+- **Seam B infers nothing.** A resource carrying field `p` has a record type that *includes* `p`. No
+  class membership follows, and no `is_a` is added.
+
+Seam B is the weaker, more conservative move: it makes the field **typed** without making the
+resource a member of anything. That is what keeps it compatible with 9c and 10d, where membership
+stays declared and checked. RDF's inference would not be.
 
 **Where Eigenius sits.** It fuses constraint into class like TTR, but asserts membership like RDF and
-then checks the assertion. That hybrid is exactly why §6.0's three implementations diverged: fusing
-the shape into the class means every subsystem needing *either* reading reimplements it, whereas
-SHACL's split gives each subsystem one artifact to consume. TTR's clause 8 is the other consistent
-position — fuse them, and let membership be *decided* by the condition rather than asserted beside
-it. **Eigenius should finish moving to clause 8, not retreat to SHACL's split**, because the
-assertion is already checked; what is missing is that the check and the type are the same thing.
+then checks the assertion. That hybrid is why §6.0's three implementations diverged: fusing the shape
+into the class means every subsystem needing *either* reading reimplements it, whereas SHACL's split
+gives each subsystem one artifact to consume.
+
+### What "adopting clause 8" actually means
+
+Clause 8 is an **iff**:
+
+```
+r : R ∪ {⟨ℓ, T⟩}   iff   r : R,  ⟨ℓ, a⟩ ∈ r,  and  a : T
+```
+
+Adopting it is a **unification, not a change to what membership means**. Four concrete changes:
+
+1. **`resolve_class_type` returns the thing clause 8 tests.** Today it builds a right-nested
+   `Val::Sigma` that no membership decision consults. It returns a field set with types — a
+   `Val::Record` — which is exactly the left-hand side of clause 8.
+2. **The validator's Rules 1+2 and 3–10 become an evaluation of clause 8** against that record type,
+   instead of an independent transitive walk of `requires` + per-property rules. Same checks, same
+   verdicts; one definition instead of two.
+3. **The query engine consumes the same record type.** `class_with_subclass_closure` + `scan_chain`
+   stay — the index is keyed on the *declaration* and clause 8 does not change that — but the notion
+   of "satisfies C" it presupposes becomes the same one the validator computes.
+4. **A resource's own type is the union of its actual fields** (§3.8), so `r : C` holds when C's
+   fields are included in r's with types matching. That is clause 8 applied repeatedly, and it is
+   what makes undeclared properties projectable.
+
+**What it does not mean** — the slogan invites all three, and all three are already rejected:
+
+- **Not** membership becoming structural or inferred. That is 9b/10b; Q9 chose 9c and Q10 chose 10d,
+  both of which keep membership **declared**.
+- **Not** `is_a` being derived rather than written. The name is still needed for dispatch, for the
+  query index, and for the nominal identity Q2 requires.
+- **Not** RDF's domain-inference. Carrying a property never adds a class.
+
+**So `is_a` survives as a declared name whose meaning is clause 8.** The check that already runs
+becomes the *definition* of the type, rather than a parallel procedure standing beside a type nothing
+consults. That is the whole of it — and it is why retreating to SHACL's split would be backwards:
+the split gives the three implementations a shared artifact but leaves membership unchecked, which is
+strictly less than Eigenius already has.
 
 ### 6.3b Rule 0 and the `Any` class — settled
 
