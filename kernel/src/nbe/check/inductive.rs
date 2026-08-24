@@ -582,10 +582,22 @@ pub(super) fn check_infer_inductive_rec(
     }
 
     // 2. Motive : I(params) → Sort(<codomain>).
-    //    For non-Prop inductives, codomain is Sort(2) — any sort body
-    //    is admitted via cumulativity (Set, Type(n) all inhabit Sort(2)).
+    //
+    //    For non-Prop inductives the codomain is `Sort(2)`, which admits a motive
+    //    returning `Prop` or `Set` and NOTHING ABOVE (eigenius#228). A motive
+    //    returning `Sort(k)` has type `I → Sort(k+1)`, so `k ∈ {0,1}` pass and
+    //    `Type 1 = Sort(2)` — whose type is `Sort(3)` — does not. An earlier
+    //    version of this comment claimed "Set, Type(n) all inhabit Sort(2)";
+    //    that is false for every `n ≥ 1`, and the effective elimination ceiling
+    //    is Set. `nbe::level::recursor_elimination_ceiling` pins the four cases.
+    //
+    //    The constant is a placeholder for a universe parameter: D75 §8 Q4
+    //    adopts `I.rec.{u}` with motive `I(params) → Sort u`, at which point this
+    //    two-way choice becomes "`u` pinned to 0" vs "`u` free" and the gate
+    //    below is unchanged. Gated on #188's residual.
+    //
     //    For Prop inductives, singleton-elim (D46 §7) gates large elim:
-    //    if `large_elim_admitted(decl)` then any sort is permitted;
+    //    if `large_elim_admitted(decl)` then the wider codomain is permitted;
     //    otherwise the motive must return Prop (Sort(0)).
     let codomain_sort =
         if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(decl) {

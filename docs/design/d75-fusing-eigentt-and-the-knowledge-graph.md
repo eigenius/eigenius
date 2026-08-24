@@ -1133,8 +1133,22 @@ the tests written during this analysis pin *current* behaviour — the defects �
 
 **Measurements:**
 
-- **M1** (is any class used as a type in a term the constraint reading cannot serve?) — **not run**,
-  and still worth running: it is the check that the synthesis does not break D18 ontology-as-types.
+- **M1** (is any class used as a type in a term the constraint reading cannot serve?) — **run; the
+  answer is no.** Measured over every shipped ontology (`2026-08-24`):
+
+  | measure | result |
+  |---|---|
+  | `ConstRef` targets in encoded terms | 11 distinct — **0 resolve to a declared class** (6 `InductiveType`, 4 `DataType`, 1 `Level`), against 894 declared classes |
+  | binder domains in shipped ESL | all `Prop`, `Set`, `Type 1`, `core:string`, or a bound type variable — **none is a class** |
+  | encoded-term constructor census | `ConstRef` 83, `OpRef` 47, `Pi` 27, `Zero` 2, `Sort` 1, `Succ` 1, `Var` 1 — **no `Construct`, no `PropAccess`** |
+
+  So **D18 ontology-as-types is not exercised by any shipped ontology**; it lives in the kernel and
+  its tests. The constraint reading serves the entire shipped corpus, and 7b's refinement is needed
+  only for the `Construct`/`PropAccess` path, which has no current content to break.
+
+  This materially de-risks Seam B: the encoding being replaced has no users outside the kernel.
+  It does **not** say the path is dead — the demo's own comment records quantifying over `Set`
+  *because* it needs a kind, which is the shape a class-as-type would otherwise serve.
 - **M2** (conversion resolve traffic) — **obsolete**. It existed to choose between Q3's options A and
   B; the synthesis answered Q3 on different grounds.
 - **M3** — **resolved into Q9**, which turned out to be already-shipped behaviour.
@@ -1204,10 +1218,11 @@ Must settle:
 - ~~**Rule 0**~~ — **settled in §6.6.** It survives as curation: `core:Resource` already exists as a
   class with no `requires`, so "0 constraints" and "at least one `is_a`" are the same state spelled
   two ways.
-- **#228's comment** — the doc comment claiming `Type(n)` inhabits `Sort(2)` is wrong today and can
-  be fixed immediately, independently of 4c.
-- **M1** — is any class used as a type in a term in a way the constraint reading cannot serve? A
-  search over the shipped ontologies plus the EigenTT term corpus, not a design question.
+- ~~**#228's comment**~~ — **fixed.** `check/inductive.rs:585` now states the real ceiling (Prop and
+  Set only), names the test that pins it, and records that the constant is a placeholder for 4c's
+  universe parameter.
+- ~~**M1**~~ — **run**; see §8a. No class is used as a type in a term anywhere in the shipped corpus,
+  and `Construct`/`PropAccess` appear in no shipped encoded term.
 
 ### Sequencing
 
