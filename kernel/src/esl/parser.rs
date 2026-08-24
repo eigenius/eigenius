@@ -1717,6 +1717,20 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(&TokenKind::LBrace)?;
+
+        // `description = "…";` — a leading body item, spelled as `class` and `property` spell it
+        // (eigenius#221). Unambiguous against a constructor: a ctor name is followed by `,`, `(`,
+        // `:` or `}`, never `=`.
+        let mut description = None;
+        if matches!(self.peek(), TokenKind::Ident(n) if n == "description")
+            && *self.peek_at(1) == TokenKind::Eq
+        {
+            self.advance();
+            self.expect(&TokenKind::Eq)?;
+            description = Some(self.expect_string()?);
+            self.expect_semicolon()?;
+        }
+
         let mut ctors = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
             ctors.push(self.parse_ctor_decl()?);
@@ -1748,6 +1762,7 @@ impl<'a> Parser<'a> {
 
         Ok(DataDecl {
             name,
+            description,
             params,
             indices,
             result_sort,
@@ -1946,51 +1961,19 @@ impl<'a> Parser<'a> {
     /// Braces disambiguate binders from positional qualified names
     /// (`ex:Nat`) — without them the two shapes are token-identical.
     fn parse_ctor_arg(&mut self) -> Result<CtorArg, EslError> {
-        if self.at(&TokenKind::LBrace) {
+        // `name : Type` is a NAMED argument; anything else is positional. One token of lookahead
+        // decides it, and there is no ambiguity with a qualified type: `ns:local` lexes as a
+        // single atomic `QualName`, while the standalone `Colon` is reserved for the binder colon
+        // (see `parse_qualified_name`). So `base : ex:Nat` is `Ident Colon QualName` and `ex:Nat`
+        // is `QualName` — different token streams, not a spacing convention.
+        if matches!(self.peek(), TokenKind::Ident(_)) && *self.peek_at(1) == TokenKind::Colon {
             let pos = self.current_pos();
-            self.advance();
             let name = self.expect_ident()?;
-            let (kind, bound) = if self.at(&TokenKind::Colon) {
-                self.advance();
-                let kind = self.parse_qualified_name()?;
-                let bound = if self.at(&TokenKind::Less) {
-                    self.advance();
-                    Some(self.parse_qualified_name()?)
-                } else {
-                    None
-                };
-                (kind, bound)
-            } else if self.at(&TokenKind::Less) {
-                // `{name < bound}` — implicit Size kind.
-                self.advance();
-                let bound = self.parse_qualified_name()?;
-                (
-                    QualifiedName {
-                        namespace: None,
-                        name: "Size".to_string(),
-                        pos: pos.clone(),
-                    },
-                    Some(bound),
-                )
-            } else {
-                return Err(EslError::parser(
-                    Some(self.current_pos()),
-                    format!(
-                        "expected ':' or '<' after binder name in ctor arg, found {:?}",
-                        self.peek()
-                    ),
-                ));
-            };
-            self.expect(&TokenKind::RBrace)?;
-            Ok(CtorArg::Named {
-                name,
-                kind,
-                bound,
-                pos,
-            })
-        } else {
-            Ok(CtorArg::Positional(self.parse_ctor_arg_type()?))
+            self.expect(&TokenKind::Colon)?;
+            let typ = self.parse_ctor_arg_type()?;
+            return Ok(CtorArg::Named { name, typ, pos });
         }
+        Ok(CtorArg::Positional(self.parse_ctor_arg_type()?))
     }
 
     /// A constructor argument type: `Name` or `Name(arg, ...)`.
@@ -3466,6 +3449,47 @@ mod tests {
         }
     }
 
+    /// **A named constructor argument — `mk(A : Set, A)`** (eigenius#221).
+    ///
+    /// Was `mk({A : Set}, A)`: the braces came from the SIZED bounded binder (`{j : Size < i}`),
+    /// which eigenius#218 removed along with sized types. They were never needed to disambiguate —
+    /// `ns:local` is one atomic `QualName` token and the standalone `Colon` is reserved for the
+    /// binder colon, so `A : Set` and `ex:Nat` are different token streams.
+    ///
+    /// The two sibling tests that covered `{j < i}` and `{j : Size < i}` are gone with the sized
+    /// binders themselves; this one survives because its subject is the NAMED form, not the size.
+    #[test]
+    fn data_ctor_named_argument() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Wrap {
+                mk(payload : Set, A),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                let args = d.ctors[0].args();
+                assert_eq!(args.len(), 2);
+                match &args[0] {
+                    CtorArg::Named { name, typ, .. } => {
+                        assert_eq!(name, "payload");
+                        assert_eq!(typ.name.name, "Set");
+                    }
+                    other => panic!("expected a Named argument, got {other:?}"),
+                }
+                assert!(
+                    matches!(&args[1], CtorArg::Positional(_)),
+                    "the second argument is positional and must stay anonymous"
+                );
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
     #[test]
     fn data_list_parametric_with_self_reference() {
         let file = parse_str(
@@ -3517,106 +3541,6 @@ mod tests {
     }
 
     // --- Bounded binders in ctor args (Phase 11b step 15h.2) ---
-
-    #[test]
-    fn data_ctor_bounded_size_binder_implicit_kind() {
-        // `{j < i}` — size kind implicit, bound to `i`.
-        let file = parse_str(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            data ex:Nat(i : Size) {
-                zero,
-                succ({j < i}, ex:Nat(j)),
-            }
-            "#,
-        )
-        .unwrap();
-        match &file.declarations[0] {
-            Declaration::Data(d) => {
-                let succ = &d.ctors[1];
-                assert_eq!(succ.args().len(), 2);
-                match &succ.args()[0] {
-                    CtorArg::Named {
-                        name, kind, bound, ..
-                    } => {
-                        assert_eq!(name, "j");
-                        assert_eq!(kind.name, "Size");
-                        assert!(kind.namespace.is_none());
-                        let b = bound.as_ref().expect("bound present");
-                        assert_eq!(b.name, "i");
-                    }
-                    other => panic!("expected Named, got {other:?}"),
-                }
-                assert!(matches!(&succ.args()[1], CtorArg::Positional(_)));
-            }
-            _ => panic!("expected data"),
-        }
-    }
-
-    #[test]
-    fn data_ctor_bounded_size_binder_explicit_kind() {
-        // `{j : Size < i}` — the explicit-kind form, which parses to the same AST the implicit
-        // `{j < i}` form synthesizes. The fixture used to write `core:Size` and this test pinned
-        // `namespace == Some("core")`; that IRI names no resource on any chain and the D47 decoder
-        // rejects it, so the sort is spelled `Size` (eigenius#188).
-        let file = parse_str(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            data ex:Nat(i : Size) {
-                zero,
-                succ({j : Size < i}, ex:Nat(j)),
-            }
-            "#,
-        )
-        .unwrap();
-        match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[1].args()[0] {
-                CtorArg::Named {
-                    name, kind, bound, ..
-                } => {
-                    assert_eq!(name, "j");
-                    assert!(kind.namespace.is_none());
-                    assert_eq!(kind.name, "Size");
-                    assert_eq!(bound.as_ref().unwrap().name, "i");
-                }
-                other => panic!("expected Named, got {other:?}"),
-            },
-            _ => panic!("expected data"),
-        }
-    }
-
-    #[test]
-    fn data_ctor_unbounded_named_binder() {
-        // `{A : Set}` — unbounded Pi binder, kind Set.
-        let file = parse_str(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            data ex:Wrap {
-                mk({A : Set}, A),
-            }
-            "#,
-        )
-        .unwrap();
-        match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[0].args()[0] {
-                CtorArg::Named {
-                    name, kind, bound, ..
-                } => {
-                    assert_eq!(name, "A");
-                    assert_eq!(kind.name, "Set");
-                    assert!(bound.is_none());
-                }
-                other => panic!("expected Named, got {other:?}"),
-            },
-            _ => panic!("expected data"),
-        }
-    }
 
     // --- eigenius#72 Layer 2: indexed data declarations ---
 

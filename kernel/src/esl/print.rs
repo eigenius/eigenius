@@ -941,11 +941,26 @@ fn print_data(
             } else {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|a| print_arg_type(a, ns, &cpath))
-                    .collect::<Result<_, _>>()?;
+                    .map(|a| {
+                        let t = print_arg_type(a, ns, &cpath)?;
+                        // `core:arg_name` prints as the named form `base : ex:Nat` (eigenius#221).
+                        match a
+                            .as_object()
+                            .and_then(|o| o.get(wk::ARG_NAME))
+                            .and_then(Value::as_str)
+                        {
+                            Some(n) => Ok(format!("{n} : {t}")),
+                            None => Ok(t),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, PrintError>>()?;
                 lines.push(format!("    {name}({}),", rendered.join(", ")));
             }
         }
+    }
+    // `description = "…";` leads the body, as it does for `class` (eigenius#221).
+    if let Some(d) = obj.get(wk::DESCRIPTION).and_then(Value::as_str) {
+        lines.insert(0, format!("    description = \"{}\";", escape(d)));
     }
     Ok(format!("{header} {{\n{}\n}}\n", lines.join("\n")))
 }

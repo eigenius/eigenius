@@ -2053,6 +2053,12 @@ impl Compiler {
         }
         r.set(iri(wk::IS_A), Value::Array(is_a_values));
         r.set(iri(wk::SHORT_NAME), Value::String(decl.name.name.clone()));
+        // eigenius#221 — `description = "…";` in the body. `core:description` is INDEXED
+        // (`core:description_text_index`, read by the DCG glossary and OOV grounding), so its
+        // absence kept every ESL-authored inductive out of that index.
+        if let Some(d) = &decl.description {
+            r.set(iri(wk::DESCRIPTION), Value::String(d.clone()));
+        }
 
         let param_names: std::collections::HashSet<&str> =
             decl.params.iter().map(|p| p.name.as_str()).collect();
@@ -2133,11 +2139,9 @@ impl Compiler {
                                 ast::CtorArg::Positional(t) => {
                                     arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
                                 }
-                                ast::CtorArg::Named {
-                                    name, kind, bound, ..
-                                } => {
+                                ast::CtorArg::Named { name, typ, .. } => {
                                     arg_values
-                                        .push(self.compile_ctor_binder(name, kind, bound, &scope)?);
+                                        .push(self.compile_named_ctor_arg(name, typ, &scope)?);
                                     local_binders.push(name.clone());
                                 }
                             }
@@ -2218,59 +2222,33 @@ impl Compiler {
         Ok(Value::Embedded(Box::new(ar)))
     }
 
-    /// Compile a named constructor-argument binder
-    /// (`ident : Kind [< Bound]`, Phase 11b step 15h).
+    /// A NAMED constructor argument — `succ(base : ex:Nat)`.
     ///
-    /// Encoded as an `InductiveArgType` resource carrying a
-    /// `binder_name` key — its presence distinguishes binders from
-    /// positional args at decode time. `binder_bound` holds the
-    /// optional upper bound (resolved identically to type names:
-    /// declared params / built-ins bare, everything else via
-    /// namespace resolution).
-    fn compile_ctor_binder(
+    /// Identical to `compile_ctor_arg_type` bar one property: the name lands in `core:arg_name`, a
+    /// declared `recommends` on `core:InductiveArgType` that the Julia mirror generator reads as
+    /// the slot's readable field name (D32 §3.2), falling back to `arg_0`/`arg_1` without it.
+    ///
+    /// This emitted `core:binder_name` until eigenius#221, which is **not a declared property** —
+    /// so every use of the form was rejected at commit by Rule 22 §c
+    /// (`property key '…:binder_name' is not defined as a core:Property`). Hence 0 occurrences of
+    /// `binder_name` on any chain against 85 of `arg_name`: the surface produced one property and
+    /// the data used the other.
+    fn compile_named_ctor_arg(
         &self,
         name: &str,
-        kind: &ast::QualifiedName,
-        bound: &Option<ast::QualifiedName>,
+        typ: &ast::CtorArgType,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Value, EslError> {
         use crate::ontology::well_known as wk;
-        let mut ar = Resource::new_embedded();
-        set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-
-        // The "type" part of the binder (kind). Resolution rules
-        // mirror `compile_ctor_arg_type` — declared params and
-        // `Inf`/`Size` built-ins stay bare; other names resolve
-        // through the namespace registry.
-        let kind_str = if kind.namespace.is_none() {
-            let n = kind.name.as_str();
-            if scope.contains(n) || n == "Inf" || n == "Size" {
-                bare_kind_value(n)
-            } else {
-                const_ref_value(&self.resolve(kind)?)
-            }
-        } else {
-            const_ref_value(&self.resolve(kind)?)
+        let compiled = self.compile_ctor_arg_type(typ, scope)?;
+        let Value::Embedded(mut ar) = compiled else {
+            return Err(EslError::compiler(
+                None,
+                "constructor argument did not compile to a resource".to_string(),
+            ));
         };
-        ar.set(iri(wk::TYPE_NAME), kind_str);
-        ar.set(iri(wk::TYPE_ARGS), Value::Array(Vec::new()));
-        ar.set(iri(wk::BINDER_NAME), Value::String(name.to_string()));
-
-        if let Some(b) = bound {
-            let bound_str = if b.namespace.is_none() {
-                let n = b.name.as_str();
-                if scope.contains(n) || n == "Inf" || n == "Size" {
-                    b.name.clone()
-                } else {
-                    self.resolve(b)?
-                }
-            } else {
-                self.resolve(b)?
-            };
-            ar.set(iri(wk::BINDER_BOUND), Value::String(bound_str));
-        }
-
-        Ok(Value::Embedded(Box::new(ar)))
+        ar.set(iri(wk::ARG_NAME), Value::String(name.to_string()));
+        Ok(Value::Embedded(ar))
     }
 
     // --- Class ---
@@ -4611,6 +4589,103 @@ mod tests {
     }
 
     // --- `data` declaration compilation (Phase 11b step 8) ---
+
+    /// **eigenius#221 — `data` can document itself and name its constructor arguments.**
+    ///
+    /// Both properties are declared in the core schema and neither was reachable from the surface:
+    /// `core:description` is universal (and INDEXED — `core:description_text_index`), and
+    /// `core:arg_name` is a `recommends` on `core:InductiveArgType` that the Julia mirror generator
+    /// reads for field names.
+    ///
+    /// The named form previously spelled `{base : ex:Nat}` and compiled to `core:binder_name`,
+    /// which is **not a declared property** — Rule 22 §c rejected every use at commit. Hence 0
+    /// `binder_name` on any chain against 85 `arg_name`.
+    #[test]
+    fn data_carries_a_description_and_named_ctor_args() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Tree(A : Set) {
+                description = "a binary tree";
+                leaf,
+                node(left : ex:Tree(A), value : A),
+            }
+            "#,
+        );
+        let r = &resources[0];
+        assert_eq!(
+            r.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("a binary tree")
+        );
+
+        let ctors = match r.get(&iri("urn:eigenius:core:ctors")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected ctors array, got {other:?}"),
+        };
+        let node = match &ctors[1] {
+            Value::Embedded(e) => e.as_ref(),
+            other => panic!("expected embedded ctor, got {other:?}"),
+        };
+        let args = match node.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected arg_types array, got {other:?}"),
+        };
+        let names: Vec<Option<&str>> = args
+            .iter()
+            .map(|a| match a {
+                Value::Embedded(e) => e
+                    .get(&iri("urn:eigenius:core:arg_name"))
+                    .and_then(|v| v.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec![Some("left"), Some("value")]);
+
+        // The undeclared property the old brace form emitted must not reappear: it fails Rule 22.
+        for a in args {
+            if let Value::Embedded(e) = a {
+                assert!(
+                    e.get(&iri("urn:eigenius:core:binder_name")).is_none(),
+                    "core:binder_name is not a declared property and must not be emitted"
+                );
+            }
+        }
+    }
+
+    /// A positional argument stays anonymous — the named form is opt-in, and a bare qualified name
+    /// must not be mistaken for `name : type`. `ex:Tree` lexes as one `QualName` token; the
+    /// standalone `Colon` is a different token, so the two are distinguishable without spacing
+    /// conventions.
+    #[test]
+    fn a_positional_ctor_arg_carries_no_arg_name() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+            data ex:Nat { zero, succ(ex:Nat), }
+            "#,
+        );
+        let ctors = match resources[0].get(&iri("urn:eigenius:core:ctors")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected ctors, got {other:?}"),
+        };
+        let succ = match &ctors[1] {
+            Value::Embedded(e) => e.as_ref(),
+            other => panic!("expected embedded, got {other:?}"),
+        };
+        let args = match succ.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected arg_types, got {other:?}"),
+        };
+        match &args[0] {
+            Value::Embedded(e) => assert!(
+                e.get(&iri("urn:eigenius:core:arg_name")).is_none(),
+                "a positional argument must not acquire a name"
+            ),
+            other => panic!("expected embedded arg, got {other:?}"),
+        }
+    }
 
     #[test]
     fn compile_data_nat_non_parametric() {

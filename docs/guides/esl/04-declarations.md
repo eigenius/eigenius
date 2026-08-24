@@ -322,9 +322,9 @@ Parser: [`parse_def`](../../../kernel/src/esl/parser.rs). AST: [`DefDecl`](../..
 
 ## 4.5. `data` — inductive types
 
-Inductive type declarations introduce a new type with a finite list of constructors. Recursive references to the type itself are allowed (and are exactly what makes inductives interesting). Sized inductives carry a size parameter and use bounded binders to track strictly-decreasing recursion.
+Inductive type declarations introduce a new type with a finite list of constructors. Recursive references to the type itself are allowed (and are exactly what makes inductives interesting).
 
-### Non-parametric, non-sized
+### Non-parametric
 
 ```esl
 data ex:Nat {
@@ -338,11 +338,40 @@ Two constructors: `zero` is nullary; `succ` takes one argument of type `Nat`. No
 ### Parametric
 
 ```esl
-data ex:List(A : core:Set) {
+data ex:List(A : Set) {
     nil,
     cons(A, ex:List(A)),
 }
 ```
+
+### Documenting the declaration
+
+`description = "…";` leads the body, spelled as `class` and `property` spell it:
+
+```esl
+data ex:Tree(A : Set) {
+    description = "a binary tree over A";
+    leaf,
+    node(ex:Tree(A), A, ex:Tree(A)),
+}
+```
+
+It populates `core:description`, which is **indexed** (`core:description_text_index`) — the same index the DCG's glossary and OOV grounding read — so a described declaration is searchable, not merely commented.
+
+### Naming constructor arguments
+
+An argument may carry a readable name, `name : Type`:
+
+```esl
+data ex:Tree(A : Set) {
+    leaf,
+    node(left : ex:Tree(A), value : A, right : ex:Tree(A)),
+}
+```
+
+The name lands in `core:arg_name`, a `recommends` on `core:InductiveArgType`. The Julia mirror generator uses it for the generated struct's field names, falling back to `arg_0`, `arg_1`, … when absent. Naming is optional and per-argument — a positional argument stays anonymous.
+
+There is no ambiguity with a qualified type: `ex:Tree` lexes as one `QualName` token, while `left : ex:Tree(A)` lexes as `Ident`, `Colon`, `QualName` — different token streams, not a spacing convention.
 
 `List` is parameterised by the element type `A`. Constructor argument types may reference parameters by bare name (`A`) or by full IRI (`ex:List(A)`).
 

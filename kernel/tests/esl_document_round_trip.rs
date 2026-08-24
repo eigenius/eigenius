@@ -96,6 +96,18 @@ fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
             "#,
         ),
         (
+            "data with a description and named arguments (eigenius#221)",
+            "urn:eigenius:ex:Tree",
+            r#"
+            namespace ex = "urn:eigenius:ex";
+            data ex:Tree(A : Set) {
+                description = "a binary tree, \"quoted\" for escaping";
+                leaf,
+                node(left : ex:Tree(A), value : A, right : ex:Tree(A)),
+            }
+            "#,
+        ),
+        (
             "plain class (the control — this form already round-trips)",
             "urn:eigenius:ex:Dog",
             r#"
@@ -151,17 +163,11 @@ fn every_declaration_form_round_trips_through_esl() {
 ///    (`core:Level:Zero`), adds `reflection:DeclaredResource` to `is_a`, and stamps
 ///    `reflection:declared_by`. The hand-authored JSON has none of these — it is under-specified
 ///    relative to compiler output, so the difference runs the other way from a loss.
-/// 2. **`core:description` on the declaration.** ESL's `data` form has no `description` item —
-///    `DataDecl` carries `name`, `params`, `indices`, `result_sort`, `extra_classes`, `ctors`.
-///    **All 10** hand-authored inductives across the shipped ontologies carry one.
-/// 3. **`core:arg_name` on constructor arguments.** There is no ESL syntax for naming a
-///    constructor argument, and `esl::compile` never emits the property. **83** named arguments
-///    exist in hand-authored JSON.
 ///
-/// (2) and (3) are gaps in the LANGUAGE, not in the printer: the chain carries information ESL
-/// cannot say. Closing them means extending the `data` surface, which is a separate decision —
-/// until it is made, `eigenius decompile` is lossy on exactly these two properties and this test
-/// says so rather than hiding it behind a normaliser.
+/// `core:description` and `core:arg_name` were on this list until eigenius#221 added the surface
+/// for both — `description = "…";` in the body and `succ(base : ex:Nat)` for a named argument. The
+/// exclusions are gone and the test now asserts the stronger property, which is what closing a
+/// language gap is supposed to buy.
 #[test]
 fn every_shipped_inductive_round_trips_through_esl() {
     const INDUCTIVE: &str = "urn:eigenius:core:InductiveType";
@@ -172,8 +178,6 @@ fn every_shipped_inductive_round_trips_through_esl() {
             match v {
                 Value::Object(o) => {
                     o.remove("@id");
-                    o.remove("urn:eigenius:core:description");
-                    o.remove("urn:eigenius:core:arg_name");
                     o.remove("urn:eigenius:reflection:declared_by");
                     o.remove("urn:eigenius:core:is_a");
                     // The compiler writes explicit empty arrays where hand-authored JSON omits

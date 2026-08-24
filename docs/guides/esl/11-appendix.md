@@ -87,7 +87,10 @@ A nullary constructor in value position requires empty parens (`Foo()`); a bare 
 DataDecl     ::= 'data' QualifiedName ParamList?
                  (':' IndexTelescope)?               (* eigenius#72 Layer 2 *)
                  (',' QualifiedName)*                (* extra is_a classes, D52 §12 *)
-                 '{' (Ctor (',' Ctor)* ','?)? '}'    (* zero ctors is legal *)
+                 '{' DataDescription? (Ctor (',' Ctor)* ','?)? '}'
+                                                     (* zero ctors is legal *)
+
+DataDescription ::= 'description' '=' StringLit ';'  (* core:description *)
 ParamList    ::= '(' DataParam (',' DataParam)* ')'
 DataParam    ::= Identifier ':' (QualifiedName | Sort)   (* "A : core:Set", "P : Prop" *)
 IndexTelescope::= (TypeExpr '->')* Sort              (* "Nat -> Set" *)
@@ -98,6 +101,7 @@ Ctor         ::= Identifier                          (* nullary, e.g. "zero" *)
               |  Identifier ':' TypeExpr             (* typed form *)
 
 CtorArg      ::= CtorArgType                         (* positional / anonymous *)
+              |  Identifier ':' CtorArgType           (* named: core:arg_name *)
 
 CtorArgType  ::= QualifiedName                       (* "Nat" *)
               |  QualifiedName '(' CtorArgType (',' CtorArgType)* ')'  (* "List(A)" *)

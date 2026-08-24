@@ -340,6 +340,10 @@ pub enum ProgramAttribute {
 #[derive(Debug)]
 pub struct DataDecl {
     pub name: QualifiedName,
+    /// `description = "…";` in the body — `core:description` on the emitted resource. The field
+    /// `ClassDecl`, `AxiomDecl` and `DefDecl` already carry; `data` did not until eigenius#221,
+    /// which kept every inductive out of `core:description_text_index`.
+    pub description: Option<String>,
     /// Type parameters: `(A : Set, B : Set, ...)`. Empty for
     /// non-parametric inductives.
     pub params: Vec<DataParam>,
@@ -482,15 +486,18 @@ impl CtorDecl {
 pub enum CtorArg {
     /// `cons(A, List(A))` — positional, anonymous binder.
     Positional(CtorArgType),
-    /// `succ(j : Size, ex:Nat(j))` — named binder with kind.
-    /// The optional `bound` encodes a `< upper` clause; when the
-    /// kind is `Size` and `bound` is present, this compiles to
-    /// `Exp::SizedPi { upper, body }` and introduces a TSO
-    /// hypothesis in the constructor's telescope.
+    /// `succ(base : ex:Nat)` — a NAMED argument. The name is the readable label for the slot and
+    /// lands in `core:arg_name`, a `recommends` on `core:InductiveArgType` that the Julia mirror
+    /// generator reads for its field names (D32 §3.2).
+    ///
+    /// The spelling was `{name : kind}` — brace-delimited — because this variant began as the
+    /// SIZED bounded binder (`{j : Size < i}`), where the braces marked a size argument. Sized
+    /// types are gone (eigenius#218) and the braces went with them: they were never needed to
+    /// disambiguate, since `ns:name` lexes as one atomic `QualName` token and the standalone
+    /// `Colon` is reserved for the binder colon (eigenius#221).
     Named {
         name: String,
-        kind: QualifiedName,
-        bound: Option<QualifiedName>,
+        typ: CtorArgType,
         pos: Position,
     },
 }
