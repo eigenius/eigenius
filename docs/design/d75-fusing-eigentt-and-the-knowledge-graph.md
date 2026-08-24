@@ -1047,7 +1047,78 @@ Seam B*, not independent of it. Seam B itself has no implementation, no `Val::Re
 migration of the three existing constraint implementations onto one. The design is settled; the
 question of whether it survives contact with 9.4M resources is not.
 
-## 9. References
+## 9. What still needs design
+
+D75 settles **what is wrong and what to do about it**. It does not settle **how**, and an implementer
+cannot start from it. What follows is the split — three documents, because the seams are independent
+and have different shapes, plus a short list of things that need a decision but not a document.
+
+### D76 — the typing environment (Seam A, steps 3–6)
+
+The one that gates #188. Must settle:
+
+- **The trait's signature.** §8 Q1 says "one environment trait, `Layer` as impl, absorbed into
+  `CheckHooks`, the `Option` goes". Not a signature. What are the methods; what does a lookup
+  *return* — `Arc<Resource>`, a `Decl` enum, a `Val`; who owns the `(LayerId, Iri)` memo now that two
+  surfaces share it.
+- **δ mechanics, not δ policy.** Q2 fixes the policy per kind. The mechanism is open: conversion must
+  know a `Const`'s kind *without* resolving on the hot path, which means the lazy-δ shape — compare
+  IRIs syntactically first, resolve only on mismatch — and that needs writing down along with
+  unfolding order when both sides are transparent.
+- **The layer under construction.** Flagged in §5's costs, never answered. A layer is built and then
+  validated, so sibling references resolve; but during `check` of one declaration, are *later*
+  declarations in the same layer visible? nanoda extends `Env` declaration-by-declaration. Forward
+  references and intra-layer self-reference both turn on this.
+- **The consolidation migration.** How ~583 sites move: `InductiveType(decl, args)` →
+  `App(Const(iri), args)`, what happens to the inlined `Arc<InductiveDecl>` at readback, and which
+  D47 codec arms change. Persisted terms change shape, so this is a chain-format change.
+- **Q4/4c** rides here: the motive codomain as a level parameter, once `Const(iri, levels)` exists.
+
+### D77 — merge as a pushout of environments (step 7, #225)
+
+Small in surface, and the place the risk actually is. Must settle:
+
+- **The recheck-scoping algorithm.** "Recheck what the pushout rebound" is a *scoping* problem of
+  exactly the kind Rule 22's retroactive scan already has — and that scan has already produced an
+  OOM on a 7.6M chain, fixed by gating to redefinitions. Getting this wrong repeats that.
+- **What `InvalidatedSignature` computes** once it stops being a forward-compat variant.
+- Whether merge gains a validation pass at all, or whether the pushout obligation *is* the pass.
+
+### D78 — resources as records (Seam B, steps 8–11)
+
+Must settle:
+
+- **`Val::Record`'s representation.** Not a `BTreeMap<Iri, Val>`: A11.6 dependency families mean a
+  later field's type can mention an earlier field, so it is a **telescope with named binders**, and
+  union-of-fields has to be reconciled with that ordering.
+- **The level-computation rule.** §6.3 asserts a record's level is computed from its field types and
+  never writes the rule, nor its interaction with the currently-pinned `Sort(1)` for classes.
+- **The refinement `{r : R | r sat C}`** — representation, conversion rule, readback, D47 codec arm,
+  and how `sat` is decided at check time (`NativeDecide` is the existing check-produces-evidence
+  path).
+- **Entailment `C ⊨ D`** — the algorithm, the variance rule for shared fields, and which validation
+  rule enforces it.
+- **Unifying the three constraint implementations** (§6.0): what actually changes in the validator,
+  in the query engine's `class_with_subclass_closure` + `scan_chain` path, and in the kernel. This is
+  the largest single risk in Seam B, because two of the three run over 9.4M resources.
+
+### Decisions that need no document
+
+- **Rule 0** — does "every resource must declare at least one `is_a` class" survive the synthesis's
+  "0 or more"? One decision, one line of consequence.
+- **#228's comment** — the doc comment claiming `Type(n)` inhabits `Sort(2)` is wrong today and can
+  be fixed immediately, independently of 4c.
+- **M1** — is any class used as a type in a term in a way the constraint reading cannot serve? A
+  search over the shipped ontologies plus the EigenTT term corpus, not a design question.
+
+### Sequencing
+
+D76 first: it gates #188 and steps 4–6, and D77 depends on its environment being a thing that exists.
+D78 is parallelisable from day one — Seam B is gated on nothing in Seam A. If only one gets written,
+**D78 has the better ratio**: §3.8 is the one place the current model loses information a resource
+already carries, and the reference design (A11.2) is worked out in a way Seam A's is not.
+
+## 10. References
 
 - `references/publications/Cooper-2023-TTR-chaper-1.pdf` — Ch. 1, the working notation (§1.4.3.3,
   §1.4.3.5, fn. 2)
