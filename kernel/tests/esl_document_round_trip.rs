@@ -108,6 +108,18 @@ fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
             "#,
         ),
         (
+            "embedded resource and opaque JSON as property values (eigenius#222)",
+            "urn:eigenius:ex:reading",
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:ex";
+            resource ex:reading : core:Class {
+                ex:bound = { core:is_a = [ex:Interval]; ex:lo = 0.5; ex:hi = -2.0; };
+                ex:solver_output = json({ "k_elim": 0.5, "path": [1, -2.0, true, null], "n": 3 });
+            }
+            "#,
+        ),
+        (
             "plain class (the control — this form already round-trips)",
             "urn:eigenius:ex:Dog",
             r#"
@@ -260,5 +272,107 @@ fn every_shipped_inductive_round_trips_through_esl() {
         "{} of {seen} shipped inductives do not round-trip:\n\n{}",
         failures.len(),
         failures.join("\n\n")
+    );
+}
+
+/// **Every shipped ontology DOCUMENT decompiles and recompiles.** (eigenius#222)
+///
+/// The per-resource tests above miss two whole classes of defect, because both are properties of
+/// the emitted *document* rather than of any one resource:
+///
+/// - **the namespace alias.** `print_document` mints an alias per IRI prefix. `urn:eigenius:program`
+///   yielded `program`, which is an ESL KEYWORD, so `program:Foo` never lexed as one `QualName`
+///   token and the parser failed on the class-list colon. 79 resources, all in one file.
+/// - **cross-resource references.** A resource compiled alone cannot see a `macro` declared beside
+///   it; the document can.
+///
+/// Four documents still fail to PRINT, all for the same reason: an IRI whose local name is not a
+/// legal ESL identifier (`let-program`, `identity-program`, `program-run`, `obo-foundry` — all
+/// hyphenated). That is a language-level question about what a local name may be, tracked
+/// separately; this test pins it as a known set rather than letting it drift.
+#[test]
+fn every_shipped_ontology_document_round_trips() {
+    fn json_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                json_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "json") {
+                out.push(p);
+            }
+        }
+    }
+    /// Documents whose IRIs ESL cannot spell. Shrinking this list is the point; growing it is a
+    /// regression and must be argued for.
+    const CANNOT_SPELL: &[&str] = &[
+        "let-program.json",
+        "simple-program.json",
+        "notebook-ontology.json",
+        "obo-meta-ontology.json",
+    ];
+
+    let mut files = Vec::new();
+    json_files(std::path::Path::new("../ontologies"), &mut files);
+    files.sort();
+    assert!(
+        files.len() > 20,
+        "expected the shipped ontologies, found {}",
+        files.len()
+    );
+
+    let mut ok = 0;
+    let mut failures = Vec::new();
+    for f in &files {
+        let name = f
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let Ok(text) = std::fs::read_to_string(f) else {
+            continue;
+        };
+        let Ok(resources) = eigon_json::parse_document(&text) else {
+            continue;
+        };
+        let doc = Value::Array(
+            resources
+                .iter()
+                .map(eigon_json::serialize_resource)
+                .collect(),
+        );
+        let expected_unspellable = CANNOT_SPELL.contains(&name.as_str());
+        match esl::print::print_document(&doc) {
+            Err(e) => {
+                if !expected_unspellable {
+                    failures.push(format!("{name}: does not decompile: {}", e.message));
+                }
+            }
+            Ok(src) => {
+                assert!(
+                    !expected_unspellable,
+                    "{name} is on CANNOT_SPELL but now decompiles — remove it from the list"
+                );
+                match esl::compile(&src) {
+                    Ok(_) => ok += 1,
+                    Err(e) => failures.push(format!(
+                        "{name}: decompiled text does not recompile: {:?}",
+                        e.first().map(std::string::ToString::to_string)
+                    )),
+                }
+            }
+        }
+    }
+    assert!(
+        ok > 25,
+        "expected most documents to round-trip; only {ok} did"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} document(s) fail:\n\n{}",
+        failures.len(),
+        failures.join("\n")
     );
 }

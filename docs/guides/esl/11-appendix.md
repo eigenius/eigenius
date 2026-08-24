@@ -71,9 +71,18 @@ Value         ::= StringLit | Integer | Float | Boolean
               |  '{' ResourceField* '}'                     (* embedded resource *)
               |  Identifier '(' (Value (',' Value)* ','?)? ')'   (* inductive ctor *)
               |  QualifiedName '(' (Value (',' Value)* ','?)? ')' (* macro call, D52 *)
+              |  'json' '(' JsonValue ')'                   (* core:json — eigenius#222 *)
               |  'formula' '(' FormulaExpr ')'              (* Pratt-parsed arithmetic *)
               |  'type_expr' '(' TypeExpr ')'               (* D47-encoded type *)
 ```
+
+JsonValue    ::= StringLit | Integer | Float | Boolean | 'null'
+              |  '-' (Integer | Float)
+              |  '[' (JsonValue (',' JsonValue)* ','?)? ']'
+              |  '{' (StringLit ':' JsonValue (',' StringLit ':' JsonValue)* ','?)? '}'
+              (* ordinary JSON. Object keys are STRING LITERALS, which is what distinguishes a
+                 json(…) value from a `{ ns:prop = … }` block — the latter is an embedded
+                 RESOURCE, a different chain value. *)
 
 Three asymmetries in `PropertyItem` are worth memorising: `allows_only`, `domain` and `class_types` take **no `=`** — they are bare comma-separated name lists, like `requires` and `recommends` in a class body — and `allows_only` takes qualified *names*, not values.
 

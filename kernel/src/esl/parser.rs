@@ -81,6 +81,46 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Is the token at `offset` usable as an IDENTIFIER? Mirrors [`Self::expect_ident`]'s accepted
+    /// set exactly, so a lookahead never disagrees with the consume that follows it.
+    ///
+    /// eigenius#222: `parse_ctor_arg` tested `matches!(peek(), TokenKind::Ident(_))`, which is
+    /// narrower than what `expect_ident` accepts. `App(fun : lean:LeanExpr, …)` — a real
+    /// constructor in `lean-expressions` — has an argument named `fun`, an ESL keyword, so the
+    /// named-argument form did not fire and the decompiled text would not reparse.
+    fn peek_is_ident_like(&self, offset: usize) -> bool {
+        !matches!(
+            self.peek_at(offset),
+            TokenKind::StringLit(_)
+                | TokenKind::IntLit(_)
+                | TokenKind::FloatLit(_)
+                | TokenKind::BoolLit(_)
+                | TokenKind::QualName(_, _)
+                | TokenKind::FatArrow
+                | TokenKind::Eq
+                | TokenKind::Arrow
+                | TokenKind::Backslash
+                | TokenKind::Lambda
+                | TokenKind::Dot
+                | TokenKind::Semicolon
+                | TokenKind::Colon
+                | TokenKind::Comma
+                | TokenKind::Less
+                | TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Caret
+                | TokenKind::LParen
+                | TokenKind::RParen
+                | TokenKind::LBrace
+                | TokenKind::RBrace
+                | TokenKind::LBracket
+                | TokenKind::RBracket
+                | TokenKind::Eof
+        )
+    }
+
     fn expect_ident(&mut self) -> Result<String, EslError> {
         // Accept keywords as identifiers (e.g., `core:resource`, `core:property`), because a
         // keyword is a fine LOCAL NAME for a resource — `axiom` and `forall` are the ones a user is
@@ -110,6 +150,25 @@ impl<'a> Parser<'a> {
             TokenKind::Axiom => "axiom".to_string(),
             TokenKind::Def => "def".to_string(),
             TokenKind::Forall => "forall".to_string(),
+            // The remaining keywords, for the same reason as the ones above: a keyword is a fine
+            // LOCAL NAME, and the chain carries several. `lean:LeanExpr`'s `App` constructor names
+            // an argument `fun`; `data`, `match`, `in` and the rest are equally spellable
+            // (eigenius#222).
+            TokenKind::Data => "data".to_string(),
+            TokenKind::MergeComorphism => "merge_comorphism".to_string(),
+            TokenKind::For => "for".to_string(),
+            TokenKind::TextIndex => "text_index".to_string(),
+            TokenKind::VectorIndex => "vector_index".to_string(),
+            TokenKind::Alias => "alias".to_string(),
+            TokenKind::In => "in".to_string(),
+            TokenKind::Match => "match".to_string(),
+            TokenKind::Returning => "returning".to_string(),
+            TokenKind::LambdaKw => "lambda".to_string(),
+            TokenKind::Pi => "pi".to_string(),
+            TokenKind::Exists => "exists".to_string(),
+            TokenKind::Fun => "fun".to_string(),
+            TokenKind::Macro => "macro".to_string(),
+            TokenKind::Universe => "universe".to_string(),
             _ => {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
@@ -528,7 +587,94 @@ impl<'a> Parser<'a> {
         Ok(ResourceField { property, value })
     }
 
+    /// A JSON literal after `json(` — ordinary JSON syntax, lexed with the tokens ESL already
+    /// has. Object keys are string literals, which is what distinguishes this from a `Block`
+    /// value whose keys are qualified names.
+    fn parse_json_literal(&mut self) -> Result<serde_json::Value, EslError> {
+        match self.peek().clone() {
+            TokenKind::StringLit(s) => {
+                self.advance();
+                Ok(serde_json::Value::String(s))
+            }
+            TokenKind::IntLit(n) => {
+                self.advance();
+                Ok(serde_json::json!(n))
+            }
+            TokenKind::FloatLit(f) => {
+                self.advance();
+                Ok(serde_json::json!(f))
+            }
+            TokenKind::BoolLit(b) => {
+                self.advance();
+                Ok(serde_json::Value::Bool(b))
+            }
+            TokenKind::Minus => {
+                self.advance();
+                match self.peek().clone() {
+                    TokenKind::IntLit(n) => {
+                        self.advance();
+                        Ok(serde_json::json!(-n))
+                    }
+                    TokenKind::FloatLit(f) => {
+                        self.advance();
+                        Ok(serde_json::json!(-f))
+                    }
+                    other => Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!("`-` in a JSON literal must precede a number, found {other:?}"),
+                    )),
+                }
+            }
+            TokenKind::Ident(n) if n == "null" => {
+                self.advance();
+                Ok(serde_json::Value::Null)
+            }
+            TokenKind::LBracket => {
+                self.advance();
+                let mut items = Vec::new();
+                while !self.at(&TokenKind::RBracket) && !self.at_eof() {
+                    items.push(self.parse_json_literal()?);
+                    if self.at(&TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Ok(serde_json::Value::Array(items))
+            }
+            TokenKind::LBrace => {
+                self.advance();
+                let mut map = serde_json::Map::new();
+                while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+                    let key = self.expect_string()?;
+                    self.expect(&TokenKind::Colon)?;
+                    map.insert(key, self.parse_json_literal()?);
+                    if self.at(&TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(&TokenKind::RBrace)?;
+                Ok(serde_json::Value::Object(map))
+            }
+            other => Err(EslError::parser(
+                Some(self.current_pos()),
+                format!("expected a JSON value, found {other:?}"),
+            )),
+        }
+    }
+
     fn parse_value(&mut self) -> Result<Value, EslError> {
+        // `json( … )` — an opaque JSON value (eigenius#222). The wrapper marks the slot, the same
+        // way `type_expr( … )` marks a D47 term: without it the same braces read as a `Block`,
+        // i.e. an embedded resource, which is a different chain value.
+        if matches!(self.peek(), TokenKind::Ident(n) if n == "json")
+            && *self.peek_at(1) == TokenKind::LParen
+        {
+            self.advance();
+            self.expect(&TokenKind::LParen)?;
+            let j = self.parse_json_literal()?;
+            self.expect(&TokenKind::RParen)?;
+            return Ok(Value::Json(j));
+        }
         match self.peek().clone() {
             TokenKind::StringLit(s) => {
                 self.advance();
@@ -1966,7 +2112,7 @@ impl<'a> Parser<'a> {
         // single atomic `QualName`, while the standalone `Colon` is reserved for the binder colon
         // (see `parse_qualified_name`). So `base : ex:Nat` is `Ident Colon QualName` and `ex:Nat`
         // is `QualName` — different token streams, not a spacing convention.
-        if matches!(self.peek(), TokenKind::Ident(_)) && *self.peek_at(1) == TokenKind::Colon {
+        if self.peek_is_ident_like(0) && *self.peek_at(1) == TokenKind::Colon {
             let pos = self.current_pos();
             let name = self.expect_ident()?;
             self.expect(&TokenKind::Colon)?;

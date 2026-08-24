@@ -2445,6 +2445,9 @@ impl Compiler {
 
     fn compile_value(&self, value: &ast::Value) -> Result<Value, EslError> {
         match value {
+            // `json( … )` — an opaque JSON value for a `core:json`-typed property. Passes through
+            // verbatim; the kernel stores it as `Value::Json` (eigenius#222).
+            ast::Value::Json(j) => Ok(Value::Json(j.clone())),
             ast::Value::String(s) => Ok(Value::String(s.clone())),
             ast::Value::Int(n) => Ok(Value::Integer(*n)),
             ast::Value::Float(f) => Ok(Value::Float(*f)),
@@ -2569,6 +2572,7 @@ impl Compiler {
     /// flat values or other ctors, not nested resources.
     fn ctor_value_to_json(&self, value: &ast::Value) -> Result<serde_json::Value, EslError> {
         match value {
+            ast::Value::Json(j) => Ok(j.clone()),
             ast::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
             ast::Value::Int(n) => Ok(serde_json::Value::Number((*n).into())),
             ast::Value::Float(f) => Ok(serde_json::Number::from_f64(*f)

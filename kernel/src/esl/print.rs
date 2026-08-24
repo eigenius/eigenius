@@ -116,7 +116,15 @@ impl Namespaces {
         };
         let mut alias = base.clone();
         let mut n = 2;
-        while self.taken.contains(&alias) {
+        // A keyword is not usable as an alias: `program:Foo` never lexes as one `QualName` token,
+        // because `program` lexes as the `program` KEYWORD. The parser then reads the name as bare
+        // `program`, eats the `:` as the class-list colon, and fails on the next one —
+        // `expected LBrace, found Colon`. That is 79 of the shipped resources, all of them under
+        // `urn:eigenius:program` (eigenius#222).
+        //
+        // Bumping is the existing collision behaviour, so keyword collisions join it rather than
+        // getting their own path: `program` becomes `program2`.
+        while self.taken.contains(&alias) || RESERVED.contains(&alias.as_str()) {
             alias = format!("{base}{n}");
             n += 1;
         }
@@ -147,6 +155,47 @@ impl Namespaces {
         self.universes.insert(name.to_string());
     }
 }
+
+/// ESL keywords, which cannot serve as a namespace alias — a keyword never lexes as the namespace
+/// half of a `QualName`. Read off the lexer's keyword table.
+const RESERVED: &[&str] = &[
+    "namespace",
+    "class",
+    "property",
+    "resource",
+    "program",
+    "data",
+    "merge_comorphism",
+    "for",
+    "text_index",
+    "vector_index",
+    "let",
+    "alias",
+    "in",
+    "case",
+    "match",
+    "returning",
+    "map",
+    "reduce",
+    "lambda",
+    "pi",
+    "forall",
+    "exists",
+    "fun",
+    "axiom",
+    "def",
+    "macro",
+    "universe",
+    "true",
+    "false",
+    "json",
+    "type_expr",
+    "Construct",
+    "Prop",
+    "Set",
+    "Type",
+    "Sort",
+];
 
 fn is_ident(s: &str) -> bool {
     !s.is_empty()
@@ -1096,6 +1145,63 @@ fn print_property_value(
                 })
                 .collect::<Result<_, _>>()?;
             Ok(format!("[{}]", els.join(", ")))
+        }
+        // An EMBEDDED RESOURCE — `{ ns:prop = value; … }`. A general chain feature, not one tied
+        // to any construct: `ast::Value::Block` compiles to `Resource::new_embedded()` in any
+        // property position, and this is its inverse.
+        //
+        // The arm was missing entirely, so decompiling a resource with ANY embedded value failed
+        // (eigenius#222) — `core:ConditionalRequirement` on `core:Property`, `julia:interval`
+        // bounds, `program:Apply` inside a comorphism `Lambda`. The same absence is what made an
+        // inductive undecompilable before eigenius#217, since `core:ctors` holds embedded
+        // `InductiveCtor` resources.
+        //
+        // An `@id` is NOT expressible in a block — the surface mints embedded resources
+        // anonymously — so a keyed embedded resource is refused rather than printed lossily.
+        Value::Object(o) => {
+            // Embedded RESOURCE or opaque JSON? `serialize_resource` flattens both to a plain
+            // object — `Value::Embedded(r) => serialize_resource(r)`, `Value::Json(v) => v` — so
+            // the distinction is not in the wire form and must be recovered.
+            //
+            // Recovered with the SAME rule the reader uses, deliberately: `parse_json_value`
+            // decides on `keys().any(|k| k == "@id" || Iri::parse(k).is_ok())`. Sharing the
+            // predicate is what makes print and parse agree; inventing a second one here is how
+            // they would drift.
+            let any_iri_key = o
+                .keys()
+                .any(|k| k == "@id" || crate::ontology::iri::Iri::parse(k).is_ok());
+            if !any_iri_key {
+                // Opaque JSON — `json( … )`. The wrapper is load-bearing: without it the same
+                // braces reparse as a `Block`, i.e. an embedded resource.
+                return Ok(format!(
+                    "json({})",
+                    serde_json::to_string(v).map_err(|e| PrintError {
+                        message: format!("value is not serialisable JSON: {e}"),
+                        path: path.to_string(),
+                    })?
+                ));
+            }
+            if let Some(id) = o.get("@id").and_then(Value::as_str) {
+                return Err(PrintError {
+                    message: format!(
+                        "embedded resource carries `@id` `{id}`, which a block value cannot \
+                         express — the ESL surface mints embedded resources anonymously"
+                    ),
+                    path: path.to_string(),
+                });
+            }
+            let mut fields = Vec::with_capacity(o.len());
+            for (k, v) in o {
+                let (p_ns, p_local) = ns.split(k).map_err(|m| PrintError {
+                    message: m,
+                    path: path.to_string(),
+                })?;
+                let inner_ctor_ns = k.rsplit_once(':').map_or("", |(p, _)| p).to_string();
+                let rendered =
+                    print_property_value(v, ns, &inner_ctor_ns, &format!("{path}.{k}"), layout)?;
+                fields.push(format!("{p_ns}:{p_local} = {rendered};"));
+            }
+            Ok(format!("{{ {} }}", fields.join(" ")))
         }
         other => Err(PrintError {
             message: format!("no ESL surface for property value `{other}`"),

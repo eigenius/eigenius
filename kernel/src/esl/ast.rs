@@ -262,6 +262,16 @@ pub enum Value {
     Ref(QualifiedName),
     Array(Vec<Value>),
     Block(Vec<ResourceField>),
+    /// `json({ "k": 0.5 })` — an opaque JSON value for a `core:json`-typed property
+    /// (eigenius#222). A general chain feature: `core:json` is a declared `core:DataType` with a
+    /// dozen declared properties, all of them written by institution runtimes (Julia solver
+    /// outputs, trajectories, witness blobs) rather than by hand — and until this existed there
+    /// was no ESL spelling for one at all.
+    ///
+    /// Distinct from [`Value::Block`], which makes an embedded RESOURCE. The wire forms are
+    /// distinguished the way `eigon_json::parse_json_value` distinguishes them: a resource has
+    /// IRI-shaped keys, opaque JSON does not.
+    Json(serde_json::Value),
     /// Inductive constructor application: `Foo(arg1, arg2, ...)`.
     /// Lands in property positions whose `data_type` is
     /// `core:inductive` — D32 inductive-value literals on the
