@@ -386,6 +386,11 @@ impl<'a> Lexer<'a> {
             });
         }
 
+        // Quoted identifier — `'obo-foundry'`, `'program'` (eigenius#222).
+        if ch == b'\'' {
+            return self.lex_quoted_identifier(pos);
+        }
+
         // Identifier or keyword
         if ch.is_ascii_alphabetic() || ch == b'_' {
             return self.lex_identifier(pos);
@@ -481,6 +486,104 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Read a quoted name segment — the text between a pair of `'`.
+    ///
+    /// **Charset is `[A-Za-z0-9_-]+`, and `#` is excluded deliberately.** Fourteen families of
+    /// kernel-minted binder name — `TC#`, `G#`, `CB#`, `IDX#`, `IH#`, `A#`, `HB#`, `HA#`, `HM#`,
+    /// `HV#`, `AR#`, `ADV#`, `DIST#`, `AGG#` — are collision-free *because* `#` cannot occur in an
+    /// ESL identifier, and the recursor and iota reduction both state that as their argument. A
+    /// quote admitting arbitrary text would make `'HB#0_1'` writable and break all fourteen at
+    /// once, with the failure showing up as an eliminator capturing a user-written name — which
+    /// the type checker would accept.
+    ///
+    /// The restricted charset costs nothing: across every shipped ontology, experiment and demo,
+    /// the only character an IRI local name uses that a bare identifier cannot is `-` (5 IRIs),
+    /// the only other unspellable shape is a leading digit (8 content hashes), and **no chain IRI
+    /// contains `#` at all**.
+    fn lex_quoted_segment(&mut self, pos: &Position) -> Result<String, EslError> {
+        self.advance(); // opening quote
+        let mut out = String::new();
+        loop {
+            let Some(ch) = self.peek() else {
+                return Err(EslError::lexer(
+                    pos.clone(),
+                    "unterminated quoted identifier".to_string(),
+                ));
+            };
+            if ch == b'\'' {
+                self.advance();
+                break;
+            }
+            if ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'-' {
+                out.push(ch as char);
+                self.advance();
+            } else {
+                return Err(EslError::lexer(
+                    pos.clone(),
+                    format!(
+                        "`{}` is not allowed in a quoted identifier — the charset is \
+                         [A-Za-z0-9_-]. `#` in particular is reserved: kernel-minted binder \
+                         names rely on it being unspellable",
+                        ch as char
+                    ),
+                ));
+            }
+        }
+        if out.is_empty() {
+            return Err(EslError::lexer(
+                pos.clone(),
+                "empty quoted identifier".to_string(),
+            ));
+        }
+        Ok(out)
+    }
+
+    /// A quoted identifier, possibly the namespace half of a qualified name.
+    fn lex_quoted_identifier(&mut self, pos: Position) -> Result<Token, EslError> {
+        let first = self.lex_quoted_segment(&pos)?;
+        if let Some(local) = self.tight_qualified_tail(&pos)? {
+            return Ok(Token {
+                kind: TokenKind::QualName(first, local),
+                pos,
+            });
+        }
+        Ok(Token {
+            kind: TokenKind::Ident(first),
+            pos,
+        })
+    }
+
+    /// After a name segment: if a `:` follows immediately (no whitespace) and a name segment
+    /// follows that, consume both and return the local half. Otherwise consume nothing.
+    ///
+    /// The local half may itself be quoted — `obo:'obo-foundry'` — which is the shape that
+    /// actually occurs, since it is local names rather than prefixes that resist spelling.
+    fn tight_qualified_tail(&mut self, pos: &Position) -> Result<Option<String>, EslError> {
+        if self.peek() != Some(b':') {
+            return Ok(None);
+        }
+        match self.peek_at(1) {
+            Some(b'\'') => {
+                self.advance(); // ':'
+                Ok(Some(self.lex_quoted_segment(pos)?))
+            }
+            Some(c) if c.is_ascii_alphabetic() || c == b'_' => {
+                self.advance(); // ':'
+                let mut name = String::new();
+                while let Some(ch) = self.peek() {
+                    if ch.is_ascii_alphanumeric() || ch == b'_' {
+                        name.push(ch as char);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                Ok(Some(name))
+            }
+            _ => Ok(None),
+        }
+    }
+
     fn lex_identifier(&mut self, pos: Position) -> Result<Token, EslError> {
         let mut word = String::new();
         while let Some(ch) = self.peek() {
@@ -555,22 +658,8 @@ impl<'a> Lexer<'a> {
         // colliding with the namespace separator. Only plain identifiers form a
         // namespace (keywords never do), so keyword tokens are left untouched.
         if let TokenKind::Ident(ns) = &kind {
-            if self.peek() == Some(b':')
-                && self
-                    .peek_at(1)
-                    .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
-            {
-                let ns = ns.clone();
-                self.advance(); // consume ':'
-                let mut name = String::new();
-                while let Some(ch) = self.peek() {
-                    if ch.is_ascii_alphanumeric() || ch == b'_' {
-                        name.push(ch as char);
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
+            let ns = ns.clone();
+            if let Some(name) = self.tight_qualified_tail(&pos)? {
                 return Ok(Token {
                     kind: TokenKind::QualName(ns, name),
                     pos,

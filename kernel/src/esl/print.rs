@@ -92,11 +92,13 @@ impl Namespaces {
         let (prefix, local) = iri.rsplit_once(':').ok_or_else(|| {
             format!("IRI `{iri}` has no `:` — cannot split into namespace + name")
         })?;
-        if !is_ident(local) {
-            return Err(format!(
-                "IRI `{iri}` has local name `{local}`, which is not a legal ESL identifier"
-            ));
-        }
+        let local = spell(local).ok_or_else(|| {
+            format!(
+                "IRI `{iri}` has local name `{local}`, which no ESL identifier can spell — the \
+                 quoted form admits [A-Za-z0-9_-] only, and `#` is reserved"
+            )
+        })?;
+        let local = local.as_str();
         if let Some(a) = self.by_prefix.get(prefix) {
             return Ok((a.clone(), local.to_string()));
         }
@@ -196,6 +198,30 @@ const RESERVED: &[&str] = &[
     "Type",
     "Sort",
 ];
+
+/// How this name is spelled in ESL: bare when it lexes as an identifier, quoted when it does not
+/// but is still within the quoted charset, and `None` when nothing can spell it (eigenius#222).
+///
+/// **Quoting is minimal by design.** Quoting defensively would put `'…'` around every name in a
+/// decompiled file and make the output unreadable, so the bare form wins whenever it lexes. The
+/// consequence is that this predicate and the lexer must agree about what "lexes as an identifier"
+/// means — the third place today where print and parse need one shared predicate rather than two
+/// that drift.
+///
+/// A KEYWORD is spelled bare too. `expect_ident` accepts the full keyword set, so `fun` and
+/// `program` are legal identifiers in an identifier position; what a keyword cannot do is form the
+/// namespace half of a tight `QualName`, and that is the namespace ALIAS's problem, solved by
+/// bumping the alias rather than by quoting it.
+fn spell(name: &str) -> Option<String> {
+    if is_ident(name) {
+        return Some(name.to_string());
+    }
+    let quotable = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    quotable.then(|| format!("'{name}'"))
+}
 
 fn is_ident(s: &str) -> bool {
     !s.is_empty()

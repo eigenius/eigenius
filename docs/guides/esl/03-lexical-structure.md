@@ -50,12 +50,29 @@ There is no `null`/`undefined` literal — Eigon-JSON uses property absence to e
 ## 3.3. Identifiers and qualified names
 
 ```
-IDENT ::= [a-zA-Z_] [a-zA-Z0-9_]*
+IDENT  ::= [a-zA-Z_] [a-zA-Z0-9_]*
+QUOTED ::= "'" [a-zA-Z0-9_-]+ "'"
 ```
 
 A bare identifier (`Dog`, `name`, `short_name`) is one `Ident` token. There's no distinction at the lexer level between class names, property names, variable names, and component names — the parser disambiguates by position.
 
-A **qualified name** like `core:string` or `ex:Dog` is **three tokens**: `Ident("core") Colon Ident("string")`. The parser stitches the three back into a single `QualifiedName` AST node. This is the same convention as EigenQL ([EigenQL §3.3](../eigenql/03-lexical-structure.md)) and it has the same consequence: the colon is also a standalone punctuation token (used in type annotations like `let x : T = ...`), so the parser disambiguates `core:string` from `let x : string` purely by what tokens precede the colon.
+A **qualified name** like `core:string` or `ex:Dog` is **one `QualName` token**, not three. The lexer forms it when an identifier is immediately followed — no whitespace — by `:` and another name segment. That is what frees a space-surrounded `:` to mean the binder / annotation colon, so `base : ex:Nat` (`Ident Colon QualName`) and `ex:Nat` (`QualName`) are different token streams rather than a spacing convention.
+
+### Quoted identifiers
+
+A name the bare form cannot spell is written between single quotes:
+
+```esl
+resource ex:'obo-foundry' : core:Class { … }   // hyphen
+resource ex:'14e82c39' : core:Class { … }      // leading digit (content hashes)
+resource 'program':Foo : core:Class { … }      // keyword in the namespace half
+```
+
+The quotes are **lexical only** — `ex:'obo-foundry'` denotes exactly `urn:eigenius:ex:obo-foundry`. Either half of a qualified name may be quoted.
+
+**The charset is `[A-Za-z0-9_-]` and `#` is excluded deliberately.** Fourteen families of kernel-minted binder name — `TC#`, `G#`, `CB#`, `IDX#`, `IH#`, `A#`, `HB#`, `HA#`, `HM#`, `HV#`, `AR#`, `ADV#`, `DIST#`, `AGG#` — are collision-free *because* `#` cannot occur in an ESL identifier; the recursor and iota reduction both give that as their argument. A quote admitting arbitrary text would make those names forgeable, and the failure would show up as an eliminator capturing a user-written name, which the type checker would accept. The restriction costs nothing: no chain IRI contains `#`, and across every shipped ontology the only unspellable shapes are the hyphen and the leading digit.
+
+`eigenius decompile` **quotes minimally** — a name that lexes bare is printed bare, so quotes appear only where they are load-bearing.
 
 Qualified names resolve through namespace aliases declared with `namespace` (chapter 4 §4.1). A bare identifier in a position that expects an IRI either resolves through context (e.g., a component name resolves to a registered component IRI) or is a plain field name.
 

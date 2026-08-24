@@ -286,10 +286,9 @@ fn every_shipped_inductive_round_trips_through_esl() {
 /// - **cross-resource references.** A resource compiled alone cannot see a `macro` declared beside
 ///   it; the document can.
 ///
-/// Four documents still fail to PRINT, all for the same reason: an IRI whose local name is not a
-/// legal ESL identifier (`let-program`, `identity-program`, `program-run`, `obo-foundry` — all
-/// hyphenated). That is a language-level question about what a local name may be, tracked
-/// separately; this test pins it as a known set rather than letting it drift.
+/// Four documents used to fail to PRINT on an IRI whose local name is not a legal ESL identifier
+/// (`let-program`, `obo-foundry`, …). Quoted identifiers (eigenius#222) close that, so the whole
+/// corpus round-trips and there is no known-failure list left to drift.
 #[test]
 fn every_shipped_ontology_document_round_trips() {
     fn json_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -305,15 +304,6 @@ fn every_shipped_ontology_document_round_trips() {
             }
         }
     }
-    /// Documents whose IRIs ESL cannot spell. Shrinking this list is the point; growing it is a
-    /// regression and must be argued for.
-    const CANNOT_SPELL: &[&str] = &[
-        "let-program.json",
-        "simple-program.json",
-        "notebook-ontology.json",
-        "obo-meta-ontology.json",
-    ];
-
     let mut files = Vec::new();
     json_files(std::path::Path::new("../ontologies"), &mut files);
     files.sort();
@@ -343,26 +333,15 @@ fn every_shipped_ontology_document_round_trips() {
                 .map(eigon_json::serialize_resource)
                 .collect(),
         );
-        let expected_unspellable = CANNOT_SPELL.contains(&name.as_str());
         match esl::print::print_document(&doc) {
-            Err(e) => {
-                if !expected_unspellable {
-                    failures.push(format!("{name}: does not decompile: {}", e.message));
-                }
-            }
-            Ok(src) => {
-                assert!(
-                    !expected_unspellable,
-                    "{name} is on CANNOT_SPELL but now decompiles — remove it from the list"
-                );
-                match esl::compile(&src) {
-                    Ok(_) => ok += 1,
-                    Err(e) => failures.push(format!(
-                        "{name}: decompiled text does not recompile: {:?}",
-                        e.first().map(std::string::ToString::to_string)
-                    )),
-                }
-            }
+            Err(e) => failures.push(format!("{name}: does not decompile: {}", e.message)),
+            Ok(src) => match esl::compile(&src) {
+                Ok(_) => ok += 1,
+                Err(e) => failures.push(format!(
+                    "{name}: decompiled text does not recompile: {:?}",
+                    e.first().map(std::string::ToString::to_string)
+                )),
+            },
         }
     }
     assert!(
@@ -375,4 +354,89 @@ fn every_shipped_ontology_document_round_trips() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// **Quoted identifiers: what they admit, and what they must never admit.** (eigenius#222)
+#[test]
+fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
+    // A hyphenated local name — the shape that made four documents undecompilable.
+    let hyphen = r#"
+        namespace core = "urn:eigenius:core";
+        namespace ex = "urn:eigenius:ex";
+        resource ex:'obo-foundry' : core:Class { core:short_name = "obo"; }
+    "#;
+    let rs = esl::compile(hyphen).expect("a hyphenated local name compiles when quoted");
+    assert!(
+        rs.iter().any(|r| r
+            .id()
+            .is_some_and(|i| i.as_str() == "urn:eigenius:ex:obo-foundry")),
+        "the quotes are lexical only — the IRI is unchanged"
+    );
+
+    // A leading digit — content-hash IRIs (`…:file:14e82c…`).
+    esl::compile(
+        r#"
+        namespace core = "urn:eigenius:core";
+        namespace ex = "urn:eigenius:ex";
+        resource ex:'14e82c39' : core:Class { core:short_name = "h"; }
+        "#,
+    )
+    .expect("a leading digit compiles when quoted");
+
+    // A keyword, in the namespace half — where a bare keyword cannot form a tight QualName.
+    esl::compile(
+        r#"
+        namespace core = "urn:eigenius:core";
+        namespace program = "urn:eigenius:program";
+        resource 'program':Foo : core:Class { core:short_name = "Foo"; }
+        "#,
+    )
+    .expect("a keyword namespace compiles when quoted");
+
+    // `#` is REFUSED. Fourteen families of kernel-minted binder name — TC#, G#, CB#, IDX#, IH#,
+    // A#, HB#, HA#, HM#, HV#, AR#, ADV#, DIST#, AGG# — are collision-free *because* `#` cannot
+    // occur in an ESL identifier, and both the recursor and iota reduction state that as their
+    // argument. Admitting it here would make those names forgeable, and the failure mode is an
+    // eliminator capturing a user-written name, which the type checker would accept.
+    let err = esl::compile(
+        r#"
+        namespace core = "urn:eigenius:core";
+        namespace ex = "urn:eigenius:ex";
+        resource ex:'HB#0_1' : core:Class { core:short_name = "x"; }
+        "#,
+    )
+    .expect_err("`#` must not be spellable, quoted or otherwise");
+    let msg = err[0].to_string();
+    assert!(
+        msg.contains('#') && msg.contains("quoted identifier"),
+        "the diagnostic must say why `#` is refused: {msg}"
+    );
+}
+
+/// **Quoting is MINIMAL** — a name that lexes bare is printed bare.
+///
+/// Quoting defensively would wrap every name in a decompiled file and make the output unreadable.
+/// The cost of minimality is that the printer's speller and the lexer must agree on what "lexes
+/// bare" means; this pins that they do.
+#[test]
+fn the_printer_quotes_only_what_needs_it() {
+    let src = r#"
+        namespace core = "urn:eigenius:core";
+        namespace ex = "urn:eigenius:ex";
+        resource ex:'obo-foundry' : core:Class { core:short_name = "obo"; }
+        resource ex:ordinary : core:Class { core:short_name = "ord"; }
+    "#;
+    let rs = esl::compile(src).expect("compiles");
+    let doc = Value::Array(rs.iter().map(eigon_json::serialize_resource).collect());
+    let printed = esl::print::print_document(&doc).expect("decompiles");
+
+    assert!(
+        printed.contains("'obo-foundry'"),
+        "the hyphenated name must be quoted:\n{printed}"
+    );
+    assert!(
+        !printed.contains("'ordinary'"),
+        "an ordinary name must NOT be quoted:\n{printed}"
+    );
+    esl::compile(&printed).expect("and the printed text recompiles");
 }

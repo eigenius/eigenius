@@ -64,6 +64,9 @@ ResourceDecl  ::= 'resource' QualifiedName ':' QualifiedName (',' QualifiedName)
                   '{' ResourceField* '}'
 ResourceField ::= QualifiedName '=' Value ';'
 
+Identifier   ::= [a-zA-Z_] [a-zA-Z0-9_]*
+              |  "'" [a-zA-Z0-9_-]+ "'"                     (* quoted; `#` excluded *)
+
 Value         ::= StringLit | Integer | Float | Boolean
               |  '-' (Integer | Float)                      (* literals only *)
               |  QualifiedName                              (* IRI ref *)
