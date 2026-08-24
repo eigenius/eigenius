@@ -1227,41 +1227,47 @@ Must settle:
 
 ### Sequencing
 
-**What actually gates what.**
+**Nothing gates anything by construction** — D77 is not gated on D76 (see below), and D78 is gated on
+neither. But two things order these anyway: a dependency §8a already records, and rework.
 
-| | gated on | gates |
-|---|---|---|
-| **D76** environment | nothing | steps 4–6 (consolidation, #188's residual, 4c) and the institution half of step 7 |
-| **D77** merge as pushout | **nothing** | #225 |
-| **D78** records | nothing | steps 8–11 |
+**Seam B is a premise of Seam A's answers, not a peer.** §8a's caveat: *"Q3, Q6, Q7 and Q8 all rest
+on the record model. They are answers given Seam B, not independent of it."* Q3 resolves to a single
+`Const` **because** a class is a resource and a resource is a record (§6.3). So D76's consolidation —
+the thing that makes #188's residual affordable — is built on a model D78 has to establish first.
+Writing D76 before D78 means writing it against an assumed premise.
 
-**D77 is not gated on D76.** `retroactive_validate` (`validation/retroactive.rs:91`) — the linear
-analogue of the very obligation a merge has to discharge — never touches the type checker. It is
-index-driven revalidation of the existing rules, scoped to redefinitions. The merge case can be built
-the same way: scoped to what the pushout rebound, running the rules that already exist. That is the
-pushout obligation implemented concretely, not a guard, and it needs no `Γ_env` refactor.
+**D77 is the one most exposed to rework.** It was written above as gated on nothing, and that is
+true of the *rule-driven* half: `retroactive_validate` (`validation/retroactive.rs:91`) discharges the
+linear form of the same obligation without touching the type checker, so a merge analogue could be
+built the same way today. But:
 
-So all three are independent, and the order is a value judgment rather than a dependency.
+- **D78 changes what a merge would revalidate.** If validation becomes clause-8 evaluation against a
+  `Val::Record` (step 10), the rules a merge-scoped rescan invokes are not the rules that exist now.
+- **D76 changes what a merge can express.** D20 named the missing cascade kind
+  `InvalidatedSignature` **(type-checker driven)** — `merge/cascade.rs:24`. The designed backstop is a
+  *type-level* check, which is precisely what the environment work enables. A rule-driven merge rescan
+  built now implements the half D20 did not ask for.
 
-**Order by severity.** Of the four filed issues, three are soundness (#225 merge, #226 institution
-boundary, #227 witness credit) and one is expressiveness (#228 recursor ceiling). Seam B has **zero**
-filed issues, because §3.7/§3.8/§3.9 are duplication and lost expressiveness rather than defects that
-admit something wrong.
+**And #225 is latent.** The production paths — reseed, demo, parse gate — are linear commits, so the
+`MergeBranches` path carries a soundness hole that nothing currently walks into. Latent, and the
+cheapest of the three to leave latent, because its fix is the one most reshaped by the other two.
 
-1. **D77** — the only one that closes a soundness defect on a live RPC (`MergeBranches`), gated on
-   nothing, smallest surface of the three.
-2. **D76** — the deepest and largest; gates #188 and steps 4–6.
-3. **D78** — parallelisable with either. M1 (§8a) measured its blast radius as small: no shipped
-   ontology exercises `Construct`/`PropAccess`, so the encoding being replaced has no users outside
-   the kernel.
+**Order: D78 → D76 → D77.**
 
-**If only one gets written: D77.** Soundness over expressiveness, live RPC, smallest surface.
+1. **D78** — establishes the record/constraint model that Q3, Q6, Q7 and Q8 already assume, and
+   unifies §6.0's three implementations. M1 (§8a) measured its blast radius: no shipped ontology
+   exercises `Construct`/`PropAccess`, so the encoding being replaced has no users outside the kernel.
+2. **D76** — consolidation and #188's residual, now resting on an established model rather than an
+   assumed one. Gates steps 4–6.
+3. **D77** — last, deliberately. Both predecessors change what it checks and what it is able to
+   check, and #225 is latent in the meantime.
 
-*An earlier version of this section said D76 first because D77 needed it, and then said D78 had "the
-better ratio" if only one could be written — two orderings by two different metrics, presented as one
-recommendation. The D78 claim rated how well-specified the reference design is (A11.2 is worked out;
-nanoda does not cover the record fusion), which measures how easy the document is to write, not what
-the work is worth.*
+*This section has been rewritten twice. The first version ordered D76 first on a gating claim that
+was false — `retroactive_validate` shows the merge rescan needs no `Γ_env` — and then recommended D78
+if only one could be written, which rated how well-specified the reference design is rather than what
+the work is worth. The second ordered by severity alone and put D77 first, which ignored both that
+#225 is latent and that D76 and D78 reshape D77's implementation. The ordering above is the one that
+respects the Seam-B-as-premise dependency §8a already recorded.*
 
 ## 10. References
 
