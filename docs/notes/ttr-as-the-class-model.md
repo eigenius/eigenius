@@ -6,10 +6,13 @@ structure good for?"*. Written `2026-08-23`.
 
 Two findings, one of which corrects a premise this repository acted on.
 
-## 1. TTR does not use universe polymorphism
+## 1. Universe polymorphism: the formal system does not have it, the working notation assumes it
 
-**N3 §5a records "Cooper is using universe polymorphism" as the trigger for building
-[#188](https://github.com/eigenius/eigenius/issues/188). The appendix does not support that.**
+> **CORRECTED `2026-08-23`, after reading Chapter 1 §1.4.3.3.** The first version of this section
+> concluded flatly that "TTR does not use universe polymorphism" and that #188's remaining half had
+> therefore lost its justification. That was right about the formal system and **wrong as a guide to
+> what an implementation needs**. Both readings are kept below, because the difference between them
+> is the whole point.
 
 A10 ("The type `Type` and stratification") defines an intensional system of complex types as a
 family of quadruples **indexed by the natural numbers**, with:
@@ -44,9 +47,54 @@ whole of what TTR's universe treatment needs.
 But the **second half** — declaration-level `uparams` and level arguments at ~583 reference sites —
 has now lost its stated justification. The TTR trigger is already satisfied by what shipped.
 
-An implementation might still prefer object-level polymorphism to avoid duplicating definitions
-across orders, which is what Cooper's family-indexed-by-ℕ construction does in the metatheory. That
-is an engineering argument and it should be made on its own terms, not attributed to Cooper.
+### What Chapter 1 adds, and why it reverses the conclusion
+
+Two things the appendix alone does not convey.
+
+**Cooper identifies `Typeⁿ` with Martin-Löf universes outright** (Ch. 1, fn. 2):
+
+> "In Martin-Löf type theory, types of types are called **universes**. This is, however, potentially
+> a confusing terminology for a theory relating to the kind of model theory which has been used in
+> linguistics where 'universe' has a different meaning."
+
+So the hierarchy is a universe hierarchy; only the word is avoided.
+
+**The working notation is level-IMPLICIT, and he says so twice** (§1.4.3.3):
+
+> "For everyday working purposes we will assume that this is the system we have and **ignore** the
+> fact that this is bringing us into danger of introducing Russell's paradox."
+
+> "We will in future assume that our type systems are stratified in this way **without mentioning it
+> explicitly for the most part**."
+
+That is the crux. In the text, `Type` is written unindexed and treated as though `Type : Type`; the
+stratification is the background story that makes it safe. **Writing `Type` unindexed and letting
+the order be inferred is exactly the ergonomic universe polymorphism buys**, achieved in prose by
+deferring the indices.
+
+**An implementation cannot defer them.** When `Type` appears in a source file, something must
+resolve it to an order, and there are two options:
+
+1. **A concrete order per site** — a literal reading of A10. Then a record-type definition cannot be
+   reused at another order; it must be restated, once per order it is needed at.
+2. **Level variables and instantiation** — object-level polymorphism, which is what #188's remaining
+   half proposes.
+
+Cooper's construction is (1) in the metatheory and reads like (2) on the page. An implementation
+that wants his notation needs (2).
+
+### So where does this leave #188
+
+**The trigger stands, restated.** Not "Cooper uses universe polymorphism" — he does not, formally —
+but "TTR's working notation is level-implicit, and an implementation of it needs either polymorphism
+or per-site concrete orders". That is a real motivation and it is the one to record, because it is
+the one that survives reading the source.
+
+EigenTT today is stricter than Cooper's *working* system and matches his *formal* one: it has
+`Sort(l) : Sort(Succ(l))`, never `Type : Type`. Nothing in the current chain writes a level-generic
+definition, because nothing can. The question the TTR work will actually pose is whether a
+chain-resident record type needs to be usable at more than one order — and if it does, option (1)
+means restating it per order in the ontology, which is the cost polymorphism removes.
 
 ## 2. A11.2 is the formal statement of a defect in `resolve_class_type`
 
@@ -99,8 +147,9 @@ Two consequences for Eigenius, neither previously written down:
 
 **Sequencing.** #188's remaining half proposes level arguments on five `Exp` variants, two of which
 (`EigonClass`, `EigonAxiom`) this analysis says should become one record/`Const` former. Building
-polymorphism onto shapes we intend to collapse is the wrong order, and the TTR justification for
-building it at all does not survive A10.
+polymorphism onto shapes we intend to collapse is still the wrong order — but that is now an
+argument about ORDER, not about whether to build it at all. §1 no longer says the justification
+fails; it says the justification is different from the one recorded in N3 §5a.
 
 **The consolidation question splits cleanly.** The class half has a reference (TTR) and a
 demonstrable defect. The inductive half (`InductiveType` / `InductiveCtor` / `InductiveRec`, fused
