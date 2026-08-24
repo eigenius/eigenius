@@ -131,6 +131,44 @@ Two consequences for Eigenius, neither previously written down:
   Cooper's observation the two share no witness. Structural subtyping is unavailable to a Σ-chain;
   it is free for a record type.
 
+## 2a. Subtyping: nominal-generative vs structural-derived
+
+Chapter 1 §1.4.3.5 defines it and gives the syntactic criterion:
+
+> "T₁ is a subtype of T₂ (in symbols T₁ ⊑ T₂) just in case for any a, a : T₁ implies a : T₂, **no
+> matter what is assigned to the basic types and ptypes**."
+>
+> "We can tell that (53b) is a subtype of (53a) simply by the fact that **the set of fields of (53a)
+> is a subset of the set of fields of (53b)**."
+
+More fields ⇒ subtype. And the relation is **modal** — it must hold in every possibility of a modal
+system (§1.4.3.5, A9), so it is necessary rather than contingent on one model.
+
+**What this does NOT show about Eigenius.** It is tempting to conclude that `subclass_of` is an
+unchecked assertion, since `SUBCLASS_OF_CLASS` only verifies the referent is a `core:Class` and no
+rule compares property sets. Probed directly: `class ex:Pup : ex:Dog { }` where `Dog` requires two
+properties and `Pup` declares none **validates clean** — but `resolve_class_type` returns *the same
+Σ-type* for both, because `collect_properties` walks `subclass_of` transitively. Field inclusion
+holds **by construction**, not by luck. There is no hole here.
+
+**What it does show.** The two systems get the relation from opposite directions:
+
+| | Eigenius | TTR |
+|---|---|---|
+| direction | **nominal-generative** — declare `subclass_of`, inheritance follows, inclusion becomes true | **structural-derived** — have the fields, the relation follows |
+| two classes with identical fields, no declaration | **unrelated** | mutual subtypes |
+| "any record with a `name` field" | inexpressible — a class must be named | a record type |
+| same structure in two ontologies | unrelated until a comorphism bridges them | already related |
+
+The third and fourth rows are the ones that cost. Cross-vocabulary alignment is a standing problem
+here — the institution/comorphism apparatus carries part of that load — and under a structural
+reading two ontologies that describe the same shape are related without anyone declaring it.
+
+That is the actual trade, and it is a genuine trade rather than a defect: nominal subtyping is
+*intentional*, and `subclass_of` being a declaration is what makes institution dispatch and
+`allows_only` decidable by looking at one resource. Moving to structural subtyping is not a
+representation change, it changes what "is a" means chain-wide.
+
 ## 3. Two further mappings the appendix supplies
 
 - **A6 singleton types are manifest fields.** `T_a`, with `b : T_a iff b : T and a = b` — a field
