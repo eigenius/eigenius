@@ -1170,6 +1170,10 @@ and have different shapes, plus a short list of things that need a decision but 
 
 ### D76 — the typing environment (Seam A, steps 3–6)
 
+**Skeleton exists: `docs/design/d76-the-typing-environment.md`.** It carries the decisions from §8 and
+the obligations other work has parked on it — D78 §3.1's `Refine` subtyping arm, Q4/4c's recursor
+motive, #188's residual, D77's `InvalidatedSignature`. Add new dependencies there, not here.
+
 The one that gates #188. Must settle:
 
 - **The trait's signature.** §8 Q1 says "one environment trait, `Layer` as impl, absorbed into

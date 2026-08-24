@@ -260,6 +260,8 @@ it here would reproduce, in new code, the thing this programme exists to remove.
 
 Pinned by `entailment_beyond_set_inclusion_is_not_yet_decided` (`nbe/readback.rs`), which asserts the
 rejection *and* records that it is for want of entailment rather than because the judgment is wrong.
+The obligation is registered as an inbound dependency in
+`docs/design/d76-the-typing-environment.md` §2.1, with that test named as the signal it has landed.
 
 **Cumulativity and forgetting.** `Refine(R, S) : Sort(level(R))` — the constraint set is names, not
 types, so it contributes no level — and by cumulativity it inhabits every sort above. Additionally
