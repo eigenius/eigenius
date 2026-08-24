@@ -769,7 +769,7 @@ question re-enters through the constraint door, and C does not settle it. Q2's a
 | | option | consequence |
 |---|---|---|
 | 7a | the **record type of the given fields** — `C` checked as a side condition, absent from the type | correct for §3.8 (a resource's type is its own), but the nominal claim leaves the type, which is Q9's problem |
-| 7b | a **refinement** — `{r : Record{…} \| r satisfies C}` | carries structure *and* nominal claim; costs a new kernel former with its own conversion |
+| 7b | **CHOSEN** — a **refinement**, `{r : Record{…} \| r satisfies C}` | carries structure *and* nominal claim; a new former, but see below on cost |
 | 7c | **the class, as today** (`EigonClass(class_iri)`, renamed) | smallest change and dispatch keeps working, but it re-imposes the class's type on the resource — **reintroducing §3.8**, the defect the synthesis closes |
 | 7d | 7a **plus a side-judgment channel** recording satisfied constraints outside the type | keeps both without a new type former; needs somewhere for the channel to live |
 
@@ -795,7 +795,7 @@ checked declaration" are one question asked twice. Sequencing them separately wo
 | 10a | **declared only** (status quo, nominal) | two identical constraints stay unrelated; `subclass_of` remains load-bearing for Rule 22, `class_types`, dispatch |
 | 10b | **derived only** (structural) | `C ⊑ D` iff C's fields ⊇ D's; `subclass_of` becomes informational, and what "is a" means changes chain-wide |
 | 10c | **declared authoritative, derived exposed as a view** | structural inclusion computed for alignment suggestions without being authoritative — the "additional, not replacing" option from the deferred note |
-| 10d | **declared, with entailment checked** | declaring `Pup : Dog` requires Pup's constraint to actually entail Dog's |
+| 10d | **CHOSEN** — declared, with entailment checked | declaring `Pup : Dog` requires Pup's constraint to actually entail Dog's |
 
 **10d is not currently checked, and today nothing needs it.** `collect_properties` walks
 `subclass_of` transitively, so a subclass *inherits* its parent's requirements and entailment holds by
@@ -806,9 +806,48 @@ incompatible type. Verified — no override, conflict, or variance check exists 
 
 **The coupling to decide first.** 9c and 10d are the same stance — *declarations are authoritative
 and checked* — applied to instances and to classes respectively. Choosing it once settles both, and
-it is the stance that closes §3.9. Q7 then follows: under 9c the nominal claim is already checked and
-recorded at commit, so it does not have to be carried in the type, and 7a becomes sufficient without
-7b's new former.
+it is the stance that closes §3.9.
+
+### Decisions: 10d and 7b
+
+**10d — `subclass_of` declared, entailment checked.** Entailment for field constraints is decidable:
+`C ⊨ D` iff C's field set includes D's, and for each shared field C's type is a subtype of D's. The
+per-field half already exists as `subtype_of_inner` (`check/conv.rs`); the field-set half is set
+inclusion. This is structural inclusion used to **validate** a nominal declaration rather than to
+replace it — 10c's machinery with 10a's semantics — and it closes the hole recorded above, where a
+subclass may today redeclare a property at an incompatible type with nothing to catch it. Needs a new
+validation rule.
+
+**7b — `Construct` returns a refinement.** Correcting the claim above that 9c makes 7a sufficient: it
+does not, and the reason is **Q2**. Under 7a,
+
+```
+Construct(Alpha, {name = "x"})  :  Record{name : string}
+Construct(Beta,  {name = "x"})  :  Record{name : string}      // identical
+```
+
+so the nominal distinction between `Alpha` and `Beta` — which Q2 established must be preserved, on
+pain of class identity silently becoming structural — is erased at **every construction site**. 9c
+checks the claim at commit, but the *type* still forgets it, so anything reasoning in the type
+language loses it. 7b is therefore required for consistency with Q2, not merely tidier than 7c.
+
+**10d and 7b supply each other.** A refinement type needs a subtyping rule:
+
+```
+{r : R | r sat C}  <:  {r : R′ | r sat D}     iff     R <: R′   and   C ⊨ D
+```
+
+`C ⊨ D` is exactly 10d's entailment judgment. 10d is the relation; 7b is the type that consumes it.
+Neither is well-formed without the other, which is why they were separate questions with one answer.
+
+**The cost of 7b is lower than first stated.** There is no refinement type today, but the kernel
+already has *check-produces-evidence*: `NativeDecide(Constraint, Box<Exp>)` (`term.rs:86`) reduces a
+decided constraint to `Refl`. So 7b introduces a new former, not a new idea — the inhabitation path
+it needs is the one `NativeDecide` already walks.
+
+**Still open: Q9.** 7b types things *constructed in terms*; the 9.4M resources on the chain carry
+`is_a` declarations, not constructed types. So dispatch still needs its answer, and 9c remains the
+option consistent with 10d's stance and with §3.9.
 
 **Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
