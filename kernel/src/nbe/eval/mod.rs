@@ -251,6 +251,17 @@ pub(crate) fn eval_impl<T: Tracer>(
         // may mention any earlier binder.
         Exp::Record(fields) => Ok((Val::Record(fields.clone(), rho.clone()), T::leaf())),
 
+        // D78 §3 — `Refine(R, ∅)` degenerates to `R`, so the empty set has one
+        // representation rather than two.
+        Exp::Refine(carrier, classes) => {
+            let (r, node) = ev(carrier)?;
+            if classes.is_empty() {
+                Ok((r, node))
+            } else {
+                Ok((Val::Refine(Box::new(r), classes.clone()), node))
+            }
+        }
+
         Exp::Sig(p, a, b) => {
             let (a_val, a_node) = ev(a)?;
             Ok((

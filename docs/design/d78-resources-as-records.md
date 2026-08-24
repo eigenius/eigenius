@@ -237,6 +237,30 @@ flat form wins:
 | readback | `Exp::Refine(Box<Exp>, BTreeSet<Iri>)` |
 | D47 codec | a `Refine` ctor beside the existing `Sig`/`Pi` arms (`eigentt_type_mirror.rs:111-127`) |
 
+### 3.1 The complete subtyping rule is blocked on D76 — a cross-seam dependency
+
+**Found while implementing Phase A.** `⋀S ⊨ D` resolves class IRIs against the layer chain, and
+conversion has **no layer**: `subtype_of(level, sub, super_)` and `eq_nf(level, v1, v2)`
+(`nbe/check/conv.rs:290`, `:30`) take no context at all, and `conv.rs` contains no reference to
+`Layer` or `resolve`. Supplying one is D76's subject (D75 §8 Q1).
+
+**This contradicts D75 §9 and §7 of this document**, which both state Seam B is gated on nothing in
+Seam A. It is gated on one thing: the complete `Refine` subtyping rule.
+
+**What ships instead, and why it is not a compromise of soundness.** Conversion uses set inclusion,
+`S ⊇ S′`, which is sound — a constraint present in `S` is trivially entailed by `⋀S` — and
+**incomplete**: it rejects the case where `S` entails `D` without containing it. An incomplete
+subtyping relation refuses some legal programs; it never admits an illegal one. Strengthening it to
+the full rule is a one-arm change once conversion carries `Γ_env`.
+
+**The alternative was rejected on principle.** Precomputing each constraint's field set into the
+`Refine` value would let conversion decide entailment with no layer — and is exactly the
+inline-the-environment antipattern D75 §3.1 identifies as the root defect of the whole system. Taking
+it here would reproduce, in new code, the thing this programme exists to remove.
+
+Pinned by `entailment_beyond_set_inclusion_is_not_yet_decided` (`nbe/readback.rs`), which asserts the
+rejection *and* records that it is for want of entailment rather than because the judgment is wrong.
+
 **Cumulativity and forgetting.** `Refine(R, S) : Sort(level(R))` — the constraint set is names, not
 types, so it contributes no level — and by cumulativity it inhabits every sort above. Additionally
 `Refine(R, S) <: R`: **forgetting constraints is always safe**, which is how a refined record flows

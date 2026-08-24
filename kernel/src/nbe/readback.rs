@@ -118,6 +118,9 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         // was written against. Field order is already canonical (`Exp::record`
         // establishes it), so readback preserves it and `eq_nf`'s syntactic
         // comparison decides record equality with no bespoke conversion arm.
+        Val::Refine(carrier, classes) => {
+            Exp::Refine(Box::new(try_readback_val(level, carrier)?), classes.clone())
+        }
         Val::Record(fields, rho) => {
             let mut out: Vec<(crate::ontology::iri::Iri, Patt, Exp)> = Vec::new();
             let mut env = rho.clone();
@@ -592,6 +595,119 @@ mod record_round_trip {
         assert!(
             eq_nf(0, &va, &vb).is_err(),
             "same local name, different namespace — must not be convertible"
+        );
+    }
+}
+
+#[cfg(test)]
+mod refine_semantics {
+    //! D78 §3 — `Val::Refine` carries a *set* of class constraints.
+
+    use crate::nbe::check::{eq_nf, subtype_of};
+    use crate::nbe::env::Rho;
+    use crate::nbe::eval::eval;
+    use crate::nbe::term::{Exp, Patt};
+    use crate::ontology::iri::Iri;
+    use std::collections::BTreeSet;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn set(names: &[&str]) -> BTreeSet<Iri> {
+        names.iter().map(|n| iri(n)).collect()
+    }
+    fn rec(fields: &[&str]) -> Exp {
+        Exp::record(
+            fields
+                .iter()
+                .map(|f| (iri(f), Patt::Var(f.to_string()), Exp::sort(1)))
+                .collect(),
+        )
+        .unwrap()
+    }
+    fn v(e: &Exp) -> crate::nbe::val::Val {
+        eval(e, &Rho::Nil).unwrap()
+    }
+
+    #[test]
+    fn the_empty_constraint_set_degenerates_to_the_carrier() {
+        // D78 §3 reason 2 for the flat form: "0 or more constraints" needs no
+        // special case, and there is only one representation of zero.
+        let carrier = rec(&["urn:t:a"]);
+        let refined = Exp::Refine(Box::new(carrier.clone()), BTreeSet::new());
+        assert!(
+            eq_nf(0, &v(&refined), &v(&carrier)).is_ok(),
+            "Refine(R, {{}}) must be R"
+        );
+    }
+
+    #[test]
+    fn constraint_identity_is_nominal_not_structural() {
+        // The measured case: 749 of 894 shipped classes have identical (empty)
+        // field sets, so only the names distinguish them (D78 §1.2).
+        let carrier = rec(&["urn:t:a"]);
+        let alpha = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Alpha"]));
+        let beta = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Beta"]));
+        assert!(
+            eq_nf(0, &v(&alpha), &v(&beta)).is_err(),
+            "same carrier, different class — must not be convertible"
+        );
+    }
+
+    #[test]
+    fn constraint_order_does_not_matter() {
+        // A `BTreeSet` has one representation, which is why the flat form beats
+        // nesting: `Refine(Refine(R,C),D)` and `Refine(Refine(R,D),C)` would be
+        // two spellings of one type (D78 §3 reason 1).
+        let carrier = rec(&["urn:t:a"]);
+        let cd = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C", "urn:t:D"]));
+        let dc = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:D", "urn:t:C"]));
+        assert!(eq_nf(0, &v(&cd), &v(&dc)).is_ok());
+    }
+
+    #[test]
+    fn forgetting_constraints_is_safe_but_inventing_them_is_not() {
+        let carrier = rec(&["urn:t:a"]);
+        let refined = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
+        assert!(
+            subtype_of(0, &v(&refined), &v(&carrier)).is_ok(),
+            "Refine(R, S) <: R — a refined record flows into a plain-record context"
+        );
+        assert!(
+            subtype_of(0, &v(&carrier), &v(&refined)).is_err(),
+            "R <: Refine(R, S) must NOT hold — that would invent a claim"
+        );
+    }
+
+    #[test]
+    fn a_larger_constraint_set_is_a_subtype() {
+        let carrier = rec(&["urn:t:a"]);
+        let more = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C", "urn:t:D"]));
+        let fewer = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
+        assert!(
+            subtype_of(0, &v(&more), &v(&fewer)).is_ok(),
+            "satisfying more constraints is satisfying fewer"
+        );
+        assert!(
+            subtype_of(0, &v(&fewer), &v(&more)).is_err(),
+            "the converse must not hold"
+        );
+    }
+
+    #[test]
+    fn entailment_beyond_set_inclusion_is_not_yet_decided() {
+        // Documents the incompleteness rather than hiding it. `Pup ⊨ Dog` would
+        // make `Refine(R, {Pup}) <: Refine(R, {Dog})` legal, but deciding that
+        // resolves class IRIs against the layer chain and conversion has no
+        // layer. Blocked on D76 (D75 §8 Q1); the rule here is set inclusion,
+        // which is sound and conservative.
+        let carrier = rec(&["urn:t:a"]);
+        let pup = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Pup"]));
+        let dog = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Dog"]));
+        assert!(
+            subtype_of(0, &v(&pup), &v(&dog)).is_err(),
+            "current behaviour: rejected for want of entailment, not because it is wrong. \
+             When conversion carries an environment this becomes legal — see D78 §3."
         );
     }
 }

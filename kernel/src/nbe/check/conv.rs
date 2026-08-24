@@ -318,6 +318,44 @@ fn subtype_of_inner(
     // `Ord` — the derived order is structural (discriminant, then fields) and is not the universe
     // order at all: it would rank `Param("u")` against `Max(..)` by variant position. It happens
     // to agree on `Succ`-chains, which is exactly why the bug would not have shown up in a test.
+    // ── D78 §3 — refinement subtyping ─────────────────────────────────────
+    //
+    // `Refine(R, S) <: R`: forgetting constraints is always safe, which is how a
+    // refined record flows into a context expecting a plain record.
+    if let Val::Refine(carrier, _) = sub {
+        if !matches!(super_, Val::Refine(..)) {
+            return subtype_of_inner(level, carrier, super_, index_policy);
+        }
+    }
+    // `Refine(R, S) <: Refine(R′, S′)`.
+    //
+    // **Sound but incomplete, and deliberately so.** D78 §3 states the rule as
+    // `R <: R′` and `⋀S ⊨ D` for every `D ∈ S′`. Entailment resolves class IRIs
+    // against the layer chain, and conversion has **no layer** — `subtype_of` and
+    // `eq_nf` take no context at all. Supplying one is D76's subject (D75 §8 Q1),
+    // so the complete rule is blocked on Seam A.
+    //
+    // The rule used here is set inclusion, `S ⊇ S′`, which is sound because a
+    // constraint present in `S` is trivially entailed by `⋀S`. It rejects the
+    // case where `S` entails `D` without containing it — an incompleteness, so
+    // some legal programs are refused, never an unsound admission. Strengthening
+    // it to the full rule is a one-arm change once conversion carries `Γ_env`.
+    //
+    // The alternative — precomputing each constraint's field set into the value
+    // so conversion needs no layer — is exactly the inline-the-environment
+    // antipattern D75 §3.1 diagnoses as the root defect, and is not taken.
+    if let (Val::Refine(r_sub, s_sub), Val::Refine(r_super, s_super)) = (sub, super_) {
+        if !s_super.is_subset(s_sub) {
+            let missing: Vec<&str> = s_super.difference(s_sub).map(|i| i.as_str()).collect();
+            return Err(CheckError::TypeMismatch(format!(
+                "refinement mismatch: the subtype does not declare {}. \
+                 (Conversion cannot yet decide entailment — it has no layer; see D78 §3.)",
+                missing.join(", ")
+            )));
+        }
+        return subtype_of_inner(level, r_sub, r_super, index_policy);
+    }
+
     if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
         if m.leq(n) {
             return Ok(());

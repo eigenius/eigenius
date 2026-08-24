@@ -58,6 +58,8 @@ pub enum Val {
     /// than by local name is what closes the collision `find_sigma_field` has
     /// today (D78 §9).
     Record(Vec<(crate::ontology::iri::Iri, Patt, Exp)>, Rho),
+    /// Refinement — the semantic counterpart of [`Exp::Refine`] (D78 §3).
+    Refine(Box<Val>, std::collections::BTreeSet<Iri>),
     /// Unit type
     One,
     /// Case function (from Sum): maps constructor names to branches

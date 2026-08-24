@@ -433,6 +433,9 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         // counts, the same as under a Π or Σ.
         Exp::Record(fields) => fields.iter().any(|(_, _, ty)| has_ind_occurrence(decl, ty)),
 
+        // The constraint set is names; only the carrier can hold an occurrence.
+        Exp::Refine(carrier, _) => has_ind_occurrence(decl, carrier),
+
         Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) => {
             has_ind_occurrence(decl, a) || has_ind_occurrence(decl, b)
         }

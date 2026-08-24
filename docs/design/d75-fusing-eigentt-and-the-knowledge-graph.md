@@ -745,7 +745,8 @@ The query engine (§6.0's third implementation) keeps its declaration-keyed inde
 changes what "satisfies C" *means*, not how membership is enumerated. `is_a` vs `:` needed no step:
 Q9 settled it as 9c, and 9c is already the shipped behaviour.
 
-Seam B is gated on nothing in 1–7, and §3.8 is the strongest single argument for starting it: it is
+Seam B is gated on nothing in 1–7 **except one arm** — complete `Refine` subtyping needs `Γ_env` in
+conversion (D78 §3.1). §3.8 is the strongest single argument for starting it: it is
 the one place where the current model loses information a resource already carries, rather than
 losing soundness. The nominal-vs-structural decision is **not** on this path — record types make
 structural subtyping available without requiring it.
@@ -1230,8 +1231,11 @@ Must settle:
 
 ### Sequencing
 
-**Nothing gates anything by construction** — D77 is not gated on D76 (see below), and D78 is gated on
-neither. But two things order these anyway: a dependency §8a already records, and rework.
+**Almost nothing gates anything by construction** — D77 is not gated on D76 (see below). D78 is gated
+on D76 in exactly **one** place, found while implementing it: the complete `Refine` subtyping rule
+needs conversion to carry an environment, and `subtype_of`/`eq_nf` take no context at all. A sound but
+incomplete rule (set inclusion on constraint sets) ships in the meantime, so the dependency delays one
+arm rather than the document. See D78 §3.1. But two things order these anyway: a dependency §8a already records, and rework.
 
 **Seam B is a premise of Seam A's answers, not a peer.** §8a's caveat: *"Q3, Q6, Q7 and Q8 all rest
 on the record model. They are answers given Seam B, not independent of it."* Q3 resolves to a single

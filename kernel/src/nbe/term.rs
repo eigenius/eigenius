@@ -57,6 +57,20 @@ pub enum Exp {
     /// Distinct from `Sig`, which survives for *anonymous* pairs (`Exp::Times`).
     /// Records subsume the class use of `Sig`, not the pair use — D78 §5.1.
     Record(Vec<(Iri, Patt, Exp)>),
+    /// Refinement: a record type together with the **set** of class constraints
+    /// it satisfies (D78 §3). `Construct` returns one of these (D75 §8 Q7, 7b).
+    ///
+    /// A set, not a nest. `is_a` is a list, so a record may satisfy several
+    /// classes; `Refine(R, {C, D})` is the direct image of that, has one
+    /// representation where nesting would have two, and degenerates to `R` at
+    /// the empty set — which is the "0 or more constraints" of D75 §6.3 with no
+    /// special case.
+    ///
+    /// The constraint set is carried as **IRIs**, not as resolved field sets.
+    /// Nominal identity (D75 §8 Q2) requires it: `Refine(R, {Alpha})` and
+    /// `Refine(R, {Beta})` must differ even when `Alpha` and `Beta` have the same
+    /// fields — which, measured, is the case for 749 of 894 shipped classes.
+    Refine(Box<Exp>, std::collections::BTreeSet<Iri>),
     /// Unit type: 1
     One,
     /// Unit value: ()

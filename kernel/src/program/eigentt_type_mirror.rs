@@ -140,6 +140,15 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             }
             Ok(ctor("Record", vec![json!(items)]))
         }
+        // D78 §3 — the constraint set encodes as a sorted IRI array. `BTreeSet`
+        // already gives one order, so the wire form is canonical for free.
+        Exp::Refine(carrier, classes) => Ok(ctor(
+            "Refine",
+            vec![
+                encode_type_json(carrier)?,
+                json!(classes.iter().map(|i| i.as_str()).collect::<Vec<_>>()),
+            ],
+        )),
         Exp::Arrow(a, b) => encode_type_json(&Exp::Pi(Patt::Unit, a.clone(), b.clone())),
         Exp::Times(a, b) => encode_type_json(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
@@ -602,6 +611,38 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                 slot: 0,
                 details: e.to_string(),
             })
+        }
+        "Refine" => {
+            expect_arg_count("Refine", 2, args)?;
+            let carrier = decode_type_json(&args[0], ctx)?;
+            let names = args[1]
+                .as_array()
+                .ok_or_else(|| DecodeError::WrongArgShape {
+                    ctor: "Refine",
+                    slot: 1,
+                    details: "expected an array of class IRIs".into(),
+                })?;
+            let mut classes = std::collections::BTreeSet::new();
+            for (i, n) in names.iter().enumerate() {
+                let s = n.as_str().ok_or_else(|| DecodeError::WrongArgShape {
+                    ctor: "Refine",
+                    slot: 1,
+                    details: format!("class {i} must be a string"),
+                })?;
+                classes.insert(crate::ontology::iri::Iri::parse(s).map_err(|e| {
+                    DecodeError::WrongArgShape {
+                        ctor: "Refine",
+                        slot: 1,
+                        details: format!("bad class iri `{s}`: {e}"),
+                    }
+                })?);
+            }
+            // `Refine(R, ∅) = R` — one representation, matching eval.
+            if classes.is_empty() {
+                Ok(carrier)
+            } else {
+                Ok(Exp::Refine(Box::new(carrier), classes))
+            }
         }
         "Lam" => {
             expect_arg_count("Lam", 3, args)?;
