@@ -1187,7 +1187,8 @@ The one that gates #188. Must settle:
 
 ### D77 — merge as a pushout of environments (step 7, #225)
 
-Small in surface, and the place the risk actually is. Must settle:
+Small in surface, gated on nothing, and the only one of the three that closes a soundness defect on a
+live RPC. Must settle:
 
 - **The recheck-scoping algorithm.** "Recheck what the pushout rebound" is a *scoping* problem of
   exactly the kind Rule 22's retroactive scan already has — and that scan has already produced an
@@ -1226,10 +1227,41 @@ Must settle:
 
 ### Sequencing
 
-D76 first: it gates #188 and steps 4–6, and D77 depends on its environment being a thing that exists.
-D78 is parallelisable from day one — Seam B is gated on nothing in Seam A. If only one gets written,
-**D78 has the better ratio**: §3.8 is the one place the current model loses information a resource
-already carries, and the reference design (A11.2) is worked out in a way Seam A's is not.
+**What actually gates what.**
+
+| | gated on | gates |
+|---|---|---|
+| **D76** environment | nothing | steps 4–6 (consolidation, #188's residual, 4c) and the institution half of step 7 |
+| **D77** merge as pushout | **nothing** | #225 |
+| **D78** records | nothing | steps 8–11 |
+
+**D77 is not gated on D76.** `retroactive_validate` (`validation/retroactive.rs:91`) — the linear
+analogue of the very obligation a merge has to discharge — never touches the type checker. It is
+index-driven revalidation of the existing rules, scoped to redefinitions. The merge case can be built
+the same way: scoped to what the pushout rebound, running the rules that already exist. That is the
+pushout obligation implemented concretely, not a guard, and it needs no `Γ_env` refactor.
+
+So all three are independent, and the order is a value judgment rather than a dependency.
+
+**Order by severity.** Of the four filed issues, three are soundness (#225 merge, #226 institution
+boundary, #227 witness credit) and one is expressiveness (#228 recursor ceiling). Seam B has **zero**
+filed issues, because §3.7/§3.8/§3.9 are duplication and lost expressiveness rather than defects that
+admit something wrong.
+
+1. **D77** — the only one that closes a soundness defect on a live RPC (`MergeBranches`), gated on
+   nothing, smallest surface of the three.
+2. **D76** — the deepest and largest; gates #188 and steps 4–6.
+3. **D78** — parallelisable with either. M1 (§8a) measured its blast radius as small: no shipped
+   ontology exercises `Construct`/`PropAccess`, so the encoding being replaced has no users outside
+   the kernel.
+
+**If only one gets written: D77.** Soundness over expressiveness, live RPC, smallest surface.
+
+*An earlier version of this section said D76 first because D77 needed it, and then said D78 had "the
+better ratio" if only one could be written — two orderings by two different metrics, presented as one
+recommendation. The D78 claim rated how well-specified the reference design is (A11.2 is worked out;
+nanoda does not cover the record fusion), which measures how easy the document is to write, not what
+the work is worth.*
 
 ## 10. References
 
