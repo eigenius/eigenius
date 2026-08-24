@@ -301,40 +301,45 @@ So the two halves disagree, and the disagreement is reachable from the surface s
   so an undeclared property is *in* the type: projectable, quantifiable over, and mentionable in a
   proposition the kernel checks. Today it is data the type system cannot talk about.
 
-### 3.9 `is_a` is not `:` — the graph's membership and the theory's typing are disjoint
+### 3.9 `is_a` is checked — by a second implementation the kernel never sees
 
-The graph's membership relation is `is_a`. The theory's is `:`. **Nothing reconciles them.**
+**Corrected.** An earlier draft of this section said the graph's membership and the theory's typing
+are "disjoint", implying membership goes unchecked. It does not. Constraint satisfaction is verified
+at commit:
 
-Exactly two validation rules invoke the type checker:
+- **Rules 1+2** (`validation/mod.rs:240-250`) require every `requires` property of every `is_a`
+  class — **including inherited** via the `subclass_of` walk and **conditional** requirements — to be
+  present on the resource.
+- **Rules 3–10** then validate each property value against its declaration: `data_type`,
+  `class_types`, `allows_only`, `domain`, format, pattern, range, length.
 
-| rule | what it checks |
-|---|---|
-| Rule 16 (`eigentt_value.rs`) | decoded `eigentt:TypeExpr` values — propositions and types |
-| Rule 23 (`inductive_decl.rs`) | inductive declarations |
+Together that is a complete constraint checker, and it runs over all 9.4M chain resources.
 
-`is_a.rs` calls neither `check_infer` nor `resolve_class_type`. The property-level rules — `domain`,
-`range`, `class_types`, `requires` — check individual property values and their presence. That is
-**shape checking, not typing**: no rule turns `r is_a C` into a check of `r` against `C`'s resolved
-type.
+**The defect is duplication, not absence.** The check is performed by the *validator's* constraint
+implementation and never by the kernel's type system:
 
-Two consequences:
+| | checks membership | how |
+|---|---|---|
+| validator | yes | field presence + per-property declaration checks |
+| kernel | no | `resolve_class_type` builds a Σ-chain that no membership decision consults |
 
-- **The Σ-chain `resolve_class_type` builds is almost never used to type anything.** It exists for
-  `Construct`, `PropAccess`, and D18 ontology-as-types inside EigenTT terms. The ~9.4M resources on
-  the chain are validated by shape rules that never consult it.
-- **`Exp::EigonClass` is pinned, not stratified.** `check_type` accepts it unconditionally
-  (`check/mod.rs:253`) and `check` admits it against any `Sort(m)` with `1 ≤ m` (`:564-568`) — every
-  class inhabits `Set` and above, regardless of the class. So `core:Class is_a core:Class` (the core
-  ontology is self-typing; 21 of its 120 resources are instances of `core:Class`) is admitted because
-  the question is never asked, not because stratification answers it.
+Exactly two rules invoke the type checker — Rule 16 (decoded `eigentt:TypeExpr` values) and Rule 23
+(inductive declarations). `is_a.rs` calls neither `check_infer` nor `resolve_class_type`. So the
+Σ-chain exists for `Construct`, `PropAccess`, and D18 ontology-as-types *inside EigenTT terms*, while
+every membership decision on the chain is made by the other implementation.
 
-**This is the strongest Seam B item.** Under A11.2 clause 8, `r : R` *is* field membership — so `is_a`
-and `:` are the same relation, and their disjointness here is the two-systems split at its most
-basic. §3.7 and §3.8 are consequences of the same gap: the type of a resource is not used to decide
-whether the resource belongs.
+**And `Exp::EigonClass` is pinned, not stratified.** `check_type` accepts it unconditionally
+(`check/mod.rs:253`) and `check` admits it against any `Sort(m)` with `1 ≤ m` (`:564-568`) — every
+class inhabits `Set` and above, regardless of the class. So `core:Class is_a core:Class` (the core
+ontology is self-typing; 21 of its 120 resources are instances of `core:Class`) is admitted because
+the kernel never asks, not because stratification answers.
 
-**Do not read the current behaviour as a design constraint.** On this axis the kernel declines to ask
-the question, so its behaviour is evidence of the gap, not of a settled semantics.
+**This is the strongest Seam B item**, and the corrected form is the stronger one: the constraint
+reading of §6.0 is not a proposal, it is **the shipped semantics of the validator**. §3.7 and §3.8
+are consequences of the kernel implementing a different reading of the same thing.
+
+**Do not read the kernel's behaviour as a design constraint.** On this axis it declines to ask the
+question, so its behaviour is evidence of the duplication, not of a settled semantics.
 
 ## 4. Closing Seam A: the chain and its ancestors are Γ_env
 
@@ -782,11 +787,20 @@ whether the nominal claim must be *in the type* or may live beside it.
 |---|---|---|
 | 9a | **declared only** (status quo) | O(1) from one resource; but under "0 or more" declaration and satisfaction come apart, so a record that satisfies `C` without declaring it will not dispatch |
 | 9b | **satisfied, computed** | structural, and cross-ontology alignment improves; but "which candidate constraints" is a full-chain scan without an index — the antipattern that has OOMed twice — and multiple satisfied constraints raise an ambiguity the dispatcher has no rule for |
-| 9c | **declared, with satisfaction checked at commit** | O(1) dispatch *and* closes §3.9, because `is_a` becomes a checked judgment; cost moves to commit time |
+| 9c | **CHOSEN — and already implemented** — declared, satisfaction checked at commit | Rules 1+2 and 3–10 already perform exactly this check (§3.9); dispatch on a declaration is therefore dispatch on a *verified* declaration |
 | 9d | **declared for dispatch, satisfaction as a separate queryable relation** | both exist for different purposes; two relations to keep coherent |
 
-**Q9c is the same decision as M3.** "Should `is_a` be a typing judgment" and "should dispatch trust a
-checked declaration" are one question asked twice. Sequencing them separately would be double work.
+**Q9c is the same decision as M3 — and it is already the shipped behaviour.** Satisfaction is
+verified at commit by Rules 1+2 and 3–10 (§3.9), so dispatching on a declared `is_a` is dispatching
+on a *verified* declaration, not on an unchecked assertion. 9a's objection — that declaration and
+satisfaction come apart under "0 or more" — does not arise: they are kept together by the commit
+gate.
+
+**This re-scopes M3 and lowers its cost estimate.** M3 was framed as "if `is_a` becomes a typing
+judgment, comparison volume rises by orders of magnitude". That was wrong: the satisfaction check is
+already being paid, in the validator. The question is not whether to *add* a check but whether to
+*unify* two implementations of one, and the cost delta is the difference between the validator's
+field-wise check and the kernel's type-wise check — not the cost of a new pass.
 
 **Q10 — is `subclass_of` declared or derived?**
 
@@ -845,9 +859,13 @@ already has *check-produces-evidence*: `NativeDecide(Constraint, Box<Exp>)` (`te
 decided constraint to `Refl`. So 7b introduces a new former, not a new idea — the inhabitation path
 it needs is the one `NativeDecide` already walks.
 
-**Still open: Q9.** 7b types things *constructed in terms*; the 9.4M resources on the chain carry
-`is_a` declarations, not constructed types. So dispatch still needs its answer, and 9c remains the
-option consistent with 10d's stance and with §3.9.
+**Q9 — 9c, and it is already implemented.** Satisfaction is verified at commit (§3.9), so dispatch
+on a declared `is_a` is dispatch on a verified declaration. The three decisions are consistent: 9c
+and 10d are the same "declarations are authoritative and checked" stance applied to instances and to
+classes, and 7b is the type that carries the resulting claim into the term language.
+
+What remains is not a decision but the unification: the validator checks satisfaction field-wise, the
+kernel would check it type-wise, and Seam B's work is making those one thing.
 
 **Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
