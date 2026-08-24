@@ -368,8 +368,9 @@ Read a resource as a record type over its actual fields, and:
 
 - **Conversion becomes environment-relative.** `eq_nf` gains `Γ_env` and needs a **δ-policy**: which
   declarations unfold, in what order, with what transparency.
-- **`Val` captures the environment.** A neutral `Const` awaiting unfolding holds an `Arc<Layer>` —
-  immutable and refcounted, but it changes `Val`'s lifetime story.
+- ~~**`Val` captures the environment.**~~ Withdrawn — see §8 Q1. `eval` already produces opaque
+  values for chain references, so the neutral carries only the IRI and the environment lives in the
+  conversion context, exactly as nanoda's `Tc` holds `Env` while `Const` holds name + levels.
 - **Which layer is `Γ_env` mid-check is a real decision.** The layer under construction sees its own
   partial contents; nanoda extends `Env` declaration-by-declaration as each is checked. Forward
   references and intra-layer self-reference both turn on this.
@@ -453,47 +454,93 @@ structural subtyping available without requiring it.
 ## 8. Open questions, and the order they resolve in
 
 ```
-Q1 environment interface ──▶ Q2 δ-policy ──▶ Q3 EigonClass as Const ──▶ Q5 `universe u v;`
-                                                  ▲
-                                        Seam B ───┘   (what a class unfolds TO)
+Q1 ANSWERED ──▶ Q2 ANSWERED ──▶ Q3 OPEN ──▶ Q5 falls out
+ env in            δ per kind      one opaque
+ check + conv      classes opaque  Const, or two?
+ not eval                              ▲
+                              Seam B ──┘  (what projection returns)
 
 Q4 recursor elimination universe ── independent ──▶ (#188 level work)
 ```
 
-**Q1 — does normalisation consult the layer directly, or is `Γ_env` a projection?**
-Foundational; everything except Q4 is downstream, because Q1 fixes the *signature* every other
-answer is written in. Largely answerable from evidence already in the repo:
+### Q1 — ANSWERED: the environment belongs to `check` and `conv`, not to `eval`
 
-- A materialised name→declaration map is the **full-chain-scan antipattern** that has produced OOMs
-  here twice (the `build_axiom_env` `iter_all_resources` scan; the institution-index rebuild). Over a
-  9.4M-resource chain it is not viable.
-- The memo at `mod.rs:678` is **not** a projection — it is a lazy cache keyed by `(LayerId, Iri)`,
-  which is the right shape and already handles shadowing.
-- `CheckHooks` (`check/hooks.rs:34`) is already the abstraction boundary, and already delegates
-  chain-resident resolution out of the pure core.
+Three findings settle it.
 
-So the live question is narrower than "direct or projected": it is **what the environment trait is,
-and how it reaches the `eval` and `eq_nf` surfaces**, given that `check` already has a version of it.
-Deliverable: one interface, replacing `CheckCtx.layer` + `type_cache` + `EvalCtx`'s effectful layer.
+**Not a materialised projection.** A name→declaration map built per pass is the full-chain-scan
+antipattern that has produced OOMs here twice (`build_axiom_env`'s `iter_all_resources`; the
+institution-index rebuild). Over a 9.4M-resource chain it is not viable. The memo at `mod.rs:678` is
+*not* a projection — it is a lazy cache keyed by `(LayerId, Iri)`, which is the right shape and
+already handles shadowing.
 
-**Q2 — the δ-policy.** Gated on Q1 (conversion cannot unfold without a lookup). Two constraints are
-already fixed and narrow it:
+**`eval` does not need it.** `eval` already produces opaque values for every chain reference:
+`Exp::EigonClass(iri) → Val::EigonClass(iri)` (`eval/mod.rs:506`), `Exp::EigonAxiom(iri) →
+Val::Nt(Neut::EigonAxiom(iri))` (`:510`). It builds neutrals and defers — which is exactly nanoda's
+shape, where `Const{name, levels}` is inert until `def_eq` unfolds it. So the environment does not
+have to be threaded through evaluation.
 
-- §3.3 — classes unfold in `check` and not in `eq_nf`, demonstrably. Whatever the policy is, it must
-  make those two agree.
-- §3.4 / D66 §4 — definitions already unfold at decode time, and the proposition hash is taken over
-  the decoded term. Changing that forks proposition identity, so definition-transparency is
-  effectively pinned.
+**The size difference is decisive.**
 
-The open part is therefore transparency *annotations* (Eigenius has none; nanoda/Lean have several)
-and unfolding order — not whether δ exists.
+| surface | call sites | needs `Γ_env` |
+|---|---|---|
+| `eval` / `eval_ctx` | 195 | **no** — already builds neutrals |
+| `check_infer` / `check` | 89 | already has one, ad hoc |
+| `eq_nf` | 23 | **yes** — this is the gap |
 
-**Q3 — does `EigonClass` survive consolidation, or become a `Const`?** Gated on Q2, and **cross-gated
-on Seam B**. If classes are transparent, `EigonClass` is a `Const` whose resolved resource happens to
-be a class, and it folds into §5's single variant. If they stay opaque, it is a distinct former. Seam
-B changes the question again: if a class resolves to a `Val::Record` rather than a Σ-chain, "unfolds
-to what" has a different answer. This is the first of the five that is a genuine design decision
-rather than a reading of existing evidence.
+**Answer.** One environment trait, `Layer` as its implementation, reached by `check` and `conv`.
+`CheckHooks` (`check/hooks.rs:34`) is already that boundary and should absorb the role, replacing
+`CheckCtx.layer: Option<Arc<Layer>>` + `type_cache` and `EvalCtx::Effectful`'s layer field. The
+`Option` must go: "no layer access in pure check mode" is precisely what let the three surfaces
+diverge. `Val` does **not** capture the environment (§5 cost withdrawn).
+
+### Q2 — ANSWERED for three kinds of global; the fourth is Q3
+
+δ is decided **per kind**, not per declaration — so Eigenius does not need nanoda/Lean's transparency
+annotations at this stage.
+
+| global | δ | why it is not a choice |
+|---|---|---|
+| **definitions** | **transparent** | `decode_type` already unfolds them (D66 §4) and §3.4's proposition hash is taken over the decoded term. Changing it forks proposition identity. |
+| **axioms** | **opaque** | a postulate has nothing to unfold; `eval/mod.rs:510` is already correct |
+| **classes** | **opaque** | see below — transparency would silently make class identity structural |
+| **inductives** | open | inlined today, so the question does not arise; it arises under Q3 |
+
+**Why classes must stay opaque, and why that inverts the obvious fix for §3.3.** Two classes with
+identical field sets are nominally distinct and structurally identical:
+
+```
+eq_nf(EigonClass(Alpha), EigonClass(Beta))  → false    // folded: compares IRIs
+eq_nf(Σ(Alpha),          Σ(Beta))           → true     // unfolded: identical fields
+```
+
+Witnessed by `unfolding_a_class_would_collapse_two_nominally_distinct_classes` (`check/mod.rs`).
+
+So making classes transparent does not merely reconcile `check` with `eq_nf` — it makes **class
+identity structural**, which is the nominal-vs-structural decision deferred to
+`docs/notes/nominal-vs-structural-subtyping.md`, taken by the back door via a δ-policy choice.
+`subclass_of` is nominal and load-bearing for Rule 22, `class_types` and institution dispatch.
+
+**Therefore §3.3 reconciles by fixing `check`, not `eq_nf`.** The naive reading — "`eq_nf` should
+unfold to match `check`" — is the wrong direction. `find_sigma_field`'s unfolding must become a
+**projection rule** that consults the environment to type a field access *without* asserting that the
+class equals its unfolding. Field access needs the class's fields; it does not need the class to *be*
+its Σ-chain.
+
+This answer is **stable under Seam B**: if a class resolves to a `Val::Record` instead of a Σ-chain,
+two same-field records are still definitionally equal, so the argument for nominal opacity is
+unchanged.
+
+### Q3 — the first genuine design decision
+
+Q2 has now constrained it from one side: classes are δ-**opaque**, so `EigonClass` cannot become a
+transparent `Const` that unfolds. The live options are narrower:
+
+- a `Const` that is **opaque by kind** — one variant, resolved for projection, never unfolded in
+  conversion; or
+- a distinct nominal former retained alongside `Const`.
+
+The first keeps §5's collapse-to-one-variant and is the reason to prefer it. Still cross-gated on
+Seam B for what projection *returns* (Σ-chain vs record).
 
 **Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
@@ -504,9 +551,8 @@ consequence of Q3: how many `Exp` variants carry levels determines whether decla
 user-visible universe parameters at all. Deciding it before Q3 would be deciding surface syntax for a
 representation that has not been chosen.
 
-**Cheapest first.** Q1 and Q2 are mostly *readings* of evidence already in the tree, so they are
-cheap and they unblock the rest. Q3 is where the real deliberation is. Q4 is parallelisable. Q5 falls
-out.
+**Status.** Q1 and Q2 are answered above from evidence in the tree. Q3 is the open design decision,
+now constrained on one side by Q2. Q4 is parallelisable. Q5 falls out of Q3.
 
 ## 9. References
 

@@ -2268,6 +2268,93 @@ mod tests {
     }
 
     #[test]
+    fn unfolding_a_class_would_collapse_two_nominally_distinct_classes() {
+        // Why classes must stay δ-opaque (D75 §3.3, Q2).
+        //
+        // `Alpha` and `Beta` are different classes requiring the same single
+        // property. Folded, they are distinct — `eq_nf` compares IRIs. Unfolded,
+        // their Σ-chains are identical, so `eq_nf` accepts them as the same type.
+        //
+        // So making classes transparent under δ does not merely reconcile
+        // `check` with `eq_nf`: it silently makes class identity STRUCTURAL,
+        // which is the nominal-vs-structural decision deferred to
+        // docs/notes/nominal-vs-structural-subtyping.md. `subclass_of` is
+        // nominal and load-bearing for Rule 22, `class_types` and institution
+        // dispatch, so the reconciliation has to go the other way: `check` must
+        // stop treating its unfolding as definitional equality.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::ontology::resource::{Resource, Value as RV};
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        let animals = std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        let name_prop = Iri::parse("urn:eigenius:example:name").unwrap();
+        let twin = |class_iri: &str, short: &str| {
+            let mut r = Resource::new(Iri::parse(class_iri).unwrap());
+            r.set(
+                Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+                RV::Array(vec![RV::ResourceRef(
+                    Iri::parse(crate::ontology::well_known::CLASS).unwrap(),
+                )]),
+            );
+            r.set(
+                Iri::parse(crate::ontology::well_known::SHORT_NAME).unwrap(),
+                RV::String(short.into()),
+            );
+            r.set(
+                Iri::parse(crate::ontology::well_known::DESCRIPTION).unwrap(),
+                RV::String("structurally identical to its twin".into()),
+            );
+            r.set(
+                Iri::parse(crate::ontology::well_known::REQUIRES).unwrap(),
+                RV::Array(vec![RV::ResourceRef(name_prop.clone())]),
+            );
+            r
+        };
+        let mut t = LayerBuilder::new("twins", Some(animals));
+        t.add_resource(twin("urn:eigenius:example:Alpha", "Alpha"))
+            .unwrap();
+        t.add_resource(twin("urn:eigenius:example:Beta", "Beta"))
+            .unwrap();
+        let layer = std::sync::Arc::new(t.build(crate::layer::LayerStorage::in_memory()));
+
+        let alpha = Iri::parse("urn:eigenius:example:Alpha").unwrap();
+        let beta = Iri::parse("urn:eigenius:example:Beta").unwrap();
+
+        assert!(
+            eq_nf(
+                0,
+                &Val::EigonClass(alpha.clone()),
+                &Val::EigonClass(beta.clone())
+            )
+            .is_err(),
+            "folded: two distinct classes must not be definitionally equal"
+        );
+        assert!(
+            eq_nf(
+                0,
+                &crate::program::ground::resolve_class_type(&alpha, &layer).unwrap(),
+                &crate::program::ground::resolve_class_type(&beta, &layer).unwrap()
+            )
+            .is_ok(),
+            "unfolded: identical field sets ARE definitionally equal — which is why δ for classes \
+             would make class identity structural. See D75 §3.3."
+        );
+    }
+
+    #[test]
     fn find_sigma_field_without_layer_returns_none_for_eigon_class() {
         // Without a layer, EigonClass resolution should fail gracefully
         let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
