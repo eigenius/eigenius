@@ -645,44 +645,59 @@ Q2 constrains it from one side: classes are δ-**opaque**, so `EigonClass` canno
   the first place. Under §6.1 a constraint is level-generic *without* level parameters, so classes
   would leave #188's scope entirely rather than contributing one variant or two.
 
-**Option C changes what M1 is for.** M1 was framed as "do classes need levels?", with the answer
-deciding whether keeping a second variant costs #188 anything. Under C the answer is *no, and not
-because nothing needs two orders* — because a constraint is checked at concrete orders per site and
-never instantiated at one. M1 should therefore be re-scoped to ask whether any class is used **as a
-type in a term** (`Construct` / `PropAccess` / D18 ontology-as-types) in a way that the constraint
-reading cannot serve. That is a much narrower search than scanning for two-order usage, and it is
-answerable from the shipped ontologies plus the EigenTT term corpus.
+**C is structurally B, with a different justification — and that matters.** A term still has to
+*refer* to a class: `Construct(class_iri, fields)` names one, `PropAccess` types against one. So C
+does not remove the variant; it reclassifies it. What changes is the argument:
 
-**The current implementation cannot arbitrate this**, per §3.9: `EigonClass` is pinned at `Sort(1)`
-and above regardless of the class, and `is_a` never becomes `:`. Observing what the kernel does today
-measures a gap, not a semantics. The assessment therefore has to be by experiment.
+- Under B, `EigonClass` staying separate is a **compromise** — §3.1's duplication accepted to avoid
+  threading levels through a second variant.
+- Under C it is **correct**. A constraint and a type are categorically different, so two variants is
+  the right shape and §3.1's duplication objection does not apply to this pair.
 
-**M3 — is `is_a` a typing judgment? (run first; it can invalidate the others)**
-If `r is_a C` becomes `r : C`, then every resource commit is a check against a class type, and the
-volume of chain-reference comparisons rises by orders of magnitude — which changes M2's answer and
-possibly the whole calculus. Deliverable: a decision plus, if yes, an estimate of the check volume
-over a real chain.
+**The split is not where §3.1 drew it.** §3.1 grouped `EigonClass` and `EigonAxiom` as the same shape
+(an IRI resolved through the chain) and proposed merging both. Under C they part company: an axiom is
+a **postulated term** — a declaration with a type, carrying uparams exactly as nanoda's axioms do —
+while a class is a constraint. So:
 
-**M2 — conversion resolve traffic.** Follows the #194/#92 protocol: instrument, log, do not reject.
-For every `eq_nf` comparison whose two sides are chain references, record the variant pair, whether
-the IRIs matched, and whether a kind lookup would have been required. Run the workspace suite, the
-parse gate, and the WRN demo. Option A's cost is exactly the cases where IRIs differ and a kind
-lookup is forced; Option B's is zero. Decides whether opaque-by-kind has a hot-path cost, or whether
-a syntactic fast path (compare IRIs first, resolve only on mismatch) makes it free — which is what
-nanoda and Lean rely on.
+| variant | under C | levels? |
+|---|---|---|
+| `EigonAxiom` | merges into `Const(iri, levels)` | yes |
+| inductive trio | de-fuses to `Const(iri, levels)` + `App` | yes |
+| `EigonClass` | stays, as a constraint reference | **no** |
 
-**M1 — does anything need a class at two orders?** Not answerable from the kernel, which pins the
-level. Answerable from the ontologies: find classes that are both a type of instances and an instance
-of a typed class. `core:Class is_a core:Class` shows the case exists. If classes need levels, Option
-B means threading them through a second variant; if they do not, Option B costs #188 nothing and the
-choice is much lower-stakes than §5 implied.
+**Result: two variants, not one and not five** — and #188's residual is levels on `Const` alone,
+which is the win §5 wanted, reached by a different route.
 
-**Reading the results.** A cheap M2 (syntactic fast path covers most comparisons) plus an M1 that
-says classes need levels ⇒ Option A. An expensive M2 or an M1 that says classes never need levels ⇒
-Option B is defensible and cheaper. M3 dominates both: if `is_a` becomes `:`, the comparison volume
-is a different problem and M2 must be re-run after that change, not before.
+**Option C changes what M1 is for.**Still cross-gated on Seam B for what projection *returns* (Σ-chain vs record).
 
-Still cross-gated on Seam B for what projection *returns* (Σ-chain vs record).
+### Questions the constraint reading opens
+
+Adopting §6.0 is not free of new decisions. Five, none of them answered here:
+
+**Q6 — what is `check_infer(EigonClass(iri))`?** Today `check` admits a class against any `Sort(m)`
+with `1 ≤ m` (`check/mod.rs:564-568`). If a class is not a thing at a level, it is not in `Sort(1)`
+and not in any sort. A constraint reference needs *some* classifying judgment, and "none of the
+existing ones" is the honest current answer. **This is the largest hole in C.**
+
+**Q7 — what does `Construct(C, fields)` return?** Today, `EigonClass(class_iri)`
+(`check/mod.rs:784-796`). If `C` is a constraint rather than a type, the constructed thing's type is a
+**record type** and `C` is a check on it. Construct's result type changes — a representation
+decision, not a relabelling.
+
+**Q8 — is a constraint a first-class value?** `Val::EigonClass` is a value today. Can a constraint be
+quantified over, passed to a function, computed? Or is it declaration-only — mentionable but not
+manipulable?
+
+**Q9 — does institution dispatch key on declared `is_a` or on satisfied constraints?** Dispatch reads
+`is_a` today: a declaration, decidable from one resource. Under the constraint reading, "is an
+instance of C" is a *predicate to check*. Dispatching on satisfaction rather than declaration changes
+both semantics and cost.
+
+**Q10 — is `subclass_of` declared or derived?** Under constraints, `Pup ⊑ Dog` is constraint
+conjunction and looks derivable. But two constraints with identical bodies are the same constraint
+only if compared structurally — so **the deferred nominal-vs-structural question re-enters through the
+constraint door, unchanged**. C does not settle it. Q2's answer (classes δ-opaque, identity nominal)
+is stable under C for the same reason it was stable under Seam B.
 
 **Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
