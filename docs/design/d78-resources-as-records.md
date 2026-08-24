@@ -106,11 +106,21 @@ plus annotation (`recommends`, `description`).
 That is accurate rather than alarming: schema.org is a vocabulary, not a schema, and genuinely
 requires nothing. The type level should say so.
 
-**It is also the strongest concrete argument for nominal identity in either document.** D75 §8 Q2
-argued classes must be δ-opaque because two same-field classes would otherwise become definitionally
-equal, demonstrated on a two-class synthetic fixture. The real chain is far past that: **structural
-identity would collapse 749 classes into a single type.** `schema_org:Person` and
-`schema_org:Organization` are distinguishable *only* by name.
+**It is also the strongest concrete argument for nominal identity in either document — and the
+collapse is not hypothetical.** `resolve_class_type` short-circuits an empty property set to
+`Val::One` (`program/ground.rs:83-85`). So **all 749 of those classes already resolve to `Val::One`
+today**, the unit type with one inhabitant, and are definitionally equal to each other in the type
+language right now.
+
+D75 §8 Q2 argued classes must be δ-opaque because two same-field classes would otherwise become
+definitionally equal, demonstrated on a two-class synthetic fixture. The chain is far past that
+fixture: 749 classes — `schema_org:Person`, `schema_org:Organization`, all of them — currently
+resolve to the *same* `Val`. The only thing keeping them apart is that `Val::EigonClass(iri)` is
+opaque and `eq_nf` never unfolds it (D75 §3.3). **δ-opacity is not a precaution here; it is the sole
+mechanism distinguishing most of the shipped ontology.**
+
+Under records those classes resolve to an *empty record* rather than `Val::One`, which is equally
+collapsed structurally. Nominal identity stays essential for the same reason.
 
 ### 1.3 Conditional requirements are dependent fields
 
@@ -310,6 +320,22 @@ undeclared property becomes projectable because a resource's type is the union o
 **`is_a` is unaffected as a surface.** It stays a declared name whose meaning is clause 8 (D75 §6.4).
 Nothing becomes inferred; membership is not computed from structure.
 
+### 5.1 What is deleted
+
+At the end of this work **no Σ-chain is constructed for a class**. Class Σ-chains are built at exactly
+one site — `build_sigma_chain(&props)` (`program/ground.rs:309`), reachable only from
+`resolve_class_type` — and step 4 replaces it. Deleted with it:
+
+- the `Val::One` short-circuit for an empty property set (`ground.rs:83-85`) — an empty class becomes
+  an **empty record**, which is a distinct type per class rather than the shared unit;
+- `make_option_type`'s use for `recommends` (§1.1);
+- `find_sigma_field`'s class path (§9), replaced by IRI-keyed record lookup.
+
+**`Val::Sig` is not deleted.** It survives for *anonymous pairs*: `Exp::Sig` and `Exp::Times`
+evaluation (`nbe/eval/mod.rs:251,361`), which the DCG uses. The distinction is that a record is a
+**named** field set and a `Sig` is a positional pair; records subsume the class use of `Sig`, not the
+pair use.
+
 ## 6. Risk, and why it is smaller than it looks
 
 **M1 (D75 §8a) measured the blast radius.** Across every shipped ontology:
@@ -333,7 +359,10 @@ than that the need is absent, and if so this work removes the obstacle rather th
 ## 7. Build order
 
 1. **`Val::Record`** (§1) with canonical ordering, cycle detection, readback, and the D47 codec arm.
-   No behaviour change yet — construct it alongside the Σ-chain and assert they agree.
+   No behaviour change yet — build it alongside the Σ-chain and assert **field-set and per-field-type
+   agreement**. Not `eq_nf` equality: a record and a Σ-chain are different types and will never
+   compare equal. The assertion is that the two carry the same `(Iri, type)` pairs, which is what
+   makes step 4 a substitution rather than a rewrite.
 2. **`Val::Refine`** (§3) with its equality, subtyping, readback and codec arms.
 3. **Entailment + its validation rule** (§4). Runs against the existing `subclass_of` declarations, so
    it is measurable before it is enforced — instrument, log, count, then enforce, per the #194/#92
