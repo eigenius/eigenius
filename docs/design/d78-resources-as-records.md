@@ -15,9 +15,10 @@ validator, extensionally in the query engine, and as a `Val::Sigma` in the kerne
 decision consults (D75 §6.0). This document makes the kernel's the same object as the other two, by
 replacing the Σ-chain with a **record type** whose membership rule is A11.2 clause 8.
 
-Five things it must settle, and does: the record's representation (§1), how its level is computed
-(§2), the refinement type 7b needs (§3), the entailment judgment 10d needs (§4), and what changes in
-each of the three implementations (§5).
+What it settles: the record's representation (§1), what `recommends` and conditional requirements
+contribute to it (§1.1, §1.3), how a record's level is computed (§2), the refinement type 7b needs
+(§3), the entailment judgment 10d needs (§4), whether `Any` is the lattice top (§4.1), and what
+changes in each of the three implementations (§5).
 
 ## 1. `Val::Record` — a canonically-ordered dependent telescope
 
@@ -110,6 +111,39 @@ argued classes must be δ-opaque because two same-field classes would otherwise 
 equal, demonstrated on a two-class synthetic fixture. The real chain is far past that: **structural
 identity would collapse 749 classes into a single type.** `schema_org:Person` and
 `schema_org:Organization` are distinguishable *only* by name.
+
+### 1.3 Conditional requirements are dependent fields
+
+`core:ConditionalRequirement` (`validation/rules/conditional.rs:117-165`) has the shape
+
+```
+{ when_property: ℓ_k,  has_value: [v₁ … vₙ],  then_requires: [ℓ₁ …],  then_recommends: [ …] }
+```
+
+— *if the resource's `ℓ_k` holds a value among `v₁ … vₙ`, require `ℓ₁ …`*. The match is **IRI-valued
+only** (`as_iri` / `as_iri_array`), so the condition is a finite disjunction over discrete tags, not a
+test on arbitrary data.
+
+**That is a dependent field**: the presence of `ℓᵢ` in the record type is a function of the *value* of
+`ℓ_k`. And it is exactly the shape A6 supplies — `has_value: [v₁ … vₙ]` is a **join of singleton
+types** `T_{v₁} ∨ … ∨ T_{vₙ}`, which D75 §6.7 already identified as something Eigenius encodes ad hoc.
+Making `has_value` a real singleton join is the same change as making conditional requirements
+dependent fields.
+
+**It splits by whether a resource is in hand, and only one half is on the critical path.**
+
+| | case | what is needed |
+|---|---|---|
+| **(a)** | checking `r : C` | the conditions are evaluated **against `r`'s values**, yielding a concrete required field set, and clause 8 applies to that with no dependent machinery. This is what `evaluate_conditional_requires` already computes, and §5's validator step therefore needs **nothing new** |
+| **(b)** | the class type standing alone — `Construct`, quantification, D18 ontology-as-types | the field set genuinely depends on a value, so the telescope carries `ℓᵢ`'s presence as a function of `ℓ_k`. M1 (D75 §8a) measured this case as **unexercised by any shipped ontology** |
+
+So conditional requirements are settled for the work §5 and §7 actually schedule, and the dependent
+form is specified but not blocking. §5 becoming a function of a *resource* is what makes (a) work:
+with the resource in hand the dependency is discharged before clause 8 is applied.
+
+**They are also a source of dependency edges for §1's ordering.** The telescope's topological sort is
+not driven only by a `class_types` that references an earlier field — `when_property` induces an edge
+too, since `ℓᵢ` must follow `ℓ_k`. Both feed the same relation.
 
 ## 2. Levels are computed
 
@@ -305,13 +339,6 @@ algorithm, not the record former.
 ## 9. Open
 
 ### Omissions — things this document does not mention at all
-
-**Conditional requirements.** `evaluate_conditional_requires` produces requirements contingent on
-other property values and chains them into `all_required` (`validation/mod.rs:231-237`). A
-value-dependent requirement is naturally a **dependent field** — which is precisely what A11.6 and
-§1's telescope are for — so this may land cleanly rather than awkwardly. But it is unaddressed, and
-it is on the critical path: Rules 1+2 fold it in today, so §5's clause-8 evaluation has to account
-for it or lose verdicts.
 
 **Level computation over dependent fields.** §2 says a record's level is the `max` over its field
 types' levels. That is not a static max: a field's type is a `Clos`, so a dependent field's type is a
