@@ -192,27 +192,70 @@ terminate — so this is a performance decision to make with a measurement, not 
 classes are opaque because unfolding them makes class identity structural, and 749 of 894 shipped
 classes have identical (empty) field sets.
 
-## 6. The layer under construction
+## 6. The layer under construction — a `letrec` group
 
-Unanswered since D75 §5, and the one question here with no reference answer that transfers.
+**Processing a layer is the fixpoint computation a `letrec` group needs.** The declarations are the
+bindings, references among them are the dependency edges, and an intra-layer forward reference is
+mutual recursion. That framing supplies the algorithm and corrects the option list an earlier draft
+had.
 
-nanoda extends `Env` declaration-by-declaration as each is checked, so a declaration sees its
-predecessors and not its successors. Eigenius differs: a layer is **built and then validated**, so
-sibling references already resolve — `Layer::resolve` walks the layer's own content before its
-parents.
+### 6.1 What the reference actually does
 
-So the question is narrower than "what is visible": it is **whether the checker may see a sibling it
-has not yet checked**. Three options, none free:
+nanoda's `Env` (`references/nanoda_lib/src/env.rs:218-228`) is an **ordered** `FxIndexMap` with a
+`cutoff` field — *"used to mark the end of what should be the visible environment"* — and
+`EnvLimit::ByIndex(idx)`. **Visibility is a prefix of the declaration sequence**: a declaration sees
+its predecessors and not its successors. Plus exactly one escape hatch, `temp_declars`, *"used for
+checking nested inductives"* — a temporary extension for the one case where a group's members must
+see each other.
 
-| | option | consequence |
-|---|---|---|
-| a | the whole layer, unchecked siblings included | forward references work; a declaration can be checked against one that later fails, so a layer's verdict depends on validation order |
-| b | only already-checked declarations | matches nanoda; forward references within a layer stop working, which is a **surface-visible restriction** on ESL |
-| c | two passes — collect signatures, then check bodies | forward references work and nothing is checked against an unchecked type; costs a pass |
+So Lean/nanoda is prefix-visibility with a narrow special case. **But the kernel gets its
+declarations already ordered**: the frontend does the dependency analysis and emits them in
+topological order. Eigenius has no such guarantee — an ESL layer's declarations arrive in *file*
+order.
 
-(c) is what most real systems land on. It is also the only one that does not trade correctness for
-convenience. **Not decided here** — it wants a count of how many shipped declarations actually
-forward-reference within their layer, which is a cheap measurement nobody has made.
+**That is the actual gap.** Not "what should be visible", but "who sorts them". Lean's answer lives
+in a frontend Eigenius does not have.
+
+### 6.2 The algorithm, which is already in the tree
+
+Dependency analysis à la Haskell: build the reference graph over the layer's declarations, collapse
+**strongly connected components**, topologically sort the SCCs, process in that order. Each SCC is a
+`letrec` group; a singleton SCC with no self-edge is an ordinary declaration checked against fully
+checked predecessors.
+
+This is the same algorithm `Exp::record` already runs for field dependencies (D78 §1) — Kahn's
+sort with a deterministic tie-break, cycles detected as the sort failing to place everything.
+Different domain, same shape, and the tie-break matters for the same reason: it makes the order
+**canonical**, so a layer's verdict does not depend on which valid order was chosen.
+
+That dissolves the objection to the earlier option (a): order-dependence is not a hazard once the
+order is derived rather than incidental.
+
+### 6.3 Where the `letrec` analogy stops
+
+**Signature-then-body separation is an ML move that does not transfer cleanly.** `letrec` typing puts
+every binding's type in `Γ` first and then checks bodies, which works because in ML a *type* never
+depends on a *term*. In a dependent theory it can: a declaration's signature may mention an earlier
+declaration's **value**, so "collect all signatures, then check all bodies" is not always possible.
+
+This is why Lean does not have general mutual recursion at the kernel level, and why its `mutual`
+blocks carry restrictions rather than being sugar for a `letrec`. nanoda's `temp_declars` is the
+shape of the concession: a *narrow* temporary extension for one construct, not a general fixpoint.
+
+### 6.4 What this leaves to decide
+
+The structure is settled — SCC decomposition, topological order, canonical tie-break. What is not:
+
+- **What a non-singleton SCC is allowed to be.** Following the reference: mutually-recursive
+  inductives, and nothing else. Anything wider needs its own argument, because §6.3 says the general
+  case is not available.
+- **Whether Eigenius has any non-singleton SCCs today.** The cheap measurement: build the reference
+  graph over each shipped layer and count SCCs of size > 1. If the answer is zero, prefix-visibility
+  over a topological order is sufficient and the special case can wait for a real trigger.
+
+That measurement now has a sharper question than the earlier draft's "how many declarations
+forward-reference": a forward reference inside a DAG is fine — the sort handles it. **Only a cycle
+needs the special case.**
 
 ## 7. The consolidation migration
 
