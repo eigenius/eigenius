@@ -55,11 +55,18 @@ names or dependency. It is missing:
 ### The representation
 
 ```rust
-Record(Vec<(Iri, Clos)>)     // canonical order; Clos.patt names the binder
+Exp::Record(Vec<(Iri, Patt, Exp)>)
+Val::Record(Vec<(Iri, Patt, Exp)>, Rho)     // flat field list + one shared environment
 ```
 
-A telescope, like `Sig`, but with the fields held in a **canonical order**: the topological order
-induced by the dependency relation, ties broken by IRI. That is:
+**A per-field `Clos` does not work, and an earlier draft of this section specified one.** Field *i*'s
+type may mention **any** earlier binder, not just the immediately preceding one, so each closure
+would need an environment that does not exist until the earlier fields are known. Sharing one `Rho`
+and extending it as the telescope is walked gives full dependency, exactly as `Sig`'s nesting does —
+and it is the shape `Val::Data(Vec<(Name, Exp)>, Rho)` already uses for the same reason.
+
+The fields are held in a **canonical order**: the topological order induced by the dependency
+relation, ties broken by IRI, established by `Exp::record` (`nbe/term.rs`). That is:
 
 - **deterministic** — the same field set always produces the same telescope;
 - **dependency-respecting** — a field never precedes one its type mentions;
@@ -428,15 +435,21 @@ chain-format change by construction.
 ### Phase A — additive. Nothing uses it yet.
 
 **Lands:** `Val::Record` with canonical ordering, cycle detection, readback, D47 codec arm (step 1).
-`Val::Refine` with equality, subtyping, readback, codec arm (step 2).
+`Val::Refine` with nominal equality, readback, codec arm, and **partial** subtyping (step 2).
 
 **Behaviour change:** none. The constructs exist; no code path produces them.
 
+**Subtyping is partial and that is expected**, not a shortfall of the phase: `Refine(R,S) <: R`
+(forgetting) and `S ⊇ S′` (set inclusion) ship; the complete rule needs entailment against the layer
+chain, which conversion cannot do — §3.1, registered as D76 §2.1.
+
 **Gate:** full workspace tests unchanged; `every_shipped_ontology_document_round_trips` holds with the
-new codec arms; the alongside-assertion of §7 step 1 — **field-set and per-field-type agreement**
-between a class's record and its Σ-chain, not `eq_nf` equality.
+new codec arms; the alongside-assertion of §7 step 1 — **field-set agreement** between a class's
+record and its Σ-chain, not `eq_nf` equality.
 
 **Reversible:** trivially. Pure addition.
+
+**Status: complete** (`07ea5b3`, `429a0d9`). 26 tests; 1712 kernel tests green.
 
 ---
 
@@ -457,6 +470,12 @@ subtyping between arbitrary `is_a` constraint sets, where nothing structural gua
 *The previous plan made this a measure-then-enforce pair on the #194/#92 protocol, and recommended
 running it first as the phase where a surprise would surface. The surprise surfaced in the design
 instead.*
+
+**It lands with no consumer, and that is the reason to do it now.** §3.1's entailment consumer — the
+complete `Refine` subtyping rule — is blocked on D76. So Phase B ships a tested function nothing
+calls. That is deliberate: D76 §2.1 promises the strengthening is a **one-arm change** in
+`subtype_of_inner`, and that promise is only true if the algorithm already exists. Building it here
+is what keeps the parked obligation cheap.
 
 **Gate:** unit tests over constructed constraint sets, including the non-`subclass_of` cases that are
 the actual use.

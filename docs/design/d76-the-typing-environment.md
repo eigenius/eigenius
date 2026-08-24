@@ -53,7 +53,9 @@ against the layer chain, and `subtype_of(level, sub, super_)` / `eq_nf(level, v1
 D78 Phase A shipped **set inclusion** (`S ⊇ S′`) instead — sound, because a constraint present in `S`
 is trivially entailed by `⋀S`; **incomplete**, because it rejects the case where `S` entails `D`
 without containing it. Strengthening it to the full rule is a **one-arm change** in
-`subtype_of_inner` once conversion carries `Γ_env`.
+`subtype_of_inner` once conversion carries `Γ_env` — *provided D78 Phase B has landed the entailment
+algorithm*. Phase B ships it with no consumer precisely to keep this obligation to one arm; if Phase B
+is skipped, this becomes "write entailment, then wire it".
 
 **Signal that this is done:** `entailment_beyond_set_inclusion_is_not_yet_decided`
 (`kernel/src/nbe/readback.rs`) currently asserts the *rejection*. It must **flip** — it pins the
