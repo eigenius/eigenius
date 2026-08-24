@@ -562,10 +562,51 @@ precisely §3.9's missing judgment, supplied rather than bolted on.
 with §6.1 — classes need no `uparams` — and it means `Const(iri, levels)` carries levels only for
 declarations that are genuinely polymorphic (inductives, definitions), not for resource references.
 
-*Rule 0 is a policy, not a necessity.* "Every resource must declare at least one `is_a` class"
-(`is_a.rs:15`) contradicts "0 or more". Under the synthesis a classless record is well-formed, and
-Rule 0 becomes a curation rule the chain chooses to enforce. Whether to keep it is a decision, but it
-should be made knowing it is no longer forced by the model.
+*Rule 0 is a policy, not a necessity* — and the policy is keepable. See §6.3b: `core:Resource` is
+already a class with no `requires`, so "0 constraints" and "at least one `is_a`" coincide.
+
+### 6.3a How RDF splits what Eigenius fuses
+
+The comparison is worth making because RDF faced this exact question and answered it by **separating**
+the two readings rather than reconciling them.
+
+| system | class | constraint | membership |
+|---|---|---|---|
+| **RDFS / OWL** | an extension; `rdfs:Resource` / `owl:Thing` are universal | none — `rdfs:domain`/`rdfs:range` are *inference rules*, not checks | asserted via `rdf:type`, extended by entailment, **never checked** |
+| **SHACL / ShEx** | unchanged from RDFS | a **separate** shape; `sh:targetClass` binds it to a class | asserted; validation is a separate pass over a separate artifact |
+| **Eigenius** | the class **is** the constraint (`requires` / `recommends`) | fused into the class | asserted via `is_a`, **checked at commit** |
+| **TTR** | a record type **is** its membership condition (A11.2 cl. 8) | fused, definitionally | **decided** by the condition |
+
+**The instructive contrast is `rdfs:domain`.** Given `?p rdfs:domain ?C` and a triple `?x ?p ?y`, RDFS
+**infers** `?x rdf:type ?C`. Eigenius's Rule 10 **rejects**. Same data, opposite conclusion: RDF
+widens the subject's type to accommodate the property; Eigenius refuses the property because the
+subject's type does not accommodate it.
+
+That is §3.8 seen from the other side. **RDF already does what Seam B proposes** — a resource's type
+follows from what it actually carries — reaching it by inference where Seam B reaches it by typing.
+
+**Where Eigenius sits.** It fuses constraint into class like TTR, but asserts membership like RDF and
+then checks the assertion. That hybrid is exactly why §6.0's three implementations diverged: fusing
+the shape into the class means every subsystem needing *either* reading reimplements it, whereas
+SHACL's split gives each subsystem one artifact to consume. TTR's clause 8 is the other consistent
+position — fuse them, and let membership be *decided* by the condition rather than asserted beside
+it. **Eigenius should finish moving to clause 8, not retreat to SHACL's split**, because the
+assertion is already checked; what is missing is that the check and the type are the same thing.
+
+### 6.3b Rule 0 and the `Any` class — settled
+
+§6.3 flagged that "every resource must declare at least one `is_a` class" (`is_a.rs:15`) contradicts
+the synthesis's "0 or more". It does not, because **the `Any` class already exists**:
+`core:Resource` is declared in `ontologies/core/core-ontology.json` as a `core:Class` with **no
+`requires`** — the direct analogue of `rdfs:Resource` and `owl:Thing`.
+
+`is_a core:Resource` is the **empty conjunction spelled as a name**: the top of the constraint
+lattice, entailed by every other constraint under 10d, carrying no obligation.
+
+So Rule 0 survives as **curation, not semantics**. It forces an author to say what a resource is —
+catching omissions and typos — and a genuinely unclassified record satisfies it by naming
+`core:Resource`. No conflict with "0 or more"; the model's zero and the rule's one are the same
+state under two spellings.
 
 ### 6.4 What TTR contributes
 
@@ -1104,8 +1145,9 @@ Must settle:
 
 ### Decisions that need no document
 
-- **Rule 0** — does "every resource must declare at least one `is_a` class" survive the synthesis's
-  "0 or more"? One decision, one line of consequence.
+- ~~**Rule 0**~~ — **settled in §6.3b.** It survives as curation: `core:Resource` already exists as a
+  class with no `requires`, so "0 constraints" and "at least one `is_a`" are the same state spelled
+  two ways.
 - **#228's comment** — the doc comment claiming `Type(n)` inhabits `Sort(2)` is wrong today and can
   be fixed immediately, independently of 4c.
 - **M1** — is any class used as a type in a term in a way the constraint reading cannot serve? A
