@@ -373,7 +373,7 @@ D75 §6.4's four changes, as work:
 | | implementation | change |
 |---|---|---|
 | kernel | `resolve_class_type` | returns `Val::Record` (§1) instead of a right-nested `Val::Sigma`, and becomes a function of a **resource** — the class constraint is the declared minimum, the resource's own record is the union of its actual fields |
-| validator | Rules 1+2, 3–10 | become an **evaluation of clause 8** against that record: same checks, same verdicts, one definition instead of an independent transitive walk of `requires` |
+| validator | Rules 1+2, and 3/8/9 | become an **evaluation of clause 8** against that record: same checks, same verdicts, one definition instead of an independent transitive walk of `requires`. **Rules 4–7 and 10 do not move** — see §5.1 |
 | query | `class_with_subclass_closure` + `scan_chain` | **unchanged**. The index is keyed on the *declaration*, and clause 8 changes what "satisfies C" means, not how membership is enumerated |
 
 Plus, in the kernel: `PropAccess` and `Construct` over records, which is what closes D75 §3.8 — an
@@ -382,7 +382,30 @@ undeclared property becomes projectable because a resource's type is the union o
 **`is_a` is unaffected as a surface.** It stays a declared name whose meaning is clause 8 (D75 §6.4).
 Nothing becomes inferred; membership is not computed from structure.
 
-### 5.1 What is deleted
+### 5.1 What clause 8 does *not* cover — corrected
+
+An earlier draft said Rules 1+2 **and 3–10** become an evaluation of clause 8. That is wrong, and the
+line between them matters for scoping Phase D.
+
+Clause 8 has exactly two clauses: `⟨ℓ, a⟩ ∈ r` (presence) and `a : T` (the field's type). A record's
+field type comes from `resolve_property_type` (`program/ground.rs:224-258`), which reads
+**`data_type`, `allows_only` and `class_types`** — and nothing else.
+
+| rule | clause 8? | why |
+|---|---|---|
+| 1+2 presence, incl. inherited and conditional | **yes** | `⟨ℓ, a⟩ ∈ r` |
+| 3 data_type, 8 class_types, 9 allows_only | **yes** | `a : T` — these *are* the field type |
+| 4 format, 5 pattern, 6 range, 7 length | **no** | refinements on the property declaration; not in `Val` |
+| 10 domain | **no** | a constraint on the *subject*, checked per-resource — and the rule §6.5 contrasts with `rdfs:domain`, which infers where this rejects |
+
+So Phase D unifies **membership**, which is what §6.0's three implementations disagreed about. Rules
+4–7 and 10 are per-property refinements that were never part of the disagreement and are left alone.
+
+Folding them in would mean refinement-on-primitives — a `{x : string | matches(p)}` former, distinct
+from `Val::Refine`, which refines a *record* by *class* constraints. Out of scope here, and noted in
+§9.
+
+### 5.3 What is deleted
 
 At the end of this work **no Σ-chain is constructed for a class**. Class Σ-chains are built at exactly
 one site — `build_sigma_chain(&props)` (`program/ground.rs:309`), reachable only from
@@ -492,7 +515,7 @@ there is no validation rule.
 
 **Lands:** `resolve_class_type` returns `Val::Record` and takes a **resource** (step 4). Deletes
 `build_sigma_chain`, the `Val::One` empty-class short-circuit, and `make_option_type`'s `recommends`
-use (§5.1).
+use (§5.3).
 
 **Behaviour change:** in the type language only. The validator is still on the old path, so chain
 verdicts are untouched.
@@ -523,8 +546,9 @@ so carrying local names alongside would have been redundant work to defer a fix 
 
 ### Phase D — the validator switches. The risky one.
 
-**Lands:** Rules 1+2 and 3–10 become an evaluation of clause 8 against the record (step 5). This is
-the step that unifies §6.0's three implementations.
+**Lands:** Rules 1+2 and 3/8/9 become an evaluation of clause 8 against the record (step 5) — the
+step that unifies §6.0's three implementations on **membership**. Rules 4–7 and 10 stay as they are
+(§5.1): they are per-property refinements, not membership, and were never part of the disagreement.
 
 **Gate: verdict parity over the full chain.** Output must be identical resource-for-resource, before
 and after. 9.4M resources.
