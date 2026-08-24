@@ -427,16 +427,26 @@ Read a resource as a record type over its actual fields, and:
 **A class is a constraint declaration, not an object sitting in a universe.** That single reading
 dissolves more of §3 than any other move in this document.
 
-Eigenius already implements it — twice, in two places that never meet:
+Eigenius already implements it — **three times**, in three places that never meet:
 
 | reading | where | what it does |
 |---|---|---|
-| class as **constraint** | the validator | `conditional.rs` collects effective `requires`/`recommends` transitively from every `is_a` class and its ancestors; Rules 3–10 check each property value against its declaration |
+| constraint, **intensional** ("does `r` satisfy `C`?") | the validator | Rules 1+2 require every `requires` property of every `is_a` class, inherited and conditional included; Rules 3–10 check each value against its declaration |
+| constraint, **extensional** ("which `r` satisfy `C`?") | the query engine | `MATCH ?x : C` compiles to `class_with_subclass_closure(C)` — a transitive `subclass_of` walk over the index — then `scan_chain(layer, is_a, concrete)` per class in the closure (`query/evaluate/pattern.rs:160-175`, `:346-362`) |
 | class as **Σ-type** | the kernel | `resolve_class_type` folds `requires` + `recommends` into a right-nested `Val::Sigma` |
 
-The first is a complete constraint checker and runs over all 9.4M chain resources. The second is a
-type former and is used only inside EigenTT terms. §3.9's disjointness is exactly this: **the
-constraint reading lives in the validator and the type reading lives in the kernel.**
+The first two are one relation seen from two sides — check it, or enumerate it — which is exactly
+A11.2 clause 8 read intensionally and extensionally. Both run over all 9.4M chain resources. **The
+kernel's Σ-type is the outlier**, used only inside EigenTT terms.
+
+**The query engine already relies on entailment that nothing checks.** `class_with_subclass_closure`
+returns instances declared at a *subclass* as answers to a query for the parent — sound only if the
+subclass's constraint entails the parent's. Today that holds, but by an implementation coincidence:
+`collect_properties` and the validator's Rules 1+2 walk `subclass_of` transitively, so an instance of
+`Pup` was in fact checked against `Dog`'s requirements. Under Seam B, where a class carries an
+explicit field set rather than inheriting one by collection, that coincidence disappears and the
+query optimizer's closure becomes unsound. **This is an independent argument for 10d**: entailment is
+already assumed by the query layer, and Seam B is what turns the assumption into an obligation.
 
 ### 6.1 Why the constraint reading makes classes level-generic
 
@@ -786,7 +796,7 @@ whether the nominal claim must be *in the type* or may live beside it.
 | | option | consequence |
 |---|---|---|
 | 9a | **declared only** (status quo) | O(1) from one resource; but under "0 or more" declaration and satisfaction come apart, so a record that satisfies `C` without declaring it will not dispatch |
-| 9b | **satisfied, computed** | structural, and cross-ontology alignment improves; but "which candidate constraints" is a full-chain scan without an index — the antipattern that has OOMed twice — and multiple satisfied constraints raise an ambiguity the dispatcher has no rule for |
+| 9b | **satisfied, computed** | structural, and cross-ontology alignment improves; the objection is *not* cost in general — the query engine already enumerates class membership by index — but that index is keyed on the **declaration** (`is_a` + `subclass_of` closure), not on field satisfaction. A satisfaction index would be a different index over field sets, and multiple satisfied constraints raise an ambiguity the dispatcher has no rule for |
 | 9c | **CHOSEN — and already implemented** — declared, satisfaction checked at commit | Rules 1+2 and 3–10 already perform exactly this check (§3.9); dispatch on a declaration is therefore dispatch on a *verified* declaration |
 | 9d | **declared for dispatch, satisfaction as a separate queryable relation** | both exist for different purposes; two relations to keep coherent |
 
@@ -824,7 +834,10 @@ it is the stance that closes §3.9.
 
 ### Decisions: 10d and 7b
 
-**10d — `subclass_of` declared, entailment checked.** Entailment for field constraints is decidable:
+**10d — `subclass_of` declared, entailment checked.** Three arguments converge on it: it closes the
+unchecked-redeclaration hole; it supplies the side condition 7b's subtyping rule needs; and it makes
+the query engine's subclass closure sound rather than accidentally sound (§6.0). Entailment for field
+constraints is decidable:
 `C ⊨ D` iff C's field set includes D's, and for each shared field C's type is a subtype of D's. The
 per-field half already exists as `subtype_of_inner` (`check/conv.rs`); the field-set half is set
 inclusion. This is structural inclusion used to **validate** a nominal declaration rather than to
