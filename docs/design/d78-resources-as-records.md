@@ -90,8 +90,21 @@ read off the fields at each site, never declared and never instantiated.
 ## 3. `Val::Refine` — the type 7b returns
 
 ```rust
-Refine(Box<Val>, Iri)        // the record type, and the class it satisfies
+Refine(Box<Val>, BTreeSet<Iri>)   // the record type, and the classes it satisfies
 ```
+
+**A set of constraints, not a nest.** `is_a` is a list, so a record may satisfy several classes.
+`Refine(R, {C, D})` is the direct image of that; `Refine(Refine(R, C), D)` is not. Three reasons the
+flat form wins:
+
+1. **Canonicity.** A `BTreeSet` has one representation. Nesting gives `Refine(Refine(R,C),D)` and
+   `Refine(Refine(R,D),C)` as two spellings of one type, which `eq_nf` — readback plus syntactic
+   comparison — would treat as distinct. That is the exact problem §1's canonical field order solves,
+   and the same answer applies.
+2. **The zero case degenerates cleanly.** `Refine(R, ∅) = R`, which is the synthesis's "0 or more
+   constraints" with no special case. Nesting has no spelling of zero except bare `R`, so it needs a
+   normalization rule to avoid two representations again.
+3. **It matches the surface.** `is_a` is a set of declared names; so is the refinement.
 
 **Restricted to a named class constraint, not an arbitrary predicate.** That is what keeps
 
@@ -102,10 +115,16 @@ Refine(Box<Val>, Iri)        // the record type, and the class it satisfies
 
 | judgment | rule |
 |---|---|
-| equality | `Refine(R, C) ≡ Refine(R′, D)` iff `R ≡ R′` and `C = D` (**by IRI** — nominal) |
-| subtyping | `Refine(R, C) <: Refine(R′, D)` iff `R <: R′` and `C ⊨ D` (§4) |
-| readback | `Exp::Refine(Box<Exp>, Iri)` |
+| equality | `Refine(R, S) ≡ Refine(R′, S′)` iff `R ≡ R′` and `S = S′` (**set equality on IRIs** — nominal) |
+| subtyping | `Refine(R, S) <: Refine(R′, S′)` iff `R <: R′` and `⋀S ⊨ D` for every `D ∈ S′` |
+| readback | `Exp::Refine(Box<Exp>, BTreeSet<Iri>)` |
 | D47 codec | a `Refine` ctor beside the existing `Sig`/`Pi` arms (`eigentt_type_mirror.rs:111-127`) |
+
+**Conjunction entailment `⋀S ⊨ D` is §4's rule unchanged.** A constraint is a field set, so the
+conjunction of `S` has `fields(⋀S) = ⋃_{C∈S} fields(C)`, and §4 applies to that union exactly as it
+applies to a single class. *An earlier draft claimed nesting "composes more obviously" with the
+subtyping rule; it does not — §4 was already stated over field sets, so it generalizes to a
+conjunction without a new case.*
 
 **Deciding `sat` at `Construct`.** The fields are known statically, so `r sat C` is the §4 algorithm
 run against a concrete record rather than another constraint — field inclusion plus a per-field
@@ -279,9 +298,12 @@ stated.
 
 - **The empty-record floor** (§2) is argued from proof irrelevance. If `Prop`-valued records are ever
   wanted, the floor becomes a per-record decision rather than a constant.
-- **`Refine` nesting.** `is_a` is a list, so a record satisfying two classes is
-  `Refine(Refine(R, C), D)` or `Refine(R, {C, D})`. The second is flatter and matches `is_a`'s shape;
-  the first composes more obviously with §3's subtyping rule.
+- **Whether a constraint set normalizes to an antichain.** `Refine(R, {Pup, Dog})` with `Pup ⊨ Dog`
+  carries a redundant member. Dropping it would discard a *declared* fact, which 9c/10d keep
+  authoritative, so §3 keeps the set as written and sorted. The consequence is that
+  `Refine(R, {Pup, Dog})` and `Refine(R, {Pup})` have identical inhabitants and are **not equal** —
+  uncomfortable, but exactly what nominal identity means, and what Q2 requires. Left as written; the
+  alternative is a normalization that silently erases declarations.
 - **Whether `Val::Sig` survives** once records exist, or whether the anonymous pair type is its only
   remaining use.
 
