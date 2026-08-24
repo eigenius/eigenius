@@ -66,6 +66,51 @@ canonical.
 **Cycle detection.** A dependency cycle has no topological order and is ill-formed. It is caught
 where the record is built, not at use.
 
+### 1.1 What `recommends` contributes to the record type: nothing
+
+`recommends` names properties that are **not required for membership but commonly present**. That is
+an annotation, and it has no type-level content.
+
+Today `resolve_class_type` Option-wraps them into the Σ-chain (`program/ground.rs:73-81`), giving a
+field of type `Option T`. Under clause 8 that is the wrong shape: `Option T` says the record **has** a
+field holding `some x` or `none`, whereas a resource that omits the property has **no field at all**.
+Absence and `none` are different states, and only one of them is what `recommends` describes.
+
+**So the class's record type is its `requires` fields, and nothing else.** Four consequences:
+
+- **The Option-wrapping is deleted.** It exists only because a *class* type had to represent
+  "maybe there". Once a resource's type is the union of its own fields (§5), the maybe-ness lives
+  where it belongs — the resource either has the field or does not.
+- **Nothing is lost in checking.** `recommends` never gated admission; Rule 3 checks any present
+  property against its declaration regardless of class, which is exactly *if `⟨ℓ,a⟩ ∈ r` then
+  `a : T`*.
+- **Entailment (§4) ignores it.** A subclass may drop a parent's recommendation, because it was never
+  a requirement.
+- **Projection improves.** A recommended property present on a resource is in that resource's own
+  record at type `T`, not `Option T`. Projecting one off a *class* type fails — correctly, since the
+  class does not guarantee it.
+
+**The `Option` survives where it is right.** The mirror generators — Julia (`mirror_gen.rs`, 30
+sites) and Lean (`mirror_gen/`, 27) — emit closed-world target-language structs, which genuinely need
+a nullable slot for a maybe-present property. A closed struct needs `Option`; an open-world record
+does not. The construct is not being deleted, only removed from the type system.
+
+### 1.2 What this measures, and what it settles
+
+Across the shipped ontologies: **749 of 894 declared classes have no `requires` at all**, including
+**all 734 schema.org classes**. Under this reading those classes have **empty record types** — at the
+type level they are `Any`, and their entire content is nominal (the name, the `subclass_of` lattice)
+plus annotation (`recommends`, `description`).
+
+That is accurate rather than alarming: schema.org is a vocabulary, not a schema, and genuinely
+requires nothing. The type level should say so.
+
+**It is also the strongest concrete argument for nominal identity in either document.** D75 §8 Q2
+argued classes must be δ-opaque because two same-field classes would otherwise become definitionally
+equal, demonstrated on a two-class synthetic fixture. The real chain is far past that: **structural
+identity would collapse 749 classes into a single type.** `schema_org:Person` and
+`schema_org:Organization` are distinguishable *only* by name.
+
 ## 2. Levels are computed
 
 A record's level is the **max over its field types' levels**, floored at `Set`:
@@ -260,17 +305,6 @@ algorithm, not the record former.
 ## 9. Open
 
 ### Omissions — things this document does not mention at all
-
-**`recommends`.** §1–§5 treat `requires` as the whole story. `resolve_class_type` today Option-wraps
-recommended properties into the Σ-chain (`program/ground.rs:73-81`), giving a field of type
-`Option T`. **Under clause 8 that is arguably the wrong encoding**: `Option` says the record *has* a
-field holding `some x` or `none`, whereas a resource that simply omits the property has **no field at
-all**, and absence and `none` are different states. What `recommends` actually means is *ℓ may be
-absent; if `⟨ℓ,a⟩ ∈ r` then `a : T`* — a conditional clause, not a field. And open-world already
-delivers exactly that: Rule 3 checks any present property against its declaration regardless of
-class. So `recommends` may reduce to **nothing at the type level**, being documentation plus a rule
-that already fires. Needs deciding before §5's validator step, because it changes what the record
-type contains.
 
 **Conditional requirements.** `evaluate_conditional_requires` produces requirements contingent on
 other property values and chains them into `all_required` (`validation/mod.rs:231-237`). A
