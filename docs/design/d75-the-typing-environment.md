@@ -12,10 +12,14 @@ order). The subtyping question that note raised is genuinely independent of this
 **The kernel's type theory has no global environment.** Every global a term could need is inlined
 into the term. This document argues that the layer chain, with its parent pointers and IRI
 shadowing, already *is* the environment `Γ_env` of the judgment `Γ_env; Γ ⊢ e : T`, and that
-reclassifying it from an effect capability to a component of the judgment is the root fix for seven
-separately-filed symptoms — of which #188's residual is one.
+reclassifying it from an effect capability to a component of the judgment is the root fix for six of
+the eight symptoms in §3 — of which #188's residual is one.
 
-Nothing here is implemented. §3.4 is the only symptom currently witnessed by tests.
+The other two (§3.7, §3.8) have a second root cause: a class's type is built as a Σ-chain from what
+the class declares, so a resource's type is its classes' type and never its own. §6 is where TTR's
+record types bear.
+
+Nothing here is implemented. §3.4 and §3.8 are witnessed by tests; the rest are read from code.
 
 ## 1. Thesis
 
@@ -51,6 +55,11 @@ carry their own resolved payloads because there is nothing to look anything up i
 there are five ways to reference a global instead of one.
 
 ## 3. The symptoms
+
+Six of the eight below follow from §1. Two — §3.7 and §3.8 — have a **second** root cause:
+`resolve_class_type` is a function of the *class*, and builds a Σ-chain where the theory wants a
+record type. They are in this document because they constrain the same code, and because §6's
+material bears on them rather than on the environment thesis.
 
 ### 3.1 Five reference variants, because each inlines its own environment
 
@@ -211,6 +220,47 @@ Two consequences:
 This is the one symptom that is not caused by the missing `Γ_env`. It is included because it
 constrains the same code and because the fix interacts: see the deferred subtyping note.
 
+### 3.8 Open-world validation admits properties the type cannot mention — **witnessed**
+
+Eigenius is open-world: a resource may carry properties its classes neither require nor recommend.
+Rule 22 §c constrains only the *vocabulary* — the key must resolve to a declared `core:Property`.
+
+The value keeps such a property: a resource marshals to `Val::ResourceVal(Box<Resource>)`
+(`nbe/eval/marshal.rs:58`), carrying the whole resource.
+
+The type does not. `resolve_class_type(class_iri: &Iri, layer: &Layer)` (`program/ground.rs:37`)
+takes a **class**, not a resource, and builds its Σ-chain from `requires` + `recommends`
+(`:63-81`). A resource's type is its *classes'* type, never its own.
+
+So the two halves disagree, and the disagreement is reachable from the surface syntax:
+
+- `Exp::PropAccess(e, prop)` resolves through `find_sigma_field` and returns
+  `CheckError::IllFormed("property '…' not found in type …")` on a miss (`check/mod.rs:766-778`).
+- `Exp::Construct(class_iri, fields)` likewise rejects a field the class does not declare
+  (`:793-796`) — so an undeclared property cannot be *written* through a typed construct either.
+
+**A resource that validates therefore has fields that cannot be projected.** Witnessed by
+`an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected` (`check/mod.rs`): with
+`example:nickname` declared as a `core:Property` on the chain, `find_sigma_field` finds `name` on
+`Dog` and does not find `nickname`.
+
+**This is where record types help most.** A11.2 clause 8 —
+
+```
+8. r : R ∪ {⟨ℓ, T⟩}   iff   r : R,  ⟨ℓ, a⟩ ∈ r,  and  a : T
+```
+
+— witnesses by **membership**, not shape. Two consequences:
+
+- **Open-world validation becomes derivable rather than policy.** A record carrying extra fields
+  witnesses the smaller type *by clause 8*, so "a resource may carry more than its class declares" is
+  a theorem about record types instead of a validation stance bolted beside a closed Σ-chain. This is
+  the same shape as §4's derivation of Rule 22's retroactive scan, and is a second piece of evidence
+  that the record model is the right one.
+- **The extra fields become typed.** A resource's own record type is the union of its actual fields,
+  so an undeclared property is *in* the type: projectable, quantifiable over, and mentionable in a
+  proposition the kernel checks. Today it is data the type system cannot talk about.
+
 ## 4. The chain and its ancestors are Γ_env
 
 `Layer::resolve_uncached` (`kernel/src/layer/mod.rs:713`) walks `parents.first()` innermost-first,
@@ -272,7 +322,9 @@ choices:
 
 Cooper's appendix is an input, not the frame. Four things it supplies:
 
-- **A11.2** is the formal statement of §3.7 — record types by union, witnessed by membership.
+- **A11.2** is the formal statement of §3.7 and the fix for §3.8 — record types by union, witnessed
+  by **membership** (clause 8), which makes open-world admission a theorem and gives undeclared
+  properties a place in the type.
 - **A11.4 fixed-point types** remove the self-reference stub of §3.2 from the other direction:
   self-referential record types are constructed as fixed points `ℱ(𝒯)` of a dependent record type
   `𝒯 = λr : T₁ . T₂((r))path`, rather than by threading a name-compared placeholder. This converges
@@ -319,6 +371,11 @@ concrete order per site. That is a real cost, but it is a different argument fro
 6. **Merge as pushout**, and the institution boundary as application.
 
 Steps 4–6 are gated on 3. Step 1 gates nothing but decides what step 2 files.
+
+**§3.7 and §3.8 are not gated on any of it.** Their root cause is the class encoding, not the
+environment, so record types can be taken up independently — and §3.8 is the strongest single
+argument for doing so, since it is the case where the current model actively loses information a
+resource already carries.
 
 ## 8. Open questions
 

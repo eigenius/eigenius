@@ -2126,6 +2126,94 @@ mod tests {
     }
 
     #[test]
+    fn an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected() {
+        // The open-world / closed-type disagreement (D75 §3.8).
+        //
+        // Rule 22 §c admits a property whose key resolves to a declared
+        // `core:Property` even when the resource's classes neither require nor
+        // recommend it — that is what open-world validation means. The value
+        // keeps it: a resource marshals to `Val::ResourceVal` carrying the whole
+        // `Resource`.
+        //
+        // The type does not. `resolve_class_type` is a function of the CLASS
+        // (`ground.rs:37` takes a `&Iri`, not a resource), so it builds its
+        // Σ-chain from `requires` + `recommends` alone. The extra field is in
+        // the value and absent from the type, so `find_sigma_field` misses and
+        // `Exp::PropAccess` reports `IllFormed`.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            builder.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let animal_resources = eigon_json::parse_document(animals_json).unwrap();
+        let mut domain_builder = LayerBuilder::new("animals", Some(core));
+        for r in animal_resources {
+            domain_builder.add_resource(r).unwrap();
+        }
+        let animals =
+            std::sync::Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        // A perfectly well-formed property that `Dog` does not mention.
+        let nickname = Iri::parse("urn:eigenius:example:nickname").unwrap();
+        let mut prop = crate::ontology::resource::Resource::new(nickname.clone());
+        prop.set(
+            Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::ResourceRef(
+                    Iri::parse(crate::ontology::well_known::PROPERTY).unwrap(),
+                ),
+            ]),
+        );
+        prop.set(
+            Iri::parse(crate::ontology::well_known::SHORT_NAME).unwrap(),
+            crate::ontology::resource::Value::String("nickname".into()),
+        );
+        prop.set(
+            Iri::parse(crate::ontology::well_known::DESCRIPTION).unwrap(),
+            crate::ontology::resource::Value::String("an informal name".into()),
+        );
+        prop.set(
+            Iri::parse(crate::ontology::well_known::DATA_TYPE_PROP).unwrap(),
+            crate::ontology::resource::Value::ResourceRef(
+                Iri::parse(crate::ontology::well_known::STRING).unwrap(),
+            ),
+        );
+        let mut top = LayerBuilder::new("nickname", Some(animals));
+        top.add_resource(prop).unwrap();
+        let layer = std::sync::Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        // Vocabulary side: the key resolves to a declared `core:Property`, which
+        // is the whole of what Rule 22 §c asks. Nothing about `Dog` is consulted.
+        assert!(
+            layer.resolve(&nickname).is_some(),
+            "test setup: nickname must be a declared property on the chain"
+        );
+
+        // Type side: `Dog`'s Σ-chain is built from requires + recommends, so it
+        // has no `nickname` field for a projection to land on.
+        let dog_type = Val::EigonClass(Iri::parse("urn:eigenius:example:Dog").unwrap());
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], std::sync::Arc::clone(&layer));
+        assert!(
+            find_sigma_field(&mut c, &dog_type, "name").is_some(),
+            "test setup: a DECLARED field must be projectable, or this proves nothing"
+        );
+        assert!(
+            find_sigma_field(&mut c, &dog_type, "nickname").is_none(),
+            "current behaviour: a declared property that Dog does not require or recommend is \
+             not in Dog's type, so `dog.nickname` is IllFormed even though a Dog carrying it \
+             validates. The value has a field the type cannot mention — see D75 §3.8. If this \
+             starts failing, a resource's type has become a function of its fields."
+        );
+    }
+
+    #[test]
     fn find_sigma_field_without_layer_returns_none_for_eigon_class() {
         // Without a layer, EigonClass resolution should fail gracefully
         let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
