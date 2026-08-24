@@ -758,11 +758,57 @@ violation, not the answer.
 instance of C" is a *predicate to check*. Dispatching on satisfaction rather than declaration changes
 both semantics and cost.
 
-**Q10 — is `subclass_of` declared or derived?** Under constraints, `Pup ⊑ Dog` is constraint
-conjunction and looks derivable. But two constraints with identical bodies are the same constraint
-only if compared structurally — so **the deferred nominal-vs-structural question re-enters through the
-constraint door, unchanged**. C does not settle it. Q2's answer (classes δ-opaque, identity nominal)
-is stable under C for the same reason it was stable under Seam B.
+**Q10 — is `subclass_of` declared or derived?** See below; the deferred nominal-vs-structural
+question re-enters through the constraint door, and C does not settle it. Q2's answer (classes
+δ-opaque, identity nominal) is stable under C for the same reason it was stable under Seam B.
+
+### The three remaining options, and how they couple
+
+**Q7 — what does `Construct(C, fields)` return?**
+
+| | option | consequence |
+|---|---|---|
+| 7a | the **record type of the given fields** — `C` checked as a side condition, absent from the type | correct for §3.8 (a resource's type is its own), but the nominal claim leaves the type, which is Q9's problem |
+| 7b | a **refinement** — `{r : Record{…} \| r satisfies C}` | carries structure *and* nominal claim; costs a new kernel former with its own conversion |
+| 7c | **the class, as today** (`EigonClass(class_iri)`, renamed) | smallest change and dispatch keeps working, but it re-imposes the class's type on the resource — **reintroducing §3.8**, the defect the synthesis closes |
+| 7d | 7a **plus a side-judgment channel** recording satisfied constraints outside the type | keeps both without a new type former; needs somewhere for the channel to live |
+
+7c is a regression, not an option on the merits. The live choice is 7a/7d versus 7b, and it turns on
+whether the nominal claim must be *in the type* or may live beside it.
+
+**Q9 — does dispatch key on declared `is_a` or on satisfied constraints?**
+
+| | option | consequence |
+|---|---|---|
+| 9a | **declared only** (status quo) | O(1) from one resource; but under "0 or more" declaration and satisfaction come apart, so a record that satisfies `C` without declaring it will not dispatch |
+| 9b | **satisfied, computed** | structural, and cross-ontology alignment improves; but "which candidate constraints" is a full-chain scan without an index — the antipattern that has OOMed twice — and multiple satisfied constraints raise an ambiguity the dispatcher has no rule for |
+| 9c | **declared, with satisfaction checked at commit** | O(1) dispatch *and* closes §3.9, because `is_a` becomes a checked judgment; cost moves to commit time |
+| 9d | **declared for dispatch, satisfaction as a separate queryable relation** | both exist for different purposes; two relations to keep coherent |
+
+**Q9c is the same decision as M3.** "Should `is_a` be a typing judgment" and "should dispatch trust a
+checked declaration" are one question asked twice. Sequencing them separately would be double work.
+
+**Q10 — is `subclass_of` declared or derived?**
+
+| | option | consequence |
+|---|---|---|
+| 10a | **declared only** (status quo, nominal) | two identical constraints stay unrelated; `subclass_of` remains load-bearing for Rule 22, `class_types`, dispatch |
+| 10b | **derived only** (structural) | `C ⊑ D` iff C's fields ⊇ D's; `subclass_of` becomes informational, and what "is a" means changes chain-wide |
+| 10c | **declared authoritative, derived exposed as a view** | structural inclusion computed for alignment suggestions without being authoritative — the "additional, not replacing" option from the deferred note |
+| 10d | **declared, with entailment checked** | declaring `Pup : Dog` requires Pup's constraint to actually entail Dog's |
+
+**10d is not currently checked, and today nothing needs it.** `collect_properties` walks
+`subclass_of` transitively, so a subclass *inherits* its parent's requirements and entailment holds by
+construction. Under explicit field sets that stops being automatic: nothing compares a subclass's
+property declarations against its parent's, so a subclass could redeclare a property at an
+incompatible type. Verified — no override, conflict, or variance check exists in `is_a.rs`,
+`conditional.rs`, or `ground.rs`.
+
+**The coupling to decide first.** 9c and 10d are the same stance — *declarations are authoritative
+and checked* — applied to instances and to classes respectively. Choosing it once settles both, and
+it is the stance that closes §3.9. Q7 then follows: under 9c the nominal claim is already checked and
+recorded at commit, so it does not have to be carried in the type, and 7a becomes sufficient without
+7b's new former.
 
 **Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
