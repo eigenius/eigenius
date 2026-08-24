@@ -664,6 +664,76 @@ mod tests {
         Iri::parse(s).unwrap()
     }
 
+    /// D75 §3.6 — the institution boundary types resource *shapes*, not
+    /// propositions.
+    ///
+    /// `build_verdict_resource` copies every non-protected property the
+    /// institution returned onto the chain-committed Verdict verbatim
+    /// (`r.set(prop_iri.clone(), value.clone())`). The kernel performs no
+    /// type-level check on the way through: an institution can put a
+    /// proposition-shaped value on a property it invented and the value lands
+    /// on the chain unexamined.
+    ///
+    /// Rule 16 (`validation/rules/eigentt_value.rs`) does decode, `check_infer`
+    /// and require `Sort(0)` — but it keys off the property's declared **range**
+    /// (`class_types ∋ eigentt:TypeExpr`) and runs at layer-validation time, not
+    /// at the boundary. So the coverage is incidental: it holds where the
+    /// ontology happens to declare that range, and a declared property with any
+    /// other range carries a proposition past every type-level check.
+    #[test]
+    fn institution_output_properties_cross_the_boundary_unchecked() {
+        let smuggled = iri("urn:eigenius:test:institution_invented");
+        // A D47-encoded application — the same shape a `canonical_proposition`
+        // carries. Nothing at the boundary looks at it.
+        let proposition_shaped = Value::Json(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt"]},
+                {"ctor": "LitFloat", "args": [1.0]}
+            ]
+        }));
+
+        let mut output = Resource::new(iri("urn:eigenius:test:institution_output"));
+        output.set(smuggled.clone(), proposition_shaped.clone());
+        // Also set a protected property, to show the filter is about kernel
+        // authority over its own fields — not about checking anything.
+        output.set(
+            iri(wk::CTOR_NAME),
+            Value::String("InstitutionSaysHolds".into()),
+        );
+
+        let dispatch = AutoOnLoadDispatch {
+            subject_iri: Some(iri("urn:eigenius:test:subject")),
+            query_class_iri: iri("urn:eigenius:test:qc"),
+            signature_iri: iri("urn:eigenius:test:sig"),
+            verdict: VerdictReading::Holds,
+            output,
+            derivations: Vec::new(),
+            partial_invocation: None,
+            environment_iri: None,
+        };
+
+        let verdict = build_verdict_resource(&dispatch, None, None, None)
+            .expect("a dispatch with a subject builds a Verdict");
+
+        assert_eq!(
+            verdict.get(&smuggled),
+            Some(&proposition_shaped),
+            "current behaviour: an institution-invented property carrying a proposition-shaped \
+             value is copied onto the committed Verdict verbatim, with no kernel type check at \
+             the boundary. See D75 §3.6."
+        );
+
+        // The protected set is about kernel authority, not validation: the
+        // kernel's own `ctor_name` wins, and that is the only reason this one
+        // did not pass through.
+        assert_eq!(
+            verdict.get(&iri(wk::CTOR_NAME)),
+            Some(&Value::String("Holds".into())),
+            "kernel-set properties take precedence — a protection, not a check"
+        );
+    }
+
     /// Institution that returns a configurable Verdict-shaped result
     /// regardless of input. Used to drive the AutoOnLoad dispatch
     /// through every Verdict branch.

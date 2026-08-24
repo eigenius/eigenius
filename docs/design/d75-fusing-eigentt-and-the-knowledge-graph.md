@@ -182,7 +182,7 @@ by accident; only widening exhibits the unsoundness.
 Immutability makes the **record** stable. It does not make the **meaning** of what was recorded
 stable, because a descendant can rebind a name the proposition mentions.
 
-### 3.5 Merge: the checking path and the resolution path are different paths
+### 3.5 Merge: the checking path and the resolution path are different paths — **witnessed**
 
 In a linear chain, "rebound between `Γ_k` and `Γ_n`" is well-defined because there is one path. A
 merge layer has two.
@@ -209,9 +209,18 @@ Three independent failures stack:
 
 Reachable as the `MergeBranches` RPC (`proto/eigenius.proto:120`, `server/branches.rs:427`).
 
-**Not yet witnessed** — this section is read from the code, not reproduced. See §7.
+**Witnessed** by `a_reference_meeting_a_redefinition_raises_no_conflict`
+(`layer/merge/conflict.rs`): LCA defines `C` requiring `{name, owner}`; branch A **widens** it to
+`{name}`; branch B adds `R` referencing `C` without defining it. `span.shared_iris()` is empty,
+`classify_conflicts` returns zero, and `merge_with_resolutions` returns `MergeOutcome::Merged`.
 
-### 3.6 The institution boundary types resource shapes, not propositions
+**On the asymmetric tombstone case.** `DeletionConflict` is documented as never raised: *"Reserved
+for v1.5 once Eigon ships an explicit tombstone shape — D23's current write model has no tombstone."*
+Tombstones are honoured on lookup (`resolve_uncached`, the bloom, the triple index) but can only be
+*written* by D20 §6.2/§6.3 merge resolutions (`handle.rs:156`), never by an ordinary commit. So the
+asymmetric case requires a branch that is itself a merge, and no conflict kind covers it.
+
+### 3.6 The institution boundary types resource shapes, not propositions — **witnessed**
 
 An institution's declared contract is an **input class**: `marshal.rs:105-115` resolves it on the
 layer and checks `required_typed_properties` — arity and property shape. EigenTT well-typedness is
@@ -228,7 +237,12 @@ runs at layer-validation time, not at the boundary. The coverage is real but inc
 where the ontology happens to declare that range. A declared property with a different range can
 carry a proposition that no type-level check ever sees.
 
-**Not yet witnessed.**
+**Witnessed** by `institution_output_properties_cross_the_boundary_unchecked`
+(`institution/dispatch.rs`): an institution-invented property carrying a D47-encoded application —
+the same shape a `canonical_proposition` carries — is copied onto the committed Verdict verbatim. The
+test also asserts that a *protected* property (`ctor_name`) is overridden by the kernel's own value,
+showing the protected set is about kernel authority over its own fields, **not** about checking
+anything.
 
 ### Seam B — a resource is a record
 
@@ -602,10 +616,9 @@ the one with a working reference design.
 
 **Seam A**
 
-1. **Witness §3.5 and §3.6.** Both are read from code, not reproduced. §3.5 first — merge is a live
-   RPC and the claim "nothing detects this" should be a failing scenario, not a reading. Also check
-   the asymmetric **tombstone** case (B tombstones an IRI, A references it): `DeletionConflict` exists
-   as a `ConflictKind` and may or may not cover it.
+1. ~~**Witness §3.5 and §3.6.**~~ **Done** — both have tests. The tombstone case turned out to be
+   unreachable by ordinary commits (tombstones are written only by D20 §6.2/§6.3 merge resolutions),
+   so it needs a nested-merge fixture against a `ConflictKind` that is documented as never raised.
 2. **File the symptoms** under #215 (the type-theory-soundness tracker) so they exist independently
    of this document.
 3. **The `Γ_env` design decision** — §5's costs are the agenda: the environment's shape, the δ-policy,
@@ -1012,10 +1025,12 @@ the tests written during this analysis pin *current* behaviour — the defects �
 - **How a record's level is computed.** §6.3 says levels are computed from field types rather than
   declared. The rule itself (presumably `max` over field levels, with the successor at the type
   level) is not worked out, nor is its interaction with the currently-pinned `Sort(1)` for classes.
-- **§3.5 (merge) and §3.6 (institution boundary) are argued, not witnessed.** Both are read from
-  code. §3.4 and §3.8 have tests; these do not.
-- **The asymmetric tombstone case at merge** — B tombstones an IRI, A references it. `DeletionConflict`
-  exists as a `ConflictKind`; whether it covers this was never checked.
+- ~~§3.5 and §3.6 are argued, not witnessed~~ — **done.** Both now have tests, so all four
+  symptoms that can be witnessed at unit scale are (§3.4, §3.5, §3.6, §3.8).
+- **The asymmetric tombstone case** is **not reachable today**: tombstones can only be written by D20
+  §6.2/§6.3 merge resolutions, never by an ordinary commit, so the case needs a branch that is itself
+  a merge. `DeletionConflict` is documented as reserved and is never raised. Left unwitnessed
+  deliberately — the fixture would be a nested merge exercising a variant that does not fire.
 
 **Measurements:**
 
