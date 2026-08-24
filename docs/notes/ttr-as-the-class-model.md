@@ -372,6 +372,25 @@ therefore hashes **identically** before and after `C`'s structure changes. A pro
 The opacity that §4 identified as a symptom — nothing δ-reduces, so `eq_nf` needs no environment —
 is the same property that makes proposition identity environment-blind here.
 
+**Witnessed, not argued.** Two tests in `kernel/src/layer/witness_index.rs`:
+
+- `redefining_a_class_does_not_change_the_hash_of_a_proposition_over_it` — `Π(x : Dog). Prop`
+  hashes identically against a layer defining `Dog` and a child redefining it, with an `assert_ne!`
+  on the two resolutions first so the redefinition is known to be real.
+- `witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over` — a `Declared`
+  witness admitted under one `Dog` is still found by `lookup_chain_witness` from a layer where
+  `Dog` is **wider** (a required property dropped, so strictly more things are Dogs). `Π(x : Dog). P`
+  is a stronger claim there than the one that earned the credit. Narrowing would shrink the domain
+  and leave stale credit sound by accident, which is why the test widens.
+
+Both assert *current* behaviour and name §6.2, so they fail loudly if proposition identity ever
+becomes environment-relative.
+
+The failing soundness argument is written down in the module doc (`witness_index.rs:30-31`):
+*"First-hit-wins is sound because Layer immutability means a once-admitted witness stays admitted in
+all descendants."* Immutability makes the **record** stable. It does not make the **meaning** of what
+was recorded stable, because a descendant can rebind a name the proposition mentions.
+
 ### 6.3 The institution protocol types resource shapes, not propositions
 
 An institution's declared contract is an **input class**: `marshal.rs:105-115` resolves it on the
