@@ -187,29 +187,76 @@ impl fmt::Display for ValidationError {
 /// `CheckCtx` that owns the layer reference. Callers passing an
 /// already-Arc'd layer should `Arc::clone` it; callers with a fresh
 /// `Layer` should wrap in `Arc::new`.
+/// D78 Phase D — class IRI → the field set its record demands, memoized for the
+/// duration of a validation pass.
+///
+/// Routing membership through `resolve_class_type` is the unification: one
+/// definition of "what does `C` require", shared with the kernel instead of
+/// re-walked here. But that call reads back and re-evaluates a telescope, which
+/// is far heavier than the `BTreeSet` union it replaces, and the pass runs over
+/// 9.4M resources. Memoizing per **class** rather than per resource is what
+/// keeps the unification affordable: ~894 distinct classes against millions of
+/// instances.
+///
+/// **Thread-local with an RAII scope, keyed by layer — the same shape as
+/// [`crate::layer::ResolveMemoScope`], and for the same reasons.** A `RefCell`
+/// field on `Validator` would have been simpler and would have silently made a
+/// public type `!Sync`; this keeps `Validator` a plain `Arc<Layer>` wrapper.
+/// No-op when no scope is installed, so a direct `validate_resource` call still
+/// works — it just recomputes.
+///
+/// Soundness is `ResolveMemoScope`'s: correct only while the chain does not
+/// change, which holds across a pass over immutable `Arc<Layer>`s.
+/// `BTreeMap`, per the project convention — deterministic iteration order and
+/// better locality. The perf argument is close to a wash at this size (~894
+/// classes): `Iri` keys share long prefixes (`urn:eigenius:core:…`), so
+/// comparisons do not short-circuit early and a B-tree lookup reads more bytes
+/// than one hash would. Determinism and consistency with the surrounding code —
+/// the value is already a `BTreeSet` — decide it.
+///
+/// Note `RESOLVE_MEMO` uses `HashMap`; this does not follow it there.
+type ClassFieldsMemo = std::collections::BTreeMap<
+    crate::layer::LayerId,
+    std::collections::BTreeMap<Iri, BTreeSet<Iri>>,
+>;
+
+thread_local! {
+    static CLASS_FIELDS_MEMO: std::cell::RefCell<Option<ClassFieldsMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard installing a [`CLASS_FIELDS_MEMO`] for its lifetime. Nesting-safe:
+/// the previous memo is restored on drop, so a re-entrant pass gets its own.
+pub struct ClassFieldsScope {
+    prev: Option<ClassFieldsMemo>,
+}
+
+impl ClassFieldsScope {
+    pub fn new() -> Self {
+        let prev = CLASS_FIELDS_MEMO.with(|m| m.borrow_mut().replace(ClassFieldsMemo::new()));
+        Self { prev }
+    }
+}
+
+impl Default for ClassFieldsScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ClassFieldsScope {
+    fn drop(&mut self) {
+        CLASS_FIELDS_MEMO.with(|m| *m.borrow_mut() = self.prev.take());
+    }
+}
+
 pub struct Validator {
     pub(crate) layer: Arc<Layer>,
-    /// D78 Phase D — class IRI → the field set its record demands.
-    ///
-    /// Routing membership through `resolve_class_type` is the unification: one
-    /// definition of "what does `C` require", shared with the kernel instead of
-    /// re-walked here. But that call reads back and re-evaluates a telescope,
-    /// which is far heavier than the `BTreeSet` union it replaces, and the pass
-    /// runs over 9.4M resources. Caching per **class** rather than per resource
-    /// is what keeps the unification affordable: ~894 distinct classes against
-    /// millions of instances.
-    ///
-    /// Sound for the same reason `RESOLVE_MEMO` is: the chain is immutable for
-    /// the duration of a pass.
-    class_fields: std::cell::RefCell<std::collections::BTreeMap<Iri, BTreeSet<Iri>>>,
 }
 
 impl Validator {
     pub fn new(layer: Arc<Layer>) -> Self {
-        Self {
-            layer,
-            class_fields: std::cell::RefCell::new(std::collections::BTreeMap::new()),
-        }
+        Self { layer }
     }
 
     /// Validate all resources in this layer.
@@ -220,6 +267,10 @@ impl Validator {
         // walked once instead of millions of times (D65 load-scaling fix). Dropped
         // at end of scope, releasing the cached `Arc`s.
         let _memo = crate::layer::ResolveMemoScope::new();
+        // D78 Phase D — same lifetime, same soundness condition: memoize each
+        // class's record field set so the telescope is built once per class
+        // rather than once per resource.
+        let _class_fields = ClassFieldsScope::new();
         let mut errors = Vec::new();
         for arc_resource in self.layer.iter_resources().map(|(_, r)| r) {
             let resource: &Resource = &arc_resource;
@@ -243,7 +294,7 @@ impl Validator {
     fn effective_record_fields(&self, class_refs: &[&Iri], resource: &Resource) -> BTreeSet<Iri> {
         let mut fields: BTreeSet<Iri> = BTreeSet::new();
         for class_iri in class_refs {
-            fields.extend(self.record_fields_of(class_iri));
+            self.extend_with_record_fields(class_iri, &mut fields);
         }
         let (conditional, _) = self.evaluate_conditional_requires(class_refs, resource);
         fields.extend(conditional);
@@ -255,22 +306,44 @@ impl Validator {
     /// An unresolvable class contributes nothing: Rule 14 and Rule 22 report the
     /// dangling reference, and reporting it twice as a missing-property error
     /// would be noise.
-    fn record_fields_of(&self, class_iri: &Iri) -> BTreeSet<Iri> {
-        if let Some(hit) = self.class_fields.borrow().get(class_iri) {
-            return hit.clone();
+    fn extend_with_record_fields(&self, class_iri: &Iri, out: &mut BTreeSet<Iri>) {
+        // Extend from inside the borrow rather than returning a `BTreeSet`.
+        // `Iri` is a `String` newtype, so handing back an owned set would clone
+        // the tree *and* a `String` per field on every lookup — once per
+        // resource, which is most of what the memo was meant to avoid.
+        let hit = CLASS_FIELDS_MEMO.with(|m| {
+            m.borrow().as_ref().and_then(|memo| {
+                memo.get(self.layer.id())
+                    .and_then(|inner| inner.get(class_iri))
+                    .map(|fields| {
+                        out.extend(fields.iter().cloned());
+                    })
+            })
+        });
+        if hit.is_some() {
+            return;
         }
-        let fields = match crate::program::ground::resolve_class_type(class_iri, &self.layer) {
-            Ok(crate::nbe::val::Val::Record(fs, _)) => {
-                fs.iter().map(|(i, _, _)| i.clone()).collect()
+
+        let fields: BTreeSet<Iri> =
+            match crate::program::ground::resolve_class_type(class_iri, &self.layer) {
+                Ok(crate::nbe::val::Val::Record(fs, _)) => {
+                    fs.iter().map(|(i, _, _)| i.clone()).collect()
+                }
+                // Primitives and inductives resolve to something other than a
+                // record and demand no fields of an instance. An unresolvable
+                // class contributes nothing either: Rules 14 and 22 report the
+                // dangling reference, and reporting it again as a missing
+                // property would be noise.
+                Ok(_) | Err(_) => BTreeSet::new(),
+            };
+        out.extend(fields.iter().cloned());
+        CLASS_FIELDS_MEMO.with(|m| {
+            if let Some(memo) = m.borrow_mut().as_mut() {
+                memo.entry(self.layer.id().clone())
+                    .or_default()
+                    .insert(class_iri.clone(), fields);
             }
-            // Primitives and inductives resolve to something other than a
-            // record and demand no fields of an instance.
-            Ok(_) | Err(_) => BTreeSet::new(),
-        };
-        self.class_fields
-            .borrow_mut()
-            .insert(class_iri.clone(), fields.clone());
-        fields
+        });
     }
 
     /// The **pre-D78 path**, kept callable for the Phase D parity gate.
@@ -2987,5 +3060,147 @@ mod phase_d_parity {
         let old = v.shadow_required_fields(&refs, &prop);
         let new = v.record_required_fields(&refs, &prop);
         assert_eq!(old, new, "conditional requirements must survive the switch");
+    }
+}
+
+#[cfg(test)]
+mod class_fields_memo {
+    //! D78 Phase D — the memo that makes routing membership through
+    //! `resolve_class_type` affordable.
+
+    use super::*;
+
+    #[test]
+    fn validator_is_send_and_sync() {
+        // The first cut put a `RefCell` field on `Validator`, which silently
+        // made a public type `!Sync`. Nothing shared one across threads at the
+        // time, so it compiled and the capability loss would have surfaced
+        // later. The memo is a thread-local instead; this pins the property.
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Validator>();
+    }
+
+    #[test]
+    fn the_memo_is_a_no_op_without_a_scope() {
+        // `validate_resource` can be called directly, outside `validate()`.
+        // Without a scope the memo is absent and the computation still runs —
+        // the same fall-through `RESOLVE_MEMO` has.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = crate::layer::LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+        let v = Validator::new(Arc::clone(&layer));
+
+        let iri = Iri::parse("urn:eigenius:core:Class").unwrap();
+        let r = layer.get_resource(&iri).unwrap();
+        let classes = r.is_a();
+        let refs: Vec<&Iri> = classes.iter().collect();
+
+        let no_scope = v.record_required_fields(&refs, &r);
+        let with_scope = {
+            let _s = ClassFieldsScope::new();
+            let first = v.record_required_fields(&refs, &r);
+            let second = v.record_required_fields(&refs, &r); // memo hit
+            assert_eq!(first, second, "a memo hit must equal the computed value");
+            second
+        };
+        assert_eq!(
+            no_scope, with_scope,
+            "the memo must not change the answer, only the cost"
+        );
+    }
+
+    #[test]
+    fn the_memo_is_bounded_by_distinct_classes_not_by_resources() {
+        // **The bound that makes this safe.** The memo is keyed by class IRI, so
+        // it grows with the ontology's class count and not with the instance
+        // count — which is the whole point over a 9.4M-resource chain. This
+        // builds many instances over one class and asserts the memo stays small.
+        //
+        // Contrast `RESOLVE_MEMO`, which is keyed by every resolved IRI and so
+        // does grow with the chain. That cost is accepted there; it is not
+        // inherited here.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = crate::layer::LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut d = crate::layer::LayerBuilder::new("many", Some(core));
+        for n in 0..500 {
+            let mut r = Resource::new(Iri::parse(&format!("urn:t:inst{n}")).unwrap());
+            r.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                Value::Array(vec![Value::ResourceRef(
+                    Iri::parse(wk::DECLARED_RESOURCE).unwrap(),
+                )]),
+            );
+            d.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        let _memo = crate::layer::ResolveMemoScope::new();
+        let _scope = ClassFieldsScope::new();
+        let v = Validator::new(Arc::clone(&layer));
+        let mut resources = 0;
+        for iri in layer.defined_iris() {
+            if let Some(r) = layer.get_resource(iri) {
+                let classes = r.is_a();
+                let refs: Vec<&Iri> = classes.iter().collect();
+                let _ = v.record_required_fields(&refs, &r);
+                resources += 1;
+            }
+        }
+        assert_eq!(resources, 500, "the fixture must exercise 500 resources");
+
+        let entries = CLASS_FIELDS_MEMO.with(|m| {
+            m.borrow()
+                .as_ref()
+                .unwrap()
+                .values()
+                .map(|inner| inner.len())
+                .sum::<usize>()
+        });
+        assert!(
+            entries <= 4,
+            "500 resources over one class must leave a handful of memo entries, \
+             not one per resource; got {entries}"
+        );
+    }
+
+    #[test]
+    fn the_scope_is_nesting_safe() {
+        // A re-entrant pass — cascade revalidation is the real case — must get
+        // its own memo and restore the outer one on drop.
+        let marker = crate::layer::LayerId([7u8; 32]);
+        let outer = ClassFieldsScope::new();
+        CLASS_FIELDS_MEMO.with(|m| {
+            m.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .insert(marker.clone(), Default::default());
+        });
+        {
+            let _inner = ClassFieldsScope::new();
+            CLASS_FIELDS_MEMO.with(|m| {
+                assert!(
+                    m.borrow().as_ref().unwrap().is_empty(),
+                    "the inner scope starts empty"
+                );
+            });
+        }
+        CLASS_FIELDS_MEMO.with(|m| {
+            assert!(
+                m.borrow().as_ref().unwrap().contains_key(&marker),
+                "the outer memo is restored on inner drop"
+            );
+        });
+        drop(outer);
+        CLASS_FIELDS_MEMO.with(|m| {
+            assert!(m.borrow().is_none(), "no memo outside any scope");
+        });
     }
 }
