@@ -190,8 +190,9 @@ const RESERVED: &[&str] = &[
     "universe",
     "true",
     "false",
-    "json",
-    "type_expr",
+    // `json` and `type_expr` are deliberately ABSENT: they are CONTEXTUAL, recognised as
+    // `Ident(_) LParen` in value position rather than lexed as keywords, so neither breaks the
+    // tight-colon `QualName` rule and both are usable as aliases. Verified.
     "Construct",
     "Prop",
     "Set",

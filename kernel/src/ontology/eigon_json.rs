@@ -234,15 +234,18 @@ fn parse_value(value: &serde_json::Value, property: &str) -> Result<Value, Parse
             // though `eigenius decompile` does have a chain: a schema-aware printer paired with a
             // shape-based reader would disagree, which is worse than both being approximate.
             //
-            // **`any` is weaker than it should be** — a Resource's keys are ALL property IRIs
-            // (Rule 22 §c requires every key to resolve to a declared `core:Property`), so `all`
-            // is the tighter test and would classify `{"a:b": 1, "plain": 2}` correctly as JSON
-            // where `any` calls it a Resource. Changing it is a reader-semantics change that
-            // could reclassify existing data, so it is measured and filed rather than done here:
-            // across every shipped ontology, experiment and demo there are 5 object-valued
-            // `core:json` instances and **none** has an IRI-shaped key, so the two agree today.
-            let any_iri_key = obj.keys().any(|k| k == "@id" || Iri::parse(k).is_ok());
-            if any_iri_key {
+            // The test is over ALL keys rather than any (eigenius#223) — see below.
+            // ALL keys, not any (eigenius#223). A Resource's keys are all property IRIs — Rule
+            // 22 §c requires every key to resolve to a declared `core:Property` — so a single
+            // IRI-shaped key among ordinary ones does not make the value a Resource.
+            // `{"a:b": 1, "plain": 2}` is opaque JSON, and `any` called it a Resource.
+            //
+            // `@id` still short-circuits: only a top-level resource carries one, and an embedded
+            // resource bearing `@id` is already a hard error (`ParseError::EmbeddedWithId`), so
+            // its presence identifies the shape before the key test is reached.
+            let resource_shaped = obj.contains_key("@id")
+                || (!obj.is_empty() && obj.keys().all(|k| Iri::parse(k).is_ok()));
+            if resource_shaped {
                 let resource = parse_embedded_resource(value, property)?;
                 Ok(Value::Embedded(Box::new(resource)))
             } else {
@@ -484,5 +487,42 @@ mod tests {
         let a_pos = as_str.find("urn:eigenius:example:a").unwrap();
         let z_pos = as_str.find("urn:eigenius:example:z").unwrap();
         assert!(a_pos < z_pos);
+    }
+    /// **A single IRI-shaped key does not make a value a Resource** (eigenius#223).
+    ///
+    /// The discrimination used to be `keys().any(is_iri)`, so one IRI-looking key among ordinary
+    /// ones classified the whole value as an embedded resource. A Resource's keys are ALL property
+    /// IRIs — Rule 22 §c requires every key to resolve to a declared `core:Property` — so `all` is
+    /// the correct test.
+    ///
+    /// Measured before and after over every shipped ontology, experiment and demo: 244 embedded
+    /// values and 111 JSON values, unchanged. The corpus does not exercise the difference; this
+    /// test does.
+    #[test]
+    fn a_lone_iri_shaped_key_does_not_make_it_a_resource() {
+        let doc = r#"[{
+            "@id": "urn:eigenius:test:r",
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+            "urn:eigenius:test:mixed": { "a:b": 1, "plain": 2 },
+            "urn:eigenius:test:pure": { "urn:eigenius:test:p": 1 }
+        }]"#;
+        let rs = parse_document(doc).expect("parses");
+        let r = &rs[0];
+
+        let mixed = r
+            .get(&Iri::parse("urn:eigenius:test:mixed").unwrap())
+            .expect("mixed present");
+        assert!(
+            matches!(mixed, Value::Json(_)),
+            "one IRI-shaped key among ordinary ones is opaque JSON, not a resource; got {mixed:?}"
+        );
+
+        let pure = r
+            .get(&Iri::parse("urn:eigenius:test:pure").unwrap())
+            .expect("pure present");
+        assert!(
+            matches!(pure, Value::Embedded(_)),
+            "all-IRI keys is an embedded resource; got {pure:?}"
+        );
     }
 }
