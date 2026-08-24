@@ -613,22 +613,27 @@ the one with a working reference design.
    the effectful one.
 4. **Consolidation** to one `Const`, which is what makes #188's residual affordable.
 5. **#188's residual** — levels on one variant.
-6. **Merge as pushout**, and the institution boundary as application.
+6. **Q4/4c — the recursor motive's codomain becomes a level parameter**, replacing the `Sort(2)`
+   constant. `large_elim_admitted` keeps its meaning and call site; the two-way choice between
+   `sort(0)` and `sort(2)` becomes *`u` pinned to 0* vs *`u` free*. Removes the Set ceiling and is
+   what makes Q5's `universe` syntax load-bearing.
+7. **Merge as pushout**, and the institution boundary as application.
 
-Steps 4–6 are gated on 3. Step 1 gates nothing but decides what step 2 files.
+Steps 4–7 are gated on 3, and 6 additionally on 5. Step 1 gates nothing but decides what step 2
+files.
 
 **Seam B**
 
-7. **Decide `is_a` vs `:`** (M3, §8 Q3) — whether the validator's constraint checker and the kernel's
+8. **Decide `is_a` vs `:`** (M3, §8 Q3) — whether the validator's constraint checker and the kernel's
    type former are one relation. §6.0 says they are two implementations of one idea; this step makes
    that a decision rather than an accident.
-8. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms — clause 8 as
+9. **`Val::Record` as a kernel former**, with conversion, readback, and D47 codec arms — clause 8 as
    the membership rule, which is what unifies the two implementations.
-9. **`resolve_class_type` becomes a function of a resource**, with the class constraint as the
+10. **`resolve_class_type` becomes a function of a resource**, with the class constraint as the
    declared minimum rather than the whole type.
-10. **`PropAccess` / `Construct` over records**, which is what closes §3.8.
+11. **`PropAccess` / `Construct` over records**, which is what closes §3.8.
 
-Seam B is gated on nothing in 1–6, and §3.8 is the strongest single argument for starting it: it is
+Seam B is gated on nothing in 1–7, and §3.8 is the strongest single argument for starting it: it is
 the one place where the current model loses information a resource already carries, rather than
 losing soundness. The nominal-vs-structural decision is **not** on this path — record types make
 structural subtyping available without requiring it.
@@ -636,13 +641,14 @@ structural subtyping available without requiring it.
 ## 8. Open questions, and the order they resolve in
 
 ```
-Q1 ANSWERED ──▶ Q2 ANSWERED ──▶ Q3 OPEN ──▶ Q5 falls out
- env in            δ per kind      one opaque
- check + conv      classes opaque  Const, or two?
- not eval                              ▲
-                              Seam B ──┘  (what projection returns)
+Q1 ──▶ Q2 ──▶ Q3 ──▶ Q5 ──▶ Q4
+env in   δ per   one    already   motive codomain
+check    kind    Const  built     becomes a level param
++ conv                                    ▲
+                     Seam B (Q6–Q10) ─────┘
+                     record + constraint
 
-Q4 recursor elimination universe ── independent ──▶ (#188 level work)
+all ten settled — the arrows are now implementation order, not deliberation order
 ```
 
 ### Q1 — ANSWERED: the environment belongs to `check` and `conv`, not to `eval`
@@ -920,7 +926,7 @@ was the first.
 |---|---|---|
 | 4a | leave it pinned at `Sort(2)` | ceiling stays at Set; no recursor eliminates into `Type 1`+ |
 | 4b | bump the constant | moves the ceiling; this is precisely the ladder #188 exists to escape — "one bump per level, each a bootstrap ontology edit and a reseed" |
-| 4c | **motive codomain becomes a level parameter** — `I.rec.{u}`, motive `I(params) → Sort u` | Lean/nanoda's shape; needs `Const(iri, levels)` (Q3) and declaration-level uparams (#188's residual) |
+| 4c | **CHOSEN** — motive codomain becomes a level parameter: `I.rec.{u}`, motive `I(params) → Sort u` | Lean/nanoda's shape; needs `Const(iri, levels)` (Q3) and declaration-level uparams (#188's residual) |
 | 4d | infer the motive's level per elimination site, no parameter on the recursor | avoids uparams for recursors specifically |
 
 **The framework discriminates 4c from 4d.** §6.1 argued a constraint is level-generic *without*
@@ -979,15 +985,15 @@ now constrained on one side by Q2. Q4 is parallelisable. Q5 falls out of Q3.
 
 ## 8a. Status roll-up
 
-**Settled on paper. Nothing here is implemented**, and the tests written during this analysis pin
-*current* behaviour — the defects — not the design.
+**All ten numbered questions are settled.** The design is closed; nothing in it is implemented, and
+the tests written during this analysis pin *current* behaviour — the defects — not the design.
 
 | | question | status |
 |---|---|---|
 | Q1 | environment interface | **answered** — `check` + `conv`, not `eval` |
 | Q2 | δ-policy | **answered** per kind; inductives deferred into Q3 |
 | Q3 | `EigonClass` as `Const`? | **answered conditionally** — 5→1, but the chain Q8→Q6→Q3 assumes Seam B lands. If the record model does not land, Q3 reverts to the A/B/C analysis. |
-| Q4 | recursor elimination universe | **soundness done** (D46 §7 singleton-elim); representation open — motive pinned at `Sort(2)`, ceiling is Set. Options enumerated; 4c indicated. |
+| Q4 | recursor elimination universe | **decided** — 4c. Soundness half already built (D46 §7 singleton-elim); the motive codomain becomes a level parameter, replacing the `Sort(2)` constant whose ceiling is Set. |
 | Q5 | `universe u v;` in ESL | **answered** — already implemented end to end; forced by round-trip. The framework shrinks who emits one to axioms and inductives. No work. |
 | Q6 | `check_infer` of a class reference | **answered** (§6.3) |
 | Q7 | what `Construct` returns | **decided** — 7b |
