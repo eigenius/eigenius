@@ -26,7 +26,7 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D8 | [CompleteJson component](d8-complete-json-component.md) |
 | D9 | [NbE unification and type extensions](d9-nbe-unification-and-type-extensions.md) |
 | D10 | [Grothendieck institution protocol](d10-grothendieck-institution-protocol.md) |
-| D11 | [Codata, streams, and resumable execution](d11-codata-streams.md) |
+| D11 | [Codata, streams, and resumable execution](d11-codata-streams.md) — ⚠️ **DEPRECATED** (eigenius#218): the codata half is removed; §5.3/§5.4 (task state, concurrency) survive |
 | D12 | [WASM extensibility](d12-wasm-extensibility.md) — **removed 2026-07-08**, retained as historical record |
 | D12b | [Orchestrator WASM plan](d12b-orchestrator-wasm-plan.md) — **removed 2026-07-08**, retained as historical record |
 | D13 | [Durable kernel state](d13-durable-kernel-state.md) |

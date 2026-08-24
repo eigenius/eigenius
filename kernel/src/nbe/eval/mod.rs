@@ -188,7 +188,7 @@ pub(crate) fn eval_impl<T: Tracer>(
     let ev = |e: &Exp| -> Result<(Val, T::Node), EvalError> { eval_impl::<T>(e, rho, ctx) };
 
     match exp {
-        Exp::Sort(n) => Ok((Val::Sort(*n), T::leaf())),
+        Exp::Sort(n) => Ok((Val::Sort(n.clone()), T::leaf())),
         Exp::One => Ok((Val::One, T::leaf())),
         Exp::Unit => Ok((Val::Unit, T::leaf())),
 
@@ -533,25 +533,6 @@ pub(crate) fn eval_impl<T: Tracer>(
                     };
                     Ok((result, T::project(source_node, prop)))
                 }
-                // Codata observation: the "property" IRI's local name is
-                // treated as the observation name (D11 §8). Evaluate the
-                // matching field body in the corecord's captured env.
-                Val::CoRecord(fields, corecord_rho) => {
-                    let obs_name = prop.local_name();
-                    for (name, body) in &fields {
-                        if name == obs_name {
-                            let (v, body_node) = eval_impl::<T>(body, &corecord_rho, ctx)?;
-                            return Ok((v, T::combine(vec![source_node, body_node])));
-                        }
-                    }
-                    tracing::warn!(
-                        { field::OPERATION } = operation::NBE_EVAL,
-                        { field::ERROR_KIND } = "observation_missing",
-                        observation = %obs_name,
-                        "observation not found in corecord during eval; returning Unit"
-                    );
-                    Ok((Val::Unit, source_node))
-                }
                 Val::Nt(n) => Ok((
                     Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
                     T::project(source_node, prop),
@@ -582,35 +563,6 @@ pub(crate) fn eval_impl<T: Tracer>(
                 field_nodes.push((prop_iri.clone(), node));
             }
             Ok((Val::ResourceVal(Box::new(r)), T::construct(field_nodes)))
-        }
-
-        // Codata (D11, Phase 9b-i)
-        Exp::Codata(observations) => Ok((
-            Val::Codata(
-                observations
-                    .iter()
-                    .map(|o| (o.name.clone(), o.typ.clone()))
-                    .collect(),
-                rho.clone(),
-            ),
-            T::leaf(),
-        )),
-
-        Exp::CoRecord(fields) => Ok((
-            Val::CoRecord(
-                fields
-                    .iter()
-                    .map(|f| (f.name.clone(), f.body.clone()))
-                    .collect(),
-                rho.clone(),
-            ),
-            T::leaf(),
-        )),
-
-        Exp::Observe(e, name) => {
-            let (v, source_node) = ev(e)?;
-            let (result, obs_node) = v.vobserve_impl::<T>(name, ctx)?;
-            Ok((result, T::combine(vec![source_node, obs_node])))
         }
 
         // Map/Reduce (Phase 11a)
@@ -699,22 +651,6 @@ pub(crate) fn eval_impl<T: Tracer>(
                     node,
                 ))
             }
-        }
-        Exp::CodataType(decl, params) => {
-            let mut vals = Vec::with_capacity(params.len());
-            let mut nodes = Vec::with_capacity(params.len());
-            for p in params {
-                let (v, n) = ev(p)?;
-                vals.push(v);
-                nodes.push(n);
-            }
-            Ok((
-                Val::CodataType {
-                    decl: decl.clone(),
-                    params: vals,
-                },
-                T::combine(nodes),
-            ))
         }
         Exp::InductiveCtor(decl, ctor_name, args) => {
             let mut vals = Vec::with_capacity(args.len());
@@ -807,33 +743,6 @@ pub(crate) fn eval_impl<T: Tracer>(
                     "Match: expected inductive value, got {other:?}"
                 ))),
             }
-        }
-
-        // Sized types (Phase 11b step 14, D19 §8).
-        Exp::SizeSort => Ok((Val::SizeSort, T::leaf())),
-        // ∞ is a fixed point of successor: `ŝ(∞) = ∞`. Matches
-        // MiniAgda's `sizeSuccE Infty = Infty` (Abstract.hs:300).
-        // Without this absorption, `SizeSucc(SizeInf)` and `SizeInf`
-        // would compare unequal, creating spurious type mismatches
-        // whenever code mixes sized and unsized (`∞`-indexed) uses.
-        Exp::SizeSucc(s) => {
-            let (v, node) = ev(s)?;
-            match v {
-                Val::SizeInf => Ok((Val::SizeInf, node)),
-                other => Ok((Val::SizeSucc(Box::new(other)), node)),
-            }
-        }
-        Exp::SizeInf => Ok((Val::SizeInf, T::leaf())),
-
-        Exp::SizedPi { patt, upper, body } => {
-            let (upper_val, node) = ev(upper)?;
-            Ok((
-                Val::SizedPi(
-                    Box::new(upper_val),
-                    Clos::new(patt.clone(), *body.clone(), rho.clone()),
-                ),
-                node,
-            ))
         }
     }
 }
@@ -967,8 +876,8 @@ mod tests {
 
     #[test]
     fn eval_set() -> Result<(), EvalError> {
-        let v = eval(&Exp::Sort(1), &Rho::Nil)?;
-        assert!(matches!(v, Val::Sort(1)));
+        let v = eval(&Exp::sort(1), &Rho::Nil)?;
+        assert!(matches!(&v, Val::Sort(l) if l.is_nat(1)));
         Ok(())
     }
 
@@ -997,7 +906,7 @@ mod tests {
     #[test]
     fn eval_pair() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Sort(1))),
+            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         assert!(matches!(v, Val::Pair(_, _)));
@@ -1009,7 +918,7 @@ mod tests {
         let v = eval(
             &Exp::Fst(Box::new(Exp::Pair(
                 Box::new(Exp::Unit),
-                Box::new(Exp::Sort(1)),
+                Box::new(Exp::sort(1)),
             ))),
             &Rho::Nil,
         )?;
@@ -1022,11 +931,11 @@ mod tests {
         let v = eval(
             &Exp::Snd(Box::new(Exp::Pair(
                 Box::new(Exp::Unit),
-                Box::new(Exp::Sort(1)),
+                Box::new(Exp::sort(1)),
             ))),
             &Rho::Nil,
         )?;
-        assert!(matches!(v, Val::Sort(1)));
+        assert!(matches!(&v, Val::Sort(l) if l.is_nat(1)));
         Ok(())
     }
 
@@ -1429,7 +1338,7 @@ mod tests {
         // Phase 10c: PropAccess where the target evaluates to a non-resource
         // Val should return Val::Unit instead of panicking.
         let ctx = io_ctx();
-        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Sort(1));
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::sort(1));
         let exp = Exp::PropAccess(
             Box::new(Exp::Var("x".to_string())),
             Iri::parse("urn:eigenius:test:prop").unwrap(),
@@ -1448,11 +1357,11 @@ mod tests {
         // Phase 10c: Arrow/Times should produce identical results to Pi/Sig
         // with Patt::Unit, but without the re-recursion overhead.
         let arrow_val = eval(
-            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         let pi_val = eval(
-            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         // Both should be Val::Pi
@@ -1463,11 +1372,11 @@ mod tests {
         assert!(matches!(pi_val, Val::Pi(_, _)), "Pi should produce Val::Pi");
 
         let times_val = eval(
-            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Times(Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         let sig_val = eval(
-            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
+            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::sort(1))),
             &Rho::Nil,
         )?;
         assert!(
@@ -1515,27 +1424,6 @@ mod tests {
             }
             other => panic!("expected stuck neutral, got {:?}", other),
         }
-        Ok(())
-    }
-
-    #[test]
-    fn prop_access_missing_observation_returns_unit() -> Result<(), EvalError> {
-        // Phase 10c: PropAccess on a CoRecord where the observation name
-        // doesn't exist should return Val::Unit instead of panicking.
-        let ctx = io_ctx();
-        let corecord = Val::CoRecord(vec![("head".to_string(), Exp::Unit)], Rho::Nil);
-        let rho = Rho::Nil.extend(Patt::Var("s".to_string()), corecord);
-        // Access observation "missing" which doesn't exist in the corecord
-        let exp = Exp::PropAccess(
-            Box::new(Exp::Var("s".to_string())),
-            Iri::parse("urn:eigenius:test:missing").unwrap(),
-        );
-        let (val, _trace) = eval_traced(&exp, &rho, &ctx)?;
-        assert!(
-            matches!(val, Val::Unit),
-            "missing observation should return Val::Unit, got {:?}",
-            val
-        );
         Ok(())
     }
 
@@ -1623,87 +1511,4 @@ mod tests {
     }
 
     // --- Sized types primitives (Phase 11b step 14) ---
-
-    #[test]
-    fn eval_size_sort() -> Result<(), EvalError> {
-        let v = eval(&Exp::SizeSort, &Rho::Nil)?;
-        assert!(matches!(v, Val::SizeSort));
-        Ok(())
-    }
-
-    #[test]
-    fn eval_size_inf() -> Result<(), EvalError> {
-        let v = eval(&Exp::SizeInf, &Rho::Nil)?;
-        assert!(matches!(v, Val::SizeInf));
-        Ok(())
-    }
-
-    #[test]
-    fn size_succ_of_inf_absorbs_to_inf() {
-        // `ŝ(∞) = ∞` — MiniAgda's fixed-point absorption
-        // (Abstract.hs:300). Prevents spurious inequality between
-        // sized types that happen to mix `SizeSucc` and `SizeInf`.
-        let exp = Exp::SizeSucc(Box::new(Exp::SizeInf));
-        let v = eval(&exp, &Rho::Nil).expect("eval");
-        assert!(
-            matches!(v, Val::SizeInf),
-            "SizeSucc(SizeInf) must collapse to SizeInf, got {v:?}"
-        );
-    }
-
-    #[test]
-    fn nested_size_succ_at_inf_still_absorbs() {
-        // ŝ(ŝ(∞)) evaluates inner first, gets ∞, outer ŝ also
-        // absorbs — final value is ∞.
-        let exp = Exp::SizeSucc(Box::new(Exp::SizeSucc(Box::new(Exp::SizeInf))));
-        let v = eval(&exp, &Rho::Nil).expect("eval");
-        assert!(
-            matches!(v, Val::SizeInf),
-            "nested SizeSucc at SizeInf must collapse, got {v:?}"
-        );
-    }
-
-    #[test]
-    fn size_succ_of_variable_does_not_absorb() {
-        // SizeSucc over a neutral size variable stays as SizeSucc —
-        // absorption only triggers for the concrete ∞ case.
-        let rho = Rho::Nil.extend(
-            Patt::Var("i".to_string()),
-            Val::Nt(Neut::Gen(0, "i".to_string())),
-        );
-        let exp = Exp::SizeSucc(Box::new(Exp::Var("i".to_string())));
-        let v = eval(&exp, &rho).expect("eval");
-        match v {
-            Val::SizeSucc(inner) => {
-                assert!(matches!(*inner, Val::Nt(Neut::Gen(_, _))));
-            }
-            other => panic!("expected SizeSucc(neutral), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn finite_size_primitives_round_trip_through_readback() -> Result<(), EvalError> {
-        // For non-∞ sizes (neutral variables), readback round-trips
-        // the successor chain losslessly.
-        let rho = Rho::Nil.extend(
-            Patt::Var("j".to_string()),
-            Val::Nt(Neut::Gen(0, "j".to_string())),
-        );
-        let exp = Exp::SizeSucc(Box::new(Exp::SizeSucc(Box::new(Exp::Var("j".to_string())))));
-        let v = eval(&exp, &rho)?;
-        let readback = crate::nbe::readback::readback_val(0, &v);
-        // The neutral variable reads back with its gen-level name,
-        // so we can't just assert_eq against the input. Verify
-        // structure instead: two SizeSucc wrappers around some Var.
-        match &readback {
-            Exp::SizeSucc(inner1) => match inner1.as_ref() {
-                Exp::SizeSucc(inner2) => {
-                    assert!(matches!(inner2.as_ref(), Exp::Var(_)));
-                }
-                other => panic!("expected nested SizeSucc, got {other:?}"),
-            },
-            other => panic!("expected outer SizeSucc, got {other:?}"),
-        }
-        Ok(())
-    }
 }

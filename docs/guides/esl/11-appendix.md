@@ -2,7 +2,7 @@
 
 ## 11.1. Grammar reference
 
-[D7 §7](../../design/d7-esl-surface-syntax.md#7-grammar-ebnf) is the design document for the grammar; the productions below are read off [`kernel/src/esl/parser.rs`](../../../kernel/src/esl/parser.rs) and are current as of 2026-08-20, including the post-D7 additions (sized bounded binders from Phase 11h, institution-capability syntax from Phase 11e.1, `axiom` from eigenius#72, `def` from D66, `macro` from D52 §12, `merge_comorphism` from D37 §3.3, the index telescope from eigenius#72 Layer 2).
+[D7 §7](../../design/d7-esl-surface-syntax.md#7-grammar-ebnf) is the design document for the grammar; the productions below are read off [`kernel/src/esl/parser.rs`](../../../kernel/src/esl/parser.rs) and are current as of 2026-08-20, including the post-D7 additions (institution-capability syntax from Phase 11e.1, `axiom` from eigenius#72, `def` from D66, `macro` from D52 §12, `merge_comorphism` from D37 §3.3, the index telescope from eigenius#72 Layer 2).
 
 ### 11.1.1. Top-level
 
@@ -11,7 +11,7 @@ File         ::= (NamespaceDecl | Declaration)*    (* freely interleaved *)
 NamespaceDecl::= 'namespace' Identifier '=' StringLit ';'
 
 Declaration  ::= ClassDecl | PropertyDecl | ResourceDecl
-              |  DataDecl  | CodataDecl   | ProgramDecl
+              |  DataDecl  | ProgramDecl
               |  DefDecl                                   (* D66 — §11.1.3 *)
               |  AxiomDecl                                 (* eigenius#72 *)
               |  MacroDecl                                 (* D52 §12 *)
@@ -64,6 +64,9 @@ ResourceDecl  ::= 'resource' QualifiedName ':' QualifiedName (',' QualifiedName)
                   '{' ResourceField* '}'
 ResourceField ::= QualifiedName '=' Value ';'
 
+Identifier   ::= [a-zA-Z_] [a-zA-Z0-9_]*
+              |  "'" [a-zA-Z0-9_-]+ "'"                     (* quoted; `#` excluded *)
+
 Value         ::= StringLit | Integer | Float | Boolean
               |  '-' (Integer | Float)                      (* literals only *)
               |  QualifiedName                              (* IRI ref *)
@@ -71,9 +74,18 @@ Value         ::= StringLit | Integer | Float | Boolean
               |  '{' ResourceField* '}'                     (* embedded resource *)
               |  Identifier '(' (Value (',' Value)* ','?)? ')'   (* inductive ctor *)
               |  QualifiedName '(' (Value (',' Value)* ','?)? ')' (* macro call, D52 *)
+              |  'json' '(' JsonValue ')'                   (* core:json — eigenius#222 *)
               |  'formula' '(' FormulaExpr ')'              (* Pratt-parsed arithmetic *)
               |  'type_expr' '(' TypeExpr ')'               (* D47-encoded type *)
 ```
+
+JsonValue    ::= StringLit | Integer | Float | Boolean | 'null'
+              |  '-' (Integer | Float)
+              |  '[' (JsonValue (',' JsonValue)* ','?)? ']'
+              |  '{' (StringLit ':' JsonValue (',' StringLit ':' JsonValue)* ','?)? '}'
+              (* ordinary JSON. Object keys are STRING LITERALS, which is what distinguishes a
+                 json(…) value from a `{ ns:prop = … }` block — the latter is an embedded
+                 RESOURCE, a different chain value. *)
 
 Three asymmetries in `PropertyItem` are worth memorising: `allows_only`, `domain` and `class_types` take **no `=`** — they are bare comma-separated name lists, like `requires` and `recommends` in a class body — and `allows_only` takes qualified *names*, not values.
 
@@ -81,13 +93,16 @@ Three asymmetries in `PropertyItem` are worth memorising: `allows_only`, `domain
 
 A nullary constructor in value position requires empty parens (`Foo()`); a bare `Foo` is a resource reference. Unary `-` applies to numeric literals only; arithmetic on references lives inside `formula(...)`.
 
-### 11.1.3. Data, codata, and definitions
+### 11.1.3. Data and definitions
 
 ```ebnf
 DataDecl     ::= 'data' QualifiedName ParamList?
                  (':' IndexTelescope)?               (* eigenius#72 Layer 2 *)
                  (',' QualifiedName)*                (* extra is_a classes, D52 §12 *)
-                 '{' (Ctor (',' Ctor)* ','?)? '}'    (* zero ctors is legal *)
+                 '{' DataDescription? (Ctor (',' Ctor)* ','?)? '}'
+                                                     (* zero ctors is legal *)
+
+DataDescription ::= 'description' '=' StringLit ';'  (* core:description *)
 ParamList    ::= '(' DataParam (',' DataParam)* ')'
 DataParam    ::= Identifier ':' (QualifiedName | Sort)   (* "A : core:Set", "P : Prop" *)
 IndexTelescope::= (TypeExpr '->')* Sort              (* "Nat -> Set" *)
@@ -98,22 +113,15 @@ Ctor         ::= Identifier                          (* nullary, e.g. "zero" *)
               |  Identifier ':' TypeExpr             (* typed form *)
 
 CtorArg      ::= CtorArgType                         (* positional / anonymous *)
-              |  '{' BoundedBinder '}'               (* sized binder *)
-
-BoundedBinder::= Identifier (':' QualifiedName)? ('<' QualifiedName)?
-              (* {j} | {j : Size} | {j < i} | {j : Size < i} *)
+              |  Identifier ':' CtorArgType           (* named: core:arg_name *)
 
 CtorArgType  ::= QualifiedName                       (* "Nat" *)
               |  QualifiedName '(' CtorArgType (',' CtorArgType)* ')'  (* "List(A)" *)
 
 
-CodataDecl   ::= 'codata' QualifiedName ParamList? '{' Observation (';' Observation)* ';'? '}'
-Observation  ::= Identifier ':' TypeExpr
-
 TypeExpr     ::= QualifiedName                                           (* "Nat" *)
-              |  QualifiedName '(' TypeExpr (',' TypeExpr)* ')'          (* "Stream(A, j)" *)
+              |  QualifiedName '(' TypeExpr (',' TypeExpr)* ')'          (* "List(A)" *)
               |  TypeExpr '->' TypeExpr                                  (* "A -> B" *)
-              |  '{' BoundedBinder '}' '->' TypeExpr                     (* "{j < i} -> body" *)
               |  ('pi' | 'forall') TypedParams '=>' TypeExpr             (* Π — "forall (x : T) => B" *)
               |  'exists' TypedParams '=>' TypeExpr                      (* Σ — "exists (x : T) => B" *)
               |  'fun' TypedParams '=>' TypeExpr                         (* λ in type position — match motive *)
@@ -144,7 +152,7 @@ ProgramDecl  ::= 'program' QualifiedName ':' QualifiedName '->' QualifiedName
 ProgramAttribute ::= 'description' '=' StringLit ';'
 
 Expr         ::= LetExpr | LambdaExpr | TypedLambdaExpr | CaseExpr | MatchExpr
-              |  ConstructExpr | CoRecordExpr | ApplyExpr | ProjectExpr
+              |  ConstructExpr | ApplyExpr | ProjectExpr
               |  MapExpr | ReduceExpr
               |  PairExpr | LiteralExpr | VarExpr
 
@@ -159,7 +167,6 @@ MapExpr      ::= 'map' '(' Expr ',' Expr ')'               (* recognised by name
 ReduceExpr   ::= 'reduce' '(' Expr ',' Expr ',' Expr ')'   (* by name + arity 3 *)
 
 ConstructExpr::= 'Construct' QualifiedName '{' (QualifiedName '=' Expr (',' QualifiedName '=' Expr)*)? '}'
-CoRecordExpr ::= 'corecord' '{' (Identifier '=' Expr ';')* '}'
 
 ApplyExpr    ::= QualifiedName '(' (Expr (',' Expr)*)? ')' ('{' ResourceField* '}')?
 ProjectExpr  ::= Expr '.' QualifiedName
@@ -174,8 +181,6 @@ QualifiedName::= Identifier ':' Identifier
 
 **D14 addition**: `ApplyExpr` with a `QualifiedName` whose IRI classifies through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) as a `Decidable` `QueryClass` dispatches as `Exp::NativeDecide` (returning a `Verdict`) — see [§9.3](09-institutions.md). An IRI classifying as a `Comorphism` is also callable from expression position: it lowers to `program:ComorphismInvokeApply`, decoded to `Exp::InstitutionInvoke` (D14 §9.3) — see [§9.5](09-institutions.md#95-invoking-comorphisms-from-esl-programs). Exactly one source argument and no configuration block.
 
-**Phase 11h addition**: brace-delimited bounded binders in constructor argument and codata observation positions. The three accepted shapes are tabulated in [§4.5](04-declarations.md).
-
 **Application does not curry.** A term takes a projection chain and then at most one argument list: `f(a)(b)` is not a production, and the callee must reduce to a plain or projected name. `map` and `reduce` are recognised at the application site by name *together with* argument count (two and three); any other arity falls through to ordinary application.
 
 **`returning` takes a full `TypeExpr`**, not just a qualified name — including a `fun (i : T) => body` motive for an indexed inductive (eigenius#72 Layer 3). When omitted, the kernel synthesises the motive from the checking-mode expected type.
@@ -184,7 +189,7 @@ QualifiedName::= Identifier ':' Identifier
 
 ### Declaration keywords
 
-`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`, `axiom`, `def` (+ `desc`), `macro`, `merge_comorphism` (+ `for`), `text_index`, `vector_index`
+`namespace`, `class`, `property`, `resource`, `data`, `program`, `axiom`, `def` (+ `desc`), `macro`, `merge_comorphism` (+ `for`), `text_index`, `vector_index`
 
 ### Type and binder keywords
 
@@ -196,7 +201,7 @@ QualifiedName::= Identifier ':' Identifier
 
 ### Expression keywords
 
-`let`, `case`, `match`, `returning`, `Construct`, `map`, `reduce`, `corecord`, `lambda`
+`let`, `case`, `match`, `returning`, `Construct`, `map`, `reduce`, `lambda`
 
 ### Literal keywords
 
@@ -278,8 +283,7 @@ Constructed via `EvalCtx::Pure` / `EvalCtx::pure()` and `EvalCtx::effectful(laye
 
 - [D7 ESL surface syntax](../../design/d7-esl-surface-syntax.md) — authoritative grammar and design
 - [D18 Ontology-as-types resolution](../../design/d18-ontology-as-types-resolution.md) — the bridge specified in [chapter 6](06-resources-types-and-the-layer.md)
-- [D19 Inductive and sized types](../../design/d19-inductive-types.md) — type theory underpinning [chapter 4](04-declarations.md) (data/codata) and [chapter 7](07-type-theory-primer.md)
-- [D11 Codata, streams, and resumable execution](../../design/d11-codata-streams.md) — coinductive type design
+- [D19 Inductive types](../../design/d19-inductive-types.md) — type theory underpinning [chapter 4](04-declarations.md) (data) and [chapter 7](07-type-theory-primer.md)
 - [D14 Institution Realisation](../../design/d14-institution-realisation.md) — institution mechanism dispatched in [chapter 9](09-institutions.md). Supersedes D10.
 - [D1 Eigon serialization format](../../design/d1-eigon-serialization-format.md) — the resource model ESL compiles to
 - [EigenQL user guide](../eigenql/README.md) — the query-language companion sharing the same institution classification
@@ -298,7 +302,7 @@ All implementation referenced in this guide:
 
 **Program parsing (resource → kernel `Exp`):**
 - [`kernel/src/program/expr.rs`](../../../kernel/src/program/expr.rs) — `parse_program`, `parse_expression`
-- [`kernel/src/program/ground.rs`](../../../kernel/src/program/ground.rs) — `resolve_class_type`, `resolve_property_type`, `collect_properties`, `resolve_codata_type` (the bridge from chapter 6)
+- [`kernel/src/program/ground.rs`](../../../kernel/src/program/ground.rs) — `resolve_class_type`, `resolve_property_type`, `collect_properties` (the bridge from chapter 6)
 
 **Kernel — type theory:**
 - [`kernel/src/nbe/term.rs`](../../../kernel/src/nbe/term.rs) — `Exp` (terms) and `Decl` definitions
@@ -317,7 +321,7 @@ All implementation referenced in this guide:
 - [`kernel/src/capability/wasm_institution_d14.rs`](../../../kernel/src/capability/wasm_institution_d14.rs) — host bridge to the `eigenius-institution-d14` WIT world
 
 **Core / institution ontology:**
-- [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) — shipped definitions of `Class`, `Property`, `InductiveType`, `CodataType`, `Verdict`, etc.
+- [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) — shipped definitions of `Class`, `Property`, `InductiveType`, `Verdict`, etc.
 - [`ontologies/institution/institution-ontology.json`](../../../ontologies/institution/institution-ontology.json) — `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`
 
 ---

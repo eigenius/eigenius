@@ -20,7 +20,7 @@
 
 use crate::nbe::env::Rho;
 use crate::nbe::eval::EvalError;
-use crate::nbe::term::{CodataDecl, Exp, InductiveDecl, Name, Patt, PrimitiveType};
+use crate::nbe::term::{Exp, InductiveDecl, Name, Patt, PrimitiveType};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use std::sync::Arc;
@@ -36,10 +36,9 @@ pub enum Val {
     Con(Name, Box<Val>),
     /// Unit value
     Unit,
-    /// Universe at a specific level: Sort(n).
-    /// `Sort(0) = Prop`, `Sort(1) = Set`, `Sort(n+1)` was `Type(n)` for `n >= 1`.
-    /// See D46 §3.
-    Sort(usize),
+    /// Universe at a level: `Sort(l)`. See [`Exp::Sort`](crate::nbe::term::Exp::Sort) —
+    /// `Sort(Zero) = Prop`, `Sort(Succ(Zero)) = Set`. Carried a `usize` until eigenius#188.
+    Sort(crate::nbe::level::Level),
     /// Dependent function type: Π(A, x.B)
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
@@ -83,31 +82,6 @@ pub enum Val {
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),
 
-    // --- Codata (D11, Phase 9b-i) ---
-    /// Codata type value: captures the observation-type pairs plus the
-    /// environment needed to evaluate them. The anonymous form —
-    /// unparameterised and self-reference-incapable. Used for legacy
-    /// codata declarations and the projected view of an applied
-    /// `CodataType` at use sites that don't need the decl reference.
-    Codata(Vec<(Name, Exp)>, Rho),
-
-    /// Parameterised codata type former applied to evaluated
-    /// parameters: `C(p₁, …, pₙ)`. The `Arc<CodataDecl>` carries the
-    /// observation list; self-references inside observation types
-    /// resolve via name-based `PartialEq`. Parallels
-    /// `Val::InductiveType`.
-    ///
-    /// `params` is empty for the *unapplied* type former; use
-    /// `Exp::CodataType(decl, args)` to apply arguments.
-    CodataType {
-        decl: Arc<CodataDecl>,
-        params: Vec<Val>,
-    },
-    /// Codata value (corecord): lazy copattern definitions. Each entry
-    /// is `(obs_name, body_exp)`; the body is evaluated only when the
-    /// matching `Observe` is applied, in the captured environment.
-    CoRecord(Vec<(Name, Exp)>, Rho),
-
     // --- Map/Reduce (Phase 11a) ---
     /// Finite list (array). Primary representation for resource arrays
     /// and the result of Map. Phase 11b's inductive List evaluates to
@@ -129,22 +103,6 @@ pub enum Val {
         ctor_name: Name,
         args: Vec<Val>,
     },
-
-    // --- Sized types (Phase 11b step 14, D19 §8) ---
-    /// The sort of size expressions, `SizeSort`. Itself a type
-    /// (lives at universe `Type(1)` for our hierarchy).
-    SizeSort,
-    /// `SizeSucc(s)` — the successor of a size value. The smallest
-    /// size strictly larger than `s`.
-    SizeSucc(Box<Val>),
-    /// The unbounded "infinity" size — the top element under the
-    /// size partial order.
-    SizeInf,
-
-    /// Bounded size Π-type value: `Π {i < upper}. body(i)`.
-    /// `upper` is the evaluated size upper bound; the closure binds
-    /// the fresh size variable in the body.
-    SizedPi(Box<Val>, Clos),
 
     // --- D49 ChainWitness (kernel-internal opaque value) ---
     /// An admitted `ChainWitness` inhabitant. ESL cannot construct one;
@@ -219,7 +177,6 @@ pub enum Neut {
 
     // --- Codata (D11, Phase 9b-i) ---
     /// Observation on a neutral codata value: (neut).obs
-    Observe(Box<Neut>, Name),
 
     // --- Map/Reduce (Phase 11a) ---
     /// Map blocked on a neutral collection.
@@ -306,6 +263,12 @@ impl Clos {
 // --- Operations on values (reference lines 147-163) ---
 
 impl Val {
+    /// `Sort` at the numeral level `n` — `sort(0)` is `Prop`, `sort(1)` is `Set`.
+    /// See [`Exp::sort`](crate::nbe::term::Exp::sort).
+    pub fn sort(n: usize) -> Val {
+        Val::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
     /// Function application: (λ f) v = f * v; (fun ...) ($c v) = ...; neutral app
     pub fn app(self, v: Val) -> Result<Val, EvalError> {
         self.app_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
@@ -372,46 +335,6 @@ impl Val {
             Val::Pair(_, u2) => Ok(*u2),
             Val::Nt(k) => Ok(Val::Nt(Neut::Snd(Box::new(k)))),
             other => Err(EvalError::NotAPair(format!("vsnd: {other:?}"))),
-        }
-    }
-
-    /// Observation on a codata value: v.obs looks up the named field in
-    /// a `CoRecord` and evaluates its body in the captured environment.
-    /// For a neutral value, produces a blocked `Neut::Observe`. Pure mode.
-    pub fn vobserve(self, obs: &str) -> Result<Val, EvalError> {
-        self.vobserve_ctx(obs, &crate::nbe::eval::EvalCtx::Pure)
-    }
-
-    /// Observation on a codata value, with capability context.
-    pub fn vobserve_ctx(
-        self,
-        obs: &str,
-        ctx: &crate::nbe::eval::EvalCtx,
-    ) -> Result<Val, EvalError> {
-        self.vobserve_impl::<crate::nbe::eval::NoTrace>(obs, ctx)
-            .map(|(val, ())| val)
-    }
-
-    /// Observation on a codata value, generic over the tracing strategy.
-    pub(crate) fn vobserve_impl<T: crate::nbe::eval::Tracer>(
-        self,
-        obs: &str,
-        ctx: &crate::nbe::eval::EvalCtx,
-    ) -> Result<(Val, T::Node), EvalError> {
-        match self {
-            Val::CoRecord(fields, rho) => {
-                for (name, body) in &fields {
-                    if name == obs {
-                        return crate::nbe::eval::eval_impl::<T>(body, &rho, ctx);
-                    }
-                }
-                Err(EvalError::ObservationNotFound(obs.to_string()))
-            }
-            Val::Nt(k) => Ok((
-                Val::Nt(Neut::Observe(Box::new(k), obs.to_string())),
-                T::leaf(),
-            )),
-            other => Err(EvalError::NotACorecord(format!("{other:?}"))),
         }
     }
 }
@@ -492,15 +415,15 @@ mod tests {
 
     #[test]
     fn vfst_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::sort(1)));
         assert!(matches!(p.vfst()?, Val::Unit));
         Ok(())
     }
 
     #[test]
     fn vsnd_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
-        assert!(matches!(p.vsnd()?, Val::Sort(1)));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::sort(1)));
+        assert!(matches!(&p.vsnd()?, Val::Sort(l) if l.is_nat(1)));
         Ok(())
     }
 

@@ -31,10 +31,11 @@
 //! arguments — matching the iota-reduction order in
 //! [`eval::iota_reduce`](super::eval).
 //!
-//! Restricted to the same fragment as the positivity checker and iota
-//! reduction: direct recursive arguments only (no higher-order, no
-//! nested). Higher-order recursion would need IHs of function type
-//! (`Π x:T. C(arg(x))`); deferred until those features land together.
+//! A recursive argument may be DIRECT (`D(params)(idx…)`) or HIGHER-ORDER POSITIVE
+//! (`(b₁:B₁) → … → D(params)(idx…)`, eigenius#92). Both contribute an IH; the higher-order one's
+//! is itself a Π — `Π b₁:B₁ … B_k. C(idx…) (arg b₁ … b_k)`. `positivity::recursive_arg_shape` is
+//! the single classifier, shared with `eval::iota_reduce_impl`, so the binders emitted here and
+//! the applications made there cannot drift apart.
 //!
 //! Used by Phase 11b step 5 (type checking for `Exp::InductiveRec`) to
 //! verify that user-supplied minors have the right type.
@@ -97,29 +98,16 @@ pub fn derive_minor_type(
     let mut current = &ctor.typ;
     let mut params_to_skip = decl.params.len();
     let mut arg_specs: Vec<MinorArg> = Vec::new();
-    loop {
-        match current {
-            Exp::Pi(patt, dom, body) => {
-                if params_to_skip > 0 {
-                    params_to_skip -= 1;
-                } else {
-                    arg_specs.push(MinorArg::Value {
-                        patt: patt.clone(),
-                        typ: (**dom).clone(),
-                    });
-                }
-                current = body;
-            }
-            Exp::SizedPi { patt, upper, body } => {
-                // Size binders never appear in the param prefix.
-                arg_specs.push(MinorArg::Size {
-                    patt: patt.clone(),
-                    upper: (**upper).clone(),
-                });
-                current = body;
-            }
-            _ => break,
+    while let Exp::Pi(patt, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            arg_specs.push(MinorArg::Value {
+                patt: patt.clone(),
+                typ: (**dom).clone(),
+            });
         }
+        current = body;
     }
 
     // Pick a stable, fresh variable name for each non-param arg. We
@@ -131,7 +119,7 @@ pub fn derive_minor_type(
         .enumerate()
         .map(|(i, a)| match a.patt() {
             Patt::Var(n) => n.clone(),
-            _ => format!("__a_{i}"),
+            _ => format!("A#{i}"),
         })
         .collect();
     let arg_var_exps: Vec<Exp> = arg_names.iter().map(|n| Exp::Var(n.clone())).collect();
@@ -175,32 +163,69 @@ pub fn derive_minor_type(
     let recursive_indices: Vec<usize> = arg_specs
         .iter()
         .enumerate()
-        .filter(
-            |(_, a)| matches!(a, MinorArg::Value { typ, .. } if decl.is_direct_recursive_ref(typ)),
-        )
+        .filter(|(_, a)| {
+            // eigenius#92: `positivity::recursive_arg_shape` is the ONE definition of "this
+            // argument is a recursive occurrence"; iota consults the same function, so the
+            // minor's binders and the reduction's applications cannot drift apart.
+            //
+            // Step 2 removed the `is_direct()` guard that stood here: a higher-order positive
+            // argument now contributes an IH too, of FUNCTION type. See the loop below.
+            matches!(a, MinorArg::Value { typ, .. }
+                if crate::nbe::positivity::recursive_arg_shape(decl, typ).is_some())
+        })
         .map(|(i, _)| i)
         .collect();
     for (rec_pos, &arg_idx) in recursive_indices.iter().enumerate().rev() {
         let arg_var = arg_var_exps[arg_idx].clone();
-        // D48: the IH type for `arg : D(params)(arg_idx_1, ..., arg_idx_m)`
-        // is `motive arg_idx_1 ... arg_idx_m arg`. For non-indexed decls
-        // `arg_idx_*` is empty, recovering the pre-D48 `motive arg` shape.
         let arg_typ = match &arg_specs[arg_idx] {
             MinorArg::Value { typ, .. } => typ.clone(),
-            MinorArg::Size { .. } => unreachable!("size args aren't recursive"),
         };
-        let arg_idx_exps: Vec<Exp> = match &arg_typ {
-            Exp::InductiveType(_, all_args) if all_args.len() >= n_params => {
-                all_args[n_params..].to_vec()
-            }
-            _ => Vec::new(),
-        };
+        let shape = crate::nbe::positivity::recursive_arg_shape(decl, &arg_typ)
+            .expect("`recursive_indices` filtered on exactly this");
+
+        // The occurrence's binders (eigenius#92 step 2). Empty for a DIRECT recursive argument
+        // `D(params)(idx…)`, non-empty for a higher-order positive one
+        // `(b₁ : B₁) → … → (b_k : B_k) → D(params)(idx…)`.
+        //
+        // A named binder keeps its declared name, because the occurrence's index expressions are
+        // written against it — `(b : Nat) → D(params)(f b)` refers to `b`. An anonymous binder
+        // (`Nat → D`, the common shape) gets `HB#{rec_pos}_{j}`: the IH has to APPLY `arg` to it,
+        // which needs a name, and `#` cannot occur in an ESL identifier, so nothing the
+        // declaration could name collides with it.
+        let binder_names: Vec<String> = shape
+            .binders
+            .iter()
+            .enumerate()
+            .map(|(j, (patt, _))| match patt {
+                Patt::Var(n) => n.clone(),
+                _ => format!("HB#{rec_pos}_{j}"),
+            })
+            .collect();
+
+        // D48: `motive idx₁ … idx_m` at the occurrence's own indices. These sit INSIDE the
+        // binders above, since an index expression may mention them.
+        let arg_idx_exps: Vec<Exp> = shape.args[n_params.min(shape.args.len())..].to_vec();
         let motive_at_arg_indices = arg_idx_exps.iter().fold(motive_exp.clone(), |acc, i| {
             Exp::App(Box::new(acc), Box::new(i.clone()))
         });
-        let ih_typ = Exp::App(Box::new(motive_at_arg_indices), Box::new(arg_var));
+        // `arg b₁ … b_k` — for a direct argument this is just `arg`.
+        let applied_arg = binder_names.iter().fold(arg_var, |acc, n| {
+            Exp::App(Box::new(acc), Box::new(Exp::Var(n.clone())))
+        });
+        let mut ih_typ = Exp::App(Box::new(motive_at_arg_indices), Box::new(applied_arg));
+        // Wrap `Π b₁:B₁ … Π b_k:B_k.` around it, outermost first.
+        for ((_, b_typ), name) in shape.binders.iter().zip(binder_names.iter()).rev() {
+            ih_typ = Exp::Pi(
+                Patt::Var(name.clone()),
+                Box::new((*b_typ).clone()),
+                Box::new(ih_typ),
+            );
+        }
         body_exp = Exp::Pi(
-            Patt::Var(format!("__ih_{rec_pos}")),
+            // `IH#{rec_pos}`, not the former `__ih_{rec_pos}`: the IH type mentions the
+            // constructor's argument names, so a constructor argument named `__ih_0` captured
+            // them. Same discipline as `gen_val`'s `TC#` and readback's `G#`.
+            Patt::Var(format!("IH#{rec_pos}")),
             Box::new(ih_typ),
             Box::new(body_exp),
         );
@@ -216,11 +241,6 @@ pub fn derive_minor_type(
             MinorArg::Value { typ, .. } => {
                 Exp::Pi(binder_patt, Box::new(typ.clone()), Box::new(body_exp))
             }
-            MinorArg::Size { upper, .. } => Exp::SizedPi {
-                patt: binder_patt,
-                upper: Box::new(upper.clone()),
-                body: Box::new(body_exp),
-            },
         };
     }
 
@@ -243,13 +263,12 @@ pub fn derive_minor_type(
 #[derive(Debug, Clone)]
 enum MinorArg {
     Value { patt: Patt, typ: Exp },
-    Size { patt: Patt, upper: Exp },
 }
 
 impl MinorArg {
     fn patt(&self) -> &Patt {
         match self {
-            MinorArg::Value { patt, .. } | MinorArg::Size { patt, .. } => patt,
+            MinorArg::Value { patt, .. } => patt,
         }
     }
 }
@@ -266,7 +285,7 @@ mod tests {
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         })
     }
@@ -279,7 +298,7 @@ mod tests {
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -293,9 +312,9 @@ mod tests {
         })
     }
 
-    /// Constant motive `λ_. Set`. Applied to anything, returns `Val::Sort(1)`.
+    /// Constant motive `λ_. Set`. Applied to anything, returns `Val::sort(1)`.
     fn const_set_motive() -> Val {
-        Val::Lam(Clos::new(Patt::Unit, Exp::Sort(1), Rho::Nil))
+        Val::Lam(Clos::new(Patt::Unit, Exp::sort(1), Rho::Nil))
     }
 
     /// Walk a `Val::Pi` chain, applying generated variables, and return
@@ -315,6 +334,104 @@ mod tests {
         }
     }
 
+    /// **eigenius#92 step 2 — the IH binder cannot capture a constructor argument.**
+    ///
+    /// The minor's shape is `Π args… Π ihs… motive (c args…)`, so the IH binders wrap a conclusion
+    /// that refers to the constructor's arguments BY NAME. The IH binder used to be
+    /// `__ih_{rec_pos}` — a legal ESL identifier — so a constructor argument of that name was
+    /// shadowed, and the conclusion `motive (c __ih_0 …)` picked up the induction hypothesis
+    /// instead of the argument. A wrong term in the conclusion, silently, with no diagnostic.
+    ///
+    /// `step : (__ih_0 : One) → D → D` is that constructor. The recursive second argument produces
+    /// one IH, which under the old name was also `__ih_0` and sat innermost.
+    ///
+    /// A constant motive cannot see the difference, so the motive here is `λx. Id(D, x, x)` — it
+    /// puts its argument in the result, letting the test read which variable reached the
+    /// constructor application. The binder is now `IH#{rec_pos}`, and `#` cannot occur in an ESL
+    /// identifier (`esl/lexer.rs:485`).
+    #[test]
+    fn ih_binder_does_not_capture_a_constructor_argument() {
+        let s = self_ref("D");
+        let d_ty = Exp::InductiveType(s, Vec::new());
+        let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:D").unwrap(),
+            name: "D".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "base".to_string(),
+                    typ: d_ty.clone(),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "step".to_string(),
+                    // (__ih_0 : One) -> D -> D
+                    typ: Exp::Pi(
+                        Patt::Var("__ih_0".to_string()),
+                        Box::new(Exp::One),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(d_ty.clone()),
+                            Box::new(d_ty.clone()),
+                        )),
+                    ),
+                },
+            ],
+        });
+
+        // motive = λx. Id(D, x, x) — surfaces its argument in the result type.
+        let motive = Val::Lam(Clos::new(
+            Patt::Var("x".to_string()),
+            Exp::Id(
+                Box::new(d_ty),
+                Box::new(Exp::Var("x".to_string())),
+                Box::new(Exp::Var("x".to_string())),
+            ),
+            Rho::Nil,
+        ));
+
+        let minor = derive_minor_type(&decl, 1, &[], &motive, &EvalCtx::Pure)
+            .expect("derive_minor_type for `step`");
+
+        // Walk the three binders — the `One` argument, the recursive `D` argument, the IH —
+        // applying a distinguishable value to each, and read back the conclusion.
+        let mut cursor = minor;
+        let mut applied = Vec::new();
+        while let Val::Pi(_, clos) = cursor {
+            let n = applied.len() + 1;
+            let gen = Val::Nt(crate::nbe::val::Neut::Gen(n, format!("arg{n}_")));
+            applied.push(gen.clone());
+            cursor = clos.apply(gen).expect("apply pi clos");
+        }
+        assert_eq!(applied.len(), 3, "two ctor args plus one IH");
+
+        // Conclusion is `Id(D, step a b, step a b)`; pull out the constructor application.
+        let body = readback_val(0, &cursor);
+        let Exp::Id(_, lhs, _) = body else {
+            panic!("motive is `λx. Id(D, x, x)`, so the conclusion is an Id; got {body:?}")
+        };
+        let Exp::InductiveCtor(_, ctor, ctor_args) = *lhs else {
+            panic!("the Id's endpoint is the constructor application")
+        };
+        assert_eq!(ctor, "step");
+        assert_eq!(ctor_args.len(), 2);
+        // The FIRST binder — the `One` argument named `__ih_0` — must be what reaches the
+        // constructor's first slot. Under the old binder name the THIRD (the IH) did.
+        assert_eq!(
+            ctor_args[0],
+            readback_val(0, &applied[0]),
+            "the constructor's `__ih_0` argument must be the one declared, not the induction \
+             hypothesis that shadowed it; got {:?}",
+            ctor_args[0]
+        );
+        assert_ne!(
+            ctor_args[0],
+            readback_val(0, &applied[2]),
+            "the IH must not appear in the constructor application"
+        );
+    }
+
     #[test]
     fn nat_zero_minor_type_is_motive_at_zero() {
         // motive = const Set ⇒ motive(zero) = Set; zero has no args.
@@ -322,7 +439,10 @@ mod tests {
         let motive = const_set_motive();
         let typ =
             derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive_minor_type");
-        assert!(matches!(typ, Val::Sort(1)), "expected Set, got {typ:?}");
+        assert!(
+            matches!(&typ, Val::Sort(l) if l.is_nat(1)),
+            "expected Set, got {typ:?}"
+        );
     }
 
     #[test]
@@ -335,7 +455,7 @@ mod tests {
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 2, "expected 2 Π binders, got {count}");
         assert!(
-            matches!(body, Val::Sort(1)),
+            matches!(&body, Val::Sort(l) if l.is_nat(1)),
             "expected final body Set, got {body:?}"
         );
     }
@@ -357,7 +477,7 @@ mod tests {
             name: "Tree".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "leaf".to_string(),
@@ -432,15 +552,15 @@ mod tests {
         let list = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -448,7 +568,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -462,16 +582,16 @@ mod tests {
                 },
             ],
         });
-        // Use Val::Sort(1) as the concrete param value (i.e. List(Set)). This
+        // Use Val::sort(1) as the concrete param value (i.e. List(Set)). This
         // suffices for the shape check; element types do not matter for
         // counting Π binders.
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 1, &[Val::Sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 1, &[Val::sort(1)], &motive, &EvalCtx::Pure)
             .expect("derive_minor_type");
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 3, "expected 3 Π binders, got {count}");
         assert!(
-            matches!(body, Val::Sort(1)),
+            matches!(&body, Val::Sort(l) if l.is_nat(1)),
             "expected final body Set, got {body:?}"
         );
     }
@@ -484,22 +604,25 @@ mod tests {
         let list = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(list_ty),
                 ),
             }],
         });
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 0, &[Val::Sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure)
             .expect("derive_minor_type");
-        assert!(matches!(typ, Val::Sort(1)), "expected Set, got {typ:?}");
+        assert!(
+            matches!(&typ, Val::Sort(l) if l.is_nat(1)),
+            "expected Set, got {typ:?}"
+        );
     }
 
     #[test]
@@ -510,7 +633,7 @@ mod tests {
             derive_minor_types(&nat, &[], &motive, &EvalCtx::Pure).expect("derive_minor_types");
         assert_eq!(typs.len(), 2);
         // zero minor: Set
-        assert!(matches!(&typs[0], Val::Sort(1)));
+        assert!(matches!(&&typs[0], Val::Sort(l) if l.is_nat(1)));
         // succ minor: Pi(_, Pi(_, Set))
         let (count, _) = count_pi_chain(typs[1].clone());
         assert_eq!(count, 2);
@@ -521,7 +644,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         // Nat takes no params; passing one should error.
-        let err = derive_minor_type(&nat, 0, &[Val::Sort(1)], &motive, &EvalCtx::Pure).unwrap_err();
+        let err = derive_minor_type(&nat, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure).unwrap_err();
         match err {
             EvalError::InvalidCaseTarget(msg) => assert!(msg.contains("params")),
             other => panic!("expected InvalidCaseTarget, got {other:?}"),
@@ -539,9 +662,9 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let vec_a_unit =
@@ -549,15 +672,15 @@ mod tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(vec_a_unit.clone()),
                     ),
                 },
@@ -565,7 +688,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::One),
@@ -591,7 +714,7 @@ mod tests {
     fn vec_motive() -> Val {
         Val::Lam(Clos::new(
             Patt::Unit,
-            Exp::Lam(Patt::Unit, Box::new(Exp::Sort(1))),
+            Exp::Lam(Patt::Unit, Box::new(Exp::sort(1))),
             Rho::Nil,
         ))
     }
@@ -605,7 +728,7 @@ mod tests {
         let motive = vec_motive();
         // Reducing the minor at evaluation time produces `motive () (nil A)`
         // which (with the const motive `λ _ _. Set`) collapses to `Set`.
-        let typ = derive_minor_type(&decl, 0, &[Val::Sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 0, &[Val::sort(0)], &motive, &EvalCtx::Pure)
             .expect("derive nil minor");
         // The minor type is `Π A:Set. motive () (nil A)` — a Pi over
         // the ctor's value-arg telescope (here just the A binder).
@@ -613,7 +736,7 @@ mod tests {
         match typ {
             Val::Pi(_dom, body_clos) => {
                 let body = body_clos
-                    .apply(Val::Sort(0))
+                    .apply(Val::sort(0))
                     .expect("apply minor body to A");
                 // Wait — the A binder is part of the *param prefix*,
                 // not the ctor's value args. `nil` has no non-param
@@ -627,7 +750,7 @@ mod tests {
             other => {
                 // `motive () (nil A)` with const motive reduces to Sort(1).
                 assert!(
-                    matches!(other, Val::Sort(1)),
+                    matches!(&other, Val::Sort(l) if l.is_nat(1)),
                     "expected Sort(1) (from const motive), got {other:?}"
                 );
             }
@@ -641,13 +764,13 @@ mod tests {
         // The const motive `λ _ _. Set` reduces all `motive () _` to Sort(1).
         let decl = simple_vec_decl();
         let motive = vec_motive();
-        let typ = derive_minor_type(&decl, 1, &[Val::Sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 1, &[Val::sort(0)], &motive, &EvalCtx::Pure)
             .expect("derive cons minor");
         // Verify the minor type starts with a Pi — `cons` has non-param
         // value args (h : 1, x : A, xs : SimpleVec A ()) plus an IH for
         // the recursive xs, so the outer shape must be a binder.
         assert!(
-            matches!(typ, Val::Pi(_, _) | Val::SizedPi(_, _)),
+            matches!(typ, Val::Pi(_, _)),
             "cons minor must be a Pi (has non-param args); got {typ:?}"
         );
     }
@@ -666,7 +789,7 @@ mod tests {
         let zero_typ =
             derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive zero minor");
         assert!(
-            matches!(zero_typ, Val::Sort(1)),
+            matches!(&zero_typ, Val::Sort(l) if l.is_nat(1)),
             "Nat.zero minor should reduce to Sort(1) under const-Set motive; got {zero_typ:?}"
         );
     }

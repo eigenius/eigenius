@@ -28,11 +28,16 @@ pub type Name = String;
 pub enum Exp {
     /// Lambda: λ p. e
     Lam(Patt, Box<Exp>),
-    /// Universe at a specific level: Sort(n).
-    /// `Sort(0) = Prop`, `Sort(1) = Set` (the universe of small types),
-    /// `Sort(n+1)` corresponds to the former `Type(n)` for `n >= 1`.
-    /// Typing rule: `Sort(n) : Sort(n+1)`. See D46 §3.
-    Sort(usize),
+    /// Universe at a level: `Sort(l)`.
+    ///
+    /// `Sort(Zero) = Prop`, `Sort(Succ(Zero)) = Set`, and `Sort(Succ^{k+1}(Zero))` is the
+    /// surface's `Type k`. Typing rule: `Sort(l) : Sort(Succ(l))`. See D46 §3.
+    ///
+    /// Carried a `usize` until eigenius#188. A [`Level`](crate::nbe::level::Level) may also be a
+    /// `Max`, an `IMax` or a `Param`, which is what lets one declaration serve every rung instead
+    /// of one declaration per rung — each of which was a bootstrap edit and a reseed. Sites that
+    /// only ever see concrete levels read them back with `Level::as_nat`.
+    Sort(crate::nbe::level::Level),
     /// Dependent function type: Π p : A. B
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
@@ -139,28 +144,6 @@ pub enum Exp {
     /// Construct a typed resource: Construct(class_iri, [(prop_iri, expr), ...])
     Construct(Iri, Vec<(Iri, Box<Exp>)>),
 
-    // --- Codata (D11, Phase 9b-i) ---
-    /// Codata type declaration: codata { obs₁ : T₁; obs₂ : T₂; ... }
-    ///
-    /// Dual of `Data`: defines a type by its observations rather than
-    /// its constructors. The canonical example is
-    /// `codata Stream A { head : A; tail : Stream A }`.
-    Codata(Vec<Observation>),
-    /// Codata value (copattern definition): corecord { obs₁ = e₁; obs₂ = e₂; ... }
-    ///
-    /// A corecord binds each observation to a body expression. The body
-    /// is evaluated lazily, once per observation, in the corecord's
-    /// captured environment. Productivity (each observation terminates)
-    /// should be checked by a guardedness pass before running untrusted
-    /// code; the evaluator itself does not enforce it.
-    CoRecord(Vec<CoField>),
-    /// Observation on a codata value: e.obs
-    ///
-    /// Picks the named field from a `CoRecord` and evaluates its body,
-    /// or produces a blocked neutral if `e` is not yet a concrete
-    /// corecord.
-    Observe(Box<Exp>, Name),
-
     // --- Map/Reduce (Phase 11a) ---
     /// Map: apply a function to each element of a list.
     /// `Map(f, collection)` — type: `(A → B) → List A → List B`.
@@ -209,42 +192,6 @@ pub enum Exp {
         arms: Vec<MatchArm>,
     },
 
-    // --- Sized types (Phase 11b step 14, D19 §8) ---
-    /// `SizeSort` — the sort of size expressions. Inhabited by
-    /// `SizeInf` and applications of `SizeSucc`. Itself a type
-    /// (`SizeSort : Type(1)`).
-    ///
-    /// Sizes are used as termination/productivity indices on
-    /// inductive and coinductive types: `List(A, i)` denotes a
-    /// list-at-size-i, where `i` strictly decreases on each
-    /// recursive call (inductives) or strictly increases on each
-    /// observation (codata). This step lands the primitives only;
-    /// constraint generation against inductives is Phase 11b step 15.
-    SizeSort,
-    /// `SizeSucc(s)` — successor of a size: the next size strictly
-    /// larger than `s`. The smallest enclosing size for a value
-    /// produced by one constructor application.
-    SizeSucc(Box<Exp>),
-    /// `SizeInf` — the unbounded ("infinity") size. Used when no
-    /// size discipline is enforced; sized inductive/coinductive
-    /// definitions degenerate to the unsized form when their size
-    /// argument is `SizeInf`.
-    SizeInf,
-
-    /// Applied codata type expression: `C(p₁, …, pₙ)` where `C` is
-    /// declared by an `Arc<CodataDecl>` and the `Vec<Exp>` supplies
-    /// the type arguments (including size arguments). Parallels
-    /// `Exp::InductiveType`.
-    ///
-    /// Observation types inside the referenced decl may contain
-    /// further `Exp::CodataType` values — in particular,
-    /// self-references of the form `Exp::CodataType(self_ref_stub,
-    /// new_args)` where `self_ref_stub` is an `Arc<CodataDecl>`
-    /// whose only load-bearing field is its name (PartialEq on
-    /// CodataDecl compares by name, so the stub unifies with the
-    /// full declaration at evaluation time).
-    CodataType(Arc<CodataDecl>, Vec<Exp>),
-
     /// Cross-institution translation via a declared comorphism (D14 §9.3).
     ///
     /// `comorphism_iri` identifies a `Comorphism` resource indexed by
@@ -273,26 +220,6 @@ pub enum Exp {
         comorphism_iri: Iri,
         source: Box<Exp>,
         target_iri: Option<Iri>,
-    },
-
-    /// Bounded size Π-type: `Π {i < upper}. body` — the function
-    /// type of a sized function that takes a size argument strictly
-    /// smaller than `upper`.
-    ///
-    /// The binder `patt` has type `SizeSort` implicitly; the hypothesis
-    /// `patt < upper` is registered in the type-checker's rigid
-    /// hypothesis tracker (TSO) when `body` is checked. Applying a
-    /// value of this type to a size `i` requires proving
-    /// `size_lt(i, upper)` — either structurally (`i = SizeSucc(..)`
-    /// making ∞-absorption trivial) or via the hypothesis chain.
-    ///
-    /// `upper` must normalise to a rigid size variable or `SizeInf`
-    /// — the TSO can only track hypotheses rooted at rigid nodes.
-    /// Composite upper bounds like `{i < ŝ j}` are rejected in v1.
-    SizedPi {
-        patt: Patt,
-        upper: Box<Exp>,
-        body: Box<Exp>,
     },
 }
 
@@ -342,20 +269,6 @@ pub struct Summand {
 /// A branch of a Case expression: constructor name with body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
-    pub name: Name,
-    pub body: Exp,
-}
-
-/// A declared observation on a codata type: obs : T.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Observation {
-    pub name: Name,
-    pub typ: Exp,
-}
-
-/// A copattern definition in a corecord: obs = e.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CoField {
     pub name: Name,
     pub body: Exp,
 }
@@ -455,48 +368,12 @@ impl PartialEq for InductiveDecl {
     }
 }
 
-impl InductiveDecl {
-    /// Whether `typ` is a direct application of this inductive
-    /// (`Exp::InductiveType(self, _)`) — the only shape of recursive
-    /// constructor argument the Phase 11b/D19 iota reduction can
-    /// eliminate. Higher-order or nested occurrences are rejected at
-    /// positivity-check time, so this simple head check suffices for
-    /// both recursor-type derivation and iota reduction.
-    pub fn is_direct_recursive_ref(&self, typ: &Exp) -> bool {
-        matches!(typ, Exp::InductiveType(d, _) if d.iri == self.iri)
-    }
-}
-
-/// Coinductive (codata) declaration — the parameterised analogue of
-/// the anonymous [`Exp::Codata`] form. Admits type parameters
-/// (including `Size` parameters for sized codata) and supports
-/// self-references in observation types via
-/// [`Exp::CodataType`] with a name-only stub `Arc<CodataDecl>`.
-///
-/// `PartialEq` is name-based — mirrors `InductiveDecl`. This is what
-/// lets an observation type declared as `Stream(A, j)` (encoded as
-/// `Exp::CodataType(stub, …)`) unify with the full declaration when
-/// the full decl is looked up through any `Arc<CodataDecl>` reference
-/// with the same name.
-#[derive(Debug, Clone)]
-pub struct CodataDecl {
-    /// Stable chain-resident identifier (gh #75). See [`InductiveDecl::iri`]
-    /// for the discipline; same role here.
-    pub iri: Iri,
-    /// Human-readable short name. Diagnostics only.
-    pub name: Name,
-    /// Parameter telescope shared by every observation.
-    pub params: Vec<(Patt, Exp)>,
-    /// Universe of the type former.
-    pub sort: Exp,
-    pub observations: Vec<Observation>,
-}
-
-impl PartialEq for CodataDecl {
-    fn eq(&self, other: &Self) -> bool {
-        self.iri == other.iri
-    }
-}
+// `InductiveDecl::is_direct_recursive_ref` lived here until eigenius#92. Its doc claimed the head
+// check "suffices for both recursor-type derivation and iota reduction" BECAUSE higher-order
+// occurrences were rejected at positivity-check time — and once positivity started admitting them
+// that premise was gone, leaving a second definition of "recursive occurrence" for the two halves
+// of the eliminator to drift apart on. Replaced by `nbe::positivity::recursive_arg_shape`, which
+// all three sites now consult.
 
 /// A single constructor within an `InductiveDecl`.
 #[derive(Debug, Clone, PartialEq)]
@@ -521,6 +398,15 @@ impl Patt {
 // --- Convenience constructors ---
 
 impl Exp {
+    /// `Sort` at the numeral level `n` — `sort(0)` is `Prop`, `sort(1)` is `Set`.
+    ///
+    /// The ergonomic constructor for the monomorphic case, which is 942 of the 944 sort uses in
+    /// the tree. A polymorphic sort is built with `Exp::Sort(Level::Param(..))` or one of the
+    /// other [`Level`](crate::nbe::level::Level) forms directly.
+    pub fn sort(n: usize) -> Exp {
+        Exp::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
     /// Non-dependent function type: A → B
     pub fn arrow(a: Exp, b: Exp) -> Exp {
         Exp::Pi(Patt::Unit, Box::new(a), Box::new(b))
@@ -573,23 +459,23 @@ fn build_list_decl() -> Arc<InductiveDecl> {
         name: "List".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     });
     let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
         iri: list_iri,
         name: "List".to_string(),
-        params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             // nil : Π A:Set. List A
             InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(list_a_typ.clone()),
                 ),
             },
@@ -598,7 +484,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
                 name: "cons".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(Exp::Var("A".to_string())),
@@ -633,23 +519,23 @@ fn build_option_decl() -> Arc<InductiveDecl> {
         name: "Option".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     });
     let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
         iri: option_iri,
         name: "Option".to_string(),
-        params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             // none : Π A:Set. Option A
             InductiveCtorDecl {
                 name: "none".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(option_a_typ.clone()),
                 ),
             },
@@ -658,7 +544,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
                 name: "some".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(Exp::Var("A".to_string())),
@@ -694,7 +580,7 @@ mod tests {
 
     #[test]
     fn arrow_desugars_to_pi() {
-        let t = Exp::arrow(Exp::One, Exp::Sort(1));
+        let t = Exp::arrow(Exp::One, Exp::sort(1));
         assert!(matches!(t, Exp::Pi(Patt::Unit, _, _)));
     }
 
@@ -714,7 +600,7 @@ mod tests {
     fn list_uses_canonical_inductive() {
         // Phase 11b step 6: Exp::list() now produces an inductive
         // type application backed by the canonical List declaration.
-        let t = Exp::list(Exp::Sort(1));
+        let t = Exp::list(Exp::sort(1));
         match t {
             Exp::InductiveType(decl, params) => {
                 assert_eq!(decl.name, "List");
@@ -722,7 +608,7 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "nil");
                 assert_eq!(decl.ctors[1].name, "cons");
                 assert_eq!(params.len(), 1);
-                assert!(matches!(params[0], Exp::Sort(1)));
+                assert!(matches!(&params[0], Exp::Sort(l) if l.is_nat(1)));
             }
             other => panic!("expected InductiveType, got {other:?}"),
         }

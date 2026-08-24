@@ -45,7 +45,7 @@ fn generalized_coord(
     depth: usize,
 ) -> Option<Exp> {
     match denote {
-        Exp::Sort(0) => {
+        Exp::Sort(l) if l.is_nat(0) => {
             if std::env::var("EIGENIUS_TRACE_COORD").is_ok()
                 && (matches!(a, Exp::Lam(..)) || matches!(b, Exp::Lam(..)))
             {
@@ -95,7 +95,7 @@ fn but_not_coord(
     layer: &Arc<Layer>,
 ) -> Option<Exp> {
     match denote {
-        Exp::Sort(0) => Some(Exp::InductiveType(
+        Exp::Sort(l) if l.is_nat(0) => Some(Exp::InductiveType(
             and.clone(),
             vec![a.clone(), negate(b.clone(), layer)?],
         )),
@@ -1023,7 +1023,7 @@ pub fn distribute_object(
     rctx: super::RightContext,
 ) -> Option<Exp> {
     let members = group_members(group_sem)?;
-    let s = Exp::Var("__dist_subj".into());
+    let s = Exp::Var("DIST#subj".into());
     let mk = |m: Exp| {
         Exp::App(
             Box::new(Exp::App(Box::new(tv_sem.clone()), Box::new(m))),
@@ -1038,7 +1038,7 @@ pub fn distribute_object(
         let op = resolve_inductive(layer, group_conn_op(group_cat, rctx)?)?;
         fold_conn(&op, members.into_iter().map(mk).collect())?
     };
-    Some(Exp::Lam(Patt::Var("__dist_subj".into()), Box::new(body)))
+    Some(Exp::Lam(Patt::Var("DIST#subj".into()), Box::new(body)))
 }
 
 /// The **reciprocal** reading "[group] V each other" (D63 §8.4 Phase 6): the
@@ -1710,7 +1710,7 @@ mod tests {
         let sigma = Exp::Sig(
             Patt::Var("x".into()),
             Box::new(gene.clone()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
         );
         let mmr_genes = ctor(
             "fwd",

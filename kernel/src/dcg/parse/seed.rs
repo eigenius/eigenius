@@ -377,8 +377,8 @@ impl Parser {
         // Identity sem `λx. x`: forward/backward application leaves the modified phrase's sem
         // unchanged (β-reduces away at felicity), so the claim `Prop` is exactly the unmodified one.
         let ident = Exp::Lam(
-            Patt::Var("__adv_x".to_string()),
-            Box::new(Exp::Var("__adv_x".to_string())),
+            Patt::Var("ADV#x".to_string()),
+            Box::new(Exp::Var("ADV#x".to_string())),
         );
         cats.into_iter()
             .map(|cat| Item::new(cat, ident.clone()))
@@ -516,8 +516,8 @@ impl Parser {
             return Vec::new();
         }
         let ident = Exp::Lam(
-            Patt::Var("__adv_x".to_string()),
-            Box::new(Exp::Var("__adv_x".to_string())),
+            Patt::Var("ADV#x".to_string()),
+            Box::new(Exp::Var("ADV#x".to_string())),
         );
         cats.into_iter()
             .map(|cat| Item::new(cat, ident.clone()))

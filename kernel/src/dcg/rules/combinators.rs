@@ -962,7 +962,7 @@ fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
     // ∀C:Prop. (∀a. …) → C   [= ∃a. TV(x,a)]
     let exists = Exp::Pi(
         Patt::Var(c.into()),
-        Box::new(Exp::Sort(0)),
+        Box::new(Exp::sort(0)),
         Box::new(Exp::Arrow(Box::new(inner), Box::new(Exp::Var(c.into())))),
     );
     Some(Exp::Lam(Patt::Var(x.into()), Box::new(exists)))
@@ -1964,7 +1964,7 @@ fn sem_arity(sem: &Exp) -> Option<usize> {
         v = g
             .apply(crate::nbe::val::Val::Nt(crate::nbe::val::Neut::Gen(
                 n,
-                format!("__arity{n}"),
+                format!("AR#{n}_"),
             )))
             .ok()?;
         n += 1;
@@ -2336,7 +2336,7 @@ mod dispatch_tests {
             protein.clone(),
             Exp::Pi(
                 crate::nbe::term::Patt::Var("C".into()),
-                Box::new(Exp::Sort(0)),
+                Box::new(Exp::sort(0)),
                 Box::new(app2_x(
                     "urn:eigenius:wordnet:v00917772_t",
                     Exp::Var("C".into()),
@@ -2587,7 +2587,7 @@ mod dispatch_tests {
             name: "And".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: Vec::new(),
         })
     }
@@ -3120,7 +3120,7 @@ mod dispatch_tests {
         let sigma = Exp::Sig(
             Patt::Var("x".into()),
             Box::new(comp.clone()),
-            Box::new(Exp::Sort(0)),
+            Box::new(Exp::sort(0)),
         );
         let l = mk_item(forall, ax("urn:eigenius:lexicon:det"));
         let r = mk_item(n(sigma.clone()), ax("urn:eigenius:lexicon:noun"));

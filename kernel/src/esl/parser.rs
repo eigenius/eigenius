@@ -81,13 +81,56 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Is the token at `offset` usable as an IDENTIFIER? Mirrors [`Self::expect_ident`]'s accepted
+    /// set exactly, so a lookahead never disagrees with the consume that follows it.
+    ///
+    /// eigenius#222: `parse_ctor_arg` tested `matches!(peek(), TokenKind::Ident(_))`, which is
+    /// narrower than what `expect_ident` accepts. `App(fun : lean:LeanExpr, …)` — a real
+    /// constructor in `lean-expressions` — has an argument named `fun`, an ESL keyword, so the
+    /// named-argument form did not fire and the decompiled text would not reparse.
+    fn peek_is_ident_like(&self, offset: usize) -> bool {
+        !matches!(
+            self.peek_at(offset),
+            TokenKind::StringLit(_)
+                | TokenKind::IntLit(_)
+                | TokenKind::FloatLit(_)
+                | TokenKind::BoolLit(_)
+                | TokenKind::QualName(_, _)
+                | TokenKind::FatArrow
+                | TokenKind::Eq
+                | TokenKind::Arrow
+                | TokenKind::Backslash
+                | TokenKind::Lambda
+                | TokenKind::Dot
+                | TokenKind::Semicolon
+                | TokenKind::Colon
+                | TokenKind::Comma
+                | TokenKind::Less
+                | TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Caret
+                | TokenKind::LParen
+                | TokenKind::RParen
+                | TokenKind::LBrace
+                | TokenKind::RBrace
+                | TokenKind::LBracket
+                | TokenKind::RBracket
+                | TokenKind::Eof
+        )
+    }
+
     fn expect_ident(&mut self) -> Result<String, EslError> {
-        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`).
-        // The eigenius#72 sort-literal keywords (Prop, Set, Type) are also
-        // accepted because the core ontology has resources at IRIs like
-        // `urn:eigenius:core:Set` whose local name parses as the keyword
-        // token. Same applies to `axiom` / `forall` which a user might
-        // happen to use as a name fragment.
+        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`), because a
+        // keyword is a fine LOCAL NAME for a resource — `axiom` and `forall` are the ones a user is
+        // most likely to reach for.
+        //
+        // The sort keywords (Prop, Set, Type, Sort) are accepted on the same footing and nothing
+        // more. An earlier version of this comment justified them by claiming the core ontology
+        // declares resources at IRIs like `urn:eigenius:core:Set`; it does not, and no chain ever
+        // has. A qualified `core:Set` in a kind position is a reference to nothing, and the D47
+        // decoder rejects it as an unresolved `ConstRef` — the sort is written `Set`.
         let name = match self.peek().clone() {
             TokenKind::Ident(name) => name,
             TokenKind::Namespace => "namespace".to_string(),
@@ -101,11 +144,31 @@ impl<'a> Parser<'a> {
             TokenKind::Map => "map".to_string(),
             TokenKind::Reduce => "reduce".to_string(),
             TokenKind::Prop => "Prop".to_string(),
+            TokenKind::SortKw => "Sort".to_string(),
             TokenKind::SetKw => "Set".to_string(),
             TokenKind::TypeKw => "Type".to_string(),
             TokenKind::Axiom => "axiom".to_string(),
             TokenKind::Def => "def".to_string(),
             TokenKind::Forall => "forall".to_string(),
+            // The remaining keywords, for the same reason as the ones above: a keyword is a fine
+            // LOCAL NAME, and the chain carries several. `lean:LeanExpr`'s `App` constructor names
+            // an argument `fun`; `data`, `match`, `in` and the rest are equally spellable
+            // (eigenius#222).
+            TokenKind::Data => "data".to_string(),
+            TokenKind::MergeComorphism => "merge_comorphism".to_string(),
+            TokenKind::For => "for".to_string(),
+            TokenKind::TextIndex => "text_index".to_string(),
+            TokenKind::VectorIndex => "vector_index".to_string(),
+            TokenKind::Alias => "alias".to_string(),
+            TokenKind::In => "in".to_string(),
+            TokenKind::Match => "match".to_string(),
+            TokenKind::Returning => "returning".to_string(),
+            TokenKind::LambdaKw => "lambda".to_string(),
+            TokenKind::Pi => "pi".to_string(),
+            TokenKind::Exists => "exists".to_string(),
+            TokenKind::Fun => "fun".to_string(),
+            TokenKind::Macro => "macro".to_string(),
+            TokenKind::Universe => "universe".to_string(),
             _ => {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
@@ -183,11 +246,13 @@ impl<'a> Parser<'a> {
 
     fn parse_file(&mut self) -> Result<File, EslError> {
         let mut namespaces = Vec::new();
+        let mut universes = Vec::new();
         let mut declarations = Vec::new();
 
         while !self.at_eof() {
             match self.peek() {
                 TokenKind::Namespace => namespaces.push(self.parse_namespace()?),
+                TokenKind::Universe => universes.push(self.parse_universe()?),
                 TokenKind::Class => declarations.push(Declaration::Class(self.parse_class()?)),
                 TokenKind::Property => {
                     declarations.push(Declaration::Property(self.parse_property()?))
@@ -197,9 +262,6 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Program => {
                     declarations.push(Declaration::Program(self.parse_program()?))
-                }
-                TokenKind::Codata => {
-                    declarations.push(Declaration::Codata(self.parse_codata()?))
                 }
                 TokenKind::Data => declarations.push(Declaration::Data(self.parse_data()?)),
                 TokenKind::MergeComorphism => declarations.push(Declaration::MergeComorphism(
@@ -222,7 +284,7 @@ impl<'a> Parser<'a> {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom, def, macro), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, data, merge_comorphism, text_index, vector_index, axiom, def, macro), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -232,6 +294,7 @@ impl<'a> Parser<'a> {
 
         Ok(File {
             namespaces,
+            universes,
             declarations,
         })
     }
@@ -247,6 +310,20 @@ impl<'a> Parser<'a> {
         let uri = self.expect_string()?;
         self.expect_semicolon()?;
         Ok(NamespaceDecl { alias, uri, pos })
+    }
+
+    /// `universe u v;` — bind level variables for the rest of the file (eigenius#188).
+    ///
+    /// Space-separated, as in Lean (`universe ident ident*`), terminated with ESL's semicolon.
+    fn parse_universe(&mut self) -> Result<crate::esl::ast::UniverseDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Universe)?;
+        let mut names = vec![self.expect_ident()?];
+        while matches!(self.peek(), TokenKind::Ident(_)) {
+            names.push(self.expect_ident()?);
+        }
+        self.expect_semicolon()?;
+        Ok(crate::esl::ast::UniverseDecl { names, pos })
     }
 
     // --- Class ---
@@ -510,7 +587,94 @@ impl<'a> Parser<'a> {
         Ok(ResourceField { property, value })
     }
 
+    /// A JSON literal after `json(` — ordinary JSON syntax, lexed with the tokens ESL already
+    /// has. Object keys are string literals, which is what distinguishes this from a `Block`
+    /// value whose keys are qualified names.
+    fn parse_json_literal(&mut self) -> Result<serde_json::Value, EslError> {
+        match self.peek().clone() {
+            TokenKind::StringLit(s) => {
+                self.advance();
+                Ok(serde_json::Value::String(s))
+            }
+            TokenKind::IntLit(n) => {
+                self.advance();
+                Ok(serde_json::json!(n))
+            }
+            TokenKind::FloatLit(f) => {
+                self.advance();
+                Ok(serde_json::json!(f))
+            }
+            TokenKind::BoolLit(b) => {
+                self.advance();
+                Ok(serde_json::Value::Bool(b))
+            }
+            TokenKind::Minus => {
+                self.advance();
+                match self.peek().clone() {
+                    TokenKind::IntLit(n) => {
+                        self.advance();
+                        Ok(serde_json::json!(-n))
+                    }
+                    TokenKind::FloatLit(f) => {
+                        self.advance();
+                        Ok(serde_json::json!(-f))
+                    }
+                    other => Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!("`-` in a JSON literal must precede a number, found {other:?}"),
+                    )),
+                }
+            }
+            TokenKind::Ident(n) if n == "null" => {
+                self.advance();
+                Ok(serde_json::Value::Null)
+            }
+            TokenKind::LBracket => {
+                self.advance();
+                let mut items = Vec::new();
+                while !self.at(&TokenKind::RBracket) && !self.at_eof() {
+                    items.push(self.parse_json_literal()?);
+                    if self.at(&TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Ok(serde_json::Value::Array(items))
+            }
+            TokenKind::LBrace => {
+                self.advance();
+                let mut map = serde_json::Map::new();
+                while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+                    let key = self.expect_string()?;
+                    self.expect(&TokenKind::Colon)?;
+                    map.insert(key, self.parse_json_literal()?);
+                    if self.at(&TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(&TokenKind::RBrace)?;
+                Ok(serde_json::Value::Object(map))
+            }
+            other => Err(EslError::parser(
+                Some(self.current_pos()),
+                format!("expected a JSON value, found {other:?}"),
+            )),
+        }
+    }
+
     fn parse_value(&mut self) -> Result<Value, EslError> {
+        // `json( … )` — an opaque JSON value (eigenius#222). The wrapper marks the slot, the same
+        // way `type_expr( … )` marks a D47 term: without it the same braces read as a `Block`,
+        // i.e. an embedded resource, which is a different chain value.
+        if matches!(self.peek(), TokenKind::Ident(n) if n == "json")
+            && *self.peek_at(1) == TokenKind::LParen
+        {
+            self.advance();
+            self.expect(&TokenKind::LParen)?;
+            let j = self.parse_json_literal()?;
+            self.expect(&TokenKind::RParen)?;
+            return Ok(Value::Json(j));
+        }
         match self.peek().clone() {
             TokenKind::StringLit(s) => {
                 self.advance();
@@ -901,51 +1065,6 @@ impl<'a> Parser<'a> {
 
     // --- Codata ---
 
-    /// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }`
-    fn parse_codata(&mut self) -> Result<CodataDecl, EslError> {
-        let pos = self.current_pos();
-        self.expect(&TokenKind::Codata)?;
-        let name = self.parse_qualified_name()?;
-
-        // Optional type parameters, e.g. `(i : core:Size, A : core:Set)`.
-        let params = if self.at(&TokenKind::LParen) {
-            self.parse_data_params()?
-        } else {
-            Vec::new()
-        };
-
-        self.expect(&TokenKind::LBrace)?;
-
-        let mut observations = Vec::new();
-        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            let obs_pos = self.current_pos();
-            let obs_name = self.expect_ident()?;
-            self.expect(&TokenKind::Colon)?;
-            let typ = self.parse_type_expr()?;
-            self.expect_semicolon()?;
-            observations.push(ObservationDecl {
-                name: obs_name,
-                typ,
-                pos: obs_pos,
-            });
-        }
-        self.expect(&TokenKind::RBrace)?;
-
-        if observations.is_empty() {
-            return Err(EslError::parser(
-                Some(pos.clone()),
-                "codata type must declare at least one observation".to_string(),
-            ));
-        }
-
-        Ok(CodataDecl {
-            name,
-            params,
-            observations,
-            pos,
-        })
-    }
-
     /// Parse a type expression (Phase 11b step 15h.3).
     ///
     /// Grammar (right-associative arrow, tight-binding ref):
@@ -999,7 +1118,11 @@ impl<'a> Parser<'a> {
         // eigenius#72 — sort literals at the head of a type
         // expression: `Prop`, `Set`, or `Type N`. May then be
         // followed by `-> ...` (an arrow whose domain is a sort).
-        if self.at(&TokenKind::Prop) || self.at(&TokenKind::SetKw) || self.at(&TokenKind::TypeKw) {
+        if self.at(&TokenKind::Prop)
+            || self.at(&TokenKind::SetKw)
+            || self.at(&TokenKind::TypeKw)
+            || self.at(&TokenKind::SortKw)
+        {
             let sort = self.parse_sort_literal()?;
             if self.at(&TokenKind::Arrow) {
                 self.advance();
@@ -1098,29 +1221,95 @@ impl<'a> Parser<'a> {
         }
         if self.at(&TokenKind::TypeKw) {
             self.advance();
-            let level = match self.peek().clone() {
-                TokenKind::IntLit(n) if n >= 0 => {
-                    self.advance();
-                    n as usize
-                }
-                other => {
-                    return Err(EslError::parser(
-                        Some(self.current_pos()),
-                        format!(
-                            "expected non-negative integer level after `Type`, found {other:?}"
-                        ),
-                    ));
-                }
-            };
+            let level = self.parse_level_expr("Type")?;
             return Ok(TypeExpr::Sort {
                 kind: crate::esl::ast::SortKind::Type(level),
                 pos,
             });
         }
+        // eigenius#188 — Lean's general form. `Sort l` is the universe at level `l`; `Prop`,
+        // `Set` and `Type k` are the abbreviations above.
+        if self.at(&TokenKind::SortKw) {
+            self.advance();
+            let level = self.parse_level_expr("Sort")?;
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Sort(level),
+                pos,
+            });
+        }
         Err(EslError::parser(
             Some(pos),
-            "expected a sort literal (Prop, Set, or Type N)".to_string(),
+            "expected a sort literal (Prop, Set, Type <level>, or Sort <level>)".to_string(),
         ))
+    }
+
+    /// Parse a universe level expression (eigenius#188), following Lean 4's grammar:
+    ///
+    /// ```text
+    /// level ::= <numeral> | <ident> | max level level | imax level level
+    ///         | level + <numeral> | ( level )
+    /// ```
+    ///
+    /// `max` and `imax` are CONTEXTUAL — they are ordinary identifiers everywhere else, and are
+    /// only read as operators in level position. That avoids reserving two common words across
+    /// the whole language for a form that appears only after `Sort` / `Type`.
+    fn parse_level_expr(&mut self, after: &str) -> Result<crate::esl::ast::LevelExpr, EslError> {
+        use crate::esl::ast::LevelExpr;
+        let mut lhs = self.parse_level_atom(after)?;
+        // `l + n` — left-associative, numeral offsets only, as in Lean.
+        while self.at(&TokenKind::Plus) {
+            self.advance();
+            match self.peek().clone() {
+                TokenKind::IntLit(n) if n >= 0 => {
+                    self.advance();
+                    lhs = LevelExpr::Add(Box::new(lhs), n as usize);
+                }
+                other => {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!("`+` in a universe level takes a numeral, found {other:?}"),
+                    ));
+                }
+            }
+        }
+        Ok(lhs)
+    }
+
+    fn parse_level_atom(&mut self, after: &str) -> Result<crate::esl::ast::LevelExpr, EslError> {
+        use crate::esl::ast::LevelExpr;
+        match self.peek().clone() {
+            TokenKind::IntLit(n) if n >= 0 => {
+                self.advance();
+                Ok(LevelExpr::Num(n as usize))
+            }
+            TokenKind::LParen => {
+                self.advance();
+                let inner = self.parse_level_expr(after)?;
+                self.expect(&TokenKind::RParen)?;
+                Ok(inner)
+            }
+            TokenKind::Ident(name) if name == "max" || name == "imax" => {
+                self.advance();
+                let l = self.parse_level_atom(after)?;
+                let r = self.parse_level_atom(after)?;
+                Ok(if name == "max" {
+                    LevelExpr::Max(Box::new(l), Box::new(r))
+                } else {
+                    LevelExpr::IMax(Box::new(l), Box::new(r))
+                })
+            }
+            TokenKind::Ident(name) => {
+                self.advance();
+                Ok(LevelExpr::Var(name))
+            }
+            other => Err(EslError::parser(
+                Some(self.current_pos()),
+                format!(
+                    "expected a universe level after `{after}` — a numeral, a level variable, \
+                     `max l r`, `imax l r`, or `(l + n)`; found {other:?}"
+                ),
+            )),
+        }
     }
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
@@ -1674,6 +1863,20 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(&TokenKind::LBrace)?;
+
+        // `description = "…";` — a leading body item, spelled as `class` and `property` spell it
+        // (eigenius#221). Unambiguous against a constructor: a ctor name is followed by `,`, `(`,
+        // `:` or `}`, never `=`.
+        let mut description = None;
+        if matches!(self.peek(), TokenKind::Ident(n) if n == "description")
+            && *self.peek_at(1) == TokenKind::Eq
+        {
+            self.advance();
+            self.expect(&TokenKind::Eq)?;
+            description = Some(self.expect_string()?);
+            self.expect_semicolon()?;
+        }
+
         let mut ctors = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
             ctors.push(self.parse_ctor_decl()?);
@@ -1705,6 +1908,7 @@ impl<'a> Parser<'a> {
 
         Ok(DataDecl {
             name,
+            description,
             params,
             indices,
             result_sort,
@@ -1903,51 +2107,19 @@ impl<'a> Parser<'a> {
     /// Braces disambiguate binders from positional qualified names
     /// (`ex:Nat`) — without them the two shapes are token-identical.
     fn parse_ctor_arg(&mut self) -> Result<CtorArg, EslError> {
-        if self.at(&TokenKind::LBrace) {
+        // `name : Type` is a NAMED argument; anything else is positional. One token of lookahead
+        // decides it, and there is no ambiguity with a qualified type: `ns:local` lexes as a
+        // single atomic `QualName`, while the standalone `Colon` is reserved for the binder colon
+        // (see `parse_qualified_name`). So `base : ex:Nat` is `Ident Colon QualName` and `ex:Nat`
+        // is `QualName` — different token streams, not a spacing convention.
+        if self.peek_is_ident_like(0) && *self.peek_at(1) == TokenKind::Colon {
             let pos = self.current_pos();
-            self.advance();
             let name = self.expect_ident()?;
-            let (kind, bound) = if self.at(&TokenKind::Colon) {
-                self.advance();
-                let kind = self.parse_qualified_name()?;
-                let bound = if self.at(&TokenKind::Less) {
-                    self.advance();
-                    Some(self.parse_qualified_name()?)
-                } else {
-                    None
-                };
-                (kind, bound)
-            } else if self.at(&TokenKind::Less) {
-                // `{name < bound}` — implicit Size kind.
-                self.advance();
-                let bound = self.parse_qualified_name()?;
-                (
-                    QualifiedName {
-                        namespace: None,
-                        name: "Size".to_string(),
-                        pos: pos.clone(),
-                    },
-                    Some(bound),
-                )
-            } else {
-                return Err(EslError::parser(
-                    Some(self.current_pos()),
-                    format!(
-                        "expected ':' or '<' after binder name in ctor arg, found {:?}",
-                        self.peek()
-                    ),
-                ));
-            };
-            self.expect(&TokenKind::RBrace)?;
-            Ok(CtorArg::Named {
-                name,
-                kind,
-                bound,
-                pos,
-            })
-        } else {
-            Ok(CtorArg::Positional(self.parse_ctor_arg_type()?))
+            self.expect(&TokenKind::Colon)?;
+            let typ = self.parse_ctor_arg_type()?;
+            return Ok(CtorArg::Named { name, typ, pos });
         }
+        Ok(CtorArg::Positional(self.parse_ctor_arg_type()?))
     }
 
     /// A constructor argument type: `Name` or `Name(arg, ...)`.
@@ -1993,7 +2165,6 @@ impl<'a> Parser<'a> {
             TokenKind::Let => self.parse_let(),
             TokenKind::Case => self.parse_case(),
             TokenKind::Match => self.parse_match(),
-            TokenKind::Corecord => self.parse_corecord(),
             TokenKind::Backslash | TokenKind::Lambda => self.parse_lambda(),
             // D37 §3.1 — typed lambda literal `lambda x : T => body`.
             // Distinct from the untyped `\x -> e` / `λx -> e` forms
@@ -2092,32 +2263,6 @@ impl<'a> Parser<'a> {
         // defensive).
         let _ = outer_pos;
         Ok(expr)
-    }
-
-    /// `corecord { head = e1; tail = e2 }`
-    fn parse_corecord(&mut self) -> Result<Expr, EslError> {
-        let pos = self.current_pos();
-        self.expect(&TokenKind::Corecord)?;
-        self.expect(&TokenKind::LBrace)?;
-
-        let mut fields = Vec::new();
-        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            let name = self.expect_ident()?;
-            self.expect(&TokenKind::Eq)?;
-            let body = self.parse_expr()?;
-            self.expect_semicolon()?;
-            fields.push(CoField { name, body });
-        }
-        self.expect(&TokenKind::RBrace)?;
-
-        if fields.is_empty() {
-            return Err(EslError::parser(
-                Some(pos.clone()),
-                "corecord must have at least one field".to_string(),
-            ));
-        }
-
-        Ok(Expr::CoRecord { fields, pos })
     }
 
     /// `case e { A -> e1; B -> e2 }`
@@ -3450,11 +3595,52 @@ mod tests {
         }
     }
 
+    /// **A named constructor argument — `mk(A : Set, A)`** (eigenius#221).
+    ///
+    /// Was `mk({A : Set}, A)`: the braces came from the SIZED bounded binder (`{j : Size < i}`),
+    /// which eigenius#218 removed along with sized types. They were never needed to disambiguate —
+    /// `ns:local` is one atomic `QualName` token and the standalone `Colon` is reserved for the
+    /// binder colon, so `A : Set` and `ex:Nat` are different token streams.
+    ///
+    /// The two sibling tests that covered `{j < i}` and `{j : Size < i}` are gone with the sized
+    /// binders themselves; this one survives because its subject is the NAMED form, not the size.
+    #[test]
+    fn data_ctor_named_argument() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Wrap {
+                mk(payload : Set, A),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                let args = d.ctors[0].args();
+                assert_eq!(args.len(), 2);
+                match &args[0] {
+                    CtorArg::Named { name, typ, .. } => {
+                        assert_eq!(name, "payload");
+                        assert_eq!(typ.name.name, "Set");
+                    }
+                    other => panic!("expected a Named argument, got {other:?}"),
+                }
+                assert!(
+                    matches!(&args[1], CtorArg::Positional(_)),
+                    "the second argument is positional and must stay anonymous"
+                );
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
     #[test]
     fn data_list_parametric_with_self_reference() {
         let file = parse_str(
             r#"
-            data ex:List(A : core:Set) {
+            data ex:List(A : Set) {
                 nil,
                 cons(A, ex:List(A)),
             }
@@ -3466,10 +3652,13 @@ mod tests {
                 assert_eq!(d.name.name, "List");
                 assert_eq!(d.params.len(), 1);
                 assert_eq!(d.params[0].name, "A");
-                match &d.params[0].kind {
-                    IndexKind::Named(qn) => assert_eq!(qn.name, "Set"),
-                    other => panic!("expected Named param kind, got {other:?}"),
-                }
+                // `Set` is the SORT keyword, so it parses as `IndexKind::Sort`. This test used to
+                // write `A : core:Set` and pin `IndexKind::Named("Set")` — a reference to
+                // `urn:eigenius:core:Set`, which no chain declares (eigenius#188).
+                assert!(matches!(
+                    &d.params[0].kind,
+                    IndexKind::Sort(crate::esl::ast::SortKind::Set)
+                ));
                 assert_eq!(d.ctors.len(), 2);
                 assert_eq!(d.ctors[0].name(), "nil");
                 assert!(d.ctors[0].args().is_empty());
@@ -3499,103 +3688,6 @@ mod tests {
 
     // --- Bounded binders in ctor args (Phase 11b step 15h.2) ---
 
-    #[test]
-    fn data_ctor_bounded_size_binder_implicit_kind() {
-        // `{j < i}` — size kind implicit, bound to `i`.
-        let file = parse_str(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            data ex:Nat(i : core:Size) {
-                zero,
-                succ({j < i}, ex:Nat(j)),
-            }
-            "#,
-        )
-        .unwrap();
-        match &file.declarations[0] {
-            Declaration::Data(d) => {
-                let succ = &d.ctors[1];
-                assert_eq!(succ.args().len(), 2);
-                match &succ.args()[0] {
-                    CtorArg::Named {
-                        name, kind, bound, ..
-                    } => {
-                        assert_eq!(name, "j");
-                        assert_eq!(kind.name, "Size");
-                        assert!(kind.namespace.is_none());
-                        let b = bound.as_ref().expect("bound present");
-                        assert_eq!(b.name, "i");
-                    }
-                    other => panic!("expected Named, got {other:?}"),
-                }
-                assert!(matches!(&succ.args()[1], CtorArg::Positional(_)));
-            }
-            _ => panic!("expected data"),
-        }
-    }
-
-    #[test]
-    fn data_ctor_bounded_size_binder_explicit_kind() {
-        // `{j : core:Size < i}` — same as implicit-kind form.
-        let file = parse_str(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            data ex:Nat(i : core:Size) {
-                zero,
-                succ({j : core:Size < i}, ex:Nat(j)),
-            }
-            "#,
-        )
-        .unwrap();
-        match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[1].args()[0] {
-                CtorArg::Named {
-                    name, kind, bound, ..
-                } => {
-                    assert_eq!(name, "j");
-                    assert_eq!(kind.namespace.as_deref(), Some("core"));
-                    assert_eq!(kind.name, "Size");
-                    assert_eq!(bound.as_ref().unwrap().name, "i");
-                }
-                other => panic!("expected Named, got {other:?}"),
-            },
-            _ => panic!("expected data"),
-        }
-    }
-
-    #[test]
-    fn data_ctor_unbounded_named_binder() {
-        // `{A : core:Set}` — unbounded Pi binder, kind Set.
-        let file = parse_str(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            data ex:Wrap {
-                mk({A : core:Set}, A),
-            }
-            "#,
-        )
-        .unwrap();
-        match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[0].args()[0] {
-                CtorArg::Named {
-                    name, kind, bound, ..
-                } => {
-                    assert_eq!(name, "A");
-                    assert_eq!(kind.name, "Set");
-                    assert!(bound.is_none());
-                }
-                other => panic!("expected Named, got {other:?}"),
-            },
-            _ => panic!("expected data"),
-        }
-    }
-
     // --- eigenius#72 Layer 2: indexed data declarations ---
 
     #[test]
@@ -3605,7 +3697,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Vec(A : core:Set) : core:Nat -> Set {
+            data ex:Vec(A : Set) : core:Nat -> Set {
                 nil : ex:Vec(A, ex:zero),
                 cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
             }
@@ -3638,7 +3730,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Eq(A : core:Set) : A -> A -> Prop {
+            data ex:Eq(A : Set) : A -> A -> Prop {
                 refl : forall (a : A) => ex:Eq(A, a, a),
             }
             "#,
@@ -3667,7 +3759,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Bad(A : core:Set) : core:Nat -> core:Nat {
+            data ex:Bad(A : Set) : core:Nat -> core:Nat {
                 mk : ex:Bad(A, ex:zero, ex:zero),
             }
             "#,
@@ -3731,7 +3823,10 @@ mod tests {
                     IndexKind::Sort(SortKind::Prop) => {}
                     other => panic!("expected Sort(Prop), got {other:?}"),
                 }
-                assert_eq!(d.result_sort, Some(SortKind::Type(0)));
+                assert_eq!(
+                    d.result_sort,
+                    Some(SortKind::Type(crate::esl::ast::LevelExpr::Num(0)))
+                );
             }
             _ => panic!("expected data"),
         }
@@ -3759,9 +3854,12 @@ mod tests {
                 assert!(matches!(d.indices[1].kind, IndexKind::Sort(SortKind::Set)));
                 assert!(matches!(
                     d.indices[2].kind,
-                    IndexKind::Sort(SortKind::Type(2))
+                    IndexKind::Sort(SortKind::Type(crate::esl::ast::LevelExpr::Num(2)))
                 ));
-                assert_eq!(d.result_sort, Some(SortKind::Type(3)));
+                assert_eq!(
+                    d.result_sort,
+                    Some(SortKind::Type(crate::esl::ast::LevelExpr::Num(3)))
+                );
             }
             _ => panic!("expected data"),
         }
@@ -4059,18 +4157,17 @@ mod tests {
         let file = parse_str(
             r#"
             namespace ex = "urn:ex";
-            codata ex:F {
-                run : pi a : ex:A, b : ex:A => ex:A;
-            }
+            axiom ex:f : pi a : ex:A, b : ex:A => ex:A;
             "#,
         )
         .unwrap();
-        let codata = match &file.declarations[0] {
-            Declaration::Codata(c) => c,
-            _ => panic!("expected codata"),
+        // Hosted in a codata observation until eigenius#218; the SUBJECT is the `pi` type-
+        // expression syntax, so the test moved to another host rather than going with codata.
+        let axiom = match &file.declarations[0] {
+            Declaration::Axiom(a) => a,
+            other => panic!("expected axiom, got {other:?}"),
         };
-        let obs_type = &codata.observations[0].typ;
-        match obs_type {
+        match &axiom.statement {
             TypeExpr::Pi {
                 params, codomain, ..
             } => {

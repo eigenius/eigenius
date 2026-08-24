@@ -489,61 +489,11 @@
     "urn:eigenius:core:short_name": "regex"
   },
 
-  {
-    "@id": "urn:eigenius:core:CodataType",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A coinductive type defined by its observations (D11). Dual of Class: Class defines a type by constructors and fields; CodataType defines it by the observations that can be made on its values.",
-    "urn:eigenius:core:short_name": "CodataType",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:core:short_name",
-      "urn:eigenius:core:observations"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:core:Observation",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A single observation declaration on a CodataType: a name and a result type.",
-    "urn:eigenius:core:short_name": "Observation",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:core:observation_name",
-      "urn:eigenius:core:observation_type"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:core:observations",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Ordered list of Observation resources declared by a CodataType.",
-    "urn:eigenius:core:short_name": "observations",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Observation"],
-    "urn:eigenius:core:domain": ["urn:eigenius:core:CodataType"]
-  },
-  {
-    "@id": "urn:eigenius:core:observation_name",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The local name of an observation (e.g. 'head', 'tail').",
-    "urn:eigenius:core:short_name": "observation_name",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:core:Observation"]
-  },
-  {
-    "@id": "urn:eigenius:core:observation_type",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Result type of an observation: a reference to a Class, CodataType, or DataType resource resolved via the layer chain.",
-    "urn:eigenius:core:short_name": "observation_type",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": [
-      "urn:eigenius:core:Class",
-      "urn:eigenius:core:CodataType",
-      "urn:eigenius:core:DataType"
-    ],
-    "urn:eigenius:core:domain": ["urn:eigenius:core:Observation"]
-  },
 
   {
     "@id": "urn:eigenius:core:InductiveType",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "An inductive type defined by its constructors (D19, Phase 11b). Dual of CodataType: an inductive type is built up from a finite set of constructors, while a codata type is taken apart by its observations.",
+    "urn:eigenius:core:description": "An inductive type defined by its constructors (D19, Phase 11b): built up from a finite set of constructors. The dual notion, CodataType — taken apart by its observations — was removed in eigenius#218; see docs/notes/218-retire-codata-and-sized-types.md.",
     "urn:eigenius:core:short_name": "InductiveType",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:short_name",
@@ -594,11 +544,350 @@
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
+    "@id": "urn:eigenius:core:Level",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Level",
+    "urn:eigenius:core:description": "A universe level. Carried by core:result_sort (an inductive type's own sort) and by eigentt:TypeExpr's `Sort` ctor. Five constructors: `Zero` (Prop), `Succ`, `Max`, `IMax` and `Param`. `IMax` is the impredicative-Pi rule held open: `imax l r` is `Zero` when `r` is `Zero` and `max l r` otherwise, which cannot be decided while `r` is a `Param`. Mirrors urn:eigenius:lean:LeanLevel's five constructors, deliberately: the Lean mirror already carried this algebra, and an isomorphic shape makes the sort translation a fold rather than a special case that only covers the monomorphic fragment. ONE divergence: `Param` takes a core:string where LeanLevel takes a lean:LeanName. Lean's Name is hierarchical (anonymous / string / numeric components) because it identifies declarations; a level parameter here needs only an identifier, and EigenTT has no Name type to borrow. The translation to LeanLevel therefore wraps the string in a single-component Name rather than being the identity on that argument. Declared in CORE rather than beside TypeExpr because core:result_sort needs it and core:Asserts uses that property — a lower layer cannot reference a higher one. One algebra serves both. See eigenius#188 and docs/notes/p2-n3-universe-polymorphism.md.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Zero",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Succ",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "base",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:Level"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Max",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:Level"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:Level"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "IMax",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "left",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:Level"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "right",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:Level"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Param",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:TypeExpr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "TypeExpr",
+    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry TypeExpr values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Sort",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "level",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:Level"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "SizeSort",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Var",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "ConstRef",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "iri",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "App",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "head",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "arg",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Ann",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "expr",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "typ",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pi",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dom",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Sig",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dom",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Lam",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dom",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "One",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Id",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ty",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "lhs",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "rhs",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "UnitVal",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitInt",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:integer"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitString",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitFloat",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:float"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitBool",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:boolean"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "CtorApp",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "decl_iri",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ctor_name",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pair",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "fst",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "snd",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Fst",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "pair",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Snd",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "pair",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:TypeExpr"]}
+          }
+        ]
+      }
+    ]
+  },
+
+  {
     "@id": "urn:eigenius:core:result_sort",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce (e.g. `Prop`, `Set`). A string naming the sort.",
+    "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce — a core:Level value. Carried a STRING (`Prop` / `Set` / `Type:N`) until eigenius#188; that grammar could not express a level VARIABLE, so `data X : Sort u` was inexpressible, and nothing validated the string's shape. Now an inductive value like any other: the validator checks it against core:Level's ctor schema, and `data X : Sort (max u v)` is as writable as `data X : Set`.",
     "urn:eigenius:core:short_name": "result_sort",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Level"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
@@ -626,14 +915,11 @@
   {
     "@id": "urn:eigenius:core:type_params",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Ordered list of type parameters on an InductiveType or CodataType. Empty for non-parametric types (Nat, Bool, non-sized streams).",
+    "urn:eigenius:core:description": "Ordered list of type parameters on an InductiveType. Empty for non-parametric types (Nat, Bool).",
     "urn:eigenius:core:short_name": "type_params",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveParam"],
-    "urn:eigenius:core:domain": [
-      "urn:eigenius:core:InductiveType",
-      "urn:eigenius:core:CodataType"
-    ]
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
     "@id": "urn:eigenius:core:ctor_name",
@@ -656,7 +942,8 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Either a class IRI or a bare parameter name from the enclosing inductive's type parameters.",
     "urn:eigenius:core:short_name": "type_name",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
   },
   {
@@ -687,9 +974,10 @@
   {
     "@id": "urn:eigenius:core:param_kind",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The kind of an InductiveParam — currently always `urn:eigenius:core:Set`.",
+    "urn:eigenius:core:description": "The kind of an InductiveParam, as an eigentt:TypeExpr value. Carried a STRING until eigenius#188 — a three-way union of class IRI, bare parameter name, and sort keyword — which could not express a level variable, and whose decoder fell through to `Sort(1)`, silently typing a class-typed parameter `Set`. A parameter reference is now `Var`, a class `ConstRef`, a sort `Sort(level)`; all three are checkable.",
     "urn:eigenius:core:short_name": "param_kind",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
   },
 
@@ -702,10 +990,10 @@
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
         "urn:eigenius:core:param_name": "iri",
-        "urn:eigenius:core:param_kind": "urn:eigenius:core:string"
+        "urn:eigenius:core:param_kind": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
       }
     ],
-    "urn:eigenius:core:result_sort": "Prop",
+    "urn:eigenius:core:result_sort": {"ctor": "Zero", "args": []},
     "urn:eigenius:core:ctors": []
   },
 
@@ -718,7 +1006,7 @@
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
         "urn:eigenius:core:param_name": "A",
-        "urn:eigenius:core:param_kind": "urn:eigenius:core:Set"
+        "urn:eigenius:core:param_kind": {"ctor": "Sort", "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]}
       }
     ],
     "urn:eigenius:core:ctors": [
@@ -733,7 +1021,7 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "value",
-            "urn:eigenius:core:type_name": "A"
+            "urn:eigenius:core:type_name": {"ctor": "Var", "args": ["A"]}
           }
         ]
       }

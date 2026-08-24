@@ -23,7 +23,6 @@ ESL has two structurally distinct surfaces:
 | `property` | `core:Property` | [4](04-declarations.md) |
 | `resource` | a resource of the named class | [4](04-declarations.md) |
 | `data` | `core:InductiveType` | [4](04-declarations.md) |
-| `codata` | `core:CodataType` | [4](04-declarations.md) |
 | `program` | `program:Program` | [4](04-declarations.md) |
 | `axiom` | `core:Axiom` (D46 §10) | [4](04-declarations.md) |
 | `def` | `eigentt:Definition` (D66) | [4](04-declarations.md) |

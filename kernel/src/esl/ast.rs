@@ -24,7 +24,23 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug)]
 pub struct File {
     pub namespaces: Vec<NamespaceDecl>,
+    /// Level variables bound by `universe` declarations (eigenius#188), in source order.
+    ///
+    /// File-scoped like `namespace`, and for the same reason: a level variable is a name that has
+    /// to be introduced before it is meaningful. Without this, `Sort u` auto-binds on first use —
+    /// Lean's `autoBound` behaviour — and a typo (`Sort v` for `Sort u`) silently becomes a second,
+    /// unrelated parameter instead of an error.
+    pub universes: Vec<UniverseDecl>,
     pub declarations: Vec<Declaration>,
+}
+
+/// `universe u v;` — binds one or more level variables for the rest of the file.
+///
+/// Follows Lean's `universe ident ident*` (space-separated), with ESL's statement terminator.
+#[derive(Debug)]
+pub struct UniverseDecl {
+    pub names: Vec<String>,
+    pub pos: Position,
 }
 
 /// A namespace alias: `namespace core = "urn:eigenius:core";`
@@ -50,7 +66,6 @@ pub enum Declaration {
     Property(PropertyDecl),
     Resource(ResourceDecl),
     Program(ProgramDecl),
-    Codata(CodataDecl),
     Data(DataDecl),
     /// D37 §3.3 — `merge_comorphism <iri> for <class> { … }`.
     /// Lowers to a `MergeComorphism` resource carrying
@@ -247,6 +262,16 @@ pub enum Value {
     Ref(QualifiedName),
     Array(Vec<Value>),
     Block(Vec<ResourceField>),
+    /// `json({ "k": 0.5 })` — an opaque JSON value for a `core:json`-typed property
+    /// (eigenius#222). A general chain feature: `core:json` is a declared `core:DataType` with a
+    /// dozen declared properties, all of them written by institution runtimes (Julia solver
+    /// outputs, trajectories, witness blobs) rather than by hand — and until this existed there
+    /// was no ESL spelling for one at all.
+    ///
+    /// Distinct from [`Value::Block`], which makes an embedded RESOURCE. The wire forms are
+    /// distinguished the way `eigon_json::parse_json_value` distinguishes them: a resource has
+    /// IRI-shaped keys, opaque JSON does not.
+    Json(serde_json::Value),
     /// Inductive constructor application: `Foo(arg1, arg2, ...)`.
     /// Lands in property positions whose `data_type` is
     /// `core:inductive` — D32 inductive-value literals on the
@@ -312,18 +337,6 @@ pub enum ProgramAttribute {
     Description(String),
 }
 
-/// `codata ex:Stream { head : ex:Elem; tail : ex:Stream }` —
-/// optionally parameterised `codata ex:Stream(i : Size, A : Set) { … }`.
-#[derive(Debug)]
-pub struct CodataDecl {
-    pub name: QualifiedName,
-    /// Type parameters: `(A : Set, i : Size, ...)`. Empty for
-    /// non-parametric codata — the legacy shape.
-    pub params: Vec<DataParam>,
-    pub observations: Vec<ObservationDecl>,
-    pub pos: Position,
-}
-
 /// `data ex:List(A : Set) { nil, cons(A, List(A)) }` —
 /// Phase 11b step 7 inductive type declaration (D19 §10).
 ///
@@ -337,6 +350,10 @@ pub struct CodataDecl {
 #[derive(Debug)]
 pub struct DataDecl {
     pub name: QualifiedName,
+    /// `description = "…";` in the body — `core:description` on the emitted resource. The field
+    /// `ClassDecl`, `AxiomDecl` and `DefDecl` already carry; `data` did not until eigenius#221,
+    /// which kept every inductive out of `core:description_text_index`.
+    pub description: Option<String>,
     /// Type parameters: `(A : Set, B : Set, ...)`. Empty for
     /// non-parametric inductives.
     pub params: Vec<DataParam>,
@@ -479,15 +496,18 @@ impl CtorDecl {
 pub enum CtorArg {
     /// `cons(A, List(A))` — positional, anonymous binder.
     Positional(CtorArgType),
-    /// `succ(j : core:Size, ex:Nat(j))` — named binder with kind.
-    /// The optional `bound` encodes a `< upper` clause; when the
-    /// kind is `core:Size` and `bound` is present, this compiles to
-    /// `Exp::SizedPi { upper, body }` and introduces a TSO
-    /// hypothesis in the constructor's telescope.
+    /// `succ(base : ex:Nat)` — a NAMED argument. The name is the readable label for the slot and
+    /// lands in `core:arg_name`, a `recommends` on `core:InductiveArgType` that the Julia mirror
+    /// generator reads for its field names (D32 §3.2).
+    ///
+    /// The spelling was `{name : kind}` — brace-delimited — because this variant began as the
+    /// SIZED bounded binder (`{j : Size < i}`), where the braces marked a size argument. Sized
+    /// types are gone (eigenius#218) and the braces went with them: they were never needed to
+    /// disambiguate, since `ns:name` lexes as one atomic `QualName` token and the standalone
+    /// `Colon` is reserved for the binder colon (eigenius#221).
     Named {
         name: String,
-        kind: QualifiedName,
-        bound: Option<QualifiedName>,
+        typ: CtorArgType,
         pos: Position,
     },
 }
@@ -679,11 +699,65 @@ pub struct AliasBinding {
 }
 
 /// Sort literals recognised in type expressions (eigenius#72).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SortKind {
+    /// `Prop` — `Sort 0`.
     Prop,
+    /// `Set` — `Sort 1`.
+    ///
+    /// This is Lean's `Type` (= `Type 0`). The names diverge and the levels do not; Lean's `Set`
+    /// is a library type for sets, so a reader arriving from Lean will misread this one. Kept
+    /// because renaming touches 230 uses for no semantic gain — see N3 §3.
     Set,
-    Type(usize),
+    /// `Type <level>` — `Sort (level + 1)`, the same numbering Lean uses.
+    Type(LevelExpr),
+    /// `Sort <level>` — the general form (eigenius#188).
+    Sort(LevelExpr),
+}
+
+impl std::fmt::Display for SortKind {
+    /// The surface spelling, for diagnostics.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SortKind::Prop => write!(f, "Prop"),
+            SortKind::Set => write!(f, "Set"),
+            SortKind::Type(l) => write!(f, "Type {l}"),
+            SortKind::Sort(l) => write!(f, "Sort {l}"),
+        }
+    }
+}
+
+impl std::fmt::Display for LevelExpr {
+    /// The surface spelling, so `result_sort` strings and diagnostics round-trip.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LevelExpr::Num(n) => write!(f, "{n}"),
+            LevelExpr::Var(v) => write!(f, "{v}"),
+            LevelExpr::Add(l, n) => write!(f, "{l} + {n}"),
+            LevelExpr::Max(l, r) => write!(f, "max {l} {r}"),
+            LevelExpr::IMax(l, r) => write!(f, "imax {l} {r}"),
+        }
+    }
+}
+
+/// A universe level as written in ESL (eigenius#188).
+///
+/// Surface syntax follows Lean 4 — see
+/// <https://lean-lang.org/doc/reference/latest/The-Type-System/Universes/>. Lowered to
+/// [`crate::nbe::level::Level`] by the compiler; `Add` becomes iterated `Succ`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LevelExpr {
+    /// A numeral: `0`, `1`, …
+    Num(usize),
+    /// A level variable, bound by a `universe` declaration.
+    Var(String),
+    /// `l + n`.
+    Add(Box<LevelExpr>, usize),
+    /// `max l r`.
+    Max(Box<LevelExpr>, Box<LevelExpr>),
+    /// `imax l r` — `0` when `r` is `0`, `max l r` otherwise. The impredicative-Pi rule, held
+    /// open while `r` is a variable.
+    IMax(Box<LevelExpr>, Box<LevelExpr>),
 }
 
 impl TypeExpr {
@@ -865,11 +939,6 @@ pub enum Expr {
     },
     /// `"hello"`, `42`, `true`
     Literal { value: LiteralValue, pos: Position },
-    /// `corecord { obs = e1; ... }`
-    ///
-    /// Values are ordered — the order must match the declared
-    /// observations of the target codata type.
-    CoRecord { fields: Vec<CoField>, pos: Position },
 
     /// `match expr [returning <motive>] { ctor -> body; ctor(x, y) -> body; ... }`
     /// (Phase 11b step 11–12, D19 §10; extended in eigenius#72 Layer 3).
@@ -911,13 +980,6 @@ pub struct MatchArm {
     pub bindings: Vec<String>,
     pub body: Expr,
     pub pos: Position,
-}
-
-/// A single copattern definition in a corecord: `obs = body`.
-#[derive(Debug)]
-pub struct CoField {
-    pub name: String,
-    pub body: Expr,
 }
 
 /// A literal value in expression position.

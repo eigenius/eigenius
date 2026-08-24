@@ -95,7 +95,7 @@ pub fn encode_lam_chain(binders: &[(Patt, Exp)], body: &Exp) -> Result<Value, En
 
 fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
     match exp {
-        Exp::Sort(n) => Ok(ctor("Sort", vec![json!(*n as i64)])),
+        Exp::Sort(n) => Ok(ctor("Sort", vec![encode_level_json(n)])),
         Exp::Var(name) => Ok(ctor("Var", vec![json!(name)])),
         Exp::App(h, a) => Ok(ctor(
             "App",
@@ -180,13 +180,6 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             }
             Ok(current)
         }
-        Exp::CodataType(decl, args) => {
-            let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
-            for arg in args {
-                current = ctor("App", vec![current, encode_type_json(arg)?]);
-            }
-            Ok(current)
-        }
 
         // ── D48 / eigenius#71 — term-level value encoding ─────────
         // Lets indexed inductive applications with concrete index values
@@ -233,6 +226,94 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         // inductives via Exp::InductiveCtor; anonymous Sum ctors don't
         // arise in axiom statements today. Add when a consumer needs it.
         other => Err(EncodeError::NotATypeLevelExp(format!("{other:?}"))),
+    }
+}
+
+/// Encode a universe level as an `eigentt:Level` value tree (eigenius#188).
+///
+/// The chain ctor took a bare integer until slice 4; it now takes a `Level`, so a `Max`, `IMax`
+/// or `Param` survives the round trip instead of being unrepresentable. Numerals encode as the
+/// `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than `1` and is the
+/// price of one ctor able to carry every level rather than one declaration per rung.
+pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
+    use crate::nbe::level::Level;
+    match l {
+        Level::Zero => ctor("Zero", vec![]),
+        Level::Succ(a) => ctor("Succ", vec![encode_level_json(a)]),
+        Level::Max(a, b) => ctor("Max", vec![encode_level_json(a), encode_level_json(b)]),
+        Level::IMax(a, b) => ctor("IMax", vec![encode_level_json(a), encode_level_json(b)]),
+        Level::Param(n) => ctor("Param", vec![json!(n)]),
+    }
+}
+
+/// Decode an `eigentt:Level` value tree.
+///
+/// **There is no legacy arm for the pre-eigenius#188 bare integer, deliberately.** One was written
+/// and removed: retyping `Sort`'s argument moves the bootstrap manifest, every persisted store
+/// then fails to resume with `ManifestDrift`, and the reseed that answers it rewrites the chain
+/// from source with this encoder. So no term in the old form can ever reach this function — the
+/// arm was a compatibility layer for a state that cannot occur.
+pub(crate) fn decode_level_json(
+    v: &serde_json::Value,
+) -> Result<crate::nbe::level::Level, DecodeError> {
+    use crate::nbe::level::Level;
+    let obj = v
+        .as_object()
+        .ok_or_else(|| wrong_shape("Sort", 0, "expected an eigentt:Level value"))?;
+    let name = obj
+        .get("ctor")
+        .and_then(|c| c.as_str())
+        .ok_or(DecodeError::MissingCtor)?;
+    let args = obj
+        .get("args")
+        .and_then(|a| a.as_array())
+        .ok_or(DecodeError::MissingArgs)?;
+    let arity = |n: usize| -> Result<(), DecodeError> {
+        if args.len() == n {
+            Ok(())
+        } else {
+            Err(wrong_shape(
+                "Sort",
+                0,
+                &format!("`{name}` takes {n} argument(s), got {}", args.len()),
+            ))
+        }
+    };
+    match name {
+        "Zero" => {
+            arity(0)?;
+            Ok(Level::Zero)
+        }
+        "Succ" => {
+            arity(1)?;
+            Ok(Level::Succ(Box::new(decode_level_json(&args[0])?)))
+        }
+        "Max" => {
+            arity(2)?;
+            Ok(Level::Max(
+                Box::new(decode_level_json(&args[0])?),
+                Box::new(decode_level_json(&args[1])?),
+            ))
+        }
+        "IMax" => {
+            arity(2)?;
+            Ok(Level::IMax(
+                Box::new(decode_level_json(&args[0])?),
+                Box::new(decode_level_json(&args[1])?),
+            ))
+        }
+        "Param" => {
+            arity(1)?;
+            let n = args[0]
+                .as_str()
+                .ok_or_else(|| wrong_shape("Sort", 0, "`Param` takes a string name"))?;
+            Ok(Level::Param(n.to_string()))
+        }
+        other => Err(wrong_shape(
+            "Sort",
+            0,
+            &format!("`{other}` is not an eigentt:Level constructor"),
+        )),
     }
 }
 
@@ -408,10 +489,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
     match ctor {
         "Sort" => {
             expect_arg_count("Sort", 1, args)?;
-            let level = args[0]
-                .as_i64()
-                .ok_or_else(|| wrong_shape("Sort", 0, "expected integer"))?;
-            Ok(Exp::Sort(level as usize))
+            Ok(Exp::Sort(decode_level_json(&args[0])?))
         }
         "Var" => {
             expect_arg_count("Var", 1, args)?;
@@ -491,10 +569,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                 Exp::InductiveType(decl, mut existing) => {
                     existing.push(arg);
                     Ok(Exp::InductiveType(decl, existing))
-                }
-                Exp::CodataType(decl, mut existing) => {
-                    existing.push(arg);
-                    Ok(Exp::CodataType(decl, existing))
                 }
                 Exp::InductiveCtor(decl, name, mut existing) => {
                     // D48 / eigenius#71: CtorApp via App-currying. The
@@ -799,7 +873,6 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
     let class_iri = wk::iri(wk::CLASS);
     let datatype_iri = wk::iri(wk::DATA_TYPE);
     let inductive_iri = wk::iri(wk::INDUCTIVE_TYPE);
-    let codata_iri = wk::iri(wk::CODATA_TYPE);
     // D46 §10 axiom IRI — an opaque chain-resident `eigentt:Axiom`
     // resource. Its registered type is looked up at `check_infer`
     // time via the layer's cached `axiom_env`; here we just emit the
@@ -852,16 +925,8 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
                     .unwrap_or_else(|_| Iri::parse("urn:_:unknown").unwrap())],
             }),
         }
-    } else if class_iris.contains(&codata_iri) {
-        // Codata decl resolution lives under ground.rs as resolve_codata_type
-        // (it's similar in shape). For now, leave as a stub error if no
-        // axiom under test needs it — extend when a use case arrives.
-        Err(DecodeError::ConstRefWrongClass {
-            iri,
-            found_classes: class_iris,
-        })
     } else {
-        // A resolved resource that is none of axiom/class/inductive/codata/datatype — a plain
+        // A resolved resource that is none of axiom/class/inductive/datatype — a plain
         // term-level *individual* (an `Entity` value). The dual of the encode-side `EigonResource →
         // ConstRef` arm: a proposition may reference a named individual (`hela`). A misuse in a *type*
         // position is caught downstream by the type-checker — the same deferral `EigonClass`/
@@ -917,8 +982,39 @@ mod tests {
 
     #[test]
     fn encodes_sort() {
-        let v = encode_type(&Exp::Sort(0)).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("Sort", vec![json!(0)])));
+        // eigenius#188: `Sort`'s argument is an `eigentt:Level` tree, not a numeral. `Prop` is
+        // `Zero`; `Set` is `Succ(Zero)`.
+        let v = encode_type(&Exp::sort(0)).unwrap();
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj("Sort", vec![ctor_obj("Zero", vec![])]))
+        );
+        let v = encode_type(&Exp::sort(1)).unwrap();
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj(
+                "Sort",
+                vec![ctor_obj("Succ", vec![ctor_obj("Zero", vec![])])]
+            ))
+        );
+    }
+
+    /// **A polymorphic level survives the round trip** — the point of eigenius#188. Under the
+    /// numeral encoding a `Max`, `IMax` or `Param` was simply unrepresentable on the chain.
+    #[test]
+    fn round_trips_a_polymorphic_level() {
+        use crate::nbe::level::Level;
+        let l = Level::IMax(
+            Box::new(Level::Param("u".to_string())),
+            Box::new(Level::Max(
+                Box::new(Level::Param("v".to_string())),
+                Box::new(Level::of_nat(1)),
+            )),
+        );
+        let layer = empty_layer();
+        let encoded = encode_type(&Exp::Sort(l.clone())).unwrap();
+        let decoded = decode_type(&encoded, &layer).unwrap();
+        assert_eq!(decoded, Exp::Sort(l));
     }
 
     // --- eigenius#71 / D49 — literal Exp variants ---
@@ -968,7 +1064,7 @@ mod tests {
     fn ann_roundtrip() {
         // `(P : Prop)` — the bidirectional annotation round-trips through D47.
         let layer = empty_layer();
-        let original = Exp::Ann(Box::new(Exp::Var("P".to_string())), Box::new(Exp::Sort(0)));
+        let original = Exp::Ann(Box::new(Exp::Var("P".to_string())), Box::new(Exp::sort(0)));
         let encoded = encode_type(&original).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
@@ -1013,7 +1109,10 @@ mod tests {
             ctor_obj("LitInt", vec![json!(42)]),
             ctor_obj("LitString", vec![json!("s")]),
             ctor_obj("LitFloat", vec![json!(1.5)]),
-            ctor_obj("Sort", vec![json!(1)]),
+            ctor_obj(
+                "Sort",
+                vec![ctor_obj("Succ", vec![ctor_obj("Zero", vec![])])],
+            ),
             ctor_obj("UnitVal", vec![]),
         ] {
             decode_type(&Value::Json(pre_existing.clone()), &layer)
@@ -1085,7 +1184,7 @@ mod tests {
         // Built from D47 §3.2's worked example.
         let p_var = || Exp::Var("P".to_string());
         let q_var = || Exp::Var("Q".to_string());
-        let prop = || Exp::Sort(0);
+        let prop = || Exp::sort(0);
         let p_to_q = Exp::Arrow(Box::new(p_var()), Box::new(q_var()));
         let q_to_p = Exp::Arrow(Box::new(q_var()), Box::new(p_var()));
         let iff = Exp::Times(Box::new(p_to_q), Box::new(q_to_p));
@@ -1143,9 +1242,9 @@ mod tests {
 
     #[test]
     fn decodes_sort() {
-        let v = encode_type(&Exp::Sort(2)).unwrap();
+        let v = encode_type(&Exp::sort(2)).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
-        assert_eq!(decoded, Exp::Sort(2));
+        assert_eq!(decoded, Exp::sort(2));
     }
 
     #[test]
@@ -1190,7 +1289,7 @@ mod tests {
         // (modulo Arrow→Pi desugaring).
         let p_var = || Exp::Var("P".to_string());
         let q_var = || Exp::Var("Q".to_string());
-        let prop = || Exp::Sort(0);
+        let prop = || Exp::sort(0);
         let p_to_q = Exp::Arrow(Box::new(p_var()), Box::new(q_var()));
         let q_to_p = Exp::Arrow(Box::new(q_var()), Box::new(p_var()));
         let iff = Exp::Times(Box::new(p_to_q), Box::new(q_to_p));
@@ -1281,12 +1380,12 @@ mod tests {
         let ix_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:_:IxClassFamily").unwrap(),
             name: "urn:_:IxClassFamily".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             // Index telescope's type is Sort(1) — indices are types
             // themselves (e.g., the index says "what type am I
             // indexed by"). This keeps the test purely type-level.
-            indices: vec![(Patt::Unit, Exp::Sort(1))],
-            sort: Exp::Sort(1),
+            indices: vec![(Patt::Unit, Exp::sort(1))],
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         // `IxClassFamily Some Other` — both param and index are
@@ -1330,15 +1429,15 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let list_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
             name: "urn:_:List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::InductiveType(
@@ -1347,7 +1446,7 @@ mod tests {
                         name: "urn:_:List".to_string(),
                         params: Vec::new(),
                         indices: Vec::new(),
-                        sort: Exp::Sort(1),
+                        sort: Exp::sort(1),
                         ctors: Vec::new(),
                     }),
                     vec![Exp::Var("A".to_string())],
@@ -1390,10 +1489,10 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "zero".to_string(),
-                typ: Exp::Sort(1),
+                typ: Exp::sort(1),
             }],
         });
         let zero = Exp::InductiveCtor(nat_decl, "zero".to_string(), Vec::new());
@@ -1412,10 +1511,10 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "succ".to_string(),
-                typ: Exp::Sort(1),
+                typ: Exp::sort(1),
             }],
         });
         let succ_x = Exp::InductiveCtor(
@@ -1482,15 +1581,15 @@ mod tests {
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
-                    typ: Exp::Sort(1),
+                    typ: Exp::sort(1),
                 },
                 InductiveCtorDecl {
                     name: "succ".to_string(),
-                    typ: Exp::Sort(1),
+                    typ: Exp::sort(1),
                 },
             ],
         });
@@ -1502,7 +1601,7 @@ mod tests {
                 Patt::Var("n".to_string()),
                 Exp::InductiveType(nat_decl.clone(), Vec::new()),
             )],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let zero = Exp::InductiveCtor(nat_decl.clone(), "zero".to_string(), Vec::new());

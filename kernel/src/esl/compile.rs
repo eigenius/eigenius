@@ -26,6 +26,101 @@ use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
 
 /// Compile an ESL AST to Eigon-JSON resources.
+/// Lower an ESL level expression to a kernel [`Level`](crate::nbe::level::Level) (eigenius#188).
+///
+/// `Add(l, n)` becomes `n` iterated `Succ`s, which is what `l + n` means; the kernel has no
+/// offset form because `Succ` composes.
+fn lower_level(
+    l: &ast::LevelExpr,
+    declared: &std::collections::BTreeSet<String>,
+    pos: &crate::esl::error::Position,
+) -> Result<crate::nbe::level::Level, EslError> {
+    use crate::nbe::level::Level;
+    Ok(match l {
+        ast::LevelExpr::Num(n) => Level::of_nat(*n),
+        ast::LevelExpr::Var(v) => {
+            if !declared.contains(v) {
+                return Err(EslError::compiler(
+                    Some(pos.clone()),
+                    format!(
+                        "universe level `{v}` is not declared — add `universe {v};` to this file. \
+                         An undeclared level variable is not auto-bound (eigenius#188): silently \
+                         minting one turns a typo into a second, unrelated universe."
+                    ),
+                ));
+            }
+            Level::Param(v.clone())
+        }
+        ast::LevelExpr::Add(inner, n) => {
+            (0..*n).fold(lower_level(inner, declared, pos)?, |acc, _| acc.succ())
+        }
+        ast::LevelExpr::Max(a, b) => Level::Max(
+            Box::new(lower_level(a, declared, pos)?),
+            Box::new(lower_level(b, declared, pos)?),
+        ),
+        ast::LevelExpr::IMax(a, b) => Level::IMax(
+            Box::new(lower_level(a, declared, pos)?),
+            Box::new(lower_level(b, declared, pos)?),
+        ),
+    })
+}
+
+/// The kernel level a `SortKind` denotes. `Prop` is `0`, `Set` is `1`, `Type l` is `l + 1`
+/// (Lean's numbering), and `Sort l` is `l`.
+fn sort_kind_level(
+    k: &ast::SortKind,
+    declared: &std::collections::BTreeSet<String>,
+    pos: &crate::esl::error::Position,
+) -> Result<crate::nbe::level::Level, EslError> {
+    use crate::nbe::level::Level;
+    Ok(match k {
+        ast::SortKind::Prop => Level::of_nat(0),
+        ast::SortKind::Set => Level::of_nat(1),
+        ast::SortKind::Type(l) => lower_level(l, declared, pos)?.succ(),
+        ast::SortKind::Sort(l) => lower_level(l, declared, pos)?,
+    })
+}
+
+/// A declaration's own sort, as the `core:Level` value `core:result_sort` now carries
+/// (eigenius#188).
+///
+/// This was a string — `"Prop"` / `"Set"` / `"Type:N"` — which could not express a level VARIABLE,
+/// so `data X : Sort u` had to be rejected and nothing validated the string's shape. Emitting the
+/// same `core:Level` tree every other level uses removes both problems: one representation, and
+/// the validator checks it against the ctor schema like any other inductive value.
+fn sort_kind_result_value(
+    k: &ast::SortKind,
+    declared: &std::collections::BTreeSet<String>,
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    Ok(Value::Json(
+        crate::program::eigentt_type_mirror::encode_level_json(&sort_kind_level(k, declared, pos)?),
+    ))
+}
+
+/// A resolved IRI as a `ConstRef` value, for sites that already hold the string.
+fn const_ref_value(iri: &str) -> Value {
+    Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [iri]}))
+}
+
+/// A bare type-parameter name as a `Var` value.
+fn var_value(name: &str) -> Value {
+    Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
+}
+
+/// A bare (unqualified) kind name as a `TypeExpr` value.
+///
+/// `Size` is the one bare name that is not a parameter reference — it is the size sort, which
+/// `decode_param_kind_str` has always special-cased. Everything else unqualified is a reference
+/// to a type parameter in scope.
+fn bare_kind_value(name: &str) -> Value {
+    if name == "Size" || name.ends_with(":Size") {
+        Value::Json(serde_json::json!({"ctor": "SizeSort", "args": []}))
+    } else {
+        var_value(name)
+    }
+}
+
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
     compile_file_with_institutions(file, None)
 }
@@ -72,6 +167,33 @@ pub fn compile_file_with_context(
     // Register namespace aliases.
     for ns in &file.namespaces {
         compiler.namespaces.insert(ns.alias.clone(), ns.uri.clone());
+    }
+
+    // Register level variables (eigenius#188). File-scoped like namespaces.
+    //
+    // A duplicate is REJECTED, not absorbed (eigenius#219). `declared_universes` is a set, so
+    // `universe u u;` and `universe u; universe u;` both used to insert twice and compile — the
+    // second insert silently did nothing. nanoda asserts the same thing at declaration admission
+    // (`no_dupes_all_params`, `references/nanoda_lib/src/tc.rs:167`), where the stakes are higher:
+    // its `uparams` is a per-declaration ORDERED LIST used for level substitution, and a duplicate
+    // there makes substitution ambiguous. Here it is only redundant. It is still a mistake, and
+    // slice 5c added the `universe` form without the companion check.
+    let mut universe_errors: Vec<EslError> = Vec::new();
+    for u in &file.universes {
+        for n in &u.names {
+            if !compiler.declared_universes.insert(n.clone()) {
+                universe_errors.push(EslError::compiler(
+                    Some(u.pos.clone()),
+                    format!(
+                        "level variable `{n}` is declared more than once — a `universe` \
+                         declaration introduces each name exactly once"
+                    ),
+                ));
+            }
+        }
+    }
+    if !universe_errors.is_empty() {
+        return Err(universe_errors);
     }
 
     // First pass: collect every declared inductive constructor in the
@@ -242,6 +364,13 @@ pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String
 
 struct Compiler {
     namespaces: BTreeMap<String, String>,
+    /// Level variables bound by `universe` declarations in this file (eigenius#188).
+    ///
+    /// A `Sort u` whose `u` is not in here is an ERROR, not a fresh parameter. Lean's
+    /// `autoBound` would silently mint one, which turns a typo — `Sort v` for `Sort u` — into a
+    /// second unrelated universe rather than a diagnostic. Level variables are cheap to declare
+    /// and expensive to get silently wrong, so the binding is required.
+    declared_universes: std::collections::BTreeSet<String>,
     /// Per-file constructor index. Two views over the same set of
     /// chain-resident + in-file ctors:
     ///
@@ -511,6 +640,7 @@ impl Compiler {
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
+            declared_universes: std::collections::BTreeSet::new(),
             ctors_by_iri: std::collections::BTreeSet::new(),
             ctors_by_short_name: BTreeMap::new(),
             macros: BTreeMap::new(),
@@ -715,7 +845,7 @@ impl Compiler {
             name: parent_short_name,
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let arg_exps: Result<Vec<Exp>, EslError> = args
@@ -723,6 +853,47 @@ impl Compiler {
             .map(|a| self.lower_type_expr_to_exp(a, scope))
             .collect();
         Ok(Exp::InductiveCtor(stub, ctor_name.to_string(), arg_exps?))
+    }
+
+    /// Lower a `data` / `codata` parameter or index KIND to its `eigentt:TypeExpr` value.
+    ///
+    /// One function for all three telescope sites — `codata` params, `data` params, `data`
+    /// indices. They were three copies of this match, and the copies had already drifted: the
+    /// `codata` param site called `var_value` where the other two called `bare_kind_value`, so a
+    /// `Size`-kinded codata parameter lowered to `Var("Size")` — a reference to a binder that does
+    /// not exist — instead of `SizeSort`. Nothing caught it, because nothing type-checked a
+    /// declaration's telescope until `check_inductive_decl_telescopes`.
+    ///
+    /// A bare name is a reference to an earlier parameter when one is in scope, and otherwise the
+    /// size sort or a namespace-resolved IRI. A sort keyword is `Sort(level)`, so `Sort u` works
+    /// wherever a kind is written (eigenius#188); this was a canonical STRING — `"Prop"` / `"Set"`
+    /// / `"Type:N"` — which could not carry a level variable.
+    fn lower_kind(
+        &self,
+        kind: &ast::IndexKind,
+        param_names: &std::collections::HashSet<&str>,
+        pos: &crate::esl::error::Position,
+    ) -> Result<Value, EslError> {
+        Ok(match kind {
+            ast::IndexKind::Named(qn) => {
+                if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                    var_value(&qn.name)
+                } else if qn.namespace.is_none() && qn.name == "Size" {
+                    // `Size` is the sort of size values, not a chain-resident class — the ESL
+                    // surface spells it as a bare name and the compiler is where it becomes a
+                    // sort. See `docs/notes/p2-n2-sized-types-wire-or-delete.md` §3.
+                    Value::Json(serde_json::json!({"ctor": "SizeSort", "args": []}))
+                } else {
+                    const_ref_value(&self.resolve(qn)?)
+                }
+            }
+            ast::IndexKind::Sort(sk) => Value::Json(serde_json::json!({
+                "ctor": "Sort",
+                "args": [crate::program::eigentt_type_mirror::encode_level_json(
+                    &sort_kind_level(sk, &self.declared_universes, pos)?
+                )],
+            })),
+        })
     }
 
     /// Resolve a qualified name to a full IRI string.
@@ -759,7 +930,6 @@ impl Compiler {
             ast::Declaration::Property(p) => self.compile_property(p),
             ast::Declaration::Resource(r) => self.compile_resource(r),
             ast::Declaration::Program(p) => self.compile_program(p),
-            ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
             ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
             // D52 §12 — macros are pure compile-time expansion
@@ -903,7 +1073,7 @@ impl Compiler {
         let option_arg = {
             let mut ar = Resource::new_embedded();
             set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-            ar.set(iri(wk::TYPE_NAME), Value::String(wk::OPTION.to_string()));
+            ar.set(iri(wk::TYPE_NAME), const_ref_value(wk::OPTION));
             ar.set(iri(wk::TYPE_ARGS), Value::Array(vec![class_value.clone()]));
             Value::Embedded(Box::new(ar))
         };
@@ -961,84 +1131,6 @@ impl Compiler {
         Ok(current)
     }
 
-    // --- Codata ---
-
-    fn compile_codata(&self, decl: &ast::CodataDecl) -> Result<Vec<Resource>, EslError> {
-        use crate::ontology::well_known as wk;
-        let id = self.resolve_iri(&decl.name)?;
-        let mut r = Resource::new(id);
-
-        r.set(
-            iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::String(
-                "urn:eigenius:core:CodataType".to_string(),
-            )]),
-        );
-        r.set(
-            iri("urn:eigenius:core:short_name"),
-            Value::String(decl.name.name.clone()),
-        );
-
-        // Type parameters (Phase 11b step 15h.3) — same shape as
-        // `data`'s params so the decoder can reuse `decode_params`.
-        let param_names: std::collections::HashSet<&str> =
-            decl.params.iter().map(|p| p.name.as_str()).collect();
-        let params: Result<Vec<Value>, EslError> = decl
-            .params
-            .iter()
-            .map(|p| {
-                let mut pr = Resource::new_embedded();
-                set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
-                pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                // A parameter's kind is a qualified-name class (possibly an
-                // earlier parameter in scope) or a sort literal — the latter
-                // for Lean-style sort-parametrized inductives (`And (P : Prop,
-                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
-                let kind = match &p.kind {
-                    ast::IndexKind::Named(qn) => {
-                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                            qn.name.clone()
-                        } else {
-                            self.resolve(qn)?
-                        }
-                    }
-                    ast::IndexKind::Sort(sk) => match sk {
-                        ast::SortKind::Prop => "Prop".to_string(),
-                        ast::SortKind::Set => "Set".to_string(),
-                        ast::SortKind::Type(n) => format!("Type:{n}"),
-                    },
-                };
-                pr.set(iri(wk::PARAM_KIND), Value::String(kind));
-                Ok(Value::Embedded(Box::new(pr)))
-            })
-            .collect();
-        r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
-
-        let mut observations = Vec::new();
-        for obs in &decl.observations {
-            let type_value = self.compile_type_expr(&obs.typ, &param_names)?;
-            let mut obs_r = Resource::new_embedded();
-            set_is_a(&mut obs_r, "urn:eigenius:core:Observation");
-            obs_r.set(
-                iri("urn:eigenius:core:observation_name"),
-                Value::String(obs.name.clone()),
-            );
-            obs_r.set(iri("urn:eigenius:core:observation_type"), type_value);
-            observations.push(Value::Embedded(Box::new(obs_r)));
-        }
-        r.set(
-            iri("urn:eigenius:core:observations"),
-            Value::Array(observations),
-        );
-
-        stamp_declared(&mut r);
-        Ok(vec![r])
-    }
-
-    /// Compile a type expression to a `Value` — either a plain string
-    /// (for simple Ref types — preserves backward compat with the
-    /// pre-15h.3 String IRI shape) or an embedded resource (for
-    /// Arrow/BinderArrow/parameterised Ref).
     fn compile_type_expr(
         &self,
         typ: &ast::TypeExpr,
@@ -1077,7 +1169,7 @@ impl Compiler {
                 } else {
                     let mut ar = Resource::new_embedded();
                     set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-                    ar.set(iri(wk::TYPE_NAME), Value::String(resolved));
+                    ar.set(iri(wk::TYPE_NAME), const_ref_value(&resolved));
                     let arg_values: Result<Vec<Value>, EslError> = args
                         .iter()
                         .map(|a| self.compile_type_expr(a, scope))
@@ -1213,7 +1305,8 @@ impl Compiler {
                 let s = match kind {
                     ast::SortKind::Prop => "Prop".to_string(),
                     ast::SortKind::Set => "Set".to_string(),
-                    ast::SortKind::Type(n) => format!("Type({n})"),
+                    ast::SortKind::Type(l) => format!("Type({l})"),
+                    ast::SortKind::Sort(l) => format!("Sort({l})"),
                 };
                 Ok(Value::String(s))
             }
@@ -1434,11 +1527,11 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(match kind {
-                ast::SortKind::Prop => 0,
-                ast::SortKind::Set => 1,
-                ast::SortKind::Type(n) => n + 1,
-            })),
+            ast::TypeExpr::Sort { kind, pos } => Ok(Exp::Sort(sort_kind_level(
+                kind,
+                &self.declared_universes,
+                pos,
+            )?)),
             // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_json`. Both paths
             // are live: `axiom X : T` lowers through here, `type_expr(...)` in a resource
             // property through the JSON encoder.
@@ -1545,7 +1638,7 @@ impl Compiler {
                         name: short_name,
                         params: Vec::new(),
                         indices: Vec::new(),
-                        sort: Exp::Sort(1),
+                        sort: Exp::sort(1),
                         ctors: Vec::new(),
                     });
                     let arg_exps: Result<Vec<Exp>, EslError> = args
@@ -1605,17 +1698,13 @@ impl Compiler {
                 // (upper bound for sized) is currently ignored — sized
                 // axiom statements need a follow-on.
                 let kind_str = self.resolve(kind)?;
-                let dom = if kind_str.ends_with(":Size") || kind_str == "Size" {
-                    Exp::SizeSort
-                } else {
-                    let iri_val = Iri::parse(&kind_str).map_err(|e| {
-                        EslError::compiler(
-                            Some(typ.pos().clone()),
-                            format!("invalid kind IRI `{kind_str}`: {e}"),
-                        )
-                    })?;
-                    Exp::EigonClass(iri_val)
-                };
+                let iri_val = Iri::parse(&kind_str).map_err(|e| {
+                    EslError::compiler(
+                        Some(typ.pos().clone()),
+                        format!("invalid kind IRI `{kind_str}`: {e}"),
+                    )
+                })?;
+                let dom = Exp::EigonClass(iri_val);
                 let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
                 inner_scope.insert(name.as_str());
                 let body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
@@ -1964,6 +2053,12 @@ impl Compiler {
         }
         r.set(iri(wk::IS_A), Value::Array(is_a_values));
         r.set(iri(wk::SHORT_NAME), Value::String(decl.name.name.clone()));
+        // eigenius#221 — `description = "…";` in the body. `core:description` is INDEXED
+        // (`core:description_text_index`, read by the DCG glossary and OOV grounding), so its
+        // absence kept every ESL-authored inductive out of that index.
+        if let Some(d) = &decl.description {
+            r.set(iri(wk::DESCRIPTION), Value::String(d.clone()));
+        }
 
         let param_names: std::collections::HashSet<&str> =
             decl.params.iter().map(|p| p.name.as_str()).collect();
@@ -1975,25 +2070,8 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                // A parameter's kind is a qualified-name class (possibly an
-                // earlier parameter in scope) or a sort literal — the latter
-                // for Lean-style sort-parametrized inductives (`And (P : Prop,
-                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
-                let kind = match &p.kind {
-                    ast::IndexKind::Named(qn) => {
-                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                            qn.name.clone()
-                        } else {
-                            self.resolve(qn)?
-                        }
-                    }
-                    ast::IndexKind::Sort(sk) => match sk {
-                        ast::SortKind::Prop => "Prop".to_string(),
-                        ast::SortKind::Set => "Set".to_string(),
-                        ast::SortKind::Type(n) => format!("Type:{n}"),
-                    },
-                };
-                pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                let kind = self.lower_kind(&p.kind, &param_names, &p.pos)?;
+                pr.set(iri(wk::PARAM_KIND), kind);
                 Ok(Value::Embedded(Box::new(pr)))
             })
             .collect();
@@ -2012,27 +2090,8 @@ impl Compiler {
                     let mut pr = Resource::new_embedded();
                     set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                     pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                    let kind = match &p.kind {
-                        ast::IndexKind::Named(qn) => {
-                            if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                                qn.name.clone()
-                            } else {
-                                self.resolve(qn)?
-                            }
-                        }
-                        // Sort literals encode as canonical strings the
-                        // kernel's `decode_param_kind_str` recognises:
-                        // "Prop" → Sort(0), "Set" → Sort(1), "Type:N"
-                        // → Sort(N+1). Needed for D39 §5's JustifiedBy
-                        // and ChainWitness predicates whose intermediate
-                        // index kinds are themselves sorts.
-                        ast::IndexKind::Sort(sk) => match sk {
-                            ast::SortKind::Prop => "Prop".to_string(),
-                            ast::SortKind::Set => "Set".to_string(),
-                            ast::SortKind::Type(n) => format!("Type:{n}"),
-                        },
-                    };
-                    pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                    let kind = self.lower_kind(&p.kind, &param_names, &p.pos)?;
+                    pr.set(iri(wk::PARAM_KIND), kind);
                     Ok(Value::Embedded(Box::new(pr)))
                 })
                 .collect();
@@ -2041,13 +2100,11 @@ impl Compiler {
 
         // eigenius#72 Layer 2 — explicit result sort. Encoded as a
         // string; the decoder parses it back into `Exp::Sort(n)`.
-        if let Some(sort) = decl.result_sort {
-            let sort_str = match sort {
-                ast::SortKind::Prop => "Prop".to_string(),
-                ast::SortKind::Set => "Set".to_string(),
-                ast::SortKind::Type(n) => format!("Type:{n}"),
-            };
-            r.set(iri(wk::RESULT_SORT), Value::String(sort_str));
+        if let Some(sort) = &decl.result_sort {
+            r.set(
+                iri(wk::RESULT_SORT),
+                sort_kind_result_value(sort, &self.declared_universes, &decl.name.pos)?,
+            );
         }
 
         let parent_iri_str = self.resolve(&decl.name)?;
@@ -2082,11 +2139,9 @@ impl Compiler {
                                 ast::CtorArg::Positional(t) => {
                                     arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
                                 }
-                                ast::CtorArg::Named {
-                                    name, kind, bound, ..
-                                } => {
+                                ast::CtorArg::Named { name, typ, .. } => {
                                     arg_values
-                                        .push(self.compile_ctor_binder(name, kind, bound, &scope)?);
+                                        .push(self.compile_named_ctor_arg(name, typ, &scope)?);
                                     local_binders.push(name.clone());
                                 }
                             }
@@ -2148,14 +2203,14 @@ impl Compiler {
         let type_name = if arg.name.namespace.is_none() {
             let n = arg.name.name.as_str();
             if params.contains(n) || n == "Inf" || n == "Size" {
-                arg.name.name.clone()
+                bare_kind_value(&arg.name.name)
             } else {
-                self.resolve(&arg.name)?
+                const_ref_value(&self.resolve(&arg.name)?)
             }
         } else {
-            self.resolve(&arg.name)?
+            const_ref_value(&self.resolve(&arg.name)?)
         };
-        ar.set(iri(wk::TYPE_NAME), Value::String(type_name));
+        ar.set(iri(wk::TYPE_NAME), type_name);
 
         let type_args: Result<Vec<Value>, EslError> = arg
             .params
@@ -2167,59 +2222,33 @@ impl Compiler {
         Ok(Value::Embedded(Box::new(ar)))
     }
 
-    /// Compile a named constructor-argument binder
-    /// (`ident : Kind [< Bound]`, Phase 11b step 15h).
+    /// A NAMED constructor argument — `succ(base : ex:Nat)`.
     ///
-    /// Encoded as an `InductiveArgType` resource carrying a
-    /// `binder_name` key — its presence distinguishes binders from
-    /// positional args at decode time. `binder_bound` holds the
-    /// optional upper bound (resolved identically to type names:
-    /// declared params / built-ins bare, everything else via
-    /// namespace resolution).
-    fn compile_ctor_binder(
+    /// Identical to `compile_ctor_arg_type` bar one property: the name lands in `core:arg_name`, a
+    /// declared `recommends` on `core:InductiveArgType` that the Julia mirror generator reads as
+    /// the slot's readable field name (D32 §3.2), falling back to `arg_0`/`arg_1` without it.
+    ///
+    /// This emitted `core:binder_name` until eigenius#221, which is **not a declared property** —
+    /// so every use of the form was rejected at commit by Rule 22 §c
+    /// (`property key '…:binder_name' is not defined as a core:Property`). Hence 0 occurrences of
+    /// `binder_name` on any chain against 85 of `arg_name`: the surface produced one property and
+    /// the data used the other.
+    fn compile_named_ctor_arg(
         &self,
         name: &str,
-        kind: &ast::QualifiedName,
-        bound: &Option<ast::QualifiedName>,
+        typ: &ast::CtorArgType,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Value, EslError> {
         use crate::ontology::well_known as wk;
-        let mut ar = Resource::new_embedded();
-        set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-
-        // The "type" part of the binder (kind). Resolution rules
-        // mirror `compile_ctor_arg_type` — declared params and
-        // `Inf`/`Size` built-ins stay bare; other names resolve
-        // through the namespace registry.
-        let kind_str = if kind.namespace.is_none() {
-            let n = kind.name.as_str();
-            if scope.contains(n) || n == "Inf" || n == "Size" {
-                kind.name.clone()
-            } else {
-                self.resolve(kind)?
-            }
-        } else {
-            self.resolve(kind)?
+        let compiled = self.compile_ctor_arg_type(typ, scope)?;
+        let Value::Embedded(mut ar) = compiled else {
+            return Err(EslError::compiler(
+                None,
+                "constructor argument did not compile to a resource".to_string(),
+            ));
         };
-        ar.set(iri(wk::TYPE_NAME), Value::String(kind_str));
-        ar.set(iri(wk::TYPE_ARGS), Value::Array(Vec::new()));
-        ar.set(iri(wk::BINDER_NAME), Value::String(name.to_string()));
-
-        if let Some(b) = bound {
-            let bound_str = if b.namespace.is_none() {
-                let n = b.name.as_str();
-                if scope.contains(n) || n == "Inf" || n == "Size" {
-                    b.name.clone()
-                } else {
-                    self.resolve(b)?
-                }
-            } else {
-                self.resolve(b)?
-            };
-            ar.set(iri(wk::BINDER_BOUND), Value::String(bound_str));
-        }
-
-        Ok(Value::Embedded(Box::new(ar)))
+        ar.set(iri(wk::ARG_NAME), Value::String(name.to_string()));
+        Ok(Value::Embedded(ar))
     }
 
     // --- Class ---
@@ -2416,6 +2445,9 @@ impl Compiler {
 
     fn compile_value(&self, value: &ast::Value) -> Result<Value, EslError> {
         match value {
+            // `json( … )` — an opaque JSON value for a `core:json`-typed property. Passes through
+            // verbatim; the kernel stores it as `Value::Json` (eigenius#222).
+            ast::Value::Json(j) => Ok(Value::Json(j.clone())),
             ast::Value::String(s) => Ok(Value::String(s.clone())),
             ast::Value::Int(n) => Ok(Value::Integer(*n)),
             ast::Value::Float(f) => Ok(Value::Float(*f)),
@@ -2540,6 +2572,7 @@ impl Compiler {
     /// flat values or other ctors, not nested resources.
     fn ctor_value_to_json(&self, value: &ast::Value) -> Result<serde_json::Value, EslError> {
         match value {
+            ast::Value::Json(j) => Ok(j.clone()),
             ast::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
             ast::Value::Int(n) => Ok(serde_json::Value::Number((*n).into())),
             ast::Value::Float(f) => Ok(serde_json::Number::from_f64(*f)
@@ -3127,28 +3160,6 @@ impl Compiler {
                 Ok(r)
             }
 
-            ast::Expr::CoRecord { fields, .. } => {
-                let mut r = Resource::new_embedded();
-                set_is_a(&mut r, "urn:eigenius:program:CoRecord");
-                let mut cofields = Vec::new();
-                for f in fields {
-                    let body_r = self.compile_expr(&f.body)?;
-                    let mut cf = Resource::new_embedded();
-                    set_is_a(&mut cf, "urn:eigenius:program:CoField");
-                    cf.set(
-                        iri("urn:eigenius:program:observation_name"),
-                        Value::String(f.name.clone()),
-                    );
-                    cf.set(
-                        iri("urn:eigenius:program:body"),
-                        Value::Embedded(Box::new(body_r)),
-                    );
-                    cofields.push(Value::Embedded(Box::new(cf)));
-                }
-                r.set(iri("urn:eigenius:program:cofields"), Value::Array(cofields));
-                Ok(r)
-            }
-
             ast::Expr::Match {
                 scrutinee,
                 returning,
@@ -3515,9 +3526,171 @@ fn stamp_declared(resource: &mut Resource) {
 
 #[cfg(test)]
 mod tests {
+    /// **eigenius#188 — a level variable must be declared with `universe`.**
+    ///
+    /// Lean's `autoBound` mints an undeclared level parameter on first use. That is the wrong
+    /// trade here: level variables are cheap to declare and expensive to get silently wrong,
+    /// because a typo — `Sort v` where `Sort u` was meant — becomes a SECOND, unrelated universe
+    /// rather than an error, and the declaration still compiles and commits.
+    ///
+    /// Follows Lean's `universe ident ident*` otherwise: space-separated, ESL's semicolon.
+    #[test]
+    fn a_level_variable_must_be_declared() {
+        let head = r#"namespace core = "urn:eigenius:core";
+                      namespace p = "urn:eigenius:probe";"#;
+
+        // Declared — compiles, in a type expression and as a declaration's own sort.
+        for body in [
+            "universe u; axiom p:a : forall (T : Sort u) => T -> T;",
+            "universe u v; axiom p:b : forall (T : Sort (max u v)) => T -> T;",
+            "universe u; data p:D : Sort u { mk : p:D }",
+            "universe u; data p:E : Type u + 1 { mk : p:E }",
+        ] {
+            crate::esl::compile(&format!("{head}\n{body}"))
+                .unwrap_or_else(|e| panic!("`{body}` must compile: {e:?}"));
+        }
+
+        // Undeclared — rejected, with the name and a fix in the message.
+        let e = crate::esl::compile(&format!(
+            "{head}\nuniverse u; axiom p:c : forall (T : Sort v) => T -> T;"
+        ))
+        .expect_err("`Sort v` with only `u` declared must be rejected");
+        let msg = e[0].to_string();
+        assert!(msg.contains("`v` is not declared"), "{msg}");
+        assert!(
+            msg.contains("universe v;"),
+            "the message should say the fix: {msg}"
+        );
+
+        // And with NO universe declaration at all — the auto-bound case.
+        crate::esl::compile(&format!(
+            "{head}\naxiom p:d : forall (T : Sort u) => T -> T;"
+        ))
+        .expect_err("an undeclared level must not auto-bind");
+    }
+
+    /// **eigenius#219 — a level variable may not be declared twice.**
+    ///
+    /// `declared_universes` is a set, so both spellings of a duplicate used to insert twice and
+    /// compile, the second insert silently doing nothing. nanoda asserts the same at declaration
+    /// admission (`no_dupes_all_params`, `references/nanoda_lib/src/tc.rs:167`), where the stakes
+    /// are higher — its `uparams` is an ordered list used for level substitution and a duplicate
+    /// makes substitution ambiguous. Here it is merely redundant, and still a mistake.
+    ///
+    /// eigenius#188 slice 5c added the `universe` form without this check.
+    #[test]
+    fn a_level_variable_may_not_be_declared_twice() {
+        let head = r#"namespace p = "urn:eigenius:p";"#;
+
+        for dup in [
+            "universe u u;",           // twice in one declaration
+            "universe u; universe u;", // twice across declarations
+        ] {
+            let e = crate::esl::compile(&format!("{head}\n{dup}"))
+                .expect_err("a duplicate level variable must be rejected");
+            let msg = e[0].to_string();
+            assert!(
+                msg.contains("`u` is declared more than once"),
+                "the diagnostic must name the offending variable: {msg}"
+            );
+        }
+
+        // The non-duplicate forms still compile — the check must not reject distinct names.
+        crate::esl::compile(&format!("{head}\nuniverse u v;"))
+            .expect("distinct level variables in one declaration are fine");
+        crate::esl::compile(&format!("{head}\nuniverse u; universe v;"))
+            .expect("distinct level variables across declarations are fine");
+    }
+
+    /// **eigenius#188 — a declaration's own sort can be POLYMORPHIC.**
+    ///
+    /// `core:result_sort` was a string (`"Prop"` / `"Set"` / `"Type:N"`), so `data X : Sort u`
+    /// had to be rejected: a level variable has no spelling in that grammar. Retyping the
+    /// property to a `core:Level` value — the same representation every other level uses — makes
+    /// it as writable as `data X : Set`, and lets the validator check it against the ctor schema
+    /// instead of nothing checking the string at all.
+    ///
+    /// The algebra lives in CORE rather than beside `eigentt:TypeExpr` because `core:Asserts`
+    /// carries a `result_sort`, and a lower layer cannot reference a higher one.
+    #[test]
+    fn a_declaration_sort_may_be_polymorphic() {
+        let cases = [
+            (
+                "Set",
+                serde_json::json!({"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}),
+            ),
+            (
+                "Sort u",
+                serde_json::json!({"ctor": "Param", "args": ["u"]}),
+            ),
+            (
+                "Sort (max u v)",
+                serde_json::json!({"ctor": "Max", "args": [
+                    {"ctor": "Param", "args": ["u"]},
+                    {"ctor": "Param", "args": ["v"]},
+                ]}),
+            ),
+            (
+                "Sort (imax u v)",
+                serde_json::json!({"ctor": "IMax", "args": [
+                    {"ctor": "Param", "args": ["u"]},
+                    {"ctor": "Param", "args": ["v"]},
+                ]}),
+            ),
+        ];
+        for (sort_src, expected) in cases {
+            let src = format!(
+                r#"namespace core = "urn:eigenius:core";
+                   namespace p = "urn:eigenius:probe";
+                   universe u v;
+                   data p:D : {sort_src} {{ mk : p:D }}"#
+            );
+            let rs = crate::esl::compile(&src)
+                .unwrap_or_else(|e| panic!("`data p:D : {sort_src}` must compile: {e:?}"));
+            let got = rs[0]
+                .get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
+                .expect("result_sort present");
+            let Value::Json(j) = got else {
+                panic!("result_sort must be a Level value, got {got:?}")
+            };
+            assert_eq!(j, &expected, "`{sort_src}` lowers to the wrong level");
+        }
+    }
+
+    /// The numeral a `core:result_sort` Level value denotes, for tests that used to compare it
+    /// against `"Prop"` / `"Set"` / `"Type:N"` (eigenius#188 retyped it to a `core:Level`).
+    fn result_sort_nat(r: &Resource) -> Option<usize> {
+        let v = r.get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())?;
+        let Value::Json(j) = v else { return None };
+        let mut n = 0usize;
+        let mut cur = j;
+        loop {
+            match cur.get("ctor")?.as_str()? {
+                "Zero" => return Some(n),
+                "Succ" => {
+                    n += 1;
+                    cur = cur.get("args")?.as_array()?.first()?;
+                }
+                _ => return None,
+            }
+        }
+    }
+
     use super::*;
     use crate::esl;
     use crate::ontology::eigon_json;
+
+    /// The `eigentt:TypeExpr` value a reference to `iri` encodes to. `core:type_name` and
+    /// `core:param_kind` carried a bare IRI STRING until eigenius#188 retyped both to
+    /// `eigentt:TypeExpr`; these two helpers keep the assertions readable.
+    fn const_ref_json(target: &str) -> Value {
+        Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [target]}))
+    }
+
+    /// The `eigentt:TypeExpr` value a reference to the type parameter `name` encodes to.
+    fn var_json(name: &str) -> Value {
+        Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
+    }
 
     fn compile_esl(input: &str) -> Vec<Resource> {
         esl::compile(input).unwrap()
@@ -4131,125 +4304,6 @@ mod tests {
     }
 
     #[test]
-    fn compile_codata_declaration() {
-        // A codata type with two observations, one referencing itself.
-        let resources = compile_esl(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            codata ex:IntStream {
-                head : core:integer;
-                tail : ex:IntStream;
-            }
-        "#,
-        );
-        assert_eq!(resources.len(), 1);
-        let r = &resources[0];
-        assert_eq!(r.id().unwrap().as_str(), "urn:eigenius:example:IntStream");
-        let is_a = r.is_a();
-        assert_eq!(is_a[0].as_str(), "urn:eigenius:core:CodataType");
-        assert_eq!(
-            r.get(&iri("urn:eigenius:core:short_name"))
-                .unwrap()
-                .as_str(),
-            Some("IntStream")
-        );
-
-        // Observations array
-        let observations = r
-            .get(&iri("urn:eigenius:core:observations"))
-            .expect("observations property");
-        let arr = match observations {
-            Value::Array(a) => a,
-            _ => panic!("observations must be an array"),
-        };
-        assert_eq!(arr.len(), 2);
-
-        // First observation: head -> core:integer
-        let head = match &arr[0] {
-            Value::Embedded(r) => r.as_ref(),
-            _ => panic!("observation must be embedded"),
-        };
-        assert_eq!(
-            head.get(&iri("urn:eigenius:core:observation_name"))
-                .unwrap()
-                .as_str(),
-            Some("head")
-        );
-        assert_eq!(
-            head.get(&iri("urn:eigenius:core:observation_type"))
-                .unwrap()
-                .as_str(),
-            Some("urn:eigenius:core:integer")
-        );
-
-        // Second observation: tail -> ex:IntStream (self-reference)
-        let tail = match &arr[1] {
-            Value::Embedded(r) => r.as_ref(),
-            _ => panic!("observation must be embedded"),
-        };
-        assert_eq!(
-            tail.get(&iri("urn:eigenius:core:observation_name"))
-                .unwrap()
-                .as_str(),
-            Some("tail")
-        );
-        assert_eq!(
-            tail.get(&iri("urn:eigenius:core:observation_type"))
-                .unwrap()
-                .as_str(),
-            Some("urn:eigenius:example:IntStream")
-        );
-    }
-
-    #[test]
-    fn compile_corecord_expression() {
-        let resources = compile_esl(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            program ex:mk_pair : ex:Unit -> ex:Pair {
-                corecord {
-                    fst = 1;
-                    snd = 2;
-                }
-            }
-        "#,
-        );
-        let r = &resources[0];
-        let body = r
-            .get(&iri("urn:eigenius:program:body"))
-            .unwrap()
-            .as_embedded()
-            .unwrap();
-        // Body should be a CoRecord
-        assert_eq!(body.is_a()[0].as_str(), "urn:eigenius:program:CoRecord");
-
-        let cofields = body
-            .get(&iri("urn:eigenius:program:cofields"))
-            .expect("cofields");
-        let arr = match cofields {
-            Value::Array(a) => a,
-            _ => panic!("cofields must be array"),
-        };
-        assert_eq!(arr.len(), 2);
-
-        let fst = match &arr[0] {
-            Value::Embedded(r) => r.as_ref(),
-            _ => panic!("cofield must be embedded"),
-        };
-        assert_eq!(fst.is_a()[0].as_str(), "urn:eigenius:program:CoField");
-        assert_eq!(
-            fst.get(&iri("urn:eigenius:program:observation_name"))
-                .unwrap()
-                .as_str(),
-            Some("fst")
-        );
-    }
-
-    #[test]
     fn compile_full_file() {
         let input = r#"
             namespace core = "urn:eigenius:core";
@@ -4449,27 +4503,6 @@ mod tests {
         assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
-    #[test]
-    fn esl_codata_stamped_declared_resource() {
-        let resources = compile_esl(
-            r#"
-            namespace core = "urn:eigenius:core";
-            namespace ex = "urn:eigenius:example";
-
-            codata ex:Stream {
-                head : core:integer;
-                tail : ex:Stream;
-            }
-        "#,
-        );
-        let r = &resources[0];
-        assert!(
-            has_declared_resource(r),
-            "ESL codata should have DeclaredResource in is_a"
-        );
-        assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
-    }
-
     /// eigenius#141 / #167 — a `declared_by` written in the source is
     /// the resource's accountability record and must survive
     /// compilation. Mirrors the WRN chain's bridge shape
@@ -4561,6 +4594,103 @@ mod tests {
 
     // --- `data` declaration compilation (Phase 11b step 8) ---
 
+    /// **eigenius#221 — `data` can document itself and name its constructor arguments.**
+    ///
+    /// Both properties are declared in the core schema and neither was reachable from the surface:
+    /// `core:description` is universal (and INDEXED — `core:description_text_index`), and
+    /// `core:arg_name` is a `recommends` on `core:InductiveArgType` that the Julia mirror generator
+    /// reads for field names.
+    ///
+    /// The named form previously spelled `{base : ex:Nat}` and compiled to `core:binder_name`,
+    /// which is **not a declared property** — Rule 22 §c rejected every use at commit. Hence 0
+    /// `binder_name` on any chain against 85 `arg_name`.
+    #[test]
+    fn data_carries_a_description_and_named_ctor_args() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Tree(A : Set) {
+                description = "a binary tree";
+                leaf,
+                node(left : ex:Tree(A), value : A),
+            }
+            "#,
+        );
+        let r = &resources[0];
+        assert_eq!(
+            r.get(&iri("urn:eigenius:core:description"))
+                .and_then(|v| v.as_str()),
+            Some("a binary tree")
+        );
+
+        let ctors = match r.get(&iri("urn:eigenius:core:ctors")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected ctors array, got {other:?}"),
+        };
+        let node = match &ctors[1] {
+            Value::Embedded(e) => e.as_ref(),
+            other => panic!("expected embedded ctor, got {other:?}"),
+        };
+        let args = match node.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected arg_types array, got {other:?}"),
+        };
+        let names: Vec<Option<&str>> = args
+            .iter()
+            .map(|a| match a {
+                Value::Embedded(e) => e
+                    .get(&iri("urn:eigenius:core:arg_name"))
+                    .and_then(|v| v.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec![Some("left"), Some("value")]);
+
+        // The undeclared property the old brace form emitted must not reappear: it fails Rule 22.
+        for a in args {
+            if let Value::Embedded(e) = a {
+                assert!(
+                    e.get(&iri("urn:eigenius:core:binder_name")).is_none(),
+                    "core:binder_name is not a declared property and must not be emitted"
+                );
+            }
+        }
+    }
+
+    /// A positional argument stays anonymous — the named form is opt-in, and a bare qualified name
+    /// must not be mistaken for `name : type`. `ex:Tree` lexes as one `QualName` token; the
+    /// standalone `Colon` is a different token, so the two are distinguishable without spacing
+    /// conventions.
+    #[test]
+    fn a_positional_ctor_arg_carries_no_arg_name() {
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+            data ex:Nat { zero, succ(ex:Nat), }
+            "#,
+        );
+        let ctors = match resources[0].get(&iri("urn:eigenius:core:ctors")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected ctors, got {other:?}"),
+        };
+        let succ = match &ctors[1] {
+            Value::Embedded(e) => e.as_ref(),
+            other => panic!("expected embedded, got {other:?}"),
+        };
+        let args = match succ.get(&iri("urn:eigenius:core:arg_types")) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected arg_types, got {other:?}"),
+        };
+        match &args[0] {
+            Value::Embedded(e) => assert!(
+                e.get(&iri("urn:eigenius:core:arg_name")).is_none(),
+                "a positional argument must not acquire a name"
+            ),
+            other => panic!("expected embedded arg, got {other:?}"),
+        }
+    }
+
     #[test]
     fn compile_data_nat_non_parametric() {
         let resources = compile_esl(
@@ -4647,10 +4777,8 @@ mod tests {
             _ => panic!("arg type must be embedded"),
         };
         assert_eq!(
-            succ_arg
-                .get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("urn:eigenius:example:Nat")
+            succ_arg.get(&iri("urn:eigenius:core:type_name")),
+            Some(&const_ref_json("urn:eigenius:example:Nat"))
         );
     }
 
@@ -4664,7 +4792,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:List(A : core:Set) {
+            data ex:List(A : Set) {
                 nil,
                 cons(A, ex:List(A)),
             }
@@ -4672,7 +4800,7 @@ mod tests {
         );
         let r = &resources[0];
 
-        // One param, name=A, kind=core:Set.
+        // One param, name=A, kind=`Sort(Succ(Zero))` — the sort `Set`.
         let params = match r.get(&iri("urn:eigenius:core:type_params")) {
             Some(Value::Array(a)) => a,
             _ => panic!("type_params must be an array"),
@@ -4688,9 +4816,11 @@ mod tests {
             Some("A")
         );
         assert_eq!(
-            p.get(&iri("urn:eigenius:core:param_kind"))
-                .and_then(|v| v.as_str()),
-            Some("urn:eigenius:core:Set")
+            p.get(&iri("urn:eigenius:core:param_kind")),
+            Some(&Value::Json(serde_json::json!({
+                "ctor": "Sort",
+                "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}],
+            })))
         );
 
         // cons ctor: first arg is bare "A", second is parametric List(A).
@@ -4714,9 +4844,8 @@ mod tests {
             _ => panic!("arg must be embedded"),
         };
         assert_eq!(
-            arg0.get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("A")
+            arg0.get(&iri("urn:eigenius:core:type_name")),
+            Some(&var_json("A"))
         );
         let arg0_args = match arg0.get(&iri("urn:eigenius:core:type_args")) {
             Some(Value::Array(a)) => a,
@@ -4730,9 +4859,8 @@ mod tests {
             _ => panic!("arg must be embedded"),
         };
         assert_eq!(
-            arg1.get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("urn:eigenius:example:List")
+            arg1.get(&iri("urn:eigenius:core:type_name")),
+            Some(&const_ref_json("urn:eigenius:example:List"))
         );
         let arg1_args = match arg1.get(&iri("urn:eigenius:core:type_args")) {
             Some(Value::Array(a)) => a,
@@ -4744,10 +4872,8 @@ mod tests {
             _ => panic!("type arg must be embedded"),
         };
         assert_eq!(
-            arg1_a
-                .get(&iri("urn:eigenius:core:type_name"))
-                .and_then(|v| v.as_str()),
-            Some("A")
+            arg1_a.get(&iri("urn:eigenius:core:type_name")),
+            Some(&var_json("A"))
         );
     }
 
@@ -4771,13 +4897,13 @@ mod tests {
                 succ(ex:Nat),
             }
 
-            data ex:Vec(A : core:Set) : core:Nat -> Set {
+            data ex:Vec(A : Set) : core:Nat -> Set {
                 nil  : ex:Vec(A, ex:zero),
                 cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
             }
 
             axiom ex:vec_inhabits_nat_length :
-                forall (A : core:Set, n : core:Nat) => ex:Vec(A, n) -> ex:Nat
+                forall (A : Set, n : core:Nat) => ex:Vec(A, n) -> ex:Nat
             note: "Every Vec carries a Nat-valued length implicit in its index."
 
             program ex:identity : ex:Nat -> ex:Nat {
@@ -4799,15 +4925,7 @@ mod tests {
                 .is_some(),
             "Vec should carry core:indices"
         );
-        assert_eq!(
-            vec.get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
-                .and_then(|v| if let Value::String(s) = v {
-                    Some(s.as_str())
-                } else {
-                    None
-                }),
-            Some("Set")
-        );
+        assert_eq!(result_sort_nat(vec), Some(1));
 
         // Layer 1: axiom resource is an eigentt:Axiom with statement +
         // justification.
@@ -4875,7 +4993,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Vec(A : core:Set) : core:Nat -> Set {
+            data ex:Vec(A : Set) : core:Nat -> Set {
                 nil : ex:Vec(A, ex:zero),
                 cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
             }
@@ -4903,29 +5021,15 @@ mod tests {
                     Some("_")
                 );
                 assert_eq!(
-                    entry
-                        .get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
-                        .and_then(|v| if let Value::String(s) = v {
-                            Some(s.as_str())
-                        } else {
-                            None
-                        }),
-                    Some("urn:eigenius:core:Nat")
+                    entry.get(&Iri::parse(wk_local::PARAM_KIND).unwrap()),
+                    Some(&const_ref_json("urn:eigenius:core:Nat"))
                 );
             }
             other => panic!("expected `core:indices` array, got {other:?}"),
         }
 
         // Result sort — explicitly `Set`.
-        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
-        assert_eq!(
-            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
-                Some(s.as_str())
-            } else {
-                None
-            }),
-            Some("Set")
-        );
+        assert_eq!(result_sort_nat(r), Some(1));
 
         // Both ctors should carry `core:ctor_type`, none should carry
         // `core:arg_types` (typed form bypasses arg_types entirely).
@@ -4966,7 +5070,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex = "urn:eigenius:example";
 
-            data ex:Eq(A : core:Set) : A -> A -> Prop {
+            data ex:Eq(A : Set) : A -> A -> Prop {
                 refl : forall (a : A) => ex:Eq(A, a, a),
             }
             "#,
@@ -4984,26 +5088,13 @@ mod tests {
                 other => panic!("expected embedded, got {other:?}"),
             };
             assert_eq!(
-                pr.get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
-                    .and_then(|v| if let Value::String(s) = v {
-                        Some(s.as_str())
-                    } else {
-                        None
-                    }),
-                Some("A"),
+                pr.get(&Iri::parse(wk_local::PARAM_KIND).unwrap()),
+                Some(&var_json("A")),
                 "param-typed index should keep bare param name as kind"
             );
         }
         // Result sort should be `Prop`.
-        assert_eq!(
-            r.get(&Iri::parse(wk_local::RESULT_SORT).unwrap())
-                .and_then(|v| if let Value::String(s) = v {
-                    Some(s.as_str())
-                } else {
-                    None
-                }),
-            Some("Prop")
-        );
+        assert_eq!(result_sort_nat(r), Some(0));
     }
 
     #[test]
@@ -5111,10 +5202,11 @@ mod tests {
 
     #[test]
     fn compile_data_indexed_emits_sort_literal_index_kinds() {
-        // D39 §5 / D49 ChainWitness path: when an intermediate index is
-        // a Sort literal (Prop / Set / Type N), the compiler must emit
-        // the kind string the kernel's `decode_param_kind_str` recognises
-        // ("Prop" → Sort(0), "Set" → Sort(1), "Type:N" → Sort(N+1)).
+        // D39 §5 / D49 ChainWitness path: when an intermediate index is a sort literal
+        // (Prop / Set / Type N), the compiler emits `Sort(level)`. This asserted the canonical
+        // STRINGS "Prop" / "Set" / "Type:2" that `decode_param_kind_str` recognised; eigenius#188
+        // retyped `core:param_kind` to `eigentt:TypeExpr` so a level VARIABLE is expressible, and
+        // the string grammar could not carry one.
         use crate::ontology::well_known as wk_local;
 
         let resources = compile_esl(
@@ -5136,27 +5228,23 @@ mod tests {
         };
         assert_eq!(arr.len(), 3);
 
-        let kind_strings: Vec<String> = arr
+        let kinds: Vec<Value> = arr
             .iter()
             .map(|v| match v {
-                Value::Embedded(e) => match e.get(&param_kind_iri) {
-                    Some(Value::String(s)) => s.clone(),
-                    other => panic!("expected string kind, got {other:?}"),
-                },
+                Value::Embedded(e) => e.get(&param_kind_iri).expect("index has a kind").clone(),
                 other => panic!("expected embedded index, got {other:?}"),
             })
             .collect();
-        assert_eq!(kind_strings, vec!["Prop", "Set", "Type:2"]);
+        let sort_json = |n: usize| {
+            let mut lvl = serde_json::json!({"ctor": "Zero", "args": []});
+            for _ in 0..n {
+                lvl = serde_json::json!({"ctor": "Succ", "args": [lvl]});
+            }
+            Value::Json(serde_json::json!({"ctor": "Sort", "args": [lvl]}))
+        };
+        assert_eq!(kinds, vec![sort_json(0), sort_json(1), sort_json(3)]);
 
-        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
-        assert_eq!(
-            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
-                Some(s.as_str())
-            } else {
-                None
-            }),
-            Some("Type:3")
-        );
+        assert_eq!(result_sort_nat(r), Some(4));
     }
 
     #[test]
@@ -5179,9 +5267,8 @@ mod tests {
             r.get(&indices_iri).is_none(),
             "non-indexed data should omit `core:indices`"
         );
-        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
         assert!(
-            r.get(&sort_iri).is_none(),
+            r.get(&Iri::parse(wk_local::RESULT_SORT).unwrap()).is_none(),
             "non-indexed data without explicit `: Set` should omit `core:result_sort`"
         );
     }
@@ -5715,7 +5802,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:project";
 
-            data ex:Option(A : core:Set) {
+            data ex:Option(A : Set) {
                 none,
                 some(A),
             }
@@ -5846,9 +5933,9 @@ mod tests {
                 let args = j["args"].as_array().expect("Pi has args");
                 assert_eq!(args[0], serde_json::json!(""));
                 assert_eq!(args[1]["ctor"], "Sort");
-                assert_eq!(args[1]["args"][0], 0);
+                assert_eq!(args[1]["args"][0]["ctor"], "Zero");
                 assert_eq!(args[2]["ctor"], "Sort");
-                assert_eq!(args[2]["args"][0], 0);
+                assert_eq!(args[2]["args"][0]["ctor"], "Zero");
             }
             other => panic!("expected Value::Json, got {other:?}"),
         }
@@ -5883,7 +5970,7 @@ mod tests {
                 assert_eq!(j["ctor"], "Pi");
                 assert_eq!(j["args"][0], "P");
                 assert_eq!(j["args"][1]["ctor"], "Sort");
-                assert_eq!(j["args"][1]["args"][0], 0);
+                assert_eq!(j["args"][1]["args"][0]["ctor"], "Zero");
                 let inner = &j["args"][2];
                 assert_eq!(inner["ctor"], "Pi");
                 assert_eq!(inner["args"][0], "");
@@ -6153,7 +6240,8 @@ mod tests {
                 assert_eq!(j["ctor"], "Pi");
                 assert_eq!(j["args"][0], "A");
                 assert_eq!(j["args"][1]["ctor"], "Sort");
-                assert_eq!(j["args"][1]["args"][0], 1);
+                assert_eq!(j["args"][1]["args"][0]["ctor"], "Succ");
+                assert_eq!(j["args"][1]["args"][0]["args"][0]["ctor"], "Zero");
                 let inner = &j["args"][2];
                 assert_eq!(inner["ctor"], "Pi");
                 assert_eq!(inner["args"][1]["ctor"], "Var");
@@ -6190,7 +6278,8 @@ mod tests {
             assert_eq!(j["ctor"], "Pi");
             assert_eq!(j["args"][0], "A");
             assert_eq!(j["args"][1]["ctor"], "Sort");
-            assert_eq!(j["args"][1]["args"][0], 1);
+            assert_eq!(j["args"][1]["args"][0]["ctor"], "Succ");
+            assert_eq!(j["args"][1]["args"][0]["args"][0]["ctor"], "Zero");
         }
     }
 
@@ -6270,7 +6359,7 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace eg   = "urn:eigenius:test:macro";
 
-            data eg:Pair(A : core:Set, B : core:Set) {
+            data eg:Pair(A : Set, B : Set) {
                 Both(A, B),
             }
 

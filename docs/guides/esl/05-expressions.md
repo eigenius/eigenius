@@ -41,7 +41,7 @@ cons(1, cons(2, nil))
 
 Bare-name function references that match a declared constructor compile to `program:CtorApply` with the constructor IRI in `function` and a positional `arguments` array. The kernel form is `Exp::InductiveCtor(decl, ctor_name, args)`.
 
-**Type-check.** The constructor's declared signature gives the expected types for each arg. Sized constructors (Phase 11g) verify that any size argument supplied is strictly below the declared upper bound — otherwise: `"InductiveCtor 'X.succ': size argument ... is not strictly below upper bound ..."`.
+**Type-check.** The constructor's declared signature gives the expected types for each arg.
 
 **Evaluation.** Constructs `Val::InductiveVal { decl, ctor_name, args }`.
 
@@ -164,8 +164,6 @@ match v returning fun (i : core:Nat) => Vec(A, i) {
 
 Compiles to `program:result_motive` carrying a D47-encoded `λ`-chain rather than the flat `program:result_type` IRI. The kernel decoder type-checks the motive's body at `Sort(n)` against the scrutinee inductive's `Π indices. Sort` signature, then specialises each arm's expected type per the constructor's conclusion indices.
 
-**Sized recursion.** When the scrutinee has a sized inductive type, each arm body sees a hypothesis recording that any recursive call within the arm must be on a strictly smaller size. This is what powers sized termination ([D19 §4](../../design/d19-inductive-types.md)).
-
 **Evaluation.** Iota-reduces — selects the arm matching the constructor and substitutes the bindings.
 
 ## 5.6. `Construct` — record/resource construction
@@ -224,27 +222,6 @@ Compiles to `program:ReduceExpr` with `function`, `initial`, `collection`. The k
 **Type-check.** Function must be `B → A → B`; `init : B`; collection is `List A`; result is `B`.
 
 **Evaluation.** Left fold over the list with `init` as starting accumulator.
-
-## 5.10. `corecord` — coinductive value construction
-
-```esl
-corecord {
-    head = first_value;
-    tail = make_next_stream();
-}
-```
-
-Builds a value of a coinductive type. Each cofield names an observation and supplies its value (or a function for size-bounded observations).
-
-Compiles to `program:CoRecord` carrying a `cofields` array of `(observation_name, body)` pairs.
-
-**Field order matters.** Cofields must be listed in the same order as the codata's declared observations. The compiler does not reorder; the kernel validates against the declared sequence.
-
-**Sized observations.** For an observation typed `{j < i} -> Body`, the body must be a lambda taking the size argument: `tail = λj -> ...`. The kernel verifies productivity — the body's recursive references must use strictly smaller sizes ([D19 §8](../../design/d19-inductive-types.md), Phase 11f productivity-by-typing).
-
-**Type-check.** The expected codata type is required (checking mode); each cofield body is checked against its observation's declared type.
-
-**Evaluation.** Yields `Val::CoRecord(closures)`. Observations are evaluated lazily — the body for each observation runs only when that observation is consumed.
 
 ## 5.11. `case` — closed-tag matching
 

@@ -244,7 +244,7 @@ fn renamed_binders_do_not_capture() {
     // exists G#0 : Set => x0(G#0)   — `x0` is free, and is the printer's first choice of name.
     let term = serde_json::json!({"ctor": "Sig", "args": [
         "G#0",
-        {"ctor": "Sort", "args": [1]},
+        {"ctor": "Sort", "args": [level_tree(1)]},
         {"ctor": "App", "args": [{"ctor": "Var", "args": ["x0"]}, {"ctor": "Var", "args": ["G#0"]}]},
     ]});
     let printed = print_type_expr(&term, &mut Namespaces::new()).expect("prints");
@@ -315,6 +315,15 @@ fn pretty_layout_changes_only_whitespace() {
 /// non-negative integer level after `Type`, found LParen`) — so no term carrying a universe above
 /// `Set` could be decompiled into source that reparses. `Prop` (`Sort 0`) and `Set` (`Sort 1`) are
 /// spelled as single tokens and were unaffected, which is exactly why a corpus that only uses
+/// `Succ^n(Zero)` as the encoder emits it (eigenius#188).
+fn level_tree(n: u64) -> serde_json::Value {
+    let mut v = serde_json::json!({"ctor": "Zero", "args": []});
+    for _ in 0..n {
+        v = serde_json::json!({"ctor": "Succ", "args": [v]});
+    }
+    v
+}
+
 /// those two did not catch it.
 #[test]
 fn sorts_round_trip_in_every_position() {
@@ -325,7 +334,11 @@ fn sorts_round_trip_in_every_position() {
     // 0 → `Prop`, 1 → `Set`, 2 and up → `Type n`. Both spellings, so the test would still hold if
     // the boundary moved.
     for level in [0u64, 1, 2, 7] {
-        let s = serde_json::json!({"ctor": "Sort", "args": [level]});
+        // eigenius#188: `Sort`'s argument is an `eigentt:Level` tree — `Set` is `Succ(Zero)`,
+        // not `1`. Built here the way the encoder builds it, so the comparison below is against
+        // the encoding a fresh compile produces. There is no numeral form to test: retyping the
+        // ctor moved the manifest, and the reseed that forced re-encodes every term from source.
+        let s = serde_json::json!({"ctor": "Sort", "args": [level_tree(level)]});
         let cases = [
             ("bare", s.clone()),
             (
@@ -390,4 +403,56 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
         }
     }
     Err("no rt:term".into())
+}
+
+/// **Polymorphic levels round-trip through ESL** (eigenius#188, N3 §3 as revised).
+///
+/// This test asserted the OPPOSITE until the surface syntax landed: that the printer refuses a
+/// polymorphic level, recorded as a documented limitation. It was evidence the design was
+/// incomplete — without syntax nothing can author a `Level::Param`, so `uparams` would have had
+/// nothing to generalise and universe polymorphism would have been unreachable from the language.
+///
+/// The forms are Lean 4's: `Sort u`, `Sort (max u v)`, `Sort (imax u v)`, `Sort (u + 1)`.
+#[test]
+fn polymorphic_levels_round_trip_through_esl() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
+    let layer = ctx.head();
+    let param = |n: &str| serde_json::json!({"ctor": "Param", "args": [n]});
+    let cases = [
+        ("Sort u", param("u")),
+        (
+            "Sort (max u v)",
+            serde_json::json!({"ctor": "Max", "args": [param("u"), param("v")]}),
+        ),
+        (
+            "Sort (imax u v)",
+            serde_json::json!({"ctor": "IMax", "args": [param("u"), param("v")]}),
+        ),
+        (
+            "Sort (u + 2)",
+            serde_json::json!({"ctor": "Succ", "args": [
+                {"ctor": "Succ", "args": [param("u")]}
+            ]}),
+        ),
+    ];
+    for (expected_source, level) in cases {
+        let term = serde_json::json!({"ctor": "Sort", "args": [level]});
+        let mut ns = Namespaces::new();
+        let printed = print_type_expr(&term, &mut ns).expect("a polymorphic level prints");
+        assert_eq!(printed, expected_source, "surface spelling");
+        let back = wrap_and_compile(&printed, &ns, layer)
+            .unwrap_or_else(|e| panic!("`{printed}` must recompile: {e}"));
+        assert_eq!(back, term, "`{printed}` must round-trip to the same level");
+    }
+}
+
+/// The abbreviations stay abbreviations: a numeral level prints as `Prop` / `Set` / `Type k`,
+/// never as the general `Sort n` form, so the 942 monomorphic uses in the tree print as written.
+#[test]
+fn numeral_levels_still_print_as_the_abbreviations() {
+    for (n, expected) in [(0u64, "Prop"), (1, "Set"), (2, "Type 1"), (4, "Type 3")] {
+        let term = serde_json::json!({"ctor": "Sort", "args": [level_tree(n)]});
+        let printed = print_type_expr(&term, &mut Namespaces::new()).expect("prints");
+        assert_eq!(printed, expected);
+    }
 }

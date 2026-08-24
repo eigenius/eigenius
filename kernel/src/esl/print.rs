@@ -31,6 +31,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use crate::ontology::well_known as wk;
 use serde_json::Value;
 
 /// A term the printer cannot express in ESL, with the path to the offending node.
@@ -73,6 +74,12 @@ pub struct Namespaces {
     /// prefix (IRI up to the last `:`) → alias
     by_prefix: BTreeMap<String, String>,
     taken: BTreeSet<String>,
+    /// Level-variable names emitted while printing (eigenius#188).
+    ///
+    /// Recorded for the same reason as the aliases above: since a level variable must be bound by
+    /// a `universe` declaration, printed source that mentions one does not recompile without it.
+    /// Collecting them as they are printed keeps the preamble exact rather than hand-maintained.
+    universes: BTreeSet<String>,
 }
 
 impl Namespaces {
@@ -85,11 +92,13 @@ impl Namespaces {
         let (prefix, local) = iri.rsplit_once(':').ok_or_else(|| {
             format!("IRI `{iri}` has no `:` — cannot split into namespace + name")
         })?;
-        if !is_ident(local) {
-            return Err(format!(
-                "IRI `{iri}` has local name `{local}`, which is not a legal ESL identifier"
-            ));
-        }
+        let local = spell(local).ok_or_else(|| {
+            format!(
+                "IRI `{iri}` has local name `{local}`, which no ESL identifier can spell — the \
+                 quoted form admits [A-Za-z0-9_-] only, and `#` is reserved"
+            )
+        })?;
+        let local = local.as_str();
         if let Some(a) = self.by_prefix.get(prefix) {
             return Ok((a.clone(), local.to_string()));
         }
@@ -109,7 +118,15 @@ impl Namespaces {
         };
         let mut alias = base.clone();
         let mut n = 2;
-        while self.taken.contains(&alias) {
+        // A keyword is not usable as an alias: `program:Foo` never lexes as one `QualName` token,
+        // because `program` lexes as the `program` KEYWORD. The parser then reads the name as bare
+        // `program`, eats the `:` as the class-list colon, and fails on the next one —
+        // `expected LBrace, found Colon`. That is 79 of the shipped resources, all of them under
+        // `urn:eigenius:program` (eigenius#222).
+        //
+        // Bumping is the existing collision behaviour, so keyword collisions join it rather than
+        // getting their own path: `program` becomes `program2`.
+        while self.taken.contains(&alias) || RESERVED.contains(&alias.as_str()) {
             alias = format!("{base}{n}");
             n += 1;
         }
@@ -126,8 +143,85 @@ impl Namespaces {
         for (alias, prefix) in by_alias {
             let _ = writeln!(out, "namespace {alias} = \"{prefix}\";");
         }
+        // eigenius#188 — bind every level variable the body mentions. Without this, printed
+        // source carrying `Sort u` does not recompile: a level variable is not auto-bound.
+        if !self.universes.is_empty() {
+            let names: Vec<&str> = self.universes.iter().map(String::as_str).collect();
+            let _ = writeln!(out, "universe {};", names.join(" "));
+        }
         out
     }
+
+    /// Record a level variable the printer is about to emit.
+    fn note_universe(&mut self, name: &str) {
+        self.universes.insert(name.to_string());
+    }
+}
+
+/// ESL keywords, which cannot serve as a namespace alias — a keyword never lexes as the namespace
+/// half of a `QualName`. Read off the lexer's keyword table.
+const RESERVED: &[&str] = &[
+    "namespace",
+    "class",
+    "property",
+    "resource",
+    "program",
+    "data",
+    "merge_comorphism",
+    "for",
+    "text_index",
+    "vector_index",
+    "let",
+    "alias",
+    "in",
+    "case",
+    "match",
+    "returning",
+    "map",
+    "reduce",
+    "lambda",
+    "pi",
+    "forall",
+    "exists",
+    "fun",
+    "axiom",
+    "def",
+    "macro",
+    "universe",
+    "true",
+    "false",
+    // `json` and `type_expr` are deliberately ABSENT: they are CONTEXTUAL, recognised as
+    // `Ident(_) LParen` in value position rather than lexed as keywords, so neither breaks the
+    // tight-colon `QualName` rule and both are usable as aliases. Verified.
+    "Construct",
+    "Prop",
+    "Set",
+    "Type",
+    "Sort",
+];
+
+/// How this name is spelled in ESL: bare when it lexes as an identifier, quoted when it does not
+/// but is still within the quoted charset, and `None` when nothing can spell it (eigenius#222).
+///
+/// **Quoting is minimal by design.** Quoting defensively would put `'…'` around every name in a
+/// decompiled file and make the output unreadable, so the bare form wins whenever it lexes. The
+/// consequence is that this predicate and the lexer must agree about what "lexes as an identifier"
+/// means — the third place today where print and parse need one shared predicate rather than two
+/// that drift.
+///
+/// A KEYWORD is spelled bare too. `expect_ident` accepts the full keyword set, so `fun` and
+/// `program` are legal identifiers in an identifier position; what a keyword cannot do is form the
+/// namespace half of a tight `QualName`, and that is the namespace ALIAS's problem, solved by
+/// bumping the alias rather than by quoting it.
+fn spell(name: &str) -> Option<String> {
+    if is_ident(name) {
+        return Some(name.to_string());
+    }
+    let quotable = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    quotable.then(|| format!("'{name}'"))
 }
 
 fn is_ident(s: &str) -> bool {
@@ -279,6 +373,74 @@ impl Printer<'_> {
         out
     }
 
+    /// Print an `eigentt:Level` tree in ESL's level syntax (eigenius#188), which is Lean 4's:
+    /// numerals, variables, `l + n`, `max l r`, `imax l r`.
+    ///
+    /// Parenthesised whenever it is not an atom, because the level sits after `Sort` / `Type` and
+    /// `max u v + 1` would otherwise reparse with the wrong shape.
+    fn print_level(&mut self, v: &Value, path: &str) -> Result<String, PrintError> {
+        if let Some(n) = level_as_nat(v) {
+            return Ok(n.to_string());
+        }
+        let obj = v
+            .as_object()
+            .ok_or_else(|| self.err("universe level is not a Level value", path))?;
+        let name = obj
+            .get("ctor")
+            .and_then(Value::as_str)
+            .ok_or_else(|| self.err("universe level has no ctor", path))?;
+        let args = obj
+            .get("args")
+            .and_then(Value::as_array)
+            .ok_or_else(|| self.err("universe level has no args", path))?;
+        let arg = |i: usize| -> Result<&Value, PrintError> {
+            args.get(i)
+                .ok_or_else(|| self.err("universe level is missing an argument", path))
+        };
+        match name {
+            "Param" => {
+                let n = arg(0)?
+                    .as_str()
+                    .ok_or_else(|| self.err("`Param` level takes a name", path))?
+                    .to_string();
+                self.ns.note_universe(&n);
+                Ok(n)
+            }
+            // A `Succ` over a non-numeral base: `l + 1`, accumulated so `Succ(Succ(u))` is `u + 2`
+            // rather than `(u + 1) + 1`.
+            "Succ" => {
+                let mut n = 0u64;
+                let mut cur = v;
+                while let Some(o) = cur.as_object() {
+                    if o.get("ctor").and_then(Value::as_str) != Some("Succ") {
+                        break;
+                    }
+                    n += 1;
+                    cur = o
+                        .get("args")
+                        .and_then(Value::as_array)
+                        .and_then(|a| a.first())
+                        .ok_or_else(|| self.err("`Succ` level takes a base", path))?;
+                }
+                let base = cur.clone();
+                Ok(format!("({} + {n})", self.print_level(&base, path)?))
+            }
+            "Max" | "IMax" => {
+                // Bind the arguments before recursing: `arg` borrows `args`, and `print_level`
+                // needs `&mut self` to record level variables into the preamble.
+                let (a0, a1) = (arg(0)?.clone(), arg(1)?.clone());
+                let l = self.print_level(&a0, path)?;
+                let r = self.print_level(&a1, path)?;
+                let op = if name == "Max" { "max" } else { "imax" };
+                Ok(format!("({op} {l} {r})"))
+            }
+            other => Err(self.err(
+                format!("`{other}` is not an eigentt:Level constructor"),
+                path,
+            )),
+        }
+    }
+
     fn go(&mut self, v: &Value, ctx: Prec, path: &str, ind: usize) -> Result<String, PrintError> {
         // Composite forms are the only ones with anywhere to break; everything else is an atom
         // whose flat rendering is the only rendering.
@@ -345,12 +507,20 @@ impl Printer<'_> {
             // `Type` and its level. `sorts_round_trip_in_every_position` in
             // kernel/tests/esl_round_trip.rs pins that — the parser wants `Type 1`, and an earlier
             // `Type(1)` here printed source that would not reparse at all.
-            "Sort" => match args.first().and_then(Value::as_u64) {
+            "Sort" => match args.first().and_then(level_as_nat) {
                 Some(0) => Ok("Prop".into()),
                 Some(1) => Ok("Set".into()),
                 // `Type n` is `Sort(n + 1)` — kernel/src/esl/compile.rs, SortKind::Type.
                 Some(n) => Ok(format!("Type {}", n - 1)),
-                None => Err(self.err("`Sort` needs a level", path)),
+                // eigenius#188: a polymorphic level prints in the general form, `Sort <level>`.
+                // The numeral cases above stay on the abbreviations so the 942 monomorphic uses
+                // in the tree print exactly as they are written.
+                None => {
+                    let l = args
+                        .first()
+                        .ok_or_else(|| self.err("`Sort` needs a level", path))?;
+                    Ok(format!("Sort {}", self.print_level(l, path)?))
+                }
             },
 
             "LitString" => Ok(format!("\"{}\"", escape(&str_arg(0)?))),
@@ -572,6 +742,29 @@ pub fn print_value_term(
     Ok(format!("{alias}:{ctor}({})", parts.join(", ")))
 }
 
+/// Read a `Sort`'s level argument as a numeral.
+///
+/// Since eigenius#188 the argument is an `eigentt:Level` tree, so `Set` arrives as `Succ(Zero)`.
+/// The pre-#188 bare integer is NOT accepted: retyping the ctor moved the bootstrap manifest, so
+/// every store carrying the old form had to be reseeded, and a reseed re-encodes from source.
+///
+/// `None` for a level that is not a closed `Succ`-chain — there is no ESL surface syntax for one.
+fn level_as_nat(v: &Value) -> Option<u64> {
+    let obj = v.as_object()?;
+    let mut n = 0u64;
+    let mut cur = obj;
+    loop {
+        match cur.get("ctor").and_then(Value::as_str)? {
+            "Zero" => return Some(n),
+            "Succ" => {
+                n = n.checked_add(1)?;
+                cur = cur.get("args")?.as_array()?.first()?.as_object()?;
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// D47 constructor names — the closed set [`print_type_expr`] understands.
 ///
 /// Used to tell the two dialects apart when walking a document: a term carrying a ctor outside
@@ -580,6 +773,14 @@ pub fn print_value_term(
 const D47_CTORS: &[&str] = &[
     "Lam",
     "Sort",
+    // eigenius#188 — `Sort`'s argument is an `eigentt:Level` tree, so its constructors are part
+    // of the D47 dialect too. Without them a term containing any sort is classified non-D47 and
+    // printed by the generic `alias:Ctor(...)` printer, whose output does not reparse.
+    "Zero",
+    "Succ",
+    "Max",
+    "IMax",
+    "Param",
     "Pi",
     "Sig",
     "One",
@@ -691,6 +892,21 @@ fn print_resource(
         names.push(format!("{c_ns}:{c_local}"));
     }
 
+    // An inductive DECLARATION has its own surface form, and printing it as a `resource` block
+    // does not round-trip: the text recompiles through the resource path, never reaching
+    // `compile_data`, so the constructor telescope is not reconstructed (eigenius#217).
+    //
+    // In practice it did not even get that far — `core:ctors` holds embedded `InductiveCtor`
+    // resources, and `print_property_value` has no surface for those, so decompiling ANY inductive
+    // failed outright with "no ESL surface for property value". Measured over the shipped
+    // ontologies: 5 of 5 inductives failed; every other resource printed.
+    if classes
+        .iter()
+        .any(|c| c.as_str() == Some(wk::INDUCTIVE_TYPE))
+    {
+        return print_data(obj, &id_ns, &id_local, ns, path, layout);
+    }
+
     let mut out = format!("resource {id_ns}:{id_local} : {} {{\n", names.join(", "));
     for (k, v) in obj {
         if k == "@id" || k == IS_A {
@@ -705,6 +921,202 @@ fn print_resource(
     }
     out.push_str("}\n");
     Ok(out)
+}
+
+/// Print a `core:InductiveType` resource as the `data` declaration it came from.
+///
+/// Inverts `esl::compile`'s `compile_data`: the parameter telescope from `core:type_params`, the
+/// index telescope from `core:indices`, the result sort from `core:result_sort`, and each
+/// constructor from `core:ctors` — positional (`core:arg_types`) or typed (`core:ctor_type`),
+/// whichever the resource carries, matching the two forms the compiler emits.
+fn print_data(
+    obj: &serde_json::Map<String, Value>,
+    id_ns: &str,
+    id_local: &str,
+    ns: &mut Namespaces,
+    path: &str,
+    layout: Layout,
+) -> Result<String, PrintError> {
+    let bad = |m: String| PrintError {
+        message: m,
+        path: path.to_string(),
+    };
+
+    let telescope = |key: &str, ns: &mut Namespaces| -> Result<Vec<String>, PrintError> {
+        let Some(arr) = obj.get(key).and_then(Value::as_array) else {
+            return Ok(Vec::new());
+        };
+        arr.iter()
+            .map(|entry| {
+                let e = entry
+                    .as_object()
+                    .ok_or_else(|| bad(format!("`{key}` entry is not a resource")))?;
+                let name = e
+                    .get(wk::PARAM_NAME)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| bad(format!("`{key}` entry has no `param_name`")))?;
+                let kind = e
+                    .get(wk::PARAM_KIND)
+                    .ok_or_else(|| bad(format!("`{key}` entry has no `param_kind`")))?;
+                Ok(format!("{name} : {}", print_kind(kind, ns, path)?))
+            })
+            .collect()
+    };
+
+    let params = telescope(wk::TYPE_PARAMS, ns)?;
+    let indices = telescope(wk::INDICES, ns)?;
+
+    // `core:result_sort` is a `core:Level` tree; absent defaults to `Set` (`Succ(Zero)`).
+    let result = match obj.get(wk::RESULT_SORT) {
+        Some(v) => sort_text(v, ns, path)?,
+        None => "Set".to_string(),
+    };
+
+    let mut header = format!("data {id_ns}:{id_local}");
+    if !params.is_empty() {
+        let _ = write!(header, "({})", params.join(", "));
+    }
+    // The header's type is `index₁ -> … -> resultSort`. It is omitted only when there are no
+    // indices AND the result is the `Set` default, which is what `compile_data` assumes.
+    if !indices.is_empty() || result != "Set" {
+        let mut chain: Vec<String> = indices
+            .iter()
+            .map(|p| p.rsplit(" : ").next().unwrap_or(p).to_string())
+            .collect();
+        chain.push(result);
+        let _ = write!(header, " : {}", chain.join(" -> "));
+    }
+
+    let ctors = obj
+        .get(wk::CTORS)
+        .and_then(Value::as_array)
+        .map_or(&[][..], |a| a);
+    let mut lines = Vec::with_capacity(ctors.len());
+    for (i, c) in ctors.iter().enumerate() {
+        let cpath = format!("{path}.ctors[{i}]");
+        let co = c
+            .as_object()
+            .ok_or_else(|| bad(format!("`ctors[{i}]` is not a resource")))?;
+        let name = co
+            .get(wk::CTOR_NAME)
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad(format!("`ctors[{i}]` has no `ctor_name`")))?;
+        if let Some(ct) = co.get(wk::CTOR_TYPE) {
+            // Typed form: the whole Π chain is one D47 term.
+            lines.push(format!(
+                "    {name} : {},",
+                print_type_expr_with(ct, ns, layout, 4)?
+            ));
+        } else {
+            let args = co
+                .get(wk::ARG_TYPES)
+                .and_then(Value::as_array)
+                .map_or(&[][..], |a| a);
+            if args.is_empty() {
+                lines.push(format!("    {name},"));
+            } else {
+                let rendered: Vec<String> = args
+                    .iter()
+                    .map(|a| {
+                        let t = print_arg_type(a, ns, &cpath)?;
+                        // `core:arg_name` prints as the named form `base : ex:Nat` (eigenius#221).
+                        match a
+                            .as_object()
+                            .and_then(|o| o.get(wk::ARG_NAME))
+                            .and_then(Value::as_str)
+                        {
+                            Some(n) => Ok(format!("{n} : {t}")),
+                            None => Ok(t),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, PrintError>>()?;
+                lines.push(format!("    {name}({}),", rendered.join(", ")));
+            }
+        }
+    }
+    // `description = "…";` leads the body, as it does for `class` (eigenius#221).
+    if let Some(d) = obj.get(wk::DESCRIPTION).and_then(Value::as_str) {
+        lines.insert(0, format!("    description = \"{}\";", escape(d)));
+    }
+    Ok(format!("{header} {{\n{}\n}}\n", lines.join("\n")))
+}
+
+/// An `InductiveArgType` as constructor-argument source: `type_name` applied to `type_args`.
+fn print_arg_type(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
+    let o = v.as_object().ok_or_else(|| PrintError {
+        message: "constructor argument is not a resource".into(),
+        path: path.to_string(),
+    })?;
+    let head = o.get(wk::TYPE_NAME).ok_or_else(|| PrintError {
+        message: "constructor argument has no `type_name`".into(),
+        path: path.to_string(),
+    })?;
+    let head = print_kind(head, ns, path)?;
+    let args = o
+        .get(wk::TYPE_ARGS)
+        .and_then(Value::as_array)
+        .map_or(&[][..], |a| a);
+    if args.is_empty() {
+        return Ok(head);
+    }
+    let rendered: Vec<String> = args
+        .iter()
+        .map(|a| print_arg_type(a, ns, path))
+        .collect::<Result<_, _>>()?;
+    Ok(format!("{head}({})", rendered.join(", ")))
+}
+
+/// A kind or type reference — the `eigentt:TypeExpr` head that `Compiler::lower_kind` produced.
+/// Inverts it: `Var` is a bare parameter name, `ConstRef` a qualified IRI, `Sort` a sort keyword.
+fn print_kind(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
+    let bad = |m: &str| PrintError {
+        message: m.to_string(),
+        path: path.to_string(),
+    };
+    let o = v.as_object().ok_or_else(|| bad("kind is not a TypeExpr"))?;
+    let ctor = o
+        .get("ctor")
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad("kind has no ctor"))?;
+    let arg0 = || {
+        o.get("args")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+    };
+    match ctor {
+        "Var" => Ok(arg0()
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad("`Var` takes a name"))?
+            .to_string()),
+        "ConstRef" => {
+            let iri = arg0()
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("`ConstRef` takes an IRI"))?;
+            let (a, b) = ns.split(iri).map_err(|m| bad(&m))?;
+            Ok(format!("{a}:{b}"))
+        }
+        "Sort" => sort_text(arg0().ok_or_else(|| bad("`Sort` takes a level"))?, ns, path),
+        other => Err(bad(&format!("`{other}` is not a kind"))),
+    }
+}
+
+/// A `core:Level` as the sort keyword the surface spells it with: `Prop`, `Set`, `Type n`, or
+/// `Sort <level>` when the level is not a numeral.
+fn sort_text(level: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
+    if let Some(n) = level_as_nat(level) {
+        return Ok(match n {
+            0 => "Prop".to_string(),
+            1 => "Set".to_string(),
+            n => format!("Type {}", n - 1),
+        });
+    }
+    let mut p = Printer {
+        ns,
+        scope: Vec::new(),
+        reserved: BTreeSet::new(),
+        layout: Layout::Flat,
+    };
+    Ok(format!("Sort {}", p.print_level(level, path)?))
 }
 
 fn print_property_value(
@@ -760,6 +1172,63 @@ fn print_property_value(
                 })
                 .collect::<Result<_, _>>()?;
             Ok(format!("[{}]", els.join(", ")))
+        }
+        // An EMBEDDED RESOURCE — `{ ns:prop = value; … }`. A general chain feature, not one tied
+        // to any construct: `ast::Value::Block` compiles to `Resource::new_embedded()` in any
+        // property position, and this is its inverse.
+        //
+        // The arm was missing entirely, so decompiling a resource with ANY embedded value failed
+        // (eigenius#222) — `core:ConditionalRequirement` on `core:Property`, `julia:interval`
+        // bounds, `program:Apply` inside a comorphism `Lambda`. The same absence is what made an
+        // inductive undecompilable before eigenius#217, since `core:ctors` holds embedded
+        // `InductiveCtor` resources.
+        //
+        // An `@id` is NOT expressible in a block — the surface mints embedded resources
+        // anonymously — so a keyed embedded resource is refused rather than printed lossily.
+        Value::Object(o) => {
+            // Embedded RESOURCE or opaque JSON? `serialize_resource` flattens both to a plain
+            // object — `Value::Embedded(r) => serialize_resource(r)`, `Value::Json(v) => v` — so
+            // the distinction is not in the wire form and must be recovered.
+            //
+            // Recovered with the SAME rule the reader uses, deliberately: `parse_json_value`
+            // decides on `keys().any(|k| k == "@id" || Iri::parse(k).is_ok())`. Sharing the
+            // predicate is what makes print and parse agree; inventing a second one here is how
+            // they would drift.
+            let any_iri_key = o
+                .keys()
+                .any(|k| k == "@id" || crate::ontology::iri::Iri::parse(k).is_ok());
+            if !any_iri_key {
+                // Opaque JSON — `json( … )`. The wrapper is load-bearing: without it the same
+                // braces reparse as a `Block`, i.e. an embedded resource.
+                return Ok(format!(
+                    "json({})",
+                    serde_json::to_string(v).map_err(|e| PrintError {
+                        message: format!("value is not serialisable JSON: {e}"),
+                        path: path.to_string(),
+                    })?
+                ));
+            }
+            if let Some(id) = o.get("@id").and_then(Value::as_str) {
+                return Err(PrintError {
+                    message: format!(
+                        "embedded resource carries `@id` `{id}`, which a block value cannot \
+                         express — the ESL surface mints embedded resources anonymously"
+                    ),
+                    path: path.to_string(),
+                });
+            }
+            let mut fields = Vec::with_capacity(o.len());
+            for (k, v) in o {
+                let (p_ns, p_local) = ns.split(k).map_err(|m| PrintError {
+                    message: m,
+                    path: path.to_string(),
+                })?;
+                let inner_ctor_ns = k.rsplit_once(':').map_or("", |(p, _)| p).to_string();
+                let rendered =
+                    print_property_value(v, ns, &inner_ctor_ns, &format!("{path}.{k}"), layout)?;
+                fields.push(format!("{p_ns}:{p_local} = {rendered};"));
+            }
+            Ok(format!("{{ {} }}", fields.join(" ")))
         }
         other => Err(PrintError {
             message: format!("no ESL surface for property value `{other}`"),

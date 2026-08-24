@@ -9,11 +9,10 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **NO ENTRY IS ACTIVE (`2026-08-20`).** D71 met its gate, which empties the parser-pipeline spine
-> that has been the top of this stack since `2026-08-11`. The next active item is a decision, not an
-> inheritance: entries (1) and (2) below are the pre-D71 spine and were assessed on `2026-08-19` as
-> largely implemented-or-obsolete, so promoting one by position would be wrong. The live candidates,
-> none of them started:
+> **ACTIVE: entry 1 (`2026-08-22`), pushed onto the empty stack.** The parser-pipeline spine emptied
+> on `2026-08-20` when D71 met its gate; entries (2) and (3) below are the pre-D71 spine, assessed on
+> `2026-08-19` as largely implemented-or-obsolete, so neither was promoted by position. P2 was picked
+> up instead. The two candidates that were live and stay unstarted:
 >
 > - **D71 residue** — §14's four open questions (source transport, draw commit granularity, pruning
 >   policy, the prefix-replay measurement) and §11's human-override loop, which the §9 draws-on-branch
@@ -21,7 +20,261 @@ any detour.
 > - **D61 faithfulness** — the half that D71 §10 reserved the institution shape for, and the only
 >   thing in the tree that still earns it.
 
-### 1. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
+### 1. [p2-type-theory-soundness-plan.md](p2-type-theory-soundness-plan.md) — **P2 · type-theory soundness**
+Tracker [#215](https://github.com/eigenius/eigenius/issues/215). What EigenTT wrongly admits, and what
+it cannot yet express: nine issues in four tracks, plus #213 as a prerequisite.
+
+#### STATUS
+Scoping done `2026-08-22`; no code yet. Three issues closed during scoping because they were already
+fixed — #191 (in #193), #71 (done but the deliberately-deferred `Exp::Con`), #22 (delivered by D48,
+residue = #138 / #69 / #139). Branch `eigentt-improvements` from `6744c9a`.
+
+**The gating decision is #92's fork** (plan §1) and it is not a code question. The positivity pass
+already exists (`kernel/src/nbe/positivity.rs`, called from `check/mod.rs:335`); the ESL declaration
+path never reaches it. Routing it in unchanged **rejects the bootstrap** — `cat_forall`,
+`cat_fin_forall`, `cat_num_forall` (`ontologies/lexicon/lexicon-ontology.esl:271,280,281`) are
+higher-order positive, the shape `positivity.rs:507` pins as rejected. **Working hypothesis `2026-08-22`: arm 1**, extend the criterion — scoped in
+[p2-n1-positivity-criterion.md](p2-n1-positivity-criterion.md). Kernel-only, no reseed, `lexicon:Cat`
+unchanged. N1 §5 splits it in two, **verified `2026-08-22`**: the current restriction is a *completeness* limit,
+not a soundness one — `derive_minor_type` and `iota_reduce_impl` filter on the same predicate and skip
+a higher-order argument identically (pinned by
+`higher_order_positive_arg_is_skipped_by_both_minor_derivation_and_iota`, `nbe/eval/iota.rs`). So
+**#92 step 1 — widen the criterion, route ESL declarations through the pass — lands BEFORE #138**;
+step 2 (function-typed IHs) after it.
+
+**#213 is no longer this package's prerequisite.** Under arm 1 nothing here edits a bootstrap
+ontology except #188, and fixing #213 itself moves all 21 manifest lines at once (the stored value is
+`current_manifest()`'s output at seed time), so it owes one reseed to adopt. Fold it into #188's
+reseed rather than paying a standalone one.
+
+#### DONE
+- **#92 step 1 (`2026-08-22`).** Criterion widened to classical strict positivity; `RecArgShape`
+  (`nbe/positivity.rs`) is now the single definition of "recursive occurrence", consumed by
+  positivity, `recursor::derive_minor_type` and `eval::iota_reduce_impl`;
+  `InductiveDecl::is_direct_recursive_ref` removed. **Rule 23** (`validation/rules/positivity.rs`)
+  routes `core:InductiveType` declarations through `check_positivity` at commit — the edge that was
+  missing, since `check_positivity` only ever ran on the TERM form and ESL `data` never produces
+  one. Measured before enforcing: 42 declarations on the bootstrap, 42 admitted, 0 decode failures,
+  exactly the three predicted higher-order ctors. Revert-checked: without the rule,
+  `Validator::validate()` returns `[]` for `(Bad -> boolean) -> Bad`, reproducing #92's symptom.
+  Manifest unmoved, no reseed.
+
+- **#64 (`2026-08-22`).** Case-branch binder renamed `__case_arg` → `CB#{level}`, using the
+  checker's existing `#` discipline (`TC#`/`G#`) rather than the issue's `__case_arg_{level}`, which
+  is still a legal ESL identifier and therefore still forgeable. Two findings recorded on the tests:
+  the collision the issue describes is **not reachable today** (readback is normalizing and mints
+  only `Gen(j, name)` → `"{name}{j}"`, so no free source name reaches the spliced motive), and the
+  arm had no test coverage at all. Closed.
+
+- **#194 (`2026-08-22`).** The sweep found **six** `(Exp::X(..), Val::Sort(_))` arms, not the two the
+  issue named — `SizeSort` was a third instance, with code, comment and inference giving three
+  different answers. Five are **deleted**, not tightened: each was `check_type(ctx, exp)`, which is
+  `check_infer`'s arm minus the universe comparison, so they now fall through to
+  `check_by_inference` and check/infer agree by construction. `SizedPi` stays permissive
+  deliberately — no `check_infer` rule exists, and the probe logged it unconditionally with **zero**
+  workspace hits, so there is no evidence to pick its sort from; reasoning recorded on the arm.
+  Measured 12 probe hits, all `inferred <= expected`. Closed.
+
+- **#138 (`2026-08-22`).** Motive is index-aware: `Π (i₁:I₁) … (i_m:I_m). D(params)(i₁…i_m) → Sort`,
+  result at the major's own indices. nanoda settled the direction (`mk_motive_dep` /
+  `mk_minors1group` both read one `local_indices`), so the motive moved to meet the minors.
+  **Watch the name hygiene**: building the motive type as an `Exp` put the burden on names, and the
+  first version let an index binder capture a same-named parameter — domain `D(idx, idx)` instead of
+  `D(param, idx)`, returning `Ok` because a constant motive checks against either. Fixed by reading
+  parameters back from values and naming index binders `IDX#{k}`. Closed; **#69 unblocked**.
+
+- **#69 closed `2026-08-22` as won't implement.** #138 unblocked its eliminator; assessing it then
+  showed three unbuilt kernel features behind it and no consumer — `IdJ` carries no motive
+  (`check/mod.rs:1105` ignores `_c`; deferred to "Phase 10b" higher-order unification), no
+  heterogeneous equality exists for the indexed case its trigger names, and generated lemmas have
+  nowhere to live. Also **nanoda does not have `noConfusion`** (grep-verified): it generates
+  recursors and `Quot`, both kernel constructions, while `noConfusion` is a frontend definition —
+  the issue's pointer at nanoda as "the inductive elaboration this would extend" was wrong.
+  **Raise `IdJ`'s motive first if revisited.**
+
+- **#92 step 2 (`2026-08-22`) — CLOSED.** Both halves of the eliminator now build the hypothesis for
+  a higher-order positive argument: `Π b₁:B₁ … B_k. motive idx… (arg b₁ … b_k)` in
+  `derive_minor_type`, `λ b₁ … b_k. rec … (arg b₁ … b_k)` in `iota_reduce_impl`. Induction through a
+  reflexive argument computes, pinned by `iota_recurses_through_a_higher_order_argument`. IH binder
+  renamed `__ih_N` → `IH#N` (a ctor argument of that name captured it — third capture defect of the
+  session). Track A and Track B are done.
+
+- **N2 written `2026-08-22`** — [p2-n2-sized-types-wire-or-delete.md](p2-n2-sized-types-wire-or-delete.md).
+  Recommends **deleting** the ~390-line Warshall solver, keeping the comparison pair. Three findings:
+  wiring is not "add a caller" (there is no flexible size in the term language to solve for —
+  `FlexId` appears nowhere outside `sized.rs`); **nothing uses sized types at all** (`core:Size` is a
+  compiler built-in, declared in no ontology, and no chain term carries a size form); and
+  `references/miniagda` **does not exist**, so the port's faithfulness cannot be checked.
+  **Correction to the earlier reading of #66**: its option 1 is not expensive because the sized path
+  is onerous — *none* of its three sanctioned recursion forms has a chain user, and neither does the
+  bare-`letrec` hazard. No recursion of any kind is exercised by any chain in this repo, which makes
+  #66 cheap now and expensive later.
+  **Corrected `2026-08-22` after review**: sized types exist for **codata productivity** first
+  (D19:491 — "required for complete termination story when combining inductive recursion with codata
+  corecursion"), not inductive termination. The productivity site — `check/mod.rs`'s
+  `Lam`-vs-`SizedPi` arm, which registers `j < upper` in the TSO — is a wired user the first draft
+  missed, because it feeds the comparison pair rather than calling it. Recommendation unchanged:
+  productivity works from sizes that are WRITTEN; `solve` infers sizes that are unknown, and there
+  are none.
+
+- **#139 CLOSED `2026-08-22`** (`e1a404a`). Solver deleted, `sized.rs` 1047 → 410 lines; comparison
+  pair and its 32 tests untouched. The deletion exposed two stale docs, both fixed: `sized_rigid.rs`
+  described MiniAgda's two constraint systems with a live intra-doc link to the removed one, and the
+  user-facing primer §7.6 advertised "the dual-solver pattern" in two places. Both also carried
+  dangling `references/miniagda/…` paths — MiniAgda is not vendored at all.
+- **#66 CLOSED `2026-08-22` as won't implement.** Option 1 is vacuous: **ESL has no `letrec`** —
+  `grep letrec|Drec` over `parser.rs`, `compile.rs`, `ast.rs` returns nothing — and **nothing in
+  production constructs a `Decl::Drec`** (the only two sites are in `check/codata.rs`'s test module).
+  The divergent program is reachable only from Rust, so there is no surface to gate. The kernel's
+  acceptance of a non-terminating `Drec` is a fact about the term language for D9/D19, not an open
+  defect. **Successor question, unfiled:** does `Decl::Drec` earn its place at all? Its stated
+  justification is recursor derivation, which does not use it — same shape as #139. Needs a look at
+  `eval/mod.rs:219` and the codata corecursion tests first.
+
+- **N3 written `2026-08-22`** — [p2-n3-universe-polymorphism.md](p2-n3-universe-polymorphism.md).
+  ~~Recommended holding #188~~ — **SUPERSEDED `2026-08-22`: building it**, on the Cooper/TTR reasoning (§5a). §§2-4 and §7 are the design; build log in §8. Its own trigger — "a second level bump is proposed" — is measured and
+  has not fired: `Prop` 712 uses, `Set` 230, **`Type 1` exactly 2** (spec_poly's binder and
+  `data lexicon:Cat`), **`Type 2` zero** (the one textual hit is a comment describing the ladder).
+  The three design questions are settled anyway so they are not re-derived: representation mirrors
+  **`lean:LeanLevel`**, which already carries nanoda's five ctors (Zero/Succ/Max/IMax/Param) on the
+  chain — a precedent nobody had noticed, and the reason a future Lean externalization becomes a fold
+  rather than a special case; **no ESL syntax** initially, level inference via `uparams` instead;
+  migration is small (**zero encoded `Sort` terms in any repo chain**) but needs a snapshot check,
+  and the decoder should accept the legacy integer. **Watch conditions**, neither in #188: the **TTR work** (Cooper, *From Perception to Communication* —
+  already a cited anchor in D18/D61/D62; **TTR uses universe polymorphism**, and stratified predicates
+  over record types are exactly what a fixed rung cannot express) is the likeliest trigger; #159/D74
+  may also make #188 its prerequisite. Whoever starts the TTR work should read N3 §2 first — the
+  level algebra to mirror is already on the chain as `lean:LeanLevel`, and choosing a different one
+  there would be expensive to unpick.
+
+- **N4 written `2026-08-23`** — [p2-n4-eigentt-representation-layer.md](p2-n4-eigentt-representation-layer.md),
+  *should the EigenTT term representation move to core?* **Yes**, and the bootstrap-cycle objection
+  does not hold: the D47 decoder dispatches on hard-coded ctor names, so nothing needs a `TypeExpr`
+  value to decode one. Root cause of a recurring symptom — `core` owns the inductive metamodel but
+  not the term language, so every type-valued slot there degrades to a string (`result_sort`, fixed
+  by #188; `param_kind`, silently types a class-typed parameter `Set`; `type_name`, correct only
+  because it has the `EigonClass` arm `param_kind` lacks). `eigentt-type-fragment` bundles two
+  strata — the term language, and `Axiom`/`Definition` which consume it — so moving `TypeExpr` down
+  separates rather than breaks. **No open questions**: Rule 16's recursion is structural on the VALUE tree, so
+  reading `TypeExpr`'s `ctors` while checking a value inside them is a bounded read, not a loop.
+  §4a records what the retype closes — **Rule 16 fails open on parameter-typed arguments**,
+  returning `Ok` for any `type_name` that is not an IRI, i.e. every parameter-typed ctor arg of
+  `logic:And` / `logic:Or` / `core:Option`. Latent (no such values on a chain) but one prose
+  encoding away: closed-class gives *"but"* the semantics `logic:And(s₁, s₂)`. **Folded into P2 on this branch** (`2026-08-23`), own gate (§7), rides #188's reseed. **89 hand-authored values** across four JSON ontologies migrate by one-shot script, each guarded by an old-decode/new-decode equivalence check — decompile-then-recompile cannot do it because `eigenius decompile` flattens `data` to `resource` (**#217**, filed, not a prerequisite). The retype cannot be scoped: `core:type_name` is one property, so the Lean mirror's 36 values are in scope and **four** layers move.
+- **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
+  ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
+
+- **N4 LANDED `2026-08-23`.** `eigentt:TypeExpr` moved into `core-ontology.json` (IRI unchanged),
+  `SizeSort` ctor added, `param_kind` and `type_name` retyped, 85 values migrated by script with the
+  equivalence guard, manifest re-pinned on **five** layers (the four predicted, plus `reasoning`),
+  full gate green (185 test binaries, clippy, fmt). **The reseed is the only thing left.**
+
+  N4 estimated **six** code sites; there were **fifteen**, and the nine extra were all silent
+  readers — code that read the property as a `Value::String`, got `None`, and carried on. Three
+  head-readers had been written by the time the suite was green; they are now one
+  `program::ground::arg_type_head`. The Julia mirror generator's two readers had **passing tests
+  throughout**, because their fixtures build the property by hand and kept writing strings.
+
+  Four defects the retype surfaced, none of them caused by it:
+  - **Every index kind on every chain decoded to `EigonClass(core:Set)`** — `decode_indices` had
+    `_ => "urn:eigenius:core:Set"` as its fallback, and that IRI is not a declared resource.
+  - **`check_type`'s fallback was `check(a, &Val::sort(1))`** — "is a type" spelled as "inhabits
+    `Set`", so `T : Type 1` was not a type. Now `ensure_sort(infer(a))` (nanoda `tc.rs:244`). Same
+    defect as the `Level` `Ord` derive: a universe comparison written as a constant.
+  - **`check_type`'s `Exp::Inductive` arm never type-checked the telescope** — nanoda gets it free
+    because a declaration is one Π-chain `Expr`. Now `check_inductive_decl_telescopes`, and Rule 23
+    routes the declaration through `check_type` rather than calling `check_positivity` directly, so
+    it is one gate and not a re-listing (renamed `rules/inductive_decl.rs`,
+    `InductiveDeclInadmissible`).
+  - **nanoda's ctor-argument universe constraint** (`inductive.rs:904`) is ported as well, after
+    the #194/#92 probe protocol: logged first, and the whole workspace produced **one** violating
+    declaration. `reasoning:JustifiedBy` was at `Type 0` while `spec_poly` binds `T : Type 1`
+    (`Sort 2`, so the argument sits at `Sort 3`) — and `spec_poly`'s own comment had predicted the
+    fix ("a rule quantifying over `Type 1` domains would need `Type 2`") while the declaration
+    contradicted it. One-token edit to `Type 2`; **`reasoning` becomes a fifth moved layer.** Still
+    unported: nanoda's parameter-prefix `assert_def_eq` (`:892`), which only bites on the
+    independently-authored `core:ctor_type` path.
+  - **The three telescope producers had drifted** — the codata-param site used `var_value` where the
+    other two used `bare_kind_value`. One `Compiler::lower_kind` now serves all three.
+
+  `core:Set` and `core:Size` were written in ESL fixtures as if they were resources. Neither is
+  declared on any chain; `wk::SET_KIND` / `wk::SIZE_KIND` were unreferenced residue and are deleted.
+
+#### FAST-FOLLOW (after the reseed, alongside #217)
+Filed `2026-08-23`. All four are residue of this package, and the accounting is worth stating
+plainly: **this repo has no third-party code**, so "pre-existing defect" means "written here in an
+earlier session". #220 is sharper than that — the `Sort(1)` fallback survived eigenius#188's OWN
+`usize`→`Level` migration, two days before it was found.
+
+- **[#217](https://github.com/eigenius/eigenius/issues/217)** — `eigenius decompile` flattens `data`
+  to `resource`, so inductives do not round-trip. Wants a document-level ESL round-trip test first:
+  the existing suite is entirely term-level, which is why this was invisible.
+- **[#218](https://github.com/eigenius/eigenius/issues/218)** — sized types are half-migrated:
+  `SizedPi`/`SizeInf`/`SizeSucc` absent from the D47 codec, `core:binder_kind` still a string that
+  matches the non-resource `urn:eigenius:core:Size`, `Size` an identifier where `Set`/`Prop`/`Type`
+  are keywords. `needs:decision` — N2 §3's "nothing declares a sized type" makes *deleting* the
+  half as coherent an ending as closing it, and nobody has called it.
+- **[#219](https://github.com/eigenius/eigenius/issues/219)** — two unported declaration-admission
+  checks: nanoda's parameter-prefix `assert_def_eq` (`inductive.rs:892`, bites only on the
+  independently-authored `core:ctor_type` path) and `no_dupes_all_params` (`tc.rs:167`) — the
+  latter introduced by slice 5c, which added `universe` declarations without it. A lint, not a
+  soundness hole; the ticket says so rather than overclaiming.
+- **[#220](https://github.com/eigenius/eigenius/issues/220)** — hardcoded universe constants
+  survived the `usize`→`Level` migration. Carries the full `is_nat(<literal>)` sweep so it is not
+  redone: `is_nat(0)` is legitimate throughout, `is_nat(1)` is test assertions plus one redundant
+  arm plus **one real defect** — `Exp::Data` is checkable only against `Set`, and unlike the `One`
+  arm it has no `check_infer` fallback to rescue it.
+
+#### RESEED — DONE `2026-08-23`
+Timings in [reseed-timings-2026-08-23.md](reseed-timings-2026-08-23.md).
+
+| step | result |
+|---|---|
+| `reseed-lexicon-db.sh --umls-all` | **34 m 40 s**, 9,439,633 resources, 35 loads, 0 errors → `wordnet-umls-2026-08-23` |
+| `build-alignment-snapshot.sh` | 40,357 entries redefined from 38,389 merges, 0 errors → `wordnet-umls-aligned-2026-08-23` |
+| `measure-parse-rate.sh` (live reranker) | coverage **PASS**, expected-hits **62/62**, invalid-selected **0**, skeletons 170→**168**, readings 613→617 |
+| `demo/wrn-helicase/run.sh` | **56 Holds, 0 Fails, 0 errors**, all 6 steps incl. every wrapped-R warrant |
+
+**The WRN demo is where the P2 gate was actually exercised outside the bootstrap.** The lexicon
+chains contain zero `data` declarations, so Rule 23 returned at its first line for all 9.4 M
+resources. The WRN corpus declares **46** inductives, and they are the shape that matters:
+`data onco:TopDifferentialDependency : core:string -> core:string -> Prop` — an INDEX telescope of
+`core:string`, which is precisely where `decode_indices`' `_ => "urn:eigenius:core:Set"` fallback
+lived. Before the fix those indices decoded to `EigonClass(core:Set)`, a class nothing can inhabit.
+All 46 admitted. All end in `Prop`, so the constructor-argument universe constraint takes its
+impredicative exemption on every one — exercised as *not firing*, which is correct behaviour.
+
+**Parse gate: one red, accepted as noise (user decision `2026-08-23`).** `reading_correct`
+29/40 vs the tracked 30. Traced to two units flipping — one wrong→correct, one correct→wrong — and
+**both had byte-identical candidate sets** (8 and 24 candidates, unchanged). The regressed unit
+differs in a single WordNet sense of *impairment* (`n00403334` the act → `n14561618` the state);
+`cancer`, `exhibit` and `DNA Repair Pathway` are identical. `structure_correct_diagnostic` is 33/40,
+exactly the baseline. Two flips in 40 is the ~5 % the baseline records for temperature-0 live draws.
+**baseline.json was NOT updated** — it says update deliberately, never to make a red run go green,
+and a single live draw cannot distinguish noise from regression either way. Settling it properly
+means 2–3 more live draws to establish the band on this snapshot.
+
+#### NEXT
+**Fast-follow: #217–#220** (above). Then P2 closes out: every code item is done, N4 has landed, and the reseed above cleared it —
+including **#213**, which rode the same reseed as planned.
+
+**Port from `references/nanoda_lib` wherever there is a counterpart** (plan §3) — positivity,
+the index-aware motive, the whole level algebra. It also answers #138 outright: nanoda's motive and
+minor premises both read one `local_indices`, so they cannot disagree, and the fix is to move the
+motive onto `derive_minor_types`' convention. **The pin moved to `6ae1f0c` and every citation is
+stale** — `positivity.rs` still cites `f58f2f6` at `:24`, `:129`, `:584`, and the line numbers in #92
+and #188 predate the repin.
+
+#### GOTCHAS
+- **#213 first, before any bootstrap edit.** Iterating on `lexicon-ontology.esl` while every
+  whitespace change costs a reseed is exactly what it removes.
+- **Measure before tightening** (#194, #92): instrument to log without rejecting, run the suites,
+  count. Precedent 356 / 0 (#137) and 204,703 / all `Sort(1)` (#191); #136 is the case where a
+  one-line arm change became a design decision plus a reseed.
+- **#196's batching plan was written and then not followed**, and the batch paid two reseeds. If
+  #194 turns out to need an ontology edit, hold it until #92's arm is known.
+
+### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity ✓ → performance (HERE).** Phase 3 closed by selection rather
 than by the multiplicity reduction this note planned for it — see STATUS. The performance work
@@ -94,7 +347,7 @@ out for this corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note*
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 Phase 1 is done (reshape, pipeline, grader, ingestion, D47 codec). Of **Phase 2** — "refactor the
 LLM parts out into the orchestrator; the served gRPC path" — two of three parts landed via D71, and
 not in the shape this note predicts:
@@ -118,7 +371,7 @@ Also remaining: **grading-phase gaps** (Citation grade-climb; graded-props over 
   felicity pruning. Cheapest first lever is the **mass-shim precision fixes**
   (d63-parse-gap-closure.md §6): spurious `mass` readings inflate BOTH reading count (median
   105/unit, capped at 256) AND parse time (up to 930 s/unit). `pos_prune` is the other untested
-  lever (see entry 1).
+  lever (see entry 2).
 
 - **`LayerTopology` resource fetch is uncapped.** `include_resources: true` emits one proto node per
   resource in the layer with no bound, so drilling into a lexicon layer is unbounded. Found during

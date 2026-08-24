@@ -286,7 +286,13 @@ The existing NbE readback-based equality check extends naturally:
 
 No changes to the core `eq_nf` algorithm — readback handles the new forms.
 
-## 8. Sized types (issue #16)
+## 8. Sized types (issue #16) — ⚠️ REMOVED `2026-08-23`
+
+> **This section describes machinery that no longer exists** (eigenius#218). It is kept as the
+> record of what was built. Sized types existed for codata productivity first, and codata was
+> removed with them; neither had a chain user. See
+> `docs/notes/218-retire-codata-and-sized-types.md` for the evidence and the revisit conditions.
+
 
 ### 8.1 Problem
 
@@ -488,7 +494,7 @@ because EigonClass never unfolds to expose a negative occurrence.
 | Nested inductives? | Deferred (#21) | Requires specialize/unspecialize pass (Lean 4 §28-65); not needed for initial use cases |
 | Indices (families)? | Deferred (#22) | Parameters suffice for List, Tree; indexed families (Vec n) add dependent pattern matching complexity |
 | Large elimination? | Allow all | Life-science recursors need to produce terms at all levels; restriction adds no safety for our use case |
-| Sized types? | In scope (#16) | Required for complete termination story when combining inductive recursion with codata corecursion |
+| Sized types? | ~~In scope (#16)~~ **REMOVED (eigenius#218)** | Existed for codata corecursion, and codata was removed with them. Never declared on any chain; the encoding half was never finished (no D47 codec path for `SizedPi`/`SizeInf`/`SizeSucc`); absent from Lean 4 and from `references/nanoda_lib` entirely |
 | Separate modules for positivity/recursor/sized? | Yes | Keeps check.rs manageable; follows nanoda_lib's separation |
 | Keep Map/Reduce as built-ins? | Yes | Performance optimisation for the common case; recursor subsumes but is heavier |
 | `Val::List` representation? | Keep | Vec<Val> is the fast path for resource arrays; recursor on List produces Val::List directly |

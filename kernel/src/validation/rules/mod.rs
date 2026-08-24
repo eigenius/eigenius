@@ -25,6 +25,7 @@ pub(super) mod domain;
 pub(super) mod eigentt_value;
 pub(super) mod format;
 pub(super) mod inductive;
+pub(super) mod inductive_decl;
 pub(super) mod is_a;
 pub(super) mod length;
 pub(super) mod pattern;

@@ -97,6 +97,32 @@ impl Validator {
             return vec![];
         }
 
+        // `core:param_kind` and `core:type_name` are fragments of a declaration TELESCOPE, not
+        // closed terms, and this rule has no telescope. `core:Option`'s `some(value : A)` names the
+        // declaration's own parameter `A`, so checking it here reports `unbound variable in type
+        // context: A` for a value that is perfectly well-formed where it lives.
+        //
+        // They are not going unchecked, and the coverage is exact rather than approximate: Rule 23
+        // (`rules::inductive_decl.rs`) routes the whole `core:InductiveType` resource through
+        // `check_type`'s `Exp::Inductive` arm, which checks the type former `Π params. Π indices.
+        // sort` and each constructor's full `Π params. Π args. Self(params)` chain. Every value of
+        // these two properties is a domain in one of those Π chains, so each is checked by the Π
+        // typing rule — in the scope of the binders before it, which is the scope it was written
+        // in. That is strictly stronger than what this rule could establish, and it is the same
+        // relationship `eigentt:definition_body` has with Rule 24 above.
+        //
+        // The coverage holds because `core:InductiveParam` and `core:InductiveArgType` occur ONLY
+        // as embedded resources under a `core:InductiveType` — they carry no `@id` and nothing
+        // references them. An instance of either reachable any other way would be unchecked; no
+        // chain has one, and Rule 23 skips a declaration it cannot decode, which is the shape that
+        // would produce one.
+        if matches!(
+            prop_iri.as_str(),
+            "urn:eigenius:core:param_kind" | "urn:eigenius:core:type_name"
+        ) {
+            return vec![];
+        }
+
         // (1) Decode the D47-encoded tree. Malformed trees, unresolved
         // ConstRefs, and unknown CtorApps surface here.
         let exp = match decode_type(value, &self.layer) {
@@ -140,7 +166,9 @@ impl Validator {
         // type. A slot that asserts something must hold a term whose type is
         // `Prop` — `Sort(0)`. `Sort(1)` is a type, not a claim; a literal's
         // type is not a universe at all.
-        if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str()) && !matches!(inferred, Val::Sort(0)) {
+        if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str())
+            && !matches!(&inferred, Val::Sort(l) if l.is_nat(0))
+        {
             return vec![ValidationError {
                 resource_id: res_id.clone(),
                 property: Some(prop_iri.clone()),
@@ -163,9 +191,12 @@ impl Validator {
 /// term rather than a statement.
 fn describe_inhabited(ty: &Val) -> String {
     match ty {
-        Val::Sort(0) => "Prop = Sort(0)".to_string(),
-        Val::Sort(1) => "Set = Sort(1)".to_string(),
-        Val::Sort(n) => format!("Type({}) = Sort({n})", n - 1),
+        Val::Sort(l) if l.is_nat(0) => "Prop = Sort(0)".to_string(),
+        Val::Sort(l) if l.is_nat(1) => "Set = Sort(1)".to_string(),
+        Val::Sort(n) => match n.as_nat() {
+            Some(k) if k >= 1 => format!("Type({}) = Sort({n})", k - 1),
+            _ => format!("Sort({n})"),
+        },
         other => {
             let readback = format!("{:?}", readback_val(0, other));
             let shown: String = readback.chars().take(160).collect();
@@ -314,7 +345,7 @@ mod tests {
         // `Prop` itself is a perfectly good `eigentt:TypeExpr` — it passes in
         // the unconstrained `test:tx` slot above — but it inhabits `Set`, so
         // it asserts nothing.
-        let encoded = encode_type(&Exp::Sort(0)).unwrap();
+        let encoded = encode_type(&Exp::sort(0)).unwrap();
         let errs = errors_for_claim(encoded);
         assert_eq!(errs.len(), 1, "`Prop` asserts nothing; got {errs:?}");
         assert!(matches!(
@@ -355,7 +386,7 @@ mod tests {
         // a literal both belong there. Guards against step 3 being widened to
         // the whole range, which would reject every `eigentt:axiom_statement`
         // and `lexicon:cat` on the chain.
-        for exp in [Exp::Sort(1), Exp::LitInt(7)] {
+        for exp in [Exp::sort(1), Exp::LitInt(7)] {
             let chain = chain_with_eigentt_prop();
             let mut top = LayerBuilder::new("tx", Some(chain));
             let encoded = encode_type(&exp).unwrap();
@@ -374,7 +405,7 @@ mod tests {
         let chain = chain_with_eigentt_prop();
         let mut top = LayerBuilder::new("ok", Some(chain));
         // `Prop` (Sort(0)) is a valid type expression that type-checks.
-        let encoded = encode_type(&Exp::Sort(0)).unwrap();
+        let encoded = encode_type(&Exp::sort(0)).unwrap();
         top.add_resource(holder_with_tx("urn:eigenius:test:ok", encoded))
             .unwrap();
         let layer = Arc::new(top.build(LayerStorage::in_memory()));

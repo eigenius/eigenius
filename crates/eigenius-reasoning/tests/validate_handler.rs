@@ -142,7 +142,9 @@ fn missing_proposition_surfaces_computation_failed() {
         Some(Value::Json(
             json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
         )),
-        Some(Value::Json(json!({"ctor": "Sort", "args": [0]}))),
+        Some(Value::Json(
+            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        )),
     );
     let err = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx).unwrap_err();
     match err {
@@ -160,7 +162,9 @@ fn missing_proposition_surfaces_computation_failed() {
 fn missing_certificate_surfaces_computation_failed() {
     let ctx = build_full_chain();
     let sentence = synthetic_sentence(
-        Some(Value::Json(json!({"ctor": "Sort", "args": [0]}))),
+        Some(Value::Json(
+            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        )),
         Some(Value::Json(
             json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
         )),
@@ -187,7 +191,9 @@ fn malformed_proposition_surfaces_verdict_fails() {
         Some(Value::Json(
             json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
         )),
-        Some(Value::Json(json!({"ctor": "Sort", "args": [0]}))),
+        Some(Value::Json(
+            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        )),
     );
     let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
         .expect("handler returns outcome");
@@ -204,11 +210,15 @@ fn malformed_justification_surfaces_verdict_fails() {
     let ctx = build_full_chain();
     let sentence = synthetic_sentence(
         // Valid Prop term.
-        Some(Value::Json(json!({"ctor": "Sort", "args": [0]}))),
+        Some(Value::Json(
+            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        )),
         // Unknown JustificationTerm ctor — chain inductive decoder
         // catches it.
         Some(Value::Json(json!({"ctor": "NotAJTctor", "args": []}))),
-        Some(Value::Json(json!({"ctor": "Sort", "args": [0]}))),
+        Some(Value::Json(
+            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        )),
     );
     let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
         .expect("handler returns outcome");
@@ -236,7 +246,9 @@ fn institution_dispatch_routes_to_validate_handler() {
         Some(Value::Json(
             json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
         )),
-        Some(Value::Json(json!({"ctor": "Sort", "args": [0]}))),
+        Some(Value::Json(
+            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        )),
     );
     let proc_iri = Iri::parse(iris::PROC_VALIDATE_JUSTIFICATION).unwrap();
     let outcome = inst
@@ -299,7 +311,9 @@ fn entailment_query_returns_undecidable_when_no_sentence_matches() {
     // not proof of impossibility).
     let ctx = build_full_chain();
     let inst = ReasoningInstitution::new();
-    let request = entailment_request(Value::Json(json!({"ctor": "Sort", "args": [0]})));
+    let request = entailment_request(Value::Json(
+        json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+    ));
     let proc_iri = Iri::parse(iris::PROC_ENTAILMENT_QUERY).unwrap();
     let outcome = inst.query(&proc_iri, &request, &ctx).expect("dispatch");
     assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_UNDECIDABLE);
@@ -529,7 +543,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
         name: asserts_iri.local_name().to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(0),
+        sort: Exp::sort(0),
         ctors: Vec::new(),
     });
     let prop_exp = Exp::InductiveType(stub_decl, vec![Exp::LitString(target_iri_str.to_string())]);
@@ -767,7 +781,7 @@ fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
                 "urn:eigenius:reasoning:JustifiedBy",
                 "declared",
             ]},
-            {"ctor": "Sort", "args": [0]},
+            {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
         ],
     }));
 

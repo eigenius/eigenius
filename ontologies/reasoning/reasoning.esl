@@ -93,10 +93,22 @@ data reasoning:JustificationTerm {
 // ── JustifiedBy ──────────────────────────────────────────────────────
 //
 // Indexed inductive predicate `JustifiedBy : JustificationTerm -> Prop
-// -> Type 0`. Inhabits `Type 0` (not `Prop`) so certificates are stored
+// -> Type 2`. Inhabits a Type (not `Prop`) so certificates are stored
 // and re-checkable — D39 §5 §last-paragraph.
+//
+// **Why `Type 2` and not `Type 0`.** A constructor argument's sort may not exceed the inductive's
+// own, or a large type is smuggled into a small one and Girard's paradox follows. `spec_poly` binds
+// `T : Type 1`, and `Type 1` is `Sort 2`, so that argument sits at `Sort 3` — the inductive must be
+// at `Sort 3` or above, which is `Type 2`. `spec_poly`'s own comment predicted this ("a rule
+// quantifying over `Type 1` domains would need `Type 2`, and so on up the ladder") while the
+// declaration said `Type 0`; nothing enforced the constraint until eigenius#188 ported nanoda's
+// `check_ctor` universe check (`references/nanoda_lib/src/inductive.rs:904`). The measurement that
+// found it reported this declaration and no other, across the whole workspace.
+//
+// This costs nothing at use sites: a certificate's TYPE moves up a universe, its VALUES do not
+// change, and nothing checks `JustifiedBy(j, p)` against a fixed sort.
 
-data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
+data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 2 {
     declared :
         forall (iri : core:string, P : Prop) =>
         witness:IsDeclaredAs(iri, P) ->
@@ -182,6 +194,13 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
     // `C : Type 1` by cumulativity. The level is FIXED at 1, not polymorphic — a rule
     // quantifying over `Type 1` domains would need `Type 2`, and so on up the ladder.
     // Genuine universe polymorphism is the standing fix; see the follow-up issue.
+    //
+    // The ladder is not hypothetical, and this comment stated one half of it while the
+    // declaration stated the other: binding `T : Type 1` here is what forces `JustifiedBy`
+    // itself to `Type 2` (see its header). `T : Type 1` is `Sort 2`, so this argument sits at
+    // `Sort 3`, and a constructor argument may not exceed its inductive's universe. The
+    // declaration said `Type 0` and nothing checked, until eigenius#188 ported nanoda's
+    // `check_ctor` universe constraint.
     spec_poly :
         forall (T : Type 1,
                 P : T -> Prop,

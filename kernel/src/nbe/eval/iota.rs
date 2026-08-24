@@ -16,7 +16,8 @@
 //! D19 §6; indexed families per D48). Split from `eval.rs`.
 
 use super::{EvalCtx, EvalError, Tracer};
-use crate::nbe::term::Exp;
+use crate::nbe::env::Rho;
+use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Neut, Val};
 use std::sync::Arc;
 
@@ -31,10 +32,12 @@ use std::sync::Arc;
 /// constructor sub-values or producing a blocked `Neut::NtRec` for
 /// neutrals.
 ///
-/// Higher-order recursive arguments (e.g. `(Nat → I) → I`) are rejected
-/// elsewhere by the positivity checker (Phase 11b step 4) — here they
-/// would simply fail the recursive-arg-type check and produce an
-/// arity-mismatch error.
+/// Higher-order recursive arguments (e.g. `(Nat → I) → I`) are admitted by the positivity checker
+/// since eigenius#92, and since its step 2 they get a FUNCTION-typed hypothesis here —
+/// `λ b₁ … b_k. rec … (arg b₁ … b_k)`, matching the `Π b₁:B₁ … B_k.` binder
+/// `recursor::derive_minor_type` emits. Pinned by
+/// `higher_order_positive_arg_gets_a_function_typed_ih_in_both_sites` and
+/// `iota_recurses_through_a_higher_order_argument` below.
 pub(super) fn iota_reduce_impl<T: Tracer>(
     decl: &Arc<crate::nbe::term::InductiveDecl>,
     motive: &Val,
@@ -85,13 +88,29 @@ pub(super) fn iota_reduce_impl<T: Tracer>(
     // Then apply an induction hypothesis for each recursive argument,
     // in the order the recursive arguments appear.
     for (arg, arg_typ) in args.iter().zip(arg_types.iter()) {
-        if decl.is_direct_recursive_ref(arg_typ) {
-            let (ih, ih_node) = build_recursor_ih::<T>(decl, motive, minors, arg, ctx)?;
-            nodes.push(ih_node);
-            let (next, node) = result.app_impl::<T>(ih, T::leaf(), ctx)?;
-            result = next;
-            nodes.push(node);
-        }
+        // eigenius#92: one definition of "recursive occurrence", shared with
+        // `recursor::derive_minor_type`, so the minor's IH binders and the applications made
+        // here cannot drift apart.
+        let Some(shape) = crate::nbe::positivity::recursive_arg_shape(decl, arg_typ) else {
+            continue;
+        };
+        let (ih, ih_node) = if shape.is_direct() {
+            build_recursor_ih::<T>(decl, motive, minors, arg, ctx)?
+        } else {
+            // Higher-order positive argument (eigenius#92 step 2): `arg` is a FUNCTION into the
+            // inductive, so its induction hypothesis is a function too —
+            // `λ b₁ … b_k. rec … (arg b₁ … b_k)` — matching the `Π b₁:B₁ … B_k. motive idx… (arg
+            // b₁ … b_k)` binder `derive_minor_type` emits. The recursive call cannot be made here
+            // because there is no value to recurse ON until the hypothesis is applied.
+            (
+                higher_order_ih(decl, motive, minors, arg, shape.binders.len())?,
+                T::leaf(),
+            )
+        };
+        nodes.push(ih_node);
+        let (next, node) = result.app_impl::<T>(ih, T::leaf(), ctx)?;
+        result = next;
+        nodes.push(node);
     }
 
     Ok((result, T::combine(nodes)))
@@ -122,33 +141,16 @@ fn extract_ctor_arg_types<'a>(
     decl: &crate::nbe::term::InductiveDecl,
     ctor_typ: &'a Exp,
 ) -> Vec<&'a Exp> {
-    // Sentinel for size-binder positions — these carry a size value
-    // at runtime but aren't recursive occurrences, so iota-reduction
-    // treats them the same as non-inductive value args (skip IH).
-    // Use `SizeSort` itself as the stand-in domain type; only
-    // `InductiveDecl::is_direct_recursive_ref` inspects these entries
-    // and `SizeSort` is never a recursive reference.
-    static SIZE_SORT: Exp = Exp::SizeSort;
     let mut types = Vec::new();
     let mut current = ctor_typ;
     let mut params_to_skip = decl.params.len();
-    loop {
-        match current {
-            Exp::Pi(_, dom, body) => {
-                if params_to_skip > 0 {
-                    params_to_skip -= 1;
-                } else {
-                    types.push(dom.as_ref());
-                }
-                current = body;
-            }
-            Exp::SizedPi { body, .. } => {
-                // Size binders never appear in the param prefix.
-                types.push(&SIZE_SORT);
-                current = body;
-            }
-            _ => break,
+    while let Exp::Pi(_, dom, body) = current {
+        if params_to_skip > 0 {
+            params_to_skip -= 1;
+        } else {
+            types.push(dom.as_ref());
         }
+        current = body;
     }
     types
 }
@@ -158,6 +160,63 @@ fn extract_ctor_arg_types<'a>(
 /// Either recurses into `iota_reduce` (if the argument is itself a
 /// constructor) or produces a blocked `Neut::NtRec` (if the argument
 /// is neutral).
+/// The induction hypothesis for a HIGHER-ORDER positive recursive argument (eigenius#92 step 2).
+///
+/// `arg : (b₁ : B₁) → … → (b_k : B_k) → D(params)(idx…)` is a function into the inductive, so
+/// there is nothing to recurse on until it is applied. The hypothesis is therefore
+/// `λ b₁ … b_k. D.rec motive minors… (arg b₁ … b_k)`, built as a closure whose environment binds
+/// the recursor's parts and whose body is an `Exp::InductiveRec`. Reducing that application is
+/// then the ordinary iota path, entered when the hypothesis is used.
+///
+/// Every bound name carries `#`, which cannot occur in an ESL identifier, so nothing reachable
+/// from a declaration can capture them. The names must also stay distinct from readback's `G#`
+/// and the checker's `TC#`.
+fn higher_order_ih(
+    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    motive: &Val,
+    minors: &[Val],
+    arg: &Val,
+    arity: usize,
+) -> Result<Val, EvalError> {
+    let binder_names: Vec<String> = (0..arity).map(|j| format!("HB#{j}")).collect();
+    let minor_names: Vec<String> = (0..minors.len()).map(|j| format!("HM#{j}")).collect();
+
+    let mut env = Rho::Nil
+        .extend(Patt::Var("HA#".to_string()), arg.clone())
+        .extend(Patt::Var("HV#".to_string()), motive.clone());
+    for (name, m) in minor_names.iter().zip(minors.iter()) {
+        env = env.extend(Patt::Var(name.clone()), m.clone());
+    }
+
+    // `HA# b₁ … b_k` — the argument applied to the hypothesis's own binders.
+    let major = binder_names
+        .iter()
+        .fold(Exp::Var("HA#".to_string()), |acc, n| {
+            Exp::App(Box::new(acc), Box::new(Exp::Var(n.clone())))
+        });
+    let mut body = Exp::InductiveRec {
+        decl: decl.clone(),
+        motive: Box::new(Exp::Var("HV#".to_string())),
+        minors: minor_names.iter().map(|n| Exp::Var(n.clone())).collect(),
+        major: Box::new(major),
+    };
+    // Wrap `λ b₁ … λ b_k` — innermost binders first, so `b₁` ends up outermost.
+    for name in binder_names.iter().skip(1).rev() {
+        body = Exp::Lam(Patt::Var(name.clone()), Box::new(body));
+    }
+    match binder_names.first() {
+        Some(first) => Ok(Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Var(first.clone()),
+            body,
+            env,
+        ))),
+        // `arity == 0` is the direct case, which never reaches here.
+        None => Err(EvalError::InvalidCaseTarget(
+            "higher_order_ih called with arity 0 — that is the direct recursive case".to_string(),
+        )),
+    }
+}
+
 fn build_recursor_ih<T: Tracer>(
     decl: &Arc<crate::nbe::term::InductiveDecl>,
     motive: &Val,
@@ -194,6 +253,192 @@ mod tests {
     use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt};
     use crate::nbe::val::{Neut, Val};
     use std::sync::Arc;
+    /// **eigenius#92 step 2 — the minor derivation and iota agree on a HIGHER-ORDER positive
+    /// argument: both give it a FUNCTION-typed induction hypothesis.**
+    ///
+    /// This test used to assert the opposite — that both sites SKIPPED such an argument. That was
+    /// step 1's staging invariant: `positivity` had just been widened to admit
+    /// `(Set → Foo) → Foo`, while `derive_minor_type` and `iota_reduce_impl` still filtered on
+    /// `is_direct()`, so neither derived an IH nor applied one. They agreed, which made the
+    /// restriction a completeness limit rather than a soundness one and let eigenius#92 land ahead
+    /// of eigenius#138. Step 2 lifts the guard in both places at once, and the invariant it pins is
+    /// unchanged in kind: **the arity the minor's type declares is the arity iota applies.**
+    ///
+    /// For `rall : (Set → Foo) → Foo` the minor is now
+    /// `Π f:(Set → Foo). Π ih:(Π b:Set. motive (f b)). motive (rall f)` — two binders, where step 1
+    /// derived one.
+    ///
+    /// The shape is `lexicon:Cat`'s, minus the parameter:
+    /// `cat_fin_forall : (lexicon:Fin -> lexicon:Cat) -> lexicon:Cat`.
+    #[test]
+    fn higher_order_positive_arg_gets_a_function_typed_ih_in_both_sites() {
+        // inductive Foo { base : Foo, rall : (Set -> Foo) -> Foo }
+        let s = ind_self_ref("Foo");
+        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
+            name: "Foo".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "base".to_string(),
+                    typ: foo_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "rall".to_string(),
+                    // (Set -> Foo) -> Foo
+                    typ: Exp::Pi(
+                        Patt::Var("f".to_string()),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::sort(1)),
+                            Box::new(foo_ty.clone()),
+                        )),
+                        Box::new(foo_ty.clone()),
+                    ),
+                },
+            ],
+        });
+
+        // Constant motive `λ_. Set`, so a fully applied minor reduces to `Val::sort(1)`.
+        let motive = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::sort(1),
+            Rho::Nil,
+        ));
+
+        // 1. How many binders does the minor derivation ask for?
+        let minor_ty =
+            crate::nbe::recursor::derive_minor_type(&foo, 1, &[], &motive, &EvalCtx::Pure)
+                .expect("derive_minor_type for `rall`");
+        let mut arity = 0usize;
+        let mut cursor = minor_ty;
+        while let Val::Pi(_, clos) = cursor {
+            arity += 1;
+            cursor = clos
+                .apply(Val::Nt(Neut::Gen(arity, format!("v{arity}"))))
+                .expect("apply pi clos");
+        }
+        assert_eq!(
+            arity, 2,
+            "`rall` has one constructor argument AND a function-typed IH for it. One binder would \
+             mean the derivation still skips higher-order arguments; three would mean it and iota \
+             have drifted."
+        );
+
+        // 2. Does iota apply exactly that many? A minor of arity 2 returning `Sort(1)`: too few
+        //    applications leaves a `Val::Lam`, too many applies `Sort(1)` to something and errors.
+        let base_minor = Val::sort(1);
+        let rall_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(Patt::Unit, Box::new(Exp::sort(1))),
+            Rho::Nil,
+        ));
+        // The constructor argument: `λ_. Foo.base`, a value of type `Set -> Foo`.
+        let arg = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Rho::Nil,
+        ));
+
+        let result = iota_reduce(
+            &foo,
+            &motive,
+            &[base_minor, rall_minor],
+            "rall",
+            &[arg],
+            &EvalCtx::Pure,
+        )
+        .expect("iota_reduce over `rall`");
+        assert!(
+            matches!(&result, Val::Sort(l) if l.is_nat(1)),
+            "iota applied exactly the {arity} argument(s) the minor's type declares, leaving the \
+             minor's body; got {result:?}"
+        );
+    }
+
+    /// **The payoff: induction THROUGH a higher-order argument actually computes.**
+    ///
+    /// The test above pins that the minor's declared arity and iota's applied arity agree. Agreeing
+    /// is what step 1 already had — both sites skipped the argument, consistently — so agreement
+    /// alone does not show the eliminator got any stronger. This one uses the hypothesis.
+    ///
+    /// `Foo { base : Foo, rall : (One → Foo) → Foo }`, eliminated with the minor
+    /// `λf. λih. ih unit`. Applying `ih` at `unit` is the recursive call on `f unit`, so reducing
+    /// `rec (rall (λ_. base))` must run one step of recursion and land on the `base` minor. Under
+    /// step 1 there was no `ih` to apply and this program could not be written.
+    #[test]
+    fn iota_recurses_through_a_higher_order_argument() {
+        let s = ind_self_ref("Foo");
+        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
+            name: "Foo".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "base".to_string(),
+                    typ: foo_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "rall".to_string(),
+                    // (One -> Foo) -> Foo
+                    typ: Exp::Pi(
+                        Patt::Var("f".to_string()),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::One),
+                            Box::new(foo_ty.clone()),
+                        )),
+                        Box::new(foo_ty.clone()),
+                    ),
+                },
+            ],
+        });
+
+        // base_minor is a marker: reaching it proves the recursive call was made.
+        let base_minor = Val::Con("reached-base".to_string(), Box::new(Val::Unit));
+        // rall_minor = λf. λih. ih unit   — `ih unit` IS the recursive call on `f unit`.
+        let rall_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(
+                Patt::Var("ih".to_string()),
+                Box::new(Exp::App(
+                    Box::new(Exp::Var("ih".to_string())),
+                    Box::new(Exp::Unit),
+                )),
+            ),
+            Rho::Nil,
+        ));
+        // The constructor argument `λ_. base`, so the recursive call lands on `base`.
+        let f = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Rho::Nil,
+        ));
+
+        let result = iota_reduce(
+            &foo,
+            &Val::Lam(crate::nbe::val::Clos::new(Patt::Unit, Exp::One, Rho::Nil)),
+            &[base_minor, rall_minor],
+            "rall",
+            &[f],
+            &EvalCtx::Pure,
+        )
+        .expect("iota over `rall` with a hypothesis that recurses");
+        match result {
+            Val::Con(c, _) if c == "reached-base" => {}
+            other => panic!(
+                "applying the IH at `unit` must recurse into `f unit` = `base` and yield the base \
+                 minor; got {other:?}"
+            ),
+        }
+    }
+
     #[test]
     fn iota_zero_arity_constructor() {
         // inductive Bool { True, False }
@@ -205,7 +450,7 @@ mod tests {
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -221,7 +466,7 @@ mod tests {
         let false_minor = Val::Con("no".to_string(), Box::new(Val::Unit));
         let result = iota_reduce(
             &bool_decl,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[true_minor, false_minor],
             "True",
             &[],
@@ -260,7 +505,7 @@ mod tests {
 
         let result = iota_reduce(
             &nat,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[zero_minor, succ_minor],
             "succ",
             &[nat_n(&nat, 1)],
@@ -290,7 +535,7 @@ mod tests {
             name: "Tree".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "leaf".to_string(),
@@ -345,7 +590,7 @@ mod tests {
         // two IHs are distinguishable. iota takes the outer ctor's args.
         let result = iota_reduce(
             &tree,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[leaf_minor, node_minor],
             "node",
             &[node(leaf.clone(), leaf.clone()), leaf],
@@ -376,15 +621,15 @@ mod tests {
         let list_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -392,7 +637,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -444,7 +689,7 @@ mod tests {
         };
         let result = iota_reduce(
             &list_decl,
-            &Val::Sort(1),
+            &Val::sort(1),
             &[nil_minor, cons_minor],
             "cons",
             &three_args,
@@ -476,7 +721,7 @@ mod tests {
             .extend(Patt::Var("succ_min".to_string()), succ_minor);
         let exp = Exp::InductiveRec {
             decl: nat.clone(),
-            motive: Box::new(Exp::Sort(1)),
+            motive: Box::new(Exp::sort(1)),
             minors: vec![
                 Exp::Var("zero_min".to_string()),
                 Exp::Var("succ_min".to_string()),
@@ -498,9 +743,9 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         let vec_a_unit =
@@ -508,15 +753,15 @@ mod tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(vec_a_unit.clone()),
                     ),
                 },
@@ -524,7 +769,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::One),

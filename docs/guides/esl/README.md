@@ -14,17 +14,17 @@ The single most important chapter for understanding *how Eigenius differs from a
 
 1. **[Introduction](01-introduction.md)** — what ESL is, the two-layer design (HCL-style declarations + ML-style expressions), how it compiles to Eigon-JSON, and how it relates to the kernel and the rest of Eigenius.
 
-2. **[Quick tour](02-quick-tour.md)** — six worked examples: minimal class+property+resource, a `program` with `let` and apply, sized inductive types, codata streams, component calls with config blocks, and an institution-dispatched decide predicate.
+2. **[Quick tour](02-quick-tour.md)** — worked examples: minimal class+property+resource, a `program` with `let` and apply, component calls with config blocks, and an institution-dispatched decide predicate.
 
 3. **[Lexical structure](03-lexical-structure.md)** — tokens, keywords (declaration / expression / type), identifiers and qualified names (`ns:local`), variables, literals, operators, the lambda forms (`\` and `λ`), comments.
 
-4. **[Declarations](04-declarations.md)** — per-form reference: `namespace`, `class`, `property`, `resource`, `axiom` (postulated propositions), `def` (transparent definitions, D66), `data` (inductive types with bounded binders), `codata` (coinductive types), `program`. Syntax + emitted resource shape + kernel mapping for each.
+4. **[Declarations](04-declarations.md)** — per-form reference: `namespace`, `class`, `property`, `resource`, `axiom` (postulated propositions), `def` (transparent definitions, D66), `data` (inductive types), `program`. Syntax + emitted resource shape + kernel mapping for each.
 
-5. **[Expressions](05-expressions.md)** — per-construct reference for the program-body sublanguage: `let`, `Apply`, `Lambda`, `Case`, `Match`, `Construct`, `Project`, `MapExpr`, `ReduceExpr`, `CoRecord`, `Pair`, `Literal`, `Var`, plus the `formula(...)` Pratt-parsed math sublanguage that lowers to chain-resident `formulas:FormulaTerm` values (full reference in the [formula language guide](../formula/README.md)). For each: syntax, kernel `Exp` it compiles to, type-check rule, evaluation rule, capability-mode notes.
+5. **[Expressions](05-expressions.md)** — per-construct reference for the program-body sublanguage: `let`, `Apply`, `Lambda`, `Case`, `Match`, `Construct`, `Project`, `MapExpr`, `ReduceExpr`, `Pair`, `Literal`, `Var`, plus the `formula(...)` Pratt-parsed math sublanguage that lowers to chain-resident `formulas:FormulaTerm` values (full reference in the [formula language guide](../formula/README.md)). For each: syntax, kernel `Exp` it compiles to, type-check rule, evaluation rule, capability-mode notes.
 
 6. **[Resources, types, and the layer](06-resources-types-and-the-layer.md)** — *the bridge chapter*. How a single IRI is simultaneously a resource you can query and a type you can ascribe. Ontology-as-types resolution. The mappings table (declaration ↔ resource shape ↔ kernel term/type). When and how the kernel calls back into the layer.
 
-7. **[Type theory primer](07-type-theory-primer.md)** — universes, Π/Σ-types, inductive types, coinductive types, sized types, identity types, normalization-by-evaluation. Brief and pragmatic; cross-linked to chapter 6.
+7. **[Type theory primer](07-type-theory-primer.md)** — universes, Π/Σ-types, inductive types, identity types, normalization-by-evaluation. Brief and pragmatic; cross-linked to chapter 6.
 
 8. **[Capability modes](08-capability-modes.md)** — `EvalCtx::Pure` vs `EvalCtx::Effectful`, the check / IO hook tiers, and how they gate which kernel AST nodes produce values and which stay neutral. Covers component dispatch, institution constraint firing, and comorphism invocation.
 
@@ -38,8 +38,7 @@ The single most important chapter for understanding *how Eigenius differs from a
 
 - [**D7 ESL surface syntax**](../../design/d7-esl-surface-syntax.md) — the authoritative grammar and semantics. This guide derives from D7 but adds worked examples and implementation pointers.
 - [**D18 Ontology-as-types resolution**](../../design/d18-ontology-as-types-resolution.md) — the bridge mechanism explained in chapter 6.
-- [**D19 Inductive and sized types**](../../design/d19-inductive-types.md) — type theory underpinning chapters 4 (`data`/`codata`) and 7.
-- [**D11 Codata, streams, and resumable execution**](../../design/d11-codata-streams.md) — coinductive type design.
+- [**D19 Inductive types**](../../design/d19-inductive-types.md) — type theory underpinning chapters 4 (`data`) and 7.
 - [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution mechanism dispatched in chapter 9. Supersedes D10.
 - [**D1 Eigon serialization format**](../../design/d1-eigon-serialization-format.md) — the resource model ESL compiles into.
 - [**EigenQL user guide**](../eigenql/README.md) — the companion query language; the two share the institution capability classification table.

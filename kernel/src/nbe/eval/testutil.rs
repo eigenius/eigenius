@@ -30,7 +30,7 @@ pub(crate) fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
         name: name.to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: Vec::new(),
     })
 }
@@ -44,7 +44,7 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
         name: "Nat".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
-        sort: Exp::Sort(1),
+        sort: Exp::sort(1),
         ctors: vec![
             InductiveCtorDecl {
                 name: "zero".to_string(),

@@ -361,7 +361,6 @@ fn meta_occurs(meta: MetaId, val: &Val) -> bool {
                 || indices.iter().any(|i| meta_occurs(meta, i))
         }
         Val::InductiveVal { args, .. } => args.iter().any(|a| meta_occurs(meta, a)),
-        Val::CodataType { params, .. } => params.iter().any(|p| meta_occurs(meta, p)),
         Val::List(items) => items.iter().any(|v| meta_occurs(meta, v)),
         _ => false,
     }
@@ -371,9 +370,7 @@ fn meta_occurs_neut(meta: MetaId, n: &Neut) -> bool {
     match n {
         Neut::Meta(id, spine) => *id == meta || spine.iter().any(|v| meta_occurs(meta, v)),
         Neut::App(k, v) => meta_occurs_neut(meta, k) || meta_occurs(meta, v),
-        Neut::Fst(k) | Neut::Snd(k) | Neut::PropAccess(k, _) | Neut::Observe(k, _) => {
-            meta_occurs_neut(meta, k)
-        }
+        Neut::Fst(k) | Neut::Snd(k) | Neut::PropAccess(k, _) => meta_occurs_neut(meta, k),
         Neut::NtFun(_, _, k) => meta_occurs_neut(meta, k),
         Neut::NtMap(f, k) => meta_occurs(meta, f) || meta_occurs_neut(meta, k),
         Neut::NtReduce(f, acc, k) => {
@@ -472,15 +469,15 @@ mod tests {
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
-                    typ: Exp::Sort(1), // placeholder; not used by tests
+                    typ: Exp::sort(1), // placeholder; not used by tests
                 },
                 InductiveCtorDecl {
                     name: "succ".to_string(),
-                    typ: Exp::Sort(1), // placeholder
+                    typ: Exp::sort(1), // placeholder
                 },
             ],
         })
@@ -517,14 +514,14 @@ mod tests {
     fn unify_identical_values_succeeds() {
         let mut mctx = MetaCtx::new();
         unify(0, &Val::One, &Val::One, &mut mctx).unwrap();
-        unify(0, &Val::Sort(0), &Val::Sort(0), &mut mctx).unwrap();
-        unify(0, &Val::Sort(2), &Val::Sort(2), &mut mctx).unwrap();
+        unify(0, &Val::sort(0), &Val::sort(0), &mut mctx).unwrap();
+        unify(0, &Val::sort(2), &Val::sort(2), &mut mctx).unwrap();
     }
 
     #[test]
     fn unify_distinct_universes_fails() {
         let mut mctx = MetaCtx::new();
-        let err = unify(0, &Val::Sort(0), &Val::Sort(1), &mut mctx).unwrap_err();
+        let err = unify(0, &Val::sort(0), &Val::sort(1), &mut mctx).unwrap_err();
         assert!(matches!(err, UnifyError::Mismatch { .. }));
     }
 
@@ -639,7 +636,7 @@ mod tests {
         let id = mctx.fresh();
         let bad_spine = vec![Val::Unit]; // not a Neut::Gen
         let m = Val::Nt(Neut::Meta(id, bad_spine));
-        let err = unify(0, &m, &Val::Sort(0), &mut mctx).unwrap_err();
+        let err = unify(0, &m, &Val::sort(0), &mut mctx).unwrap_err();
         assert!(matches!(err, UnifyError::NonPatternSpine { .. }));
     }
 
@@ -648,7 +645,7 @@ mod tests {
         // Default fresh metas have empty spines; solving works.
         let mut mctx = MetaCtx::new();
         let (id, m) = fresh_meta(&mut mctx);
-        unify(0, &m, &Val::Sort(0), &mut mctx).unwrap();
+        unify(0, &m, &Val::sort(0), &mut mctx).unwrap();
         assert!(mctx.solution(id).is_some());
     }
 
@@ -661,7 +658,7 @@ mod tests {
         let id = mctx.fresh();
         let spine = vec![bound_var(0), bound_var(1)];
         let m = Val::Nt(Neut::Meta(id, spine));
-        let err = unify(2, &m, &Val::Sort(0), &mut mctx).unwrap_err();
+        let err = unify(2, &m, &Val::sort(0), &mut mctx).unwrap_err();
         assert!(matches!(err, UnifyError::NonPatternSpine { .. }));
     }
 
@@ -671,8 +668,8 @@ mod tests {
     fn unify_vec_a_concrete_indices_succeeds() {
         // Vec A 0 = Vec A 0 — structural equality on indexed type.
         let decl = vec_decl();
-        let lhs = vec_type(&decl, Val::Sort(0), Val::Unit);
-        let rhs = vec_type(&decl, Val::Sort(0), Val::Unit);
+        let lhs = vec_type(&decl, Val::sort(0), Val::Unit);
+        let rhs = vec_type(&decl, Val::sort(0), Val::Unit);
         let mut mctx = MetaCtx::new();
         unify(0, &lhs, &rhs, &mut mctx).unwrap();
     }
@@ -680,8 +677,8 @@ mod tests {
     #[test]
     fn unify_vec_a_distinct_indices_fails() {
         let decl = vec_decl();
-        let lhs = vec_type(&decl, Val::Sort(0), Val::Unit);
-        let rhs = vec_type(&decl, Val::Sort(0), Val::One);
+        let lhs = vec_type(&decl, Val::sort(0), Val::Unit);
+        let rhs = vec_type(&decl, Val::sort(0), Val::One);
         let mut mctx = MetaCtx::new();
         let err = unify(0, &lhs, &rhs, &mut mctx).unwrap_err();
         assert!(matches!(err, UnifyError::Mismatch { .. }));
@@ -693,8 +690,8 @@ mod tests {
         let decl = vec_decl();
         let mut mctx = MetaCtx::new();
         let (id, n_meta) = fresh_meta(&mut mctx);
-        let lhs = vec_type(&decl, Val::Sort(0), n_meta);
-        let rhs = vec_type(&decl, Val::Sort(0), Val::Unit);
+        let lhs = vec_type(&decl, Val::sort(0), n_meta);
+        let rhs = vec_type(&decl, Val::sort(0), Val::Unit);
         unify(0, &lhs, &rhs, &mut mctx).unwrap();
         assert!(matches!(mctx.solution(id), Some(Val::Unit)));
     }
@@ -703,8 +700,8 @@ mod tests {
     fn unify_vec_distinct_decls_fails() {
         let v1 = vec_decl_named("VecA");
         let v2 = vec_decl_named("VecB");
-        let lhs = vec_type(&v1, Val::Sort(0), Val::Unit);
-        let rhs = vec_type(&v2, Val::Sort(0), Val::Unit);
+        let lhs = vec_type(&v1, Val::sort(0), Val::Unit);
+        let rhs = vec_type(&v2, Val::sort(0), Val::Unit);
         let mut mctx = MetaCtx::new();
         let err = unify(0, &lhs, &rhs, &mut mctx).unwrap_err();
         assert!(matches!(err, UnifyError::Mismatch { .. }));
@@ -718,9 +715,9 @@ mod tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         })
     }

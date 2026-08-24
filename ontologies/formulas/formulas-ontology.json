@@ -12,7 +12,7 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
           }
         ]
       },
@@ -23,7 +23,7 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "value",
-            "urn:eigenius:core:type_name": "urn:eigenius:core:float"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:float"]}
           }
         ]
       },
@@ -34,7 +34,7 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "iri",
-            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
           }
         ]
       },
@@ -45,12 +45,12 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "head",
-            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "arg",
-            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
           }
         ]
       },
@@ -61,17 +61,17 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "ty",
-            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
           }
         ]
       },
@@ -82,17 +82,17 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "ty",
-            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": "urn:eigenius:formulas:FormulaTerm"
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
           }
         ]
       }

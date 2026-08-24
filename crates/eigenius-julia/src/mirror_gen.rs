@@ -126,7 +126,6 @@ const TYPE_INDUCTIVE: &str = "urn:eigenius:core:inductive";
 const PROP_CTORS: &str = "urn:eigenius:core:ctors";
 const PROP_CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
 const PROP_ARG_TYPES: &str = "urn:eigenius:core:arg_types";
-const PROP_TYPE_NAME: &str = "urn:eigenius:core:type_name";
 const PROP_ARG_NAME: &str = "urn:eigenius:core:arg_name";
 const CLASS_INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
 
@@ -783,7 +782,7 @@ fn walk_closure(request: &MirrorGenerationRequest) -> Result<ClosureResult, Mirr
             // by the visited check.
             for ctor in resource_array(&def, PROP_CTORS) {
                 for arg_type in resource_array(&ctor, PROP_ARG_TYPES) {
-                    if let Some(tn) = string_value(&arg_type, PROP_TYPE_NAME) {
+                    if let Ok(tn) = eigenius_kernel::program::ground::arg_type_head(&arg_type) {
                         if let Ok(target) = Iri::parse(&tn) {
                             if !is_core_meta_iri(&target)
                                 && !is_core_primitive_iri(&target)
@@ -1032,15 +1031,17 @@ fn resolve_inductive_declarations(
 
             let mut args = Vec::new();
             for arg_res in resource_array(&ctor_res, PROP_ARG_TYPES) {
-                let type_name = string_value(&arg_res, PROP_TYPE_NAME).ok_or_else(|| {
-                    MirrorGeneratorError::UnrepresentableClass {
-                        class_iri: ind_iri.as_str().to_string(),
-                        language: "julia".to_string(),
-                        reason: format!(
-                            "InductiveArgType on ctor `{ctor_name}` missing `core:type_name`"
-                        ),
-                    }
-                })?;
+                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188), so the referenced
+                // type is the value's HEAD. This read it as a string; the tests did not catch the
+                // break because their fixtures build the property by hand and still built strings.
+                let type_name =
+                    eigenius_kernel::program::ground::arg_type_head(&arg_res).map_err(|e| {
+                        MirrorGeneratorError::UnrepresentableClass {
+                            class_iri: ind_iri.as_str().to_string(),
+                            language: "julia".to_string(),
+                            reason: format!("InductiveArgType on ctor `{ctor_name}`: {e}"),
+                        }
+                    })?;
                 args.push(InductiveArgDecl {
                     arg_name: string_value(&arg_res, PROP_ARG_NAME),
                     type_name,
@@ -2605,6 +2606,11 @@ fn sanitise_for_identifier(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// Test-only: `core:type_name` is written by fixtures here, and READ through
+    /// `eigenius_kernel::program::ground::arg_type_head` (eigenius#188 retyped it to an
+    /// `eigentt:TypeExpr`, so there is no string to read directly any more).
+    const PROP_TYPE_NAME: &str = "urn:eigenius:core:type_name";
+
     use super::*;
     use eigenius_runtime_substrate::chain::ChainAccessor;
     use std::collections::HashMap;
@@ -4042,9 +4048,12 @@ end # module EigeniusMirror
             ))]),
         );
         succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
+        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
-            Value::String("urn:eigenius:test:Nat".into()),
+            Value::Json(serde_json::json!({
+                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+            })),
         );
 
         let mut succ = Resource::new(iri("urn:eigenius:test:Nat:succ"));

@@ -596,7 +596,7 @@ fn eval_aggregate(
         };
 
         // Use a synthetic name for the aggregate in the binding
-        let name = format!("__agg_{op:?}");
+        let name = format!("AGG#{op:?}");
         Ok(Some((name, result)))
     } else {
         Ok(None)

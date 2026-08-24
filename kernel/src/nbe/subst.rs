@@ -223,18 +223,11 @@ fn variant_name(e: &Exp) -> &'static str {
         Exp::PropAccess(..) => "PropAccess",
         Exp::Template(..) => "Template",
         Exp::Construct(..) => "Construct",
-        Exp::Codata(..) => "Codata",
-        Exp::CoRecord(..) => "CoRecord",
-        Exp::Observe(..) => "Observe",
         Exp::Map(..) => "Map",
         Exp::Reduce(..) => "Reduce",
         Exp::Inductive(..) => "Inductive",
         Exp::InductiveRec { .. } => "InductiveRec",
         Exp::Match { .. } => "Match",
-        Exp::SizeSort => "SizeSort",
-        Exp::SizeSucc(..) => "SizeSucc",
-        Exp::SizeInf => "SizeInf",
-        Exp::CodataType(..) => "CodataType",
         _ => "unknown",
     }
 }
@@ -274,7 +267,7 @@ mod tests {
     fn a_shadowing_binder_stops_substitution() {
         let body = Exp::Sig(
             Patt::Var("x".into()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(v("x")),
         );
         assert_eq!(subst(&body, "x", &cls(WRN)).unwrap(), body);
@@ -296,7 +289,7 @@ mod tests {
     fn substitutes_under_a_non_shadowing_binder() {
         let body = Exp::Sig(
             Patt::Var("y".into()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(v("x")),
         );
         let out = subst(&body, "x", &cls(WRN)).unwrap();
@@ -311,7 +304,7 @@ mod tests {
     fn capture_is_an_error() {
         let body = Exp::Sig(
             Patt::Var("y".into()),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(v("x")),
         );
         let err = subst(&body, "x", &v("y")).expect_err("y would be captured");
@@ -322,9 +315,12 @@ mod tests {
     /// through unsubstituted. A silent pass-through would produce a wrong hash that looks right.
     #[test]
     fn a_variant_outside_the_fragment_is_refused() {
-        let body = Exp::Observe(Box::new(v("x")), "head".into());
-        let err = subst(&body, "x", &cls(WRN)).expect_err("Observe is outside the fragment");
-        assert_eq!(err, SubstError::OutsideFragment("Observe"));
+        // Used `Exp::Observe` until eigenius#218 removed codata. The SUBJECT of this test is the
+        // refusal, not the variant, so it is re-pointed at another out-of-fragment form rather
+        // than deleted with its example.
+        let body = Exp::Map(Box::new(v("x")), Box::new(v("x")));
+        let err = subst(&body, "x", &cls(WRN)).expect_err("Map is outside the fragment");
+        assert_eq!(err, SubstError::OutsideFragment("Map"));
     }
 
     #[test]

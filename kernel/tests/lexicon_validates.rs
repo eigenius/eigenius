@@ -420,15 +420,15 @@ fn denotation_is_order_and_type_sensitive() {
     let ar = |a: Exp, b: Exp| Exp::Arrow(Box::new(a), Box::new(b));
 
     assert!(
-        type_eq(&denoted, &ar(gene(), ar(cell(), Exp::Sort(0)))),
+        type_eq(&denoted, &ar(gene(), ar(cell(), Exp::sort(0)))),
         "⟦cat⟧ should be Gene → CellLine → Prop, got {denoted:?}"
     );
     assert!(
-        !type_eq(&denoted, &ar(cell(), ar(gene(), Exp::Sort(0)))),
+        !type_eq(&denoted, &ar(cell(), ar(gene(), Exp::sort(0)))),
         "⟦·⟧ must be argument-order sensitive"
     );
     assert!(
-        !type_eq(&denoted, &ar(gene(), ar(gene(), Exp::Sort(0)))),
+        !type_eq(&denoted, &ar(gene(), ar(gene(), Exp::sort(0)))),
         "⟦·⟧ must distinguish entity types (the homogeneity bug is now rejected)"
     );
 }
@@ -518,7 +518,7 @@ fn parser_composes_sentence_to_checked_prop() {
         .expect("composed sentence must type-check (felicity of the parse)");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the composed sentence must inhabit Prop"
     );
 }
@@ -658,7 +658,7 @@ fn kernel_honors_subclass_subsumption() {
         .expect("affects(Gene, CellLine) must type-check via subclass subsumption");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the general-predicate application inhabits Prop"
     );
 
@@ -697,7 +697,7 @@ fn parser_composes_general_verb_via_subsumption() {
         .expect("composed general-verb sentence must type-check via subsumption");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the composed general-verb sentence must inhabit Prop"
     );
 }
@@ -1232,7 +1232,7 @@ fn every_gene_q_composes_and_reduces_to_prop() {
         .expect("composed `every gene q` must type-check after NbE reduction");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "`every gene q` must inhabit Prop"
     );
 }
@@ -1626,7 +1626,7 @@ fn every_gene_q_composes_via_apply_to_a_quantified_prop() {
 
     // The produced category is a declarative S → Prop.
     assert!(
-        type_eq(&denote_cat(out.cat()).expect("denote S"), &Exp::Sort(0)),
+        type_eq(&denote_cat(out.cat()).expect("denote S"), &Exp::sort(0)),
         "the produced category must denote Prop"
     );
     // The produced sem NbE-reduces to a well-typed proposition (∀x:Gene. q(x)).
@@ -1635,7 +1635,7 @@ fn every_gene_q_composes_via_apply_to_a_quantified_prop() {
     let ty = check_infer(&mut ctx, &reduced).expect("composed sentence must type-check");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "`every gene q` (composed via apply) must inhabit Prop"
     );
 }
@@ -1676,7 +1676,7 @@ fn every_cell_line_is_primary_parses_from_entries_to_a_checked_prop() {
         .iter()
         .find(|it| {
             denote_cat(it.cat())
-                .map(|d| type_eq(&d, &Exp::Sort(0)))
+                .map(|d| type_eq(&d, &Exp::sort(0)))
                 .unwrap_or(false)
         })
         .expect("CKY must yield a spanning S that denotes Prop");
@@ -1687,7 +1687,7 @@ fn every_cell_line_is_primary_parses_from_entries_to_a_checked_prop() {
     let ty = check_infer(&mut ctx, &reduced).expect("parsed sentence must type-check");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "the parsed quantified sentence must inhabit Prop"
     );
 }
@@ -1713,7 +1713,7 @@ fn bridge_parses_every_gene_affects_hela_to_prop() {
         let ty = check_infer(&mut ctx, p.sem()).expect("parsed (reduced) sem type-checks");
         assert_eq!(
             readback_val(0, &ty),
-            Exp::Sort(0),
+            Exp::sort(0),
             "each parse inhabits Prop"
         );
     }
@@ -1741,7 +1741,7 @@ fn bridge_parses_every_gene_affects_a_cell_line_to_prop() {
         let ty = check_infer(&mut ctx, p.sem()).expect("parsed (reduced) sem type-checks");
         assert_eq!(
             readback_val(0, &ty),
-            Exp::Sort(0),
+            Exp::sort(0),
             "each parse inhabits Prop"
         );
     }
@@ -1801,7 +1801,7 @@ fn kind_subject_predicate_nominal_is_subclass_of() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("kind nominal type-checks");
     assert_eq!(
         readback_val(0, &ty),
-        Exp::Sort(0),
+        Exp::sort(0),
         "a kind predicate nominal denotes Prop"
     );
     // Structure: subclass_of(Gene, CellLine) = App(App(ontology:subclass_of, Gene), CellLine).
@@ -2081,7 +2081,7 @@ fn assert_parses_to_prop(layer: &Arc<Layer>, index: &Parser, sentence: &str) {
             .unwrap_or_else(|e| panic!("'{sentence}' must type-check: {e}"));
         assert_eq!(
             readback_val(0, &ty),
-            Exp::Sort(0),
+            Exp::sort(0),
             "'{sentence}' must inhabit Prop"
         );
     }

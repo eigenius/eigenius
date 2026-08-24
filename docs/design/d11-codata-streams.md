@@ -2,7 +2,24 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Implemented (Phase 9b)
+**Status:** ⚠️ **DEPRECATED `2026-08-23`** — the codata half is REMOVED from the implementation
+(eigenius#218). This document is retained as the record of what was built and why; it is no longer
+a description of the system.
+
+**What was removed:** §2, §3, §4, §5.1 and §6 — the codata type former, copatterns, corecords,
+observations, the guardedness/productivity check, streams, and the sized-types machinery that
+existed to give codata a termination story (D19 §8). Nothing on any chain ever declared one:
+`core:CodataType` was declared in the core ontology with zero instances, and no ESL source in
+`ontologies/`, `experiments/` or `demo/` contained a `codata` declaration.
+
+**What SURVIVES, and is unaffected:** §5.3 (persistent task state) and §5.4 (concurrent tasks).
+The trace/task subsystem — `RocksTraceStore`, task tracking, resumption — never referenced a codata
+form; §5.1's "Tasks as Codata" was a conceptual framing, not an implementation dependency. Do not
+read this deprecation as retiring resumable execution.
+
+**Rationale and revisit conditions:** `docs/notes/218-retire-codata-and-sized-types.md`.
+
+*Superseded status:* Implemented (Phase 9b)
 **Required before:** Phase 8.9 implementation
 **Depends on:** D9 (NbE unification), D10 (Grothendieck institutions)
 

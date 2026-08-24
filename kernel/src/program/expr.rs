@@ -37,7 +37,6 @@ const PROJECT: &str = "urn:eigenius:program:Project";
 const MAP: &str = "urn:eigenius:program:Map";
 const REDUCE: &str = "urn:eigenius:program:Reduce";
 const LITERAL: &str = "urn:eigenius:program:Literal";
-const CORECORD: &str = "urn:eigenius:program:CoRecord";
 /// Phase 11e: comorphism translation invocation via ESL
 /// `f(source)` where `f` is a registered Comorphism IRI.
 const COMORPHISM_INVOKE_APPLY: &str = "urn:eigenius:program:ComorphismInvokeApply";
@@ -147,11 +146,9 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 // directly with a name-only stub decl and recursively-
                 // decoded args; the type checker resolves the stub
                 // by name at use time.
-                let type_name = match r.get(&Iri::parse(wk::TYPE_NAME).unwrap()) {
-                    Some(Value::String(s)) => s.clone(),
-                    Some(Value::ResourceRef(i)) => i.as_str().to_string(),
-                    _ => return Err("InductiveArgType missing `type_name`".to_string()),
-                };
+                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188); the referenced type
+                // is its head. Shares `arg_type_head` with `program::ground`'s two readers.
+                let type_name = crate::program::ground::arg_type_head(r)?;
                 let class_iri = Iri::parse(&type_name).map_err(|e| {
                     format!("InductiveArgType type_name '{type_name}' invalid IRI: {e}")
                 })?;
@@ -185,7 +182,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                     name: name_of_iri,
                     params: Vec::new(),
                     indices: Vec::new(),
-                    sort: Exp::Sort(1),
+                    sort: Exp::sort(1),
                     ctors: Vec::new(),
                 });
                 let sub_args: Result<Vec<Exp>, String> = type_args_arr
@@ -224,7 +221,6 @@ pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, Strin
         MAP => parse_map(resource, layer),
         REDUCE => parse_reduce(resource, layer),
         LITERAL => parse_literal(resource),
-        CORECORD => parse_corecord(resource, layer),
         COMORPHISM_INVOKE_APPLY => parse_comorphism_invoke_apply(resource, layer),
         DECIDE_APPLY => parse_decide_apply(resource, layer),
         _ => Err(format!("unknown expression class: '{class_str}'")),
@@ -896,35 +892,6 @@ fn parse_project(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let prop_iri = get_iri(resource, "urn:eigenius:program:property")?;
 
     Ok(Exp::PropAccess(Box::new(expr_exp), prop_iri))
-}
-
-/// corecord { obs = e; ... }
-fn parse_corecord(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
-    use crate::nbe::term::CoField;
-    let cofields_prop = Iri::parse("urn:eigenius:program:cofields").unwrap();
-    let cofields = match resource.get(&cofields_prop) {
-        Some(Value::Array(arr)) => arr,
-        _ => return Err("CoRecord missing 'cofields' array".to_string()),
-    };
-    let mut fields = Vec::new();
-    for entry in cofields {
-        let cf = match entry {
-            Value::Embedded(r) => r.as_ref(),
-            _ => {
-                return Err(
-                    "CoRecord 'cofields' must contain embedded CoField resources".to_string(),
-                )
-            }
-        };
-        let name = get_string(cf, "urn:eigenius:program:observation_name")?;
-        let body_resource = get_embedded(cf, "urn:eigenius:program:body")?;
-        let body_exp = parse_expression(&body_resource, layer)?;
-        fields.push(CoField {
-            name,
-            body: body_exp,
-        });
-    }
-    Ok(Exp::CoRecord(fields))
 }
 
 /// map(f, collection)

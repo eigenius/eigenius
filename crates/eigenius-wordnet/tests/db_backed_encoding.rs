@@ -545,7 +545,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
 /// Does this sem kernel-gate to a `Prop`? (the felicity confirmation)
 fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(layer));
-    matches!(check_infer(&mut ctx, sem), Ok(ty) if readback_val(0, &ty) == Exp::Sort(0))
+    matches!(check_infer(&mut ctx, sem), Ok(ty) if readback_val(0, &ty) == Exp::sort(0))
 }
 
 /// The four-way outcome taxonomy the pipeline routes on (D62 §4). Mirrors `encoding_prototype.rs`

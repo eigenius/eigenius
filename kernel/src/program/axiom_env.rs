@@ -297,7 +297,7 @@ mod tests {
         // Build the type, commit it as an axiom, verify the env.
         let p_var = || Exp::Var("P".to_string());
         let q_var = || Exp::Var("Q".to_string());
-        let prop = || Exp::Sort(0);
+        let prop = || Exp::sort(0);
         let p_to_q = Exp::Arrow(Box::new(p_var()), Box::new(q_var()));
         let q_to_p = Exp::Arrow(Box::new(q_var()), Box::new(p_var()));
         let iff = Exp::Times(Box::new(p_to_q), Box::new(q_to_p));
@@ -375,7 +375,7 @@ mod tests {
         use crate::program::eigentt_type_mirror::{decode_type, encode_type};
 
         let core_string = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
-        let pred_type = Exp::Arrow(Box::new(core_string), Box::new(Exp::Sort(0)));
+        let pred_type = Exp::Arrow(Box::new(core_string), Box::new(Exp::sort(0)));
         let chain = chain_with_axioms(vec![(
             "urn:eigenius:test:pred",
             pred_type,
@@ -398,7 +398,7 @@ mod tests {
         let inferred =
             check_infer(&mut ctx, &decoded).expect("check_infer succeeds for axiom application");
         assert!(
-            matches!(inferred, Val::Sort(0)),
+            matches!(&inferred, Val::Sort(l) if l.is_nat(0)),
             "pred(\"urn:...\") should infer as Prop = Sort(0); got {inferred:?}"
         );
     }

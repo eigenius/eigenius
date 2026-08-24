@@ -107,7 +107,7 @@ pub fn do_validate_justification(
 
     // ── Step 4: type-check proposition at Prop = Sort(0), then eval ──
     let mut prop_ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), ctx.head().clone());
-    if let Err(e) = check(&mut prop_ctx, &proposition_exp, &Val::Sort(0)) {
+    if let Err(e) = check(&mut prop_ctx, &proposition_exp, &Val::sort(0)) {
         return Ok(verdict_fails(format!(
             "proposition does not type-check at Prop: {e}"
         )));

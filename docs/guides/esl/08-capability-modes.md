@@ -38,7 +38,7 @@ Only these three delegate to the hooks:
 
 "Neutral" means the form stays in the value as a stuck term. The evaluator returns successfully — it just doesn't reduce that form, and a Σ-tuple containing a neutral is still a Σ-tuple.
 
-Every other form — β-redexes, ι-redexes (`match` on a constructor), projections of built pairs, `map` / `reduce` over known lists, `EigonPrimitive` arithmetic, `NativeDecide` on a *structural* constraint (`MinValue`, `Pattern`, …), corecords and observations — reduces the same way under both variants. In particular:
+Every other form — β-redexes, ι-redexes (`match` on a constructor), projections of built pairs, `map` / `reduce` over known lists, `EigonPrimitive` arithmetic, `NativeDecide` on a *structural* constraint (`MinValue`, `Pattern`, …) — reduces the same way under both variants. In particular:
 
 - `Exp::EigonClass(iri)` evaluates to `Val::EigonClass(iri)` in **both** modes. The evaluator never resolves a class IRI against the layer. Class resolution happens elsewhere: at resource-to-`Exp` parse time in [`program/expr.rs`](../../../kernel/src/program/expr.rs) and at check time through [`program/check_hooks.rs`](../../../kernel/src/program/check_hooks.rs), both calling [`resolve_class_type`](../../../kernel/src/program/ground.rs). See [chapter 6](06-resources-types-and-the-layer.md).
 - The `layer` an `Effectful` context carries is read by the hooks (and by `EvalCtx::layer()` consumers), not by the evaluator's structural arms.

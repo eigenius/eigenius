@@ -31,6 +31,24 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
+//! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
+//! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
+//! move: `core:Asserts` carries a `result_sort`, so the property is used inside `core` itself, and
+//! a lower layer cannot reference a higher one — the same constraint that stopped `eigentt:Level`
+//! reusing `lean:LeanLevel`. One algebra now serves both `result_sort` and `eigentt:TypeExpr`'s
+//! `Sort` ctor, and `data X : Sort u` is expressible where the string grammar could not spell a
+//! level variable. `core` moving revalidates every layer above it; both reseeds fold into one,
+//! since none has run since the first move.
+//!
+//! IT FIRED FOR eigenius#188 (`2026-08-23`), on ONE layer, `eigentt-type-fragment`: the
+//! `TypeExpr` `Sort` constructor's argument changed from `core:integer` to a new
+//! `eigentt:Level` inductive (Zero/Succ/Max/IMax/Param), so a universe level can be a `Max`,
+//! an `IMax` or a `Param` instead of only a numeral. The decoder still accepts the old numeral
+//! form — `decodes_the_pre_188_numeral_form` pins that — so a persisted store's terms remain
+//! readable; what it cannot survive is this manifest move, which is why the reseed is owed
+//! regardless. **eigenius#213 rides along with that reseed** rather than paying its own.
+//!
 //! IT FIRED ON THE D73 CLOSE-OUT (`2026-08-22`): two layers, `program` (eigenius#210 declared
 //! `program:components:RunRuntimeScript`, which D56 §7 added to the kernel's REMOTE_COMPONENTS
 //! and never declared here, so the kernel could dispatch a component no chain could reference)
@@ -60,18 +78,18 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "\
-core:872bffbcfbadfc275c3d4c266cea46ead85e77b1c6326c31fbb4741d4db7dc30
-eigentt-type-fragment:5dfce7f7508be045308e77049ea01f749b0e3d84315709dd3be0a5e8187a8577
+core:116e8a49bf13080f2da0b6f96a7f931197f3bf6e21aa31123c2c329ba75ca7b2
+eigentt-type-fragment:e1a41cdf9560e1b4412328988fcc82651073d74796e630d6d03ccf67d01b19f8
 program:224bb234a8651afdeb5144dca0e609afded5a633dd6495f4ae588e44bf855d4e
 reflection:c4c613c9b8391371f6c3346c2248f79f846ae674f5022b629665eee556cdb9a8
 obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf
 institution:27871f87612484d6469b66a4b0379731152af0c1f8eb04007c8b0343f4648c13
 runtime:4c05dc3b114acb2554e8f8d594a6878f94e8f60f3a512d46eb816d3a030f26cc
-formulas:ba63b387d496f46effd86b6e544c2daebea69b605c5b366123f17317bbae7957
-lean-expressions:6263f64c4fb167dedb9ba69c2e353517bd343b21da7ad6aa346f42f2b975fac5
+formulas:d7b4d67937d215eaadbad7e71f7afe6cdeed3128c589f3ad92df6d80c675fe27
+lean-expressions:88e53197dff41f07f1e075d0fa13fe6cd7de05b32fad45df38752aa43a5297a6
 lean-runtime-classes:11de512ae4aea72e0865a19becdefd4daed9c9f6cdf2abd5af3b88d17078294e
 lean-institution:e48be69b9df06f02232feac048fc4ec5bdebcf62b8a50b90145b9f62176610dc
-reasoning:d1564233f6e7e889a107b30b0cb709e8576baf42f12f700f407a70648413b548
+reasoning:9f05a417f5167ce2eda033cba984c30b412a3807aa26d210563ab39c81b23c20
 statistics:0e179b5ef88c9e01399a84d6c863b6ddb4fe38859374c45b3f685175d584af3b
 notebook:376c2726292782680b5534319890b63af0a70d6e8f5938972be6ee2d30d635e9
 ingest:67534b5bcf3478a18bd5df2a3c856132e8702dd3f9d3e8727b40179794ae0aba

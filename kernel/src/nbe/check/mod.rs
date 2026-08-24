@@ -17,7 +17,6 @@
 //! Ported from `Main.hs` lines 289-378 in the EigenTT reference.
 //! Uses NbE (eval + readback) for type equality checking.
 
-mod codata;
 mod conv;
 mod error;
 mod hooks;
@@ -26,16 +25,14 @@ mod inductive;
 mod testutil;
 mod witness;
 
-pub use codata::{check_guarded, lookup_codata_observation};
-use codata::{collect_pattern_names, resolve_full_codata_decl};
 use conv::infer_dependent_sort;
-pub use conv::{def_eq_at_type, eq_nf, exp_mentions_var, subtype_of, subtype_of_with_hyps};
+pub use conv::{def_eq_at_type, eq_nf, exp_mentions_var, subtype_of};
 pub use error::CheckError;
 pub use hooks::CheckHooks;
 pub use inductive::large_elim_admitted;
 use inductive::{
-    check_inductive_ctor_args, check_infer_inductive_rec, check_match,
-    validate_indexed_ctor_conclusions,
+    check_inductive_ctor_args, check_inductive_decl_telescopes, check_infer_inductive_rec,
+    check_match, validate_indexed_ctor_conclusions,
 };
 
 use crate::layer::Layer;
@@ -55,7 +52,7 @@ use std::sync::Arc;
 /// cache for resolved class types.
 ///
 /// Design follows nanoda_lib's `TypeChecker` pattern
-/// (`references/nanoda_lib/src/tc.rs` @ pinned commit `f58f2f6`): a
+/// (`references/nanoda_lib/src/tc.rs` @ pinned commit `6ae1f0c`): a
 /// single struct carrying mutable state (cache) plus immutable
 /// environment through all checker calls. The cache is scoped per
 /// type-check invocation — fresh per call, no cross-check invalidation
@@ -68,15 +65,6 @@ pub struct CheckCtx {
     pub layer: Option<Arc<Layer>>,
     /// Per-check memoization of resolved class types, keyed by class IRI string.
     type_cache: BTreeMap<String, Val>,
-    /// Rigid size hypotheses accumulated from bounded size binders
-    /// (`SizedPi { patt, upper, body }`). Keyed by the level of the
-    /// bound size variable (which doubles as its rigid-id): the TSO
-    /// records `bound_level < upper_rigid_level` (or distance 0 against
-    /// `∞`'s sentinel) when the checker crosses a `SizedPi` in a type.
-    ///
-    /// Consulted by [`subtype_of`] and any direct size-comparison
-    /// site via [`crate::nbe::sized::size_le_with_hyps`].
-    pub size_tso: crate::nbe::sized_rigid::Tso,
     /// institution index — derived view of the layer chain. When
     /// attached together with `institution_runtime`,
     /// `Constraint::Institution` predicates dispatch through
@@ -101,7 +89,6 @@ impl CheckCtx {
             gamma,
             layer: None,
             type_cache: BTreeMap::new(),
-            size_tso: crate::nbe::sized_rigid::Tso::new(),
             institution_index: None,
             institution_runtime: None,
             hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
@@ -115,7 +102,6 @@ impl CheckCtx {
             gamma,
             layer: Some(layer),
             type_cache: BTreeMap::new(),
-            size_tso: crate::nbe::sized_rigid::Tso::new(),
             institution_index: None,
             institution_runtime: None,
             hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
@@ -179,7 +165,6 @@ impl CheckCtx {
             gamma: gamma1,
             layer: self.layer.clone(),
             type_cache: self.type_cache.clone(),
-            size_tso: self.size_tso.clone(),
             institution_index: self.institution_index.clone(),
             institution_runtime: self.institution_runtime.clone(),
             hooks: self.hooks.clone(),
@@ -238,13 +223,6 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, CheckError> 
             // Extend context with the recursive variable and check body
             let mut inner = ctx.extend(patt, &t, &gen)?;
             check(&mut inner, body, &t)?;
-            // Guardedness: if the recursive body constructs a corecord,
-            // verify every corecursive reference appears under a
-            // constructor/lambda/app — not at the bare head of an
-            // observation. D11 §3 "productivity."
-            let mut forbidden: std::collections::HashSet<&str> = std::collections::HashSet::new();
-            collect_pattern_names(patt, &mut forbidden);
-            check_guarded(body, &forbidden)?;
             // Re-evaluate with the recursive binding
             let v = ctx.eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))?;
             up_gamma(&ctx.gamma, patt, &t, &v).map_err(CheckError::from)
@@ -263,42 +241,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
             let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
             check_type(&mut inner, b)
         }
-        // Bounded size Π-type: `{i < upper}. body`. The upper bound
-        // must be a rigid size variable or `∞`. Crossing the binder
-        // registers `i_level + 1 ≤ upper_level` as a hypothesis in
-        // the TSO so subsequent size comparisons in `body` can use
-        // the strict-decrease fact.
-        Exp::SizedPi { patt, upper, body } => {
-            check(ctx, upper, &Val::SizeSort)?;
-            let upper_val = ctx.eval(upper, &ctx.rho)?;
-            let new_level = ctx.rho.len();
-            let i_val = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(patt, &Val::SizeSort, &i_val)?;
-            match &upper_val {
-                Val::SizeInf => {
-                    // No hypothesis: i ≤ ∞ holds structurally.
-                }
-                Val::Nt(crate::nbe::val::Neut::Gen(upper_level, _)) => {
-                    inner
-                        .size_tso
-                        .insert(new_level as u32, 1, *upper_level as u32);
-                }
-                other => {
-                    return Err(CheckError::IllFormed(format!(
-                        "SizedPi: upper bound must normalise to a rigid size variable \
-                         or ∞ — got {:?}",
-                        readback_val(ctx.rho.len(), other)
-                    )));
-                }
-            }
-            check_type(&mut inner, body)
-        }
-        Exp::Sort(1) | Exp::One | Exp::Sort(_) => Ok(()),
-        // `SizeSort` is a type (at the first universe above `Set`).
-        // Phase 11b step 14 treats it as a distinguished sort so
-        // sized-type parameter annotations (`i : SizeSort`) can
-        // be written without further infrastructure.
-        Exp::SizeSort => Ok(()),
+        Exp::Sort(_) | Exp::One => Ok(()),
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
             check_type(ctx, a)?;
@@ -309,22 +252,6 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // Eigenius ground types are always valid types
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(()),
 
-        // Codata type declaration: each observation's type must be a type.
-        // Observation names must be distinct.
-        Exp::Codata(observations) => {
-            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-            for obs in observations {
-                if !seen.insert(obs.name.as_str()) {
-                    return Err(CheckError::IllFormed(format!(
-                        "duplicate observation name in codata type: '{}'",
-                        obs.name
-                    )));
-                }
-                check_type(ctx, &obs.typ)?;
-            }
-            Ok(())
-        }
-
         // Inductive type forms (Phase 11b, D19; D48 indices).
         // The introduction form runs the strict-positivity checker
         // (Phase 11b step 3) and the indexed-ctor-conclusion validator
@@ -332,6 +259,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // the right `params ++ indices` shape and each index expression
         // type-checks against its declared telescope type.
         Exp::Inductive(decl) => {
+            check_inductive_decl_telescopes(ctx, decl)?;
             crate::nbe::positivity::check_positivity(decl)?;
             validate_indexed_ctor_conclusions(ctx, decl)
         }
@@ -355,13 +283,48 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // sentence whose only readings were ill-typed. The coordination rule now uses POINTWISE
         // conjunction (`λk. And(f(k), g(k))`), so `And` receives `Prop`s and the terms type-check.
         Exp::InductiveType(decl, args) => check_inductive_type_args(ctx, decl, args),
-        // Applied codata type. Admitted as a type when the decl is
-        // already known valid; the declaration-site validation runs
-        // at ingest time via the ground resolver. We conservatively
-        // just accept, matching `InductiveType`'s behaviour.
-        Exp::CodataType(_, _) => Ok(()),
 
-        a => check(ctx, a, &Val::Sort(1)),
+        // "Is a type" means the INFERRED type is a sort — any sort. Port of `ensure_sort`
+        // (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`), which `check_declar_info` (`:165`)
+        // applies to a declaration's ascribed type and `check_ctor` applies to every constructor
+        // binder domain as `ensure_infers_as_sort` (`src/inductive.rs:900`).
+        //
+        // This was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits `Set`". The
+        // hardcoded 1 made every type ABOVE `Set` unusable in any position routed through here:
+        // `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+        // which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the
+        // wrong way for this — it lets a SMALLER type be used where a larger one is wanted, and the
+        // question here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord`
+        // derive removed earlier in eigenius#188: a universe comparison written as a constant.
+        a => ensure_infers_as_sort(ctx, a).map(|_| ()),
+    }
+}
+
+/// The LEVEL of the sort an expression inhabits, or an error if it does not inhabit a sort — i.e.
+/// if it is not a type. Port of `ensure_sort` (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`),
+/// which `check_declar_info` (`:165`) applies to a declaration's ascribed type and `check_ctor`
+/// applies to every constructor binder domain as `ensure_infers_as_sort`
+/// (`src/inductive.rs:900`).
+///
+/// [`check_type`]'s fallback was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits
+/// `Set`". The hardcoded 1 made every type ABOVE `Set` unusable in any position routed through
+/// there: `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+/// which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the wrong
+/// way for this — it lets a SMALLER type be used where a larger one is wanted, and the question
+/// here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord` derive removed
+/// earlier in eigenius#188: a universe comparison written as a constant.
+///
+/// The level is returned rather than discarded because the constructor-argument universe
+/// constraint needs it ([`check_ctor_type`]).
+pub(super) fn ensure_infers_as_sort(
+    ctx: &mut CheckCtx,
+    e: &Exp,
+) -> Result<crate::nbe::level::Level, CheckError> {
+    match check_infer(ctx, e)? {
+        Val::Sort(l) => Ok(l),
+        other => Err(CheckError::IllFormed(format!(
+            "expected a type, but `{e:?}` has type `{other:?}`"
+        ))),
     }
 }
 
@@ -416,53 +379,12 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         (Exp::Lam(..), Val::Sort(n)) => Err(CheckError::TypeMismatch(format!(
             "a λ cannot inhabit a universe: expected a type in Sort({n}), got an abstraction \
              {:?}. (A type-level function has a Π type, not a Sort.)",
-            readback_val(ctx.rho.len(), &Val::Sort(*n))
+            readback_val(ctx.rho.len(), &Val::Sort(n.clone()))
         ))),
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, t, &gen)?;
-            check(&mut inner, e, &g.apply(gen)?)
-        }
-
-        // Lambda against a bounded size Π (Phase 11b step 15f).
-        //
-        // This is the productivity-via-typing arm: when a corecord
-        // observation has type `{j < upper}. body_ty`, its field body
-        // is typically `λ j. …`, and that lambda must type-check with
-        // `j < upper` registered as a hypothesis in the TSO. The body
-        // under this hypothesis can then reference sized inductive or
-        // coinductive values at size `j`, and recursive calls on the
-        // corecord itself — required by type to produce a result at
-        // size `j < outer-size` — are automatically size-decreasing.
-        //
-        // Productivity of sized corecords falls out of typing: any
-        // recursive call that could make the observation infinite-loop
-        // would have to produce a value at size ≥ outer, which the
-        // size-aware subtyping rejects.
-        (Exp::Lam(p, e), Val::SizedPi(upper, g)) => {
-            let new_level = ctx.rho.len();
-            let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &Val::SizeSort, &gen)?;
-            match upper.as_ref() {
-                Val::SizeInf => {
-                    // Upper is ∞: size arg is unconstrained; no hypothesis.
-                }
-                Val::Nt(crate::nbe::val::Neut::Gen(upper_level, _)) => {
-                    inner
-                        .size_tso
-                        .insert(new_level as u32, 1, *upper_level as u32);
-                }
-                other => {
-                    // Shouldn't arise — a well-formed SizedPi value
-                    // always carries a rigid or ∞ upper. Fail loudly
-                    // rather than silently accept an unsound hypothesis.
-                    return Err(CheckError::IllFormed(format!(
-                        "SizedPi: upper bound must be rigid size var or ∞ — got {:?}",
-                        readback_val(ctx.rho.len(), other),
-                    )));
-                }
-            }
             check(&mut inner, e, &g.apply(gen)?)
         }
 
@@ -498,14 +420,27 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             }
             for (branch, (c, a)) in branches.iter().zip(cases.iter()) {
                 let a_val = ctx.eval(a, rho1)?;
+                // The branch's expected type is `Πx:aᶜ. g(c x)` — the motive applied to the
+                // constructor applied to the branch's argument. Building it needs a NAME for that
+                // argument, because the motive is spliced in as an `Exp` (read back from `g`) and
+                // must refer to it.
+                //
+                // eigenius#64: that name was the literal `"__case_arg"`, which is a legal ESL
+                // identifier — `[A-Za-z_][A-Za-z0-9_]*`, see `esl/lexer.rs:485` — so user code
+                // could bind it. The issue proposed `__case_arg_{level}`; that is still a legal
+                // identifier and still forgeable. Using the checker's existing `#` discipline
+                // instead makes the name unforgeable by construction: `#` cannot appear in an ESL
+                // identifier, which is exactly why `gen_val` and `readback`'s fresh variables are
+                // spelled `TC#{level}` and `G#{level}`.
+                //
+                // The prefix must differ from `G#`: `readback_val` below starts generating at
+                // `ctx.rho.len()`, so `G#{ctx.rho.len()}` is a name the motive itself may contain.
+                let arg_name = format!("CB#{}", ctx.rho.len());
                 let g_c = Clos {
-                    patt: Patt::Var("__case_arg".to_string()),
+                    patt: Patt::Var(arg_name.clone()),
                     body: Exp::App(
                         Box::new(readback_val(ctx.rho.len(), &Val::Lam(g.clone()))),
-                        Box::new(Exp::Con(
-                            c.clone(),
-                            Box::new(Exp::Var("__case_arg".to_string())),
-                        )),
+                        Box::new(Exp::Con(c.clone(), Box::new(Exp::Var(arg_name)))),
                     ),
                     env: ctx.rho.clone(),
                 };
@@ -518,57 +453,37 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         (Exp::Unit, Val::One) => Ok(()),
 
         // One against Set (One is a type)
-        (Exp::One, Val::Sort(1)) => Ok(()),
-
-        // Sized types (Phase 11b step 14, D19 §8).
-        // `SizeSort` is a type — admit it against `Set` / `Type(n)`
-        // the same way Pi and Sigma are. Concrete size values —
-        // `SizeInf` and `SizeSucc(_)` — inhabit `Val::SizeSort`.
-        (Exp::SizeSort, Val::Sort(1)) | (Exp::SizeSort, Val::Sort(_)) => Ok(()),
-        (Exp::SizeInf, Val::SizeSort) => Ok(()),
-        (Exp::SizeSucc(s), Val::SizeSort) => check(ctx, s, &Val::SizeSort),
-
         // Impredicative Pi: when the codomain is in Prop, the whole Pi
         // is in Prop regardless of the domain's universe level. D46 §4.1.
         // The domain may be at any level (including Type(n) for arbitrary n);
         // we only require it to be a well-formed type.
-        (Exp::Pi(p, a, b), Val::Sort(0)) => {
+        (Exp::Pi(p, a, b), Val::Sort(l)) if l.is_nat(0) => {
             check_type(ctx, a)?;
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
-            check(&mut inner, b, &Val::Sort(0))
+            check(&mut inner, b, &Val::sort(0))
         }
 
         // Sigma in Prop is predicative — both components must be in Prop.
         // No impredicativity for Sigma (D46 §3.4, §4).
-        (Exp::Sig(p, a, b), Val::Sort(0)) => {
-            check(ctx, a, &Val::Sort(0))?;
+        (Exp::Sig(p, a, b), Val::Sort(l)) if l.is_nat(0) => {
+            check(ctx, a, &Val::sort(0))?;
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
-            check(&mut inner, b, &Val::Sort(0))
+            check(&mut inner, b, &Val::sort(0))
         }
 
-        // Pi type against Set
-        (Exp::Pi(p, a, b), Val::Sort(1)) | (Exp::Sig(p, a, b), Val::Sort(1)) => {
-            check(ctx, a, &Val::Sort(1))?;
-            let gen = gen_val(&ctx.rho);
-            let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
-            check(&mut inner, b, &Val::Sort(1))
-        }
-
-        // Bounded size Pi against Set/Type — delegate to `check_type`
-        // so the TSO hypothesis-insertion logic runs exactly once.
-        (Exp::SizedPi { .. }, Val::Sort(1)) | (Exp::SizedPi { .. }, Val::Sort(_)) => {
-            check_type(ctx, exp)
-        }
-
-        // Sum type against Set
-        (Exp::Data(summands), Val::Sort(1)) => {
-            for s in summands {
-                check(ctx, &s.typ, &Val::Sort(1))?;
-            }
-            Ok(())
-        }
+        // The `Set`-level counterparts of the two arms above are ABSENT, deliberately. They were
+        // `(Exp::Pi | Exp::Sig, Val::Sort(l)) if l.is_nat(1)`, `(Exp::One, ..)` and
+        // `(Exp::Data(..), ..)`, each re-deriving at `Set` what `check_infer` already computes, and
+        // each testing the expected sort for EQUALITY with `Set` rather than letting subtyping
+        // decide. `check_infer` has a rule for all three forms, so they fall through to
+        // `check_by_inference` and check/infer agree by construction (eigenius#220, disposing of
+        // them the way eigenius#194 disposed of five siblings).
+        //
+        // The `Prop` arms above are NOT of that kind and stay: impredicativity is a genuine typing
+        // rule, not a fast path — `Pi (x:A). B` inhabits `Prop` when `B` does, whatever universe
+        // `A` lives in, and inference expresses that as `imax`.
 
         // Declaration
         (Exp::Dec(d, e), t) => {
@@ -578,7 +493,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
                 gamma: gamma1,
                 layer: ctx.layer.clone(),
                 type_cache: ctx.type_cache.clone(),
-                size_tso: ctx.size_tso.clone(),
                 institution_index: ctx.institution_index.clone(),
                 institution_runtime: ctx.institution_runtime.clone(),
                 hooks: ctx.hooks.clone(),
@@ -602,7 +516,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // continue to work via cumulativity (Prop ⊆ Set ⊆ Type(n)) — see
         // the universe-hierarchy arms below — so existing callers that
         // expected Id to live in Set are unaffected.
-        (Exp::Id(a, x, y), Val::Sort(0)) => {
+        (Exp::Id(a, x, y), Val::Sort(l)) if l.is_nat(0) => {
             check_type(ctx, a)?;
             let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
@@ -625,7 +539,9 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // Self-referential meta-claims (e.g. a level-1 trace referencing
         // level-1) are blocked at resource ingestion by the universe
         // stratification validator (Rule 13), not in the term checker.
-        (Exp::Sort(n), Val::Sort(m)) if n < m => Ok(()),
+        // eigenius#188: strict `<` in the LEVEL order, which is `succ(n) <= m` — not `<` on
+        // `Level`, which does not exist precisely so this cannot be written structurally.
+        (Exp::Sort(n), Val::Sort(m)) if n.clone().succ().leq(m) => Ok(()),
         (Exp::Sort(n), Val::Sort(m)) => Err(CheckError::TypeMismatch(format!(
             "universe stratification: Sort({n}) does not inhabit Sort({m}) — \
              a universe lives strictly above itself, `Sort(k) : Sort(k+1)`. \
@@ -645,7 +561,9 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // anything Rule 21 checks at the commit gate) with no diagnostic
         // (eigenius#191). Same check-vs-infer disagreement eigenius#136
         // removed for `Sort`.
-        (Exp::EigonClass(_), Val::Sort(m)) | (Exp::EigonPrimitive(_), Val::Sort(m)) if *m >= 1 => {
+        (Exp::EigonClass(_), Val::Sort(m)) | (Exp::EigonPrimitive(_), Val::Sort(m))
+            if crate::nbe::level::Level::of_nat(1).leq(m) =>
+        {
             Ok(())
         }
         (Exp::EigonClass(_), Val::Sort(m)) | (Exp::EigonPrimitive(_), Val::Sort(m)) => {
@@ -656,21 +574,19 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             )))
         }
 
-        // Codata type formation: codata { ... } : Set
-        (Exp::Codata(_), Val::Sort(1)) => check_type(ctx, exp),
-        (Exp::Codata(_), Val::Sort(_)) => check_type(ctx, exp),
-        // Parameterised codata — applied codata type expression.
-        (Exp::CodataType(_, _), Val::Sort(1)) | (Exp::CodataType(_, _), Val::Sort(_)) => {
-            check_type(ctx, exp)
-        }
-
-        // Inductive type formation (Phase 11b, D19).
-        (Exp::Inductive(_), Val::Sort(1)) | (Exp::InductiveType(_, _), Val::Sort(1)) => {
-            check_type(ctx, exp)
-        }
-        (Exp::Inductive(_), Val::Sort(_)) | (Exp::InductiveType(_, _), Val::Sort(_)) => {
-            check_type(ctx, exp)
-        }
+        // `Codata`, `CodataType`, `Inductive` and `InductiveType` against a universe had explicit
+        // arms here until eigenius#194. Each read `(Exp::X(..), Val::Sort(_)) => check_type(ctx,
+        // exp)` — matching EVERY universe and then discarding it, because `check_type` takes no
+        // expected type. They were `Ok(())` with extra steps, and they admitted `codata {…} : Prop`
+        // and a `Set`-level inductive standing where a proposition is expected.
+        //
+        // They are gone rather than tightened. `check_infer`'s arm for each of these constructors
+        // is `check_type(ctx, exp)?` followed by returning the sort — so the check arms were
+        // inference minus the universe comparison, not a different judgement. Falling through to
+        // `check_by_inference` runs the same `check_type` and then compares under `subtype_of`,
+        // which is where cumulativity already lives. Check and infer now agree by construction:
+        // there is no second rule to keep in sync, which is the property #137, #191 and #209 each
+        // lost in a different arm.
 
         // Constructor application against an inductive type — Phase 11b
         // step 5 checking mode. Parameters come from the expected type;
@@ -702,63 +618,6 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // Exhaustiveness, no-duplicate-arms, and binding-count match
         // are validated here.
         (Exp::Match { scrutinee, arms }, expected) => check_match(ctx, scrutinee, arms, expected),
-
-        // Corecord against a codata type: each field's body must have
-        // the corresponding observation's type, and every declared
-        // observation must be covered.
-        (Exp::CoRecord(fields), Val::Codata(observations, rho1)) => {
-            let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-            let obs_names: Vec<&str> = observations.iter().map(|(n, _)| n.as_str()).collect();
-            if field_names != obs_names {
-                return Err(CheckError::IllFormed(format!(
-                    "corecord fields {:?} do not match codata observations {:?}",
-                    field_names, obs_names
-                )));
-            }
-            for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
-                let t = ctx.eval(obs_typ, rho1)?;
-                check(ctx, &field.body, &t)?;
-            }
-            Ok(())
-        }
-
-        // Corecord against a parameterised codata type (D19 self-ref
-        // path). Same flow as the anonymous variant, but the
-        // observations come from `decl.observations` and each
-        // observation's type is evaluated in an environment where
-        // the decl's type parameters are bound to the applied
-        // `params`. This is what lets a self-referential observation
-        // like `tail : Stream(A, j)` resolve to the concrete codata
-        // type when the corecord is checked against `Stream(A_val, i)`.
-        (Exp::CoRecord(fields), Val::CodataType { decl, params }) => {
-            // Self-references inside observation types evaluate to
-            // `Val::CodataType { stub_decl, params }` where the stub
-            // has empty observations. Rehydrate the full decl from
-            // the layer when we encounter a stub — analogous to how
-            // `resolve_class_cached` threads EigonClass references.
-            let full_decl = resolve_full_codata_decl(ctx, decl)?;
-            let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-            let obs_names: Vec<&str> = full_decl
-                .observations
-                .iter()
-                .map(|o| o.name.as_str())
-                .collect();
-            if field_names != obs_names {
-                return Err(CheckError::IllFormed(format!(
-                    "corecord fields {:?} do not match codata observations {:?}",
-                    field_names, obs_names
-                )));
-            }
-            let mut obs_env = Rho::Nil;
-            for ((patt, _), val) in full_decl.params.iter().zip(params.iter()) {
-                obs_env = obs_env.extend(patt.clone(), val.clone());
-            }
-            for (field, obs) in fields.iter().zip(full_decl.observations.iter()) {
-                let t = ctx.eval(&obs.typ, &obs_env)?;
-                check(ctx, &field.body, &t)?;
-            }
-            Ok(())
-        }
 
         // EigonResource against a class type — **intensional** inhabitation (#91):
         // the resource inhabits `sup` iff one of its declared `is_a` classes is a
@@ -835,7 +694,7 @@ fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckE
             }
         }
     }
-    subtype_of_with_hyps(ctx.rho.len(), &t1, t, &ctx.size_tso)
+    subtype_of(ctx.rho.len(), &t1, t)
 }
 
 /// Is `e` the `ontology:kind_of` nominalization axiom (Chierchia's ∩, `Set -> Entity`)?
@@ -881,22 +740,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
 
         Exp::App(e1, e2) => {
             let t1 = check_infer(ctx, e1)?;
-            // Sized function application: `f(i)` where `f : {i < upper}. body`.
-            // The argument must be a size strictly below `upper`, verified
-            // via `size_lt_with_hyps` against the current TSO so bounded
-            // binders in scope contribute entailment.
-            if let Val::SizedPi(upper, g) = &t1 {
-                check(ctx, e2, &Val::SizeSort)?;
-                let arg_val = ctx.eval(e2, &ctx.rho)?;
-                if !crate::nbe::sized::size_lt_with_hyps(&arg_val, upper, &ctx.size_tso) {
-                    return Err(CheckError::TypeMismatch(format!(
-                        "SizedPi application: argument {:?} is not strictly below upper bound {:?}",
-                        readback_val(ctx.rho.len(), &arg_val),
-                        readback_val(ctx.rho.len(), upper),
-                    )));
-                }
-                return g.apply(arg_val).map_err(CheckError::from);
-            }
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
             Ok(g.apply(ctx.eval(e2, &ctx.rho)?)?)
@@ -924,24 +767,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let t = check_infer(ctx, e)?;
             let prop_name = prop.local_name();
 
-            // Codata observation — same lookup that Exp::Observe does.
-            if let Val::Codata(observations, rho1) = &t {
-                for (name, typ) in observations {
-                    if name == prop_name {
-                        return ctx.eval(typ, rho1).map_err(CheckError::from);
-                    }
-                }
-                return Err(CheckError::IllFormed(format!(
-                    "observation '{}' not found in codata type {:?}",
-                    prop_name,
-                    readback_val(ctx.rho.len(), &t)
-                )));
-            }
-            if let Val::CodataType { decl, params } = &t {
-                let full_decl = resolve_full_codata_decl(ctx, decl)?;
-                return lookup_codata_observation(&full_decl, params, prop_name, ctx.rho.len());
-            }
-
             // Fall back to the existing Sigma / resource behaviour.
             find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
                 CheckError::IllFormed(format!(
@@ -950,34 +775,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                     readback_val(ctx.rho.len(), &t)
                 ))
             })
-        }
-
-        // Codata observation type inference: e.obs has type T where
-        // `obs : T` appears in the inferred codata type of e.
-        Exp::Observe(e, obs) => {
-            let t = check_infer(ctx, e)?;
-            match &t {
-                Val::Codata(observations, rho1) => {
-                    for (name, typ) in observations {
-                        if name == obs {
-                            return ctx.eval(typ, rho1).map_err(CheckError::from);
-                        }
-                    }
-                    Err(CheckError::IllFormed(format!(
-                        "observation '{}' not found in codata type {:?}",
-                        obs,
-                        readback_val(ctx.rho.len(), &t)
-                    )))
-                }
-                Val::CodataType { decl, params } => {
-                    let full_decl = resolve_full_codata_decl(ctx, decl)?;
-                    lookup_codata_observation(&full_decl, params, obs, ctx.rho.len())
-                }
-                other => Err(CheckError::ExpectedCodata(format!(
-                    "observation target is not a codata value: {:?}",
-                    readback_val(ctx.rho.len(), other)
-                ))),
-            }
         }
 
         // --- Eigenius extension: 7 inference rules (D18 §6, issue #12 item 2) ---
@@ -1086,7 +883,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             // is the return type of d applied to x.
             match d_type {
                 Val::Pi(_, g) => g.apply(x_val).map_err(CheckError::from),
-                _ => Ok(Val::Sort(1)), // conservative fallback
+                _ => Ok(Val::sort(1)), // conservative fallback
             }
         }
 
@@ -1197,21 +994,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 .to_string(),
         )),
 
-        // Sized types (Phase 11b step 14). `SizeSort` is itself a
-        // type at universe 1; `SizeInf` and `SizeSucc(_)` inhabit
-        // `SizeSort`.
-        Exp::SizeSort => Ok(Val::Sort(2)),
-        Exp::SizeInf => Ok(Val::SizeSort),
-        Exp::SizeSucc(s) => {
-            check(ctx, s, &Val::SizeSort)?;
-            Ok(Val::SizeSort)
-        }
-
         // Universe inference for type-formers (D46 §3-§4). These rules
         // let `is_propositional_in_ctx` decide propositionality via
         // type inference for any well-formed type expression.
-        Exp::Sort(n) => Ok(Val::Sort(n + 1)),
-        Exp::One => Ok(Val::Sort(1)),
+        Exp::Sort(n) => Ok(Val::Sort(n.clone().succ())),
+        Exp::One => Ok(Val::sort(1)),
         Exp::Pi(patt, a, b) => {
             // Pi (a : A) (b : B) lives at Sort(max(m, n)) for non-Prop B,
             // or Sort(0) impredicatively when B inhabits Sort(0).
@@ -1220,6 +1007,25 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::Sig(patt, a, b) => {
             // Sigma is predicative — always max(m, n).
             infer_dependent_sort(ctx, patt, a, b, /*impredicative=*/ false)
+        }
+        // A sum type `Sum(c₁ A₁ | … | cₙ Aₙ)` lives at `max` of its summands' levels — predicative,
+        // like `Sig`, and for the same reason: a sum stores one of its summands, so it cannot be
+        // smaller than the largest of them. The `max` identity is `Zero`, so an empty sum is at
+        // `Prop` — the empty type is a proposition.
+        //
+        // eigenius#220: `check` had the ONLY rule for this form, `(Exp::Data(..), Val::Sort(l)) if
+        // l.is_nat(1)`, which checked each summand against `Set` exactly. A sum of `Type 1`
+        // summands was unwritable, and a `Set` sum checked against `Type 1` was rejected where
+        // cumulativity says it should pass. With an inference rule the narrow arm is deleted rather
+        // than widened, so `check` and `check_infer` agree by construction — the same disposal
+        // eigenius#194 applied to five sibling arms.
+        Exp::Data(summands) => {
+            let mut level = crate::nbe::level::Level::zero();
+            for summand in summands {
+                let l = ensure_infers_as_sort(ctx, &summand.typ)?;
+                level = crate::nbe::level::Level::Max(Box::new(level), Box::new(l)).simplify();
+            }
+            Ok(Val::Sort(level))
         }
         Exp::Arrow(a, b) => {
             let pi = Exp::Pi(Patt::Unit, a.clone(), b.clone());
@@ -1236,9 +1042,9 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            Ok(Val::Sort(0))
+            Ok(Val::sort(0))
         }
-        Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::Sort(1)),
+        Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::sort(1)),
         // D46 §10 — axiom reference. The IRI denotes an opaque typed
         // constant declared by `axiom NAME : T;` and lifted onto the
         // chain as a `eigentt:Axiom` resource carrying the encoded
@@ -1279,14 +1085,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitBool(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Boolean,
         )),
-        Exp::Codata(_) => {
-            check_type(ctx, exp)?;
-            Ok(Val::Sort(1))
-        }
-        Exp::CodataType(decl, _) => {
-            check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
-        }
         Exp::Inductive(decl) => {
             check_type(ctx, exp)?;
             ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
@@ -1414,7 +1212,7 @@ mod tests {
     #[test]
     fn ann_makes_a_curry_lambda_inferable() {
         let id = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::Var("x".into())));
-        let ty = Exp::Arrow(Box::new(Exp::Sort(0)), Box::new(Exp::Sort(0)));
+        let ty = Exp::Arrow(Box::new(Exp::sort(0)), Box::new(Exp::sort(0)));
 
         // Bare: check_infer has no Lam arm — not inferable.
         assert!(
@@ -1435,7 +1233,7 @@ mod tests {
     fn ann_rejects_a_body_that_mismatches_the_annotation() {
         // `λx. x` annotated as `Prop` (not a function type) — must fail.
         let id = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::Var("x".into())));
-        let ann = Exp::Ann(Box::new(id), Box::new(Exp::Sort(0)));
+        let ann = Exp::Ann(Box::new(id), Box::new(Exp::sort(0)));
         assert!(
             check_infer(&mut ctx(), &ann).is_err(),
             "Ann with a non-function annotation for an identity lambda must be rejected"
@@ -1456,8 +1254,8 @@ mod tests {
     /// `Ann` is runtime-erased: `⟦(e : T)⟧ = ⟦e⟧`.
     #[test]
     fn ann_is_runtime_erased() {
-        let e = Exp::Sort(0);
-        let ann = Exp::Ann(Box::new(e.clone()), Box::new(Exp::Sort(1)));
+        let e = Exp::sort(0);
+        let ann = Exp::Ann(Box::new(e.clone()), Box::new(Exp::sort(1)));
         let via_ann = readback_val(0, &eval(&ann, &Rho::Nil).unwrap());
         let direct = readback_val(0, &eval(&e, &Rho::Nil).unwrap());
         assert_eq!(via_ann, direct, "Ann must erase to its underlying term");
@@ -1465,7 +1263,7 @@ mod tests {
 
     #[test]
     fn check_one_has_type_set() {
-        check(&mut ctx(), &Exp::One, &Val::Sort(1)).unwrap();
+        check(&mut ctx(), &Exp::One, &Val::sort(1)).unwrap();
     }
 
     /// eigenius#136 — `Set : Set` is rejected in checking mode.
@@ -1475,7 +1273,7 @@ mod tests {
     /// paradox was expressible in a term the commit gate (Rule 21) checks.
     #[test]
     fn set_does_not_inhabit_set() {
-        let err = check(&mut ctx(), &Exp::Sort(1), &Val::Sort(1))
+        let err = check(&mut ctx(), &Exp::sort(1), &Val::sort(1))
             .expect_err("Set : Set must be rejected");
         assert!(
             format!("{err:?}").contains("universe stratification"),
@@ -1488,7 +1286,7 @@ mod tests {
     fn no_universe_inhabits_itself() {
         for n in 0..5 {
             assert!(
-                check(&mut ctx(), &Exp::Sort(n), &Val::Sort(n)).is_err(),
+                check(&mut ctx(), &Exp::sort(n), &Val::sort(n)).is_err(),
                 "Sort({n}) : Sort({n}) must be rejected"
             );
         }
@@ -1501,7 +1299,7 @@ mod tests {
     fn a_higher_universe_does_not_inhabit_set() {
         for n in 2..6 {
             assert!(
-                check(&mut ctx(), &Exp::Sort(n), &Val::Sort(1)).is_err(),
+                check(&mut ctx(), &Exp::sort(n), &Val::sort(1)).is_err(),
                 "Sort({n}) : Set must be rejected — Set is not the top universe"
             );
         }
@@ -1514,7 +1312,7 @@ mod tests {
     fn a_universe_inhabits_every_universe_strictly_above_it() {
         for n in 0..5 {
             for m in 0..6 {
-                let got = check(&mut ctx(), &Exp::Sort(n), &Val::Sort(m)).is_ok();
+                let got = check(&mut ctx(), &Exp::sort(n), &Val::sort(m)).is_ok();
                 assert_eq!(
                     got,
                     n < m,
@@ -1533,10 +1331,10 @@ mod tests {
     fn check_mode_and_inference_agree_on_universes() {
         for n in 0..5 {
             for m in 0..6 {
-                let checked = check(&mut ctx(), &Exp::Sort(n), &Val::Sort(m)).is_ok();
-                let inferred = check_infer(&mut ctx(), &Exp::Sort(n)).unwrap();
+                let checked = check(&mut ctx(), &Exp::sort(n), &Val::sort(m)).is_ok();
+                let inferred = check_infer(&mut ctx(), &Exp::sort(n)).unwrap();
                 let subsumed =
-                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::Sort(m)).is_ok();
+                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::sort(m)).is_ok();
                 assert_eq!(
                     checked, subsumed,
                     "Sort({n}) against Sort({m}): check mode says {checked}, \
@@ -1554,7 +1352,7 @@ mod tests {
     #[test]
     fn an_eigon_class_does_not_inhabit_prop() {
         let class = Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:test:CellLine").unwrap());
-        let err = check(&mut ctx(), &class, &Val::Sort(0))
+        let err = check(&mut ctx(), &class, &Val::sort(0))
             .expect_err("`SomeClass : Prop` must be rejected");
         assert!(
             format!("{err:?}").contains("universe stratification"),
@@ -1566,12 +1364,80 @@ mod tests {
     #[test]
     fn an_eigon_primitive_does_not_inhabit_prop() {
         let prim = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
-        let err = check(&mut ctx(), &prim, &Val::Sort(0))
+        let err = check(&mut ctx(), &prim, &Val::sort(0))
             .expect_err("`core:string : Prop` must be rejected");
         assert!(
             format!("{err:?}").contains("universe stratification"),
             "expected a universe-stratification diagnostic, got: {err:?}"
         );
+    }
+
+    // ── eigenius#194: the `Val::Sort(_)` wildcard arms are gone ──────────────
+    //
+    // `Codata`, `CodataType`, `Inductive` and `InductiveType` each had an arm matching EVERY
+    // universe and delegating to `check_type`, which takes no expected type — so the universe was
+    // discarded. They now fall through to `check_by_inference`, which compares under `subtype_of`.
+    // These four tests pin both directions of that comparison.
+
+    /// A declaration-carrying inductive at the given sort, with no constructors.
+    fn ind_at(name: &str, sort: usize) -> Exp {
+        Exp::Inductive(std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
+            name: name.to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(sort),
+            ctors: Vec::new(),
+        }))
+    }
+
+    /// `data D : Set` standing where a proposition is expected. `JustifiedBy(j, P)`,
+    /// `reflection:canonical_proposition` and everything else Rule 21 checks take a `Prop` in that
+    /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
+    #[test]
+    fn a_set_level_inductive_does_not_inhabit_prop() {
+        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::sort(0))
+            .expect_err("`data D : Set` must not check against `Prop`");
+    }
+
+    /// The other half, and the reason the fix is a deletion rather than a `m >= 1` guard: a
+    /// `Prop`-sorted inductive — `logic:And`, `reasoning:JustifiedBy`, the witness predicates —
+    /// must still check against `Set` by cumulativity. Nine of the twelve probe hits measured on
+    /// `2026-08-22` were exactly this shape, so a guard written the obvious way would have broken
+    /// them.
+    #[test]
+    fn a_prop_level_inductive_still_inhabits_set_and_above() {
+        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::sort(1))
+            .expect("`data D : Prop` inhabits `Set` by cumulativity");
+        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::sort(2))
+            .expect("...and every universe above it");
+        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::sort(2))
+            .expect("`data D : Set` inhabits `Type 1` — the other three probe hits");
+    }
+
+    /// The invariant the deletion buys, stated directly: for these constructors `check` accepts
+    /// exactly what `check_infer` + `subtype_of` accepts, because it now IS that path. A future
+    /// arm re-added above `check_by_inference` would break this before it broke a chain.
+    #[test]
+    fn check_and_infer_agree_on_type_former_universes() {
+        for (exp, label) in [
+            (ind_at("P", 0), "inductive at Prop"),
+            (ind_at("S", 1), "inductive at Set"),
+        ] {
+            let inferred = match check_infer(&mut ctx(), &exp).expect("inferable") {
+                Val::Sort(k) => k,
+                other => panic!("{label}: expected a sort, got {other:?}"),
+            };
+            for m in 0..4usize {
+                let checked = check(&mut ctx(), &exp, &Val::sort(m)).is_ok();
+                let cumulative = inferred.leq(&crate::nbe::level::Level::of_nat(m));
+                assert_eq!(
+                    checked, cumulative,
+                    "{label}: check against Sort({m}) = {checked}, but inference gives \
+                     Sort({inferred}) and cumulativity says {cumulative}"
+                );
+            }
+        }
     }
 
     /// The rule the fix installs: a ground Eigon type inhabits `Set` and, by
@@ -1582,7 +1448,7 @@ mod tests {
         let prim = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Integer);
         for exp in [&class, &prim] {
             for m in 0..6 {
-                let got = check(&mut ctx(), exp, &Val::Sort(m)).is_ok();
+                let got = check(&mut ctx(), exp, &Val::sort(m)).is_ok();
                 assert_eq!(
                     got,
                     m >= 1,
@@ -1603,10 +1469,10 @@ mod tests {
         let prim = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
         for exp in [&class, &prim] {
             for m in 0..6 {
-                let checked = check(&mut ctx(), exp, &Val::Sort(m)).is_ok();
+                let checked = check(&mut ctx(), exp, &Val::sort(m)).is_ok();
                 let inferred = check_infer(&mut ctx(), exp).unwrap();
                 let subsumed =
-                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::Sort(m)).is_ok();
+                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::sort(m)).is_ok();
                 assert_eq!(
                     checked, subsumed,
                     "{exp:?} against Sort({m}): check mode says {checked}, \
@@ -1618,7 +1484,7 @@ mod tests {
 
     #[test]
     fn check_set_is_type() {
-        check_type(&mut ctx(), &Exp::Sort(1)).unwrap();
+        check_type(&mut ctx(), &Exp::sort(1)).unwrap();
     }
 
     #[test]
@@ -1658,10 +1524,100 @@ mod tests {
         check(&mut ctx(), &pair, &sig).unwrap();
     }
 
+    /// The `Case`-against-Pi arm still checks when the surrounding context binds the name the
+    /// branch binder uses. **This test does NOT discriminate the eigenius#64 fix** — it passes
+    /// against the old literal `"__case_arg"` too — and that is recorded here on purpose, because
+    /// the obvious reading of eigenius#64 is that a capture was reachable and it was not.
+    ///
+    /// Why not: the motive is spliced in via `readback_val`, and readback is fully normalizing. It
+    /// evaluates under the environment and emits no free source-level name — the only variables it
+    /// mints come from `Neut::Gen(j, name)`, which reads back as `"{name}{j}"` with the level
+    /// always appended (`readback.rs:264`), and `try_readback_fun` likewise evaluates each branch
+    /// before reading it back rather than copying the source `Exp`. So `Exp::Var("__case_arg")`
+    /// could not appear in the spliced motive, and the branch binder had nothing to capture.
+    ///
+    /// The fix is therefore what eigenius#64 says it is — robustness, not a bug fix — and the
+    /// property it buys is pinned by `case_branch_binder_name_is_unforgeable` below. This test is
+    /// kept because the arm had no coverage at all.
+    #[test]
+    fn case_branch_checks_under_a_shadowing_outer_binding() {
+        let sum_ty = Val::Data(
+            vec![
+                ("left".to_string(), Exp::One),
+                ("right".to_string(), Exp::One),
+            ],
+            Rho::Nil,
+        );
+        // The outer binding the motive refers to, and which the branch binder must not capture.
+        let outer = Rho::Nil.extend(Patt::Var("__case_arg".to_string()), Val::One);
+        // Motive: `λ_. __case_arg` — constantly the type `One`, named indirectly.
+        let motive = Clos::new(
+            Patt::Unit,
+            Exp::Var("__case_arg".to_string()),
+            outer.clone(),
+        );
+
+        let case = Exp::Case(vec![
+            crate::nbe::term::Branch {
+                name: "left".to_string(),
+                body: Exp::Lam(Patt::Unit, Box::new(Exp::Unit)),
+            },
+            crate::nbe::term::Branch {
+                name: "right".to_string(),
+                body: Exp::Lam(Patt::Unit, Box::new(Exp::Unit)),
+            },
+        ]);
+
+        let mut ctx = CheckCtx::new(outer, Vec::new());
+        check(&mut ctx, &case, &Val::Pi(Box::new(sum_ty), motive))
+            .expect("each branch checks against `Pi y:One. One`; a captured motive breaks this");
+    }
+
+    /// **eigenius#64 — the minted binder name cannot be written in ESL.**
+    ///
+    /// This is the property the fix actually delivers, and the reason the name is `CB#{level}`
+    /// rather than the `__case_arg_{level}` the issue proposed: `#` is not a legal identifier
+    /// character, so no source program can bind the name, at any scope, ever. `__case_arg_0` is a
+    /// perfectly good ESL identifier and would have left the same latent hazard one rename away.
+    ///
+    /// The `#` discipline is not invented here — `gen_val` mints `TC#{level}` and readback mints
+    /// `G#{level}` for the same reason. The prefixes must stay distinct: `readback_val` starts
+    /// generating at `ctx.rho.len()`, the same level the branch binder is named from, so reusing
+    /// `G#` would collide with the motive's own variables.
+    #[test]
+    fn case_branch_binder_name_is_unforgeable() {
+        // The lexer either rejects the name or splits it — what it must not do is hand back a
+        // single identifier token equal to it.
+        let lexes_as_one_identifier = |name: &str| -> bool {
+            crate::esl::lexer::tokenize(name)
+                .map(|toks| {
+                    toks.iter()
+                        .any(|t| format!("{t:?}").contains(&format!("\"{name}\"")))
+                })
+                .unwrap_or(false)
+        };
+
+        // First: the detector fires on a name that IS writable. Without this the assertion below
+        // would pass against any string, including one that is perfectly forgeable — which is the
+        // failure mode that let the original literal sit here unnoticed.
+        assert!(
+            lexes_as_one_identifier("__case_arg_7"),
+            "eigenius#64's proposed `__case_arg_{{level}}` IS a legal ESL identifier; if this stops \
+             holding the test below no longer discriminates anything"
+        );
+
+        let minted = format!("CB#{}", 7);
+        assert!(
+            !lexes_as_one_identifier(&minted),
+            "`{minted}` must not be writable as an ESL identifier; if it becomes one, the \
+             case-branch binder can be captured and this name has to change"
+        );
+    }
+
     #[test]
     fn check_type_mismatch_fails() {
         // () : U should fail (unit is not a type)
-        let result = check(&mut ctx(), &Exp::Unit, &Val::Sort(1));
+        let result = check(&mut ctx(), &Exp::Unit, &Val::sort(1));
         assert!(result.is_err());
     }
 
@@ -1714,12 +1670,12 @@ mod tests {
     fn eq_nf_equal() {
         eq_nf(0, &Val::One, &Val::One).unwrap();
         eq_nf(0, &Val::Unit, &Val::Unit).unwrap();
-        eq_nf(0, &Val::Sort(1), &Val::Sort(1)).unwrap();
+        eq_nf(0, &Val::sort(1), &Val::sort(1)).unwrap();
     }
 
     #[test]
     fn eq_nf_not_equal() {
-        assert!(eq_nf(0, &Val::One, &Val::Sort(1)).is_err());
+        assert!(eq_nf(0, &Val::One, &Val::sort(1)).is_err());
         assert!(eq_nf(0, &Val::Unit, &Val::One).is_err());
     }
 
@@ -1736,7 +1692,63 @@ mod tests {
                 typ: Exp::One,
             },
         ]);
-        check(&mut ctx(), &data, &Val::Sort(1)).unwrap();
+        check(&mut ctx(), &data, &Val::sort(1)).unwrap();
+    }
+
+    #[test]
+    fn sum_of_large_summands_is_checkable() {
+        // eigenius#220. `check` had the only rule for `Exp::Data`, and it required the sum AND
+        // every summand to be at `Set` exactly. A sum storing a `Type 1` was therefore unwritable:
+        // there was no inference fallback to rescue it, unlike the `Exp::One` arm beside it.
+        //
+        // `Sum(a (Type 1) | b Set)` lives at `max(Sort 2, Sort 1)`'s successor structure — each
+        // summand's TYPE is inferred, so `Type 1` (`Sort 2`) contributes level 3 and `Set`
+        // (`Sort 1`) contributes 2, giving `Sort 3`.
+        let data = Exp::Data(vec![
+            crate::nbe::term::Summand {
+                name: "a".to_string(),
+                typ: Exp::sort(2),
+            },
+            crate::nbe::term::Summand {
+                name: "b".to_string(),
+                typ: Exp::sort(1),
+            },
+        ]);
+        let inferred = check_infer(&mut ctx(), &data).expect("a sum of large summands has a type");
+        assert!(
+            matches!(&inferred, Val::Sort(l) if l.is_nat(3)),
+            "expected Sort(3) = max(3, 2); got {inferred:?}"
+        );
+        check(&mut ctx(), &data, &Val::sort(3)).expect("and checks against its own sort");
+    }
+
+    #[test]
+    fn small_sum_checks_against_a_larger_sort_by_cumulativity() {
+        // The other half of eigenius#220: `Sum(a 1 | b 1)` is at `Set`, and `Set ⊆ Type 1`, so it
+        // must check against `Type 1`. The deleted arm's `l.is_nat(1)` guard rejected this — it
+        // tested the expected sort for EQUALITY with `Set` rather than letting subtyping decide.
+        let data = Exp::Data(vec![
+            crate::nbe::term::Summand {
+                name: "a".to_string(),
+                typ: Exp::One,
+            },
+            crate::nbe::term::Summand {
+                name: "b".to_string(),
+                typ: Exp::One,
+            },
+        ]);
+        check(&mut ctx(), &data, &Val::sort(1)).expect("at Set");
+        check(&mut ctx(), &data, &Val::sort(2)).expect("and at Type 1 by cumulativity");
+    }
+
+    #[test]
+    fn an_empty_sum_is_a_proposition() {
+        // `max` over no summands is its identity, `Zero` — so the empty type is at `Prop`.
+        let inferred = check_infer(&mut ctx(), &Exp::Data(vec![])).expect("empty sum has a type");
+        assert!(
+            matches!(&inferred, Val::Sort(l) if l.is_nat(0)),
+            "the empty sum is uninhabited, hence a proposition; got {inferred:?}"
+        );
     }
 
     #[test]
@@ -1763,9 +1775,9 @@ mod tests {
         // D46 §9 — Id lives in Prop; older callers expecting Set are
         // unaffected because Prop ⊆ Set.
         let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        check(&mut ctx(), &id, &Val::Sort(0)).unwrap();
-        check(&mut ctx(), &id, &Val::Sort(1)).unwrap();
-        check(&mut ctx(), &id, &Val::Sort(2)).unwrap();
+        check(&mut ctx(), &id, &Val::sort(0)).unwrap();
+        check(&mut ctx(), &id, &Val::sort(1)).unwrap();
+        check(&mut ctx(), &id, &Val::sort(2)).unwrap();
     }
 
     #[test]
@@ -1774,7 +1786,7 @@ mod tests {
         let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
         let inferred = check_infer(&mut ctx(), &id).unwrap();
         assert!(
-            matches!(inferred, Val::Sort(0)),
+            matches!(&inferred, Val::Sort(l) if l.is_nat(0)),
             "Id should infer at Sort(0); got {inferred:?}"
         );
     }
@@ -1824,7 +1836,7 @@ mod tests {
         use crate::nbe::eval::eval;
         let j = Exp::IdJ(Box::new([
             Exp::One,                                                        // A
-            Exp::Sort(1),                                                    // C (placeholder)
+            Exp::sort(1),                                                    // C (placeholder)
             Exp::Lam(Patt::Var("a".into()), Box::new(Exp::Var("a".into()))), // d = λa. a
             Exp::Unit,                                                       // x
             Exp::Unit,                                                       // y
@@ -1851,9 +1863,9 @@ mod tests {
         use crate::nbe::eval::eval;
         // DecEq(Set, 1, Set) — One ≠ Set, produces neutral
         let deceq = Exp::DecEq(
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(Exp::One),
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
         );
         let result = eval(&deceq, &Rho::Nil)?;
         assert!(matches!(result, Val::Nt(_)));
@@ -1865,7 +1877,7 @@ mod tests {
         use crate::nbe::eval::eval;
         let iri = Iri::parse("urn:eigenius:core:string").unwrap();
         let deceq = Exp::DecEq(
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(Exp::EigonClass(iri.clone())),
             Box::new(Exp::EigonClass(iri)),
         );
@@ -1880,7 +1892,7 @@ mod tests {
         let iri1 = Iri::parse("urn:eigenius:core:string").unwrap();
         let iri2 = Iri::parse("urn:eigenius:core:integer").unwrap();
         let deceq = Exp::DecEq(
-            Box::new(Exp::Sort(1)),
+            Box::new(Exp::sort(1)),
             Box::new(Exp::EigonClass(iri1)),
             Box::new(Exp::EigonClass(iri2)),
         );
@@ -1895,7 +1907,7 @@ mod tests {
         check(
             &mut ctx(),
             &Exp::EigonPrimitive(PrimitiveType::Integer),
-            &Val::Sort(1),
+            &Val::sort(1),
         )
         .unwrap();
     }
@@ -2077,7 +2089,7 @@ mod tests {
     #[test]
     fn find_sigma_field_resolves_eigon_class_with_layer() {
         // With a layer, find_sigma_field on EigonClass should resolve
-        // to actual property types instead of Val::Sort(1).
+        // to actual property types instead of Val::sort(1).
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
 
@@ -2104,10 +2116,10 @@ mod tests {
         let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
         let field = find_sigma_field(&mut c, &dog_type, "name");
         assert!(field.is_some(), "should find 'name' on Dog");
-        // The type should NOT be Val::Sort(1) (the old broken behavior)
+        // The type should NOT be Val::sort(1) (the old broken behavior)
         let field_type = field.unwrap();
         assert!(
-            !matches!(field_type, Val::Sort(1)),
+            !matches!(&field_type, Val::Sort(l) if l.is_nat(1)),
             "field type should be resolved, not Set; got {:?}",
             field_type
         );
@@ -2121,410 +2133,6 @@ mod tests {
         let mut c = ctx();
         let field = find_sigma_field(&mut c, &dog_type, "name");
         assert!(field.is_none(), "no layer → should not resolve");
-    }
-
-    // --- Sized types primitives (Phase 11b step 14) ---
-
-    #[test]
-    fn size_sort_is_a_type() {
-        // SizeSort checks as a type (Type(1)).
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        check_type(&mut c, &Exp::SizeSort).expect("SizeSort should be a type");
-    }
-
-    #[test]
-    fn size_inf_inhabits_size_sort() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        check(&mut c, &Exp::SizeInf, &Val::SizeSort).expect("SizeInf : SizeSort");
-    }
-
-    #[test]
-    fn size_succ_of_inf_inhabits_size_sort() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let exp = Exp::SizeSucc(Box::new(Exp::SizeInf));
-        check(&mut c, &exp, &Val::SizeSort).expect("SizeSucc(SizeInf) : SizeSort");
-    }
-
-    #[test]
-    fn size_sort_inferred_at_type_1() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let typ = check_infer(&mut c, &Exp::SizeSort).expect("infer SizeSort");
-        assert!(matches!(typ, Val::Sort(2)));
-    }
-
-    #[test]
-    fn size_inf_inferred_at_size_sort() {
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let typ = check_infer(&mut c, &Exp::SizeInf).expect("infer SizeInf");
-        assert!(matches!(typ, Val::SizeSort));
-    }
-
-    #[test]
-    fn size_succ_requires_size_sort_argument() {
-        // SizeSucc applied to a non-size expression should fail.
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let bogus = Exp::SizeSucc(Box::new(Exp::Sort(1)));
-        assert!(check(&mut c, &bogus, &Val::SizeSort).is_err());
-    }
-
-    // --- End-to-end sized Nat (Phase 11b step 15d capstone) ---
-    //
-    // Builds a sized Nat inductive and exercises the full pipeline:
-    // constructor type-checking with size parameter binding,
-    // ∞-absorption collapsing `↑ ∞` to `∞`, and subtyping-aware
-    // result-type verification.
-    //
-    // **Known limitation of the encoding.** This is a Lean-style
-    // declaration: the constructor's first binder is *identified*
-    // with the outer inductive index (both named `i`). Agda-style
-    // sized types treat the inductive's index and the constructor's
-    // local predecessor size as *separate* variables, unifying them
-    // at the call site (i.e. solving `↑ i_pred = outer_index` for
-    // `i_pred`). Without that unification — or bounded binders, which
-    // would let us write `succ : {j < i}. SizedNat j → SizedNat i` —
-    // the `succ` constructor below only type-checks at outer size
-    // `∞` (via ∞-absorption collapsing `↑ ∞` to `∞`). At finite outer
-    // sizes `k` the model forces `i = k` and the declared result
-    // `SizedNat (↑ k)` fails the `↑ k ≤ k` subtype check.
-    //
-    // These tests therefore exercise the ∞-end of the sized lattice.
-    // Real size-tracking termination awaits bounded binders and/or
-    // implicit-arg solving in a later step.
-
-    fn snat_ty(decl: Arc<InductiveDecl>, size: Val) -> Val {
-        Val::InductiveType {
-            decl,
-            params: vec![size],
-            indices: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn sized_nat_type_at_inf_is_a_type() {
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let ty = Exp::InductiveType(decl, vec![Exp::SizeInf]);
-        check_type(&mut c, &ty).expect("SizedNat(∞) is a valid type");
-    }
-
-    #[test]
-    fn sized_nat_zero_at_inf() {
-        // `zero` at expected SizedNat(∞) type-checks. After binding
-        // i = ∞, the result is SizedNat(∞) — matches expected exactly.
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        check(&mut c, &zero, &snat_ty(decl, Val::SizeInf)).expect("zero : SizedNat(∞)");
-    }
-
-    #[test]
-    fn sized_nat_succ_zero_at_inf() {
-        // `succ(zero) : SizedNat(∞)`. Critical: `succ`'s declared result
-        // is `SizedNat(↑ i)`. After binding i = ∞, the result evaluates
-        // to `SizedNat(↑ ∞)` which ∞-absorption collapses to
-        // `SizedNat(∞)`. So the subtype check on the constructor's
-        // result trivially succeeds.
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        let one = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![zero]);
-        check(&mut c, &one, &snat_ty(decl, Val::SizeInf)).expect("succ zero : SizedNat(∞)");
-    }
-
-    #[test]
-    fn sized_nat_two_at_inf() {
-        // Nested: `succ(succ(zero)) : SizedNat(∞)`.
-        let decl = sized_nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
-        let one = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![zero]);
-        let two = Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![one]);
-        check(&mut c, &two, &snat_ty(decl, Val::SizeInf)).expect("2 : SizedNat(∞)");
-    }
-
-    #[test]
-    fn sized_nat_succ_lifts_into_inf_via_subtyping() {
-        // `x : SizedNat(j)`, check `succ(x) : SizedNat(∞)`.
-        // succ produces SizedNat(↑ j); subtyping ↑j ≤ ∞ permits it.
-        let decl = sized_nat_decl();
-        let j_val = gen_val(&Rho::Nil);
-        let rho1 = Rho::Nil.extend(Patt::Var("j".to_string()), j_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("j".to_string()),
-            &Val::SizeSort,
-            &j_val,
-        )
-        .unwrap();
-        let snat_j = snat_ty(decl.clone(), j_val);
-        let x_val = gen_val(&rho1);
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &snat_j, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let succ_x = Exp::InductiveCtor(
-            decl.clone(),
-            "succ".to_string(),
-            vec![Exp::Var("x".to_string())],
-        );
-        check(&mut c, &succ_x, &snat_ty(decl, Val::SizeInf))
-            .expect("succ x : SizedNat(∞) via subtyping");
-    }
-
-    #[test]
-    fn sized_nat_succ_mismatch_rejected() {
-        // `x : SizedNat(j)` neutral, check `succ(x) : SizedNat(j)`.
-        // Applied param binds the ctor's local `i := j`, so succ's
-        // declared result `SizedNat (↑ i)` evaluates to SizedNat(↑ j);
-        // subtyping requires `↑ j ≤ j` which fails without a
-        // hypothesis. Must be rejected — validates that the new
-        // result-type check in `check_inductive_ctor_args` actually
-        // fires for a mismatched sized constructor.
-        let decl = sized_nat_decl();
-        let j_val = gen_val(&Rho::Nil);
-        let rho1 = Rho::Nil.extend(Patt::Var("j".to_string()), j_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("j".to_string()),
-            &Val::SizeSort,
-            &j_val,
-        )
-        .unwrap();
-        let snat_j = snat_ty(decl.clone(), j_val.clone());
-        let x_val = gen_val(&rho1);
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &snat_j, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let succ_x = Exp::InductiveCtor(
-            decl.clone(),
-            "succ".to_string(),
-            vec![Exp::Var("x".to_string())],
-        );
-        assert!(
-            check(&mut c, &succ_x, &snat_ty(decl, j_val)).is_err(),
-            "succ x must not check against SizedNat(j) — result is ↑j, not j"
-        );
-    }
-
-    #[test]
-    fn check_var_with_inf_size_against_finite_expected_fails() {
-        // Dual: `x : SizedStream(∞, One)` cannot be checked against
-        // `SizedStream(i, One)` — ∞ ≰ i for an unconstrained rigid i.
-        let decl = sized_stream_decl();
-
-        let i_val = gen_val(&Rho::Nil);
-        let rho1 = Rho::Nil.extend(Patt::Var("i".to_string()), i_val.clone());
-        let gamma1 = up_gamma(
-            &Vec::new(),
-            &Patt::Var("i".to_string()),
-            &Val::SizeSort,
-            &i_val,
-        )
-        .unwrap();
-
-        let sup_stream = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let x_val = gen_val(&rho1);
-        let rho2 = rho1.extend(Patt::Var("x".to_string()), x_val.clone());
-        let gamma2 = up_gamma(&gamma1, &Patt::Var("x".to_string()), &sup_stream, &x_val).unwrap();
-
-        let mut c = CheckCtx::new(rho2, gamma2);
-        let expected = mk_sized_type(decl, i_val, Val::One);
-        assert!(
-            check(&mut c, &Exp::Var("x".to_string()), &expected).is_err(),
-            "x : SizedStream(∞, 1) must not check against SizedStream(i, 1)"
-        );
-    }
-
-    // --- Bounded size binders (Phase 11b step 15e) ---
-    //
-    // Exercise `Exp::SizedPi` end-to-end: type formation, application
-    // with a strictly-smaller size argument, rejection of oversized
-    // applications, and subtyping-under-hypothesis via the TSO.
-
-    #[test]
-    fn sized_pi_at_inf_is_a_type() {
-        // `{j < ∞}. One` is a valid type.
-        let exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::SizeInf),
-            body: Box::new(Exp::One),
-        };
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        check_type(&mut c, &exp).expect("{j < ∞}. 1 is a type");
-    }
-
-    #[test]
-    fn sized_pi_at_rigid_var_is_a_type() {
-        // Under `i : SizeSort`, `{j < i}. One` is a valid type.
-        let (mut c, _) = ctx_with_size_var("i");
-        let exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(Exp::One),
-        };
-        check_type(&mut c, &exp).expect("{j < i}. 1 is a type");
-    }
-
-    #[test]
-    fn sized_pi_non_rigid_upper_rejected() {
-        // `{j < ŝ i}. One` must be rejected — the upper bound is
-        // not a rigid size variable or ∞.
-        let (mut c, _) = ctx_with_size_var("i");
-        let exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::SizeSucc(Box::new(Exp::Var("i".to_string())))),
-            body: Box::new(Exp::One),
-        };
-        let err = check_type(&mut c, &exp).unwrap_err().to_string();
-        assert!(
-            err.contains("rigid size variable"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn sized_pi_app_with_strict_smaller_size_succeeds() {
-        // `f : {j < i}. 1`. Applying to a size strictly below `i`
-        // succeeds. Use `ŝ i`? No — that's GREATER than i. We need
-        // something below i, which means ∞-absorption doesn't help.
-        // Simplest: hoist `f` to type `{j < ∞}. 1`, then apply at `i`.
-        let (c, i_val) = ctx_with_size_var("i");
-
-        let f_val = gen_val(&c.rho);
-        let f_ty = Val::SizedPi(
-            Box::new(Val::SizeInf),
-            Clos {
-                patt: Patt::Unit,
-                body: Exp::One,
-                env: Rho::Nil,
-            },
-        );
-        let rho2 = c
-            .rho
-            .clone()
-            .extend(Patt::Var("f".to_string()), f_val.clone());
-        let gamma2 = up_gamma(&c.gamma, &Patt::Var("f".to_string()), &f_ty, &f_val).unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
-        c2.size_tso = c.size_tso.clone();
-
-        // f(i) — i is a size, and i < ∞ trivially.
-        let app = Exp::App(
-            Box::new(Exp::Var("f".to_string())),
-            Box::new(Exp::Var("i".to_string())),
-        );
-        let result_ty = check_infer(&mut c2, &app).expect("f(i) : 1");
-        eq_nf(c2.rho.len(), &result_ty, &Val::One).expect("result is 1");
-        drop(i_val);
-    }
-
-    #[test]
-    fn sized_pi_app_with_equal_size_rejected() {
-        // `f : {j < i}. 1`. Applying at `i` violates `i < i`.
-        // Build the context by check_type-ing the SizedPi (which
-        // registers no hypothesis since f's domain is inside the
-        // binder, not outer scope).
-        let (c, i_val) = ctx_with_size_var("i");
-
-        // f's type: {j < i}. 1
-        let f_ty_exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(Exp::One),
-        };
-        let f_ty = eval(&f_ty_exp, &c.rho).expect("eval f_ty");
-        let f_val = gen_val(&c.rho);
-        let rho2 = c
-            .rho
-            .clone()
-            .extend(Patt::Var("f".to_string()), f_val.clone());
-        let gamma2 = up_gamma(&c.gamma, &Patt::Var("f".to_string()), &f_ty, &f_val).unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
-
-        // f(i) must be rejected: i < i is false.
-        let app = Exp::App(
-            Box::new(Exp::Var("f".to_string())),
-            Box::new(Exp::Var("i".to_string())),
-        );
-        let err = check_infer(&mut c2, &app).unwrap_err().to_string();
-        assert!(
-            err.contains("not strictly below"),
-            "unexpected error: {err}"
-        );
-        drop(i_val);
-    }
-
-    #[test]
-    fn sized_pi_hypothesis_witnesses_sized_subtyping() {
-        // The payoff test. Given `i : SizeSort` and we're inside a
-        // `{j < i}. body`, a variable of type `SizedStream(j, 1)`
-        // must check against expected `SizedStream(i, 1)` via
-        // `j ≤ i` derived from the TSO hypothesis.
-        //
-        // We can't directly observe the TSO state from a check() call
-        // without entering a SizedPi binder, so this test descends
-        // into a `check_type` for a SizedPi whose body references
-        // a sized inductive — which gives us the entailment in the
-        // `body` position via the subtype_of fallthrough.
-        let decl = sized_stream_decl();
-
-        // Outer: bind i : SizeSort.
-        let (c, i_val) = ctx_with_size_var("i");
-
-        // Body of the SizedPi: Π x : SizedStream(j, 1). SizedStream(i, 1).
-        // Inside, we have `j < i` as hypothesis. A variable
-        // `x : SizedStream(j, 1)` used where `SizedStream(i, 1)` is
-        // expected will go through the fallthrough → subtype_of,
-        // which consults the TSO and sees `j ≤ i`.
-        let body = Exp::Pi(
-            Patt::Var("x".to_string()),
-            Box::new(Exp::InductiveType(
-                decl.clone(),
-                vec![Exp::Var("j".to_string()), Exp::One],
-            )),
-            Box::new(Exp::InductiveType(
-                decl.clone(),
-                vec![Exp::Var("i".to_string()), Exp::One],
-            )),
-        );
-        let outer = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(body),
-        };
-
-        // Type-formation succeeds — both SizedStream(j, 1) and
-        // SizedStream(i, 1) are types in the extended ctx.
-        let mut c = c;
-        check_type(&mut c, &outer).expect("SizedPi type with inductive body type-checks");
-        drop((decl, i_val));
-    }
-
-    #[test]
-    fn sized_pi_hypothesis_lets_variable_cross_size_boundary() {
-        // End-to-end: `{j < i}. SizedStream(j, 1) → SizedStream(i, 1)`
-        // treated as a function type. We check a lambda `λ x. x`
-        // against this type — the body uses x : SizedStream(j, 1)
-        // where the codomain expects SizedStream(i, 1). The subtype
-        // check has TSO hypothesis `j < i` in scope.
-        let decl = sized_stream_decl();
-        let (mut c, _i_val) = ctx_with_size_var("i");
-
-        let sized_stream_j =
-            Exp::InductiveType(decl.clone(), vec![Exp::Var("j".to_string()), Exp::One]);
-        let sized_stream_i =
-            Exp::InductiveType(decl.clone(), vec![Exp::Var("i".to_string()), Exp::One]);
-        let fn_ty_exp = Exp::SizedPi {
-            patt: Patt::Var("j".to_string()),
-            upper: Box::new(Exp::Var("i".to_string())),
-            body: Box::new(Exp::Pi(
-                Patt::Var("x".to_string()),
-                Box::new(sized_stream_j),
-                Box::new(sized_stream_i),
-            )),
-        };
-        check_type(&mut c, &fn_ty_exp)
-            .expect("{j < i}. SizedStream(j, 1) → SizedStream(i, 1) is a type");
     }
 
     // --- D14 §9.2: institution-registered decision procedures ---
@@ -3113,9 +2721,9 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         // `SimpleVec A ()` — the conclusion shape used by both ctors.
@@ -3124,16 +2732,16 @@ mod tests {
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![
                 // nil : Π A:Set. SimpleVec A ()
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(vec_a_unit.clone()),
                     ),
                 },
@@ -3142,7 +2750,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::One),
@@ -3183,9 +2791,9 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         // Conclusion has only 1 arg (the param), missing the index.
@@ -3193,14 +2801,14 @@ mod tests {
         let decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(bad_conclusion),
                 ),
             }],
@@ -3223,27 +2831,27 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         // The index slot has Sort(1) instead of Unit — wrong type.
         let bad_conclusion = Exp::InductiveType(
             self_ref.clone(),
-            vec![Exp::Var("A".to_string()), Exp::Sort(1)],
+            vec![Exp::Var("A".to_string()), Exp::sort(1)],
         );
         let decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::sort(1)),
                     Box::new(bad_conclusion),
                 ),
             }],
@@ -3302,7 +2910,7 @@ mod tests {
             name: "Flag".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: Vec::new(),
         });
         Arc::new(InductiveDecl {
@@ -3310,7 +2918,7 @@ mod tests {
             name: "Flag".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::Sort(1),
+            sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
@@ -3385,7 +2993,7 @@ mod tests {
         let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
-            params: vec![Val::Sort(0)],
+            params: vec![Val::sort(0)],
             indices: vec![Val::Unit],
         };
         check(&mut c, &nil_app, &expected).unwrap();
@@ -3405,7 +3013,7 @@ mod tests {
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::One],
-            indices: vec![Val::Sort(0)], // wrong index too — any non-Unit
+            indices: vec![Val::sort(0)], // wrong index too — any non-Unit
         };
         // The current implementation should reject — either via param
         // mismatch (Sort(0) didn't get substituted as A — A is whatever
@@ -3434,8 +3042,8 @@ mod tests {
         let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
-            params: vec![Val::Sort(0)],
-            indices: vec![Val::Sort(1)], // wrong index — should be Unit
+            params: vec![Val::sort(0)],
+            indices: vec![Val::sort(1)], // wrong index — should be Unit
         };
         let err = check(&mut c, &nil_app, &expected).unwrap_err().to_string();
         assert!(
@@ -3472,7 +3080,7 @@ mod tests {
         let decl = simple_vec_decl();
         let scrutinee_typ = Val::InductiveType {
             decl: decl.clone(),
-            params: vec![Val::Sort(0)],
+            params: vec![Val::sort(0)],
             indices: vec![Val::Unit],
         };
         // Set up a CheckCtx with `v : SimpleVec Set ()` bound.
@@ -3527,8 +3135,8 @@ mod tests {
         let decl = simple_vec_decl();
         let scrutinee_typ = Val::InductiveType {
             decl: decl.clone(),
-            params: vec![Val::Sort(0)],
-            indices: vec![Val::Sort(1)], // mismatched: nil produces (), not Sort(1)
+            params: vec![Val::sort(0)],
+            indices: vec![Val::sort(1)], // mismatched: nil produces (), not Sort(1)
         };
         let c = ctx();
         let v_val = gen_val(&c.rho);
@@ -3632,7 +3240,7 @@ mod tests {
         let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
-            params: vec![Val::Sort(0)],
+            params: vec![Val::sort(0)],
             indices: vec![m],
         };
         // Note: Phase D currently uses a per-call fresh MetaCtx
@@ -3662,7 +3270,7 @@ mod tests {
                 name: category_short_name.to_string(),
                 params: Vec::new(),
                 indices: Vec::new(),
-                sort: TermExp::Sort(0),
+                sort: TermExp::sort(0),
                 ctors: Vec::new(),
             }),
             params: Vec::new(),
@@ -3675,12 +3283,12 @@ mod tests {
         // Sanity: a regular inductive type (Sort, Pi, ...) doesn't
         // trigger the hook. Falls through to the standard check path.
         let c = ctx();
-        assert!(try_synthesize_chain_witness(&c, &Val::Sort(0))
+        assert!(try_synthesize_chain_witness(&c, &Val::sort(0))
             .unwrap()
             .is_none());
         // Even an InductiveType whose decl.name isn't a ChainWitness
         // short name falls through.
-        let stub = chain_witness_typed_at("Vec", Val::LitString("A".into()), Val::Sort(1));
+        let stub = chain_witness_typed_at("Vec", Val::LitString("A".into()), Val::sort(1));
         assert!(try_synthesize_chain_witness(&c, &stub).unwrap().is_none());
     }
 
@@ -3694,7 +3302,7 @@ mod tests {
         let expected = chain_witness_typed_at(
             "IsDeclaredAs",
             Val::LitString("urn:test:axiom".into()),
-            Val::Sort(0),
+            Val::sort(0),
         );
         let err = try_synthesize_chain_witness(&c, &expected)
             .unwrap_err()
@@ -3714,8 +3322,8 @@ mod tests {
         let c = ctx();
         let expected = chain_witness_typed_at(
             "IsDeclaredAs",
-            Val::Sort(0), // not a LitString
-            Val::Sort(0),
+            Val::sort(0), // not a LitString
+            Val::sort(0),
         );
         let err = try_synthesize_chain_witness(&c, &expected)
             .unwrap_err()
@@ -3738,7 +3346,7 @@ mod tests {
         use crate::program::eigentt_type_mirror::encode_type;
 
         let target_iri_str = "urn:test:phase9:axiom";
-        let prop_exp = Exp::Sort(0); // any well-typed Prop suffices for index population
+        let prop_exp = Exp::sort(0); // any well-typed Prop suffices for index population
 
         let mut target = Resource::new(Iri::parse(target_iri_str).unwrap());
         target.set(
@@ -3771,11 +3379,11 @@ mod tests {
 
         // Expected type is `IsDeclaredAs(target_iri_str, Sort(0))`.
         // The eval'd index must match what the witness index was
-        // populated with — prop_exp evaluates to Val::Sort(0).
+        // populated with — prop_exp evaluates to Val::sort(0).
         let expected = chain_witness_typed_at(
             "IsDeclaredAs",
             Val::LitString(target_iri_str.to_string()),
-            Val::Sort(0),
+            Val::sort(0),
         );
         let synth = try_synthesize_chain_witness(&c, &expected).unwrap();
         let val = synth.expect("witness should be admitted for declared trace");
@@ -3798,7 +3406,7 @@ mod tests {
         let expected = chain_witness_typed_at(
             "IsDeclaredAs",
             Val::LitString("urn:test:phase9:missing".into()),
-            Val::Sort(0),
+            Val::sort(0),
         );
         let err = try_synthesize_chain_witness(&c, &expected)
             .unwrap_err()
@@ -3831,28 +3439,28 @@ mod tests {
         let decl = InductiveDecl {
             iri: Iri::parse("urn:eigenius:test:Box").unwrap(),
             name: "Box".to_string(),
-            params: vec![(Patt::Var("P".to_string()), Exp::Sort(0))],
+            params: vec![(Patt::Var("P".to_string()), Exp::sort(0))],
             indices: vec![],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![],
         };
 
         // A genuine Prop argument must still pass. (`Exp::One` is NOT one — it inhabits `Sort(1)`
-        // per the `(Exp::One, Val::Sort(1))` arm — so this needs a parameterless inductive in
+        // per the `(Exp::One, Val::Sort(l)) if l.is_nat(1)` arm — so this needs a parameterless inductive in
         // `Sort(0)`.)
         let prop_decl = InductiveDecl {
             iri: Iri::parse("urn:eigenius:test:TrueP").unwrap(),
             name: "TrueP".to_string(),
             params: vec![],
             indices: vec![],
-            sort: Exp::Sort(0),
+            sort: Exp::sort(0),
             ctors: vec![],
         };
         let a_prop = Exp::InductiveType(std::sync::Arc::new(prop_decl), vec![]);
         let ok = Exp::InductiveType(std::sync::Arc::new(decl.clone()), vec![a_prop]);
         let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
         assert!(
-            check(&mut ctx, &ok, &Val::Sort(0)).is_ok(),
+            check(&mut ctx, &ok, &Val::sort(0)).is_ok(),
             "Box(TrueP) must remain well-formed — the check must not reject valid arguments"
         );
 
@@ -3866,7 +3474,7 @@ mod tests {
         );
         let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
         assert!(
-            check(&mut ctx, &bad, &Val::Sort(0)).is_err(),
+            check(&mut ctx, &bad, &Val::sort(0)).is_err(),
             "Box(λk. k) must be rejected — accepting it lets an ill-typed proposition through the \
              felicity gate, which treats this checker as the oracle"
         );
