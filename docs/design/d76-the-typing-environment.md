@@ -231,6 +231,32 @@ Different domain, same shape, and the tie-break matters for the same reason: it 
 That dissolves the objection to the earlier option (a): order-dependence is not a hazard once the
 order is derived rather than incidental.
 
+### 6.2a The order must be derived — there is none to inherit
+
+**The implementation obligation, stated concretely.** A loader cannot process a layer's declarations
+"in the order they arrived", because that order does not survive loading:
+
+- `LayerBuilder.resources` is a **`BTreeMap<Iri, Resource>`** (`layer/mod.rs:926`). An Eigon-JSON
+  document is an array, and its order is discarded the moment resources are added.
+- Everything downstream iterates `Layer::defined_iris()` — **IRI-lexicographic** order.
+
+So the choice is not between "trust the input order" and "derive one". There is no input order left.
+The only order available for free is alphabetical by IRI, which bears no relation to dependency.
+
+**This makes a naive prefix-visibility implementation quietly wrong**, which is the hazard worth
+recording. Extending the environment while iterating `defined_iris()` compiles, runs, and produces a
+visibility rule determined by *IRI spelling*: `urn:x:Apple` would see nothing and `urn:x:Zebra` would
+see everything, regardless of what either references. Renaming a declaration would change what
+type-checks. Nothing would fail loudly.
+
+So §6.2's SCC-and-topological-sort is not an optimisation or a nicety — **it is the only thing that
+makes prefix visibility mean anything**. It has to be built before the visibility rule it orders, not
+after.
+
+For the same reason the tie-break must be deterministic (IRI, as `Exp::record` already does): with
+`defined_iris()` gone as the ordering, something must make the result canonical, or a layer's verdict
+depends on which valid topological order the sort happened to produce.
+
 ### 6.3 Where the `letrec` analogy stops
 
 **Signature-then-body separation is an ML move that does not transfer cleanly.** `letrec` typing puts
@@ -337,6 +363,11 @@ being carried in the term. What that touches:
   type carries a *stub* decl that must compare equal to the full one. With `Const` there is no stub,
   so equality can be structural — and that is what makes universe levels able to distinguish
   `List.{0}` from `List.{1}` (D75 §3.2).
+
+**A pass that does not exist yet.** §6.2a: the declaration order prefix-visibility needs must be
+*derived*, because `LayerBuilder` stores resources in a `BTreeMap<Iri, …>` and the input order is
+gone. So the migration adds a dependency-ordering pass over each layer — it is not a refactor of
+something already there.
 
 **Order within the migration.** The stub is the thing to remove first: it is what forces by-IRI
 equality, which is what makes levels unsound, which is what #188's residual is blocked on. Everything
