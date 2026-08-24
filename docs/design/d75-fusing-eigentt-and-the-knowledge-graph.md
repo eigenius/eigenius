@@ -16,7 +16,7 @@ missing, in both directions:
 | | the graph has | the theory does |
 |---|---|---|
 | **Seam A — environment** | a chain of immutable layers, IRI-keyed, innermost-first lookup with shadowing | inline every global into the term; carry the layer as an *effect capability* |
-| **Seam B — records** | resources: sets of IRI-keyed fields, open-world | derive a right-nested `Val::Sigma` from what a *class* declares |
+| **Seam B — records** | resources: sets of IRI-keyed fields, open-world; `is_a` as membership | derive a right-nested `Val::Sigma` from what a *class* declares; `is_a` never becomes `:` |
 
 Seam A: the chain **is** `Γ_env` in `Γ_env; Γ ⊢ e : T`. Seam B: a resource **is** a record type in
 Cooper's sense (D62 §3 already says "exactly the Class-as-record-signature Eigenius uses"). The
@@ -301,6 +301,41 @@ So the two halves disagree, and the disagreement is reachable from the surface s
   so an undeclared property is *in* the type: projectable, quantifiable over, and mentionable in a
   proposition the kernel checks. Today it is data the type system cannot talk about.
 
+### 3.9 `is_a` is not `:` — the graph's membership and the theory's typing are disjoint
+
+The graph's membership relation is `is_a`. The theory's is `:`. **Nothing reconciles them.**
+
+Exactly two validation rules invoke the type checker:
+
+| rule | what it checks |
+|---|---|
+| Rule 16 (`eigentt_value.rs`) | decoded `eigentt:TypeExpr` values — propositions and types |
+| Rule 23 (`inductive_decl.rs`) | inductive declarations |
+
+`is_a.rs` calls neither `check_infer` nor `resolve_class_type`. The property-level rules — `domain`,
+`range`, `class_types`, `requires` — check individual property values and their presence. That is
+**shape checking, not typing**: no rule turns `r is_a C` into a check of `r` against `C`'s resolved
+type.
+
+Two consequences:
+
+- **The Σ-chain `resolve_class_type` builds is almost never used to type anything.** It exists for
+  `Construct`, `PropAccess`, and D18 ontology-as-types inside EigenTT terms. The ~9.4M resources on
+  the chain are validated by shape rules that never consult it.
+- **`Exp::EigonClass` is pinned, not stratified.** `check_type` accepts it unconditionally
+  (`check/mod.rs:253`) and `check` admits it against any `Sort(m)` with `1 ≤ m` (`:564-568`) — every
+  class inhabits `Set` and above, regardless of the class. So `core:Class is_a core:Class` (the core
+  ontology is self-typing; 21 of its 120 resources are instances of `core:Class`) is admitted because
+  the question is never asked, not because stratification answers it.
+
+**This is the strongest Seam B item.** Under A11.2 clause 8, `r : R` *is* field membership — so `is_a`
+and `:` are the same relation, and their disjointness here is the two-systems split at its most
+basic. §3.7 and §3.8 are consequences of the same gap: the type of a resource is not used to decide
+whether the resource belongs.
+
+**Do not read the current behaviour as a design constraint.** On this axis the kernel declines to ask
+the question, so its behaviour is evidence of the gap, not of a settled semantics.
+
 ## 4. Closing Seam A: the chain and its ancestors are Γ_env
 
 `Layer::resolve_uncached` (`kernel/src/layer/mod.rs:713`) walks `parents.first()` innermost-first,
@@ -530,17 +565,46 @@ This answer is **stable under Seam B**: if a class resolves to a `Val::Record` i
 two same-field records are still definitionally equal, so the argument for nominal opacity is
 unchanged.
 
-### Q3 — the first genuine design decision
+### Q3 — the first genuine design decision, and how to assess it
 
-Q2 has now constrained it from one side: classes are δ-**opaque**, so `EigonClass` cannot become a
-transparent `Const` that unfolds. The live options are narrower:
+Q2 constrains it from one side: classes are δ-**opaque**, so `EigonClass` cannot become a transparent
+`Const`. Two options remain:
 
-- a `Const` that is **opaque by kind** — one variant, resolved for projection, never unfolded in
-  conversion; or
-- a distinct nominal former retained alongside `Const`.
+- **A — one `Const`, opaque by kind.** Opacity is a property of the resolved resource's kind.
+  Keeps §5's collapse to a single variant.
+- **B — a distinct nominal former retained** beside `Const`. Never resolves in conversion; keeps the
+  duplication §3.1 identified.
 
-The first keeps §5's collapse-to-one-variant and is the reason to prefer it. Still cross-gated on
-Seam B for what projection *returns* (Σ-chain vs record).
+**The current implementation cannot arbitrate this**, per §3.9: `EigonClass` is pinned at `Sort(1)`
+and above regardless of the class, and `is_a` never becomes `:`. Observing what the kernel does today
+measures a gap, not a semantics. The assessment therefore has to be by experiment.
+
+**M3 — is `is_a` a typing judgment? (run first; it can invalidate the others)**
+If `r is_a C` becomes `r : C`, then every resource commit is a check against a class type, and the
+volume of chain-reference comparisons rises by orders of magnitude — which changes M2's answer and
+possibly the whole calculus. Deliverable: a decision plus, if yes, an estimate of the check volume
+over a real chain.
+
+**M2 — conversion resolve traffic.** Follows the #194/#92 protocol: instrument, log, do not reject.
+For every `eq_nf` comparison whose two sides are chain references, record the variant pair, whether
+the IRIs matched, and whether a kind lookup would have been required. Run the workspace suite, the
+parse gate, and the WRN demo. Option A's cost is exactly the cases where IRIs differ and a kind
+lookup is forced; Option B's is zero. Decides whether opaque-by-kind has a hot-path cost, or whether
+a syntactic fast path (compare IRIs first, resolve only on mismatch) makes it free — which is what
+nanoda and Lean rely on.
+
+**M1 — does anything need a class at two orders?** Not answerable from the kernel, which pins the
+level. Answerable from the ontologies: find classes that are both a type of instances and an instance
+of a typed class. `core:Class is_a core:Class` shows the case exists. If classes need levels, Option
+B means threading them through a second variant; if they do not, Option B costs #188 nothing and the
+choice is much lower-stakes than §5 implied.
+
+**Reading the results.** A cheap M2 (syntactic fast path covers most comparisons) plus an M1 that
+says classes need levels ⇒ Option A. An expensive M2 or an M1 that says classes never need levels ⇒
+Option B is defensible and cheaper. M3 dominates both: if `is_a` becomes `:`, the comparison volume
+is a different problem and M2 must be re-run after that change, not before.
+
+Still cross-gated on Seam B for what projection *returns* (Σ-chain vs record).
 
 **Q4 — recursor elimination universe.** Independent of Q1–Q3 and of both seams. It concerns which
 universe a recursor may eliminate into (large elimination, `Prop` vs `Type`), and depends only on
