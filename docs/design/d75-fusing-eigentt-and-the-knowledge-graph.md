@@ -472,7 +472,73 @@ So the move is not "adopt constraints instead of TTR types". It is: adopt clause
 the validator's constraint checker and the kernel's type former become the same thing, and the thing
 they become is level-generic.
 
-### 6.3 What TTR contributes
+### 6.3 The synthesis
+
+**A resource is a record, inhabiting a specific universe level, that satisfies 0 or more class
+constraints.**
+
+Three clauses, each doing work:
+
+- **a record** — its type is derived from its *actual* fields, not from its classes (§3.8)
+- **at a specific level** — computed from its field types, not declared (§6.1: a constraint is
+  level-generic precisely because the levels live in the fields)
+- **satisfying 0 or more constraints** — `is_a` is a checkable claim of satisfaction, and the record
+  exists independently of what it satisfies
+
+This closes three of the five questions §6.0 opened.
+
+**Q8 — a constraint is a value, because a class is a resource.** This follows from the project's
+founding principle: *"Everything is a `Resource` — no separate Class/Property/DataType Rust types."*
+The value language violates it today —
+
+```rust
+Val::EigonClass(Iri),          // val.rs:62 — a class
+Val::ResourceVal(Box<Resource>), // val.rs:66 — a resource
+```
+
+— two variants for a thing the architecture says is one. No new machinery is needed for Q8; the
+existing machinery has to stop making the distinction.
+
+**Q6 — `check_infer` of a class reference is the record type of the class resource, at its level.**
+The hole in option C was that a constraint is not in `Sort(1)` or any sort. The synthesis dissolves
+it with a use/mention split:
+
+| | what it is | what classifies it |
+|---|---|---|
+| `C` **the resource** | a record with fields `requires`, `short_name`, `subclass_of`, … | its record type, at its level |
+| `C` **the constraint** | the predicate that resource *denotes* | a predicate on records |
+
+The reference carries the first; the second is reached by **interpreting** the resource, which is
+what `resolve_class_type` already does. A class reference therefore needs no exotic judgment — it is
+classified like any other resource reference.
+
+**And this moves Q3 again — back to one variant, for a better reason.** If a class is a resource and
+a reference to a resource is `Const(iri)`, then `EigonClass` is not a distinct kind of reference at
+all. It disappears not by merging into a type former (option A's argument, which Q2 refuted) and not
+by being categorically separate (option C's argument), but because **it was never a distinct kind of
+reference**. What is special about a class is not how you refer to it but what you do with it.
+
+So `r is_a C` is an **application** — the constraint denoted by `C`, applied to `r` — which is
+precisely §3.9's missing judgment, supplied rather than bolted on.
+
+| | variants | why |
+|---|---|---|
+| §3.1 as written | 5 → 1 | merge duplicates, de-fuse application |
+| option C | 5 → 2 | a constraint is categorically not a type |
+| synthesis | 5 → **1** | a class reference is a resource reference |
+
+**Two consequences to flag, not resolve.**
+
+*Levels are computed, not declared.* A record's level follows from its field types. That is consistent
+with §6.1 — classes need no `uparams` — and it means `Const(iri, levels)` carries levels only for
+declarations that are genuinely polymorphic (inductives, definitions), not for resource references.
+
+*Rule 0 is a policy, not a necessity.* "Every resource must declare at least one `is_a` class"
+(`is_a.rs:15`) contradicts "0 or more". Under the synthesis a classless record is well-formed, and
+Rule 0 becomes a curation rule the chain chooses to enforce. Whether to keep it is a decision, but it
+should be made knowing it is no longer forced by the model.
+
+### 6.4 What TTR contributes
 
 Cooper's appendix is an input, not the frame. Four things it supplies:
 
@@ -674,19 +740,18 @@ which is the win §5 wanted, reached by a different route.
 
 Adopting §6.0 is not free of new decisions. Five, none of them answered here:
 
-**Q6 — what is `check_infer(EigonClass(iri))`?** Today `check` admits a class against any `Sort(m)`
-with `1 ≤ m` (`check/mod.rs:564-568`). If a class is not a thing at a level, it is not in `Sort(1)`
-and not in any sort. A constraint reference needs *some* classifying judgment, and "none of the
-existing ones" is the honest current answer. **This is the largest hole in C.**
+**Q6 — what is `check_infer(EigonClass(iri))`? — ANSWERED in §6.3.** The record type of the class
+resource, at its level. The hole in option C came from conflating the class-resource with the
+constraint it denotes; the use/mention split removes it.
 
 **Q7 — what does `Construct(C, fields)` return?** Today, `EigonClass(class_iri)`
 (`check/mod.rs:784-796`). If `C` is a constraint rather than a type, the constructed thing's type is a
 **record type** and `C` is a check on it. Construct's result type changes — a representation
 decision, not a relabelling.
 
-**Q8 — is a constraint a first-class value?** `Val::EigonClass` is a value today. Can a constraint be
-quantified over, passed to a function, computed? Or is it declaration-only — mentionable but not
-manipulable?
+**Q8 — is a constraint a first-class value? — ANSWERED in §6.3.** Yes, because a class is a resource
+and "everything is a Resource". `Val::EigonClass` beside `Val::ResourceVal` is the architectural
+violation, not the answer.
 
 **Q9 — does institution dispatch key on declared `is_a` or on satisfied constraints?** Dispatch reads
 `is_a` today: a declaration, decidable from one resource. Under the constraint reading, "is an
