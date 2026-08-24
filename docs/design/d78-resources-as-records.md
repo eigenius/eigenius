@@ -141,6 +141,38 @@ satisfies `D`'s requirement by subsumption.
 Point 3 is the one that makes this rule **load-bearing rather than hygienic**, and it is why the rule
 lands in the same change as the record model, not after it.
 
+### 4.1 Is `Any` the top of the lattice?
+
+Measured over the shipped ontologies (`2026-08-24`): 894 declared classes, **0** declaring
+`subclass_of core:Resource`, **138** with no `subclass_of` at all, and 3 resources declaring
+`is_a core:Resource`. So the `Any` class exists in shape and is absent from the lattice. The question
+splits three ways and gets three different answers.
+
+**Entailment — already top, automatically, no edge required.** `C ⊨ Any` iff
+`fields(Any) ⊆ fields(C)`, and `fields(Any) = ∅`, so it holds vacuously for every `C`. §4's algorithm
+makes `Any` the top of the entailment order with nothing declared. **Adding a declared edge would
+contribute nothing** to typing, subtyping, or `Refine`'s side condition.
+
+**`subclass_of` — no implicit edge.** Three reasons:
+
+1. **It would be a derived edge in a declared relation.** 10d's whole shape is that `subclass_of` is
+   *declared* and entailment is *checked*. Synthesising edges is inference in a nominal relation —
+   the thing 10b was rejected for.
+2. **It would cost what the project has twice paid.** `class_with_subclass_closure(core:Resource)`
+   would become every class in the chain, each triggering a `scan_chain` — the full-chain-scan
+   antipattern behind two prior OOMs. Today it returns `{core:Resource}` and scans once.
+3. It would rewrite 138 declarations for no typing benefit, since (1) above already holds.
+
+**But the question points at a real hole.** `MATCH ?x : core:Resource` today returns the 3 resources
+declaring it directly, not everything. "Query for all resources" does not work. The fix is not an
+implicit edge — it is that **the universal class is answered by enumeration, not by closure**. Every
+resource is a record, so the query engine can answer `: core:Resource` from the resource index
+without walking subclasses at all. That is a query-planner special case for one well-known IRI, and
+strictly cheaper than the closure it replaces.
+
+Filed as its own concern rather than folded in: it is a query-engine gap that exists today and is
+independent of whether records land.
+
 ## 5. What changes in each of the three implementations
 
 D75 §6.4's four changes, as work:
