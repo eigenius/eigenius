@@ -111,8 +111,10 @@ D78 is not a prerequisite. The two meet at one trait method,
   caveat that Q3 "rests on the record model" is about the **argument** that produced Q3, not a code
   dependency.
 
-So D76 and D78 can interleave. The only ordering that matters is that D76 is a **chain-format change**
-and D78 is not.
+So D76 and D78 can interleave. ~~The only ordering that matters is that D76 is a chain-format change
+and D78 is not.~~ **Corrected `2026-08-24`: de-inlining is not a format change either** — the encoder
+already writes `ConstRef(iri)` + an `App` spine (Phase E). Only *levels on the wire* are, and those
+are #188's residual.
 
 ## 3. The census
 
@@ -493,8 +495,10 @@ as a question, not a claim.
 
 ## 7. The consolidation migration
 
-**This is the chain-format change**, and the sharpest difference from D78, which was additive
-throughout (D78 §7).
+~~This is the chain-format change.~~ **Corrected `2026-08-24` — see Phase E.** The encoder already
+emits `ConstRef(iri)` plus an `App` spine, so de-inlining makes the in-memory form match the
+persisted one and the bytes do not move. Only *levels on the wire* are a format change, and that is
+#188's residual.
 
 `InductiveType(decl, args)` → `App(Const(iri), args)`, and the inlined `Arc<InductiveDecl>` stops
 being carried in the term. What that touches:
@@ -546,9 +550,9 @@ the outcomes in §2 and the ordering below are the goal, and the reading serves 
 Six phases, drawn where the **risk class changes**, as D78's were. Two things make this phasing
 different from D78's and shape every boundary below:
 
-- **It is a chain-format change.** D78 was additive to the chain throughout and forced no reseed
-  (D78 §7). Phase E here rewrites every persisted term containing an inductive reference, and the
-  reseed is mandatory.
+- **Only E2 is a chain-format change** — corrected `2026-08-24`. De-inlining (E1) leaves the bytes
+  untouched, because the encoder already writes `ConstRef(iri)` + an `App` spine. Levels on the wire
+  (E2) are the format change, and are #188's residual by another name.
 - **The first phase is a new pass, not an inert addition.** D78 opened with "constructs exist, nothing
   produces them". Here the ordering pass (§6.2a) must land *before* the visibility rule it orders,
   so Phase A is load-bearing from the moment it exists.
@@ -756,8 +760,29 @@ changes. Plus: no resolve on the equal path, asserted by instrumentation rather 
 `InductiveType(decl, args)` → `App(Const(iri), args)`. **606 `Exp` sites, 128 `Val` sites** (§3), plus
 readback and both D47 codec arms.
 
-**⚠ The chain-format change.** Every persisted term containing an inductive reference changes shape.
-**A reseed is mandatory** — not optional as D78's was.
+**⚠ CORRECTED `2026-08-24`: de-inlining is *not* a chain-format change.** This phase and §7 both said
+every persisted term containing an inductive reference changes shape and a reseed is mandatory. The
+encoder says otherwise:
+
+```rust
+Exp::InductiveType(decl, args) => {
+    let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
+    for arg in args { current = ctor("App", vec![current, encode_type_json(arg)?]); }
+```
+
+**The wire form is already `App(App(ConstRef(iri), a₁), a₂)` — `Const` plus an `App` spine.** The
+`Arc<InductiveDecl>` never reaches the chain; only `decl.iri` does, and the encoder already de-fuses
+the application. `InductiveCtor` likewise emits `CtorApp(iri, ctor_name)` + spine.
+
+So de-inlining makes the **in-memory form match the form already persisted**. Encode becomes close to
+an identity, decode stops reconstructing a decl — and **the bytes on the chain do not change. No
+reseed.**
+
+**What *is* a format change is levels.** `Const(iri, levels)` with a non-empty level list is new on
+the wire, and that is #188's residual — not part of de-inlining. So E splits:
+
+- **E1 — de-inline.** In-memory only, no wire change, no reseed.
+- **E2 — levels on the wire.** Chain-format change, reseed, and #188's residual by another name.
 
 **Gate:** `every_shipped_ontology_document_round_trips`; a full `--umls-all` reseed at
 **9,439,633 resources, 0 errors**; the WRN demo at **56 Holds / 0 Fails**; the parse gate compared by
