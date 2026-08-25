@@ -75,7 +75,7 @@ cargo build --release -p eigenius-cli
 # the current validator, and a stale image validates it against old rules. The result is a
 # persistent snapshot containing something today's kernel would reject — discovered later, far from
 # here. Building is cheap next to a snapshot copy; not building is a correctness hole.
-say "building the kernel image (compose pins a tag, so `up` alone would reuse a stale one)"
+say 'building the kernel image (compose pins a tag, so a bare up would reuse a stale one)'
 docker compose build kernel
 
 say "staging the base snapshot into a clean volume ($VOLUME)"
