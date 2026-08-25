@@ -46,7 +46,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::augment::{LexicalBinding, LexiconAugmentation, Provenance, ResolutionMethod};
-use super::category::{denote_cat, is_adjective_cat, resolve_inductive};
+use super::category::{denote_cat, inductive_iri, is_adjective_cat};
 use super::named_entity::extract_named_entities_with;
 use crate::layer::{
     normalize_value, resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage,
@@ -293,8 +293,8 @@ pub fn abbreviation_resources(
     layer: &Arc<Layer>,
     binding: &AbbreviationBinding,
 ) -> Option<Vec<Resource>> {
-    let cat_decl = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let num_decl = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
+    let cat_decl = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let num_decl = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
     let concept = Iri::parse(binding.concept_iri).ok()?;
     let class_iri = Iri::parse(wk::CLASS).ok()?;
 

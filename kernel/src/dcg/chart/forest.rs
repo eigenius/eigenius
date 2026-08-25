@@ -365,7 +365,7 @@ mod tests {
     use std::sync::Arc;
 
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
     fn cls(iri: &str) -> Exp {
         Exp::EigonClass(Iri::parse(iri).unwrap())
@@ -460,11 +460,15 @@ mod tests {
                 Box::new(restr),
             );
             leaf(Exp::InductiveCtor(
-                crate::nbe::term::list_decl(),
+                crate::nbe::term::list_decl().iri.clone(),
                 "cat_n".into(),
                 vec![
                     sig_ty,
-                    Exp::InductiveCtor(crate::nbe::term::list_decl(), "sg".into(), vec![]),
+                    Exp::InductiveCtor(
+                        crate::nbe::term::list_decl().iri.clone(),
+                        "sg".into(),
+                        vec![],
+                    ),
                 ],
             ))
         };

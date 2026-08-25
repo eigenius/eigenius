@@ -783,9 +783,9 @@ fn refine_rules() -> &'static [CatRule] {
 
 /// Pull the head noun's `decl` (from `noun`'s category ctor) and the `C` / `num` metavariables the
 /// trigger bound — the shared preamble of the refine builders.
-fn noun_parts(noun: &Item, binds: &CatSubst) -> (Arc<crate::nbe::term::InductiveDecl>, Exp, Exp) {
+fn noun_parts(noun: &Item, binds: &CatSubst) -> (crate::ontology::iri::Iri, Exp, Exp) {
     let decl = match noun.cat() {
-        Exp::InductiveCtor(d, _, _) => d.clone(),
+        Exp::InductiveCtor(iri, _, _) => iri.clone(),
         _ => unreachable!("a refine rule matched a non-inductive noun category"),
     };
     let c = binds.get("C").expect("refine trigger binds C").clone();
@@ -799,7 +799,11 @@ fn noun_parts(noun: &Item, binds: &CatSubst) -> (Arc<crate::nbe::term::Inductive
 /// coordinate without introducing an abstract `C`. Rust-only ctor (categories are name-keyed on the
 /// shared `list_decl`), so no ontology edit / reseed.
 pub(crate) fn cat_mod_cat() -> Exp {
-    Exp::InductiveCtor(crate::nbe::term::list_decl(), "cat_mod".into(), Vec::new())
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_mod".into(),
+        Vec::new(),
+    )
 }
 
 /// **Modifier lift** (M1: adjectives): re-categorise a modifier-eligible item into a standalone
@@ -1426,10 +1430,9 @@ pub fn apply_core(
     };
     // The composed RESULT carries the rule's keyed modality, exactly as Baldridge writes it:
     // `X/⋄Y Y/⋄Z ⇒B X/⋄Z` (194), `X/×Y Y\×Z ⇒B X\×Z` (200a). It is NOT inherited from the inputs.
-    let mk =
-        |decl: &Arc<crate::nbe::term::InductiveDecl>, ctor: &str, mode: &Exp, a: Exp, b: Exp| {
-            Exp::InductiveCtor(decl.clone(), ctor.into(), vec![mode.clone(), a, b])
-        };
+    let mk = |iri: &crate::ontology::iri::Iri, ctor: &str, mode: &Exp, a: Exp, b: Exp| {
+        Exp::InductiveCtor(iri.clone(), ctor.into(), vec![mode.clone(), a, b])
+    };
 
     // Forward family: left is the primary functor `A/B` (fwd); not itself a composition output.
     if !primary_blocked(left.prov()) {
@@ -1716,7 +1719,7 @@ fn conjoin_canonical(and: &crate::ontology::iri::Iri, p_body: &Exp, new_restr: E
 /// consumes (the bare-mass `And` over-generation used to be the only other flattener; see
 /// `experiments/parsing/near-encoded-bucket-analysis.md`). Sem is the Σ itself; provenance `Compound`.
 fn refine_conjoin(
-    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    decl: &crate::ontology::iri::Iri,
     c: &Exp,
     noun_num: &Exp,
     layer: &Arc<Layer>,
@@ -2082,13 +2085,17 @@ mod dispatch_tests {
         // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
         // the call sites keep reading as `A/B` / `A\\B`.
         let args = if name == "fwd" || name == "bwd" {
-            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            let mut v = vec![Exp::InductiveCtor(
+                list_decl().iri.clone(),
+                "m_all".into(),
+                Vec::new(),
+            )];
             v.extend(args);
             v
         } else {
             args
         };
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
     fn cls(s: &str) -> Exp {
         Exp::EigonClass(Iri::parse(s).unwrap())
@@ -2985,9 +2992,13 @@ mod dispatch_tests {
     /// A slash carrying an EXPLICIT modality — `ct` injects the permissive `m_all`, so mode-licensing
     /// tests need to name the mode themselves.
     fn ct_mode(name: &str, mode: &str, args: Vec<Exp>) -> Exp {
-        let mut v = vec![Exp::InductiveCtor(list_decl(), mode.into(), Vec::new())];
+        let mut v = vec![Exp::InductiveCtor(
+            list_decl().iri.clone(),
+            mode.into(),
+            Vec::new(),
+        )];
         v.extend(args);
-        Exp::InductiveCtor(list_decl(), name.into(), v)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), v)
     }
 
     // ── multimodal slash licensing (Baldridge 2002 §5.2) ─────────────────────────────────────────

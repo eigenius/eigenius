@@ -217,17 +217,17 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
         // Both are InductiveVal — same decl + ctor + recurse on args.
         (
             Val::InductiveVal {
-                decl: ld,
+                iri: ld,
                 ctor_name: lc,
                 args: la,
             },
             Val::InductiveVal {
-                decl: rd,
+                iri: rd,
                 ctor_name: rc,
                 args: ra,
             },
         ) => {
-            if ld.name != rd.name || lc != rc {
+            if ld != rd || lc != rc {
                 return Err(mismatch(level, &lhs, &rhs));
             }
             if la.len() != ra.len() {
@@ -434,11 +434,11 @@ fn zonk_val(mctx: &MetaCtx, val: &Val) -> Val {
             indices: indices.iter().map(|i| zonk_val(mctx, i)).collect(),
         },
         Val::InductiveVal {
-            decl,
+            iri,
             ctor_name,
             args,
         } => Val::InductiveVal {
-            decl: decl.clone(),
+            iri: iri.clone(),
             ctor_name: ctor_name.clone(),
             args: args.iter().map(|a| zonk_val(mctx, a)).collect(),
         },
@@ -485,7 +485,7 @@ mod tests {
 
     fn nat_zero(decl: &Arc<InductiveDecl>) -> Val {
         Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "zero".to_string(),
             args: Vec::new(),
         }
@@ -493,7 +493,7 @@ mod tests {
 
     fn nat_succ(decl: &Arc<InductiveDecl>, n: Val) -> Val {
         Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "succ".to_string(),
             args: vec![n],
         }

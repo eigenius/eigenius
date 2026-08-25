@@ -60,7 +60,7 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
 
 pub(crate) fn ind_zero(decl: &Arc<InductiveDecl>) -> Val {
     Val::InductiveVal {
-        decl: decl.clone(),
+        iri: decl.iri.clone(),
         ctor_name: "zero".to_string(),
         args: Vec::new(),
     }
@@ -68,7 +68,7 @@ pub(crate) fn ind_zero(decl: &Arc<InductiveDecl>) -> Val {
 
 pub(crate) fn ind_succ(decl: &Arc<InductiveDecl>, n: Val) -> Val {
     Val::InductiveVal {
-        decl: decl.clone(),
+        iri: decl.iri.clone(),
         ctor_name: "succ".to_string(),
         args: vec![n],
     }

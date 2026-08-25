@@ -323,7 +323,7 @@ fn decode_json(
         .collect();
 
     Ok(Exp::InductiveCtor(
-        decl.clone(),
+        decl.iri.clone(),
         ctor_name.to_string(),
         decoded_args?,
     ))
@@ -707,7 +707,7 @@ data probe:Lits {
         match exp {
             Exp::InductiveCtor(d, name, args) => {
                 assert_eq!(name, "App");
-                assert_eq!(d.iri.as_str(), iris::JUSTIFICATION_TERM);
+                assert_eq!(d.as_str(), iris::JUSTIFICATION_TERM);
                 assert!(matches!(&args[0], Exp::InductiveCtor(_, n, _) if n == "DeclaredEvidence"));
                 match &args[1] {
                     Exp::InductiveCtor(_, n, inner) => {

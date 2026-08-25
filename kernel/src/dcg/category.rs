@@ -22,8 +22,7 @@ use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
 use crate::nbe::readback::readback_val;
-use crate::nbe::term::{list_decl, Exp, InductiveDecl, Name};
-use crate::nbe::val::Val;
+use crate::nbe::term::{list_decl, Exp, Name};
 use crate::ontology::iri::Iri;
 
 /// A category type-variable binding: schematic `Exp::Var` name → concrete type.
@@ -245,7 +244,7 @@ pub const MODE_APP: &str = "m_app";
 /// `None` if the `lexicon:Mode` inductive doesn't resolve in the layer chain.
 pub fn mode_value(layer: &Arc<Layer>, name: &str) -> Option<Exp> {
     Some(Exp::InductiveCtor(
-        resolve_inductive(layer, "urn:eigenius:lexicon:Mode")?,
+        inductive_iri(layer, "urn:eigenius:lexicon:Mode")?,
         name.to_string(),
         vec![],
     ))
@@ -545,15 +544,6 @@ pub(crate) fn inductive_iri(layer: &Arc<Layer>, iri_str: &str) -> Option<Iri> {
     crate::program::ground::is_inductive_type(&resource).then_some(iri)
 }
 
-pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc<InductiveDecl>> {
-    let iri = Iri::parse(iri_str).ok()?;
-    let resource = layer.resolve(&iri)?;
-    match crate::program::ground::resolve_inductive_type(&iri, &resource, layer).ok()? {
-        Val::InductiveType { decl, .. } => Some(decl),
-        _ => None,
-    }
-}
-
 /// The transparent **adverb modifier** categories (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
 /// A productive `-ly` adverb seeds these, each with an identity sem, so the clause composes and the
 /// adverb contributes nothing to the claim `Prop` (the science-transparent default; the
@@ -583,10 +573,10 @@ pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc
 /// adjective-modifier cat ([`adverb_modifier_cats`]) and the D63 denominal `X-based` adjective
 /// (`docs/notes/d63-compound-morphology.md` §3, Slice 2). `None` if the inductives don't resolve.
 pub fn predicative_adjective_cat(layer: &Arc<Layer>) -> Option<Exp> {
-    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
-    let num = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
+    let num = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
     let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let adj = Exp::InductiveCtor(fin, "adj".to_string(), vec![]);
@@ -605,9 +595,9 @@ pub fn predicative_adjective_cat(layer: &Arc<Layer>) -> Option<Exp> {
 }
 
 pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
-    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
     let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
@@ -646,9 +636,9 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
 /// clause feature is `fin_any` so they wrap any finite declarative. Identity sem (transparent).
 /// Used in addition to [`adverb_modifier_cats`] for lexicalized discourse adverbs.
 pub fn sentence_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
-    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let fin_any = Exp::InductiveCtor(fin, "fin_any".to_string(), vec![]);
     let s = Exp::InductiveCtor(cat.clone(), "cat_s".to_string(), vec![dcl, fin_any]);
@@ -1029,16 +1019,13 @@ mod tests {
     #[test]
     fn governed_preposition_test_refuses_the_prep_any_wildcard() {
         fn ctor(name: &str, args: Vec<Exp>) -> Exp {
-            // A minimal `lexicon:Cat` inductive — the predicate only reads ctor names.
-            let decl = Arc::new(InductiveDecl {
-                iri: Iri::parse("urn:eigenius:lexicon:Cat").expect("iri"),
-                name: "Cat".into(),
-                params: vec![],
-                indices: vec![],
-                sort: Exp::sort(0),
-                ctors: vec![],
-            });
-            Exp::InductiveCtor(decl, name.to_string(), args)
+            // The node carries the inductive's IRI (D76 Phase B); this built a
+            // whole minimal `lexicon:Cat` declaration to hold the same string.
+            Exp::InductiveCtor(
+                Iri::parse("urn:eigenius:lexicon:Cat").expect("iri"),
+                name.to_string(),
+                args,
+            )
         }
         let vp = ctor(
             "bwd",
@@ -1083,8 +1070,14 @@ mod tests {
     #[test]
     fn every_connective_the_parser_builds_is_declared_in_the_ontology() {
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
-        let decl =
-            resolve_inductive(ctx.head(), "urn:eigenius:lexicon:Conn").expect("Conn resolves");
+        // The test needs the DECLARATION, not just the name — it enumerates the
+        // constructors — so it resolves through the environment (D76 Phase B).
+        let decl = match crate::nbe::env_global::Env::of(ctx.head().clone())
+            .lookup(&Iri::parse("urn:eigenius:lexicon:Conn").unwrap())
+        {
+            crate::nbe::env_global::Global::Inductive(d) => d,
+            other => panic!("lexicon:Conn must be an inductive, got {other:?}"),
+        };
         let declared: Vec<&str> = decl.ctors.iter().map(|c| c.name.as_str()).collect();
         // The exhaustive set of names the coordination builders can emit: `coordinate_prop` /
         // `coordinate_np` map an `op_iri` to one of the first three; `coordinate_but_not` emits the last.
@@ -1169,13 +1162,17 @@ mod tests {
         // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
         // the call sites keep reading as `A/B` / `A\\B`.
         let args = if name == "fwd" || name == "bwd" {
-            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            let mut v = vec![Exp::InductiveCtor(
+                list_decl().iri.clone(),
+                "m_all".into(),
+                Vec::new(),
+            )];
             v.extend(args);
             v
         } else {
             args
         };
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
 
     // ── D1 modifier-restrictor discriminator (nominal-modification NF §5/§8 D1) ──
@@ -1189,16 +1186,9 @@ mod tests {
         Exp::App(Box::new(f), Box::new(a))
     }
     fn and2(a: Exp, b: Exp) -> Exp {
-        // A minimal `logic:And` inductive — `modifier_class` only reads `decl.iri`.
-        let and = Arc::new(InductiveDecl {
-            iri: Iri::parse("urn:eigenius:logic:And").expect("iri"),
-            name: "And".into(),
-            params: vec![],
-            indices: vec![],
-            sort: Exp::sort(0),
-            ctors: vec![],
-        });
-        Exp::const_applied(and.iri.clone(), Vec::new(), vec![a, b])
+        // `modifier_class` reads the IRI, which the term now carries directly.
+        let and = Iri::parse("urn:eigenius:logic:And").expect("iri");
+        Exp::const_applied(and.clone(), Vec::new(), vec![a, b])
     }
 
     #[test]

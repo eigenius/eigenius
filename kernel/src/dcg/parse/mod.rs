@@ -1333,8 +1333,9 @@ mod tests {
                 ctors: Vec::new(),
             })
         }
-        let ctor =
-            |local: &str, args: Vec<Exp>| Exp::InductiveCtor(decl(local), Name::from(local), args);
+        let ctor = |local: &str, args: Vec<Exp>| {
+            Exp::InductiveCtor(decl(local).iri.clone(), Name::from(local), args)
+        };
         let m = ctor("m_all", vec![]);
         let vp = ctor(
             "bwd",

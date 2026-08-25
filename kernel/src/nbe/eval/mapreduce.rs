@@ -49,7 +49,7 @@ pub(super) fn eval_map_impl<T: Tracer>(
                 ))),
             }
         }
-        Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+        Val::InductiveVal { ref iri, .. } if iri.local_name() == "List" => {
             match crate::nbe::val::inductive_list_to_vec(&coll) {
                 Some(items) => map_items(items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
@@ -105,7 +105,7 @@ pub(super) fn eval_reduce_impl<T: Tracer>(
                 ))),
             }
         }
-        Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+        Val::InductiveVal { ref iri, .. } if iri.local_name() == "List" => {
             match crate::nbe::val::inductive_list_to_vec(&coll) {
                 Some(items) => fold_items(acc, items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
@@ -272,13 +272,13 @@ mod tests {
     fn ind_list(items: Vec<Val>) -> Val {
         let list = crate::nbe::term::list_decl();
         let mut current = Val::InductiveVal {
-            decl: list.clone(),
+            iri: list.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
         for item in items.into_iter().rev() {
             current = Val::InductiveVal {
-                decl: list.clone(),
+                iri: list.iri.clone(),
                 ctor_name: "cons".to_string(),
                 args: vec![item, current],
             };

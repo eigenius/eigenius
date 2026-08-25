@@ -118,6 +118,53 @@ impl CheckCtx {
         }
     }
 
+    /// Instantiate a closure under this context's environment.
+    ///
+    /// D76 Phase B: `Clos::apply` defaults to an *effect-free and environment-free*
+    /// evaluation, which is the `EvalCtx::Pure` conflation one level down — a
+    /// closure captures its `Rho` but the global environment is ambient, so
+    /// applying one without it leaves any name in the body a neutral. The checker
+    /// applies Π-closures constantly, so it goes through here.
+    pub fn apply(
+        &self,
+        clos: &crate::nbe::val::Clos,
+        v: Val,
+    ) -> Result<Val, crate::nbe::eval::EvalError> {
+        clos.apply_ctx(v, &self.eval_ctx())
+    }
+
+    /// Apply a value to an argument under this context's environment. See
+    /// [`CheckCtx::apply`].
+    pub fn app(&self, f: Val, v: Val) -> Result<Val, crate::nbe::eval::EvalError> {
+        f.app_ctx(v, &self.eval_ctx())
+    }
+
+    /// The declaration `iri` names, or a diagnostic saying what the environment
+    /// found instead.
+    ///
+    /// D76 Phase B: a term names its inductive rather than carrying it, so every
+    /// consumer that needs the telescope or the constructor list comes through
+    /// here. Failing loudly matters — an unresolved name that fell through would
+    /// leave the checker with no constructors and no arity, which reads downstream
+    /// as "this constructor does not exist" rather than "this inductive is not
+    /// declared".
+    pub fn lookup_inductive(
+        &self,
+        iri: &Iri,
+    ) -> Result<std::sync::Arc<crate::nbe::term::InductiveDecl>, CheckError> {
+        match self.env.lookup(iri) {
+            crate::nbe::env_global::Global::Inductive(d) => Ok(d),
+            other => Err(CheckError::ExpectedInductive(format!(
+                "`{iri}` does not name an inductive in this environment — \
+                 it resolves to {}",
+                match other {
+                    crate::nbe::env_global::Global::Absent => "nothing".to_string(),
+                    o => format!("{o:?}"),
+                }
+            ))),
+        }
+    }
+
     /// This context with one more declaration in scope — a declaration being
     /// checked is in scope for its own constructor types (D76 Phase B,
     /// [`Env::declaring`](crate::nbe::env_global::Env::declaring)).
@@ -495,13 +542,16 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, t, &gen)?;
-            check(&mut inner, e, &g.apply(gen)?)
+            check(&mut inner, e, &ctx.apply(g, gen)?)
         }
 
         // Pair against Sigma type
         (Exp::Pair(e1, e2), Val::Sig(t, g)) => {
             check(ctx, e1, t)?;
-            check(ctx, e2, &g.apply(ctx.eval(e1, &ctx.rho)?)?)
+            {
+                let arg = ctx.eval(e1, &ctx.rho)?;
+                check(ctx, e2, &ctx.apply(g, arg)?)
+            }
         }
 
         // Constructor against Sum type
@@ -703,21 +753,28 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // each constructor argument is checked against its declared
         // type (with parameters substituted).
         (
-            Exp::InductiveCtor(decl, ctor_name, args),
+            Exp::InductiveCtor(iri, ctor_name, args),
             Val::InductiveType {
                 decl: expected_decl,
                 params,
                 indices,
             },
-        ) => check_inductive_ctor_args(
-            ctx,
-            decl,
-            ctor_name,
-            args,
-            expected_decl,
-            params,
-            Some(indices),
-        )
+        ) => {
+            // D76 Phase B: the term names the inductive, so the declaration comes
+            // from `Γ_env`. A name the environment cannot resolve is an error here
+            // rather than a silent fallthrough — a constructor of an unknown
+            // inductive has no type to check against.
+            let decl = ctx.lookup_inductive(iri)?;
+            check_inductive_ctor_args(
+                ctx,
+                &decl,
+                ctor_name,
+                args,
+                expected_decl,
+                params,
+                Some(indices),
+            )
+        }
         .map(|_| ()),
 
         // Pattern-match elimination with motive inferred from the
@@ -876,7 +933,10 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let t1 = check_infer(ctx, e1)?;
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
-            Ok(g.apply(ctx.eval(e2, &ctx.rho)?)?)
+            {
+                let arg = ctx.eval(e2, &ctx.rho)?;
+                Ok(ctx.apply(&g, arg)?)
+            }
         }
 
         Exp::Fst(e) => {
@@ -888,7 +948,10 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::Snd(e) => {
             let t = check_infer(ctx, e)?;
             let (_, g) = ext_sig(&t)?;
-            Ok(g.apply(ctx.eval(e, &ctx.rho)?.vfst()?)?)
+            {
+                let arg = ctx.eval(e, &ctx.rho)?.vfst()?;
+                Ok(ctx.apply(&g, arg)?)
+            }
         }
 
         // Eigenius: property/observation access type inference.
@@ -1069,7 +1132,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             // J reduces to d(x) when p = refl(x), so the result type
             // is the return type of d applied to x.
             match d_type {
-                Val::Pi(_, g) => g.apply(x_val).map_err(CheckError::from),
+                Val::Pi(_, g) => ctx.apply(&g, x_val).map_err(CheckError::from),
                 _ => Ok(Val::sort(1)), // conservative fallback
             }
         }
@@ -1095,7 +1158,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 )
             })?;
             // Compute result element type B by applying closure to a dummy
-            let b = b_clos.apply(gen_val(&ctx.rho))?;
+            let b = ctx.apply(&b_clos, gen_val(&ctx.rho))?;
             // Build list type with element type B
             let list_exp = Exp::list(readback_val(ctx.rho.len(), &b));
             ctx.eval(&list_exp, &ctx.rho).map_err(CheckError::from)
@@ -1110,7 +1173,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 )
             })?;
             // f's return must be a function A → B
-            let inner_type = inner_clos.apply(gen_val(&ctx.rho))?;
+            let inner_type = ctx.apply(&inner_clos, gen_val(&ctx.rho))?;
             let (_a_inner, _b_ret_clos) = ext_pi(&inner_type).map_err(|_| {
                 "Reduce: first argument must be a curried function (B → A → B)".to_string()
             })?;
@@ -1137,7 +1200,8 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // has no parameters (the result type is fully determined).
         // Parameterised inductives need an expected type to drive
         // parameter inference; require checking mode for those.
-        Exp::InductiveCtor(decl, ctor_name, args) => {
+        Exp::InductiveCtor(iri, ctor_name, args) => {
+            let decl = ctx.lookup_inductive(iri)?;
             if !decl.params.is_empty() {
                 return Err(CheckError::CannotInfer(format!(
                     "InductiveCtor: cannot infer type of `{}.{ctor_name}` — \
@@ -1151,7 +1215,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             // arguments IS the answer — including its indices, which the previous
             // `indices: Vec::new()` silently discarded. Lean's `infer_app` does exactly this
             // (`inst(fun, ctx)`), which is why it needs no special case for indexed inductives.
-            check_inductive_ctor_args(ctx, decl, ctor_name, args, decl, &[], None)
+            check_inductive_ctor_args(ctx, &decl, ctor_name, args, &decl, &[], None)
         }
 
         // Recursor application — Phase 11b step 5.
@@ -1163,11 +1227,14 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         //    [`derive_minor_types`](super::recursor).
         // 4. The result type is `motive(major)`.
         Exp::InductiveRec {
-            decl,
+            iri,
             motive,
             minors,
             major,
-        } => check_infer_inductive_rec(ctx, decl, motive, minors, major),
+        } => {
+            let decl = ctx.lookup_inductive(iri)?;
+            check_infer_inductive_rec(ctx, &decl, motive, minors, major)
+        }
 
         // Pattern-match without an explicit motive cannot run in
         // inference mode — its result type is determined by checking-
@@ -1306,7 +1373,7 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
                 // Not this field — apply the closure with a dummy value
                 // and search the rest of the chain
                 let gen = gen_val(&g.env);
-                let rest = g.apply(gen).ok()?;
+                let rest = ctx.apply(g, gen).ok()?;
                 find_sigma_field(ctx, &rest, field_name)
             }
         }
@@ -3084,9 +3151,13 @@ mod tests {
         let ctx = check_ctx_for(fake.clone(), 1);
 
         let succ_zero_exp = Exp::InductiveCtor(
-            nat.clone(),
+            nat.iri.clone(),
             "succ".to_string(),
-            vec![Exp::InductiveCtor(nat, "zero".to_string(), Vec::new())],
+            vec![Exp::InductiveCtor(
+                nat.iri.clone(),
+                "zero".to_string(),
+                Vec::new(),
+            )],
         );
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:pose").unwrap(),
@@ -3538,7 +3609,7 @@ mod tests {
     #[test]
     fn infers_indexed_ctor_result_indices() {
         let decl = flag_decl();
-        let exp = Exp::InductiveCtor(decl.clone(), "mk".to_string(), vec![Exp::Unit]);
+        let exp = Exp::InductiveCtor(decl.iri.clone(), "mk".to_string(), vec![Exp::Unit]);
         let mut c = ctx().declaring(decl.clone());
         let ty = check_infer(&mut c, &exp).expect("an indexed ctor must be inferable");
         match ty {
@@ -3612,7 +3683,7 @@ mod tests {
         // The constructor expression: nil applied to its param A := Sort(0).
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::sort(0)],
@@ -3633,7 +3704,7 @@ mod tests {
         // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
         // declaration must be in `Γ_env` for the checker to evaluate it.
         let mut c = ctx().declaring(decl.clone());
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::One],
@@ -3665,7 +3736,7 @@ mod tests {
         let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::sort(0)],
@@ -3684,7 +3755,7 @@ mod tests {
         // pre-D48 — the new index-unification path is a no-op when
         // `decl.indices.is_empty()`.
         let nat = nat_decl();
-        let mut c = ctx();
+        let mut c = ctx().declaring(nat.clone());
         let zero = nat_zero_exp(&nat);
         let expected = Val::InductiveType {
             decl: nat.clone(),
@@ -3863,7 +3934,7 @@ mod tests {
         let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::sort(0)],

@@ -296,7 +296,7 @@ pub fn coordinate_prop(
     let mut all = members;
     all.push(r_sem.clone());
     let conn = Exp::InductiveCtor(
-        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        inductive_iri(layer, "urn:eigenius:lexicon:Conn")?,
         conn_name.into(),
         vec![],
     );
@@ -346,11 +346,15 @@ pub fn coordinate_mod(
     all.push(r_sem.clone());
     // Neutral connective marker; `complete_coord` folds `Or` for a `cat_mod` base regardless (D63 §6).
     let conn = Exp::InductiveCtor(
-        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        inductive_iri(layer, "urn:eigenius:lexicon:Conn")?,
         "conn_list".into(),
         vec![],
     );
-    let coord_cat = Exp::InductiveCtor(list_decl(), "cat_coord".into(), vec![r_cat.clone(), conn]);
+    let coord_cat = Exp::InductiveCtor(
+        list_decl().iri.clone(),
+        "cat_coord".into(),
+        vec![r_cat.clone(), conn],
+    );
     Some((coord_cat, list_term(&all)))
 }
 
@@ -438,9 +442,9 @@ pub fn complete_coord(
 /// only their fields (`cons(head, tail)`, `nil()`); the element type is inferred
 /// from the check-mode expected type (`List C` at the consuming verb's slot).
 fn list_term(members: &[Exp]) -> Exp {
-    let mut acc = Exp::InductiveCtor(list_decl(), "nil".into(), vec![]);
+    let mut acc = Exp::InductiveCtor(list_decl().iri.clone(), "nil".into(), vec![]);
     for m in members.iter().rev() {
-        acc = Exp::InductiveCtor(list_decl(), "cons".into(), vec![m.clone(), acc]);
+        acc = Exp::InductiveCtor(list_decl().iri.clone(), "cons".into(), vec![m.clone(), acc]);
     }
     acc
 }
@@ -605,7 +609,7 @@ pub fn coordinate_np(
     let mut all = members;
     all.push(r_member);
     let conn = Exp::InductiveCtor(
-        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        inductive_iri(layer, "urn:eigenius:lexicon:Conn")?,
         conn_name.into(),
         vec![],
     );
@@ -683,8 +687,8 @@ fn np_conjunct(
 ) -> Option<(
     Exp,
     Exp,
-    Arc<crate::nbe::term::InductiveDecl>,
-    Arc<crate::nbe::term::InductiveDecl>,
+    crate::ontology::iri::Iri,
+    crate::ontology::iri::Iri,
 )> {
     let Exp::InductiveCtor(cat_decl, n, args) = cat else {
         return None;
@@ -750,11 +754,11 @@ pub fn coordinate_but_not(
     };
     let c = common_super(lt, rt, layer)?;
     let conn = Exp::InductiveCtor(
-        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        inductive_iri(layer, "urn:eigenius:lexicon:Conn")?,
         "conn_but_not".into(),
         vec![],
     );
-    let num_decl = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
+    let num_decl = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
     let pl = Exp::InductiveCtor(num_decl, "pl".into(), vec![]);
     let group_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_group".into(), vec![c, conn, pl]);
     Some((group_cat, list_term(&[l_sem.clone(), r_sem.clone()])))
@@ -1279,8 +1283,8 @@ pub fn type_raise(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)
     // of a restrictive relative). `Mood`/`Fin` are sibling inductives, resolved from
     // the layer (as `coordinate_np` resolves `Conn`); `cat_s`/`fwd`/`bwd` reuse the
     // `cat_np`'s own `Cat` decl.
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
     let s = Exp::InductiveCtor(
         cat_decl.clone(),
         "cat_s".into(),
@@ -1457,8 +1461,8 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
         return None;
     }
     let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
-    let mood_d = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin_d = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let mood_d = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin_d = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
     let dcl = Exp::InductiveCtor(mood_d, "dcl".into(), vec![]);
     let fin_any = Exp::InductiveCtor(fin_d, "fin_any".into(), vec![]);
     let s_full = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl, fin_any]);
@@ -1606,13 +1610,17 @@ mod tests {
         // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
         // the call sites keep reading as `A/B` / `A\\B`.
         let args = if name == "fwd" || name == "bwd" {
-            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            let mut v = vec![Exp::InductiveCtor(
+                list_decl().iri.clone(),
+                "m_all".into(),
+                Vec::new(),
+            )];
             v.extend(args);
             v
         } else {
             args
         };
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
     fn cls(iri: &str) -> Exp {
         Exp::EigonClass(Iri::parse(iri).unwrap())

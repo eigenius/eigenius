@@ -195,7 +195,7 @@ fn higher_order_ih(
             Exp::App(Box::new(acc), Box::new(Exp::Var(n.clone())))
         });
     let mut body = Exp::InductiveRec {
-        decl: decl.clone(),
+        iri: decl.iri.clone(),
         motive: Box::new(Exp::Var("HV#".to_string())),
         minors: minor_names.iter().map(|n| Exp::Var(n.clone())).collect(),
         major: Box::new(major),
@@ -339,7 +339,7 @@ mod tests {
         // The constructor argument: `λ_. Foo.base`, a value of type `Set -> Foo`.
         let arg = Val::Lam(crate::nbe::val::Clos::new(
             Patt::Unit,
-            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Exp::InductiveCtor(foo.iri.clone(), "base".to_string(), Vec::new()),
             Rho::Nil,
         ));
 
@@ -417,7 +417,7 @@ mod tests {
         // The constructor argument `λ_. base`, so the recursive call lands on `base`.
         let f = Val::Lam(crate::nbe::val::Clos::new(
             Patt::Unit,
-            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Exp::InductiveCtor(foo.iri.clone(), "base".to_string(), Vec::new()),
             Rho::Nil,
         ));
 
@@ -427,7 +427,8 @@ mod tests {
             &[base_minor, rall_minor],
             "rall",
             &[f],
-            &EvalCtx::pure(),
+            // The IH recurses into `Foo`, so the declaration must be reachable.
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(foo.clone())),
         )
         .expect("iota over `rall` with a hypothesis that recurses");
         match result {
@@ -488,10 +489,10 @@ mod tests {
 
         // succ_minor body: succ (succ ih)
         let succ_body = Exp::InductiveCtor(
-            nat.clone(),
+            nat.iri.clone(),
             "succ".to_string(),
             vec![Exp::InductiveCtor(
-                nat.clone(),
+                nat.iri.clone(),
                 "succ".to_string(),
                 vec![Exp::Var("ih".to_string())],
             )],
@@ -556,12 +557,12 @@ mod tests {
             ],
         });
         let leaf = Val::InductiveVal {
-            decl: tree.clone(),
+            iri: tree.iri.clone(),
             ctor_name: "leaf".to_string(),
             args: Vec::new(),
         };
         let node = |l: Val, r: Val| Val::InductiveVal {
-            decl: tree.clone(),
+            iri: tree.iri.clone(),
             ctor_name: "node".to_string(),
             args: vec![l, r],
         };
@@ -655,12 +656,12 @@ mod tests {
 
         let elem = Val::Unit;
         let nil_val = Val::InductiveVal {
-            decl: list_decl.clone(),
+            iri: list_decl.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
         let cons = |a: Val, l: Val| Val::InductiveVal {
-            decl: list_decl.clone(),
+            iri: list_decl.iri.clone(),
             ctor_name: "cons".to_string(),
             args: vec![a, l],
         };
@@ -675,7 +676,7 @@ mod tests {
                 Box::new(Exp::Lam(
                     Patt::Var("ih".to_string()),
                     Box::new(Exp::InductiveCtor(
-                        nat.clone(),
+                        nat.iri.clone(),
                         "succ".to_string(),
                         vec![Exp::Var("ih".to_string())],
                     )),
@@ -721,7 +722,7 @@ mod tests {
             .extend(Patt::Var("zero_min".to_string()), zero_minor)
             .extend(Patt::Var("succ_min".to_string()), succ_minor);
         let exp = Exp::InductiveRec {
-            decl: nat.clone(),
+            iri: nat.iri.clone(),
             motive: Box::new(Exp::sort(1)),
             minors: vec![
                 Exp::Var("zero_min".to_string()),
@@ -729,7 +730,14 @@ mod tests {
             ],
             major: Box::new(Exp::Var("n".to_string())),
         };
-        let result = eval_ctx(&exp, &rho, &EvalCtx::pure()).expect("eval");
+        let result = eval_ctx(
+            &exp,
+            &rho,
+            // D76 Phase B: the recursor names its inductive, so the declaration
+            // has to be in `Γ_env` for `iota_reduce` to reach its ctors.
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(nat.clone())),
+        )
+        .expect("eval");
         match result {
             Val::Nt(Neut::NtRec { decl: d, .. }) => assert_eq!(d.name, "Nat"),
             other => panic!("expected NtRec, got {other:?}"),
@@ -805,7 +813,7 @@ mod tests {
         // result must reduce to Unit.
         let decl = simple_vec_decl_for_eval();
         let nil_val = Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
@@ -835,7 +843,7 @@ mod tests {
             .extend(Patt::Var("nil_min".to_string()), nil_minor)
             .extend(Patt::Var("cons_min".to_string()), cons_minor);
         let rec_exp = Exp::InductiveRec {
-            decl,
+            iri: decl.iri.clone(),
             motive: Box::new(Exp::Var("m".to_string())),
             minors: vec![
                 Exp::Var("nil_min".to_string()),
@@ -843,7 +851,12 @@ mod tests {
             ],
             major: Box::new(Exp::Var("v".to_string())),
         };
-        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::pure()).expect("iota nil");
+        let result = eval_ctx(
+            &rec_exp,
+            &rho,
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(decl.clone())),
+        )
+        .expect("iota nil");
         // For nil with no value-args, the minor is applied to nothing —
         // the result is nil_minor itself, which is Unit.
         assert!(
@@ -861,12 +874,12 @@ mod tests {
         // result is Unit regardless of the IH value.
         let decl = simple_vec_decl_for_eval();
         let nil_val = Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
         let cons_val = Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "cons".to_string(),
             args: vec![Val::Unit, Val::Unit, nil_val],
         };
@@ -893,7 +906,7 @@ mod tests {
             .extend(Patt::Var("nil_min".to_string()), nil_minor)
             .extend(Patt::Var("cons_min".to_string()), cons_minor);
         let rec_exp = Exp::InductiveRec {
-            decl,
+            iri: decl.iri.clone(),
             motive: Box::new(Exp::Var("m".to_string())),
             minors: vec![
                 Exp::Var("nil_min".to_string()),
@@ -901,7 +914,12 @@ mod tests {
             ],
             major: Box::new(Exp::Var("v".to_string())),
         };
-        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::pure()).expect("iota cons");
+        let result = eval_ctx(
+            &rec_exp,
+            &rho,
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(decl.clone())),
+        )
+        .expect("iota cons");
         assert!(
             matches!(result, Val::Unit),
             "expected iota(rec on cons) to reduce to Unit (const cons_minor); got {result:?}"

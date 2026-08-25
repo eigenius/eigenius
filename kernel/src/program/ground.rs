@@ -413,30 +413,7 @@ pub(crate) fn resolve_inductive_type(
     let indices_telescope = decode_indices(class_iri, resource, layer)?;
     let sort = decode_result_sort(class_iri, resource)?;
 
-    // The self-reference stub, D76 Phase B — **all that remains of it**. Type
-    // references inside constructor bodies are `Exp::Const` now and need no stub;
-    // this survives only for the `CtorApp` decode path, because
-    // `Exp::InductiveCtor` still carries an `Arc<InductiveDecl>`. B-b2 swaps that
-    // for the IRI and this goes with it.
-    //
-    // Empty `ctors` is fine — name-based lookup is all the kernel
-    // needs for inner self-refs (see Phase 11b step 2 notes).
-    //
-    // Stub-Arc preservation (eigenius#72 Layer 2 / D48): the stub
-    // carries the real `indices` telescope so that ctor-internal
-    // self-references like `Vec(A, n)` decode against the same shape
-    // the kernel's check pass expects. `params` stays empty in the
-    // stub since references inside ctor bodies thread params lexically.
-    let self_ref = Arc::new(InductiveDecl {
-        iri: class_iri.clone(),
-        name: short_name.clone(),
-        params: Vec::new(),
-        indices: indices_telescope.clone(),
-        sort: sort.clone(),
-        ctors: Vec::new(),
-    });
-
-    let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope, layer)?;
+    let ctors = decode_ctors(class_iri, resource, &params_telescope, layer)?;
 
     let decl = Arc::new(InductiveDecl {
         iri: class_iri.clone(),
@@ -631,7 +608,6 @@ fn decode_param_kind(value: &Value, class_iri: &Iri, layer: &Layer) -> Result<Ex
 fn decode_ctors(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
-    self_ref: &Arc<InductiveDecl>,
     params: &[(Patt, Exp)],
     layer: &Layer,
 ) -> Result<Vec<InductiveCtorDecl>, String> {
@@ -669,19 +645,14 @@ fn decode_ctors(
         // type checker takes it from there.
         let ctor_typ_iri = Iri::parse(wk::CTOR_TYPE).unwrap();
         let ctor_typ = if let Some(ct) = cr.get(&ctor_typ_iri) {
-            // Self-reference threading: the codec needs to know it's
-            // decoding a ctor for the in-construction `class_iri` so
-            // that ConstRef / CtorApp targets matching `class_iri`
-            // short-circuit to the stub `self_ref` instead of
-            // recursively re-entering `resolve_inductive_type`. Without
-            // this, any ctor body that mentions its own decl
-            // (e.g. `cons : ... -> Vec(A, n)`) loops unboundedly.
-            crate::program::eigentt_type_mirror::decode_type_with_self_ref(
-                ct,
-                layer,
-                Some((class_iri, self_ref)),
-            )
-            .map_err(|e| {
+            // **No self-reference threading, D76 Phase B.** The codec used to need
+            // telling that it was decoding a ctor for the in-construction
+            // `class_iri`, so that `ConstRef` / `CtorApp` targets matching it
+            // short-circuited to a stub declaration instead of re-entering
+            // `resolve_inductive_type` — without which any ctor body mentioning its
+            // own decl (`cons : … -> Vec(A, n)`) looped unboundedly. A reference
+            // decodes to its IRI now, so nothing is resolved and nothing recurses.
+            crate::program::eigentt_type_mirror::decode_type(ct, layer).map_err(|e| {
                 format!("inductive type '{class_iri}.{name}' has malformed `ctor_type`: {e:?}")
             })?
         } else {

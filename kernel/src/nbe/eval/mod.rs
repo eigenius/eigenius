@@ -674,7 +674,7 @@ pub(crate) fn eval_impl<T: Tracer>(
         // `Γ_env`; its arguments fold on one at a time through `App`, whose
         // `Val::InductiveType` case in `Val::app_impl` performs the
         // `params ++ indices` split this arm did in one step.
-        Exp::InductiveCtor(decl, ctor_name, args) => {
+        Exp::InductiveCtor(iri, ctor_name, args) => {
             let mut vals = Vec::with_capacity(args.len());
             let mut nodes = Vec::with_capacity(args.len());
             for a in args {
@@ -682,9 +682,13 @@ pub(crate) fn eval_impl<T: Tracer>(
                 vals.push(v);
                 nodes.push(n);
             }
+            // D76 Phase B: the value names its inductive too, so there is nothing
+            // to resolve here and evaluation stays total. Holding the declaration
+            // made this a lookup, which fails without an environment — and readback
+            // applies closures with none, deliberately, since it must not unfold.
             Ok((
                 Val::InductiveVal {
-                    decl: decl.clone(),
+                    iri: iri.clone(),
                     ctor_name: ctor_name.clone(),
                     args: vals,
                 },
@@ -692,11 +696,21 @@ pub(crate) fn eval_impl<T: Tracer>(
             ))
         }
         Exp::InductiveRec {
-            decl,
+            iri,
             motive,
             minors,
             major,
         } => {
+            let decl = match ctx.env().lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(d) => d,
+                _ => {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                        "recursor on `{iri}`, which this environment does not \
+                         declare as an inductive"
+                    )))
+                }
+            };
+            let decl = &decl;
             let (motive_val, motive_node) = ev(motive)?;
             let mut minor_vals = Vec::with_capacity(minors.len());
             let mut nodes = vec![motive_node];
@@ -1256,7 +1270,11 @@ mod tests {
         let (ctx, rho, identity_call) = f5_setup();
         let nat = nat_decl();
         let exp = Exp::Match {
-            scrutinee: Box::new(Exp::InductiveCtor(nat.clone(), "zero".to_string(), vec![])),
+            scrutinee: Box::new(Exp::InductiveCtor(
+                nat.iri.clone(),
+                "zero".to_string(),
+                vec![],
+            )),
             arms: vec![
                 crate::nbe::term::MatchArm {
                     ctor_name: "zero".to_string(),

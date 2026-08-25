@@ -512,7 +512,7 @@ fn parse_ctor_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
             )),
         })
         .collect();
-    Ok(Exp::InductiveCtor(decl, ctor_name, args?))
+    Ok(Exp::InductiveCtor(decl.iri.clone(), ctor_name, args?))
 }
 
 /// x
@@ -526,7 +526,7 @@ fn parse_var(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     if let Some((decl, idx, arity)) = resolve_ctor_iri(&name, layer) {
         if arity == 0 {
             let ctor_name = decl.ctors[idx].name.clone();
-            return Ok(Exp::InductiveCtor(decl, ctor_name, Vec::new()));
+            return Ok(Exp::InductiveCtor(decl.iri.clone(), ctor_name, Vec::new()));
         }
     }
     Ok(Exp::Var(name))
@@ -778,7 +778,7 @@ fn build_inductive_rec(
     }
 
     Ok(Exp::InductiveRec {
-        decl,
+        iri: decl.iri.clone(),
         motive: Box::new(motive),
         minors,
         major: Box::new(scrutinee_exp),
@@ -1085,7 +1085,7 @@ mod tests {
     use crate::ontology::eigon_json;
     use std::sync::Arc;
 
-    fn build_layer_with_esl(esl_source: &str) -> Arc<crate::layer::Layer> {
+    pub(super) fn build_layer_with_esl(esl_source: &str) -> Arc<crate::layer::Layer> {
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut core_builder = LayerBuilder::new("core", None);
@@ -1216,7 +1216,7 @@ mod tests {
         let body = parse_program_body("urn:eigenius:example:zero_program", &layer);
         match body {
             Exp::InductiveCtor(decl, name, args) => {
-                assert_eq!(decl.name, "Nat");
+                assert_eq!(decl.local_name(), "Nat");
                 assert_eq!(name, "zero");
                 assert!(args.is_empty());
             }
@@ -1247,7 +1247,7 @@ mod tests {
             Exp::InductiveCtor(d, n, a) => (d, n, a),
             other => panic!("expected outer InductiveCtor, got {other:?}"),
         };
-        assert_eq!(outer_decl.name, "Nat");
+        assert_eq!(outer_decl.local_name(), "Nat");
         assert_eq!(outer_name, "succ");
         assert_eq!(outer_args.len(), 1);
         // Middle: succ(zero)
@@ -1255,13 +1255,13 @@ mod tests {
             Exp::InductiveCtor(d, n, a) => (d, n, a),
             other => panic!("expected middle InductiveCtor, got {other:?}"),
         };
-        assert_eq!(mid_decl.name, "Nat");
+        assert_eq!(mid_decl.local_name(), "Nat");
         assert_eq!(mid_name, "succ");
         assert_eq!(mid_args.len(), 1);
         // Innermost: zero
         match mid_args.remove(0) {
             Exp::InductiveCtor(d, n, a) => {
-                assert_eq!(d.name, "Nat");
+                assert_eq!(d.local_name(), "Nat");
                 assert_eq!(n, "zero");
                 assert!(a.is_empty());
             }
@@ -1295,41 +1295,48 @@ mod tests {
         // with the layer available for class resolution.
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
 
         // Evaluate by applying to a dummy string input.
         let input_val = crate::nbe::val::Val::Unit; // placeholder; type unused at runtime
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
-        let result = prog_val.app(input_val).expect("apply program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
+        let result = prog_val
+            .app_ctx(input_val, &eval_ctx)
+            .expect("apply program");
 
         // Result should be succ(succ(zero)) — InductiveVal nested twice.
         match result {
             crate::nbe::val::Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
             } => {
-                assert_eq!(decl.name, "Nat");
+                assert_eq!(iri.local_name(), "Nat");
                 assert_eq!(ctor_name, "succ");
                 assert_eq!(args.len(), 1);
                 match &args[0] {
                     crate::nbe::val::Val::InductiveVal {
-                        decl: d2,
+                        iri: d2,
                         ctor_name: n2,
                         args: a2,
                     } => {
-                        assert_eq!(d2.name, "Nat");
+                        assert_eq!(d2.local_name(), "Nat");
                         assert_eq!(n2, "succ");
                         match &a2[0] {
                             crate::nbe::val::Val::InductiveVal {
-                                decl: d3,
+                                iri: d3,
                                 ctor_name: n3,
                                 args: a3,
                             } => {
-                                assert_eq!(d3.name, "Nat");
+                                assert_eq!(d3.local_name(), "Nat");
                                 assert_eq!(n3, "zero");
                                 assert!(a3.is_empty());
                             }
@@ -1374,13 +1381,13 @@ mod tests {
             Exp::InductiveCtor(d, n, a) => (d, n, a),
             other => panic!("expected outer InductiveCtor, got {other:?}"),
         };
-        assert_eq!(outer_decl.name, "NatList");
+        assert_eq!(outer_decl.local_name(), "NatList");
         assert_eq!(outer_name, "cons");
         assert_eq!(outer_args.len(), 2, "cons should have 2 args");
         // First arg: zero (Nat)
         match &outer_args[0] {
             Exp::InductiveCtor(d, n, a) => {
-                assert_eq!(d.name, "Nat");
+                assert_eq!(d.local_name(), "Nat");
                 assert_eq!(n, "zero");
                 assert!(a.is_empty());
             }
@@ -1389,7 +1396,7 @@ mod tests {
         // Second arg: cons(succ(zero), nil)
         match &outer_args[1] {
             Exp::InductiveCtor(d, n, a) => {
-                assert_eq!(d.name, "NatList");
+                assert_eq!(d.local_name(), "NatList");
                 assert_eq!(n, "cons");
                 assert_eq!(a.len(), 2);
             }
@@ -1402,23 +1409,30 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
 
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
-        let result = prog_val.app(crate::nbe::val::Val::Unit).expect("apply");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
+        let result = prog_val
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
+            .expect("apply");
         // Walk the resulting list: cons(zero, cons(succ(zero), nil))
         let (decl, ctor, args) = match result {
             crate::nbe::val::Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
-            } => (decl, ctor_name, args),
+            } => (iri, ctor_name, args),
             other => panic!("expected InductiveVal, got {other:?}"),
         };
-        assert_eq!(decl.name, "NatList");
+        assert_eq!(decl.local_name(), "NatList");
         assert_eq!(ctor, "cons");
         assert_eq!(args.len(), 2);
     }
@@ -1487,7 +1501,7 @@ mod tests {
             Exp::InductiveCtor(d, n, a) => (d, n, a),
             other => panic!("expected InductiveCtor, got {other:?}"),
         };
-        assert_eq!(decl.name, "Triple");
+        assert_eq!(decl.local_name(), "Triple");
         assert_eq!(name, "triple");
         assert_eq!(args.len(), 3, "all 3 args preserved end to end");
 
@@ -1497,21 +1511,26 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
         let result = prog_val
-            .app(crate::nbe::val::Val::Unit)
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
             .expect("apply program");
         match result {
             crate::nbe::val::Val::InductiveVal {
-                decl,
+                iri: _,
                 ctor_name,
                 args,
             } => {
-                assert_eq!(decl.name, "Triple");
+                assert_eq!(decl.local_name(), "Triple");
                 assert_eq!(ctor_name, "triple");
                 assert_eq!(args.len(), 3);
             }
@@ -1607,22 +1626,27 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
         let result = prog_val
-            .app(crate::nbe::val::Val::Unit)
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
             .expect("apply program");
         // Result: succ(zero)
         match result {
             crate::nbe::val::Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
             } => {
-                assert_eq!(decl.name, "Nat");
+                assert_eq!(iri.local_name(), "Nat");
                 assert_eq!(ctor_name, "succ");
                 assert_eq!(args.len(), 1);
                 match &args[0] {
@@ -1663,13 +1687,18 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
         let result = prog_val
-            .app(crate::nbe::val::Val::Unit)
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
             .expect("apply program");
         match result {
             crate::nbe::val::Val::InductiveVal { ctor_name, .. } => {
@@ -1713,22 +1742,27 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
         let result = prog_val
-            .app(crate::nbe::val::Val::Unit)
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
             .expect("apply program");
         // Result: succ(zero)
         match result {
             crate::nbe::val::Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
             } => {
-                assert_eq!(decl.name, "Nat");
+                assert_eq!(iri.local_name(), "Nat");
                 assert_eq!(ctor_name, "succ");
                 assert_eq!(args.len(), 1);
             }
@@ -1861,13 +1895,18 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check (motive inferred)");
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
         let result = prog_val
-            .app(crate::nbe::val::Val::Unit)
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
             .expect("apply program");
         // Result should be succ(zero).
         match result {
@@ -1907,13 +1946,18 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         check(&mut ctx, &term, &typ_val).expect("type check");
-        let prog_val = eval(&term, &Rho::Nil).expect("eval program");
+        let prog_val =
+            crate::nbe::eval::eval_ctx(&term, &Rho::Nil, &eval_ctx).expect("eval program");
         let result = prog_val
-            .app(crate::nbe::val::Val::Unit)
+            .app_ctx(crate::nbe::val::Val::Unit, &eval_ctx)
             .expect("apply program");
         match result {
             crate::nbe::val::Val::InductiveVal { ctor_name, .. } => {
@@ -1950,8 +1994,12 @@ mod tests {
         let (term, typ) = parse_program(&resource, &layer).expect("parse_program");
         use crate::nbe::check::{check, CheckCtx};
         use crate::nbe::env::Rho;
-        use crate::nbe::eval::eval;
-        let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
+        // D76 Phase B: the program names its inductives, so evaluation happens in
+        // the chain's environment; an env-less eval would leave every constructor
+        // application a neutral.
+        let eval_ctx =
+            crate::nbe::eval::EvalCtx::in_env(crate::nbe::env_global::Env::of(layer.clone()));
+        let typ_val = crate::nbe::eval::eval_ctx(&typ, &Rho::Nil, &eval_ctx).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         let err = check(&mut ctx, &term, &typ_val).unwrap_err().to_string();
         assert!(

@@ -152,7 +152,7 @@ pub fn derive_minor_type(
         });
 
     // Result type: motive idx_1 ... idx_m (cⱼ args)
-    let ctor_app = Exp::InductiveCtor(decl.clone(), ctor.name.clone(), arg_var_exps.clone());
+    let ctor_app = Exp::InductiveCtor(decl.iri.clone(), ctor.name.clone(), arg_var_exps.clone());
     let mut body_exp = Exp::App(Box::new(motive_at_concl_indices), Box::new(ctor_app));
 
     // Wrap one IH binder per recursive argument, in original order

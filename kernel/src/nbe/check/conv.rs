@@ -764,7 +764,8 @@ mod index_conversion_tests {
         let nat = nat_decl();
         let c = CheckCtx::new(Rho::Nil, vec![]);
         let zero_exp = nat_zero_exp(&nat);
-        let one_exp = Exp::InductiveCtor(nat, "succ".to_string(), vec![zero_exp.clone()]);
+        let one_exp =
+            Exp::InductiveCtor(nat.iri.clone(), "succ".to_string(), vec![zero_exp.clone()]);
         let zero = c.eval(&zero_exp, &Rho::Nil).unwrap();
         let one = c.eval(&one_exp, &Rho::Nil).unwrap();
         (zero, one)
@@ -917,7 +918,7 @@ mod index_conversion_tests {
             params: Vec::new(),
             indices: vec![gen_val(&Rho::Nil)],
         };
-        let ctor = Exp::InductiveCtor(decl, "mk".to_string(), Vec::new());
+        let ctor = Exp::InductiveCtor(decl.iri.clone(), "mk".to_string(), Vec::new());
         let err = check(&mut c, &ctor, &expected)
             .expect_err("`Box.mk : Box ()` must not check against `Box x`");
         assert!(

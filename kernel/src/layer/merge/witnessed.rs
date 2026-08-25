@@ -329,12 +329,12 @@ pub fn apply_witness_resolution(
     let val_b = Val::ResourceVal(Box::new(branch_b));
     let val_opt = match ancestor {
         None => Val::InductiveVal {
-            decl: option_decl(),
+            iri: option_decl().iri.clone(),
             ctor_name: "none".to_string(),
             args: vec![a_val.clone()],
         },
         Some(r) => Val::InductiveVal {
-            decl: option_decl(),
+            iri: option_decl().iri.clone(),
             ctor_name: "some".to_string(),
             args: vec![a_val, Val::ResourceVal(Box::new(r))],
         },

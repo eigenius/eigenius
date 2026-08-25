@@ -214,12 +214,26 @@ pub enum Exp {
     // written in the first form once evaded positivity checking
     // (`positivity::rejects_disguised_inductive_negative_occurrence`). Neither had
     // a slot for a level argument, which is what blocked #188's residual.
-    /// Constructor application: `c(a₁, …, aₘ)` on the named inductive.
-    InductiveCtor(Arc<InductiveDecl>, Name, Vec<Exp>),
+    /// Constructor application: `c(a₁, …, aₘ)` on the **named** inductive.
+    ///
+    /// D76 Phase B: the inductive's IRI, not its declaration. A constructor's
+    /// identity is `(inductive IRI, constructor name)`, which is what the D47 wire
+    /// has always carried — `CtorApp(D, c)` plus an `App` spine. Holding the
+    /// declaration here meant the codec had to *decode* the target inductive, every
+    /// constructor type of it, to build a reference; and for a self-reference it
+    /// had nothing to decode yet, which is what the stub was for.
+    ///
+    /// nanoda goes further and gives each constructor its own `Const`, but its
+    /// constructors are environment entries with names. Here they are not
+    /// chain-resident — `InductiveCtorDecl { name, typ }` lives *inside* the
+    /// inductive's resource and has no IRI — so minting constructor IRIs is a
+    /// chain-format change and belongs with E2.
+    InductiveCtor(Iri, Name, Vec<Exp>),
     /// Recursor application: eliminate a value of the inductive with
     /// motive and one minor per constructor.
     InductiveRec {
-        decl: Arc<InductiveDecl>,
+        /// The inductive's IRI (D76 Phase B), resolved through `Γ_env`.
+        iri: Iri,
         motive: Box<Exp>,
         minors: Vec<Exp>,
         major: Box<Exp>,

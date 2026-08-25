@@ -101,7 +101,7 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
 }
 
 pub(crate) fn nat_zero_exp(decl: &Arc<InductiveDecl>) -> Exp {
-    Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new())
+    Exp::InductiveCtor(decl.iri.clone(), "zero".to_string(), Vec::new())
 }
 
 pub(crate) fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {

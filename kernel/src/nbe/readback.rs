@@ -195,11 +195,11 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
                 .collect::<Result<Vec<_>, EvalError>>()?,
         ),
         Val::InductiveVal {
-            decl,
+            iri,
             ctor_name,
             args,
         } => Exp::InductiveCtor(
-            decl.clone(),
+            iri.clone(),
             ctor_name.clone(),
             args.iter()
                 .map(|a| try_readback_val(level, a))
@@ -283,7 +283,7 @@ pub fn try_readback_neut(level: usize, neut: &Neut) -> Result<Exp, EvalError> {
             minors,
             major,
         } => Exp::InductiveRec {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             motive: Box::new(try_readback_val(level, motive)?),
             minors: minors
                 .iter()

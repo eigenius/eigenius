@@ -688,9 +688,9 @@ pub(super) fn check_infer_inductive_rec(
     let major_val = ctx.eval(major, &ctx.rho)?;
     let mut result = motive_val;
     for idx in major_indices {
-        result = result.app(idx).map_err(CheckError::from)?;
+        result = ctx.app(result, idx).map_err(CheckError::from)?;
     }
-    result.app(major_val).map_err(CheckError::from)
+    ctx.app(result, major_val).map_err(CheckError::from)
 }
 
 /// Build the motive's type for a recursor on `decl` at concrete `params`:
@@ -1179,7 +1179,11 @@ mod tests {
         Exp::Ann(
             // No args: in checking mode the parameter comes from the expected type, so `nil`'s
             // argument list is its NON-parameter arguments, of which it has none.
-            Box::new(Exp::InductiveCtor(decl.clone(), "nil".to_string(), vec![])),
+            Box::new(Exp::InductiveCtor(
+                decl.iri.clone(),
+                "nil".to_string(),
+                vec![],
+            )),
             Box::new(Exp::const_applied(
                 decl.iri.clone(),
                 Vec::new(),
@@ -1208,7 +1212,7 @@ mod tests {
     fn inductive_rec_over_an_indexed_family_type_checks() {
         let decl = simple_vec();
         let rec = Exp::InductiveRec {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             // λ_idx. λ_v. One
             motive: Box::new(lams(2, Exp::One)),
             minors: vec![
@@ -1248,7 +1252,7 @@ mod tests {
     fn a_unary_motive_is_rejected_for_an_indexed_family() {
         let decl = simple_vec();
         let rec = Exp::InductiveRec {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             motive: Box::new(lams(1, Exp::One)),
             minors: vec![Exp::Unit, lams(4, Exp::Unit)],
             major: Box::new(vec_nil_at_one(&decl)),
@@ -1741,7 +1745,7 @@ mod tests {
     use crate::nbe::term::InductiveCtorDecl;
 
     fn nat_succ_exp(decl: &Arc<InductiveDecl>, n: Exp) -> Exp {
-        Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![n])
+        Exp::InductiveCtor(decl.iri.clone(), "succ".to_string(), vec![n])
     }
 
     /// Constant `λ_. Set` motive — applied to anything yields `Set`.
@@ -1757,7 +1761,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         check(&mut c, &nat_zero_exp(&nat), &nat_ty).expect("zero : Nat");
     }
 
@@ -1770,7 +1774,7 @@ mod tests {
             indices: Vec::new(),
         };
         let exp = nat_succ_exp(&nat, nat_zero_exp(&nat));
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         check(&mut c, &exp, &nat_ty).expect("succ zero : Nat");
     }
 
@@ -1783,7 +1787,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::sort(1)]);
+        let bogus = Exp::InductiveCtor(nat.iri.clone(), "succ".to_string(), vec![Exp::sort(1)]);
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         assert!(check(&mut c, &bogus, &nat_ty).is_err());
     }
@@ -1796,8 +1800,8 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let bogus = Exp::InductiveCtor(nat.clone(), "two".to_string(), Vec::new());
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let bogus = Exp::InductiveCtor(nat.iri.clone(), "two".to_string(), Vec::new());
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         let err = check(&mut c, &bogus, &nat_ty).unwrap_err().to_string();
         assert!(err.contains("no constructor"), "unexpected: {err}");
     }
@@ -1819,13 +1823,15 @@ mod tests {
                 typ: bool_ty_exp,
             }],
         });
-        let true_exp = Exp::InductiveCtor(bool_decl, "True".to_string(), Vec::new());
+        let true_exp = Exp::InductiveCtor(bool_decl.iri.clone(), "True".to_string(), Vec::new());
         let nat_ty = Val::InductiveType {
-            decl: nat,
+            decl: nat.clone(),
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![])
+            .declaring(nat)
+            .declaring(bool_decl);
         let err = check(&mut c, &true_exp, &nat_ty).unwrap_err().to_string();
         assert!(err.contains("does not match"), "unexpected: {err}");
     }
@@ -1869,8 +1875,10 @@ mod tests {
                 ),
             }],
         });
-        let nil_exp = Exp::InductiveCtor(list_decl, "nil".to_string(), Vec::new());
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let nil_exp = Exp::InductiveCtor(list_decl.iri.clone(), "nil".to_string(), Vec::new());
+        // The FULL declaration, not the ctor-less self-reference helper: the
+        // checker resolves the name through `Γ_env` and needs the constructor.
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(list_decl.clone());
         let err = check_infer(&mut c, &nil_exp).unwrap_err().to_string();
         assert!(err.contains("checking mode"), "unexpected: {err}");
     }
@@ -1884,7 +1892,7 @@ mod tests {
             indices: Vec::new(),
         };
         let nat_val = Val::InductiveVal {
-            decl: nat.clone(),
+            iri: nat.iri.clone(),
             ctor_name: "zero".to_string(),
             args: Vec::new(),
         };
@@ -1906,7 +1914,7 @@ mod tests {
             Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp.clone()))),
         );
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![nat_ty_exp, succ_minor],
             major: Box::new(Exp::Var("n".to_string())),
@@ -1922,7 +1930,7 @@ mod tests {
     fn infer_rec_wrong_minor_count() {
         let (nat, mut c) = ctx_with_nat_var();
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![Exp::const_applied(
                 nat_decl().iri.clone(),
@@ -1945,7 +1953,7 @@ mod tests {
             Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp))),
         );
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![Exp::Unit, succ_minor],
             major: Box::new(Exp::Var("n".to_string())),
@@ -1963,14 +1971,17 @@ mod tests {
             Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp.clone()))),
         );
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![nat_ty_exp, succ_minor],
             major: Box::new(Exp::Var("u".to_string())),
         };
         let gamma: Gamma = vec![("u".to_string(), Val::One)];
         let rho = Rho::Nil.extend(Patt::Var("u".to_string()), Val::Unit);
-        let mut c = CheckCtx::new(rho, gamma);
+        // `Nat` IS declared — the error under test is the MAJOR's type, not a
+        // missing declaration, and the two diagnostics would otherwise be
+        // indistinguishable.
+        let mut c = CheckCtx::new(rho, gamma).declaring(nat.clone());
         let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(
             err.contains("expected an inductive type"),
@@ -1981,7 +1992,7 @@ mod tests {
     #[test]
     fn infer_rec_decl_mismatch() {
         // n : Nat but recursor uses Bool decl.
-        let (_nat, mut c) = ctx_with_nat_var();
+        let (_nat, c) = ctx_with_nat_var();
         let bs = ind_self_ref("Bool");
         let bool_ty = Exp::const_applied(bs.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
@@ -2002,11 +2013,14 @@ mod tests {
             ],
         });
         let exp = Exp::InductiveRec {
-            decl: bool_decl,
+            iri: bool_decl.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![bool_ty.clone(), bool_ty],
             major: Box::new(Exp::Var("n".to_string())),
         };
+        // Both declarations are in scope — the mismatch under test is between the
+        // recursor's inductive and the major's, not a missing declaration.
+        let mut c = c.declaring(bool_decl.clone());
         let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(err.contains("declaration mismatch"), "unexpected: {err}");
     }

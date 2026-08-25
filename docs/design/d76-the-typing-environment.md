@@ -913,9 +913,47 @@ leaving `check_inductive_type_args` to check the arguments. nanoda has no such a
 outright — and it is B2's change, because the ordinary rule checks arity where the fused node's rule
 did not. The arm is the minimal shape that keeps Phase B verdict-neutral.
 
-**Remaining in B-b2:** `InductiveCtor` and `InductiveRec` carry the IRI instead of the declaration.
-The self-reference stub in `resolve_inductive_type` survives *only* to serve the `CtorApp` decode
-path, and goes with it.
+**Status of B-b2 (`InductiveCtor` + `InductiveRec` → IRI): complete, and the phase gate is met.** No
+`Exp` variant carries an `Arc<InductiveDecl>`; `self_ref` occurs zero times in `program::ground` and
+`program::eigentt_type_mirror`. 1761 kernel tests, workspace and clippy clean.
+
+**The site split is the reverse of B-b1's: 179 production, 77 test**, concentrated in the parser's
+category machinery (`constructions.rs` 55, `category.rs` 30, `combinators.rs` 27), because
+`Exp::InductiveCtor` is how the DCG builds categories — `cat_np(T, num)` and `cat_s(mood, fin)` are
+constructor applications of `lexicon:Cat` / `Mood` / `Num`. The *edit* was simpler than B-b1's even so:
+the variant keeps its shape and only its first field's type changes, so there is no spine to walk and
+a match that ignores the declaration does not change at all.
+
+**`Val::InductiveVal` had to follow, and the measurement decided it.** Making the *term* name its
+inductive made *evaluating* a constructor application a lookup — and readback applies closures with
+**no environment, deliberately**, because it must not unfold. Constructor applications inside closure
+bodies started failing.
+
+| way out | cost |
+|---|---|
+| thread an environment through readback | **114** `readback_val` call sites |
+| let `Val::InductiveVal` carry the IRI as well | **93** sites, only **4** reading the declaration |
+
+The second is also the better end state: value and term name their inductive the same way, evaluation
+becomes total again — no lookup, so no failure mode — and readback stays environment-free.
+`iota_reduce` is unaffected; it takes the declaration from the *recursor*, which resolves it where the
+environment is in hand.
+
+**A lossy fallback caught before it shipped.** When the environment could not resolve a constructor's
+inductive, an intermediate version of the eval arm fell back to `Const(iri)` applied to the arguments
+— which **drops the constructor name**, making `succ x` and `zero x` the same value. `Neut` has no
+constructor form, so there was nothing to fall back *to*. Moot once the value carries the IRI, but it
+is the shape of mistake that passes tests.
+
+**`Clos::apply` and `Val::app` were the `EvalCtx::Pure` conflation one level down.** Both default to
+an evaluation with no environment, and the checker applies Π-closures constantly. `CheckCtx::apply` /
+`CheckCtx::app` carry it now; readback's uses stay environment-free, which is correct there and is
+now said rather than assumed.
+
+**Deleted:** `resolve_inductive_decl_for_ctor` (decoded the whole target inductive to validate a name
+the checker validates anyway), `DecodeCtx::self_ref` and `decode_type_with_self_ref` (the recursion
+guard that existed only because resolving a name produced a declaration), `category::resolve_inductive`
+(superseded by `inductive_iri`), and the stub in `resolve_inductive_type` itself.
 
 **B-b deletes the variant rather than deprecating it.** Leaving it in place while migrating callers
 would make every un-migrated match arm a *silent* non-match — the failure mode that a spine walker

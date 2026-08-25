@@ -218,12 +218,12 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         // `demo/prose-to-chain`, on «MSI cancer models required the helicase activity of WRN»).
         Exp::Fst(p) => Ok(ctor("Fst", vec![encode_type_json(p)?])),
         Exp::Snd(p) => Ok(ctor("Snd", vec![encode_type_json(p)?])),
-        Exp::InductiveCtor(decl, ctor_name, args) => {
+        Exp::InductiveCtor(iri, ctor_name, args) => {
             // Encode `D.c(a1, ..., aN)` as
             //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
-            // gh #75: read decl.iri (stable identifier) — see the
-            // matching comment on the InductiveType arm above.
-            let mut current = ctor("CtorApp", vec![json!(decl.iri.as_str()), json!(ctor_name)]);
+            // gh #75: the stable identifier is the IRI, which the node now carries
+            // directly (D76 Phase B) instead of inside a declaration.
+            let mut current = ctor("CtorApp", vec![json!(iri.as_str()), json!(ctor_name)]);
             for arg in args {
                 current = ctor("App", vec![current, encode_type_json(arg)?]);
             }
@@ -446,43 +446,27 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
-/// Context threaded through the recursive decoder. Carries the
-/// layer for `ConstRef` resolution plus an optional "self-reference"
-/// stub for the in-construction inductive — when present, any
-/// `ConstRef` whose IRI matches `self_ref.0` short-circuits to the
-/// stub instead of recursively calling `resolve_inductive_type`
-/// (which would loop unboundedly while decoding the inductive's own
-/// constructor types). Mirrors the self-reference short-circuit
-/// `ground::decode_arg_type` uses for the Layer-1 positional
-/// `arg_types` form.
+/// Context threaded through the recursive decoder: the layer for `ConstRef`
+/// resolution.
+///
+/// **It used to carry a self-reference stub too** — an `Arc<InductiveDecl>` for
+/// the in-construction inductive, so that a `ConstRef` naming it short-circuited
+/// instead of calling `resolve_inductive_type` and looping unboundedly while
+/// decoding that inductive's own constructor types. D76 Phase B removes the need:
+/// a reference decodes to `Exp::Const`/`Exp::InductiveCtor` carrying the IRI, so
+/// nothing is resolved here and there is nothing to recurse into.
 #[derive(Clone, Copy)]
 struct DecodeCtx<'a> {
     layer: &'a Layer,
-    self_ref: Option<(&'a Iri, &'a std::sync::Arc<crate::nbe::term::InductiveDecl>)>,
 }
 
 /// Decode a chain-resident `eigentt:TypeExpr` value back to an
 /// EigenTT `Exp`.
 ///
-/// `App`-spines whose head is a `ConstRef` pointing to a parametric
-/// `InductiveType` or `CodataType` are folded into a single
-/// `Exp::const_applied(decl.iri.clone(), Vec::new(), args)` / `Exp::CodataType(decl, args)`
-/// node, matching the encoder's currying convention (D47 §3.1).
+/// An `App` spine over a `ConstRef` decodes to the same spine over an
+/// `Exp::Const` — the wire's currying convention (D47 §3.1) and the term's are the
+/// same shape since D76 Phase B, so no folding happens here any more.
 pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
-    decode_type_with_self_ref(value, layer, None)
-}
-
-/// Like [`decode_type`] but with the self-reference short-circuit
-/// described on [`DecodeCtx`]. Required when decoding a constructor
-/// `core:ctor_type` payload whose body may reference the inductive
-/// being assembled — pass the stub Arc so the ConstRef arm resolves
-/// to the stub rather than recursively re-running
-/// `resolve_inductive_type` for the same IRI.
-pub fn decode_type_with_self_ref(
-    value: &Value,
-    layer: &Layer,
-    self_ref: Option<(&Iri, &std::sync::Arc<crate::nbe::term::InductiveDecl>)>,
-) -> Result<Exp, DecodeError> {
     let json = match value {
         Value::Json(j) => j,
         other => {
@@ -491,7 +475,7 @@ pub fn decode_type_with_self_ref(
             )));
         }
     };
-    let ctx = DecodeCtx { layer, self_ref };
+    let ctx = DecodeCtx { layer };
     decode_type_json(json, &ctx)
 }
 
@@ -735,8 +719,16 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             // are layered via App on the decode side (see the "App" arm
             // above, which folds args into Exp::InductiveCtor's args
             // vec); CtorApp produces the nullary base.
-            let decl = resolve_inductive_decl_for_ctor(&decl_iri, &ctor_name, ctx)?;
-            Ok(Exp::InductiveCtor(decl, ctor_name, Vec::new()))
+            //
+            // **D76 Phase B — no resolution here.** This called
+            // `resolve_inductive_decl_for_ctor`, which decoded the ENTIRE target
+            // inductive, every constructor type of it, to fill a declaration slot
+            // the node no longer has; and short-circuited to the self-reference stub
+            // when the target was the inductive being assembled, because otherwise
+            // it recursed unboundedly. It also verified the constructor name — which
+            // the type checker does anyway (`check_ctor_unknown_name`), and does with
+            // the environment in hand rather than at decode time.
+            Ok(Exp::InductiveCtor(decl_iri, ctor_name, Vec::new()))
         }
         // eigenius#71 — literal primitive values. The matching encode
         // arms emit `{"ctor": "LitString", "args": [<json-value>]}`
@@ -795,57 +787,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
 
         other => Err(DecodeError::UnknownCtor(other.to_string())),
     }
-}
-
-fn resolve_inductive_decl_for_ctor(
-    decl_iri: &Iri,
-    ctor_name: &str,
-    ctx: &DecodeCtx<'_>,
-) -> Result<std::sync::Arc<crate::nbe::term::InductiveDecl>, DecodeError> {
-    // Self-reference short-circuit: when the CtorApp targets the
-    // inductive currently being assembled, return the stub Arc rather
-    // than recursing into `resolve_inductive_type`. The stub has empty
-    // ctors so we can't verify the name in the usual way; the encoder
-    // is the authority here, and a `core:ctor_type` body that names a
-    // ctor on its own decl is by construction well-formed.
-    if let Some((self_iri, stub)) = ctx.self_ref {
-        if decl_iri == self_iri {
-            return Ok(stub.clone());
-        }
-    }
-    let resource = ctx
-        .layer
-        .resolve(decl_iri)
-        .ok_or_else(|| DecodeError::UnresolvedConstRef(decl_iri.clone()))?;
-    use crate::ontology::well_known as wk;
-    if !resource.is_instance_of(&wk::iri(wk::INDUCTIVE_TYPE)) {
-        return Err(DecodeError::ConstRefWrongClass {
-            iri: decl_iri.clone(),
-            found_classes: resource.is_a().to_vec(),
-        });
-    }
-    let val = crate::program::ground::resolve_inductive_type(decl_iri, &resource, ctx.layer)
-        .map_err(|e| DecodeError::ConstRefWrongClass {
-            iri: decl_iri.clone(),
-            found_classes: vec![wk::iri(&format!("resolution error: {e}"))],
-        })?;
-    let decl = match val {
-        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
-        other => {
-            return Err(DecodeError::ConstRefWrongClass {
-                iri: decl_iri.clone(),
-                found_classes: vec![wk::iri(&format!("unexpected resolution: {other:?}"))],
-            });
-        }
-    };
-    if !decl.ctors.iter().any(|c| c.name == ctor_name) {
-        return Err(DecodeError::CtorAppUnknownCtor {
-            decl_iri: decl_iri.clone(),
-            ctor_name: ctor_name.to_string(),
-            available: decl.ctors.iter().map(|c| c.name.clone()).collect(),
-        });
-    }
-    Ok(decl)
 }
 
 /// `urn:eigenius:eigentt:Definition` — the class decode unfolds (D66).
@@ -1581,7 +1522,7 @@ mod tests {
                 typ: Exp::sort(1),
             }],
         });
-        let zero = Exp::InductiveCtor(nat_decl, "zero".to_string(), Vec::new());
+        let zero = Exp::InductiveCtor(nat_decl.iri.clone(), "zero".to_string(), Vec::new());
         let v = encode_type(&zero).unwrap();
         assert_eq!(
             v,
@@ -1604,7 +1545,7 @@ mod tests {
             }],
         });
         let succ_x = Exp::InductiveCtor(
-            nat_decl,
+            nat_decl.iri.clone(),
             "succ".to_string(),
             vec![Exp::Var("x".to_string())],
         );
@@ -1690,8 +1631,8 @@ mod tests {
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let zero = Exp::InductiveCtor(nat_decl.clone(), "zero".to_string(), Vec::new());
-        let succ_zero = Exp::InductiveCtor(nat_decl, "succ".to_string(), vec![zero]);
+        let zero = Exp::InductiveCtor(nat_decl.iri.clone(), "zero".to_string(), Vec::new());
+        let succ_zero = Exp::InductiveCtor(nat_decl.iri.clone(), "succ".to_string(), vec![zero]);
         let assay_succ_zero =
             Exp::const_applied(assay_decl.iri.clone(), Vec::new(), vec![succ_zero]);
 

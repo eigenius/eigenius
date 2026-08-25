@@ -114,9 +114,19 @@ pub enum Val {
         params: Vec<Val>,
         indices: Vec<Val>,
     },
-    /// Constructor value: `c(args)` on the named inductive.
+    /// Constructor value: `c(args)` on the **named** inductive.
+    ///
+    /// D76 Phase B: the IRI, matching `Exp::InductiveCtor`. Holding the declaration
+    /// made evaluating a constructor application a *lookup*, which fails without an
+    /// environment — and readback applies closures with none, deliberately, since
+    /// it must not unfold. The alternative was threading an environment through all
+    /// 114 `readback_val` call sites to serve four consumers that read the
+    /// declaration; the four get it from `Γ_env`, and eval becomes total again.
+    ///
+    /// `iota_reduce` is unaffected: it takes the declaration from the *recursor*,
+    /// which resolves it where the environment is in hand.
     InductiveVal {
-        decl: Arc<InductiveDecl>,
+        iri: Iri,
         ctor_name: Name,
         args: Vec<Val>,
     },
@@ -440,7 +450,7 @@ pub fn cons_to_vec(val: &Val) -> Option<Vec<Val>> {
 
 /// Convert a canonical-`List` inductive value to a `Vec`.
 ///
-/// Recognises `Val::InductiveVal { decl, ctor_name, args }` where
+/// Recognises `Val::InductiveVal { iri, ctor_name, args }` where
 /// `decl.name == "List"` and `ctor_name` is `nil` or `cons`. The `cons`
 /// case expects exactly two args: head and tail (where tail is itself
 /// a list value to recurse into).
@@ -458,20 +468,20 @@ pub fn inductive_list_to_vec(val: &Val) -> Option<Vec<Val>> {
     loop {
         match current {
             Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
-            } if decl.name == "List" && ctor_name == "nil" => {
+            } if iri.local_name() == "List" && ctor_name == "nil" => {
                 if !args.is_empty() {
                     return None;
                 }
                 return Some(items);
             }
             Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
-            } if decl.name == "List" && ctor_name == "cons" => {
+            } if iri.local_name() == "List" && ctor_name == "cons" => {
                 if args.len() != 2 {
                     return None;
                 }

@@ -20,7 +20,7 @@
 
 use crate::esl::ast;
 use crate::esl::error::{EslError, Position};
-use crate::nbe::term::{Exp, InductiveDecl, Patt};
+use crate::nbe::term::{Exp, Patt};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
@@ -836,23 +836,19 @@ impl Compiler {
                 format!("invalid parent IRI `{parent_iri_str}` for ctor `{ctor_name}`: {e}"),
             )
         })?;
-        // Per gh #75 the stub's `name` is the diagnostic label; the
-        // identity is the IRI. Pull the short name from the parent
-        // IRI's local part so error messages read naturally.
-        let parent_short_name = parent_iri.local_name().to_string();
-        let stub = std::sync::Arc::new(InductiveDecl {
-            iri: parent_iri,
-            name: parent_short_name,
-            params: Vec::new(),
-            indices: Vec::new(),
-            sort: Exp::sort(1),
-            ctors: Vec::new(),
-        });
+        // D76 Phase B — a constructor reference is `(inductive IRI, ctor name)`.
+        // This built a stub declaration whose only real content was that same IRI:
+        // per gh #75 the `name` was a diagnostic label and the identity was always
+        // the IRI.
         let arg_exps: Result<Vec<Exp>, EslError> = args
             .iter()
             .map(|a| self.lower_type_expr_to_exp(a, scope))
             .collect();
-        Ok(Exp::InductiveCtor(stub, ctor_name.to_string(), arg_exps?))
+        Ok(Exp::InductiveCtor(
+            parent_iri,
+            ctor_name.to_string(),
+            arg_exps?,
+        ))
     }
 
     /// Lower a `data` / `codata` parameter or index KIND to its `eigentt:TypeExpr` value.

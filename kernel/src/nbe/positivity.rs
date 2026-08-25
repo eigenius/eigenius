@@ -462,16 +462,16 @@ fn check_result_type(
 /// case branch — counts.
 pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
     match exp {
-        Exp::InductiveCtor(d, _, args) => {
-            d.iri == decl.iri || args.iter().any(|a| has_ind_occurrence(decl, a))
+        Exp::InductiveCtor(iri, _, args) => {
+            *iri == decl.iri || args.iter().any(|a| has_ind_occurrence(decl, a))
         }
         Exp::InductiveRec {
-            decl: d,
+            iri,
             motive,
             minors,
             major,
         } => {
-            d.iri == decl.iri
+            *iri == decl.iri
                 || has_ind_occurrence(decl, motive)
                 || minors.iter().any(|m| has_ind_occurrence(decl, m))
                 || has_ind_occurrence(decl, major)
