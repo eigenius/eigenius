@@ -230,7 +230,7 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
 pub fn try_readback_neut(level: usize, neut: &Neut) -> Result<Exp, EvalError> {
     Ok(match neut {
         // D76 Phase B1 — an unresolved named reference reads back as itself.
-        Neut::Const(iri) => Exp::Const(iri.clone(), Vec::new()),
+        Neut::Const(iri, levels) => Exp::Const(iri.clone(), levels.clone()),
         Neut::Gen(j, name) => Exp::Var(format!("{name}{j}")),
         // D48 Phase C: an unsolved metavariable reads back as a fresh
         // variable name (`?<id>`) plus the spine applied. Solved metas

@@ -812,6 +812,74 @@ the full one, so by-IRI equality compares only complete declarations. The stub d
 | B-b | delete `Exp::InductiveType`, sweep 168 sites | the sweep; compiler-enumerated |
 | B-c | stubs gone as a consequence; by-IRI `PartialEq` re-justified | the payoff |
 
+**⚠ Fifth correction, `2026-08-24`: four `Exp` variants carry a declaration, not one.**
+
+| variant | sites | becomes |
+|---|---|---|
+| `Inductive(Arc<InductiveDecl>)` | 22 | `Const(iri, levels)` — it *is* the unapplied former |
+| `InductiveType(Arc<InductiveDecl>, Vec<Exp>)` | 190 | `const_applied(iri, levels, args)` |
+| `InductiveCtor(Arc<InductiveDecl>, Name, Vec<Exp>)` | 255 | `InductiveCtor(Iri, Name, Vec<Exp>)` |
+| `InductiveRec { decl, .. }` | 34 | `InductiveRec { iri, .. }` |
+
+Deleting only `InductiveType` would leave the gate unmet, because the codec hands the **same stub** to
+the constructor arm: `resolve_inductive_decl_for_ctor`
+(`program::eigentt_type_mirror`) short-circuits to `ctx.self_ref` when the `CtorApp` targets the
+inductive being assembled. A stub in `InductiveCtor` is the same hollow declaration in a different
+slot.
+
+**`Inductive(d)` is a second spelling of `InductiveType(d, [])`, and the tree knows it.**
+`positivity::rejects_disguised_inductive_negative_occurrence` exists because a negative occurrence
+written in the `Exp::Inductive` form once evaded the checker; its comment calls the form *"non-canonical
+spelling"*. One `Const` retires the spelling rather than continuing to test around it. Its one
+production construction — `validation/rules/inductive_decl.rs:89`, building `Exp::Inductive(decl)` to
+check a declaration — is not a reference at all but an *admission*, and becomes a direct call. That is
+nanoda's split too: `check_inductive_declar` takes the declaration, not an expression.
+
+**Constructors keep `(inductive IRI, ctor name)` rather than becoming declarations of their own.**
+nanoda gives each constructor its own `Const`, but its constructors are environment entries with
+names. Here they are not chain-resident: `InductiveCtorDecl { name, typ }` lives *inside* the
+inductive's resource and has no IRI. Minting constructor IRIs is a chain-format change, so it belongs
+with E2; swapping the declaration for the IRI removes the stub now without it. The wire already agrees
+— `CtorApp(D, c)` plus an `App` spine is head-and-spine already.
+
+The payoff there is a deletion: `resolve_inductive_decl_for_ctor` currently resolves the **entire**
+target inductive — every constructor type decoded — for no purpose but checking that a name is in the
+list. Carrying the IRI removes both the eager resolution and the self-reference short-circuit that
+exists to stop it recursing.
+
+**⚠ Sixth correction, `2026-08-24`, found by the sweep's first two sites: the environment did not know
+the kernel's own declarations.** De-inlining `list_decl` and `option_decl` — the two `term.rs` stub
+sites, the smallest change in the phase — broke `collective_np_coordination_parses`, a felicity test.
+
+`core:List` is built in `nbe::term::list_decl` and is **not** a chain resource. `decode_type`'s
+`ConstRef` arm has always special-cased it:
+
+```rust
+wk::LIST => return Ok(Exp::InductiveType(crate::nbe::term::list_decl(), Vec::new())),
+```
+
+`Env::lookup` did not. While `list_decl` inlined the declaration into its own constructor types the
+gap was invisible; written as `Const(core:List)` the name resolved to nothing and evaluated to a
+neutral, so the constructor types stopped being types and felicity filtering rejected the parse.
+
+This is exactly the divergence §2 names — one surface knowing something another does not — and the
+fix belongs on `Env`: `Env::intrinsic` answers for the kernel-provided declarations, in **every**
+environment including the empty one. They are not chain content and cannot be shadowed, so "knows
+nothing" means nothing *about the chain*.
+
+**`core:Option` is deliberately not intrinsic.** It exists twice — as a chain resource *and* as
+`nbe::term::option_decl` — and `List` does not. Answering it from the kernel's copy would hide any
+disagreement between the two; `the_chain_and_the_kernel_agree_about_option` asserts they match
+instead. They do today.
+
+**The general lesson for the rest of the sweep:** inlining hid every place a name could not be
+resolved, because the answer travelled inside the term. Each de-inlined site is a new demand on the
+environment, and a missing answer degrades to a neutral rather than an error — silent, and visible
+only as a downstream verdict change. The felicity suites are load-bearing here, not incidental.
+
+**So B-b splits in two commits**, each compiler-enumerated: `Inductive` + `InductiveType` → `Const`
+(212 sites), then `InductiveCtor` + `InductiveRec` → IRI (289 sites).
+
 **B-b deletes the variant rather than deprecating it.** Leaving it in place while migrating callers
 would make every un-migrated match arm a *silent* non-match — the failure mode that a spine walker
 looks like a plain `App`. Deleting it turns all 168 into compile errors, so the sweep is enumerated

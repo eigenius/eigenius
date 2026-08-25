@@ -279,7 +279,7 @@ pub(crate) fn eval_impl<T: Tracer>(
         // Without an environment this is inert rather than an error — the same
         // treatment `EigonClass` and `EigonAxiom` get, and what lets a
         // declaration's own constructor types mention it before it is committed.
-        Exp::Const(iri, _levels) => {
+        Exp::Const(iri, levels) => {
             let resolved = ctx.layer().and_then(|layer| {
                 match crate::nbe::env_global::Env::of(std::sync::Arc::clone(layer)).lookup(iri) {
                     crate::nbe::env_global::Global::Inductive(decl) => Some(Val::InductiveType {
@@ -294,7 +294,9 @@ pub(crate) fn eval_impl<T: Tracer>(
                 }
             });
             Ok((
-                resolved.unwrap_or_else(|| Val::Nt(crate::nbe::val::Neut::Const(iri.clone()))),
+                resolved.unwrap_or_else(|| {
+                    Val::Nt(crate::nbe::val::Neut::Const(iri.clone(), levels.clone()))
+                }),
                 T::leaf(),
             ))
         }

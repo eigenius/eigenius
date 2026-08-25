@@ -159,11 +159,17 @@ impl std::fmt::Display for MetaId {
 /// Neutral terms — computations that cannot reduce further.
 #[derive(Debug, Clone)]
 pub enum Neut {
-    /// D76 Phase B1 — an unresolved named reference. A `Const` whose IRI the
+    /// D76 Phase B — an unresolved named reference. A `Const` whose IRI the
     /// environment cannot resolve stays neutral rather than erroring, which is
     /// what lets a declaration's constructor types mention it before it is
     /// committed.
-    Const(crate::ontology::iri::Iri),
+    ///
+    /// **Carries its levels.** Without them readback reconstructs
+    /// `Exp::Const(iri, vec![])` and the level arguments are silently gone —
+    /// harmless while nothing produces non-empty levels, wrong the moment E2
+    /// does. Phase B is what makes `Const` load-bearing, so the field belongs
+    /// here rather than left as a trap for the phase that fills it.
+    Const(crate::ontology::iri::Iri, Vec<crate::nbe::level::Level>),
     /// Generated variable (de Bruijn level + name for readback)
     Gen(usize, Name),
     /// Unification metavariable (D48 Phase C) optionally applied to a
@@ -336,6 +342,53 @@ impl Val {
                 } else {
                     Err(EvalError::InvalidCaseTarget(format!("{v:?}")))
                 }
+            }
+            // D76 Phase B — a type former applied to one argument.
+            //
+            // Fused, `Exp::InductiveType(decl, args)` evaluated the whole
+            // argument vector at once and split it into `params ++ indices` in a
+            // single step. De-fused, the arguments arrive one at a time through
+            // `App`, so the split happens here and a partially applied former is
+            // a legitimate intermediate value rather than an error.
+            //
+            // **Arity behaviour is reproduced exactly, conflation included.**
+            // Today an over-application is refused only when `decl.indices` is
+            // non-empty — a test that cannot tell an un-indexed inductive from
+            // the stub it was written for (Phase B audit). All ten shipped
+            // inductives are un-indexed, so every one of them takes the lenient
+            // path. Changing that is B2's, which runs the #194/#92 measurement
+            // protocol first; Phase B is a representation change and moves no
+            // verdict.
+            Val::InductiveType {
+                decl,
+                mut params,
+                mut indices,
+            } => {
+                if params.len() < decl.params.len() {
+                    params.push(v);
+                } else if decl.indices.is_empty() {
+                    // Lenient path: no arity check, every argument a parameter.
+                    params.push(v);
+                } else if indices.len() < decl.indices.len() {
+                    indices.push(v);
+                } else {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                        "indexed InductiveType `{}`: over-applied past {} arg(s) \
+                         (params + indices: {} + {})",
+                        decl.name,
+                        decl.params.len() + decl.indices.len(),
+                        decl.params.len(),
+                        decl.indices.len()
+                    )));
+                }
+                Ok((
+                    Val::InductiveType {
+                        decl,
+                        params,
+                        indices,
+                    },
+                    arg_node,
+                ))
             }
             Val::Nt(k) => Ok((Val::Nt(Neut::App(Box::new(k), Box::new(v))), arg_node)),
             other => Err(EvalError::NotAFunction(format!("{other:?}"))),

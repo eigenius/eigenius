@@ -656,10 +656,9 @@ impl Exp {
 ///
 /// Returns the same `Arc<InductiveDecl>` on every call so that all
 /// list types and constructors throughout the kernel reference one
-/// declaration. The inner self-reference inside the constructor types
-/// uses the "stub Arc" pattern (an empty-ctors `Arc<InductiveDecl>`
-/// with matching name) — Phase 11b's name-based lookups handle this
-/// without needing genuinely cyclic Arc allocation.
+/// declaration. The self-references inside the constructor types are
+/// `Exp::Const` naming the IRI (D76 Phase B), which is why no stub
+/// declaration is needed and no cyclic `Arc` allocation is either.
 pub fn list_decl() -> Arc<InductiveDecl> {
     static LIST_DECL: OnceLock<Arc<InductiveDecl>> = OnceLock::new();
     LIST_DECL.get_or_init(build_list_decl).clone()
@@ -667,15 +666,11 @@ pub fn list_decl() -> Arc<InductiveDecl> {
 
 fn build_list_decl() -> Arc<InductiveDecl> {
     let list_iri = Iri::parse("urn:eigenius:core:List").expect("static List IRI");
-    let self_ref = Arc::new(InductiveDecl {
-        iri: list_iri.clone(),
-        name: "List".to_string(),
-        params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::sort(1),
-        ctors: Vec::new(),
-    });
-    let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
+    let list_a_typ = Exp::const_applied(
+        list_iri.clone(),
+        Vec::new(),
+        vec![Exp::Var("A".to_string())],
+    );
     Arc::new(InductiveDecl {
         iri: list_iri,
         name: "List".to_string(),
@@ -718,8 +713,8 @@ fn build_list_decl() -> Arc<InductiveDecl> {
 /// Used by the merge-witness type-check (Phase 15b step 3, D20 §6.1):
 /// a `MergeComorphism`'s transformation must have signature
 /// `(A, A, Option(A)) -> A`, where the third argument carries the
-/// optional ancestor value. Same stub-Arc / name-based-equality
-/// pattern as [`list_decl`].
+/// optional ancestor value. Self-references are `Exp::Const`, as in
+/// [`list_decl`].
 pub fn option_decl() -> Arc<InductiveDecl> {
     static OPTION_DECL: OnceLock<Arc<InductiveDecl>> = OnceLock::new();
     OPTION_DECL.get_or_init(build_option_decl).clone()
@@ -727,15 +722,11 @@ pub fn option_decl() -> Arc<InductiveDecl> {
 
 fn build_option_decl() -> Arc<InductiveDecl> {
     let option_iri = Iri::parse(crate::ontology::well_known::OPTION).expect("static Option IRI");
-    let self_ref = Arc::new(InductiveDecl {
-        iri: option_iri.clone(),
-        name: "Option".to_string(),
-        params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::sort(1),
-        ctors: Vec::new(),
-    });
-    let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
+    let option_a_typ = Exp::const_applied(
+        option_iri.clone(),
+        Vec::new(),
+        vec![Exp::Var("A".to_string())],
+    );
     Arc::new(InductiveDecl {
         iri: option_iri,
         name: "Option".to_string(),

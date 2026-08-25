@@ -1332,6 +1332,82 @@ mod level_slot {
     }
 
     #[test]
+    fn an_unresolved_reference_keeps_its_levels_through_readback() {
+        // `Neut::Const` used to carry only the IRI, so readback rebuilt
+        // `Exp::Const(iri, vec![])` and the level arguments were silently gone.
+        // Nothing produces non-empty levels yet, which is exactly why this had to
+        // be fixed before E2 rather than by E2.
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::{eval_ctx, EvalCtx};
+        use crate::nbe::readback::readback_val;
+
+        let reference = Exp::Const(iri("urn:test:Unresolvable"), vec![Level::of_nat(2)]);
+        let value = eval_ctx(&reference, &Rho::Nil, &EvalCtx::pure()).expect("eval");
+        assert_eq!(
+            readback_val(0, &value),
+            reference,
+            "the level argument must survive eval → readback"
+        );
+    }
+
+    #[test]
+    fn a_de_fused_application_reaches_the_same_value_as_the_fused_one() {
+        // The equivalence Phase B's sweep rests on: `App(Const(I), a)` evaluated
+        // in an environment must produce the value `InductiveType(I, [a])`
+        // produced. If it did not, de-inlining would be a semantic change rather
+        // than a representation change.
+        use crate::nbe::env::Rho;
+        use crate::nbe::env_global::Env;
+        use crate::nbe::eval::{eval_ctx, EvalCtx};
+        use crate::nbe::val::Val;
+
+        let level_iri = Iri::parse("urn:eigenius:core:Level").unwrap();
+        let layer = {
+            let json = include_str!("../../../ontologies/core/core-ontology.json");
+            let mut b = crate::layer::LayerBuilder::new("app-arm", None);
+            for r in crate::ontology::eigon_json::parse_document(json).unwrap() {
+                b.add_resource(r).unwrap();
+            }
+            std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+        };
+        let ctx = EvalCtx::in_env(Env::of(layer));
+
+        let bare =
+            eval_ctx(&Exp::Const(level_iri.clone(), Vec::new()), &Rho::Nil, &ctx).expect("eval");
+        let decl = match &bare {
+            Val::InductiveType {
+                decl,
+                params,
+                indices,
+            } => {
+                assert!(
+                    params.is_empty() && indices.is_empty(),
+                    "an unapplied former carries no arguments"
+                );
+                decl.clone()
+            }
+            other => panic!("expected the type former, got {other:?}"),
+        };
+
+        // Applying it one argument at a time is what an `App` spine does.
+        let applied = eval_ctx(
+            &Exp::const_applied(level_iri, Vec::new(), vec![Exp::sort(1)]),
+            &Rho::Nil,
+            &ctx,
+        )
+        .expect("eval");
+        match applied {
+            Val::InductiveType {
+                decl: d, params, ..
+            } => {
+                assert_eq!(d.iri, decl.iri);
+                assert_eq!(params.len(), 1, "the argument folded onto the former");
+            }
+            other => panic!("a de-fused application must stay a type: {other:?}"),
+        }
+    }
+
+    #[test]
     fn identity_by_iri_is_the_reference_behaviour_not_a_workaround() {
         // The corollary: with levels on the reference, comparing declarations by
         // name is what nanoda does, and structural comparison would be *wrong* —

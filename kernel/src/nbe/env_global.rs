@@ -193,7 +193,7 @@ impl Env {
     /// would silently disagree with every already-decoded term.
     pub fn lookup(&self, iri: &Iri) -> Global {
         let Some(layer) = self.layer.as_ref() else {
-            return Global::Absent;
+            return Self::intrinsic(iri).unwrap_or(Global::Absent);
         };
         let key = layer.id().clone();
         if let Some(hit) = GLOBAL_MEMO.with(|m| {
@@ -214,7 +214,32 @@ impl Env {
         computed
     }
 
+    /// The declarations the kernel provides itself, which no layer declares.
+    ///
+    /// `core:List` is built in `nbe::term::list_decl` and is **not** a chain
+    /// resource, so a chain lookup for it returns nothing. `decode_type`'s
+    /// `ConstRef` arm has always special-cased it; the environment did not, which
+    /// is one of the divergences D76 exists to remove — de-inlining `list_decl`'s
+    /// own constructor types is what surfaced it, as a `Const` naming `List`
+    /// evaluating to a neutral.
+    ///
+    /// Answered by *every* environment, the empty one included: these are not
+    /// chain content and cannot be shadowed, so "knows nothing" means nothing
+    /// about the chain. `core:Option` is deliberately **not** here — it *is* a
+    /// chain resource, and taking the kernel's copy would hide any disagreement
+    /// between the two rather than surface it
+    /// (`the_chain_and_the_kernel_agree_about_option`).
+    fn intrinsic(iri: &Iri) -> Option<Global> {
+        if iri.as_str() == crate::ontology::well_known::LIST {
+            return Some(Global::Inductive(crate::nbe::term::list_decl()));
+        }
+        None
+    }
+
     fn lookup_uncached(&self, layer: &Arc<Layer>, iri: &Iri) -> Global {
+        if let Some(g) = Self::intrinsic(iri) {
+            return g;
+        }
         let Some(resource) = layer.resolve(iri) else {
             return Global::Absent;
         };
@@ -496,7 +521,7 @@ mod tests {
 
         let without = eval_ctx(&reference, &Rho::Nil, &EvalCtx::pure()).expect("eval");
         assert!(
-            matches!(without, Val::Nt(crate::nbe::val::Neut::Const(_))),
+            matches!(without, Val::Nt(crate::nbe::val::Neut::Const(..))),
             "with no environment the name is inert — a neutral, not an error: {without:?}"
         );
 
@@ -523,6 +548,51 @@ mod tests {
         assert!(
             environed.hooks().is_none() && !environed.env().is_empty(),
             "effect-free, yet it has an environment"
+        );
+    }
+    #[test]
+    fn the_kernel_s_own_declarations_are_in_every_environment() {
+        // `core:List` is built in `nbe::term::list_decl` and is not a chain
+        // resource. Before this, a chain lookup returned `Absent` and a `Const`
+        // naming it evaluated to a neutral — which broke felicity filtering the
+        // moment `list_decl`'s constructor types stopped inlining the stub.
+        let list = i(crate::ontology::well_known::LIST);
+        for (label, env) in [("empty", Env::empty()), ("chain", with(vec![]))] {
+            match env.lookup(&list) {
+                Global::Inductive(decl) => assert_eq!(
+                    decl.iri, list,
+                    "{label}: the intrinsic declaration answers for its own IRI"
+                ),
+                other => panic!("{label}: core:List must resolve, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_chain_and_the_kernel_agree_about_option() {
+        // `core:Option` exists twice — as a chain resource and as
+        // `nbe::term::option_decl`. The environment answers from the chain, so
+        // that a disagreement shows up here rather than being papered over by
+        // preferring the kernel's copy.
+        let chain_decl = match with(vec![]).lookup(&i(crate::ontology::well_known::OPTION)) {
+            Global::Inductive(d) => d,
+            other => panic!("core:Option is a chain inductive, got {other:?}"),
+        };
+        let kernel_decl = crate::nbe::term::option_decl();
+
+        assert_eq!(chain_decl.iri, kernel_decl.iri);
+        assert_eq!(
+            chain_decl.params.len(),
+            kernel_decl.params.len(),
+            "parameter counts differ: chain {:?} vs kernel {:?}",
+            chain_decl.params,
+            kernel_decl.params
+        );
+        let names = |d: &InductiveDecl| d.ctors.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            names(&chain_decl),
+            names(&kernel_decl),
+            "constructor sets differ between the chain's Option and the kernel's"
         );
     }
 }
