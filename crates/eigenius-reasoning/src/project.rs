@@ -389,6 +389,7 @@ mod tests {
 
     fn decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:reasoning:JustificationTerm").unwrap(),
             name: "JustificationTerm".to_string(),
             params: Vec::new(),

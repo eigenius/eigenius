@@ -1121,6 +1121,7 @@ mod tests {
     /// REDUCTION over an indexed family while type-checking one was impossible.
     fn simple_vec() -> std::sync::Arc<InductiveDecl> {
         let self_ref = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1134,6 +1135,7 @@ mod tests {
             vec![Exp::Var("A".to_string()), Exp::Unit],
         );
         std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1275,6 +1277,7 @@ mod tests {
     #[test]
     fn motive_domain_is_not_captured_by_a_shadowing_index_binder() {
         let shadow = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Shadow").unwrap(),
             name: "Shadow".to_string(),
             // Parameter `A` and index `A` — the same name, deliberately.
@@ -1314,6 +1317,7 @@ mod tests {
     #[test]
     fn motive_domain_handles_an_anonymous_parameter_binder() {
         let anon = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Anon").unwrap(),
             name: "Anon".to_string(),
             params: vec![(Patt::Unit, Exp::sort(1))],
@@ -1342,6 +1346,7 @@ mod tests {
         ctors: Vec<crate::nbe::term::InductiveCtorDecl>,
     ) -> crate::nbe::term::InductiveDecl {
         crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
@@ -1443,6 +1448,7 @@ mod tests {
     fn eq_decl() -> std::sync::Arc<crate::nbe::term::InductiveDecl> {
         // Self-ref for the ctor's conclusion.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1473,6 +1479,7 @@ mod tests {
             )),
         );
         std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1508,6 +1515,7 @@ mod tests {
         // index expressions. Even with the Phase H extension, this
         // should still be rejected.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
@@ -1526,6 +1534,7 @@ mod tests {
             Box::new(conclusion),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
@@ -1578,6 +1587,7 @@ mod tests {
         // P : 1 → Prop with ctor `mk : (n : 1) → P (n, ())` — the index
         // expression `(n, ())` mentions `n` but is not `n` itself.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
             name: "MentionsIx".to_string(),
             params: Vec::new(),
@@ -1593,6 +1603,7 @@ mod tests {
             Box::new(conclusion),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
             name: "MentionsIx".to_string(),
             params: Vec::new(),
@@ -1618,6 +1629,7 @@ mod tests {
         // — the index `n` refers to the SECOND (propositional) binder;
         // the first, non-Prop `n` is shadowed and unrecoverable.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:ShadowIx").unwrap(),
             name: "ShadowIx".to_string(),
             params: Vec::new(),
@@ -1641,6 +1653,7 @@ mod tests {
             )),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:ShadowIx").unwrap(),
             name: "ShadowIx".to_string(),
             params: Vec::new(),
@@ -1666,6 +1679,7 @@ mod tests {
     fn rejects_nonuniform_conclusion_params() {
         // Q(A : Set) { mk : Q(1) } — conclusion `Q(1)`, not `Q(A)`.
         let s = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
             name: "Q".to_string(),
             params: Vec::new(),
@@ -1674,6 +1688,7 @@ mod tests {
             ctors: Vec::new(),
         });
         let decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
             name: "Q".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1706,6 +1721,7 @@ mod tests {
         // at all — large_elim_admitted is only consulted for Prop decls.
         // Smoke-test the function returns sensibly regardless.
         let set_decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
@@ -1812,6 +1828,7 @@ mod tests {
         let bs = ind_self_ref("Bool");
         let bool_ty_exp = Exp::const_applied(bs.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
@@ -1860,6 +1877,7 @@ mod tests {
         let list_ty =
             Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1995,6 +2013,7 @@ mod tests {
         let bs = ind_self_ref("Bool");
         let bool_ty = Exp::const_applied(bs.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),

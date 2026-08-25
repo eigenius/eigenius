@@ -88,6 +88,32 @@ fn sort_kind_level(
 /// so `data X : Sort u` had to be rejected and nothing validated the string's shape. Emitting the
 /// same `core:Level` tree every other level uses removes both problems: one representation, and
 /// the validator checks it against the ctor schema like any other inductive value.
+/// The level variables an `ast::LevelExpr` mentions, appended in first-mention
+/// order and without duplicates.
+fn level_expr_params(l: &ast::LevelExpr, out: &mut Vec<String>) {
+    match l {
+        ast::LevelExpr::Num(_) => {}
+        ast::LevelExpr::Var(v) => {
+            if !out.iter().any(|x| x == v) {
+                out.push(v.clone());
+            }
+        }
+        ast::LevelExpr::Add(inner, _) => level_expr_params(inner, out),
+        ast::LevelExpr::Max(a, b) | ast::LevelExpr::IMax(a, b) => {
+            level_expr_params(a, out);
+            level_expr_params(b, out);
+        }
+    }
+}
+
+/// The level variables a `SortKind` mentions.
+fn sort_kind_params(k: &ast::SortKind, out: &mut Vec<String>) {
+    match k {
+        ast::SortKind::Prop | ast::SortKind::Set => {}
+        ast::SortKind::Type(l) | ast::SortKind::Sort(l) => level_expr_params(l, out),
+    }
+}
+
 fn sort_kind_result_value(
     k: &ast::SortKind,
     declared: &std::collections::BTreeSet<String>,
@@ -637,6 +663,46 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
 }
 
 impl Compiler {
+    /// **Universe generalisation** — the level variables a `data` declaration
+    /// binds, in first-mention order (eigenius#188, D76 Phase E2).
+    ///
+    /// Walks the three places a declaration can mention a level: its result sort,
+    /// its parameter kinds, and its index kinds. A constructor argument cannot
+    /// introduce a *new* one — it may only mention a parameter or the declaration's
+    /// own sort — so the walk is closed over these three.
+    ///
+    /// **First-mention order is the instantiation contract.** A reference
+    /// substitutes level arguments by position (`Level::subst`), so this order is
+    /// what a `ConstRef`'s level list is understood against. A `BTreeSet` would
+    /// make it alphabetical, which is arbitrary and would silently permute a
+    /// two-parameter declaration's arguments.
+    fn declaration_universe_params(&self, decl: &ast::DataDecl) -> Result<Vec<String>, EslError> {
+        let mut out: Vec<String> = Vec::new();
+        if let Some(sort) = &decl.result_sort {
+            sort_kind_params(sort, &mut out);
+        }
+        for p in &decl.params {
+            if let ast::IndexKind::Sort(k) = &p.kind {
+                sort_kind_params(k, &mut out);
+            }
+        }
+        for ix in &decl.indices {
+            if let ast::IndexKind::Sort(k) = &ix.kind {
+                sort_kind_params(k, &mut out);
+            }
+        }
+        // Every name here already passed `lower_level`'s declared-universe check on
+        // the way to the emitted `result_sort` / `param_kind`, so an undeclared one
+        // cannot reach this point. Asserted rather than re-checked: a second,
+        // divergent check is how `decode_param_kind` and `decode_arg_type` came to
+        // disagree (eigenius#199).
+        debug_assert!(
+            out.iter().all(|u| self.declared_universes.contains(u)),
+            "generalisation found an undeclared level variable, which `lower_level` should have rejected"
+        );
+        Ok(out)
+    }
+
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
@@ -2091,6 +2157,27 @@ impl Compiler {
             r.set(
                 iri(wk::RESULT_SORT),
                 sort_kind_result_value(sort, &self.declared_universes, &decl.name.pos)?,
+            );
+        }
+
+        // **Universe generalisation** (eigenius#188, D76 Phase E2). The level
+        // variables this declaration actually mentions become its `uparams`, in
+        // first-mention order.
+        //
+        // Generalised rather than written, per N3 §3's binder decision: `universe u;`
+        // is FILE-scoped, so a file declaring `u` does not thereby make every
+        // declaration in it polymorphic. What binds `u` on a declaration is that the
+        // declaration *uses* it — which is also what makes the common case free, since
+        // a monomorphic declaration mentions none and gets an empty list.
+        //
+        // ORDER IS THE INSTANTIATION ORDER. A reference substitutes by position, so
+        // first-mention order is the contract between this function and
+        // `Level::subst`; a set would make it arbitrary.
+        let uparams = self.declaration_universe_params(decl)?;
+        if !uparams.is_empty() {
+            r.set(
+                iri(wk::UNIVERSE_PARAMS),
+                Value::Array(uparams.into_iter().map(Value::String).collect()),
             );
         }
 

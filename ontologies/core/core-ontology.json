@@ -500,7 +500,8 @@
       "urn:eigenius:core:ctors"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:core:type_params"
+      "urn:eigenius:core:type_params",
+      "urn:eigenius:core:universe_params"
     ]
   },
   {
@@ -919,6 +920,15 @@
     "urn:eigenius:core:short_name": "type_params",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveParam"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
+  },
+  {
+    "@id": "urn:eigenius:core:universe_params",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of UNIVERSE parameters an InductiveType binds \u2014 the level variables its `result_sort`, parameter kinds and constructor types may mention (eigenius#188). nanoda's `uparams`. ORDER IS SIGNIFICANT and duplicates are rejected, because a reference instantiates by position: a `ConstRef` carrying level arguments substitutes the i-th argument for the i-th parameter. Absent or empty on every monomorphic declaration, which is all ten shipped ones, so substitution over it is the identity on the common path. Distinct from core:type_params, which lists VALUE-level parameters: a type parameter is a binder in the term, a universe parameter is a binder in the sort.",
+    "urn:eigenius:core:short_name": "universe_params",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {

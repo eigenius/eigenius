@@ -219,6 +219,10 @@ pub const INDICES: &str = "urn:eigenius:core:indices";
 /// so `data X : Sort u` is expressible (eigenius#188). Absent defaults
 /// to `Succ(Zero)`, the level of `Set`.
 pub const RESULT_SORT: &str = "urn:eigenius:core:result_sort";
+
+/// The level variables an inductive declaration binds (eigenius#188, D76 Phase
+/// E2). Ordered — a reference instantiates by position.
+pub const UNIVERSE_PARAMS: &str = "urn:eigenius:core:universe_params";
 /// Typed-ctor full Π-telescope encoded via the D47 type-fragment codec
 /// (eigenius#72 Layer 2). Present on `InductiveCtor` resources that
 /// were authored with the `name : <type-expr>` surface form. When

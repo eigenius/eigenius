@@ -402,6 +402,7 @@ mod tests {
     #[test]
     fn node_sig_separates_a_coordination_sem_from_a_plain_one_at_the_same_cat() {
         let and_decl = Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:logic:And").unwrap(),
             name: "And".to_string(),
             params: Vec::new(),

@@ -37,6 +37,7 @@ pub(crate) fn ctx_declaring(decls: &[(&str, usize)]) -> (CheckCtx, Vec<Exp>) {
     for (name, sort) in decls {
         let iri = Iri::parse(&format!("urn:test:{name}")).expect("test iri");
         c = c.declaring(Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: iri.clone(),
             name: (*name).to_string(),
             params: Vec::new(),
@@ -58,6 +59,7 @@ use std::sync::Arc;
 /// until eigenius#218; the subtyping tests that used it care about parameter INVARIANCE, not sizes.
 pub(crate) fn two_param_decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: crate::ontology::iri::Iri::parse("urn:test:Pair2").unwrap(),
         name: "Pair2".to_string(),
         params: vec![
@@ -82,6 +84,7 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
     let s = ind_self_ref("Nat");
     let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
         name: "Nat".to_string(),
         params: Vec::new(),
@@ -106,6 +109,7 @@ pub(crate) fn nat_zero_exp(decl: &Arc<InductiveDecl>) -> Exp {
 
 pub(crate) fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
         name: name.to_string(),
         params: Vec::new(),

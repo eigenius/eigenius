@@ -76,6 +76,7 @@ fn build_full_chain() -> Arc<Layer> {
 fn asserts_prop(content_iri: &str) -> Exp {
     let asserts_iri = Iri::parse("urn:eigenius:core:Asserts").expect("static Asserts IRI");
     let decl = Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: asserts_iri.clone(),
         name: asserts_iri.local_name().to_string(),
         params: Vec::new(),

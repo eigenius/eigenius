@@ -470,6 +470,7 @@ mod tests {
 
     fn nat_decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
@@ -718,6 +719,7 @@ mod tests {
 
     fn vec_decl_named(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],

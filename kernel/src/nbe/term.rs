@@ -418,6 +418,19 @@ pub struct InductiveDecl {
     /// readable when unambiguous, but never the identifier.
     pub name: Name,
     /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
+    /// **Universe parameters** — the level variables this declaration binds
+    /// (eigenius#188, D76 Phase E2). nanoda's `uparams`
+    /// (`references/nanoda_lib/src/env.rs:38`).
+    ///
+    /// **Ordered, and a duplicate is a bug**, because a reference instantiates by
+    /// position: `Const(iri, levels)` substitutes `levels[i]` for `uparams[i]`.
+    /// nanoda asserts the same at declaration admission (`no_dupes_all_params`,
+    /// `tc.rs:167`).
+    ///
+    /// Empty for every monomorphic declaration, which is all ten shipped ones —
+    /// so `subst` over an empty list is the identity and the common path is
+    /// untouched.
+    pub uparams: Vec<Name>,
     pub params: Vec<(Patt, Exp)>,
     /// Index telescope — varies per constructor (D48). Empty for non-
     /// indexed declarations (the default; matches D19's pre-D48 shape).
@@ -427,6 +440,53 @@ pub struct InductiveDecl {
     /// Universe of the type former — `Exp::Sort(n)`.
     pub sort: Exp,
     pub ctors: Vec<InductiveCtorDecl>,
+}
+
+impl InductiveDecl {
+    /// Instantiate this declaration's universe parameters with `levels`
+    /// (eigenius#188, D76 Phase E2) — nanoda's `subst_declar_info_levels`.
+    ///
+    /// **By position**, against `uparams`. Returns the declaration unchanged when
+    /// it binds nothing, which is every shipped one, so the common path allocates
+    /// nothing.
+    ///
+    /// **Arity is the caller's to check.** A wrong-length level list is a type
+    /// error at the reference site, where the diagnostic can name the reference;
+    /// silently padding or truncating here would turn `List.{}` into `List.{0}`
+    /// and lose exactly the distinction Phase B built the slot for.
+    pub fn instantiate_levels(&self, levels: &[crate::nbe::level::Level]) -> InductiveDecl {
+        if self.uparams.is_empty() {
+            return self.clone();
+        }
+        let ks = &self.uparams;
+        InductiveDecl {
+            // The parameters are CONSUMED by instantiation: the result is a
+            // monomorphic declaration, and leaving them would let it be
+            // instantiated twice.
+            uparams: Vec::new(),
+            iri: self.iri.clone(),
+            name: self.name.clone(),
+            params: self
+                .params
+                .iter()
+                .map(|(p, k)| (p.clone(), k.subst_levels(ks, levels)))
+                .collect(),
+            indices: self
+                .indices
+                .iter()
+                .map(|(p, k)| (p.clone(), k.subst_levels(ks, levels)))
+                .collect(),
+            sort: self.sort.subst_levels(ks, levels),
+            ctors: self
+                .ctors
+                .iter()
+                .map(|c| InductiveCtorDecl {
+                    name: c.name.clone(),
+                    typ: c.typ.subst_levels(ks, levels),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl PartialEq for InductiveDecl {
@@ -554,6 +614,144 @@ impl Exp {
         };
         args.reverse();
         Some((iri, levels.as_slice(), args))
+    }
+
+    /// Substitute level arguments for level parameters throughout this expression
+    /// (eigenius#188, D76 Phase E2).
+    ///
+    /// **Positional**, matching `Level::subst`: `vs[i]` replaces `Param(ks[i])`.
+    /// A `Param` not in `ks` is left alone, which is what makes this safe to run
+    /// over a term that mentions an outer declaration's parameters.
+    ///
+    /// Only two variants carry a level — `Sort` and `Const` — and everything else
+    /// either has none or is a container. **Written without a catch-all arm on
+    /// purpose:** a new level-carrying variant must then fail to compile here
+    /// rather than silently keeping an uninstantiated `Param`, which is the failure
+    /// mode this whole phase exists to make impossible.
+    pub fn subst_levels(&self, ks: &[Name], vs: &[crate::nbe::level::Level]) -> Exp {
+        if ks.is_empty() {
+            return self.clone();
+        }
+        let go = |e: &Exp| e.subst_levels(ks, vs);
+        let bx = |e: &Exp| Box::new(e.subst_levels(ks, vs));
+        match self {
+            Exp::Sort(l) => Exp::Sort(l.subst(ks, vs)),
+            Exp::Const(iri, levels) => Exp::Const(
+                iri.clone(),
+                levels.iter().map(|l| l.subst(ks, vs)).collect(),
+            ),
+
+            Exp::Lam(p, b) => Exp::Lam(p.clone(), bx(b)),
+            Exp::Pi(p, a, b) => Exp::Pi(p.clone(), bx(a), bx(b)),
+            Exp::Sig(p, a, b) => Exp::Sig(p.clone(), bx(a), bx(b)),
+            Exp::Record(fs) => Exp::Record(
+                fs.iter()
+                    .map(|(i, p, t)| (i.clone(), p.clone(), go(t)))
+                    .collect(),
+            ),
+            Exp::Refine(c, s) => Exp::Refine(bx(c), s.clone()),
+            Exp::Pair(a, b) => Exp::Pair(bx(a), bx(b)),
+            Exp::Con(n, b) => Exp::Con(n.clone(), bx(b)),
+            Exp::Data(ss) => Exp::Data(
+                ss.iter()
+                    .map(|s| Summand {
+                        name: s.name.clone(),
+                        typ: go(&s.typ),
+                    })
+                    .collect(),
+            ),
+            Exp::Case(bs) => Exp::Case(
+                bs.iter()
+                    .map(|b| Branch {
+                        name: b.name.clone(),
+                        body: go(&b.body),
+                    })
+                    .collect(),
+            ),
+            Exp::Fst(a) => Exp::Fst(bx(a)),
+            Exp::Snd(a) => Exp::Snd(bx(a)),
+            Exp::App(f, a) => Exp::App(bx(f), bx(a)),
+            Exp::Ann(a, t) => Exp::Ann(bx(a), bx(t)),
+            Exp::Dec(d, b) => Exp::Dec(
+                match d {
+                    Decl::Def(p, t, v) => Decl::Def(p.clone(), bx(t), bx(v)),
+                    Decl::Drec(p, t, v) => Decl::Drec(p.clone(), bx(t), bx(v)),
+                },
+                bx(b),
+            ),
+            Exp::Id(a, x, y) => Exp::Id(bx(a), bx(x), bx(y)),
+            Exp::Refl(a) => Exp::Refl(bx(a)),
+            Exp::IdJ(six) => Exp::IdJ(Box::new([
+                go(&six[0]),
+                go(&six[1]),
+                go(&six[2]),
+                go(&six[3]),
+                go(&six[4]),
+                go(&six[5]),
+            ])),
+            Exp::NativeDecide(c, b) => Exp::NativeDecide(c.clone(), bx(b)),
+            Exp::DecEq(a, b, c) => Exp::DecEq(bx(a), bx(b), bx(c)),
+            Exp::Arrow(a, b) => Exp::Arrow(bx(a), bx(b)),
+            Exp::Times(a, b) => Exp::Times(bx(a), bx(b)),
+            Exp::PropAccess(a, i) => Exp::PropAccess(bx(a), i.clone()),
+            Exp::Template(t, fs) => Exp::Template(
+                t.clone(),
+                fs.iter().map(|(i, e)| (i.clone(), bx(e))).collect(),
+            ),
+            Exp::Construct(c, fs) => Exp::Construct(
+                c.clone(),
+                fs.iter().map(|(i, e)| (i.clone(), bx(e))).collect(),
+            ),
+            Exp::Map(f, c) => Exp::Map(bx(f), bx(c)),
+            Exp::Reduce(f, i, c) => Exp::Reduce(bx(f), bx(i), bx(c)),
+            Exp::InductiveCtor(iri, n, args) => {
+                Exp::InductiveCtor(iri.clone(), n.clone(), args.iter().map(go).collect())
+            }
+            Exp::InductiveRec {
+                iri,
+                motive,
+                minors,
+                major,
+            } => Exp::InductiveRec {
+                iri: iri.clone(),
+                motive: bx(motive),
+                minors: minors.iter().map(go).collect(),
+                major: bx(major),
+            },
+            Exp::Match { scrutinee, arms } => Exp::Match {
+                scrutinee: bx(scrutinee),
+                arms: arms
+                    .iter()
+                    .map(|a| MatchArm {
+                        ctor_name: a.ctor_name.clone(),
+                        bindings: a.bindings.clone(),
+                        body: go(&a.body),
+                    })
+                    .collect(),
+            },
+            Exp::InstitutionInvoke {
+                comorphism_iri,
+                source,
+                target_iri,
+            } => Exp::InstitutionInvoke {
+                comorphism_iri: comorphism_iri.clone(),
+                source: bx(source),
+                target_iri: target_iri.clone(),
+            },
+
+            // Level-free leaves.
+            Exp::One
+            | Exp::Unit
+            | Exp::Var(_)
+            | Exp::EigonClass(_)
+            | Exp::EigonAxiom(_)
+            | Exp::EigonPrimitive(_)
+            | Exp::EigonResource(_)
+            | Exp::LitString(_)
+            | Exp::LitInt(_)
+            | Exp::LitFloat(_)
+            | Exp::LitBool(_) => self.clone(),
+        }
     }
 
     /// Build an [`Exp::Record`] in **canonical order** (D78 §1), or report a
@@ -690,6 +888,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
         vec![Exp::Var("A".to_string())],
     );
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: list_iri,
         name: "List".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -746,6 +945,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
         vec![Exp::Var("A".to_string())],
     );
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: option_iri,
         name: "Option".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],

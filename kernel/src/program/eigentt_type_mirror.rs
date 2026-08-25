@@ -195,12 +195,26 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         // (D76 §8 Phase E): these are the bytes `InductiveType` has always
         // produced for its head.
         Exp::Const(iri, levels) => {
-            debug_assert!(
-                levels.is_empty(),
-                "levels on the wire are Phase E2 / #188's residual; a level-carrying Const \
-                 must not reach the encoder before the format is extended"
-            );
-            Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
+            // **Level arguments are an OPTIONAL TRAILING argument** (eigenius#188,
+            // D76 Phase E2): `ConstRef(iri)` when the reference is monomorphic,
+            // `ConstRef(iri, [l₁, …])` when it is not.
+            //
+            // Emitting `[]` unconditionally would have been more uniform and is not
+            // taken, because it rewrites every `ConstRef` already on the chain —
+            // and every one of them is monomorphic. Keeping those bytes identical
+            // is what lets the reseed's parity check stay a comparison rather than
+            // becoming a wholesale rewrite in which nothing could be noticed.
+            if levels.is_empty() {
+                Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
+            } else {
+                Ok(ctor(
+                    "ConstRef",
+                    vec![
+                        json!(iri.as_str()),
+                        serde_json::Value::Array(levels.iter().map(encode_level_json).collect()),
+                    ],
+                ))
+            }
         }
         // ── D48 / eigenius#71 — term-level value encoding ─────────
         // Lets indexed inductive applications with concrete index values
@@ -676,12 +690,45 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             }
         }
         "ConstRef" => {
-            expect_arg_count("ConstRef", 1, args)?;
+            // One or two arguments: the IRI, and optionally its level arguments.
+            // See the encode arm — the second is emitted only when non-empty, so a
+            // monomorphic reference is byte-identical to what shipped before
+            // eigenius#188's residual.
+            if args.len() != 1 && args.len() != 2 {
+                return Err(DecodeError::WrongArgCount {
+                    ctor: "ConstRef",
+                    expected: 1,
+                    actual: args.len(),
+                });
+            }
             let iri_str = arg_string("ConstRef", 0, &args[0])?;
             let iri = Iri::parse(&iri_str).map_err(|e| {
                 wrong_shape("ConstRef", 0, &format!("invalid IRI `{iri_str}`: {e}"))
             })?;
-            resolve_const_ref(iri, ctx)
+            let levels: Vec<crate::nbe::level::Level> = match args.get(1) {
+                None => Vec::new(),
+                Some(serde_json::Value::Array(ls)) => ls
+                    .iter()
+                    .map(decode_level_json)
+                    .collect::<Result<Vec<_>, _>>()?,
+                Some(other) => {
+                    return Err(wrong_shape(
+                        "ConstRef",
+                        1,
+                        &format!("level arguments must be an array, got {other}"),
+                    ))
+                }
+            };
+            if levels.is_empty() {
+                resolve_const_ref(iri, ctx)
+            } else {
+                // A level-carrying reference names its declaration and keeps its
+                // arguments; it does not unfold here. Resolution and instantiation
+                // happen in `Γ_env`, which is the whole point of D76 — the decoder
+                // deciding it would be the inline-the-environment antipattern with
+                // levels attached.
+                Ok(Exp::Const(iri, levels))
+            }
         }
 
         // ── D48 / eigenius#71 — term-level value decoding ─────────
@@ -1401,6 +1448,7 @@ mod tests {
         // extended with literal/ctor encoding. This test exercises
         // the type-level-index case which IS supported.
         let ix_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:IxClassFamily").unwrap(),
             name: "urn:_:IxClassFamily".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1449,6 +1497,7 @@ mod tests {
         // InductiveType(List, [Nat]) — encoded as App(ConstRef(List), ConstRef(Nat))
         // via currying. We use synthetic decls with names that read as IRIs.
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1457,6 +1506,7 @@ mod tests {
             ctors: Vec::new(),
         });
         let list_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
             name: "urn:_:List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1466,6 +1516,7 @@ mod tests {
                 name: "nil".to_string(),
                 typ: Exp::const_applied(
                     Arc::new(InductiveDecl {
+                        uparams: Vec::new(),
                         iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
                         name: "urn:_:List".to_string(),
                         params: Vec::new(),
@@ -1512,6 +1563,7 @@ mod tests {
     fn encodes_nullary_inductive_ctor() {
         // Nat.zero — encoded as CtorApp(urn:_:Nat, zero) with no args.
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1534,6 +1586,7 @@ mod tests {
     fn encodes_unary_inductive_ctor_via_app_currying() {
         // Nat.succ(x) — encoded as App(CtorApp(urn:_:Nat, succ), Var(x))
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1604,6 +1657,7 @@ mod tests {
         // The encoder must produce a nested App spine:
         //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1621,6 +1675,7 @@ mod tests {
             ],
         });
         let assay_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:AssayShape").unwrap(),
             name: "urn:_:AssayShape".to_string(),
             params: Vec::new(),

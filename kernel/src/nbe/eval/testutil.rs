@@ -26,6 +26,7 @@ use std::sync::Arc;
 /// to drive the algorithm without genuinely cyclic Arc allocation.
 pub(crate) fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
         name: name.to_string(),
         params: Vec::new(),
@@ -40,6 +41,7 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
     let s = ind_self_ref("Nat");
     let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
         name: "Nat".to_string(),
         params: Vec::new(),

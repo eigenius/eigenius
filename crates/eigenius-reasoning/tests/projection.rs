@@ -41,6 +41,7 @@ const DRIVE: &str = "urn:eigenius:pub:wrn:dd_drive";
 
 fn decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: Iri::parse("urn:eigenius:reasoning:JustificationTerm").unwrap(),
         name: "JustificationTerm".to_string(),
         params: Vec::new(),

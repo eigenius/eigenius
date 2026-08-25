@@ -1325,6 +1325,7 @@ mod tests {
 
         fn decl(local: &str) -> Arc<InductiveDecl> {
             Arc::new(InductiveDecl {
+                uparams: Vec::new(),
                 iri: Iri::parse(&format!("urn:eigenius:lexicon:{local}")).unwrap(),
                 name: Name::from(local),
                 params: Vec::new(),

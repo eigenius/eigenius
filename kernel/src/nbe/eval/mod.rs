@@ -296,11 +296,28 @@ pub(crate) fn eval_impl<T: Tracer>(
             // neutral, so the loss was silent: `Nat.zero` inferred as
             // `Nt(Const(Nat))` instead of its inductive type.
             let resolved = match ctx.env().lookup(iri) {
-                crate::nbe::env_global::Global::Inductive(decl) => Some(Val::InductiveType {
-                    decl,
-                    params: Vec::new(),
-                    indices: Vec::new(),
-                }),
+                crate::nbe::env_global::Global::Inductive(decl) => {
+                    // **Universe instantiation** (eigenius#188, D76 Phase E2). The
+                    // reference's level arguments replace the declaration's
+                    // `uparams`, by position. Both empty is every shipped
+                    // declaration, and `instantiate_levels` returns the declaration
+                    // untouched in that case.
+                    //
+                    // An arity mismatch is left to `check`, which can name the
+                    // reference; silently padding here would make `List.{}` and
+                    // `List.{0}` the same value and lose the distinction the slot
+                    // exists for (`nbe::positivity::level_slot`).
+                    let decl = if decl.uparams.len() == levels.len() && !levels.is_empty() {
+                        std::sync::Arc::new(decl.instantiate_levels(levels))
+                    } else {
+                        decl
+                    };
+                    Some(Val::InductiveType {
+                        decl,
+                        params: Vec::new(),
+                        indices: Vec::new(),
+                    })
+                }
                 crate::nbe::env_global::Global::Definition(v) => Some(v),
                 // **A rigid name has ONE value form.** An axiom — or a definition
                 // its author flagged opaque, which `lookup` classifies as one —

@@ -276,6 +276,7 @@ mod tests {
         let s = ind_self_ref("Foo");
         let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let foo = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
@@ -374,6 +375,7 @@ mod tests {
         let s = ind_self_ref("Foo");
         let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let foo = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
@@ -447,6 +449,7 @@ mod tests {
         let s = ind_self_ref("Bool");
         let bool_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
@@ -532,6 +535,7 @@ mod tests {
         let s = ind_self_ref("Tree");
         let tree_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let tree = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
             params: Vec::new(),
@@ -621,6 +625,7 @@ mod tests {
         let list_ty =
             Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -750,6 +755,7 @@ mod tests {
     /// can be verified against the same shape.
     fn simple_vec_decl_for_eval() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -763,6 +769,7 @@ mod tests {
             vec![Exp::Var("A".to_string()), Exp::Unit],
         );
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],

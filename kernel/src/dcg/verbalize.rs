@@ -938,6 +938,7 @@ mod register_tests {
         // `logic:And` is an INDUCTIVE, not an axiom application — that is the shape
         // `flatten_and_exp` splits and the shape the resolver builds.
         let and_decl = Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:logic:And").expect("iri"),
             name: "And".to_string(),
             params: Vec::new(),

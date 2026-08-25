@@ -569,6 +569,7 @@ mod tests {
 
     fn self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
@@ -583,6 +584,7 @@ mod tests {
         let s = self_ref("Nat");
         let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
@@ -608,6 +610,7 @@ mod tests {
         let list_ty =
             Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -648,6 +651,7 @@ mod tests {
         let s = self_ref("Bool");
         let bool_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
@@ -674,6 +678,7 @@ mod tests {
         let bad_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bad").unwrap(),
             name: "Bad".to_string(),
             params: Vec::new(),
@@ -720,6 +725,7 @@ mod tests {
         let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
@@ -767,6 +773,7 @@ mod tests {
         let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
@@ -800,6 +807,7 @@ mod tests {
         let tree_ty = Exp::const_applied(tree_self.iri.clone(), Vec::new(), Vec::new());
         let nested = Exp::const_applied(list_self.iri.clone(), Vec::new(), vec![tree_ty.clone()]);
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
             params: Vec::new(),
@@ -818,6 +826,7 @@ mod tests {
     fn rejects_wrong_result_type() {
         // mk : Nat → Set  — does not return the inductive
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bogus").unwrap(),
             name: "Bogus".to_string(),
             params: Vec::new(),
@@ -851,6 +860,7 @@ mod tests {
         let conclusion =
             Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:P").unwrap(),
             name: "P".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -890,6 +900,7 @@ mod tests {
         let neg_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let disguised_negative = Exp::Pi(Patt::Unit, Box::new(neg_ty.clone()), Box::new(Exp::One));
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Neg").unwrap(),
             name: "Neg".to_string(),
             params: Vec::new(),
@@ -918,6 +929,7 @@ mod const_self_reference {
 
     fn decl_with(ctor_typ: Exp) -> InductiveDecl {
         InductiveDecl {
+            uparams: Vec::new(),
             iri: iri("urn:test:T"),
             name: "T".to_string(),
             params: Vec::new(),
@@ -951,6 +963,7 @@ mod const_self_reference {
         // `List(A)` written as `App(Const(List), A)` — the form replacing a stub
         // produces, and the form the wire has always used.
         let list = InductiveDecl {
+            uparams: Vec::new(),
             iri: iri("urn:test:List"),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -981,6 +994,7 @@ mod const_self_reference {
     fn a_de_fused_occurrence_under_a_binder_keeps_its_binders() {
         // `(n : Nat) → List(A)` — higher-order positive.
         let list = InductiveDecl {
+            uparams: Vec::new(),
             iri: iri("urn:test:List"),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1005,6 +1019,7 @@ mod const_self_reference {
     fn a_de_fused_negative_occurrence_is_still_refused() {
         // `(List(A) → Nat) → …` — the inductive in a domain.
         let list = InductiveDecl {
+            uparams: Vec::new(),
             iri: iri("urn:test:List"),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1066,6 +1081,7 @@ mod mutual_positivity_gap {
 
     fn stub(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
             name: name.to_string(),
             params: Vec::new(),
@@ -1079,6 +1095,7 @@ mod mutual_positivity_gap {
     }
     fn decl(name: &str, ctors: Vec<InductiveCtorDecl>) -> InductiveDecl {
         InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
             name: name.to_string(),
             params: Vec::new(),
@@ -1253,6 +1270,7 @@ mod level_slot {
 
     fn decl_at(sort: Level) -> InductiveDecl {
         InductiveDecl {
+            uparams: Vec::new(),
             iri: iri("urn:test:List"),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1389,5 +1407,125 @@ mod level_slot {
         let once = decl_at(Level::of_nat(1));
         let twice = decl_at(Level::of_nat(1));
         assert_eq!(once, twice);
+    }
+}
+
+/// D76 Phase E2 / eigenius#188's residual — universe polymorphism, end to end.
+///
+/// Phase B built the *slot* (`Const(iri, levels)`); these pin that it now carries
+/// something. Before E2 a polymorphic declaration compiled, persisted and
+/// validated, and then every reference to it saw `Sort(Param("u"))` with nothing
+/// bound — "implemented and unreachable", which is what N3 §3 warned the feature
+/// would be if the surface landed without instantiation.
+#[cfg(test)]
+mod universe_polymorphism {
+    use crate::nbe::level::Level;
+    use crate::nbe::term::Exp;
+    use crate::ontology::iri::Iri;
+
+    fn polymorphic_layer() -> std::sync::Arc<crate::layer::Layer> {
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = crate::layer::LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+        let src = r#"
+            namespace core = "urn:eigenius:core";
+            namespace p    = "urn:eigenius:p";
+            universe u;
+            data p:Box(A : Sort u) : Sort u { mk(A), }
+        "#;
+        let mut d = crate::layer::LayerBuilder::new("p", Some(core));
+        for r in crate::esl::compile(src).expect("polymorphic ESL compiles") {
+            d.add_resource(r).unwrap();
+        }
+        std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn a_declaration_binds_the_level_variables_it_mentions() {
+        // Generalisation: `universe u;` is FILE-scoped, so what binds `u` on this
+        // declaration is that the declaration uses it.
+        let layer = polymorphic_layer();
+        let iri = Iri::parse("urn:eigenius:p:Box").unwrap();
+        match crate::nbe::env_global::Env::of(layer).lookup(&iri) {
+            crate::nbe::env_global::Global::Inductive(d) => {
+                assert_eq!(d.uparams, vec!["u".to_string()], "Box binds exactly `u`");
+                assert!(
+                    matches!(&d.sort, Exp::Sort(Level::Param(n)) if n == "u"),
+                    "and its sort is that parameter, not a numeral: {:?}",
+                    d.sort
+                );
+            }
+            other => panic!("expected an inductive, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_reference_instantiates_the_declaration_at_its_level_argument() {
+        // The payoff. `Box.{0}` and `Box.{1}` are different types, which is what
+        // `level_slot` said the fused representation could not express.
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::{eval_env, EvalCtx};
+        let _ = EvalCtx::pure;
+        let env = crate::nbe::env_global::Env::of(polymorphic_layer());
+        let iri = Iri::parse("urn:eigenius:p:Box").unwrap();
+
+        let at = |k: usize| {
+            let e = Exp::Const(iri.clone(), vec![Level::of_nat(k)]);
+            match eval_env(&e, &Rho::Nil, &env).expect("eval") {
+                crate::nbe::val::Val::InductiveType { decl, .. } => decl,
+                other => panic!("expected the type former, got {other:?}"),
+            }
+        };
+
+        let zero = at(0);
+        let one = at(1);
+        assert!(
+            zero.uparams.is_empty(),
+            "instantiation CONSUMES the parameter — the result is monomorphic"
+        );
+        assert!(
+            matches!(&zero.sort, Exp::Sort(l) if l.is_nat(0)),
+            "Box.{{0}} is at Sort(0): {:?}",
+            zero.sort
+        );
+        assert!(
+            matches!(&one.sort, Exp::Sort(l) if l.is_nat(1)),
+            "Box.{{1}} is at Sort(1): {:?}",
+            one.sort
+        );
+        assert_ne!(
+            zero.sort, one.sort,
+            "and the two instantiations differ — #188's residual, closed"
+        );
+    }
+
+    #[test]
+    fn level_arguments_round_trip_through_the_wire() {
+        // The chain-format half. A monomorphic reference is byte-identical to what
+        // shipped before; a polymorphic one carries its arguments.
+        use crate::program::eigentt_type_mirror::{decode_type, encode_type};
+        let layer = polymorphic_layer();
+        let iri = Iri::parse("urn:eigenius:p:Box").unwrap();
+
+        let poly = Exp::Const(iri.clone(), vec![Level::of_nat(1)]);
+        let encoded = encode_type(&poly).expect("encodes");
+        let decoded = decode_type(&encoded, &layer).expect("decodes");
+        assert_eq!(decoded, poly, "a level-carrying reference round-trips");
+
+        // Monomorphic: one argument, exactly as before E2.
+        let mono = Exp::Const(iri, Vec::new());
+        let enc_mono = encode_type(&mono).expect("encodes");
+        let as_json = match &enc_mono {
+            crate::ontology::resource::Value::Json(j) => j.clone(),
+            other => panic!("expected Json, got {other:?}"),
+        };
+        assert_eq!(
+            as_json["args"].as_array().map(|a| a.len()),
+            Some(1),
+            "a monomorphic ConstRef keeps its single argument: {as_json}"
+        );
     }
 }

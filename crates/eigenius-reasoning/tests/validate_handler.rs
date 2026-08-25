@@ -539,6 +539,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
     // built shape produce identical bytes.
     let asserts_iri = Iri::parse("urn:eigenius:core:Asserts").expect("static Asserts IRI");
     let stub_decl = std::sync::Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: asserts_iri.clone(),
         name: asserts_iri.local_name().to_string(),
         params: Vec::new(),

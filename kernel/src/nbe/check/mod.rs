@@ -3397,6 +3397,7 @@ mod tests {
     /// without requiring `Nat`. Phase D will pull in real `Nat` indices.
     fn simple_vec_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -3411,6 +3412,7 @@ mod tests {
             vec![Exp::Var("A".to_string()), Exp::Unit],
         );
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -3472,6 +3474,7 @@ mod tests {
         // conclusion `SimpleVec A` (missing the index) supplies only 1.
         // Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -3486,6 +3489,7 @@ mod tests {
             vec![Exp::Var("A".to_string())],
         );
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -3516,6 +3520,7 @@ mod tests {
         // conclusion supplies a Sort(1) value in the index slot —
         // type mismatch. Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -3530,6 +3535,7 @@ mod tests {
             vec![Exp::Var("A".to_string()), Exp::sort(1)],
         );
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -3591,6 +3597,7 @@ mod tests {
     /// `Flag : One -> Type 0` with `mk : Π (u : One). Flag u`.
     fn flag_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Flag").unwrap(),
             name: "Flag".to_string(),
             params: Vec::new(),
@@ -3599,6 +3606,7 @@ mod tests {
             ctors: Vec::new(),
         });
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Flag").unwrap(),
             name: "Flag".to_string(),
             params: Vec::new(),
@@ -3981,6 +3989,7 @@ mod tests {
         use crate::nbe::term::{Exp as TermExp, InductiveDecl};
         Val::InductiveType {
             decl: Arc::new(InductiveDecl {
+                uparams: Vec::new(),
                 iri: crate::ontology::iri::Iri::parse(&format!(
                     "urn:eigenius:reasoning:ChainWitness:{category_short_name}"
                 ))
@@ -4155,6 +4164,7 @@ mod tests {
     fn applied_inductive_type_checks_its_parameter_arguments() {
         // data Box (P : Prop) : Prop — one Prop parameter, mirroring `logic:And`'s telescope.
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:test:Box").unwrap(),
             name: "Box".to_string(),
             params: vec![(Patt::Var("P".to_string()), Exp::sort(0))],
@@ -4167,6 +4177,7 @@ mod tests {
         // per the `(Exp::One, Val::Sort(l)) if l.is_nat(1)` arm — so this needs a parameterless inductive in
         // `Sort(0)`.)
         let prop_decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:test:TrueP").unwrap(),
             name: "TrueP".to_string(),
             params: vec![],

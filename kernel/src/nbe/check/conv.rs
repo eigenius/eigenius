@@ -666,6 +666,7 @@ mod tests {
         // An inductive declared with sort = Sort(0) is propositional — caught
         // by the structural fast-path on Val::InductiveType.
         let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MyProp").unwrap(),
             name: "MyProp".to_string(),
             params: Vec::new(),
@@ -685,6 +686,7 @@ mod tests {
     fn proof_irrelevance_does_not_fire_for_set_typed_inductive() {
         // An inductive declared with sort = Sort(1) is NOT propositional.
         let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MyData").unwrap(),
             name: "MyData".to_string(),
             params: Vec::new(),
@@ -777,6 +779,7 @@ mod tests {
         // rejects them.
         let decl_a = two_param_decl();
         let decl_b = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:OtherStream").unwrap(),
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
@@ -805,6 +808,7 @@ mod index_conversion_tests {
     fn vec_decl() -> Arc<InductiveDecl> {
         let nat = nat_decl();
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Vec").unwrap(),
             name: "Vec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -882,6 +886,7 @@ mod index_conversion_tests {
     /// `screen:HasLowIC50`, `bench:concerns`, …).
     fn string_predicate_decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:HasLowIC50").unwrap(),
             name: "HasLowIC50".to_string(),
             params: Vec::new(),
@@ -929,6 +934,7 @@ mod index_conversion_tests {
     #[test]
     fn a_mismatch_in_a_later_index_is_rejected() {
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Concerns").unwrap(),
             name: "Concerns".to_string(),
             params: Vec::new(),
@@ -995,6 +1001,7 @@ mod index_conversion_tests {
         let box_iri = crate::ontology::iri::Iri::parse("urn:test:Box").unwrap();
         let box_unit = Exp::const_applied(box_iri.clone(), Vec::new(), vec![Exp::Unit]);
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
             name: "Box".to_string(),
             params: Vec::new(),
@@ -1026,6 +1033,7 @@ mod index_conversion_tests {
     /// (`ontologies/logic/logic.esl:38`).
     fn and_decl() -> std::sync::Arc<InductiveDecl> {
         std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").unwrap(),
             name: "And".to_string(),
             params: vec![

@@ -412,10 +412,12 @@ pub(crate) fn resolve_inductive_type(
     let params_telescope = decode_params(class_iri, resource, layer)?;
     let indices_telescope = decode_indices(class_iri, resource, layer)?;
     let sort = decode_result_sort(class_iri, resource)?;
+    let uparams = decode_universe_params(class_iri, resource)?;
 
     let ctors = decode_ctors(class_iri, resource, &params_telescope, layer)?;
 
     let decl = Arc::new(InductiveDecl {
+        uparams,
         iri: class_iri.clone(),
         name: short_name,
         params: params_telescope,
@@ -499,6 +501,48 @@ fn decode_indices(
 /// resource (eigenius#72 Layer 2). Recognised forms: `"Prop"`,
 /// `"Set"`, `"Type:N"`. Absent or unrecognised → `Sort(1)` (the
 /// pre-Layer-2 default).
+/// The level variables a declaration binds (eigenius#188, D76 Phase E2).
+///
+/// Absent means monomorphic, which is every shipped declaration — so the common
+/// path is an absent property and an empty list, and substitution over it is the
+/// identity.
+///
+/// **A duplicate is rejected.** Instantiation is by position, so `[u, u]` makes
+/// the second argument unreachable and the first apply twice; nanoda asserts the
+/// same at declaration admission (`no_dupes_all_params`, `tc.rs:167`). The ESL
+/// compiler generalises without duplicates by construction, so this catches an
+/// authored or hand-edited resource rather than its own emitter.
+fn decode_universe_params(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Result<Vec<String>, String> {
+    let Some(v) = resource.get(&Iri::parse(wk::UNIVERSE_PARAMS).unwrap()) else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(items) = v else {
+        return Err(format!(
+            "inductive type '{class_iri}' has a `universe_params` that is not an array: {v:?}"
+        ));
+    };
+    let mut out: Vec<String> = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::String(name) = item else {
+            return Err(format!(
+                "inductive type '{class_iri}' has a non-string `universe_params` entry: {item:?}"
+            ));
+        };
+        if out.contains(name) {
+            return Err(format!(
+                "inductive type '{class_iri}' declares the level variable `{name}` twice — \
+                 `universe_params` is ordered and instantiated by position, so a duplicate \
+                 makes substitution ambiguous"
+            ));
+        }
+        out.push(name.clone());
+    }
+    Ok(out)
+}
+
 fn decode_result_sort(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
