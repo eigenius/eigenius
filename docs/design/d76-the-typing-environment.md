@@ -234,6 +234,29 @@ D78's memo grows with the ontology's class count; this one would grow with every
 like `RESOLVE_MEMO`, which over a 9.4M chain is the cost that has to be justified rather than
 assumed.
 
+### 4.3 When to build it: Phase D, and only if measured
+
+Not in Phase C, and the reason is that a shared memo buys nothing yet.
+
+- **`check` is the only consumer today, and it already caches** — `type_cache`, per-`CheckCtx`, keyed
+  by IRI. A second cache in front of it would serve one client that has one.
+- **`conv` becomes a consumer in Phase D**, and it has no `CheckCtx`, so `type_cache` cannot help it.
+  That is the first moment two surfaces would each pay.
+- **`eval`/iota becomes one in Phase E** (§1, Q1 correction).
+
+**And §5's fast path is the first-order control, not the memo.** Lazy-δ compares names before
+resolving, so equal-name conversions — the overwhelming majority — never reach a lookup at all. The
+memo only helps the *mismatch* path. Building it before measuring whether the fast path suffices
+would be optimising the case that was already designed away.
+
+**So: measure in Phase D, build if the measurement warrants it.** The measurement is only meaningful
+once `conv` is a consumer, and §4.2's real question — does this thing stay bounded over a 9.4M
+chain — cannot be answered without a representative workload.
+
+**Deferring is cheap to reverse.** `Env::lookup` is the single entry point, so a memo goes behind one
+function. The opposite — building it now — costs a cache with no second client and a boundedness
+claim nothing can check.
+
 ## 5. δ mechanics
 
 Q2 fixed the policy per kind. The mechanism is the open part, and it has one hard requirement:
@@ -617,9 +640,9 @@ same outcome. The new path matches on `Global` and says which —
 `axiom_env`, and `EvalCtx` construction. Those want the *layer*, not the environment, so the `Option`
 survives for them. `EvalCtx`'s belongs with the Q1 correction, in Phase D or E.
 
-**Not yet done in this phase:** the `(LayerId, Iri) → Global` memo of §4.2. `type_cache` still keys
-class resolutions by IRI string, per-`CheckCtx`. Siting the shared memo and measuring its bound is
-the remainder.
+**The `(LayerId, Iri) → Global` memo is deliberately not built here** — §4.3. `check` is its only
+consumer today and already caches via `type_cache`; `conv` becomes the second in Phase D, which is
+also the first point its boundedness can be measured against a real workload.
 
 ---
 
@@ -630,6 +653,9 @@ the remainder.
 
 **This is the phase D78 has been waiting on.** D76 §2.1's parked obligation discharges here, and
 `entailment_beyond_set_inclusion_is_not_yet_decided` must **flip**.
+
+**Also decides §4.3:** measure whether the lazy-δ fast path leaves enough lookups to warrant the
+shared memo, and build it only if so.
 
 **Gate:** the parked test flips; `a_class_and_its_own_unfolding_are_not_definitionally_equal` is
 **re-examined, not assumed** — Q2 says the reconciliation is to stop `check` treating its unfolding as
