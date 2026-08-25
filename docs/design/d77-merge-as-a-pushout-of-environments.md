@@ -83,7 +83,37 @@ D75 §7 flagged this and it held: validation is now clause-8 evaluation against 
 transitive `subclass_of` walk that existed when D20 was written. Building the rescan before D78 would
 have wired it to rules that no longer exist.
 
-### 2.4 The linear analogue is complete and is the template
+### 2.4 The resolution invariant — load-bearing, and stated nowhere in the code
+
+`Layer` carries `parents: Vec<Arc<Layer>>` and merges with three parents exist
+(`lattice.rs:2475`), but `resolve_uncached` advances via `parents.first()`
+(`layer/mod.rs:748`) — resolution walks **one** parent. `collect_ancestors`
+(`layer/index.rs:700`) walks **all** of them.
+
+That is not a disagreement, and reading it as one was a mistake worth recording, because the
+resolution of it is what makes this document's central question well-posed. The two answer different
+questions — the index needs the ancestor *set* for triple-index coverage; resolution needs the
+*binding* — and **the binding is the same down either path**:
+
+> `commit_resolutions_as_merge_layer` materialises `sources_a`, `sources_b` and every resolved
+> conflict into the merge layer itself (`merge/resolve.rs:929-966`). So anything either branch changed
+> since the LCA is found *in the merge layer*, before any parent walk begins; and anything neither
+> changed is unchanged since the LCA, which is reachable down either parent and identical either way.
+
+**So `Γ_merge` is well-defined**, `binding_M(i)` in §3 means something, and `revalidate_pending`'s
+reuse below is sound — it resolves through `new_layer.resolve()`, which is exactly this walk.
+
+**The distinction the invariant does *not* cross is this document's subject.** It says which body `i`
+resolves to. It says nothing about whether a resource that mentions `i` is still *valid* given what
+`i` now binds to. #225 is precisely a resource **neither branch changed** becoming unsound because the
+other side rebound something under it — a merge that is correct by the invariant and wrong by the
+judgment.
+
+Worth writing down because nothing in the code states it: the correctness of first-parent resolution
+rests on the materialisation above, and a future change that made the merge layer hold *references*
+rather than bodies would break it silently.
+
+### 2.5 The linear analogue is complete and is the template
 
 `retroactive_validate` (`validation/retroactive.rs:91`) discharges the same obligation for a **linear**
 commit:
@@ -176,11 +206,16 @@ checking path and the resolution path are different paths*; keeping them differe
 onto one of them preserves the defect's cause while removing this instance of it. The project posture
 names that shape directly.
 
-**But (a) needs a decision this document cannot make alone:** the commit pipeline is built around a
-single parent, and a merge layer has two. Whether `LayerBuilder` and `CommitPipeline` admit a
-two-parent layer without reshaping is unestablished — `layer/handle.rs` and `commit/pipeline.rs` need
-reading against that question before (a) can be costed. **That is the first work item, and it is
-research, not code.**
+**But (a) needs a decision this document cannot make alone.** Not for the reason first written here —
+that *"the commit pipeline is built around a single parent, and a merge layer has two"* — because
+`Layer` already carries `parents: Vec<Arc<Layer>>` and §2.4's invariant makes resolution through such
+a layer well-defined. The data model is not the obstacle.
+
+What is unestablished is narrower: whether `CommitPipeline`'s **phases** hold assumptions a merge
+breaks — `already_validated`'s anchored-commit cache, the branch-advance gating, and whether
+`retroactive_validate`'s enumeration means the same thing when "the new layer" is a union of two
+branches rather than a delta over one. `commit/pipeline.rs` and `commit/phases.rs` need reading
+against *that*. **That is the first work item, and it is research, not code.**
 
 ---
 
