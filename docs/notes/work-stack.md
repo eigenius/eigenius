@@ -9,7 +9,12 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry 1 (`2026-08-22`), pushed onto the empty stack.** The parser-pipeline spine emptied
+> **ACTIVE: entry 1 (`2026-08-24`), pushed on top of P2.** D75 diagnosed the two seams as one
+> problem, so the fusion work outranks the individual P2 issues it subsumes — #188's residual is
+> D76 Phase E2, and D78 §3.1 waits on D76 Phase D. Entry 2 stays the tracker for what fusion does
+> *not* cover.
+>
+> **Superseded note (entry 2, `2026-08-22`), kept for the reasoning:** The parser-pipeline spine emptied
 > on `2026-08-20` when D71 met its gate; entries (2) and (3) below are the pre-D71 spine, assessed on
 > `2026-08-19` as largely implemented-or-obsolete, so neither was promoted by position. P2 was picked
 > up instead. The two candidates that were live and stay unstarted:
@@ -20,7 +25,38 @@ any detour.
 > - **D61 faithfulness** — the half that D71 §10 reserved the institution shape for, and the only
 >   thing in the tree that still earns it.
 
-### 1. [p2-type-theory-soundness-plan.md](p2-type-theory-soundness-plan.md) — **P2 · type-theory soundness**
+### 1. [d75-fusing-eigentt-and-the-knowledge-graph.md](../design/d75-fusing-eigentt-and-the-knowledge-graph.md) — **fusing the type theory with the graph**
+The diagnosis: two seams, built twice — Seam A (*the layer chain is `Γ_env`*) and Seam B (*a resource
+is a record*) — with nine symptoms and ten questions, all answered. Two implementation documents hang
+off it.
+
+#### STATUS `2026-08-25`
+- **[D78](../design/d78-resources-as-records.md) — Seam B: complete.** All five phases. Closes D75
+  §3.7 (the Σ-chain), §3.8 (undeclared properties projectable) and §6.0's three-implementations
+  duplication, plus two latent defects: local-name projection collisions, and `classes.first()`
+  discarding 73 % of class claims. Two deferrals remain in its §9. Its §3.1 entailment arm is parked
+  on D76 Phase D.
+- **[D76](../design/d76-the-typing-environment.md) — Seam A: Phases A, C, B complete; D, E2, F open.**
+  Order is `A ▸ C ▸ B ▸ D ▸ E2 ▸ F`.
+
+  **Phase B is done and its gate is met:** no `Exp` variant carries an `Arc<InductiveDecl>`, and the
+  self-reference stub is gone. Five commits (`9d1f33b`, `a7b1a38`, `da0d747`, `2e7afca`, `f007b87`,
+  `6dee735`, `406f0b2`). Six defects surfaced along the way, none findable by the compiler — the
+  felicity and parse suites found them all. The pattern, worth carrying into D: **inlining hid every
+  place a name could not be resolved**, because the answer travelled inside the term, and a missing
+  answer degrades to a *neutral* rather than an error.
+
+  **B2 is deferred by design** — turning on the arity check the stub was suppressing is
+  verdict-affecting over the whole chain, so it runs the #194/#92 protocol: instrument, count, then
+  enforce. Its natural shape is nanoda's: give a type former the Π-telescope type
+  `Π(params)(indices). Sort l` and let the ordinary application rule check the arguments, deleting
+  `check_inductive_type_args`.
+
+- **Next:** the reseed (running `2026-08-25`, from `406f0b2`) validates four commits of kernel change
+  against the real 9.4M-resource chain and is the only place §4.2's `Global`-memo boundedness gets
+  measured. Then Phase D — δ in conversion, 54 call sites — which is what D78 §3.1 is waiting on.
+
+### 2. [p2-type-theory-soundness-plan.md](p2-type-theory-soundness-plan.md) — **P2 · type-theory soundness**
 Tracker [#215](https://github.com/eigenius/eigenius/issues/215). What EigenTT wrongly admits, and what
 it cannot yet express: nine issues in four tracks, plus #213 as a prerequisite.
 
@@ -274,7 +310,7 @@ and #188 predate the repin.
 - **#196's batching plan was written and then not followed**, and the batch paid two reseeds. If
   #194 turns out to need an ontology edit, hold it until #92's arm is known.
 
-### 2. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
+### 3. [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 4 of 4: performance**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity ✓ → performance (HERE).** Phase 3 closed by selection rather
 than by the multiplicity reduction this note planned for it — see STATUS. The performance work
@@ -347,7 +383,7 @@ out for this corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note*
 refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
 than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
-### 3. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
+### 4. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 Phase 1 is done (reshape, pipeline, grader, ingestion, D47 codec). Of **Phase 2** — "refactor the
 LLM parts out into the orchestrator; the served gRPC path" — two of three parts landed via D71, and
 not in the shape this note predicts:
