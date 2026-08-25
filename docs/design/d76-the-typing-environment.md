@@ -521,6 +521,11 @@ else in this section is mechanical once it is gone.
 
 **Each phase opens by reading the code it names, and correcting this document before writing any.**
 
+**Compare against the code and against nanoda — not against pre-D50 design docs.** Anything older
+than D50 has drifted, and the audit has repeatedly found the drift *in the docs* rather than in the
+code: D19 never defines the stub its own subject depends on, and D48's status line conflates it with
+the arity-skip. A pre-D50 doc is evidence of intent at the time, not of current behaviour.
+
 Not a general principle — a response to this document's own error rate. §3–§8 were written in one pass
 from a `grep -c` census, which measured the code's *shape* and not its *behaviour*. Four claims were
 wrong, and each was caught only when a phase reached the code its section had named:
@@ -652,10 +657,33 @@ all of them.
   is a parameter. Whether that misalignment is reachable is **untested** — the tolerance at `:373`
   describes a stub the builder does not produce.
 
-  So B1 is not "swap a representation": it is reconciling three disagreeing notions of what a stub
-  is, one of which may be misaligning a check. That is worth doing — the disagreement is exactly the
-  kind of thing the stub's existence hides — but it is larger than the phase's one-line description,
-  and the misalignment should be tested before anything is removed.
+  **There is no definition to reconcile them against.** D19 — the design doc *for inductive types* —
+  never mentions the concept. D48 mentions it only in status lines, as a preserved artifact:
+  *"stub-Arc pattern preserved (eval skips arity check when `decl.indices.is_empty()`)"* — which
+  conflates the stub with the arity-skip in the same sentence, so the conflation in the code is
+  inherited from the doc that shipped it. The three code sites are the only descriptions that exist,
+  and they disagree because each wrote down the part it needed.
+
+  **nanoda has the definition, and it is not a declaration.**
+  `st.ind_consts.push(self.ctx.mk_const(ind.name, st.uparams))`
+  (`references/nanoda_lib/src/inductive.rs:506`): a self-reference is a **`Const(name, levels)`** —
+  an ordinary expression, the same form as any other reference — held in the check state for the
+  duration of the declaration. There is no hollowed-out decl because none is needed.
+
+  **So the stub exists because `Exp::InductiveType` has no way to say "the one being declared".** Its
+  slot holds an `Arc<InductiveDecl>`, so a self-reference has to *be* some decl, and the least-wrong
+  one is a copy with the unavailable parts left empty. The three-way disagreement follows: each site
+  guessed differently about which parts those are.
+
+  **B1 therefore aligns with nanoda: the self-reference becomes a `Const`.** That merges B1's
+  construct with Phase E's — the same `Exp::Const(iri, levels)` serves both — so B1 is no longer a
+  reconciliation with no fixed point but a well-defined change with a reference implementation.
+
+  **And `ind_consts` is a `Vec`.** nanoda's positivity scans
+  `has_ind_occ(ctor_type, st.ind_consts.as_ref())` — *all* the block's constants, which is exactly
+  why it catches the cross-type occurrence `check_positivity(decl)` cannot (§6.5,
+  `nbe::positivity::mutual_positivity_gap`). Aligning the representation makes the mutual-positivity
+  fix a change of arity on one function rather than a new mechanism.
 - **B2 — arity checking.** Turn on the check the stub was suppressing. **Verdict-affecting over the
   whole chain**, so it follows the #194/#92 protocol: instrument to log without rejecting, run the
   suites and the shipped ontologies, count, then enforce. A non-zero count is a finding about the
