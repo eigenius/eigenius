@@ -249,6 +249,37 @@ pub(crate) fn eval_impl<T: Tracer>(
         // list plus the environment its types are read in. Field types are
         // evaluated lazily, as the telescope is walked, because field `i`'s type
         // may mention any earlier binder.
+        // D76 Phase B1 — a named reference to a chain-resident declaration.
+        //
+        // Resolves through the environment when there is one, and otherwise
+        // stays a neutral. That is the Q1 correction (D76 §1) in the one place
+        // it bites: an inductive reference must reach its declaration for
+        // `iota_reduce` to have `decl.ctors`, so evaluation is a consumer of the
+        // environment and not exempt from it.
+        //
+        // Without an environment this is inert rather than an error — the same
+        // treatment `EigonClass` and `EigonAxiom` get, and what lets a
+        // declaration's own constructor types mention it before it is committed.
+        Exp::Const(iri, _levels) => {
+            let resolved = ctx.layer().and_then(|layer| {
+                match crate::nbe::env_global::Env::of(std::sync::Arc::clone(layer)).lookup(iri) {
+                    crate::nbe::env_global::Global::Inductive(decl) => Some(Val::InductiveType {
+                        decl,
+                        params: Vec::new(),
+                        indices: Vec::new(),
+                    }),
+                    crate::nbe::env_global::Global::Definition(v) => Some(v),
+                    crate::nbe::env_global::Global::Constraint(_)
+                    | crate::nbe::env_global::Global::Axiom
+                    | crate::nbe::env_global::Global::Absent => None,
+                }
+            });
+            Ok((
+                resolved.unwrap_or_else(|| Val::Nt(crate::nbe::val::Neut::Const(iri.clone()))),
+                T::leaf(),
+            ))
+        }
+
         Exp::Record(fields) => Ok((Val::Record(fields.clone(), rho.clone()), T::leaf())),
 
         // D78 §3 — `Refine(R, ∅)` degenerates to `R`, so the empty set has one

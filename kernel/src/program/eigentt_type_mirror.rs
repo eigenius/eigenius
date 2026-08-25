@@ -190,6 +190,18 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             };
             Ok(ctor("ConstRef", vec![json!(iri_str)]))
         }
+        // D76 Phase B1 — a named reference encodes as the `ConstRef` the wire
+        // already uses. This is why de-inlining is *not* a chain-format change
+        // (D76 §8 Phase E): these are the bytes `InductiveType` has always
+        // produced for its head.
+        Exp::Const(iri, levels) => {
+            debug_assert!(
+                levels.is_empty(),
+                "levels on the wire are Phase E2 / #188's residual; a level-carrying Const \
+                 must not reach the encoder before the format is extended"
+            );
+            Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
+        }
         Exp::InductiveType(decl, args) => {
             // Encode `I(a1, a2, ...)` as
             //   App(App(...App(ConstRef(I.iri), a1)..., a_{n-1}), a_n)

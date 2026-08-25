@@ -159,6 +159,11 @@ impl std::fmt::Display for MetaId {
 /// Neutral terms — computations that cannot reduce further.
 #[derive(Debug, Clone)]
 pub enum Neut {
+    /// D76 Phase B1 — an unresolved named reference. A `Const` whose IRI the
+    /// environment cannot resolve stays neutral rather than erroring, which is
+    /// what lets a declaration's constructor types mention it before it is
+    /// committed.
+    Const(crate::ontology::iri::Iri),
     /// Generated variable (de Bruijn level + name for readback)
     Gen(usize, Name),
     /// Unification metavariable (D48 Phase C) optionally applied to a

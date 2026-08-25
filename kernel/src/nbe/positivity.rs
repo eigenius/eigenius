@@ -139,6 +139,16 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
                 binders.push((patt, dom));
                 cursor = body;
             }
+            // D76 Phase B1 — a bare `Const` naming this inductive is a
+            // zero-argument recursive occurrence, the form the stub used to
+            // take. `has_ind_occurrence` alone is not enough: this classifier
+            // decides the *shape*, and an occurrence it cannot classify falls
+            // through as if it were not recursive — which silently accepted a
+            // negative occurrence written as a `Const`
+            // (`const_self_reference::positivity_still_rejects_…`).
+            Exp::Const(iri, _) if *iri == decl.iri => {
+                return Some(RecArgShape { binders, args: &[] });
+            }
             Exp::InductiveType(d, args) if d.iri == decl.iri => {
                 // An occurrence inside its own index arguments is not something the eliminator can
                 // build a hypothesis for; rejected here and diagnosed by `check_arg_positivity`.
@@ -382,6 +392,14 @@ fn check_result_type(
     param_refs: &[Option<String>],
 ) -> Result<(), String> {
     match typ {
+        // D76 Phase B1 — a constructor may conclude in a bare `Const` naming its
+        // inductive, which is the zero-argument case of the application below.
+        // The third site in this module that has to know the occurrence form:
+        // `has_ind_occurrence` says *whether*, `recursive_arg_shape` says *what
+        // shape*, and this says *is it a valid conclusion*. Missing any one of
+        // them fails differently — this one rejected a strictly positive
+        // constructor rather than accepting a bad one.
+        Exp::Const(iri, _) if *iri == decl.iri => Ok(()),
         Exp::InductiveType(d, args) if d.iri == decl.iri => {
             let upto = decl.params.len().min(args.len());
             check_params_uniform(decl, ctor_name, &args[..upto], param_refs, "the conclusion")
@@ -431,6 +449,12 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
 
         // D78 §1 — a record's field types are subterms; any occurrence in one
         // counts, the same as under a Π or Σ.
+        // D76 Phase B1 — a `Const` naming this inductive is a recursive
+        // occurrence, exactly as the stub was. nanoda scans for occurrences of
+        // `st.ind_consts` (`inductive.rs:762`), a Vec covering the whole mutual
+        // block; this scans for one, which is §6.5's gap.
+        Exp::Const(iri, _) => *iri == decl.iri,
+
         Exp::Record(fields) => fields.iter().any(|(_, _, ty)| has_ind_occurrence(decl, ty)),
 
         // The constraint set is names; only the carrier can hold an occurrence.
@@ -852,6 +876,76 @@ mod tests {
         // disguised spelling must be too.
         let err = check_positivity(&decl).expect_err("disguised negative occurrence");
         assert!(err.contains("non-positive"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod const_self_reference {
+    //! D76 Phase B1 — a self-reference is a `Const`, as in nanoda.
+
+    use super::*;
+    use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt};
+
+    fn iri(s: &str) -> crate::ontology::iri::Iri {
+        crate::ontology::iri::Iri::parse(s).unwrap()
+    }
+
+    fn decl_with(ctor_typ: Exp) -> InductiveDecl {
+        InductiveDecl {
+            iri: iri("urn:test:T"),
+            name: "T".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_const_naming_the_inductive_is_a_recursive_occurrence() {
+        // What the stub did, without the stub. `has_ind_occurrence` must see a
+        // `Const` bearing the declaration's own IRI exactly as it saw an
+        // `InductiveType` carrying a stub of it.
+        let d = decl_with(Exp::sort(1));
+        assert!(
+            has_ind_occurrence(&d, &Exp::Const(iri("urn:test:T"), Vec::new())),
+            "a Const naming this inductive is a recursive occurrence"
+        );
+        assert!(
+            !has_ind_occurrence(&d, &Exp::Const(iri("urn:test:Other"), Vec::new())),
+            "a Const naming a different declaration is not"
+        );
+    }
+
+    #[test]
+    fn positivity_still_rejects_a_negative_self_occurrence_expressed_as_a_const() {
+        // The control that matters: swapping the representation must not lose
+        // the check. `mk : (T → T) → T` with the self-reference as a `Const`.
+        let self_ref = || Exp::Const(iri("urn:test:T"), Vec::new());
+        let bad = decl_with(Exp::Pi(
+            Patt::Unit,
+            Box::new(Exp::Pi(
+                Patt::Unit,
+                Box::new(self_ref()),
+                Box::new(self_ref()),
+            )),
+            Box::new(self_ref()),
+        ));
+        assert!(
+            check_positivity(&bad).is_err(),
+            "a negative self-occurrence must still be rejected when written as a Const"
+        );
+
+        // And a positive one is still accepted: `mk : T → T`.
+        let good = decl_with(Exp::Pi(
+            Patt::Unit,
+            Box::new(self_ref()),
+            Box::new(self_ref()),
+        ));
+        check_positivity(&good).expect("a strictly positive self-occurrence must be accepted");
     }
 }
 

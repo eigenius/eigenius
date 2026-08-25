@@ -42,6 +42,26 @@ pub enum Exp {
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
     Sig(Patt, Box<Exp>, Box<Exp>),
+    /// D76 Phase B1 — a reference to a chain-resident declaration, by name.
+    ///
+    /// **The form nanoda uses.** `ind_consts.push(mk_const(ind.name, uparams))`
+    /// (`references/nanoda_lib/src/inductive.rs:506`): a constructor's type names
+    /// its own inductive with an ordinary `Const`, the same form as any other
+    /// reference. There is no hollowed-out declaration because none is needed.
+    ///
+    /// **What it replaces.** Eigenius wrote a *stub* — an `Arc<InductiveDecl>`
+    /// with the parts it could not supply left empty — because
+    /// `Exp::InductiveType`'s slot holds a declaration, so a self-reference had
+    /// to *be* one. Three sites then disagreed about which parts "could not
+    /// supply" means (D76 §8 Phase B), because the concept was never defined:
+    /// D19 does not mention it and D48 records it only as a preserved artifact.
+    ///
+    /// **`levels` is empty until #188's residual.** The wire form already carries
+    /// the IRI — `encode_type_json` emits `ConstRef(iri)` for an
+    /// `InductiveType` — so a level-free `Const` round-trips through the
+    /// existing codec unchanged. Levels are what makes this a chain-format
+    /// change, and they are Phase E2.
+    Const(Iri, Vec<crate::nbe::level::Level>),
     /// Record type: a **named**, canonically-ordered dependent telescope (D78 §1).
     ///
     /// Each entry is `(field IRI, binder, field type)`, and a later field's type
