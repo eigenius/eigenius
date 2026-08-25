@@ -401,7 +401,7 @@ on a different trigger, and it needs its own decision about what "revoking credi
 already-committed `JustifiedBy` results. It is F5 in §6, gated behind F2c, and it is called out here
 so that the tool is not built and left unwired.
 
-### 4.5 Support is a third relation, and it is the one that cannot be rechecked
+### 4.5 Support is a third relation, and re-execution is sometimes the right recheck
 
 §3.2 split the dependency relation in two. There is a third, and it is the one an institution verdict
 lives on. A `reflection:InstitutionEmittedDerivation` — the statistics institution emits one per ANOVA
@@ -413,9 +413,7 @@ stays structurally valid and type-correct**. Nothing is invalid. The verdict is 
 |---|---|---|---|
 | **shape** | `is_a`, property value, property key | one hop — validity is local | `validate_resource` |
 | **term** | `ConstRef` in an encoded term | one hop — the term is checked in `Γ` | re-type-check in `Γ_merge` |
-| **support** | `from_subject`, `runtime_invocation`, `runtime:inputs`, `derivation_trace` | **transitive** | **not in-process** |
-
-Two properties distinguish it.
+| **support** | `from_subject`, `runtime_invocation`, `runtime:inputs`, `derivation_trace` | **transitive** | **§4.5.2** |
 
 **It is transitive, and the other two are not.** One hop suffices for shape and term because validity
 and type-correctness are *local*: revalidating `R` against the merged chain settles `R`, and `R`'s own
@@ -424,39 +422,67 @@ dataset invalidates a derivation through `invocation → inputs`, and that deriv
 input to another. `enumerate_dependents` is a single pass over the new layer's `defined_iris()`
 (`retroactive.rs:91`) with no fixpoint, so it cannot reach past one hop by construction.
 
-**Its recheck is re-execution.** Deciding whether the verdict still holds means running the
-institution again — R or Julia in a pinned container, against data that may be external. A merge
-commit cannot be unbounded in time or depend on a foreign runtime, and the verdict is the
-institution's to issue, not the kernel's to recompute.
+#### 4.5.1 The staleness question is decidable from the index
 
-#### Which is why D77 does not route through institutions — it routes through provenance
+`runtime:inputs` is `core:resource_array` ("ordered list of input resource IRIs"); `from_subject`,
+`runtime_invocation`, `runtime:script` and `environment` are `core:resource`; the invocation pins
+`image_digest`, and D53 §6.1 file-backed observations carry a `content_hash` the kernel verifies. Every
+provenance edge is therefore an indexed triple under the existing rule — no §4.2 extension is needed
+for this relation, only a transitive closure over a **named edge set** rather than over all reference
+edges, which would reach the whole chain.
 
-**Staleness is decidable without re-execution, and the index already holds what decides it.**
-`runtime:inputs` is `core:resource_array` ("ordered list of input resource IRIs"), `from_subject`,
-`runtime_invocation` and `runtime:script` / `environment` are `core:resource`, and the invocation pins
-`image_digest`. Every provenance edge is therefore an indexed triple under the existing rule — no §4.2
-extension is needed for this relation, only a transitive closure over a **named edge set** rather than
-over all reference edges (which would reach the whole chain).
+So *"was this verdict computed from something the rebinding moved"* is answerable by closure over the
+index, for every institution, without running anything.
 
-So the merge can answer *"was this verdict computed from something the rebinding moved"* by closure
-over the index. What it cannot answer is *"would the verdict come out the same"* — only re-execution
-answers that, and the honest response to an undecidable-in-process question is to **mark, not
-recompute**.
+#### 4.5.2 Whether it can be *rechecked* is declared, not assumed
 
-That is `CascadeItem::InvalidatedTrace { trace, reason }`, which D20 §8 reserved for exactly this:
-*"A trace references content that becomes inconsistent."* The variant has been waiting for the
-enumeration that populates it.
+An earlier draft of this section asserted that a verdict's recheck is re-execution and that a merge
+commit therefore cannot perform it — "the verdict is the institution's to issue, not the kernel's to
+recompute." **That is false for the institution this section is about.** `eigenius-statistics` is a
+kernel crate whose Cargo manifest states the design directly: *"The verifier is in-process and reads
+SampleSets from the chain via the kernel's resource/value machinery; no external prover or worker."*
+It is `ndarray` + `statrs`, deterministic, with chain-resident or content-hashed inputs.
 
-**F5 and F6 are the same shape.** Witness credit (§4.4) and institution verdicts are both *earned
-under a binding* and both become unsupported when that binding widens; neither is repaired by
-revalidation or re-type-checking. The kernel's job for both is to stop asserting support it no longer
-has. What "revoking" means downstream — whether a claim survives as unsupported, whether `JustifiedBy`
-starts failing, whether re-execution is scheduled — is one policy question shared by both phases, and
-this document does not answer it. It is each phase's first output.
+The distinction is **declared on the verdict itself**. `institution:runtime_invocation` is documented
+as *"Set when the dispatching institution was external-runtime (D31 §6.3); absent for in-process /
+WASM dispatches whose provenance is program-trace-only."* Its presence or absence decides whether
+re-execution is admissible inside a commit — so this is a property read, not a hard-coded list of
+institutions.
 
-**What is out of scope here**, and stated so it is not mistaken for an oversight: institution
-*dispatch*, re-execution scheduling, and any notion of a verdict's numerical stability. D77 enumerates
-and marks. Nothing in it runs an institution.
+**And re-execution is already a commit phase.** `dispatch_auto_on_load_for_layer`
+(`commit/phases.rs:411`) fires every AutoOnLoad QueryClass for the layer being committed. For an
+in-process institution, recomputing the verdict against the merged chain is not new machinery; it is
+the pipeline doing what it already does.
+
+#### 4.5.3 Three cells, and merge currently serves none of them
+
+Crossing "can it re-execute in-process" with §2.4's materialisation invariant — the merge layer holds
+what *either branch changed*, and nothing else:
+
+| verdict | carrier in the merge layer | disposition |
+|---|---|---|
+| in-process (no `runtime_invocation`) | **yes** — a branch changed the spec | re-fires under §5(a) **for free**; skipped entirely under (b) |
+| in-process | **no** — spec unchanged, its *data* was rebound | F6 enumerates it, then **re-dispatches** AutoOnLoad for that subject |
+| external-runtime | either | **mark** — `InvalidatedTrace`; re-execution is out of scope |
+
+Row 2 is the case in the question that prompted this section, and it is #225's shape exactly: the
+at-risk carrier is one *neither branch changed*, so it is not in the merge layer and no amount of
+pipeline routing reaches it. It needs the enumeration.
+
+**Row 1 is a present defect, and it sharpens §5.** Merge today ends at `store_layer` (§5, failure 2),
+so `dispatch_auto_on_load_for_layer` never runs for a merge — an analysis spec contributed by a branch
+produces no verdict at all, and one whose inputs moved keeps the old one. §5 argues for (a) on the
+structural ground that the checking path and the resolution path should not be two paths; this is the
+same argument with a witness attached, and it is not hypothetical.
+
+Row 3 is where the original "mark, don't recompute" answer stands, and it stands for the right reason:
+not that the kernel lacks authority, but that a merge commit cannot be unbounded in time or depend on
+a foreign runtime. That is `CascadeItem::InvalidatedTrace { trace, reason }`, which D20 §8 reserved for
+exactly this — *"A trace references content that becomes inconsistent."*
+
+**What is out of scope**, stated so it is not mistaken for an oversight: dispatching *external-runtime*
+institutions, scheduling their re-execution, and any notion of a verdict's numerical stability. D77
+re-dispatches only what the commit pipeline already re-dispatches on an ordinary load.
 
 ## 5. Does merge gain a validation pass, or *is* the pushout obligation the pass?
 
@@ -500,8 +526,10 @@ Each phase begins with a code audit, per the discipline D76's phases established
 seven audits corrected something the design had asserted.
 
 - **F0 — can a merge route through the commit pipeline?** Read `commit/pipeline.rs`,
-  `commit/phases.rs` and `layer/handle.rs` against the two-parent question. Output is a decision
-  between §5's (a) and (b), with the cost of each measured rather than estimated. **No code.**
+  `commit/phases.rs` and `layer/handle.rs` against the two-parent question. **Include
+  `dispatch_auto_on_load_for_layer` (`phases.rs:411`) in the audit** — §4.5.3 row 1 shows merge
+  currently skips AutoOnLoad entirely, which is a live hole (a) closes and (b) does not. Output is a
+  decision between §5's (a) and (b), with the cost of each measured rather than estimated. **No code.**
 - **F1 — the rebound set.** `rebound_A` / `rebound_B` from `MergeSpan` + the LCA, with
   `conjunction_entails` deciding weakening. Pure function, unit-testable against the #225 fixture.
   Gate: `a_reference_meeting_a_redefinition_raises_no_conflict` **flips** — renamed, since after this
@@ -540,13 +568,15 @@ seven audits corrected something the design had asserted.
   it guards proposition *identity*, which §7 keeps environment-blind. F5 revokes credit; it does not
   refork every existing witness key. An F5 that flips both has changed the wrong thing.
 
-- **F6 — institution verdicts under a rebound input** (§4.5), gated behind F1, not F2c — the
-  provenance edges are already indexed, so this needs the rebound set but not the term arm. Transitive
-  closure over `from_subject` / `runtime_invocation` / `runtime:inputs` / `derivation_trace`, bounded
-  to that named edge set; emit `InvalidatedTrace`. Gate: rebinding a dataset two hops below an
-  `InstitutionEmittedDerivation` marks it, and the closure is bounded — a chain where the edge set is
-  absent enumerates nothing, asserted so the closure cannot degrade into a full reference walk. Shares
-  F5's revocation-policy decision. **No institution is dispatched.**
+- **F6 — institution verdicts under a rebound input** (§4.5), gated behind F1 — the provenance edges
+  are already indexed, so this needs the rebound set but not the term arm. Transitive closure over
+  `from_subject` / `runtime_invocation` / `runtime:inputs` / `derivation_trace`, bounded to that named
+  edge set. Then split on the verdict's `institution:runtime_invocation`: **absent** ⇒ re-dispatch the
+  AutoOnLoad QueryClass for that subject against `Γ_merge`; **present** ⇒ emit `InvalidatedTrace`.
+  Gates: rebinding a dataset two hops below an in-process `InstitutionEmittedDerivation` **recomputes**
+  it, and a `Fails` verdict surfaces rather than being silently replaced; the same shape with an
+  external-runtime verdict **marks** and dispatches nothing; the closure is bounded — a chain lacking
+  the edge set enumerates nothing, asserted so it cannot degrade into a full reference walk.
 
 **F2b is the one reseed.** Everything else leaves the chain format and the ontologies alone; F2b is a
 bootstrap edit and should batch with any other pending one. F2a and F2c are ordered around it
@@ -558,9 +588,11 @@ run in parallel.
 
 ## 7. What this does not cover
 
-- **Institution dispatch and re-execution.** §4.5 / F6 enumerate and mark verdicts whose inputs were
-  rebound. Deciding whether a verdict still *holds* requires running the institution, which a merge
-  commit cannot do. Scheduling that re-execution is a separate surface.
+- **External-runtime institution dispatch.** F6 re-dispatches *in-process* verdicts (§4.5.2 — the
+  distinction is read off `institution:runtime_invocation`, and `dispatch_auto_on_load_for_layer` is
+  already a commit phase). Verdicts produced by an external runtime are **marked, not recomputed**:
+  re-execution there is unbounded in time and depends on a foreign runtime. Scheduling it is a
+  separate surface.
 - **Proposition identity stays environment-blind.** F5 invalidates *credit* under a widening
   rebinding; it does not put the layer into `hash_proposition_exp`. Making the environment part of
   proposition identity is the alternative fix for D75 §3.4 and a much larger change — it forks every
