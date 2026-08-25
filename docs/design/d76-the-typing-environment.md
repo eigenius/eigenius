@@ -683,6 +683,26 @@ all of them.
   construct with Phase E's — the same `Exp::Const(iri, levels)` serves both — so B1 is no longer a
   reconciliation with no fixed point but a well-defined change with a reference implementation.
 
+  **⚠ And B1 must merge into E1, `2026-08-24`.** An earlier answer kept them apart on blast radius:
+  B1 touches four sites, E1 touches 734. That was given before checking how a self-reference is
+  *used*.
+
+  It is **applied**: `Exp::InductiveType(self_ref, vec![Exp::Var("A")])` (`term.rs`, `build_list_decl`).
+  So replacing the stub yields `App(Const(List), Var("A"))` — **replacing a stub entails de-fusing the
+  application it heads**, because `Exp::InductiveType(stub, args)` has no `Const`-shaped equivalent
+  that keeps the args fused.
+
+  And B1's payoff needs *all* stubs gone: `PartialEq` can only become structural when no hollow decl
+  has to compare equal to a full one. Three of the four are parametric, so B1 cannot stop at the
+  non-parametric case.
+
+  The alternative — `InductiveType` surviving for resolved references while self-references become
+  `Const` + `App` — is worse than either: two forms for one thing, and every consumer handling both.
+  That is the stub's own failure mode repeated.
+
+  **So: B1 and E1 are one phase.** Its payoff is still `PartialEq` structural and #188 unblocked; its
+  size is E1's.
+
   **And `ind_consts` is a `Vec`.** nanoda's positivity scans
   `has_ind_occ(ctor_type, st.ind_consts.as_ref())` — *all* the block's constants, which is exactly
   why it catches the cross-type occurrence `check_positivity(decl)` cannot (§6.5,
