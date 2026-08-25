@@ -185,6 +185,27 @@ Two things change:
    carries `layer: Option<Arc<Layer>>` in its `Effectful` arm as an *effect capability*; it becomes
    the same environment every other surface holds, for the same reason.
 
+4. **`lookup` is not the whole interface — Phase C audit, `2026-08-24`.** Classifying every reader of
+   `CheckCtx.layer` shows they do not all want a global lookup:
+
+   | use | sites | wants |
+   |---|---|---|
+   | `layer.is_subclass_of(sub, sup)` | 3 | the **nominal subclass lattice** |
+   | `resolve_class_cached` | 1 | a global lookup |
+   | `resource_record(r, layer)` | 1 | property-type resolution |
+   | context propagation, `EvalCtx` construction | 3 | mechanical |
+   | witness synthesis | 1 | the layer itself |
+
+   The subclass query is the substantive one. It is the **nominal** relation D78 §8a argues is
+   load-bearing — and the counterpart to D78 Phase B's `entails`, which is the structural one; the
+   two halves of Q10. It is a fact about declarations that the judgment consults, so it belongs on
+   `Env`.
+
+   So the interface is `lookup` **and** `is_subclass_of`, plus a `layer()` escape hatch for the
+   consumers that genuinely need the layer (witness synthesis, `resource_record`) until they are
+   migrated. **"The Option goes" holds for the judgment's view of globals and not yet for those** —
+   an honest partial, not a completed removal.
+
 ### 4.2 Who owns the memo
 
 Not the trait. Two memos already exist with the right lifetime and different keys —
@@ -459,6 +480,25 @@ equality, which is what makes levels unsound, which is what #188's residual is b
 else in this section is mechanical once it is gone.
 
 ## 8. Phases
+
+**Each phase opens by reading the code it names, and correcting this document before writing any.**
+
+Not a general principle — a response to this document's own error rate. §3–§8 were written in one pass
+from a `grep -c` census, which measured the code's *shape* and not its *behaviour*. Four claims were
+wrong, and each was caught only when a phase reached the code its section had named:
+
+| claim | reality | found at |
+|---|---|---|
+| Q1: `eval` needs no environment | `iota_reduce_impl` reads `decl.ctors` to reduce | Phase B |
+| §7: remove the stub first | the stub also serves cross-inductive references, so it needs the environment | Phase B |
+| §5: no transparency annotations needed | `definition_is_opaque` is one, and is honoured | Phase C |
+| Phase A: reuse `layer::supporting`'s walker | it skips `Value::Json`, so it would find no inductive edges | Phase A |
+
+**Bounded, so this does not become the work.** Read the functions the phase names, correct what is
+wrong, implement. Not an audit of the whole document, and not a re-derivation of settled decisions —
+the outcomes in §2 and the ordering below are the goal, and the reading serves them.
+
+---
 
 Six phases, drawn where the **risk class changes**, as D78's were. Two things make this phasing
 different from D78's and shape every boundary below:

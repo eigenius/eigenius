@@ -101,6 +101,23 @@ impl Env {
         self.layer.is_none()
     }
 
+    /// Is `sub` a declared subclass of `sup`?
+    ///
+    /// The **nominal** relation — `subclass_of`, walked transitively — as
+    /// distinct from D78's structural `entails`. They are the two halves of D75
+    /// §8 Q10, and D78 §8a argues the nominal one is load-bearing: 749 of 894
+    /// shipped classes have identical field sets, so structure cannot tell them
+    /// apart and only the declared relation can.
+    ///
+    /// On `Env` rather than reached through `layer()` because it is a fact about
+    /// declarations that the judgment consults — three `check` sites use it for
+    /// subsumption today.
+    pub fn is_subclass_of(&self, sub: &Iri, sup: &Iri) -> bool {
+        self.layer
+            .as_ref()
+            .is_some_and(|l| l.is_subclass_of(sub, sup))
+    }
+
     /// What does this environment know about `iri`?
     ///
     /// **Kind decides the default; a definition may override it.** The order of
@@ -278,6 +295,23 @@ mod tests {
         assert!(
             matches!(e.lookup(&i("urn:t:rigid")), Global::Axiom),
             "an opaque definition is rigid — it must classify as Axiom, not Definition"
+        );
+    }
+
+    #[test]
+    fn the_nominal_subclass_relation_is_on_the_environment() {
+        // The counterpart to D78's structural `entails` — the two halves of Q10.
+        // `core:Class` and `core:Property` are unrelated by `subclass_of`.
+        let e = with(vec![]);
+        assert!(
+            !e.is_subclass_of(&i(wk::PROPERTY), &i(wk::CLASS)),
+            "unrelated classes must not be in the relation"
+        );
+        // Reflexivity is the layer's business, not asserted here; what matters
+        // is that the empty environment answers rather than panicking.
+        assert!(
+            !Env::empty().is_subclass_of(&i(wk::CLASS), &i(wk::CLASS)),
+            "the empty environment knows no relation, and says so"
         );
     }
 
