@@ -607,6 +607,43 @@ The rest of this phase's content stands; only its position moved.
 **Lands:** a constructor's type refers to its inductive without the empty-`ctors` stub decl, so
 `PartialEq for InductiveDecl` (`term.rs:365`) stops being by-IRI and becomes structural.
 
+**⚠ Audit `2026-08-24`: the stub is also a behaviour flag, and the flag is conflated.** Two dispatch
+sites test for a stub by its *shape* rather than by anything that says "stub":
+
+- `eval/mod.rs:637` — `if decl.indices.is_empty()` selects **pre-D48 behaviour**: all arguments
+  treated as parameters, **no arity check**. The comment says so: *"Stubs are detected by
+  `decl.indices` being empty … so the stub-Arc pattern keeps working."*
+- `check/mod.rs:373` — `check_inductive_type_args` tolerates a stub because it *"carries no telescope
+  to check against"*.
+
+**A genuine non-indexed inductive has empty indices too.** `Nat` is indistinguishable from a stub by
+that test, so the lenient path is taken for *every* non-indexed inductive, not only for stubs.
+Arity checking on their type applications is skipped as backward compatibility, not as a decision.
+
+So Phase B is wider than "remove the stub":
+
+1. represent the self-reference without a stub — **now possible, `Env` exists** (Phase C);
+2. give the two dispatch sites a discriminator that is not `indices.is_empty()`;
+3. **decide whether non-indexed inductives get arity checking** — a behaviour change the stub has
+   been hiding, and not mechanical;
+4. only then can `PartialEq` become structural.
+
+**Sized: all 10 shipped inductives have no indices**, so the lenient path is taken by *every*
+inductive application in the chain, not by an edge case. Turning arity checking on would newly check
+all of them.
+
+**So Phase B splits, one risk class each** — the same principle that draws the phase boundaries:
+
+- **B1 — representation.** Self-reference without a stub, a discriminator that is not
+  `indices.is_empty()`, `PartialEq` structural. **No verdict change**; gate is kernel tests.
+- **B2 — arity checking.** Turn on the check the stub was suppressing. **Verdict-affecting over the
+  whole chain**, so it follows the #194/#92 protocol: instrument to log without rejecting, run the
+  suites and the shipped ontologies, count, then enforce. A non-zero count is a finding about the
+  chain, not a blocker for B1.
+
+B1 is the part #188 is blocked on — it is `PartialEq` that makes levels unsound. B2 can follow at its
+own pace.
+
 **Why second, and why not later.** §7: the stub forces by-IRI equality, which makes `List.{0}` compare
 equal to `List.{1}`, which is what blocks #188's residual. Everything downstream in the migration is
 mechanical once it is gone; nothing downstream is safe while it remains.
