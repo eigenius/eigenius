@@ -678,11 +678,23 @@ mod refine_semantics {
         let carrier = rec(&["urn:t:a"]);
         let refined = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
         assert!(
-            subtype_of(0, &v(&refined), &v(&carrier)).is_ok(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &v(&carrier)
+            )
+            .is_ok(),
             "Refine(R, S) <: R — a refined record flows into a plain-record context"
         );
         assert!(
-            subtype_of(0, &v(&carrier), &v(&refined)).is_err(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&carrier),
+                &v(&refined)
+            )
+            .is_err(),
             "R <: Refine(R, S) must NOT hold — that would invent a claim"
         );
     }
@@ -693,11 +705,23 @@ mod refine_semantics {
         let more = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C", "urn:t:D"]));
         let fewer = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
         assert!(
-            subtype_of(0, &v(&more), &v(&fewer)).is_ok(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&more),
+                &v(&fewer)
+            )
+            .is_ok(),
             "satisfying more constraints is satisfying fewer"
         );
         assert!(
-            subtype_of(0, &v(&fewer), &v(&more)).is_err(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&fewer),
+                &v(&more)
+            )
+            .is_err(),
             "the converse must not hold"
         );
     }
@@ -719,11 +743,18 @@ mod refine_semantics {
         let as_class = crate::nbe::val::Val::EigonClass(iri("urn:t:C"));
 
         assert!(
-            subtype_of(0, &v(&refined), &as_class).is_ok(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &as_class
+            )
+            .is_ok(),
             "a record declaring C must flow into a context expecting class C"
         );
         assert!(
             subtype_of(
+                &crate::nbe::env_global::Env::empty(),
                 0,
                 &v(&refined),
                 &crate::nbe::val::Val::EigonClass(iri("urn:t:Other"))
@@ -736,31 +767,121 @@ mod refine_semantics {
         // classes have no `requires`.
         let empty = Exp::Refine(Box::new(Exp::record(vec![]).unwrap()), set(&["urn:t:C"]));
         assert!(
-            subtype_of(0, &v(&empty), &as_class).is_ok(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&empty),
+                &as_class
+            )
+            .is_ok(),
             "an empty record declaring C is still an instance of C"
         );
 
         // Forgetting still applies against a structural supertype.
         assert!(
-            subtype_of(0, &v(&refined), &v(&carrier)).is_ok(),
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &v(&carrier)
+            )
+            .is_ok(),
             "Refine(R, S) <: R must keep working"
         );
     }
 
+    /// D76 Phase D — the parked obligation, discharged.
+    ///
+    /// This asserted the *incompleteness*: `Refine(R, {Pup}) <: Refine(R, {Dog})`
+    /// was rejected because deciding `Pup ⊨ Dog` resolves class IRIs and
+    /// conversion had no environment. It now decides it, and the assertion is
+    /// inverted.
+    ///
+    /// **Set inclusion stays the fast path.** The environment is consulted only
+    /// where inclusion fails — that is, only where the conservative rule was about
+    /// to reject — which is how conversion still resolves nothing on the equal
+    /// path (D76 §5).
     #[test]
-    fn entailment_beyond_set_inclusion_is_not_yet_decided() {
-        // Documents the incompleteness rather than hiding it. `Pup ⊨ Dog` would
-        // make `Refine(R, {Pup}) <: Refine(R, {Dog})` legal, but deciding that
-        // resolves class IRIs against the layer chain and conversion has no
-        // layer. Blocked on D76 (D75 §8 Q1); the rule here is set inclusion,
-        // which is sound and conservative.
+    fn entailment_beyond_set_inclusion_is_now_decided() {
+        // `Pup` requires everything `Dog` does and more, so `⋀{Pup} ⊨ Dog` — but
+        // `{Pup} ⊉ {Dog}`, so set inclusion alone rejects it.
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::{Resource, Value};
+        use crate::ontology::well_known as wk;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(LayerStorage::in_memory()));
+
+        // Two properties. `constraint_fields` reads `requires` and collects IRIs,
+        // so no range is needed to decide entailment (D78 §4.1: the per-field
+        // variance clause is vacuous because a field's type is a function of the
+        // property, not of the class).
+        let property = |id: &str| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            );
+            r
+        };
+
+        let class_with = |id: &str, reqs: Vec<&str>| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            );
+            r.set(
+                iri(wk::REQUIRES),
+                Value::Array(
+                    reqs.into_iter()
+                        .map(|p| Value::ResourceRef(iri(p)))
+                        .collect(),
+                ),
+            );
+            r
+        };
+
+        let mut d = LayerBuilder::new("t", Some(core));
+        for r in [
+            property("urn:t:name"),
+            property("urn:t:tag"),
+            class_with("urn:t:Dog", vec!["urn:t:name"]),
+            class_with("urn:t:Pup", vec!["urn:t:name", "urn:t:tag"]),
+            class_with("urn:t:Cat", vec!["urn:t:tag"]),
+        ] {
+            d.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(d.build(LayerStorage::in_memory()));
+        let env = crate::nbe::env_global::Env::of(layer);
+
         let carrier = rec(&["urn:t:a"]);
         let pup = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Pup"]));
         let dog = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Dog"]));
+        let cat = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Cat"]));
+
         assert!(
-            subtype_of(0, &v(&pup), &v(&dog)).is_err(),
-            "current behaviour: rejected for want of entailment, not because it is wrong. \
-             When conversion carries an environment this becomes legal — see D78 §3."
+            subtype_of(&env, 0, &v(&pup), &v(&dog)).is_ok(),
+            "Pup's fields cover Dog's, so ⋀{{Pup}} ⊨ Dog — legal since D76 Phase D"
+        );
+        assert!(
+            subtype_of(&env, 0, &v(&dog), &v(&pup)).is_err(),
+            "and not the converse: Dog does not require `tag`"
+        );
+        assert!(
+            subtype_of(&env, 0, &v(&cat), &v(&dog)).is_err(),
+            "nor between classes whose fields merely overlap"
+        );
+
+        // The empty environment decides nothing, so the conservative rule stands —
+        // an environment omitted by accident cannot silently widen what is legal.
+        assert!(
+            subtype_of(&crate::nbe::env_global::Env::empty(), 0, &v(&pup), &v(&dog)).is_err(),
+            "with no environment, entailment is undecidable and inclusion governs"
         );
     }
 }

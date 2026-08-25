@@ -156,6 +156,11 @@ impl std::error::Error for UnifyError {}
 ///
 /// `level` is the current de Bruijn level (number of binders in scope) —
 /// passed through for readback and equality.
+/// **Takes no environment**, for the same reason [`eq_nf`] does not (D76 Phase D):
+/// unification falls back to `eq_nf` and otherwise recurses, and never reaches the
+/// one arm that consults `Γ_env` — `Refine` subtyping. Threading one in left a
+/// parameter used only by the recursion, which clippy reported and which would
+/// have been a parameter that lies about what the function needs.
 pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(), UnifyError> {
     let lhs = mctx.zonk(lhs);
     let rhs = mctx.zonk(rhs);

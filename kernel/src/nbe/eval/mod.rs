@@ -302,8 +302,21 @@ pub(crate) fn eval_impl<T: Tracer>(
                     indices: Vec::new(),
                 }),
                 crate::nbe::env_global::Global::Definition(v) => Some(v),
+                // **A rigid name has ONE value form.** An axiom — or a definition
+                // its author flagged opaque, which `lookup` classifies as one —
+                // is `Neut::EigonAxiom`, the form `Exp::EigonAxiom` already
+                // evaluates to. Falling through to `Neut::Const` below would mint
+                // a *second* neutral meaning "rigid name, compare by IRI", and the
+                // two do not compare equal: they read back as `EigonAxiom(x)` and
+                // `Const(x, [])`. Which one a term got would then depend on
+                // whether it reached the kernel through `resolve_const_ref` (which
+                // emits `EigonAxiom`) or named the same thing as a `Const`.
+                // Found by D76 Phase D's audit; two forms for one thing is the
+                // stub's own failure mode.
+                crate::nbe::env_global::Global::Axiom => {
+                    Some(Val::Nt(crate::nbe::val::Neut::EigonAxiom(iri.clone())))
+                }
                 crate::nbe::env_global::Global::Constraint(_)
-                | crate::nbe::env_global::Global::Axiom
                 | crate::nbe::env_global::Global::Absent => None,
             };
             Ok((

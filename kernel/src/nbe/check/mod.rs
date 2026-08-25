@@ -853,7 +853,7 @@ fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckE
             }
         }
     }
-    subtype_of(ctx.rho.len(), &t1, t)
+    subtype_of(&ctx.env, ctx.rho.len(), &t1, t)
 }
 
 /// Is `e` the `ontology:kind_of` nominalization axiom (Chierchia's ∩, `Set -> Entity`)?
@@ -1594,8 +1594,13 @@ mod tests {
             for m in 0..6 {
                 let checked = check(&mut ctx(), &Exp::sort(n), &Val::sort(m)).is_ok();
                 let inferred = check_infer(&mut ctx(), &Exp::sort(n)).unwrap();
-                let subsumed =
-                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::sort(m)).is_ok();
+                let subsumed = crate::nbe::check::conv::subtype_of(
+                    &crate::nbe::env_global::Env::empty(),
+                    0,
+                    &inferred,
+                    &Val::sort(m),
+                )
+                .is_ok();
                 assert_eq!(
                     checked, subsumed,
                     "Sort({n}) against Sort({m}): check mode says {checked}, \
@@ -1735,8 +1740,13 @@ mod tests {
             for m in 0..6 {
                 let checked = check(&mut ctx(), exp, &Val::sort(m)).is_ok();
                 let inferred = check_infer(&mut ctx(), exp).unwrap();
-                let subsumed =
-                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::sort(m)).is_ok();
+                let subsumed = crate::nbe::check::conv::subtype_of(
+                    &crate::nbe::env_global::Env::empty(),
+                    0,
+                    &inferred,
+                    &Val::sort(m),
+                )
+                .is_ok();
                 assert_eq!(
                     checked, subsumed,
                     "{exp:?} against Sort({m}): check mode says {checked}, \
@@ -2483,11 +2493,22 @@ mod tests {
         // δ is implemented for classes in `check` and absent from `eq_nf`
         // (D75 §3.3).
         //
-        // `CheckCtx` carries `layer` + `type_cache` and unfolds an `EigonClass`
-        // to its Σ-chain through `CheckHooks::resolve_class` whenever inference
-        // needs a field. `eq_nf(level, v1, v2)` takes no context at all, so it
-        // compares `Val::EigonClass(iri)` opaquely. The two halves of the
-        // checker therefore disagree about what a class *is*.
+        // `CheckCtx` unfolds an `EigonClass` to its record through the environment
+        // whenever inference needs a field. `eq_nf` compares
+        // `Val::EigonClass(iri)` opaquely. The two halves of the checker therefore
+        // disagree about what a class *is*.
+        //
+        // **Re-examined at D76 Phase D and deliberately unchanged.** `eq_nf` now
+        // takes `Γ_env`, so the old reason — *"it takes no context at all"* — no
+        // longer holds; the behaviour does, because Q2 requires it. Unfolding a
+        // class in conversion would make class identity structural, and 749 of 894
+        // shipped classes have identical (empty) field sets
+        // (`unfolding_a_class_would_collapse_two_nominally_distinct_classes`, just
+        // below). The environment reaching conversion is what makes the *choice*
+        // to stay opaque, rather than the absence of a layer making it for us.
+        //
+        // The reconciliation Q2 names is still outstanding and is still `check`'s
+        // side: stop treating a class's unfolding as definitional equality.
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
 

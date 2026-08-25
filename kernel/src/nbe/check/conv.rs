@@ -22,11 +22,23 @@ use crate::nbe::env::gen_val;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::Val;
+use crate::ontology::iri::Iri;
 
 /// Check type equality by normalization.
 ///
 /// Port of `eqNf` from the reference: normalize both sides
 /// and compare syntactically.
+///
+/// **Deliberately takes no environment**, unlike `subtype_of` (D76 Phase D).
+/// Phase D's spec listed `eq_nf` among the functions to thread; it does not need
+/// one, and clippy said so — the parameter went unread.
+///
+/// The reason is that entailment is a *subtyping* notion. `⋀S ⊨ D` decides
+/// whether one constraint set is at least as strong as another, which is the
+/// asymmetric question. For **equality** the sets must match, and relaxing that to
+/// mutual entailment would make refinement identity structural — the same
+/// objection Q2 raises against unfolding classes, where 749 of 894 shipped classes
+/// have identical field sets.
 pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), CheckError> {
     // D49 §8 — ChainWitness values are opaque kernel-internal markers
     // that intentionally do not read back into surface syntax. Equality
@@ -303,25 +315,32 @@ enum Indices {
 /// COVARIANT at `SizeSort` positions — `T(s) <: T(ŝ s) <: T(∞)`, the driving motivation for
 /// sized types (D19 §8.3). Sized types are gone (#218), so no parameter position is covariant
 /// any more and parameters are invariant exactly as indices always were (eigenius#137).
-pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), CheckError> {
-    subtype_of_inner(level, sub, super_, Indices::Compare)
+pub fn subtype_of(
+    env: &crate::nbe::env_global::Env,
+    level: usize,
+    sub: &Val,
+    super_: &Val,
+) -> Result<(), CheckError> {
+    subtype_of_inner(env, level, sub, super_, Indices::Compare)
 }
 
-/// Constructor-site subtyping: [`subtype_of_with_hyps`] with the index
-/// telescope left to the caller.
+/// Constructor-site subtyping: [`subtype_of`] with the index telescope left to
+/// the caller.
 ///
 /// Only sound when the caller compares the indices itself. The one caller
 /// is `check_inductive_ctor_args`, which runs D48 Phase D index unification
 /// on the same pair of values on the next statement.
 pub(super) fn subtype_of_deferring_indices(
+    env: &crate::nbe::env_global::Env,
     level: usize,
     sub: &Val,
     super_: &Val,
 ) -> Result<(), CheckError> {
-    subtype_of_inner(level, sub, super_, Indices::DeferToCaller)
+    subtype_of_inner(env, level, sub, super_, Indices::DeferToCaller)
 }
 
 fn subtype_of_inner(
+    env: &crate::nbe::env_global::Env,
     level: usize,
     sub: &Val,
     super_: &Val,
@@ -372,36 +391,61 @@ fn subtype_of_inner(
     // handles first.
     if let Val::Refine(carrier, _) = sub {
         if !matches!(super_, Val::Refine(..)) {
-            return subtype_of_inner(level, carrier, super_, index_policy);
+            return subtype_of_inner(env, level, carrier, super_, index_policy);
         }
     }
     // `Refine(R, S) <: Refine(R′, S′)`.
     //
-    // **Sound but incomplete, and deliberately so.** D78 §3 states the rule as
-    // `R <: R′` and `⋀S ⊨ D` for every `D ∈ S′`. Entailment resolves class IRIs
-    // against the layer chain, and conversion has **no layer** — `subtype_of` and
-    // `eq_nf` take no context at all. Supplying one is D76's subject (D75 §8 Q1),
-    // so the complete rule is blocked on Seam A.
+    // **D78 §3's rule, complete since D76 Phase D:** `R <: R′` and `⋀S ⊨ D` for
+    // every `D ∈ S′`.
     //
-    // The rule used here is set inclusion, `S ⊇ S′`, which is sound because a
-    // constraint present in `S` is trivially entailed by `⋀S`. It rejects the
-    // case where `S` entails `D` without containing it — an incompleteness, so
-    // some legal programs are refused, never an unsound admission. Strengthening
-    // it to the full rule is a one-arm change once conversion carries `Γ_env`.
+    // Set inclusion `S ⊇ S′` stays the **fast path**, and not only for speed: a
+    // constraint present in `S` is trivially entailed by `⋀S`, so inclusion is the
+    // sound-and-cheap majority case, and taking it first means the environment is
+    // consulted **only where the conservative rule was about to reject**. That is
+    // how §5's "conversion must not resolve on the equal path" is honoured here —
+    // by the shape of the rule rather than by a δ mechanism (see §8 Phase D's
+    // audit: δ never reaches conversion, so there is no folded-definition case to
+    // be lazy about).
     //
-    // The alternative — precomputing each constraint's field set into the value
-    // so conversion needs no layer — is exactly the inline-the-environment
-    // antipattern D75 §3.1 diagnoses as the root defect, and is not taken.
+    // What the entailment fallback adds is the case D78 §3 named and could not
+    // decide: `S` entails `D` without containing it. `Pup ⊨ Dog` when `Pup`'s
+    // fields cover `Dog`'s. Rejecting that was an incompleteness — legal programs
+    // refused — never an unsound admission, which is why it could ship parked.
+    //
+    // The alternative — precomputing each constraint's field set into the value so
+    // conversion needs no layer — is exactly the inline-the-environment antipattern
+    // D75 §3.1 diagnoses as the root defect, and is not taken.
     if let (Val::Refine(r_sub, s_sub), Val::Refine(r_super, s_super)) = (sub, super_) {
         if !s_super.is_subset(s_sub) {
-            let missing: Vec<&str> = s_super.difference(s_sub).map(|i| i.as_str()).collect();
-            return Err(CheckError::TypeMismatch(format!(
-                "refinement mismatch: the subtype does not declare {}. \
-                 (Conversion cannot yet decide entailment — it has no layer; see D78 §3.)",
-                missing.join(", ")
-            )));
+            let undecided: Vec<&Iri> = s_super.difference(s_sub).collect();
+            let entailed = match env.layer() {
+                Some(layer) => undecided.iter().try_fold(true, |acc, d| {
+                    crate::program::ground::conjunction_entails(s_sub, d, layer).map(|ok| acc && ok)
+                }),
+                // An empty environment decides nothing, so the conservative rule
+                // stands. Reported as such rather than as a refinement mismatch.
+                None => Ok(false),
+            };
+            match entailed {
+                Ok(true) => {}
+                Ok(false) => {
+                    let missing: Vec<&str> = undecided.iter().map(|i| i.as_str()).collect();
+                    return Err(CheckError::TypeMismatch(format!(
+                        "refinement mismatch: the subtype does not declare {}, and its \
+                         constraints do not entail {} either (D78 §3).",
+                        missing.join(", "),
+                        if missing.len() == 1 { "it" } else { "them" }
+                    )));
+                }
+                Err(e) => {
+                    return Err(CheckError::TypeMismatch(format!(
+                        "refinement mismatch: entailment could not be decided: {e}"
+                    )));
+                }
+            }
         }
-        return subtype_of_inner(level, r_sub, r_super, index_policy);
+        return subtype_of_inner(env, level, r_sub, r_super, index_policy);
     }
 
     if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
@@ -569,13 +613,25 @@ mod tests {
         // the Sort(n) : Sort(n+1) rule) and as a subtype rule (Sort(0) <:
         // Sort(1) by D46 §3.2 cumulativity).
         check(&mut ctx(), &Exp::sort(0), &Val::sort(1)).unwrap();
-        subtype_of(0, &Val::sort(0), &Val::sort(1)).unwrap();
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::sort(0),
+            &Val::sort(1),
+        )
+        .unwrap();
     }
 
     #[test]
     fn sort_strict_cumulativity_set_not_subtype_of_prop() {
         // Sort(1) is NOT a subtype of Sort(0). Catches the wrong direction.
-        assert!(subtype_of(0, &Val::sort(1), &Val::sort(0)).is_err());
+        assert!(subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::sort(1),
+            &Val::sort(0)
+        )
+        .is_err());
     }
 
     // ---------- D46 §5 — proof irrelevance tests ----------
@@ -689,7 +745,7 @@ mod tests {
         let sub = mk_two_param(decl.clone(), Val::One, Val::One);
         let sup = mk_two_param(decl, Val::One, Val::sort(1));
         assert!(
-            subtype_of(0, &sub, &sup).is_err(),
+            subtype_of(&crate::nbe::env_global::Env::empty(), 0, &sub, &sup).is_err(),
             "element type mismatch must be rejected"
         );
     }
@@ -698,8 +754,20 @@ mod tests {
     fn subtype_non_inductive_falls_back_to_eq_nf() {
         // Simple non-inductive types fall through to `eq_nf` —
         // equal types accept, mismatched types reject.
-        subtype_of(0, &Val::One, &Val::One).expect("1 <: 1");
-        assert!(subtype_of(0, &Val::One, &Val::sort(1)).is_err());
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::One,
+            &Val::One,
+        )
+        .expect("1 <: 1");
+        assert!(subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::One,
+            &Val::sort(1)
+        )
+        .is_err());
     }
 
     #[test]
@@ -718,7 +786,7 @@ mod tests {
         });
         let sub = mk_two_param(decl_a, Val::One, Val::One);
         let sup = mk_two_param(decl_b, Val::One, Val::One);
-        assert!(subtype_of(0, &sub, &sup).is_err());
+        assert!(subtype_of(&crate::nbe::env_global::Env::empty(), 0, &sub, &sup).is_err());
     }
 }
 
@@ -773,7 +841,7 @@ mod index_conversion_tests {
 
     /// `Vec A 0` and `Vec A 1` are different types.
     ///
-    /// The inductive case of [`subtype_of_with_hyps`] returned `Ok(())` right
+    /// The inductive case of [`subtype_of`] returned `Ok(())` right
     /// after the parameter telescope, never reaching the `eq_nf` fallback that
     /// compares indices, so this pair was definitionally equal on every path
     /// that goes through conversion — every expression form without a
@@ -782,8 +850,13 @@ mod index_conversion_tests {
     fn vec_at_distinct_indices_is_not_convertible() {
         let decl = vec_decl();
         let (zero, one) = zero_and_one();
-        let err = subtype_of(0, &vec_at(&decl, zero), &vec_at(&decl, one))
-            .expect_err("`Vec A 0 <: Vec A 1` must be rejected");
+        let err = subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &vec_at(&decl, zero),
+            &vec_at(&decl, one),
+        )
+        .expect_err("`Vec A 0 <: Vec A 1` must be rejected");
         assert!(
             format!("{err:?}").contains("index #0 mismatch"),
             "expected an index-mismatch diagnostic, got: {err:?}"
@@ -795,8 +868,13 @@ mod index_conversion_tests {
     fn vec_at_equal_indices_is_convertible() {
         let decl = vec_decl();
         let (zero, _) = zero_and_one();
-        subtype_of(0, &vec_at(&decl, zero.clone()), &vec_at(&decl, zero))
-            .expect("`Vec A 0 <: Vec A 0` must hold");
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &vec_at(&decl, zero.clone()),
+            &vec_at(&decl, zero),
+        )
+        .expect("`Vec A 0 <: Vec A 0` must hold");
     }
 
     /// `data P : core:string -> Prop` — zero parameters, one index. The shape
@@ -825,14 +903,24 @@ mod index_conversion_tests {
             params: Vec::new(),
             indices: vec![Val::LitString(s.to_string())],
         };
-        let err = subtype_of(0, &at("compound-A"), &at("compound-B"))
-            .expect_err("HasLowIC50(\"compound-A\") <: HasLowIC50(\"compound-B\") is rejected");
+        let err = subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &at("compound-A"),
+            &at("compound-B"),
+        )
+        .expect_err("HasLowIC50(\"compound-A\") <: HasLowIC50(\"compound-B\") is rejected");
         assert!(
             format!("{err:?}").contains("index #0 mismatch"),
             "expected an index-mismatch diagnostic, got: {err:?}"
         );
-        subtype_of(0, &at("compound-A"), &at("compound-A"))
-            .expect("the same application converts with itself");
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &at("compound-A"),
+            &at("compound-A"),
+        )
+        .expect("the same application converts with itself");
     }
 
     /// A two-index family rejects a mismatch in the *second* index — the shape
@@ -856,8 +944,13 @@ mod index_conversion_tests {
             params: Vec::new(),
             indices: vec![Val::LitString(a.to_string()), Val::LitString(b.to_string())],
         };
-        let err = subtype_of(0, &at("WRN", "MSI"), &at("WRN", "MSS"))
-            .expect_err("a second-index mismatch must be rejected");
+        let err = subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &at("WRN", "MSI"),
+            &at("WRN", "MSS"),
+        )
+        .expect_err("a second-index mismatch must be rejected");
         assert!(
             format!("{err:?}").contains("index #1 mismatch"),
             "expected an index-#1 diagnostic, got: {err:?}"
@@ -971,6 +1064,7 @@ mod index_conversion_tests {
         // parameter that genuinely is a proof reaches irrelevance through that rule instead.
         assert!(
             subtype_of(
+                &crate::nbe::env_global::Env::empty(),
                 0,
                 &and_of("urn:test:A", "urn:test:B"),
                 &and_of("urn:test:C", "urn:test:D")
@@ -985,6 +1079,7 @@ mod index_conversion_tests {
         // The guard against over-correcting: removing the arm must not make a family
         // non-reflexive.
         subtype_of(
+            &crate::nbe::env_global::Env::empty(),
             0,
             &and_of("urn:test:A", "urn:test:B"),
             &and_of("urn:test:A", "urn:test:B"),

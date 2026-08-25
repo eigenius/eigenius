@@ -1016,10 +1016,80 @@ also the first point its boundedness can be measured against a real workload.
 **Also decides §4.3:** measure whether the lazy-δ fast path leaves enough lookups to warrant the
 shared memo, and build it only if so.
 
+**Status: complete `2026-08-25`.** The parked test flips —
+`entailment_beyond_set_inclusion_is_now_decided` — and `subtype_of_inner`'s `Refine` arm implements
+D78 §3's full rule. `a_class_and_its_own_unfolding_are_not_definitionally_equal` still holds, but its
+stated reason (*"`eq_nf` takes no context at all"*) was corrected: the behaviour is now a *choice* Q2
+requires, not something the absence of a layer decided.
+
 **Gate:** the parked test flips; `a_class_and_its_own_unfolding_are_not_definitionally_equal` is
 **re-examined, not assumed** — Q2 says the reconciliation is to stop `check` treating its unfolding as
 definitional equality, so that test's *class* case should still hold while the mechanism beneath it
 changes. Plus: no resolve on the equal path, asserted by instrumentation rather than by reading.
+
+**⚠ Audit `2026-08-25`, before implementation — the phase is narrower than this says.**
+
+*1. `subtype_of_with_hyps` does not exist.* It is `subtype_of_deferring_indices`
+(`check/conv.rs:316`). Three doc comments still name the old one (`conv.rs:310`, `conv.rs:776`,
+`inductive.rs:505`). The threaded surface is **`eq_nf` (30 sites) + `subtype_of` (26) = 56**, not 54 —
+D78 added two. `def_eq_at_type` and `is_propositional_in_ctx` already take a `CheckCtx`, so they are
+not part of the thread.
+
+*2. **δ never reaches conversion, so §5's lazy path has no case to optimize.*** §5 states the
+requirement as *"conversion must not resolve on the equal path"* and gives nanoda's shape:
+`conv(Const(a, ls), Const(b, ms))` compares names first and unfolds only on mismatch. That shape
+presumes conversion is where δ happens. In Eigenius it is not:
+
+| where a definition unfolds | since |
+|---|---|
+| `decode_type`'s `ConstRef` arm returns the decoded **body** for a transparent definition | D66 |
+| `eval`'s `Const` arm returns `Global::Definition(v)` — the **value** | Phase B |
+
+Both are **eager**. By the time conversion sees a value, a transparent definition is already its body;
+there is no folded definition name for a fast path to compare. What conversion *does* compare by name
+— `EigonClass`, `EigonAxiom`, `InductiveType`'s declaration, `Neut::Const` — is exactly the set that
+must **not** unfold (Q2: classes opaque because unfolding makes class identity structural; axioms and
+opaque definitions rigid).
+
+So the requirement is already met, and trivially: conversion resolves nothing at all today. The lazy-δ
+mechanism is **not built**, because there is no folded-definition case for it to serve. Building it
+would be a fast path for a state that cannot arise.
+
+*3. What Phase D therefore is.* One arm, plus the threading that arm needs:
+
+- thread `&Env` through `eq_nf` / `subtype_of` / `subtype_of_inner` / `subtype_of_deferring_indices`;
+- replace `subtype_of_inner`'s `Refine` rule — set inclusion `S ⊇ S′` — with **inclusion first, then
+  `conjunction_entails`**. Inclusion stays the fast path, so the environment is consulted only where
+  the conservative rule was about to *reject*. That preserves §5's "no resolve on the equal path"
+  by construction rather than by a mechanism.
+
+*3a. Correction found while implementing: `eq_nf` does not need the environment, and neither does
+`unify`.* Both were threaded per this phase's wording; clippy reported the parameter as unread in one
+and recursion-only in the other.
+
+The reason is that **entailment is a subtyping notion**. `⋀S ⊨ D` decides whether one constraint set
+is at least as strong as another — the asymmetric question. For *equality* the sets must match, and
+relaxing that to mutual entailment would make refinement identity structural, which is the same
+objection Q2 raises against unfolding classes. `unify` follows: it falls back to `eq_nf` and otherwise
+recurses, never reaching the `Refine` arm.
+
+So the threaded surface is **`subtype_of` (26 sites), `subtype_of_deferring_indices` and
+`subtype_of_inner`** — not the 54-or-56 the phase implies. A parameter that goes unread is a parameter
+that lies about what the function needs, so it was removed rather than underscored.
+
+*3b. A consistency defect the audit surfaced: two neutral forms for one rigid name.* `Neut::EigonAxiom`
+and `Neut::Const` both mean "a name that does not unfold, compared by IRI", and they read back
+differently — `EigonAxiom(x)` versus `Const(x, [])` — so they do not compare equal. Which one a term
+carried depended on how it arrived: `resolve_const_ref` emits `EigonAxiom` for an axiom or an opaque
+definition, while `eval`'s `Const` arm mapped `Global::Axiom` to `Neut::Const`. Eval now produces the
+existing form. Two forms for one thing is the stub's own failure mode
+(`a_transparent_definition_never_reaches_conversion_folded` pins both halves).
+
+*4. §4.3's memo decision follows from that shape.* Entailment is reached only when set inclusion
+fails, i.e. only where the answer changes a rejection into an acceptance. Lookups on that path are
+rare by construction, so Phase D does not supply the second heavy consumer §4.3 was waiting for. The
+`(LayerId, Iri) → Global` memo built in Phase B keeps its one installed scope; see the
+`2026-08-25` reseed note for why its boundedness is still unmeasured.
 
 ---
 

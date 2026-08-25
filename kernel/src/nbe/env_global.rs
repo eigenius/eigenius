@@ -631,4 +631,46 @@ mod tests {
             "constructor sets differ between the chain's Option and the kernel's"
         );
     }
+    #[test]
+    fn a_transparent_definition_never_reaches_conversion_folded() {
+        // **The claim D76 §8 Phase D's audit rests on**, asserted rather than read.
+        //
+        // §5 specifies lazy δ — `conv(Const(a), Const(b))` comparing names first
+        // and unfolding only on mismatch — which presumes conversion is where δ
+        // happens. In Eigenius it is not: `decode_type` returns a transparent
+        // definition's decoded body, and `eval` returns its VALUE. Both are eager,
+        // so no folded definition name survives to be compared, and a lazy path
+        // would serve a state that cannot arise.
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::{eval_env, EvalCtx};
+        let _ = EvalCtx::pure;
+
+        let e = with(vec![definition("urn:t:clear", false)]);
+        let reference = crate::nbe::term::Exp::Const(i("urn:t:clear"), Vec::new());
+        let value = eval_env(&reference, &Rho::Nil, &e).expect("eval");
+
+        // The body is `Sort(1)`. Conversion sees THAT, never `Const(urn:t:clear)`.
+        assert!(
+            matches!(value, Val::Sort(_)),
+            "a transparent definition evaluates to its body, not to its name: {value:?}"
+        );
+        assert!(
+            !matches!(value, Val::Nt(crate::nbe::val::Neut::Const(..))),
+            "if this ever becomes a folded name, §5's lazy-δ path becomes necessary"
+        );
+
+        // An OPAQUE one is the opposite and must stay so: rigid, identity is the
+        // folded name, and conversion compares it by IRI without resolving.
+        let e2 = with(vec![definition("urn:t:rigid", true)]);
+        let rigid = crate::nbe::term::Exp::Const(i("urn:t:rigid"), Vec::new());
+        let rigid_val = eval_env(&rigid, &Rho::Nil, &e2).expect("eval");
+        // And it is the SAME rigid-name form `Exp::EigonAxiom` evaluates to, not a
+        // second one: `Neut::EigonAxiom` and `Neut::Const` both mean "compare by
+        // IRI" but read back differently, so a term naming one opaque definition
+        // two ways would compare unequal to itself.
+        assert!(
+            matches!(rigid_val, Val::Nt(crate::nbe::val::Neut::EigonAxiom(ref x)) if *x == i("urn:t:rigid")),
+            "an opaque definition must NOT unfold, and must be the one rigid-name form: {rigid_val:?}"
+        );
+    }
 }

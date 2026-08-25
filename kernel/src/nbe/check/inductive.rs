@@ -502,15 +502,14 @@ pub(super) fn check_inductive_ctor_args(
     };
     // Parameter telescope only — the index telescope is settled by the D48
     // Phase D unification below, which can instantiate metavariables that
-    // `subtype_of_with_hyps`'s definitional index comparison would reject.
-    subtype_of_deferring_indices(ctx.rho.len(), &actual_result, &expected_result).map_err(
-        |err| {
+    // `subtype_of_deferring_indices`' definitional index comparison would reject.
+    subtype_of_deferring_indices(&ctx.env, ctx.rho.len(), &actual_result, &expected_result)
+        .map_err(|err| {
             CheckError::TypeMismatch(format!(
                 "InductiveCtor `{}.{ctor_name}`: result type mismatch ({err})",
                 decl.name
             ))
-        },
-    )?;
+        })?;
 
     // D48 Phase D — index unification. For indexed inductives
     // (`decl.indices` non-empty), unify each actual conclusion index
