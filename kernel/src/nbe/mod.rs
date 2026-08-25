@@ -22,6 +22,7 @@
 
 pub mod check;
 pub mod env;
+pub mod env_global;
 pub mod eval;
 pub mod level;
 pub mod positivity;

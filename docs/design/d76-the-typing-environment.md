@@ -150,21 +150,40 @@ pub trait CheckHooks: Send + Sync {
 Two things change:
 
 1. **A general lookup replaces the class-specific one.** `resolve_class` answers one question about
-   one kind of global. What conversion needs is *what kind is this IRI, and if transparent, what does
-   it unfold to*. That is one method returning a small enum, not a `Val`:
+   one kind of global. What the three consumers need is *what kind is this IRI, and what does that
+   kind's consumer need from it*:
 
    ```rust
-   enum Global { Transparent(Val), Opaque, Absent }
-   fn lookup(&self, iri: &Iri, layer: &Env) -> Global;
+   pub enum Global {
+       /// Unfolds during conversion (D66 §4 pins this).
+       Definition(Val),
+       /// Nominal, never unfolds — but `check` needs the record to project.
+       Constraint(Val),
+       /// Postulated; nothing to unfold.
+       Axiom,
+       /// Carries the declaration `iota_reduce` needs to reduce.
+       Inductive(Arc<InductiveDecl>),
+       Absent,
+   }
    ```
 
-   `Opaque` is the answer for classes and axioms (§1, Q2) and is what lets conversion stop without
-   materialising anything.
+   **One variant per kind Q2 named, each carrying exactly what its consumer needs.** The split that
+   matters is `Definition` vs `Constraint`: both resolve to a `Val`, and only the first may be
+   unfolded in conversion. Collapsing them to a single `Transparent` — as an earlier draft of this
+   section did — would make Q2's opacity a caller convention instead of a type distinction.
+
+   `Inductive` exists because of §1's Q1 correction: `iota_reduce_impl` needs `decl.ctors`, so
+   evaluation is a consumer of this lookup, not exempt from it.
 
 2. **The `Option` goes.** `CheckCtx.layer: Option<Arc<Layer>>` and `resolve_class_cached`'s *"no layer
    access in pure check mode"* error are what let the three surfaces diverge (§0). An environment is
    a component of the judgment, so it is not optional — a caller with nothing to resolve against
-   passes an **empty** environment, not `None`.
+   passes an **empty** environment, not `None`. Emptiness stays an implementation detail: a caller
+   cannot ask "do I have a layer", only look up and get `Absent`.
+
+3. **`EvalCtx` holds one too.** Not in the original draft — see §1's Q1 correction. `EvalCtx` already
+   carries `layer: Option<Arc<Layer>>` in its `Effectful` arm as an *effect capability*; it becomes
+   the same environment every other surface holds, for the same reason.
 
 ### 4.2 Who owns the memo
 
@@ -206,6 +225,18 @@ terminate — so this is a performance decision to make with a measurement, not 
 `decode_type` unfolds them and §3.4's proposition hash is taken over the decoded term (D66 §4);
 classes are opaque because unfolding them makes class identity structural, and 749 of 894 shipped
 classes have identical (empty) field sets.
+
+**Correction `2026-08-24`: Eigenius already has per-declaration transparency.** An earlier draft of
+this section said δ is decided per kind *"so Eigenius does not need nanoda/Lean's transparency
+annotations at this stage"*. It has one. `definition_is_opaque`
+(`program/eigentt_type_mirror.rs:871`) reads a boolean on a `Definition` resource, and an opaque
+definition decodes to `Exp::EigonAxiom` — rigid, never unfolded, identity is the folded name
+(D66, #95).
+
+So the picture is: **kind decides the default, and definitions carry an override.** D76 does not have
+to invent the annotation — it has to avoid *losing* it when lookup replaces decode as the place the
+distinction is made. A `Global::Definition(_)` returned for a declaration flagged opaque would
+silently make a rigid definition unfold.
 
 ## 6. The layer under construction — a `letrec` group
 
