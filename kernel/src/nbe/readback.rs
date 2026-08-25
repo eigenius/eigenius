@@ -726,6 +726,92 @@ mod refine_semantics {
         );
     }
 
+    /// **D78 §9's antichain deferral, reviewed after D76 Phase D.**
+    ///
+    /// §9 keeps a redundant member — `Refine(R, {Pup, Dog})` where `Pup ⊨ Dog` —
+    /// because dropping it would discard a declared fact, and records the
+    /// consequence as *"that type and `Refine(R, {Pup})` have identical inhabitants
+    /// and are not equal"*, to revisit only if the inequality causes friction.
+    ///
+    /// Phase D sharpens the consequence, so it is worth pinning rather than
+    /// leaving as prose. Entailment is decidable in conversion now, so the two are
+    /// **mutually subtypes**: `{Pup,Dog} ⊇ {Pup}` gives one direction by inclusion,
+    /// and `⋀{Pup} ⊨ Dog` gives the other by entailment. Before Phase D only the
+    /// first held.
+    ///
+    /// Mutual subtyping without equality is what nominal identity means and is not
+    /// friction — a subtyping system routinely has distinct types that admit each
+    /// other. Recorded so a future reader sees the state Phase D left, not the
+    /// weaker one §9 was written against.
+    #[test]
+    fn a_redundant_refinement_member_is_mutually_a_subtype_but_not_equal() {
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::{Resource, Value};
+        use crate::ontology::well_known as wk;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(LayerStorage::in_memory()));
+
+        let property = |id: &str| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            );
+            r
+        };
+        let class_with = |id: &str, reqs: Vec<&str>| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            );
+            r.set(
+                iri(wk::REQUIRES),
+                Value::Array(
+                    reqs.into_iter()
+                        .map(|p| Value::ResourceRef(iri(p)))
+                        .collect(),
+                ),
+            );
+            r
+        };
+        let mut d = LayerBuilder::new("t", Some(core));
+        for r in [
+            property("urn:t:name"),
+            property("urn:t:tag"),
+            class_with("urn:t:Dog", vec!["urn:t:name"]),
+            class_with("urn:t:Pup", vec!["urn:t:name", "urn:t:tag"]),
+        ] {
+            d.add_resource(r).unwrap();
+        }
+        let env = crate::nbe::env_global::Env::of(std::sync::Arc::new(
+            d.build(LayerStorage::in_memory()),
+        ));
+
+        let carrier = rec(&["urn:t:a"]);
+        let both = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Pup", "urn:t:Dog"]));
+        let just_pup = Exp::Refine(Box::new(carrier), set(&["urn:t:Pup"]));
+
+        assert!(
+            subtype_of(&env, 0, &v(&both), &v(&just_pup)).is_ok(),
+            "{{Pup,Dog}} ⊇ {{Pup}} — one direction by set inclusion"
+        );
+        assert!(
+            subtype_of(&env, 0, &v(&just_pup), &v(&both)).is_ok(),
+            "and ⋀{{Pup}} ⊨ Dog gives the other by entailment — new since D76 Phase D"
+        );
+        assert!(
+            eq_nf(0, &v(&both), &v(&just_pup)).is_err(),
+            "yet they are not EQUAL: the declared set is part of the type's identity, \
+             which is what D78 §9 chose to keep"
+        );
+    }
+
     #[test]
     fn a_refinement_flows_into_a_nominal_class_context_by_its_constraint_set() {
         // D78 Phase E. `Construct C {}` yields `Refine(record, {C})`, and an

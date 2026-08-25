@@ -7162,3 +7162,84 @@ fn coordination_may_not_strand_a_modifier() {
         "coordinating two unrefined conjuncts of unlike kind must still parse"
     );
 }
+
+/// **D76 §4.2 — is the `Global` memo bounded by declarations or by resources?**
+///
+/// §4.2 flags this memo as the one that *"grows with every resolved IRI"*, unlike
+/// `CLASS_FIELDS_MEMO` which grows with the ontology's class count, and calls that
+/// "the cost that has to be justified rather than assumed". It stayed assumed
+/// through three reseeds: the memo is a thread-local inside a containerized kernel
+/// and `entry_count()` had no caller.
+///
+/// This is the measurement, against a real layer rather than a fixture. Validating
+/// one layer of the loaded chain populates the memo exactly as a commit does, and
+/// the ratio of entries to resources is the answer:
+///
+/// - **bounded** — entries ≪ resources: the key set tracks the *declarations* terms
+///   mention, and adding resources that mention the same ones adds nothing;
+/// - **unbounded** — entries rising with resources, i.e. roughly one key per
+///   resource, which is what `RESOLVE_MEMO` does and what §4.2 feared.
+///
+/// Skipped without `EIGENIUS_DB_SNAPSHOT`; a fixture cannot answer it, because the
+/// question is about scale.
+#[test]
+fn the_global_memo_is_bounded_by_declarations_not_resources() {
+    let Some(path) = snapshot_path() else {
+        return;
+    };
+    let Some((head, _backend)) = open_head_and_backend(&path) else {
+        return;
+    };
+
+    // Walk the whole chain, layer by layer, so the measurement covers BOTH the
+    // term-free lexical bulk and the term-carrying bootstrap. Measuring only the
+    // head would have answered with the head's character rather than the chain's —
+    // and the head is a UMLS concept chunk, which carries no terms at all.
+    let mut chain: Vec<Arc<Layer>> = Vec::new();
+    let mut cursor = Some(Arc::clone(&head));
+    while let Some(l) = cursor {
+        cursor = l.parent().cloned();
+        chain.push(l);
+    }
+    chain.reverse();
+
+    let mut worst_ratio = 0.0_f64;
+    let mut total_entries = 0usize;
+    let mut total_resources = 0usize;
+    for layer in &chain {
+        let resources = layer.iter_resources().count();
+        if resources == 0 {
+            continue;
+        }
+        let _scope = eigenius_kernel::nbe::env_global::GlobalMemoScope::new();
+        let errors = eigenius_kernel::validation::Validator::new(Arc::clone(layer)).validate();
+        let entries = eigenius_kernel::nbe::env_global::GlobalMemoScope::entry_count()
+            .expect("a scope is installed");
+        let ratio = entries as f64 / resources as f64;
+        worst_ratio = worst_ratio.max(ratio);
+        total_entries += entries;
+        total_resources += resources;
+        eprintln!(
+            "GLOBAL MEMO  {entries:>6} entries / {resources:>7} resources  \
+             ({ratio:.4}/res)  {} err  layer {}",
+            errors.len(),
+            &layer.id().to_string()[..12]
+        );
+    }
+
+    eprintln!(
+        "GLOBAL MEMO TOTAL: {total_entries} entries over {total_resources} resources \
+         across {} layers; worst per-layer ratio {worst_ratio:.4}",
+        chain.len()
+    );
+
+    // The bound. A key set tracking declarations cannot approach one-per-resource:
+    // the chain declares a few thousand classes and ten inductives against millions
+    // of instances. The gate is the WORST layer, not the average — an average hides
+    // a single unbounded layer among term-free ones.
+    assert!(
+        worst_ratio < 0.1,
+        "the memo is meant to be bounded by the DECLARATIONS terms mention, not by \
+         the resources validated; worst layer ratio was {worst_ratio:.4}"
+    );
+}

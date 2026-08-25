@@ -276,9 +276,36 @@ impl Validator {
         // than once per occurrence.
         let _globals = crate::nbe::env_global::GlobalMemoScope::new();
         let mut errors = Vec::new();
+        let mut resources = 0_u64;
         for arc_resource in self.layer.iter_resources().map(|(_, r)| r) {
             let resource: &Resource = &arc_resource;
+            resources += 1;
             errors.extend(self.validate_resource(resource));
+        }
+
+        // **D76 §4.2's boundedness question, reported rather than argued.** That
+        // section flags the `(LayerId, Iri) → Global` memo as growing with every
+        // *resolved* IRI — unlike `CLASS_FIELDS_MEMO`, which grows with the
+        // ontology's class count — and calls that "the cost that has to be
+        // justified rather than assumed".
+        //
+        // It stayed assumed through three reseeds for a mundane reason: the memo is
+        // a thread-local inside a containerized kernel and nothing read it back.
+        // `entry_count()` existed and had no caller. One line closes that: the
+        // ratio of memo entries to resources validated is the measurement, and a
+        // pass over a real layer prints it.
+        //
+        // Bounded looks like entries ≪ resources — the key set tracking the
+        // *declarations* terms mention. Unbounded looks like the two rising
+        // together.
+        if let Some(entries) = crate::nbe::env_global::GlobalMemoScope::entry_count() {
+            tracing::info!(
+                { crate::observability::field::OPERATION } = "kernel.validate.memo",
+                { crate::observability::field::LAYER_ID } = %self.layer.id(),
+                { crate::observability::field::COUNT } = entries as u64,
+                resources = resources,
+                "validate.global_memo"
+            );
         }
         errors
     }

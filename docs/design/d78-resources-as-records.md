@@ -746,10 +746,23 @@ record of *proofs* — a conjunction — would want `Prop`, but conjunctions in 
 `Prop`-valued record is ever wanted, at which point the floor becomes a per-record decision rather
 than a constant.
 
+> **Reviewed `2026-08-25`: the condition has not fired.** No `Prop`-valued record exists anywhere in
+> the tree. Still correctly deferred.
+
 **Antichain normalization** (§3). `Refine(R, {Pup, Dog})` with `Pup ⊨ Dog` keeps the redundant member,
 because dropping it would discard a declared fact that 9c/10d keep authoritative. The consequence —
 that type and `Refine(R, {Pup})` have identical inhabitants and are not equal — is what nominal
 identity means. Revisit only if that inequality causes friction in practice.
+
+> **Reviewed `2026-08-25`: no friction, but D76 Phase D sharpened the consequence.** Entailment is
+> decidable in conversion now, so the two types are **mutually subtypes** — `{Pup,Dog} ⊇ {Pup}` gives
+> one direction by inclusion, `⋀{Pup} ⊨ Dog` the other by entailment. Before Phase D only the first
+> held, so this paragraph was written against a weaker state than the code is now in.
+>
+> Mutual subtyping without equality is not friction: a subtyping system routinely has distinct types
+> that admit each other, and the declared set being part of identity is exactly what §9 chose to keep.
+> Pinned by `readback::refine_semantics::a_redundant_refinement_member_is_mutually_a_subtype_but_not_equal`
+> so the state is a test rather than prose. Still correctly deferred.
 
 ## 10. References
 
