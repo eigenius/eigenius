@@ -7171,19 +7171,20 @@ fn coordination_may_not_strand_a_modifier() {
 /// through three reseeds: the memo is a thread-local inside a containerized kernel
 /// and `entry_count()` had no caller.
 ///
-/// This is the measurement, against a real layer rather than a fixture. Validating
-/// one layer of the loaded chain populates the memo exactly as a commit does, and
-/// the ratio of entries to resources is the answer:
+/// **This replicates `Validator::validate`'s body rather than calling it**, and the
+/// reason is a bug this test had on the first attempt. `validate` installs its own
+/// `GlobalMemoScope`; a test that installs one *and then calls it* gets the inner
+/// scope collecting every entry and restoring the outer on drop, so the test reads
+/// the outer and sees **0 for every layer**. The nesting-safety that makes the
+/// guards composable is exactly what defeats measuring from outside.
 ///
-/// - **bounded** — entries ≪ resources: the key set tracks the *declarations* terms
-///   mention, and adding resources that mention the same ones adds nothing;
-/// - **unbounded** — entries rising with resources, i.e. roughly one key per
-///   resource, which is what `RESOLVE_MEMO` does and what §4.2 feared.
-///
-/// Skipped without `EIGENIUS_DB_SNAPSHOT`; a fixture cannot answer it, because the
-/// question is about scale.
+/// Samples rather than walking all 9.4M resources: the **bootstrap** layers carry
+/// declarations and type expressions, the **lexicon** layers carry `sem`/`cat` terms
+/// in bulk, and those are the two populations the question is about.
 #[test]
 fn the_global_memo_is_bounded_by_declarations_not_resources() {
+    use eigenius_kernel::nbe::env_global::GlobalMemoScope;
+
     let Some(path) = snapshot_path() else {
         return;
     };
@@ -7191,10 +7192,6 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         return;
     };
 
-    // Walk the whole chain, layer by layer, so the measurement covers BOTH the
-    // term-free lexical bulk and the term-carrying bootstrap. Measuring only the
-    // head would have answered with the head's character rather than the chain's —
-    // and the head is a UMLS concept chunk, which carries no terms at all.
     let mut chain: Vec<Arc<Layer>> = Vec::new();
     let mut cursor = Some(Arc::clone(&head));
     while let Some(l) = cursor {
@@ -7203,43 +7200,53 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
     }
     chain.reverse();
 
-    let mut worst_ratio = 0.0_f64;
-    let mut total_entries = 0usize;
-    let mut total_resources = 0usize;
-    for layer in &chain {
+    // Every bootstrap layer (the term-bearing ontologies, all small), plus the
+    // largest lexicon layer (the bulk population).
+    let biggest = chain
+        .iter()
+        .max_by_key(|l| l.iter_resources().count())
+        .map(|l| l.id().clone());
+    let sample: Vec<&Arc<Layer>> = chain
+        .iter()
+        .filter(|l| {
+            let n = l.iter_resources().count();
+            n > 0 && (n < 5_000 || Some(l.id().clone()) == biggest)
+        })
+        .collect();
+
+    let mut worst = 0.0_f64;
+    for layer in sample {
         let resources = layer.iter_resources().count();
-        if resources == 0 {
-            continue;
+        let validator = eigenius_kernel::validation::Validator::new(Arc::clone(layer));
+
+        // `Validator::validate`'s body, inlined so the scope is OURS and nothing
+        // nests. Keep the three in step with it.
+        let _resolve = eigenius_kernel::layer::ResolveMemoScope::new();
+        let _class_fields = eigenius_kernel::validation::ClassFieldsScope::new();
+        let _globals = GlobalMemoScope::new();
+        let mut errs = 0usize;
+        for arc in layer.iter_resources().map(|(_, r)| r) {
+            errs += validator.validate_resource(&arc).len();
         }
-        let _scope = eigenius_kernel::nbe::env_global::GlobalMemoScope::new();
-        let errors = eigenius_kernel::validation::Validator::new(Arc::clone(layer)).validate();
-        let entries = eigenius_kernel::nbe::env_global::GlobalMemoScope::entry_count()
-            .expect("a scope is installed");
+        let entries = GlobalMemoScope::entry_count().expect("our scope");
         let ratio = entries as f64 / resources as f64;
-        worst_ratio = worst_ratio.max(ratio);
-        total_entries += entries;
-        total_resources += resources;
+        worst = worst.max(ratio);
         eprintln!(
-            "GLOBAL MEMO  {entries:>6} entries / {resources:>7} resources  \
-             ({ratio:.4}/res)  {} err  layer {}",
-            errors.len(),
+            "GLOBAL MEMO  {entries:>6} entries / {resources:>7} resources  ({ratio:.5}/res)  \
+             {errs} err  layer {}",
             &layer.id().to_string()[..12]
         );
     }
 
-    eprintln!(
-        "GLOBAL MEMO TOTAL: {total_entries} entries over {total_resources} resources \
-         across {} layers; worst per-layer ratio {worst_ratio:.4}",
-        chain.len()
-    );
+    eprintln!("GLOBAL MEMO worst per-layer ratio: {worst:.5}");
 
     // The bound. A key set tracking declarations cannot approach one-per-resource:
-    // the chain declares a few thousand classes and ten inductives against millions
-    // of instances. The gate is the WORST layer, not the average — an average hides
-    // a single unbounded layer among term-free ones.
+    // the chain declares a few thousand classes against millions of instances. The
+    // gate is the WORST layer, not the average — an average hides one unbounded
+    // layer among many term-free ones.
     assert!(
-        worst_ratio < 0.1,
+        worst < 0.1,
         "the memo is meant to be bounded by the DECLARATIONS terms mention, not by \
-         the resources validated; worst layer ratio was {worst_ratio:.4}"
+         the resources validated; worst layer ratio was {worst:.5}"
     );
 }
