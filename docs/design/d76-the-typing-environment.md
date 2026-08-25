@@ -8,10 +8,8 @@ The header said *"skeleton — the design is not written"* until the phases had 
 kind of staleness this document spent seven audits catching in other people's comments. Corrected on
 noticing.
 
-**One item remains open**, tracked in §4.3: whether the `(LayerId, Iri) → Global` memo earns its place.
-§4.2 asks whether it stays bounded over a 9.4M chain; the reporting path exists now
-(`validate.global_memo`, and `GlobalMemoScope::entry_count`) and the measurement is the last thing
-outstanding.
+§4.3's memo question is **closed** `2026-08-25`: bounded — 2 entries over 327,583 resources on the
+largest layer, 16 across any — and nearly idle on the validation path. See the note in §4.3.
 
 Implements **Seam A** of `docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md`.
 
@@ -275,6 +273,33 @@ chain — cannot be answered without a representative workload.
 **Deferring is cheap to reverse.** `Env::lookup` is the single entry point, so a memo goes behind one
 function. The opposite — building it now — costs a cache with no second client and a boundedness
 claim nothing can check.
+
+> **Measured `2026-08-25`, and both halves matter.** The memo was built in Phase B rather than here,
+> on that phase's audit finding that de-inlining moves declaration decoding from decode-time to
+> eval-time. §4.2's question went unanswered through three reseeds for a mundane reason — the memo is
+> a thread-local inside a containerized kernel and `entry_count()` had no caller.
+>
+> **Bounded: yes, decisively.** Over the real chain, the largest lexicon layer populates **2 entries
+> across 327,583 resources** (0.00001/res), and no sampled layer exceeds **16 entries**. The key set
+> tracks the declarations terms mention, not the resources validated — §4.2 feared it would grow
+> "like `RESOLVE_MEMO`, keyed by every resolved IRI", and it does not. Memory cost is nil.
+>
+> **But it is nearly idle on the validation path.** Two lookups across a third of a million resources
+> is not a cache doing work. Whatever the memo is worth, it is worth it on the *checking* path
+> (`check`, `conv`), which this measurement does not cover. §4.3's question — does it earn its place —
+> gets: it is free, and on this path it is close to inert.
+>
+> Pinned by `db_backed_encoding::the_global_memo_is_bounded_by_declarations_not_resources`
+> (snapshot-gated). **Two measurement bugs preceded the number**, both of which would have produced a
+> green test asserting something false:
+>
+> - the first version installed its own scope and then called `Validator::validate`, which installs a
+>   nested one — the inner scope collected every entry and restored the outer on drop, so it read
+>   **0 for every layer**. The nesting-safety that makes the guards composable is what defeats
+>   measuring from outside;
+> - the second gated on the *worst per-layer ratio*, which failed on a **4-resource layer holding 4
+>   entries** — ratio 1.0 and perfectly bounded. A ratio carries scaling information only where
+>   resources ≫ declarations, so the gate is now the largest layer plus an absolute ceiling.
 
 ## 5. δ mechanics
 

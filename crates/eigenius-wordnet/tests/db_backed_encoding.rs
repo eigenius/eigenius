@@ -7215,6 +7215,8 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         .collect();
 
     let mut worst = 0.0_f64;
+    let mut worst_entries = 0usize;
+    let mut biggest_sample: Option<(usize, usize)> = None;
     for layer in sample {
         let resources = layer.iter_resources().count();
         let validator = eigenius_kernel::validation::Validator::new(Arc::clone(layer));
@@ -7231,6 +7233,10 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         let entries = GlobalMemoScope::entry_count().expect("our scope");
         let ratio = entries as f64 / resources as f64;
         worst = worst.max(ratio);
+        worst_entries = worst_entries.max(entries);
+        if biggest_sample.map_or(true, |(_, r)| resources > r) {
+            biggest_sample = Some((entries, resources));
+        }
         eprintln!(
             "GLOBAL MEMO  {entries:>6} entries / {resources:>7} resources  ({ratio:.5}/res)  \
              {errs} err  layer {}",
@@ -7238,15 +7244,34 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         );
     }
 
-    eprintln!("GLOBAL MEMO worst per-layer ratio: {worst:.5}");
+    eprintln!("GLOBAL MEMO worst per-layer ratio: {worst:.5} (informational — see the gate below)");
 
-    // The bound. A key set tracking declarations cannot approach one-per-resource:
-    // the chain declares a few thousand classes against millions of instances. The
-    // gate is the WORST layer, not the average — an average hides one unbounded
-    // layer among many term-free ones.
+    // **The gate is the LARGEST layer, and the first version of this test got that
+    // wrong.** It gated on the worst per-layer ratio, which failed on a 4-resource
+    // layer with 4 entries: ratio 1.0, and completely bounded — 4 is 4. A ratio
+    // carries scaling information only where resources ≫ declarations, so gating it
+    // on a tiny layer measures nothing and rejects a healthy memo.
+    //
+    // Boundedness is a statement about GROWTH, so it is tested where there is growth
+    // to observe.
+    let (biggest_entries, biggest_resources) = biggest_sample.expect("a large layer was sampled");
     assert!(
-        worst < 0.1,
+        biggest_resources > 100_000,
+        "the bound needs a layer with enough scale to be informative; largest was \
+         {biggest_resources} resources"
+    );
+    assert!(
+        (biggest_entries as f64) < (biggest_resources as f64) / 1_000.0,
         "the memo is meant to be bounded by the DECLARATIONS terms mention, not by \
-         the resources validated; worst layer ratio was {worst:.5}"
+         the resources validated: {biggest_entries} entries over {biggest_resources} \
+         resources on the largest layer"
+    );
+
+    // And the absolute ceiling across every sampled layer, which is the number that
+    // actually bounds memory. Declarations in the shipped chain number in the
+    // hundreds; a memo holding thousands would mean it is keyed by something else.
+    assert!(
+        worst_entries < 1_000,
+        "no layer should populate more than a few hundred entries; worst was {worst_entries}"
     );
 }
