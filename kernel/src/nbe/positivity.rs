@@ -98,7 +98,12 @@ pub struct RecArgShape<'a> {
     /// (`(a : A) → D(params)(indices)`, with `D` absent from every `A`).
     pub binders: Vec<(&'a Patt, &'a Exp)>,
     /// The occurrence's own arguments: the parameter prefix followed by the indices.
-    pub args: &'a [Exp],
+    ///
+    /// `Vec<&Exp>` rather than `&[Exp]` since D76 Phase B. A fused
+    /// `InductiveType(d, args)` has its arguments contiguous, but a de-fused
+    /// `App(App(Const(I), a₁), a₂)` does not — they are nested one per `App`.
+    /// Borrowed references collect a spine's arguments without cloning.
+    pub args: Vec<&'a Exp>,
 }
 
 impl RecArgShape<'_> {
@@ -149,7 +154,54 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
             // over-strictness, not unsoundness: `None` here reaches
             // `Err(classify_bad_occurrence(..))`, never a silent accept.
             Exp::Const(iri, _) if *iri == decl.iri => {
-                return Some(RecArgShape { binders, args: &[] });
+                return Some(RecArgShape {
+                    binders,
+                    args: Vec::new(),
+                });
+            }
+            // D76 Phase B — a **de-fused** occurrence: `App(App(Const(I), a₁), a₂)`.
+            //
+            // Peel the spine to its head. This is the same occurrence the fused
+            // `InductiveType(d, args)` arm below classifies, written the way the
+            // wire has always written it (`encode_type_json` emits
+            // `ConstRef(iri)` + an `App` spine), so both forms must be
+            // recognised while the migration is in flight.
+            //
+            // Arguments come off the spine outermost-first, so they are
+            // collected and reversed — the fused arm's `args` are already in
+            // application order.
+            Exp::App(..) => {
+                let mut spine: Vec<&'a Exp> = Vec::new();
+                let mut head = cursor;
+                while let Exp::App(f, x) = head {
+                    spine.push(x.as_ref());
+                    head = f.as_ref();
+                }
+                let Exp::Const(iri, _) = head else {
+                    // Not headed by a name — some other application that
+                    // happens to mention the inductive. Unclassifiable here, and
+                    // `check_arg_positivity` will diagnose it.
+                    return None;
+                };
+                if *iri != decl.iri {
+                    return None;
+                }
+                spine.reverse();
+                // An occurrence inside its own index arguments is not something
+                // the eliminator can build a hypothesis for — the same rule the
+                // fused arm applies.
+                let n_params = decl.params.len();
+                if spine.len() < n_params
+                    || spine[n_params..]
+                        .iter()
+                        .any(|a| has_ind_occurrence(decl, a))
+                {
+                    return None;
+                }
+                return Some(RecArgShape {
+                    binders,
+                    args: spine,
+                });
             }
             Exp::InductiveType(d, args) if d.iri == decl.iri => {
                 // An occurrence inside its own index arguments is not something the eliminator can
@@ -160,7 +212,10 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
                 {
                     return None;
                 }
-                return Some(RecArgShape { binders, args });
+                return Some(RecArgShape {
+                    binders,
+                    args: args.iter().collect(),
+                });
             }
             _ => return None,
         }
@@ -252,7 +307,7 @@ fn shadow_patt(param_refs: &mut [Option<String>], patt: &Patt) {
 fn check_params_uniform(
     decl: &InductiveDecl,
     ctor_name: &str,
-    param_args: &[Exp],
+    param_args: &[&Exp],
     param_refs: &[Option<String>],
     context: &str,
 ) -> Result<(), String> {
@@ -405,7 +460,8 @@ fn check_result_type(
         Exp::Const(iri, _) if *iri == decl.iri => Ok(()),
         Exp::InductiveType(d, args) if d.iri == decl.iri => {
             let upto = decl.params.len().min(args.len());
-            check_params_uniform(decl, ctor_name, &args[..upto], param_refs, "the conclusion")
+            let prefix: Vec<&Exp> = args[..upto].iter().collect();
+            check_params_uniform(decl, ctor_name, &prefix, param_refs, "the conclusion")
         }
         _ => Err(format!(
             "constructor `{}.{ctor_name}` must end in an application of `{}`",
@@ -920,6 +976,86 @@ mod const_self_reference {
         assert!(
             !has_ind_occurrence(&d, &Exp::Const(iri("urn:test:Other"), Vec::new())),
             "a Const naming a different declaration is not"
+        );
+    }
+
+    #[test]
+    fn a_de_fused_parametric_occurrence_is_classified() {
+        // `List(A)` written as `App(Const(List), A)` — the form replacing a stub
+        // produces, and the form the wire has always used.
+        let list = InductiveDecl {
+            iri: iri("urn:test:List"),
+            name: "List".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: Vec::new(),
+        };
+        let occurrence = Exp::App(
+            Box::new(Exp::Const(iri("urn:test:List"), Vec::new())),
+            Box::new(Exp::Var("A".to_string())),
+        );
+
+        let shape = recursive_arg_shape(&list, &occurrence)
+            .expect("a de-fused parametric occurrence must classify");
+        assert_eq!(shape.args.len(), 1, "the spine's argument is recovered");
+        assert!(
+            shape.binders.is_empty(),
+            "a direct occurrence has no binders"
+        );
+        assert!(
+            matches!(shape.args[0], Exp::Var(n) if n == "A"),
+            "and in application order: {:?}",
+            shape.args[0]
+        );
+    }
+
+    #[test]
+    fn a_de_fused_occurrence_under_a_binder_keeps_its_binders() {
+        // `(n : Nat) → List(A)` — higher-order positive.
+        let list = InductiveDecl {
+            iri: iri("urn:test:List"),
+            name: "List".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: Vec::new(),
+        };
+        let occurrence = Exp::Pi(
+            Patt::Var("n".to_string()),
+            Box::new(Exp::sort(1)),
+            Box::new(Exp::App(
+                Box::new(Exp::Const(iri("urn:test:List"), Vec::new())),
+                Box::new(Exp::Var("A".to_string())),
+            )),
+        );
+        let shape = recursive_arg_shape(&list, &occurrence).expect("higher-order positive");
+        assert_eq!(shape.binders.len(), 1, "the Π binder is kept");
+        assert_eq!(shape.args.len(), 1);
+    }
+
+    #[test]
+    fn a_de_fused_negative_occurrence_is_still_refused() {
+        // `(List(A) → Nat) → …` — the inductive in a domain.
+        let list = InductiveDecl {
+            iri: iri("urn:test:List"),
+            name: "List".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
+            indices: Vec::new(),
+            sort: Exp::sort(1),
+            ctors: Vec::new(),
+        };
+        let neg = Exp::Pi(
+            Patt::Unit,
+            Box::new(Exp::App(
+                Box::new(Exp::Const(iri("urn:test:List"), Vec::new())),
+                Box::new(Exp::Var("A".to_string())),
+            )),
+            Box::new(Exp::sort(1)),
+        );
+        assert!(
+            recursive_arg_shape(&list, &neg).is_none(),
+            "an occurrence in a Π domain is not a positive recursive argument"
         );
     }
 

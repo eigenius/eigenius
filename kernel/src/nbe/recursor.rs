@@ -204,7 +204,10 @@ pub fn derive_minor_type(
 
         // D48: `motive idx₁ … idx_m` at the occurrence's own indices. These sit INSIDE the
         // binders above, since an index expression may mention them.
-        let arg_idx_exps: Vec<Exp> = shape.args[n_params.min(shape.args.len())..].to_vec();
+        let arg_idx_exps: Vec<Exp> = shape.args[n_params.min(shape.args.len())..]
+            .iter()
+            .map(|e| (*e).clone())
+            .collect();
         let motive_at_arg_indices = arg_idx_exps.iter().fold(motive_exp.clone(), |acc, i| {
             Exp::App(Box::new(acc), Box::new(i.clone()))
         });
