@@ -68,6 +68,72 @@ pub enum Global {
     Absent,
 }
 
+/// Memo for [`Env::lookup`], keyed by layer then IRI.
+///
+/// **Phase B creates the need for this, not Phase D.** §4.3 deferred the memo on
+/// the argument that `check` was its only consumer and already caches through
+/// `type_cache`. De-inlining changes the arithmetic: a lookup for an inductive
+/// runs `resolve_class_type` → `resolve_inductive_type`, which decodes params,
+/// indices, and every constructor type. `RESOLVE_MEMO` does not cover that — it
+/// caches `Layer::resolve`, the resource fetch beneath the decode. While the
+/// declaration is inlined in the term the decode happens **once**, at
+/// `resolve_const_ref`; de-inlined, it happens once per occurrence per
+/// evaluation, in the evaluator's inner loop.
+///
+/// Shape follows [`crate::validation::ClassFieldsScope`] (D78 Phase D):
+/// thread-local, RAII scope, `BTreeMap` at both levels, no-op when no scope is
+/// installed. Soundness is `ResolveMemoScope`'s — correct while the chain does
+/// not change, which holds across a pass over immutable `Arc<Layer>`s.
+///
+/// **Boundedness differs from `CLASS_FIELDS_MEMO`'s and is the cost §4.2 flags.**
+/// That memo is keyed by class — ~894 of them against millions of instances. This
+/// one is keyed by every IRI looked up, including those that resolve to
+/// [`Global::Absent`]. The key set is bounded by the distinct IRIs *appearing in
+/// terms*, not by chain size, but that is an argument and not a measurement; the
+/// reseed measures it.
+type GlobalMemo =
+    std::collections::BTreeMap<crate::layer::LayerId, std::collections::BTreeMap<Iri, Global>>;
+
+thread_local! {
+    static GLOBAL_MEMO: std::cell::RefCell<Option<GlobalMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard installing a [`GLOBAL_MEMO`] for its lifetime. Nesting-safe: the
+/// previous memo is restored on drop.
+pub struct GlobalMemoScope {
+    prev: Option<GlobalMemo>,
+}
+
+impl GlobalMemoScope {
+    pub fn new() -> Self {
+        let prev = GLOBAL_MEMO.with(|m| m.borrow_mut().replace(GlobalMemo::new()));
+        Self { prev }
+    }
+
+    /// Number of memoized entries, for the boundedness measurement. `None` when
+    /// no scope is installed.
+    pub fn entry_count() -> Option<usize> {
+        GLOBAL_MEMO.with(|m| {
+            m.borrow()
+                .as_ref()
+                .map(|memo| memo.values().map(|per_layer| per_layer.len()).sum())
+        })
+    }
+}
+
+impl Default for GlobalMemoScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for GlobalMemoScope {
+    fn drop(&mut self) {
+        GLOBAL_MEMO.with(|m| *m.borrow_mut() = self.prev.take());
+    }
+}
+
 /// `Γ_env` — the global environment of a typing judgment.
 ///
 /// Cheap to clone: an `Option<Arc<Layer>>`.
@@ -129,6 +195,26 @@ impl Env {
         let Some(layer) = self.layer.as_ref() else {
             return Global::Absent;
         };
+        let key = layer.id().clone();
+        if let Some(hit) = GLOBAL_MEMO.with(|m| {
+            m.borrow()
+                .as_ref()
+                .and_then(|memo| memo.get(&key)?.get(iri).cloned())
+        }) {
+            return hit;
+        }
+        let computed = self.lookup_uncached(layer, iri);
+        GLOBAL_MEMO.with(|m| {
+            if let Some(memo) = m.borrow_mut().as_mut() {
+                memo.entry(key)
+                    .or_default()
+                    .insert(iri.clone(), computed.clone());
+            }
+        });
+        computed
+    }
+
+    fn lookup_uncached(&self, layer: &Arc<Layer>, iri: &Iri) -> Global {
         let Some(resource) = layer.resolve(iri) else {
             return Global::Absent;
         };
@@ -319,5 +405,124 @@ mod tests {
     fn an_unknown_iri_is_absent_rather_than_an_error() {
         let e = with(vec![]);
         assert!(matches!(e.lookup(&i("urn:t:nope")), Global::Absent));
+    }
+    /// A layer plus three IRIs the environment classifies differently: an
+    /// inductive, a class, and one that resolves to nothing.
+    fn memo_fixture() -> (Arc<Layer>, Iri, Iri, Iri) {
+        let b = LayerBuilder::new("memo-test", Some(core()));
+        let layer = Arc::new(b.build(LayerStorage::in_memory()));
+        (
+            layer,
+            i("urn:eigenius:core:Level"),
+            i(wk::CLASS),
+            i("urn:t:not-there"),
+        )
+    }
+
+    #[test]
+    fn the_memo_answers_identically_and_is_installed_by_scope() {
+        // The memo must not change what the environment says, only how often it
+        // computes it. Same lookups, once outside a scope and once inside.
+        let (layer, inductive, klass, missing) = memo_fixture();
+        let env = Env::of(layer);
+
+        let uncached: Vec<String> = [&inductive, &klass, &missing]
+            .iter()
+            .map(|i| format!("{:?}", env.lookup(i)))
+            .collect();
+
+        assert_eq!(
+            GlobalMemoScope::entry_count(),
+            None,
+            "no scope installed → no memo"
+        );
+        let _scope = GlobalMemoScope::new();
+        assert_eq!(GlobalMemoScope::entry_count(), Some(0));
+
+        let cached: Vec<String> = [&inductive, &klass, &missing]
+            .iter()
+            .map(|i| format!("{:?}", env.lookup(i)))
+            .collect();
+        assert_eq!(uncached, cached, "the memo changes no answer");
+        assert_eq!(
+            GlobalMemoScope::entry_count(),
+            Some(3),
+            "including the Absent one — that is the boundedness cost \u{a7}4.2 flags"
+        );
+
+        // A second round of the same lookups adds no entries.
+        for i in [&inductive, &klass, &missing] {
+            let _ = env.lookup(i);
+        }
+        assert_eq!(GlobalMemoScope::entry_count(), Some(3));
+    }
+
+    #[test]
+    fn the_memo_scope_nests_and_restores() {
+        let (layer, inductive, _klass, _missing) = memo_fixture();
+        let env = Env::of(layer);
+        let _outer = GlobalMemoScope::new();
+        let _ = env.lookup(&inductive);
+        assert_eq!(GlobalMemoScope::entry_count(), Some(1));
+        {
+            let _inner = GlobalMemoScope::new();
+            assert_eq!(
+                GlobalMemoScope::entry_count(),
+                Some(0),
+                "inner starts empty"
+            );
+        }
+        assert_eq!(
+            GlobalMemoScope::entry_count(),
+            Some(1),
+            "the outer memo is restored on drop"
+        );
+    }
+
+    #[test]
+    fn an_effect_free_evaluation_still_resolves_a_name_through_its_environment() {
+        // **The defect D76 Phase B's audit found.** `EvalCtx` filed chain access
+        // under the effect capability, so the type checker's evaluator — always
+        // effect-free — had no environment. A de-inlined `Exp::Const` would
+        // evaluate to a neutral instead of the declaration it names, and every
+        // inductive reference would stop being a type the moment it stopped
+        // being inlined.
+        use crate::nbe::env::Rho;
+        use crate::nbe::eval::{eval_ctx, EvalCtx};
+        use crate::nbe::term::Exp;
+
+        let (layer, inductive, _, _) = memo_fixture();
+        let reference = Exp::Const(inductive.clone(), Vec::new());
+
+        let without = eval_ctx(&reference, &Rho::Nil, &EvalCtx::pure()).expect("eval");
+        assert!(
+            matches!(without, Val::Nt(crate::nbe::val::Neut::Const(_))),
+            "with no environment the name is inert — a neutral, not an error: {without:?}"
+        );
+
+        let with_env =
+            eval_ctx(&reference, &Rho::Nil, &EvalCtx::in_env(Env::of(layer))).expect("eval");
+        match with_env {
+            Val::InductiveType { decl, .. } => assert_eq!(decl.iri, inductive),
+            other => panic!("an effect-free context with an environment must resolve: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effects_and_the_environment_are_independent() {
+        // The shape claim behind the fix: `hooks` is the capability, `env` is not.
+        // An effect-free context can carry an environment, which the old enum
+        // could not express.
+        use crate::nbe::eval::EvalCtx;
+        let (layer, _, _, _) = memo_fixture();
+
+        let plain = EvalCtx::pure();
+        assert!(plain.hooks().is_none() && plain.env().is_empty());
+
+        let environed = EvalCtx::in_env(Env::of(layer));
+        assert!(
+            environed.hooks().is_none() && !environed.env().is_empty(),
+            "effect-free, yet it has an environment"
+        );
     }
 }

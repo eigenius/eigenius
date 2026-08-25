@@ -714,6 +714,67 @@ all of them.
   suites and the shipped ontologies, count, then enforce. A non-zero count is a finding about the
   chain, not a blocker for B1.
 
+**⚠ Audit `2026-08-24`, before the sweep — three corrections.**
+
+*1. The site count is 168, not 606.* `Exp::InductiveType` occurs 168 times — **85 production, 83
+test** — across 34 files. The "606 `Exp` sites" §3 reports is the whole `Exp` reference surface, all
+variants; it was never a count of this one. The production concentration is not in the kernel core:
+
+| area | sites |
+|---|---|
+| `dcg/` (parser, rules, verbalize, chart) | 35 |
+| `program/` (codec, ground, expr) | 13 |
+| `nbe/` (check, eval, positivity, subst, readback, recursor, term) | 22 |
+| `layer/`, `validation/`, `esl/`, `crates/` | 15 |
+
+*2. `EvalCtx::Pure` has no environment, and the type checker uses it.* The environment sits in the
+`Effectful` arm only:
+
+```rust
+pub enum EvalCtx {
+    Pure,
+    Effectful { layer: Option<Arc<Layer>>, hooks: Arc<dyn EffectHooks> },
+}
+```
+
+`eval(exp, rho)` — 161 call sites, 67 of them in `check/` — hardcodes `Pure`. `eval`'s `Const` arm
+resolves through `ctx.layer()`, so under `Pure` a de-fused `App(Const(List), A)` evaluates to a
+**neutral** instead of a `Val::InductiveType`. Every inductive reference would stop being a type the
+moment it is de-inlined.
+
+The shape says why: **the environment is filed under the effect capability.** They are independent —
+a pure evaluation needs `Γ_env` exactly as much as an effectful one; what `Effectful` adds is IO. So
+`EvalCtx` carries `env: Env` in every mode and `hooks` becomes the optional part. This is the Q1
+correction reaching its second surface: §1 established that *evaluation* consumes the environment,
+and this is where the type says so.
+
+*3. De-inlining moves declaration decoding from decode-time to eval-time, so the §4.3 memo is Phase
+B's, not Phase D's.* `Env::lookup` on an inductive calls `resolve_class_type` →
+`resolve_inductive_type`, which decodes params, indices, and every constructor type — on **every
+call**. `RESOLVE_MEMO` does not cover it: that memo caches `Layer::resolve`, the resource lookup,
+not the decode above it.
+
+Today the decode happens **once**, in `resolve_const_ref`, and the result is inlined into the term —
+which is precisely what "the declaration is inlined" buys. De-inlining moves it to once **per
+occurrence per evaluation**. So the `(LayerId, Iri) → Global` memo §4.3 defers to Phase D on the
+argument that Phase D adds the second consumer is superseded: Phase B *creates the need*, and
+shipping the sweep without it trades a correctness fix for a decode in the evaluator's inner loop.
+It lands here, shaped after `CLASS_FIELDS_MEMO` (D78 Phase D) — thread-local, RAII scope, keyed by
+`LayerId`, `BTreeMap` at both levels.
+
+**So Phase B sequences into three steps**, each compiling and tested:
+
+| step | change | risk class |
+|---|---|---|
+| B-a | `EvalCtx` carries `Env`; `Global` memo | no de-inlining yet — verdict parity expected |
+| B-b | delete `Exp::InductiveType`, sweep 168 sites | the sweep; compiler-enumerated |
+| B-c | `PartialEq for InductiveDecl` structural | the payoff |
+
+**B-b deletes the variant rather than deprecating it.** Leaving it in place while migrating callers
+would make every un-migrated match arm a *silent* non-match — the failure mode that a spine walker
+looks like a plain `App`. Deleting it turns all 168 into compile errors, so the sweep is enumerated
+by the compiler instead of by grep.
+
 B1 is the part #188 is blocked on — it is `PartialEq` that makes levels unsound. B2 can follow at its
 own pace.
 

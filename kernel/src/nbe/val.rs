@@ -259,7 +259,7 @@ impl Clos {
 
     /// Instantiate the closure with a value (Pure mode).
     pub fn apply(&self, v: Val) -> Result<Val, EvalError> {
-        self.apply_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
+        self.apply_ctx(v, &crate::nbe::eval::EvalCtx::pure())
     }
 
     /// Instantiate the closure with a value and capability context.
@@ -293,7 +293,7 @@ impl Val {
 
     /// Function application: (λ f) v = f * v; (fun ...) ($c v) = ...; neutral app
     pub fn app(self, v: Val) -> Result<Val, EvalError> {
-        self.app_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
+        self.app_ctx(v, &crate::nbe::eval::EvalCtx::pure())
     }
 
     /// Function application with capability context.

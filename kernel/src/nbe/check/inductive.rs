@@ -657,7 +657,7 @@ pub(super) fn check_infer_inductive_rec(
         )));
     }
     let motive_val = ctx.eval(motive, &ctx.rho)?;
-    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::Pure)?;
+    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::pure())?;
     for (minor, expected_typ) in minors.iter().zip(expected_minor_types.iter()) {
         check(ctx, minor, expected_typ)?;
     }

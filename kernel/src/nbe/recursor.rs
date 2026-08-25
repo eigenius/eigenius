@@ -394,7 +394,7 @@ mod tests {
             Rho::Nil,
         ));
 
-        let minor = derive_minor_type(&decl, 1, &[], &motive, &EvalCtx::Pure)
+        let minor = derive_minor_type(&decl, 1, &[], &motive, &EvalCtx::pure())
             .expect("derive_minor_type for `step`");
 
         // Walk the three binders — the `One` argument, the recursive `D` argument, the IH —
@@ -441,7 +441,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         let typ =
-            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive_minor_type");
+            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::pure()).expect("derive_minor_type");
         assert!(
             matches!(&typ, Val::Sort(l) if l.is_nat(1)),
             "expected Set, got {typ:?}"
@@ -454,7 +454,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         let typ =
-            derive_minor_type(&nat, 1, &[], &motive, &EvalCtx::Pure).expect("derive_minor_type");
+            derive_minor_type(&nat, 1, &[], &motive, &EvalCtx::pure()).expect("derive_minor_type");
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 2, "expected 2 Π binders, got {count}");
         assert!(
@@ -507,7 +507,7 @@ mod tests {
             Exp::Var("x".to_string()),
             Rho::Nil,
         ));
-        let typ = derive_minor_type(&tree, 1, &[], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&tree, 1, &[], &motive, &EvalCtx::pure())
             .expect("derive_minor_type for node");
 
         // Walk the Pi chain, applying distinguishable generic values.
@@ -589,7 +589,7 @@ mod tests {
         // suffices for the shape check; element types do not matter for
         // counting Π binders.
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 1, &[Val::sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 1, &[Val::sort(1)], &motive, &EvalCtx::pure())
             .expect("derive_minor_type");
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 3, "expected 3 Π binders, got {count}");
@@ -620,7 +620,7 @@ mod tests {
             }],
         });
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 0, &[Val::sort(1)], &motive, &EvalCtx::pure())
             .expect("derive_minor_type");
         assert!(
             matches!(&typ, Val::Sort(l) if l.is_nat(1)),
@@ -633,7 +633,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         let typs =
-            derive_minor_types(&nat, &[], &motive, &EvalCtx::Pure).expect("derive_minor_types");
+            derive_minor_types(&nat, &[], &motive, &EvalCtx::pure()).expect("derive_minor_types");
         assert_eq!(typs.len(), 2);
         // zero minor: Set
         assert!(matches!(&&typs[0], Val::Sort(l) if l.is_nat(1)));
@@ -647,7 +647,8 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         // Nat takes no params; passing one should error.
-        let err = derive_minor_type(&nat, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure).unwrap_err();
+        let err =
+            derive_minor_type(&nat, 0, &[Val::sort(1)], &motive, &EvalCtx::pure()).unwrap_err();
         match err {
             EvalError::InvalidCaseTarget(msg) => assert!(msg.contains("params")),
             other => panic!("expected InvalidCaseTarget, got {other:?}"),
@@ -731,7 +732,7 @@ mod tests {
         let motive = vec_motive();
         // Reducing the minor at evaluation time produces `motive () (nil A)`
         // which (with the const motive `λ _ _. Set`) collapses to `Set`.
-        let typ = derive_minor_type(&decl, 0, &[Val::sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 0, &[Val::sort(0)], &motive, &EvalCtx::pure())
             .expect("derive nil minor");
         // The minor type is `Π A:Set. motive () (nil A)` — a Pi over
         // the ctor's value-arg telescope (here just the A binder).
@@ -767,7 +768,7 @@ mod tests {
         // The const motive `λ _ _. Set` reduces all `motive () _` to Sort(1).
         let decl = simple_vec_decl();
         let motive = vec_motive();
-        let typ = derive_minor_type(&decl, 1, &[Val::sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 1, &[Val::sort(0)], &motive, &EvalCtx::pure())
             .expect("derive cons minor");
         // Verify the minor type starts with a Pi — `cons` has non-param
         // value args (h : 1, x : A, xs : SimpleVec A ()) plus an IH for
@@ -790,7 +791,7 @@ mod tests {
         let motive = const_set_motive();
         // zero's minor: no args, result is `motive zero` → Sort(1) under const.
         let zero_typ =
-            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive zero minor");
+            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::pure()).expect("derive zero minor");
         assert!(
             matches!(&zero_typ, Val::Sort(l) if l.is_nat(1)),
             "Nat.zero minor should reduce to Sort(1) under const-Set motive; got {zero_typ:?}"

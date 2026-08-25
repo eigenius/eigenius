@@ -259,7 +259,7 @@ pub enum Exp {
     /// at the caller-named IRI.
     ///
     /// Without a institution index/runtime attached (bare
-    /// `EvalCtx::Pure` used at type-check time), the expression
+    /// `EvalCtx::pure()` used at type-check time), the expression
     /// reduces to a passthrough neutral so the conversion checker can
     /// compare two `InstitutionInvoke`s structurally. Runtime callers
     /// attach the index/runtime via an effectful `EvalCtx` (the IO or check-time institution engine).
@@ -502,6 +502,40 @@ impl Exp {
     /// other [`Level`](crate::nbe::level::Level) forms directly.
     pub fn sort(n: usize) -> Exp {
         Exp::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
+    /// A reference to a declaration, applied to arguments —
+    /// `App(App(Const(iri), a₁), a₂)`.
+    ///
+    /// The de-inlined form of what `Exp::InductiveType(decl, args)` fused into a
+    /// single node (D76 §8 Phase B). It is also what the D47 wire has always
+    /// carried: the encoder emits `ConstRef` plus an `App` spine, so this
+    /// constructor produces the shape the codec already round-trips.
+    pub fn const_applied(iri: Iri, levels: Vec<crate::nbe::level::Level>, args: Vec<Exp>) -> Exp {
+        args.into_iter().fold(Exp::Const(iri, levels), |head, arg| {
+            Exp::App(Box::new(head), Box::new(arg))
+        })
+    }
+
+    /// Peel an application spine down to a [`Exp::Const`] head, returning the
+    /// head's IRI and levels and the arguments **in application order**.
+    ///
+    /// `None` when the head is anything else. The reversal matters: a spine peels
+    /// outermost-first, so the arguments come off backwards relative to how they
+    /// were applied — a caller that pairs them against a parameter telescope
+    /// without reversing pairs each argument with the wrong binder.
+    pub fn as_const_spine(&self) -> Option<(&Iri, &[crate::nbe::level::Level], Vec<&Exp>)> {
+        let mut args: Vec<&Exp> = Vec::new();
+        let mut head = self;
+        while let Exp::App(f, x) = head {
+            args.push(x.as_ref());
+            head = f.as_ref();
+        }
+        let Exp::Const(iri, levels) = head else {
+            return None;
+        };
+        args.reverse();
+        Some((iri, levels.as_slice(), args))
     }
 
     /// Build an [`Exp::Record`] in **canonical order** (D78 §1), or report a

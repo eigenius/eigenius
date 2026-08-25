@@ -271,6 +271,10 @@ impl Validator {
         // class's record field set so the telescope is built once per class
         // rather than once per resource.
         let _class_fields = ClassFieldsScope::new();
+        // D76 Phase B — same lifetime and soundness condition again: memoize the
+        // environment's answers so a declaration is decoded once per pass rather
+        // than once per occurrence.
+        let _globals = crate::nbe::env_global::GlobalMemoScope::new();
         let mut errors = Vec::new();
         for arc_resource in self.layer.iter_resources().map(|(_, r)| r) {
             let resource: &Resource = &arc_resource;

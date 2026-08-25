@@ -311,7 +311,7 @@ mod tests {
 
         // 1. How many binders does the minor derivation ask for?
         let minor_ty =
-            crate::nbe::recursor::derive_minor_type(&foo, 1, &[], &motive, &EvalCtx::Pure)
+            crate::nbe::recursor::derive_minor_type(&foo, 1, &[], &motive, &EvalCtx::pure())
                 .expect("derive_minor_type for `rall`");
         let mut arity = 0usize;
         let mut cursor = minor_ty;
@@ -349,7 +349,7 @@ mod tests {
             &[base_minor, rall_minor],
             "rall",
             &[arg],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce over `rall`");
         assert!(
@@ -427,7 +427,7 @@ mod tests {
             &[base_minor, rall_minor],
             "rall",
             &[f],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota over `rall` with a hypothesis that recurses");
         match result {
@@ -470,7 +470,7 @@ mod tests {
             &[true_minor, false_minor],
             "True",
             &[],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
         match result {
@@ -509,7 +509,7 @@ mod tests {
             &[zero_minor, succ_minor],
             "succ",
             &[nat_n(&nat, 1)],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
 
@@ -594,7 +594,7 @@ mod tests {
             &[leaf_minor, node_minor],
             "node",
             &[node(leaf.clone(), leaf.clone()), leaf],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
         // rec(node(node(leaf,leaf), leaf)) = (rec(node(leaf,leaf)), rec(leaf))
@@ -693,7 +693,7 @@ mod tests {
             &[nil_minor, cons_minor],
             "cons",
             &three_args,
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
 
@@ -728,7 +728,7 @@ mod tests {
             ],
             major: Box::new(Exp::Var("n".to_string())),
         };
-        let result = eval_ctx(&exp, &rho, &EvalCtx::Pure).expect("eval");
+        let result = eval_ctx(&exp, &rho, &EvalCtx::pure()).expect("eval");
         match result {
             Val::Nt(Neut::NtRec { decl: d, .. }) => assert_eq!(d.name, "Nat"),
             other => panic!("expected NtRec, got {other:?}"),
@@ -839,7 +839,7 @@ mod tests {
             ],
             major: Box::new(Exp::Var("v".to_string())),
         };
-        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::Pure).expect("iota nil");
+        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::pure()).expect("iota nil");
         // For nil with no value-args, the minor is applied to nothing —
         // the result is nil_minor itself, which is Unit.
         assert!(
@@ -897,7 +897,7 @@ mod tests {
             ],
             major: Box::new(Exp::Var("v".to_string())),
         };
-        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::Pure).expect("iota cons");
+        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::pure()).expect("iota cons");
         assert!(
             matches!(result, Val::Unit),
             "expected iota(rec on cons) to reduce to Unit (const cons_minor); got {result:?}"

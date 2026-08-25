@@ -37,7 +37,11 @@ use inductive::{
 
 use crate::layer::Layer;
 use crate::nbe::env::{gen_val, lookup_gamma, up_gamma, Gamma, Rho};
-use crate::nbe::eval::{eval, eval_ctx};
+// D76 Phase B: the bare `eval` is deliberately NOT imported here. Every
+// evaluation the checker performs goes through `CheckCtx::eval`, which carries
+// `Γ_env`; an env-less call would leave a de-inlined `Const` as a neutral
+// instead of the declaration it names. Tests import it explicitly.
+use crate::nbe::eval::eval_ctx;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::{Decl, Exp, Patt};
 use crate::nbe::val::{Clos, Val};
@@ -75,7 +79,7 @@ pub struct CheckCtx {
     /// attached together with `institution_runtime`,
     /// `Constraint::Institution` predicates dispatch through
     /// `try_institution_decide` (D14 §9.2). Without these, constraints stay
-    /// as passthrough neutrals — what `EvalCtx::Pure` does anyway.
+    /// as passthrough neutrals — what `EvalCtx::pure()` does anyway.
     pub institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
     /// institution runtime — registry of `Institution` trait
     /// objects keyed by institution IRI. See `institution_index`.
@@ -133,7 +137,7 @@ impl CheckCtx {
     /// Returns an effectful context backed by a check-time
     /// [`InstitutionEngine`](crate::institution::eval_hooks::InstitutionEngine)
     /// when an institution index/runtime is attached; otherwise
-    /// `EvalCtx::Pure`. All internal `eval` calls in the checker route
+    /// `EvalCtx::pure()`. All internal `eval` calls in the checker route
     /// through this so institution-dispatched constraints fire at check
     /// time rather than deferring to runtime.
     pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
@@ -145,7 +149,12 @@ impl CheckCtx {
             );
             crate::nbe::eval::EvalCtx::effectful(self.env.layer().cloned(), Arc::new(engine))
         } else {
-            crate::nbe::eval::EvalCtx::Pure
+            // D76 Phase B: the *environment* is not a capability, so an
+            // effect-free checker still evaluates inside `Γ_env`. Handing
+            // `EvalCtx::pure()` down here is what left a de-inlined `Const` with
+            // nothing to resolve against — it would evaluate to a neutral instead
+            // of the inductive it names.
+            crate::nbe::eval::EvalCtx::in_env(self.env.clone())
         }
     }
 
@@ -843,7 +852,8 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let record = Exp::record(built)
                 .map_err(|e| CheckError::CannotInfer(e.to_string()))
                 .and_then(|e| {
-                    eval(&e, &Rho::Nil).map_err(|e| CheckError::CannotInfer(format!("{e:?}")))
+                    ctx.eval(&e, &Rho::Nil)
+                        .map_err(|e| CheckError::CannotInfer(format!("{e:?}")))
                 })?;
             Ok(Val::Refine(
                 Box::new(record),
@@ -1195,7 +1205,7 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
                 .iter()
                 .find(|(_, patt, _)| matches!(patt, Patt::Var(n) if n == field_name))?;
             let _ = patt;
-            eval(ty, rho).ok()
+            ctx.eval(ty, rho).ok()
         }
         Val::Refine(carrier, _) => find_sigma_field(ctx, carrier, field_name),
         Val::Sig(t, g) => {
@@ -1232,7 +1242,7 @@ fn find_record_field(ctx: &mut CheckCtx, typ: &Val, field: &Iri) -> Option<Val> 
     match typ {
         Val::Record(fields, rho) => {
             let (_, _, ty) = fields.iter().find(|(iri, _, _)| iri == field)?;
-            eval(ty, rho).ok()
+            ctx.eval(ty, rho).ok()
         }
         Val::Refine(carrier, _) => find_record_field(ctx, carrier, field),
         Val::EigonClass(iri) => {
@@ -1288,6 +1298,7 @@ mod tests {
     use super::testutil::*;
     use super::witness::try_synthesize_chain_witness;
     use super::*;
+    use crate::nbe::eval::eval;
     use crate::nbe::eval::EvalCtx;
     use crate::nbe::term::PrimitiveType;
     use crate::nbe::term::{InductiveCtorDecl, InductiveDecl};
@@ -2850,7 +2861,7 @@ mod tests {
 
     #[test]
     fn decide_without_registry_is_undecidable() {
-        // Bare `EvalCtx::Pure` has no registry → institution-dispatched
+        // Bare `EvalCtx::pure()` has no registry → institution-dispatched
         // constraint falls through to `Undecidable`, reducing to the
         // passthrough neutral.
         let constraint = Constraint::Institution {
@@ -2858,7 +2869,7 @@ mod tests {
             args: vec![],
         };
         let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(7)));
-        let v = eval_ctx(&exp, &Rho::Nil, &EvalCtx::Pure).expect("eval");
+        let v = eval_ctx(&exp, &Rho::Nil, &EvalCtx::pure()).expect("eval");
         assert!(
             matches!(v, Val::Nt(crate::nbe::val::Neut::Gen(_, ref n)) if n == "__constraint_undecidable")
         );

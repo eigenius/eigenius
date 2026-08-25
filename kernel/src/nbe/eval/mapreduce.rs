@@ -295,7 +295,7 @@ mod tests {
             Rho::Nil,
         ));
         let lst = ind_list(vec![Val::Unit, Val::Unit, Val::Unit]);
-        let result = eval_map(id_lam, lst, &EvalCtx::Pure).expect("eval_map");
+        let result = eval_map(id_lam, lst, &EvalCtx::pure()).expect("eval_map");
         match result {
             Val::List(items) => assert_eq!(items.len(), 3),
             other => panic!("expected List, got {other:?}"),
@@ -312,7 +312,7 @@ mod tests {
             Exp::Lam(Patt::Unit, Box::new(Exp::Var("acc".to_string()))),
             Rho::Nil,
         ));
-        let result = eval_reduce(f, Val::sort(1), lst, &EvalCtx::Pure).expect("eval_reduce");
+        let result = eval_reduce(f, Val::sort(1), lst, &EvalCtx::pure()).expect("eval_reduce");
         assert!(matches!(&result, Val::Sort(l) if l.is_nat(1)));
     }
 
@@ -324,7 +324,7 @@ mod tests {
             Rho::Nil,
         ));
         let lst = ind_list(Vec::new());
-        let result = eval_map(id_lam, lst, &EvalCtx::Pure).expect("eval_map");
+        let result = eval_map(id_lam, lst, &EvalCtx::pure()).expect("eval_map");
         match result {
             Val::List(items) => assert!(items.is_empty()),
             other => panic!("expected empty List, got {other:?}"),

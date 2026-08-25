@@ -101,59 +101,75 @@ use crate::ontology::iri::Iri;
 use crate::program::trace::Trace;
 use std::sync::Arc;
 
-/// Evaluation context controlling what effects are available.
+/// Evaluation context: the environment the evaluator reads, plus whatever
+/// effect capability it was given.
 ///
-/// `Pure` is standard NbE — no side effects, no chain access (the type
-/// checker's default). `Effectful` carries an [`EffectHooks`]
-/// implementation ([`crate::institution::eval_hooks::InstitutionEngine`])
-/// that the three effectful expression forms delegate to; the
-/// capability tier (full IO vs. check-time institution deciding) is a
-/// property of the hooks impl, not the enum. Optional `layer` gives the
-/// evaluator read access to the chain for the few places that need it.
-#[derive(Clone)]
-pub enum EvalCtx {
-    /// Standard NbE: normalize terms, check types. No side effects.
-    Pure,
-    /// Effectful evaluation: institution dispatch / IO component
-    /// invocation delegated to `hooks`.
-    Effectful {
-        layer: Option<Arc<Layer>>,
-        hooks: Arc<dyn EffectHooks>,
-    },
+/// **The environment is not part of the capability tier.** This was an enum —
+/// `Pure` with nothing, `Effectful { layer, hooks }` — which filed chain access
+/// under effects and left the type checker's `Pure` evaluator unable to resolve a
+/// name. The two are independent: a pure evaluation needs `Γ_env` exactly as much
+/// as an effectful one, and what `Effectful` adds is IO. So `env` is a field of
+/// every context and `hooks` is the optional part (D76 §8 Phase B audit, the Q1
+/// correction's second surface).
+///
+/// `hooks` is an [`EffectHooks`] implementation
+/// ([`crate::institution::eval_hooks::InstitutionEngine`]) that the three
+/// effectful expression forms delegate to; the capability tier (full IO vs.
+/// check-time institution deciding) is a property of the hooks impl, not of this
+/// type.
+#[derive(Clone, Default)]
+pub struct EvalCtx {
+    env: crate::nbe::env_global::Env,
+    hooks: Option<Arc<dyn EffectHooks>>,
 }
 
 impl EvalCtx {
-    /// A static Pure context for convenience.
+    /// No environment, no effects — for a closed term with no global references.
+    ///
+    /// Prefer [`EvalCtx::in_env`] wherever an environment is in hand: a name this
+    /// context cannot resolve evaluates to a neutral rather than an error, so an
+    /// environment omitted by accident is silent.
     pub fn pure() -> Self {
-        EvalCtx::Pure
+        Self::default()
+    }
+
+    /// Effect-free evaluation in an environment. The type checker's context.
+    pub fn in_env(env: crate::nbe::env_global::Env) -> Self {
+        Self { env, hooks: None }
     }
 
     /// Construct an effectful context from a hooks implementation.
     pub fn effectful(layer: Option<Arc<Layer>>, hooks: Arc<dyn EffectHooks>) -> Self {
-        EvalCtx::Effectful { layer, hooks }
+        Self {
+            env: layer.map_or_else(
+                crate::nbe::env_global::Env::empty,
+                crate::nbe::env_global::Env::of,
+            ),
+            hooks: Some(hooks),
+        }
     }
 
-    /// Layer for this evaluation context, if any.
+    /// The environment this context reads.
+    pub fn env(&self) -> &crate::nbe::env_global::Env {
+        &self.env
+    }
+
+    /// Layer for this evaluation context, if any. For consumers that still want
+    /// the chain itself rather than the environment over it.
     pub fn layer(&self) -> Option<&Arc<Layer>> {
-        match self {
-            EvalCtx::Pure => None,
-            EvalCtx::Effectful { layer, .. } => layer.as_ref(),
-        }
+        self.env.layer()
     }
 
     /// Effect hooks for this context, if effectful.
     pub fn hooks(&self) -> Option<&Arc<dyn EffectHooks>> {
-        match self {
-            EvalCtx::Pure => None,
-            EvalCtx::Effectful { hooks, .. } => Some(hooks),
-        }
+        self.hooks.as_ref()
     }
 }
 
 /// Evaluate an expression in an environment to produce a semantic value.
 /// Pure mode — no IO, no layer access. Used by the type checker.
 pub fn eval(exp: &Exp, rho: &Rho) -> Result<Val, EvalError> {
-    eval_ctx(exp, rho, &EvalCtx::Pure)
+    eval_ctx(exp, rho, &EvalCtx::pure())
 }
 
 /// Evaluate an expression with a capability mode.
@@ -200,13 +216,16 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::LitBool(b) => Ok((Val::LitBool(*b), T::leaf())),
 
         Exp::Dec(d, e) => {
-            match ctx {
-                EvalCtx::Pure => {
-                    // Pure mode: lazy evaluation via UpDec (standard
+            // Branching on the *capability*, not on the environment (D76 Phase B):
+            // effect-free evaluation is lazy via `UpDec`; an effectful one forces
+            // the declaration so dispatch happens in the right context.
+            match ctx.hooks() {
+                None => {
+                    // No effects: lazy evaluation via UpDec (standard
                     // EigenTT). No Let node — the value is not forced here.
                     eval_impl::<T>(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
                 }
-                _ => {
+                Some(_) => {
                     // Effectful: eagerly evaluate the declaration value
                     // so that effect dispatch happens in the correct context.
                     match d {
@@ -325,7 +344,7 @@ pub(crate) fn eval_impl<T: Tracer>(
             // reach institutions only via `Exp::InstitutionInvoke`
             // (comorphisms) and `Exp::NativeDecide` (Decidable
             // QueryClasses).
-            if let (EvalCtx::Effectful { hooks, .. }, Exp::Var(name)) = (ctx, e1.as_ref()) {
+            if let (Some(hooks), Exp::Var(name)) = (ctx.hooks(), e1.as_ref()) {
                 if hooks.is_component(name) {
                     let (arg_val, arg_node) = ev(e2)?;
                     let (val, comp_trace) = hooks.dispatch_component(name, &arg_val)?;
@@ -345,9 +364,9 @@ pub(crate) fn eval_impl<T: Tracer>(
 
         Exp::Var(x) => match rho.get(x) {
             Ok(val) => Ok((val, T::leaf())),
-            Err(e) => match ctx {
-                EvalCtx::Pure => Err(EvalError::UnboundVariable(e)),
-                _ => {
+            Err(e) => match ctx.hooks() {
+                None => Err(EvalError::UnboundVariable(e)),
+                Some(_) => {
                     // Effectful: unbound variables may be component IRIs
                     // that will be intercepted at the App level.
                     Ok((Val::Nt(Neut::Gen(usize::MAX, x.clone())), T::leaf()))

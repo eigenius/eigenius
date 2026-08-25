@@ -171,22 +171,15 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
             // collected and reversed — the fused arm's `args` are already in
             // application order.
             Exp::App(..) => {
-                let mut spine: Vec<&'a Exp> = Vec::new();
-                let mut head = cursor;
-                while let Exp::App(f, x) = head {
-                    spine.push(x.as_ref());
-                    head = f.as_ref();
-                }
-                let Exp::Const(iri, _) = head else {
-                    // Not headed by a name — some other application that
-                    // happens to mention the inductive. Unclassifiable here, and
-                    // `check_arg_positivity` will diagnose it.
-                    return None;
-                };
+                // A de-fused occurrence. `as_const_spine` is the shared walker —
+                // it returns `None` for a head that is not a name (some other
+                // application that happens to mention the inductive;
+                // unclassifiable here, and `check_arg_positivity` diagnoses it)
+                // and recovers the arguments in application order.
+                let (iri, _levels, spine) = cursor.as_const_spine()?;
                 if *iri != decl.iri {
                     return None;
                 }
-                spine.reverse();
                 // An occurrence inside its own index arguments is not something
                 // the eliminator can build a hypothesis for — the same rule the
                 // fused arm applies.

@@ -310,7 +310,7 @@ pub fn apply_witness_resolution(
     })?;
 
     // 5. Evaluate in Pure mode — merge witnesses can't do IO.
-    let ctx = EvalCtx::Pure;
+    let ctx = EvalCtx::pure();
     let term_val =
         eval_ctx(&exp, &Rho::Nil, &ctx).map_err(|e| MergeError::TransformationEvalError {
             transformation: handle.transformation.clone(),
