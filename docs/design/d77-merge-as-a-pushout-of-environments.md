@@ -181,6 +181,9 @@ binding admits strictly more than the old.
 
 ### 3.2 The dependency relation is *two* relations, and only one is enumerable today
 
+*(Two for the purposes of §3. §4.5 adds a third — **support** — which behaves differently enough that
+it is stated after the machinery it depends on.)*
+
 This is what changes when the chain becomes `Γ_env`, and it is the correction that reshaped this
 section.
 
@@ -398,6 +401,63 @@ on a different trigger, and it needs its own decision about what "revoking credi
 already-committed `JustifiedBy` results. It is F5 in §6, gated behind F2c, and it is called out here
 so that the tool is not built and left unwired.
 
+### 4.5 Support is a third relation, and it is the one that cannot be rechecked
+
+§3.2 split the dependency relation in two. There is a third, and it is the one an institution verdict
+lives on. A `reflection:InstitutionEmittedDerivation` — the statistics institution emits one per ANOVA
+effect — is a verdict computed from a gated analysis spec and its data. Rebind the bound dataset or an
+experimental-design parameter and the verdict no longer follows, **while every resource on the path
+stays structurally valid and type-correct**. Nothing is invalid. The verdict is *unsupported*.
+
+| relation | reaches `i` via | closure | recheck |
+|---|---|---|---|
+| **shape** | `is_a`, property value, property key | one hop — validity is local | `validate_resource` |
+| **term** | `ConstRef` in an encoded term | one hop — the term is checked in `Γ` | re-type-check in `Γ_merge` |
+| **support** | `from_subject`, `runtime_invocation`, `runtime:inputs`, `derivation_trace` | **transitive** | **not in-process** |
+
+Two properties distinguish it.
+
+**It is transitive, and the other two are not.** One hop suffices for shape and term because validity
+and type-correctness are *local*: revalidating `R` against the merged chain settles `R`, and `R`'s own
+dependents are unaffected because `R` did not change. Support does not work that way — a rebound
+dataset invalidates a derivation through `invocation → inputs`, and that derivation may itself be an
+input to another. `enumerate_dependents` is a single pass over the new layer's `defined_iris()`
+(`retroactive.rs:91`) with no fixpoint, so it cannot reach past one hop by construction.
+
+**Its recheck is re-execution.** Deciding whether the verdict still holds means running the
+institution again — R or Julia in a pinned container, against data that may be external. A merge
+commit cannot be unbounded in time or depend on a foreign runtime, and the verdict is the
+institution's to issue, not the kernel's to recompute.
+
+#### Which is why D77 does not route through institutions — it routes through provenance
+
+**Staleness is decidable without re-execution, and the index already holds what decides it.**
+`runtime:inputs` is `core:resource_array` ("ordered list of input resource IRIs"), `from_subject`,
+`runtime_invocation` and `runtime:script` / `environment` are `core:resource`, and the invocation pins
+`image_digest`. Every provenance edge is therefore an indexed triple under the existing rule — no §4.2
+extension is needed for this relation, only a transitive closure over a **named edge set** rather than
+over all reference edges (which would reach the whole chain).
+
+So the merge can answer *"was this verdict computed from something the rebinding moved"* by closure
+over the index. What it cannot answer is *"would the verdict come out the same"* — only re-execution
+answers that, and the honest response to an undecidable-in-process question is to **mark, not
+recompute**.
+
+That is `CascadeItem::InvalidatedTrace { trace, reason }`, which D20 §8 reserved for exactly this:
+*"A trace references content that becomes inconsistent."* The variant has been waiting for the
+enumeration that populates it.
+
+**F5 and F6 are the same shape.** Witness credit (§4.4) and institution verdicts are both *earned
+under a binding* and both become unsupported when that binding widens; neither is repaired by
+revalidation or re-type-checking. The kernel's job for both is to stop asserting support it no longer
+has. What "revoking" means downstream — whether a claim survives as unsupported, whether `JustifiedBy`
+starts failing, whether re-execution is scheduled — is one policy question shared by both phases, and
+this document does not answer it. It is each phase's first output.
+
+**What is out of scope here**, and stated so it is not mistaken for an oversight: institution
+*dispatch*, re-execution scheduling, and any notion of a verdict's numerical stability. D77 enumerates
+and marks. Nothing in it runs an institution.
+
 ## 5. Does merge gain a validation pass, or *is* the pushout obligation the pass?
 
 D75 §7 left this open. **The answer is that it gains one, and the pushout obligation is its
@@ -480,6 +540,14 @@ seven audits corrected something the design had asserted.
   it guards proposition *identity*, which §7 keeps environment-blind. F5 revokes credit; it does not
   refork every existing witness key. An F5 that flips both has changed the wrong thing.
 
+- **F6 — institution verdicts under a rebound input** (§4.5), gated behind F1, not F2c — the
+  provenance edges are already indexed, so this needs the rebound set but not the term arm. Transitive
+  closure over `from_subject` / `runtime_invocation` / `runtime:inputs` / `derivation_trace`, bounded
+  to that named edge set; emit `InvalidatedTrace`. Gate: rebinding a dataset two hops below an
+  `InstitutionEmittedDerivation` marks it, and the closure is bounded — a chain where the edge set is
+  absent enumerates nothing, asserted so the closure cannot degrade into a full reference walk. Shares
+  F5's revocation-policy decision. **No institution is dispatched.**
+
 **F2b is the one reseed.** Everything else leaves the chain format and the ontologies alone; F2b is a
 bootstrap edit and should batch with any other pending one. F2a and F2c are ordered around it
 deliberately — the seal first (so the indexer can rely on it), the declarations next (so the indexer
@@ -490,7 +558,9 @@ run in parallel.
 
 ## 7. What this does not cover
 
-- **`InvalidatedTrace`** — the other reserved variant, trace-store driven. Separate surface, untouched.
+- **Institution dispatch and re-execution.** §4.5 / F6 enumerate and mark verdicts whose inputs were
+  rebound. Deciding whether a verdict still *holds* requires running the institution, which a merge
+  commit cannot do. Scheduling that re-execution is a separate surface.
 - **Proposition identity stays environment-blind.** F5 invalidates *credit* under a widening
   rebinding; it does not put the layer into `hash_proposition_exp`. Making the environment part of
   proposition identity is the alternative fix for D75 §3.4 and a much larger change — it forks every
