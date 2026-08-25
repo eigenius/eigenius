@@ -138,50 +138,107 @@ repeating.
 
 ## 3. What `InvalidatedSignature` computes
 
-**The rebound set, then its dependents, then revalidation.** Stated as the pushout obligation:
-
-For a merge `M` of branches `A` and `B` over LCA `L`, a resource `R` contributed by side `S` is at
-risk iff some IRI `i` that `R` depends on satisfies
+**The rebound set, its dependents, then rechecking.** Stated as the pushout obligation: for a merge
+`M` of branches `A` and `B` over LCA `L`, a resource `R` contributed by side `S` is at risk iff some
+IRI `i` that `R` depends on satisfies
 
 ```
 binding_M(i)  ≠  binding_S(i)
 ```
 
-— that is, `i` resolves differently in the merged chain than it did in the chain `R` was checked
-against.
+— `i` resolves differently in the merged chain than in the chain `R` was checked against.
 
-**This is computable from the existing `MergeSpan`.** `sources_a` and `sources_b` already record which
-IRIs each side contributed and from which layer (`merge/conflict.rs`). The rebound set for side `B` is
+### 3.1 The rebound set
+
+Computable from the existing `MergeSpan`. `sources_a` and `sources_b` record which IRIs each side
+contributed and from which layer, so
 
 ```
 rebound_B = { i ∈ sources_a : binding_M(i) ≠ binding_L(i) }
 ```
 
-and symmetrically for `A`. **Note what this is not:** `shared_iris` is `sources_a ∩ sources_b`, and
-`rebound_B` is drawn from `sources_a` alone — the IRIs the *other* side changed. That asymmetry is the
-whole defect. An intersection asks "did both sides touch this?"; the pushout asks "did the other side
-move something under me?"
+and symmetrically. **Note what this is not:** `shared_iris` is `sources_a ∩ sources_b`, and `rebound_B`
+is drawn from `sources_a` **alone** — the IRIs the *other* side changed. An intersection asks "did both
+sides touch this?"; the pushout asks "did the other side move something under me?" That asymmetry is
+the whole defect, and no patch to an intersection expresses it.
 
-**Then the dependents of `rebound`, by the three triggers `enumerate_dependents` already implements**
-— instances of a redefined class, carriers of a redefined property, referents of a redefined IRI —
-scoped to the side that did *not* make the change.
+**Weakening is decidable by D78's `conjunction_entails`** (§2.1): a rebinding matters when the new
+binding admits strictly more than the old.
 
-**Then revalidation**, which is `revalidate_pending` unchanged.
+### 3.2 The dependency relation is *two* relations, and only one is enumerable today
 
-### 3.1 Why not simply revalidate the whole merge layer
+This is what changes when the chain becomes `Γ_env`, and it is the correction that reshaped this
+section.
 
-It is the obvious answer and it is wrong for the same reason Rule 22's scan was gated: a merge layer
-is the union of two branches, which over a lexicon chain is millions of resources. The scan must be
-proportional to *what changed*, not to what exists. `rebound` is typically a handful of IRIs.
+Before D76 a layer was a store of resource **shapes**, and "`R` depends on `i`" meant `R`'s property
+graph points at `i` — an `is_a` target, a property value, a property key. All three of
+`enumerate_dependents`' triggers walk exactly that, and the triple index is built from it
+(`extract_indexable_triples`, `layer/index.rs:294`).
 
-### 3.2 What makes this tractable that was not available before
+After D76 the chain binds **names to declarations**, and a resource carrying a proposition was
+type-checked in that environment. So "`R` depends on `i`" *also* means **`R`'s term mentions `i`** — a
+`ConstRef` inside an encoded proposition, an inductive named in a `ctor_type`, an axiom cited in a
+justification.
 
-`rebound` requires comparing a binding in two environments. With D76, both are `Env`s and the
-comparison is `Env::lookup` on each — `Global::Constraint(v)` against `Global::Constraint(v')` — with
-`conjunction_entails` deciding whether the difference weakens. Before D76 there was no `Env` to
-compare.
+| dependency | how `R` reaches `i` | enumerable today |
+|---|---|---|
+| **shape** | `is_a`, property value, property key | yes — the three triggers |
+| **term** | a `ConstRef` inside an encoded proposition | **no** |
 
----
+**Term dependencies are invisible to every mechanism the linear scan uses.** They live inside
+`Value::Json`, and `extract_indexable_triples` emits triples only for `Value::ResourceRef` under
+`resource` / `resource_array` predicates (`index.rs:306-340`) — an encoded term contributes **no
+triples at all**. Trigger 3 ("referenced as an IRI value") therefore cannot see them.
+
+**The tree already knows this distinction, and has been bitten by it.** D76 Phase A needed its own
+reference walker for `declaration_order`, documented at `layer/declaration_order.rs:113`:
+
+> *"Descends into `Value::Json`, which the walker in `layer::supporting` does not. That one documents
+> JSON as never carrying typed-reference semantics, which is true for its purpose and false here: an
+> inductive's constructor argument types are stored as D47-encoded JSON, so a walker that skips `Json`
+> finds **no inductive-to-inductive edges at all**. Reusing it would produce an empty graph for
+> precisely the case `OrderError::MutualInductives` exists to catch, **and would look like it
+> worked**."*
+
+The same sentence applies here with "merge hazard" substituted for "mutual inductives". **That walker
+is the one to reuse** — `declaration_order::references` already does exactly the descent this needs.
+
+### 3.3 Rechecking means two different things
+
+Symmetrically:
+
+- **shape dependents** — `Validator::validate_resource`, which is `revalidate_pending` unchanged;
+- **term dependents** — **re-type-check the term in `Γ_merge`**, which is `check` against the merged
+  environment, not a validation rule.
+
+The second is only expressible because D76 put the environment in the judgment, and it is why D20
+called the kind `InvalidatedSignature` **(type-checker driven)** rather than validator-driven. It is
+not a scoping variant of the rule-driven scan — **it is a different pass over a different dependency
+relation**, and an earlier draft of this section had it as the former.
+
+### 3.4 Why not simply revalidate the whole merge layer
+
+The obvious answer, and wrong for the reason Rule 22's scan was gated: a merge layer is the union of
+two branches, which over a lexicon chain is millions of resources. The scan must be proportional to
+*what changed*. `rebound` is typically a handful of IRIs.
+
+### 3.5 Cost, corrected
+
+An earlier draft called trigger 2 — the `O(chain)` carrier scan — the cost driver. Two corrections:
+
+- **it is narrower than it looks.** Gated on `is_property && redefines`, so it fires only when the
+  rebound IRI is a redefined `core:Property` *declaration*. #225's rebound IRI is a **class**, which
+  takes the indexed trigger 1.
+- **and `predicate`-alone is a prefix range, not a missing capability.** `MemoryTripleIndex` keys
+  `pos: BTreeSet<Vec<u8>>` on `pos_key(p, o, s, layer)` (`index.rs:360-374`), so ranging on the `p`
+  prefix would answer "which subjects carry `P`" in `O(carriers)`. The trait exposes only
+  `scan_predicate_object(p, o)`; the *method* is absent, not the capability. `retroactive.rs:309`
+  presents this as an index limitation alongside the genuine one, and only the genuine one stands:
+  a **literal-valued** property has no triples to range over, because `is_indexable_predicate` indexes
+  only `resource` / `resource_array`.
+
+Neither changes this document's scope. Adding `scan_predicate` improves the linear commit path
+identically and belongs there, not here.
 
 ## 4. Does merge gain a validation pass, or *is* the pushout obligation the pass?
 
@@ -231,11 +288,16 @@ seven audits corrected something the design had asserted.
   `conjunction_entails` deciding weakening. Pure function, unit-testable against the #225 fixture.
   Gate: `a_reference_meeting_a_redefinition_raises_no_conflict` **flips** — renamed, since after this
   it raises one.
-- **F2 — enumeration.** Dependents of `rebound`, reusing `enumerate_dependents`' three triggers
-  scoped to the opposite side. Gate: the scan is proportional to `|rebound|`, asserted by a test with
-  a large chain and a one-IRI rebound — the shape the 7.6M OOM took.
-- **F3 — the pass.** Wire per §4's decision. Gate: the #225 scenario is **refused**, and a merge whose
-  bindings did not weaken still succeeds.
+- **F2 — enumeration, both relations.** Shape dependents reuse `enumerate_dependents`' three triggers
+  scoped to the opposite side. **Term dependents need the second walker** (§3.2): an index from
+  declaration IRI → resources whose encoded terms mention it, built with
+  `declaration_order::references`, which already descends into `Value::Json`. Gate: a resource whose
+  *only* link to the rebound IRI is inside an encoded proposition is enumerated — the case the
+  existing triggers provably miss, and the case #225 is made of. Plus: the scan is proportional to
+  `|rebound|`, asserted against a large chain with a one-IRI rebound.
+- **F3 — the pass, both recheckers.** Shape dependents through `revalidate_pending`; term dependents
+  through `check` in `Γ_merge` (§3.3). Wire per §4's decision. Gate: the #225 scenario is **refused**,
+  and a merge whose bindings did not weaken still succeeds.
 - **F4 — `InvalidatedSignature` fires.** The cascade variant carries the finding, so the resolution UI
   can surface it. Gate: the variant is constructed somewhere other than a test.
 
