@@ -123,7 +123,7 @@ Worth writing down because nothing in the code states it: the correctness of fir
 rests on the materialisation above, and a future change that made the merge layer hold *references*
 rather than bodies would break it silently.
 
-### 2.5 The linear analogue is complete and is the template
+### 2.5 The linear analogue is the template — and is complete only for shape dependents
 
 `retroactive_validate` (`validation/retroactive.rs:91`) discharges the same obligation for a **linear**
 commit:
@@ -139,6 +139,10 @@ pub fn retroactive_validate(new_layer: &Arc<Layer>, ws: &mut CommitWorkingSet)
 
 Two halves — *enumerate what the change could have broken*, then *revalidate it* — and D77 needs the
 same two halves with a different enumeration. The second half is reusable as-is.
+
+**It is complete for *shape* dependents only.** The linear path has the same term-dependency hole
+§3.2 identifies for merge, and D75 §3.4 witnessed it: witness credit earned against one binding of a
+class survives that class being widened. §4.4 states the relationship.
 
 **Its scoping lesson is the one to inherit.** That scan produced an OOM on a 7.6M chain and was fixed
 by gating to *redefinitions* (`redefines_ancestor`). D75 §7 names this as the trap D77 most risks
@@ -347,15 +351,52 @@ removes two of three. `wn:n00001740` survives — and must, because the alignmen
 WordNet sense classes, which is exactly the live merge hazard. Per-entry mentions fall from ~5 to
 ~1-2, and every retained edge is one a merge can actually break.
 
-**The seal has standing independent of merge.** `layer/witness_index.rs:1133` currently *asserts the
-unsound behaviour* as a standing test: `Π(x : Dog). Prop` hashes identically after `Dog` is rebound,
-so witness credit survives redefinition of a class the proposition quantifies over — the assertion
-message says *"this is the current behaviour, not the desired one."* That is a linear-chain
-unsoundness, not a merge one. Sealing removes it for the constructor vocabulary.
+**What the seal does not do.** An earlier draft cited `layer/witness_index.rs:1133` — where witness
+credit survives redefinition of a class a proposition quantifies over — as evidence that the seal has
+standing beyond merge, and said sealing "removes it for the constructor vocabulary." That reads as if
+the seal addresses the cited case. It does not: the rebound name in that test is `Dog`, a **class**,
+and classes stay redefinable by design (§7). The seal covers only the sub-case where the rebound name
+is a constructor, which is not what that test exhibits.
+
+The witness index is a real defect and a closely related one, but it is related as a *sibling*, not
+as something the seal fixes. §4.4 states the relationship.
 
 **It is not a substitute for the pass.** #225's rebound IRI is a domain class, and domain classes are
 unsealed by construction — that is where modeling happens. The seal shrinks the index and removes the
 largest posting lists; it does not remove the need for §3's rebound-set pass.
+
+### 4.4 The witness index is the linear-chain instance of this document's defect
+
+D75 §3.4 and §3.5 are siblings, and only §3.5 was given a follow-on:
+
+| | §3.4 — witness credit | §3.5 — merge (#225) |
+|---|---|---|
+| trigger | a **descendant layer** rebinds a name | a **merge** rebinds a name |
+| what was checked against the old binding | witness credit for `Π(x : Dog). P` | a resource neither branch changed |
+| direction that makes it unsound | `Dog` **widens** | the binding **weakens** |
+| what rechecks it | nothing | nothing |
+| follow-on | **none assigned** | this document |
+
+The direction criterion is the same predicate. D75 §3.4: *"Narrowing the class shrinks the domain and
+leaves stale credit sound by accident; only widening exhibits the unsoundness."* That is
+`conjunction_entails` (§2.1), reached from the other side.
+
+**This falsifies §2.5's heading.** "The linear analogue is complete" is true of `retroactive_validate`
+for **shape** dependents and false for **term** dependents — witness credit is a term-level fact about
+what a proposition mentions, and no linear pass rechecks it. So the two-relations split of §3.2 is not
+merge-specific: the linear path has the same hole, and the witness index is where it shows.
+
+That strengthens the case for §4.2 rather than complicating it. Once `core:mentions` exists, *"which
+witnessed propositions mention `Dog`"* is the same range query as *"which resources mention `i`"*, and
+the fix has the same two halves — enumerate, then invalidate credit — discharged at commit through
+`retroactive_validate` rather than at `lookup_chain_witness`, which is a hot path and the wrong place
+to put a recheck.
+
+**Scope.** §4.1-4.3 are prerequisites for §3 and are in this document because §3 cannot be built
+without them. Wiring the witness invalidation is not: it is a second consumer of machinery §4 builds,
+on a different trigger, and it needs its own decision about what "revoking credit" means for
+already-committed `JustifiedBy` results. It is F5 in §6, gated behind F2c, and it is called out here
+so that the tool is not built and left unwired.
 
 ## 5. Does merge gain a validation pass, or *is* the pushout obligation the pass?
 
@@ -429,6 +470,16 @@ seven audits corrected something the design had asserted.
 - **F4 — `InvalidatedSignature` fires.** The cascade variant carries the finding, so the resolution UI
   can surface it. Gate: the variant is constructed somewhere other than a test.
 
+- **F5 — witness credit under a widening redefinition** (§4.4), gated behind F2c. Enumerate witnessed
+  propositions mentioning a rebound IRI via `core:mentions`; invalidate credit at commit rather than
+  rechecking at `lookup_chain_witness`, which is a hot path. Needs its own decision on what revocation
+  means for already-committed `JustifiedBy` results — that decision is the phase's first output.
+  Gate: `witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over`
+  (`witness_index.rs:1184`) **flips** and is renamed, closing D75 §3.4.
+  **`redefining_a_class_does_not_change_the_hash_of_a_proposition_over_it` (`:1133`) must NOT flip** —
+  it guards proposition *identity*, which §7 keeps environment-blind. F5 revokes credit; it does not
+  refork every existing witness key. An F5 that flips both has changed the wrong thing.
+
 **F2b is the one reseed.** Everything else leaves the chain format and the ontologies alone; F2b is a
 bootstrap edit and should batch with any other pending one. F2a and F2c are ordered around it
 deliberately — the seal first (so the indexer can rely on it), the declarations next (so the indexer
@@ -440,6 +491,10 @@ run in parallel.
 ## 7. What this does not cover
 
 - **`InvalidatedTrace`** — the other reserved variant, trace-store driven. Separate surface, untouched.
+- **Proposition identity stays environment-blind.** F5 invalidates *credit* under a widening
+  rebinding; it does not put the layer into `hash_proposition_exp`. Making the environment part of
+  proposition identity is the alternative fix for D75 §3.4 and a much larger change — it forks every
+  existing witness key. `witness_index.rs:1136` already names the assertion that would have to move.
 - **The asymmetric tombstone case.** `DeletionConflict` is documented as never raised: tombstones are
   honoured on lookup but written only by D20 §6.2/§6.3 merge resolutions (`layer/handle.rs:156`), so
   the case needs a branch that is itself a merge. D75 §3.5 records it as uncovered by any conflict
