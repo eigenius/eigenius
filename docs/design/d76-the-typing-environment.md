@@ -89,8 +89,10 @@ between `sort(0)` and `sort(2)` becomes *`u` pinned to 0* vs *`u` free*.
 ### 2.3 #188's residual — declaration-level `uparams` and level arguments
 
 Affordable only after consolidation to one `Const`, which is what removes the self-reference stub and
-`PartialEq`-by-IRI. Without that, levels land on five variants and `List.{0}` compares equal to
-`List.{1}`.
+gives a reference a slot for its level arguments. Without that, levels land on five variants — and on
+none of them is there anywhere to put a level except inside the declaration, where identity-by-IRI
+cannot see it, so `List.{0}` compares equal to `List.{1}` (Phase B's fourth audit note; pinned by
+`nbe::positivity::level_slot`).
 
 ### 2.4 D77 — `InvalidatedSignature`
 
@@ -507,10 +509,11 @@ being carried in the term. What that touches:
 - **Readback**, which must produce a `Const` rather than reconstructing a decl.
 - **The D47 codec**, both arms — and therefore **every persisted term containing an inductive
   reference**. A reseed is required; unlike D78's, it is not optional.
-- **`PartialEq` on `InductiveDecl`**, which is by IRI today (`term.rs:365`) because a constructor's
-  type carries a *stub* decl that must compare equal to the full one. With `Const` there is no stub,
-  so equality can be structural — and that is what makes universe levels able to distinguish
-  `List.{0}` from `List.{1}` (D75 §3.2).
+- **`PartialEq` on `InductiveDecl`** — **corrected `2026-08-24`, see Phase B's fourth audit note.**
+  It is by IRI today (`term.rs:365`), and it stays by IRI: nanoda compares declarations by name and
+  levels by reference (`tc.rs:886`). What distinguishes `List.{0}` from `List.{1}` (D75 §3.2) is that
+  `Const(iri, levels)` *has a slot for the level* and the fused node does not — not a change of
+  equality.
 
 **A pass that does not exist yet.** §6.2a: the declaration order prefix-visibility needs must be
 *derived*, because `LayerBuilder` stores resources in a `BTreeMap<Iri, …>` and the input order is
@@ -597,7 +600,7 @@ encoded term. A possible latent defect in a different subsystem.
 
 ---
 
-### Phase B — de-inline: `Const` + `App`, stub removed, `PartialEq` structural
+### Phase B — de-inline: `Const` + `App`, stub removed, the level slot created
 *(absorbs what was Phase E1)*
 
 **⚠ Reordered `2026-08-24`, before implementation.** Phase B was placed before Phase C on the
@@ -614,8 +617,9 @@ outside it.
 The rest of this phase's content stands; only its position moved.
 
 
-**Lands:** a constructor's type refers to its inductive without the empty-`ctors` stub decl, so
-`PartialEq for InductiveDecl` (`term.rs:365`) stops being by-IRI and becomes structural.
+**Lands:** a constructor's type refers to its inductive without the empty-`ctors` stub decl, and a
+reference gains the slot a level argument goes in. **Superseded in part** — the fourth audit
+correction below shows `PartialEq for InductiveDecl` (`term.rs:365`) should *stay* by-IRI.
 
 **⚠ Audit `2026-08-24`: the stub is also a behaviour flag, and the flag is conflated.** Two dispatch
 sites test for a stub by its *shape* rather than by anything that says "stub":
@@ -636,7 +640,7 @@ So Phase B is wider than "remove the stub":
 2. give the two dispatch sites a discriminator that is not `indices.is_empty()`;
 3. **decide whether non-indexed inductives get arity checking** — a behaviour change the stub has
    been hiding, and not mechanical;
-4. only then can `PartialEq` become structural.
+4. only then do stubs disappear — as a consequence, not a step (fourth audit note).
 
 **Sized: all 10 shipped inductives have no indices**, so the lenient path is taken by *every*
 inductive application in the chain, not by an edge case. Turning arity checking on would newly check
@@ -645,7 +649,7 @@ all of them.
 **So Phase B splits, one risk class each** — the same principle that draws the phase boundaries:
 
 - **B1 — representation.** Self-reference without a stub, a discriminator that is not
-  `indices.is_empty()`, `PartialEq` structural. **No verdict change**; gate is kernel tests.
+  `indices.is_empty()`, stubs gone. **No verdict change**; gate is kernel tests.
 
   **⚠ B1 audit, continued.** The stub's shape is **inconsistent between its builder and its
   consumers**, and that has to be reconciled before it can be removed:
@@ -693,16 +697,16 @@ all of them.
   application it heads**, because `Exp::InductiveType(stub, args)` has no `Const`-shaped equivalent
   that keeps the args fused.
 
-  And B1's payoff needs *all* stubs gone: `PartialEq` can only become structural when no hollow decl
-  has to compare equal to a full one. Three of the four are parametric, so B1 cannot stop at the
-  non-parametric case.
+  And B1's payoff needs *all* stubs gone: a hollow decl standing in for a full one is what hides the
+  `ctors` iota needs and misleads the two `indices.is_empty()` dispatch sites. Three of the four are
+  parametric, so B1 cannot stop at the non-parametric case.
 
   The alternative — `InductiveType` surviving for resolved references while self-references become
   `Const` + `App` — is worse than either: two forms for one thing, and every consumer handling both.
   That is the stub's own failure mode repeated.
 
-  **So: B1 and E1 are one phase.** Its payoff is still `PartialEq` structural and #188 unblocked; its
-  size is E1's.
+  **So: B1 and E1 are one phase.** Its payoff is still #188 unblocked — via the level slot, per the
+  fourth audit note — and its size is E1's.
 
   **And `ind_consts` is a `Vec`.** nanoda's positivity scans
   `has_ind_occ(ctor_type, st.ind_consts.as_ref())` — *all* the block's constants, which is exactly
@@ -762,28 +766,69 @@ shipping the sweep without it trades a correctness fix for a decode in the evalu
 It lands here, shaped after `CLASS_FIELDS_MEMO` (D78 Phase D) — thread-local, RAII scope, keyed by
 `LayerId`, `BTreeMap` at both levels.
 
+**⚠ And a fourth correction, `2026-08-24`: B-c is the wrong change.** This phase has said throughout
+that its payoff is `PartialEq for InductiveDecl` becoming structural, and that structural equality is
+what unblocks #188's residual. Both halves are wrong.
+
+**nanoda compares declarations by name.** `def_eq_const`
+(`references/nanoda_lib/src/tc.rs:886`):
+
+```rust
+(Const { name: x_name, levels: x_levels, .. }, Const { name: y_name, levels: y_levels, .. }) =>
+    x_name == y_name && self.ctx.eq_antisymm_many(x_levels, y_levels),
+```
+
+Name equality plus **level** equality. Declarations are never compared structurally — they are stored
+in `Env` with their `uparams` uninstantiated, and instantiation happens at the *reference*. Adopting
+structural comparison would make two lookups of one declaration compare unequal if any decode detail
+differed between them.
+
+**So what actually blocks #188 is the missing slot, not the equality.** `Exp::InductiveType(decl,
+args)` has two slots — a declaration and value arguments — and a level argument is neither. The only
+place `List.{0}` and `List.{1}` can differ is *inside* the declaration, and declaration identity is
+the IRI, which does not see it. Pinned by `nbe::positivity::level_slot`:
+
+| test | shows |
+|---|---|
+| `the_fused_form_has_nowhere_to_put_a_level_but_inside_the_declaration` | two decls differing only in `sort` compare **equal** |
+| `the_de_fused_form_carries_the_level_on_the_reference_and_equality_sees_it` | `Const(iri, [0])` ≠ `Const(iri, [1])` |
+| `identity_by_iri_is_the_reference_behaviour_not_a_workaround` | two lookups of one decl compare equal, as they must |
+
+De-inlining *creates the slot*. That is why Phase B precedes E2, and the reason is structural rather
+than about equality.
+
+**By-IRI `PartialEq` therefore stays, and stops being a workaround.** Its docstring justifies itself
+by the stub — *"a 'stub' `Arc<InductiveDecl>` carrying just the IRI can stand in for the full
+declaration"* — which is backwards: identity-by-name is the correct discipline, and the stub is what
+exploited it. Once no `Exp` carries a declaration, every decl in hand comes from `Env::lookup` and is
+the full one, so by-IRI equality compares only complete declarations. The stub disappears as a
+*consequence* of de-inlining rather than as a step in it.
+
 **So Phase B sequences into three steps**, each compiling and tested:
 
 | step | change | risk class |
 |---|---|---|
 | B-a | `EvalCtx` carries `Env`; `Global` memo | no de-inlining yet — verdict parity expected |
 | B-b | delete `Exp::InductiveType`, sweep 168 sites | the sweep; compiler-enumerated |
-| B-c | `PartialEq for InductiveDecl` structural | the payoff |
+| B-c | stubs gone as a consequence; by-IRI `PartialEq` re-justified | the payoff |
 
 **B-b deletes the variant rather than deprecating it.** Leaving it in place while migrating callers
 would make every un-migrated match arm a *silent* non-match — the failure mode that a spine walker
 looks like a plain `App`. Deleting it turns all 168 into compile errors, so the sweep is enumerated
 by the compiler instead of by grep.
 
-B1 is the part #188 is blocked on — it is `PartialEq` that makes levels unsound. B2 can follow at its
-own pace.
+B1 is the part #188 is blocked on — **corrected below**: it is the missing level slot on the
+reference, not `PartialEq`. B2 can follow at its own pace.
 
-**Why second, and why not later.** §7: the stub forces by-IRI equality, which makes `List.{0}` compare
-equal to `List.{1}`, which is what blocks #188's residual. Everything downstream in the migration is
+**Why second, and why not later.** §7 put it as: the stub forces by-IRI equality, which makes
+`List.{0}` compare equal to `List.{1}`. The fourth correction below sharpens this — by-IRI equality is
+right, and what makes the two compare equal is that the fused node has no slot for a level, so the
+only place to put one is inside the declaration where equality cannot see it. Everything downstream in the migration is
 mechanical once it is gone; nothing downstream is safe while it remains.
 
-**Gate:** structural equality holds; the three stub sites (`term.rs:447`, `check/mod.rs:339`,
-`eval/mod.rs:604`) are gone; existing inductive tests unchanged.
+**Gate:** no `Exp` carries an `Arc<InductiveDecl>`, so every declaration in hand comes from
+`Env::lookup`; the three stub sites (`term.rs:447`, `check/mod.rs:339`, `eval/mod.rs:604`) are gone;
+`nbe::positivity::level_slot` holds; existing inductive tests unchanged.
 
 ---
 
@@ -956,14 +1001,14 @@ its exact meaning and call site, the two-way choice becoming *`u` pinned to 0* v
 A ──▶ C ──▶ B ─────────▶ D ──────────▶ E2 ─────────▶ F
 done  done  de-inline    δ in conv     levels/wire   4c
             Const+App    │             │
-            PartialEq    unblocks      reseed
-            structural   D78 §3.1      (#188 residual)
+            level slot   unblocks      reseed
+            on the ref   D78 §3.1      (#188 residual)
 ```
 
-**B absorbs E1.** Replacing a stub entails de-fusing the application it heads (see Phase B), and
-`PartialEq` cannot go structural while any stub survives — so the two are one change. What remains as
-**E2** is levels on the wire, which is the only part that moves the chain format, and is #188's
-residual under another name.
+**B absorbs E1.** Replacing a stub entails de-fusing the application it heads (see Phase B), and the
+level slot only exists on a de-fused reference — so the two are one change. What remains as **E2** is
+levels on the wire, which is the only part that moves the chain format, and is #188's residual under
+another name.
 
 **D follows B**, not the reverse: §5's fast path is `conv(Const(a, ls), Const(b, ms))`, which
 presumes `Const`s exist to compare.

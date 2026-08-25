@@ -1261,3 +1261,83 @@ data t:B { mkB(t:A) }
         );
     }
 }
+
+/// D76 Phase B — where a level argument can live, and what equality then sees.
+///
+/// The phase was specified as "`PartialEq for InductiveDecl` becomes structural,
+/// and that is what unblocks #188". Both halves are wrong, and these tests are
+/// the check.
+#[cfg(test)]
+mod level_slot {
+    use crate::nbe::level::Level;
+    use crate::nbe::term::{Exp, InductiveDecl, Patt};
+    use crate::ontology::iri::Iri;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    fn decl_at(sort: Level) -> InductiveDecl {
+        InductiveDecl {
+            iri: iri("urn:test:List"),
+            name: "List".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
+            indices: Vec::new(),
+            sort: Exp::Sort(sort),
+            ctors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_fused_form_has_nowhere_to_put_a_level_but_inside_the_declaration() {
+        // `Exp::InductiveType(decl, args)` has two slots: a declaration and
+        // value arguments. A *level* argument is neither, so instantiating
+        // `List.{0}` and `List.{1}` can only differ inside the declaration —
+        // and declaration identity is the IRI, which does not see it.
+        let at_zero = decl_at(Level::of_nat(0));
+        let at_one = decl_at(Level::of_nat(1));
+        assert_ne!(at_zero.sort, at_one.sort, "the declarations do differ");
+        assert_eq!(
+            at_zero, at_one,
+            "yet they compare equal — identity is the IRI, so a level folded \
+             into the declaration is invisible to equality"
+        );
+    }
+
+    #[test]
+    fn the_de_fused_form_carries_the_level_on_the_reference_and_equality_sees_it() {
+        // `Const(iri, levels)` has the slot the fused form lacks. This is
+        // nanoda's shape — `def_eq_const` is `name == name && levels equal`
+        // (`references/nanoda_lib/src/tc.rs:886`) — and it is what actually
+        // unblocks #188's residual.
+        let at_zero = Exp::const_applied(
+            iri("urn:test:List"),
+            vec![Level::of_nat(0)],
+            vec![Exp::Var("A".to_string())],
+        );
+        let at_one = Exp::const_applied(
+            iri("urn:test:List"),
+            vec![Level::of_nat(1)],
+            vec![Exp::Var("A".to_string())],
+        );
+        assert_ne!(
+            at_zero, at_one,
+            "two instantiations of one declaration must not be interconvertible"
+        );
+
+        let (head, levels, args) = at_zero.as_const_spine().expect("a const spine");
+        assert_eq!(head, &iri("urn:test:List"), "one declaration, named once");
+        assert_eq!(levels, &[Level::of_nat(0)]);
+        assert_eq!(args.len(), 1);
+    }
+
+    #[test]
+    fn identity_by_iri_is_the_reference_behaviour_not_a_workaround() {
+        // The corollary: with levels on the reference, comparing declarations by
+        // name is what nanoda does, and structural comparison would be *wrong* —
+        // two lookups of one declaration must be equal however they decoded.
+        let once = decl_at(Level::of_nat(1));
+        let twice = decl_at(Level::of_nat(1));
+        assert_eq!(once, twice);
+    }
+}
