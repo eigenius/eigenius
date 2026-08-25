@@ -636,6 +636,26 @@ all of them.
 
 - **B1 — representation.** Self-reference without a stub, a discriminator that is not
   `indices.is_empty()`, `PartialEq` structural. **No verdict change**; gate is kernel tests.
+
+  **⚠ B1 audit, continued.** The stub's shape is **inconsistent between its builder and its
+  consumers**, and that has to be reconciled before it can be removed:
+
+  | site | says a stub is |
+  |---|---|
+  | `ground.rs:424-431` (builder) | empty `params`, empty `ctors`, **real `indices`** — deliberate, #72 / D48, *"so ctor-internal self-references like `Vec(A, n)` decode against the same shape the check pass expects"* |
+  | `check/mod.rs:373` (tolerance) | *"`params` and `indices` both empty"* — carries no telescope |
+  | `eval/mod.rs:637` (dispatch) | `indices.is_empty()`, labelled stub-detection |
+
+  Three descriptions, no two the same. And `check_inductive_type_args` zips
+  `params.chain(indices)` against `args`, so for an indexed inductive a builder-shaped stub
+  (`params` empty, `indices` real) would pair the **index's type against the first argument**, which
+  is a parameter. Whether that misalignment is reachable is **untested** — the tolerance at `:373`
+  describes a stub the builder does not produce.
+
+  So B1 is not "swap a representation": it is reconciling three disagreeing notions of what a stub
+  is, one of which may be misaligning a check. That is worth doing — the disagreement is exactly the
+  kind of thing the stub's existence hides — but it is larger than the phase's one-line description,
+  and the misalignment should be tested before anything is removed.
 - **B2 — arity checking.** Turn on the check the stub was suppressing. **Verdict-affecting over the
   whole chain**, so it follows the #194/#92 protocol: instrument to log without rejecting, run the
   suites and the shipped ontologies, count, then enforce. A non-zero count is a finding about the
