@@ -1,8 +1,17 @@
 # D76 — The typing environment
 
-**Status: skeleton.** The design is not written. This file exists so the decisions already made, and
-the obligations other work has parked here, have a home rather than living in another document's
-appendix.
+**Status: implemented `2026-08-25`.** All phases complete — `A ▸ C ▸ B ▸ D ▸ E2 ▸ F`, plus B2.
+Validated by two `--umls-all` reseeds at 9,439,633 resources / 0 errors, the WRN demo, and the parse
+gate under `--replay`.
+
+The header said *"skeleton — the design is not written"* until the phases had all landed, which is the
+kind of staleness this document spent seven audits catching in other people's comments. Corrected on
+noticing.
+
+**One item remains open**, tracked in §4.3: whether the `(LayerId, Iri) → Global` memo earns its place.
+§4.2 asks whether it stays bounded over a 9.4M chain; the reporting path exists now
+(`validate.global_memo`, and `GlobalMemoScope::entry_count`) and the measurement is the last thing
+outstanding.
 
 Implements **Seam A** of `docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md`.
 
@@ -1133,6 +1142,11 @@ the wire, and that is #188's residual — not part of de-inlining. So E splits:
 **Gate:** `every_shipped_ontology_document_round_trips`; a full `--umls-all` reseed at
 **9,439,633 resources, 0 errors**; the WRN demo at **56 Holds / 0 Fails**; the parse gate compared by
 `--replay`, never live (see `docs/notes/parse-gate-drift-2026-08-24.md`).
+
+**Status: complete `2026-08-25`** (#188 slice 5 + 6). Reseed at 9,439,633 / 0 errors with every
+per-layer count matching; demo both checkpoints; parse gate COVERAGE PASS, 62/62 hits, 0 malformed
+replies, 0 replay misses. `Box.{0}` and `Box.{1}` are different types
+(`nbe::positivity::universe_polymorphism`). See `docs/notes/reseed-timings-2026-08-25-e2.md`.
 
 ### 8a. `EigonClass` or `Const` — the Phase E decision
 
