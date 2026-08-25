@@ -60,9 +60,15 @@ use std::sync::Arc;
 pub struct CheckCtx {
     pub rho: Rho,
     pub gamma: Gamma,
-    /// Optional layer for ontology resolution. `None` is the "pure"
-    /// case used by tests that don't touch EigonClass resolution.
-    pub layer: Option<Arc<Layer>>,
+    /// D76 Phase C — `Γ_env`, the global environment of the judgment.
+    ///
+    /// Was `layer: Option<Arc<Layer>>`. The `Option` is gone from the
+    /// judgment's view: a caller with nothing to resolve holds
+    /// [`Env::empty()`](crate::nbe::env_global::Env::empty), and looks up to get
+    /// `Absent` rather than branching on whether it has a layer. Every
+    /// layer-less construction in the tree is a test — production always
+    /// supplied one — so this removes a mode only tests took.
+    pub env: crate::nbe::env_global::Env,
     /// Per-check memoization of resolved class types, keyed by class IRI string.
     type_cache: BTreeMap<String, Val>,
     /// institution index — derived view of the layer chain. When
@@ -87,7 +93,7 @@ impl CheckCtx {
         Self {
             rho,
             gamma,
-            layer: None,
+            env: crate::nbe::env_global::Env::empty(),
             type_cache: BTreeMap::new(),
             institution_index: None,
             institution_runtime: None,
@@ -100,7 +106,7 @@ impl CheckCtx {
         Self {
             rho,
             gamma,
-            layer: Some(layer),
+            env: crate::nbe::env_global::Env::of(layer),
             type_cache: BTreeMap::new(),
             institution_index: None,
             institution_runtime: None,
@@ -133,11 +139,11 @@ impl CheckCtx {
     pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
         if self.institution_index.is_some() && self.institution_runtime.is_some() {
             let engine = crate::institution::eval_hooks::InstitutionEngine::for_check(
-                self.layer.clone(),
+                self.env.layer().cloned(),
                 self.institution_index.clone(),
                 self.institution_runtime.clone(),
             );
-            crate::nbe::eval::EvalCtx::effectful(self.layer.clone(), Arc::new(engine))
+            crate::nbe::eval::EvalCtx::effectful(self.env.layer().cloned(), Arc::new(engine))
         } else {
             crate::nbe::eval::EvalCtx::Pure
         }
@@ -163,7 +169,7 @@ impl CheckCtx {
         Ok(CheckCtx {
             rho: rho1,
             gamma: gamma1,
-            layer: self.layer.clone(),
+            env: self.env.clone(),
             type_cache: self.type_cache.clone(),
             institution_index: self.institution_index.clone(),
             institution_runtime: self.institution_runtime.clone(),
@@ -172,18 +178,46 @@ impl CheckCtx {
     }
 
     /// Resolve an EigonClass IRI to a EigenTT Sigma type, with caching.
+    /// D76 Phase C — resolve a class through the environment.
+    ///
+    /// Goes through [`Env::lookup`](crate::nbe::env_global::Env::lookup) rather
+    /// than `CheckHooks::resolve_class`, so `check` and `conv` consult one
+    /// definition of what a global is instead of two.
+    ///
+    /// **Only `Global::Constraint` answers here.** A class resolves to its
+    /// record and never unfolds in conversion (D75 §8 Q2); an inductive, an
+    /// axiom or a definition reaching this path is a caller error, not a class
+    /// whose resolution failed, and says so. The old code could not tell those
+    /// apart — `resolve_class` returned a bare `Val`.
+    ///
+    /// The "no layer access in pure check mode" error is gone: an empty
+    /// environment yields `Absent`, which reads as "not resolvable here" like
+    /// any other miss. Nothing asserted on that message, and its one swallowing
+    /// caller (`find_sigma_field`, via `.ok()?`) allocated it only to discard it.
     fn resolve_class_cached(&mut self, iri: &Iri) -> Result<Val, CheckError> {
-        let layer = self.layer.as_ref().ok_or_else(|| {
-            format!(
-                "cannot resolve class '{}' — no layer access in pure check mode",
-                iri
-            )
-        })?;
         let key = iri.as_str().to_string();
         if let Some(cached) = self.type_cache.get(&key) {
             return Ok(cached.clone());
         }
-        let v = self.hooks.resolve_class(iri, layer)?;
+        let v = match self.env.lookup(iri) {
+            crate::nbe::env_global::Global::Constraint(v) => v,
+            crate::nbe::env_global::Global::Absent => {
+                return Err(CheckError::from(format!(
+                    "cannot resolve class '{iri}' in this environment"
+                )))
+            }
+            other => {
+                return Err(CheckError::from(format!(
+                    "'{iri}' is not a class — the environment classifies it as {}",
+                    match other {
+                        crate::nbe::env_global::Global::Definition(_) => "a definition",
+                        crate::nbe::env_global::Global::Axiom => "an axiom",
+                        crate::nbe::env_global::Global::Inductive(_) => "an inductive",
+                        _ => unreachable!("Constraint and Absent handled above"),
+                    }
+                )))
+            }
+        };
         self.type_cache.insert(key, v.clone());
         Ok(v)
     }
@@ -491,7 +525,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             let mut inner = CheckCtx {
                 rho: Rho::UpDec(Box::new(ctx.rho.clone()), d.clone()),
                 gamma: gamma1,
-                layer: ctx.layer.clone(),
+                env: ctx.env.clone(),
                 type_cache: ctx.type_cache.clone(),
                 institution_index: ctx.institution_index.clone(),
                 institution_runtime: ctx.institution_runtime.clone(),
@@ -632,7 +666,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             let inhabits = r
                 .is_a()
                 .iter()
-                .any(|c| c == sup || ctx.layer.as_ref().is_some_and(|l| l.is_subclass_of(c, sup)));
+                .any(|c| c == sup || ctx.env.is_subclass_of(c, sup));
             if inhabits {
                 Ok(())
             } else {
@@ -659,15 +693,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // or not peelable to a class) the term falls back to plain inference, so
         // `kind_of(K) : Entity` keeps typing through the axiom's codomain as before.
         (Exp::App(f, k), Val::EigonClass(sup)) if is_kind_of_axiom(f) => match kind_base_class(k) {
-            Some(base)
-                if base == sup
-                    || ctx
-                        .layer
-                        .as_ref()
-                        .is_some_and(|l| l.is_subclass_of(base, sup)) =>
-            {
-                Ok(())
-            }
+            Some(base) if base == sup || ctx.env.is_subclass_of(base, sup) => Ok(()),
             _ => check_by_inference(ctx, exp, typ),
         },
 
@@ -688,8 +714,8 @@ fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckE
     // relaxation lives ONLY at the directional check boundary; definitional
     // equality (`eq_nf`) stays exact.
     if let (Val::EigonClass(sub), Val::EigonClass(sup)) = (&t1, t) {
-        if let Some(layer) = &ctx.layer {
-            if layer.is_subclass_of(sub, sup) {
+        {
+            if ctx.env.is_subclass_of(sub, sup) {
                 return Ok(());
             }
         }
@@ -843,7 +869,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // a legitimate caller (tests that never touch chain resolution).
         Exp::EigonResource(r) => {
             let classes = r.is_a();
-            match ctx.layer.as_ref() {
+            match ctx.env.layer() {
                 Some(layer) => {
                     let record = crate::program::ground::resource_record(r, layer)
                         .map_err(CheckError::CannotInfer)?;
@@ -1108,7 +1134,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // reference (the chain was supposed to admit it but didn't),
         // also an error.
         Exp::EigonAxiom(iri) => {
-            let layer = ctx.layer.as_ref().ok_or_else(|| {
+            let layer = ctx.env.layer().ok_or_else(|| {
                 format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
             })?;
             let env = layer.axiom_env();

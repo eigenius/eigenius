@@ -43,5 +43,5 @@ pub(super) fn try_synthesize_chain_witness(
     expected_typ: &Val,
 ) -> Result<Option<Val>, CheckError> {
     ctx.hooks
-        .synthesize_chain_witness(expected_typ, ctx.rho.len(), ctx.layer.as_ref())
+        .synthesize_chain_witness(expected_typ, ctx.rho.len(), ctx.env.layer())
 }

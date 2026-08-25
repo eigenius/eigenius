@@ -840,7 +840,7 @@ pub(super) fn check_match(
         let mut arm_ctx = CheckCtx {
             rho: ctx.rho.clone(),
             gamma: ctx.gamma.clone(),
-            layer: ctx.layer.clone(),
+            env: ctx.env.clone(),
             type_cache: ctx.type_cache.clone(),
             institution_index: ctx.institution_index.clone(),
             institution_runtime: ctx.institution_runtime.clone(),

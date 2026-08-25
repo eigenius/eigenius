@@ -206,6 +206,21 @@ Two things change:
    migrated. **"The Option goes" holds for the judgment's view of globals and not yet for those** —
    an honest partial, not a completed removal.
 
+5. **Consistency check on the 101 construction sites.** Worth doing because a wide mechanical change
+   is where an inconsistency hides:
+
+   - **Every layer-less construction is a test.** All 23 `CheckCtx::new` calls sit inside
+     `#[cfg(test)]` modules and none exists outside `kernel/src/nbe/check/`; production uses
+     `with_layer` (78 sites) throughout. **The `Option` serves test convenience, not a production
+     need** — which makes removing it safer than the count suggests, since no production path
+     depends on layer-less checking.
+   - **Nothing asserts on the "no layer access in pure check mode" error.** It appears only at its
+     definition. So converting a `None`-error into `Global::Absent` breaks no assertion.
+   - **That error is swallowed at one of its two call sites.** `find_sigma_field` does
+     `ctx.resolve_class_cached(iri).ok()?`, discarding a formatted string it allocated;
+     `Construct` propagates. Under `lookup` returning `Absent`, `Construct` produces its own
+     message, which can be more specific than the generic one it forwards today.
+
 ### 4.2 Who owns the memo
 
 Not the trait. Two memos already exist with the right lifetime and different keys —
@@ -589,6 +604,22 @@ sited beside `RESOLVE_MEMO` and `CLASS_FIELDS_MEMO` rather than inside the trait
 **Gate:** verdict parity on the shipped ontologies. **Memo boundedness measured, not assumed** —
 unlike D78's class-keyed memo this one grows with every resolved IRI, which §4.2 flags as the cost
 needing justification.
+
+**Status: complete.** `CheckCtx.layer: Option<Arc<Layer>>` is now `env: Env`, and
+`resolve_class_cached` goes through `Env::lookup`. 1745 kernel tests, workspace and clippy clean.
+
+Routing through `lookup` surfaced a conflation `CheckHooks::resolve_class` could not express: it
+returned a bare `Val` for any IRI, so "this class did not resolve" and "this is not a class" were the
+same outcome. The new path matches on `Global` and says which —
+*"'urn:x:Foo' is not a class — the environment classifies it as an inductive"*.
+
+**Still on `Env::layer()`, deliberately:** witness synthesis, `resource_record`, `EigonAxiom`'s
+`axiom_env`, and `EvalCtx` construction. Those want the *layer*, not the environment, so the `Option`
+survives for them. `EvalCtx`'s belongs with the Q1 correction, in Phase D or E.
+
+**Not yet done in this phase:** the `(LayerId, Iri) → Global` memo of §4.2. `type_cache` still keys
+class resolutions by IRI string, per-`CheckCtx`. Siting the shared memo and measuring its bound is
+the remainder.
 
 ---
 
