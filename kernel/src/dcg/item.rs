@@ -256,6 +256,11 @@ fn cat_arity_of(c: &Exp) -> Option<usize> {
 }
 
 /// Leading-λ count of a sem's VALUE — the number of arguments it actually takes.
+/// **Env-independent, deliberately (D76 Phase B).** Evaluated with no environment:
+/// the leading-λ count is unchanged by whether a `Const` resolves, since neither a
+/// resolved `Val::InductiveType` nor an unresolved neutral is a `Val::Lam`. A
+/// definition that unfolds *to* a lambda would matter, but `decode_type` inlines
+/// transparent definitions at decode time, so none reaches here as a `Const`.
 fn sem_arity_of(sem: &Exp) -> Option<usize> {
     let mut v = crate::nbe::eval::eval(sem, &crate::nbe::env::Rho::Nil).ok()?;
     let mut n = 0;

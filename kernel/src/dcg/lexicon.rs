@@ -45,7 +45,6 @@ use std::sync::Arc;
 use crate::layer::Layer;
 use crate::nbe::check::{check, CheckCtx};
 use crate::nbe::env::Rho;
-use crate::nbe::eval::eval;
 use crate::nbe::term::Exp;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::Iri;
@@ -138,7 +137,12 @@ pub fn gate_entry(layer: &Arc<Layer>, entry: &Resource) -> Result<Exp, String> {
         .ok_or("entry has no `sem`")?;
     let sem = resolve_sem_value(layer, sem_v)?;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(layer));
-    let denoted_val = eval(&denoted, &Rho::Nil).map_err(|e| format!("⟦cat⟧ eval: {e}"))?;
+    let denoted_val = crate::nbe::eval::eval_env(
+        &denoted,
+        &Rho::Nil,
+        &crate::nbe::env_global::Env::of(Arc::clone(layer)),
+    )
+    .map_err(|e| format!("⟦cat⟧ eval: {e}"))?;
     check(&mut ctx, &sem, &denoted_val).map_err(|e| format!("sem does not inhabit ⟦cat⟧: {e}"))?;
     Ok(denoted)
 }

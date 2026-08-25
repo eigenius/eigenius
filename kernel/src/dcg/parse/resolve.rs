@@ -125,7 +125,7 @@ impl Parser {
         };
 
         let expected = denote_cat(open.item.cat()).ok()?;
-        let expected_val = eval(&expected, &Rho::Nil).ok()?;
+        let expected_val = eval_env(&expected, &Rho::Nil, &self.grammar.env()).ok()?;
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
@@ -155,7 +155,10 @@ impl Parser {
             };
             term = Exp::App(Box::new(term), Box::new(arg.clone()));
         }
-        Some(readback_val(0, &eval(&term, &Rho::Nil).ok()?))
+        Some(readback_val(
+            0,
+            &eval_env(&term, &Rho::Nil, &self.grammar.env()).ok()?,
+        ))
     }
 
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
@@ -239,7 +242,7 @@ impl Parser {
     /// (the soundness authority for direct callers); [`Self::resolve_with`] uses it to filter
     /// each hole's candidates BEFORE the assignment search.
     fn hole_accepts(&self, hole: &HoleInfo, ante: &Exp) -> bool {
-        let Ok(ty_val) = eval(&hole.ty, &Rho::Nil) else {
+        let Ok(ty_val) = eval_env(&hole.ty, &Rho::Nil, &self.grammar.env()) else {
             return false;
         };
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));

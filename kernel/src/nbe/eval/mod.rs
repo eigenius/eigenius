@@ -172,6 +172,15 @@ pub fn eval(exp: &Exp, rho: &Rho) -> Result<Val, EvalError> {
     eval_ctx(exp, rho, &EvalCtx::pure())
 }
 
+/// Evaluate in an environment, with no effects — the form most callers want.
+///
+/// `eval(exp, rho)` resolves no names: a `Const` it cannot look up stays a
+/// neutral, silently. Reach for that only when the term is closed by
+/// construction (D76 Phase B).
+pub fn eval_env(exp: &Exp, rho: &Rho, env: &crate::nbe::env_global::Env) -> Result<Val, EvalError> {
+    eval_ctx(exp, rho, &EvalCtx::in_env(env.clone()))
+}
+
 /// Evaluate an expression with a capability mode.
 pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
     eval_impl::<NoTrace>(exp, rho, ctx).map(|(v, ())| v)

@@ -68,7 +68,7 @@ use std::sync::Arc;
 use crate::layer::Layer;
 use crate::nbe::check::{check, exp_mentions_var, CheckCtx};
 use crate::nbe::env::Rho;
-use crate::nbe::eval::eval;
+use crate::nbe::eval::eval_env;
 use crate::nbe::readback::{readback_val, try_readback_val};
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Neut, Val};

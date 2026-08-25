@@ -167,6 +167,11 @@ fn denote_mood(mood: &Exp) -> Result<Exp, String> {
 
 /// Definitional equality of two closed type expressions, via NbE normal forms
 /// (so `A -> B` and `Pi _:A. B` compare equal).
+///
+/// **Env-independent, deliberately (D76 Phase B).** With no environment a `Const`
+/// normalizes to itself on both sides, so the comparison stays structural — which
+/// is the equality this function is for. Genuine δ-equality (two names that unfold
+/// alike) is `conv`'s job and arrives with Phase D.
 pub fn type_eq(a: &Exp, b: &Exp) -> bool {
     let norm = |e: &Exp| eval(e, &Rho::Nil).map(|v| readback_val(0, &v));
     matches!((norm(a), norm(b)), (Ok(x), Ok(y)) if x == y)

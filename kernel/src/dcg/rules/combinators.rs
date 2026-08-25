@@ -1957,6 +1957,11 @@ fn cat_arity(c: &Exp) -> Option<usize> {
 /// Leading-λ count of a sem's VALUE — how many arguments it actually takes. Evaluated, because an
 /// `Exp::App` given too few arguments is syntactically an application and only becomes a closure
 /// under evaluation; a syntactic λ-count cannot see it.
+/// **Env-independent, deliberately (D76 Phase B).** Evaluated with no environment:
+/// the leading-λ count is unchanged by whether a `Const` resolves, since neither a
+/// resolved `Val::InductiveType` nor an unresolved neutral is a `Val::Lam`. A
+/// definition that unfolds *to* a lambda would matter, but `decode_type` inlines
+/// transparent definitions at decode time, so none reaches here as a `Const`.
 fn sem_arity(sem: &Exp) -> Option<usize> {
     let mut v = crate::nbe::eval::eval(sem, &crate::nbe::env::Rho::Nil).ok()?;
     let mut n = 0;

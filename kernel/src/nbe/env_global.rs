@@ -269,7 +269,14 @@ impl Env {
                     .unwrap_or(crate::ontology::resource::Value::Boolean(false)),
                 layer,
             ) {
-                Ok(body) => match crate::nbe::eval::eval(&body, &crate::nbe::env::Rho::Nil) {
+                // In *this* environment, not an empty one: a definition body may
+                // name other declarations, and an env-less eval would leave each
+                // as a neutral.
+                Ok(body) => match crate::nbe::eval::eval_env(
+                    &body,
+                    &crate::nbe::env::Rho::Nil,
+                    &Env::of(Arc::clone(layer)),
+                ) {
                     Ok(v) => Global::Definition(v),
                     Err(_) => Global::Absent,
                 },

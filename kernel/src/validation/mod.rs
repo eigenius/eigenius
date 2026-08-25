@@ -976,7 +976,11 @@ impl Validator {
         };
 
         // Evaluate the declared type to a Val so `check` can use it.
-        let type_val = match crate::nbe::eval::eval(&type_exp, &crate::nbe::env::Rho::Nil) {
+        let type_val = match crate::nbe::eval::eval_env(
+            &type_exp,
+            &crate::nbe::env::Rho::Nil,
+            &crate::nbe::env_global::Env::of(Arc::clone(&self.layer)),
+        ) {
             Ok(v) => v,
             Err(eval_err) => {
                 errors.push(ValidationError {
@@ -1120,7 +1124,11 @@ impl Validator {
                     return errors;
                 }
             };
-        let type_val = match crate::nbe::eval::eval(&type_exp, &crate::nbe::env::Rho::Nil) {
+        let type_val = match crate::nbe::eval::eval_env(
+            &type_exp,
+            &crate::nbe::env::Rho::Nil,
+            &crate::nbe::env_global::Env::of(Arc::clone(&self.layer)),
+        ) {
             Ok(v) => v,
             Err(e) => {
                 fail(

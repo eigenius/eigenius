@@ -50,7 +50,7 @@ use std::sync::Arc;
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::nbe::env::Rho;
-use eigenius_kernel::nbe::eval::eval;
+use eigenius_kernel::nbe::eval::eval_env;
 use eigenius_kernel::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, PrimitiveType};
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
@@ -70,7 +70,12 @@ pub fn extract_justification(
     ctx: &ExecutionContext,
 ) -> Result<Val, InstitutionError> {
     let exp = justification_exp(sentence, ctx)?;
-    eval(&exp, &Rho::Nil).map_err(|e| {
+    eval_env(
+        &exp,
+        &Rho::Nil,
+        &eigenius_kernel::nbe::env_global::Env::of(ctx.head().clone()),
+    )
+    .map_err(|e| {
         InstitutionError::ComputationFailed(format!("failed to evaluate justification: {e:?}"))
     })
 }

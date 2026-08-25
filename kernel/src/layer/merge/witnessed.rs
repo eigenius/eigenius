@@ -309,8 +309,9 @@ pub fn apply_witness_resolution(
         }
     })?;
 
-    // 5. Evaluate in Pure mode — merge witnesses can't do IO.
-    let ctx = EvalCtx::pure();
+    // 5. Effect-free — merge witnesses can't do IO — but *in the chain's
+    // environment*, since the transformation term names declarations (D76).
+    let ctx = EvalCtx::in_env(crate::nbe::env_global::Env::of(Arc::clone(&layer)));
     let term_val =
         eval_ctx(&exp, &Rho::Nil, &ctx).map_err(|e| MergeError::TransformationEvalError {
             transformation: handle.transformation.clone(),
