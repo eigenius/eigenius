@@ -22,11 +22,26 @@ surfaces (D75 §2):
 
 Carried in so D76 starts from them rather than reopening them.
 
-- **Q1 — the environment belongs to `check` and `conv`, not `eval`.** `eval` already produces opaque
-  values for chain references (`Val::EigonClass(iri)`, `Neut::EigonAxiom(iri)`), so it builds
-  neutrals and defers — nanoda's shape. 195 `eval` sites are untouched; 23 `eq_nf` sites are the gap.
-  Not a materialised projection: that is the full-chain-scan antipattern behind two prior OOMs. The
-  memo at `layer/mod.rs:678` is already the right shape — a lazy cache keyed by `(LayerId, Iri)`.
+- **Q1 — CORRECTED `2026-08-24`.** As originally stated: *the environment belongs to `check` and
+  `conv`, not `eval`*, on the evidence that `eval` produces opaque values for chain references
+  (`Val::EigonClass(iri)`, `Neut::EigonAxiom(iri)`) and so builds neutrals and defers.
+
+  **That is true for the opaque kinds and false for inductives.** `iota_reduce_impl`
+  (`nbe/eval/iota.rs:41-69`) takes `decl: &Arc<InductiveDecl>` and reads **`decl.ctors`** to reduce —
+  during *evaluation*. It needs no environment today only because the declaration is **inlined in the
+  term**. De-inline it (§7, Phase E) and iota must resolve an IRI to reduce, so **`eval` needs the
+  environment after all**.
+
+  Q1 generalised from the opaque cases to every case. The 195-vs-54 site framing that made
+  "environment in conv only" look cheap rests on that overgeneralisation.
+
+  **The reference confirms the corrected reading**: nanoda's `Tc` holds the `Env` and performs both
+  whnf and `def_eq` — evaluation and conversion share it. There is no version of this where the
+  evaluator reduces recursors without an environment *and* declarations are not inlined.
+
+  What survives: not a materialised projection — that is the full-chain-scan antipattern behind two
+  prior OOMs — and the memo at `layer/mod.rs:678` is the right shape, a lazy cache keyed by
+  `(LayerId, Iri)`.
 - **Q1 — the `Option` goes.** "No layer access in pure check mode" is what let the three surfaces
   diverge.
 - **Q2 — δ is decided per kind**, so no transparency annotations are needed: definitions
@@ -466,6 +481,20 @@ encoded term. A possible latent defect in a different subsystem.
 
 ### Phase B — remove the self-reference stub
 
+**⚠ Reordered `2026-08-24`, before implementation.** Phase B was placed before Phase C on the
+argument that the stub blocks everything downstream. Reading the stub's own documentation shows it
+serves **two** uses, not one: *"self-references during ctor-type construction, **cross-inductive
+argument-type references**"* (`term.rs:361-367`). Both are "name a declaration whose full form is not
+available here" — which is what an environment is *for*. **The stub cannot be removed before the
+environment exists.**
+
+Combined with the Q1 correction in §1 — evaluation needs the environment too, because iota reads
+`decl.ctors` — the order becomes **C → B**, and `eval` is inside the environment's scope rather than
+outside it.
+
+The rest of this phase's content stands; only its position moved.
+
+
 **Lands:** a constructor's type refers to its inductive without the empty-`ctors` stub decl, so
 `PartialEq for InductiveDecl` (`term.rs:365`) stops being by-IRI and becomes structural.
 
@@ -604,10 +633,14 @@ its exact meaning and call site, the two-way choice becoming *`u` pinned to 0* v
 ### Ordering
 
 ```
-A (order) ──▶ B (stub) ──▶ C (interface) ──▶ D (δ in conv) ──▶ E (Const) ──▶ F (4c)
-                                                  │                  │
-                                       unblocks D78 §3.1      reseed required
+A (order) ──▶ C (interface) ──▶ B (stub) ──▶ D (δ in conv) ──▶ E (Const) ──▶ F (4c)
+   done          eval IS in scope     needs C      │                  │
+                                          unblocks D78 §3.1    reseed required
 ```
+
+**B and C swapped `2026-08-24`**, before implementing B — see Phase B's note and §1's Q1 correction.
+The stub's two uses both require an environment, and iota reduction puts `eval` inside the
+environment's scope, not outside it.
 
 Strictly sequential, unlike D78 where Seam B's phases had slack. A gates everything because
 visibility is meaningless without it; B gates E because consolidation on by-IRI equality would bake
