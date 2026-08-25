@@ -60,7 +60,7 @@ impl Grammar {
         {
             return None;
         }
-        let and = super::super::category::resolve_inductive(&self.layer, "urn:eigenius:logic:And")?;
+        let and = super::super::category::inductive_iri(&self.layer, "urn:eigenius:logic:And")?;
         // The `a` object determiner's raised cat `cat_forall(sg, λT. (S\NP)\((S\NP)/NP_T))` (the
         // `bwd`-headed body); instantiate `T := C` for this antecedent's class.
         let det_cat = self
@@ -90,7 +90,7 @@ impl Grammar {
             Patt::Var(tv.into()),
             Box::new(Exp::Lam(
                 Patt::Var(sj.into()),
-                Box::new(Exp::InductiveType(and, vec![tv_r_s, body_r])),
+                Box::new(Exp::const_applied(and, Vec::new(), vec![tv_r_s, body_r])),
             )),
         );
         Some(Item::with_cost(

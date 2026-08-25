@@ -4192,9 +4192,9 @@ fn pp_adjunct_adds_an_opaque_conjunct() {
     let forest = index.parse("HeLa affects BRCA1 in HeLa", &Identity);
     assert!(!forest.is_empty(), "the PP-adjunct sentence must parse");
     let has_prep = forest.iter().any(|p| {
-        matches!(p.sem(), Exp::InductiveType(decl, args)
-            if decl.name == "And" && args.len() == 2
-                && head_is_axiom(&args[1], "urn:eigenius:ontology:prep_in"))
+        matches!(p.sem().as_const_spine(), Some((iri, _, args))
+            if iri.local_name() == "And" && args.len() == 2
+                && head_is_axiom(args[1], "urn:eigenius:ontology:prep_in"))
     });
     assert!(
         has_prep,
@@ -4204,7 +4204,9 @@ fn pp_adjunct_adds_an_opaque_conjunct() {
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let p = forest
         .iter()
-        .find(|p| matches!(p.sem(), Exp::InductiveType(decl, _) if decl.name == "And"))
+        .find(
+            |p| matches!(p.sem().as_const_spine(), Some((iri, _, _)) if iri.local_name() == "And"),
+        )
         .unwrap();
     let ty = check_infer(&mut ctx, p.sem()).expect("PP-adjunct sem type-checks");
     assert_eq!(
@@ -4227,7 +4229,7 @@ fn sem_mentions_axiom(e: &Exp, iri: &str) -> bool {
             sem_mentions_axiom(a, iri) || sem_mentions_axiom(b, iri)
         }
         Exp::Lam(_, a) | Exp::Fst(a) | Exp::Snd(a) | Exp::Con(_, a) => sem_mentions_axiom(a, iri),
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => any(args),
+        Exp::InductiveCtor(_, _, args) => any(args),
         _ => false,
     }
 }
@@ -4288,15 +4290,15 @@ fn pp_attachment_is_ambiguous() {
     );
     // One parse conjoins at the VP (And-headed); another refines the noun (no top-level And).
     assert!(
-        forest
-            .iter()
-            .any(|p| matches!(p.sem(), Exp::InductiveType(d, _) if d.name == "And")),
+        forest.iter().any(
+            |p| matches!(p.sem().as_const_spine(), Some((iri, _, _)) if iri.local_name() == "And")
+        ),
         "one attachment conjoins the locative at the VP (And-headed)"
     );
     assert!(
-        forest
-            .iter()
-            .any(|p| !matches!(p.sem(), Exp::InductiveType(d, _) if d.name == "And")),
+        forest.iter().any(
+            |p| !matches!(p.sem().as_const_spine(), Some((iri, _, _)) if iri.local_name() == "And")
+        ),
         "the other attachment refines the object noun (not top-level And)"
     );
     assert_parses_to_prop("HeLa affects a cell line in HeLa");
@@ -4388,9 +4390,9 @@ fn coordinators_are_known_to_the_missing_lexeme_signal() {
 /// b)`) for `conn` ∈ {"And", "Or"}, flattened left-to-right; `None` if `sem` is not
 /// headed by that connective.
 fn conn_chain(sem: &Exp, conn: &str) -> Option<Vec<Exp>> {
-    match sem {
-        Exp::InductiveType(decl, args) if decl.name == conn && args.len() == 2 => {
-            let mut left = conn_chain(&args[0], conn).unwrap_or_else(|| vec![args[0].clone()]);
+    match sem.as_const_spine() {
+        Some((iri, _, args)) if iri.local_name() == conn && args.len() == 2 => {
+            let mut left = conn_chain(args[0], conn).unwrap_or_else(|| vec![args[0].clone()]);
             left.push(args[1].clone());
             Some(left)
         }
@@ -5033,7 +5035,7 @@ fn is_negation(sem: &Exp) -> bool {
         Exp::Pi(_, _, c) => c,
         _ => return false,
     };
-    matches!(&**cod, Exp::InductiveType(decl, _) if decl.name == "False")
+    matches!(cod.as_const_spine(), Some((iri, _, _)) if iri.local_name() == "False")
 }
 
 #[test]

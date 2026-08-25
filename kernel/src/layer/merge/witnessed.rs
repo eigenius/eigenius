@@ -282,7 +282,8 @@ pub fn apply_witness_resolution(
     //    and evaluating in `Rho::Nil` keeps construction uniform with
     //    how the rest of the kernel produces Pi-chain Vals.
     let a_exp = Exp::EigonClass(class.clone());
-    let option_a_exp = Exp::InductiveType(option_decl(), vec![a_exp.clone()]);
+    let option_a_exp =
+        Exp::const_applied(option_decl().iri.clone(), Vec::new(), vec![a_exp.clone()]);
     let expected_exp = Exp::Pi(
         Patt::Unit,
         Box::new(a_exp.clone()),

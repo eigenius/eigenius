@@ -1166,7 +1166,7 @@ impl Parser {
             }
             Exp::Pi(_, a, b) | Exp::Sig(_, a, b) => vec![a.as_ref(), b.as_ref()],
             Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            Exp::InductiveCtor(_, _, args) => args.iter().collect(),
             _ => Vec::new(),
         }
     }

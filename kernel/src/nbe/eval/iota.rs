@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// `mⱼ(args, ih₁, …, ihₘ)` where each `ihᵢ` is the recursor applied to a
 /// recursive sub-argument of `cⱼ`. Recursive sub-arguments are identified
 /// by walking the constructor's type telescope: any binder (after the
-/// parameter prefix) whose type is a self-reference `Exp::InductiveType(I, _)`
+/// parameter prefix) whose type is a self-reference `Exp::const_applied(I.iri.clone(), Vec::new(), _)`
 /// contributes one IH, computed by recursing into `iota_reduce` for
 /// constructor sub-values or producing a blocked `Neut::NtRec` for
 /// neutrals.
@@ -274,7 +274,7 @@ mod tests {
     fn higher_order_positive_arg_gets_a_function_typed_ih_in_both_sites() {
         // inductive Foo { base : Foo, rall : (Set -> Foo) -> Foo }
         let s = ind_self_ref("Foo");
-        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let foo = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn iota_recurses_through_a_higher_order_argument() {
         let s = ind_self_ref("Foo");
-        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let foo = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
@@ -444,7 +444,7 @@ mod tests {
         // inductive Bool { True, False }
         // Bool.rec C true_minor false_minor True ↝ true_minor
         let s = ind_self_ref("Bool");
-        let bool_ty = Exp::InductiveType(s, Vec::new());
+        let bool_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
@@ -529,7 +529,7 @@ mod tests {
     fn iota_two_recursive_args_ih_order_matches_minor_binders() {
         // Tree { leaf : Tree, node : Tree → Tree → Tree }
         let s = ind_self_ref("Tree");
-        let tree_ty = Exp::InductiveType(s, Vec::new());
+        let tree_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let tree = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
@@ -617,7 +617,8 @@ mod tests {
         // List.rec zero (λa rest ih. succ ih) [_, _, _] = succ (succ (succ zero))
         let nat = nat_decl();
         let s = ind_self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
@@ -748,8 +749,11 @@ mod tests {
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let vec_a_unit =
-            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),

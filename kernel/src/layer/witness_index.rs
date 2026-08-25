@@ -359,15 +359,17 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
 pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Option<[u8; 32]> {
     let asserts_iri = Iri::parse(wk::ASSERTS).ok()?;
     let asserts_resource = layer.resolve(&asserts_iri)?;
-    let val =
-        crate::program::ground::resolve_inductive_type(&asserts_iri, &asserts_resource, layer)
-            .ok()?;
-    let decl = match val {
-        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
-        _ => return None,
-    };
-    let proposition = crate::nbe::term::Exp::InductiveType(
-        decl,
+    // The declaration need only *exist* — D76 Phase B: the term names it rather
+    // than carrying it, so the full decode this used to do was dropped into a slot
+    // that no longer exists. The encoded form is unchanged (`ConstRef` + an `App`
+    // spine either way), so the witness hash is too — `witness_hash_agreement` is
+    // the gate on that.
+    if !crate::program::ground::is_inductive_type(&asserts_resource) {
+        return None;
+    }
+    let proposition = crate::nbe::term::Exp::const_applied(
+        asserts_iri,
+        Vec::new(),
         vec![crate::nbe::term::Exp::LitString(
             target_iri.as_str().to_string(),
         )],
@@ -387,15 +389,12 @@ pub fn default_asserts_proposition(
 ) -> Option<crate::nbe::term::Exp> {
     let asserts_iri = Iri::parse(wk::ASSERTS).ok()?;
     let asserts_resource = layer.resolve(&asserts_iri)?;
-    let val =
-        crate::program::ground::resolve_inductive_type(&asserts_iri, &asserts_resource, layer)
-            .ok()?;
-    let decl = match val {
-        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
-        _ => return None,
-    };
-    Some(crate::nbe::term::Exp::InductiveType(
-        decl,
+    if !crate::program::ground::is_inductive_type(&asserts_resource) {
+        return None;
+    }
+    Some(crate::nbe::term::Exp::const_applied(
+        asserts_iri,
+        Vec::new(),
         vec![crate::nbe::term::Exp::LitString(
             target_iri.as_str().to_string(),
         )],

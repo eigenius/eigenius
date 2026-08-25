@@ -38,7 +38,7 @@ pub(crate) fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
 /// inductive Nat { zero : Nat, succ : Nat → Nat }
 pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
     let s = ind_self_ref("Nat");
-    let nat_ty = Exp::InductiveType(s, Vec::new());
+    let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
     Arc::new(InductiveDecl {
         iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
         name: "Nat".to_string(),

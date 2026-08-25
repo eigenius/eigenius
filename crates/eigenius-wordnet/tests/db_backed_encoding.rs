@@ -2517,7 +2517,7 @@ fn collect_iris(e: &Exp, out: &mut std::collections::BTreeSet<String>) {
             collect_iris(t, out);
             collect_iris(b, out);
         }
-        E::InductiveCtor(_, _, args) | E::InductiveType(_, args) => {
+        E::InductiveCtor(_, _, args) => {
             for a in args {
                 collect_iris(a, out);
             }
@@ -3371,7 +3371,7 @@ fn wrn_first_page_over_full_lexicon() {
                 // Worth its keep: the pretty printer renders `logic:And(P, Q)` and an ordinary
                 // application identically, so a term that looked like an ill-typed `And(λ…, …)` could
                 // not be diagnosed from the printed form alone. The `{:?}` showed it was
-                // `Exp::InductiveType(AndDecl{params:[(P,Sort(0)),(Q,Sort(0))]}, [Lam(…), …])`, which
+                // `Exp::const_applied(AndDecl{params:[(P,Sort(0)),(Q,Sort(0))]}.iri.clone(), Vec::new(), [Lam(…), …])`, which
                 // located the real defect in `check_type` — an applied inductive type was admitted
                 // without checking its parameter arguments. Reach for this before theorising about a
                 // skeleton string.

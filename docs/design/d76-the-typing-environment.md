@@ -880,6 +880,43 @@ only as a downstream verdict change. The felicity suites are load-bearing here, 
 **So B-b splits in two commits**, each compiler-enumerated: `Inductive` + `InductiveType` → `Const`
 (212 sites), then `InductiveCtor` + `InductiveRec` → IRI (289 sites).
 
+**Status of B-b1 (`Inductive` + `InductiveType` → `Const`): complete.** 1761 kernel tests, workspace
+and clippy clean. Four defects surfaced, none of them test plumbing:
+
+| defect | why it was silent |
+|---|---|
+| `eval`'s `Const` arm rebuilt an `Env` from `ctx.layer()` instead of using the context's own | discards the intrinsics and any declaration in progress; an unresolved name degrades to a *neutral*, so `Nat.zero` inferred as `Nt(Const(Nat))` rather than its type |
+| the new `check_infer` arm sat **after** `App` | `App` infers its head and demands a Π of it, and a type former's type is a *sort* — every applied former failed `expected Pi type, got Sort(Zero)`, and the core ontology stopped loading |
+| de-fusing **lost** the indexed-arity check | fused, eval got the whole argument vector and could count it; de-fused, arguments arrive one at a time and eval never knows more are not coming |
+| `Env` had no place for a declaration in progress | the stub *was* that place |
+
+The third is the one to note: a representation change silently dropped a check. It moved to
+`check_inductive_type_args`, unchanged in what it accepts and scoped to indexed declarations — the
+lenient path for un-indexed ones is still B2's, under the measurement protocol.
+
+The fourth is nanoda's `temp_declars` (`references/nanoda_lib/src/env.rs:221`, consulted ahead of the
+committed declarations at `:259`). A declaration is in scope for its own constructor types before it
+is committed anywhere, which is exactly what the stub was faking; `Env::declaring` is the honest
+version.
+
+**Two eager resolutions deleted.** `resolve_inductive_decl_for_ctor` and `inductive_stub_for` each
+decoded an entire inductive — every constructor type — to fill a slot that no longer exists; both are
+existence predicates now (`names_an_inductive`, `inductive_iri`). And `resolve_const_ref`'s
+self-reference short-circuit is gone: it existed only because resolving a name produced a
+*declaration*, so a constructor body mentioning its own inductive recursed unboundedly. A name
+resolves to `Const`, so there is nothing to recurse into.
+
+**What `check_infer`'s new arm is not.** It reads `decl.sort` from `Γ_env` and hands back a sort,
+leaving `check_inductive_type_args` to check the arguments. nanoda has no such arm: a type former is a
+`Const` whose type is the Π-telescope `Π(params)(indices). Sort l`, so `infer_app` walks it and the
+**ordinary application rule** checks the arguments. Adopting that deletes `check_inductive_type_args`
+outright — and it is B2's change, because the ordinary rule checks arity where the fused node's rule
+did not. The arm is the minimal shape that keeps Phase B verdict-neutral.
+
+**Remaining in B-b2:** `InductiveCtor` and `InductiveRec` carry the IRI instead of the declaration.
+The self-reference stub in `resolve_inductive_type` survives *only* to serve the `CtorApp` decode
+path, and goes with it.
+
 **B-b deletes the variant rather than deprecating it.** Leaving it in place while migrating callers
 would make every un-migrated match arm a *silent* non-match — the failure mode that a spine walker
 looks like a plain `App`. Deleting it turns all 168 into compile errors, so the sweep is enumerated

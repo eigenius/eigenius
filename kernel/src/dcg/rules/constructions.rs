@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use crate::layer::Layer;
-use crate::nbe::term::{list_decl, Exp, InductiveDecl, Patt};
+use crate::nbe::term::{list_decl, Exp, Patt};
 use crate::ontology::iri::Iri;
 
 use super::super::category::*;
@@ -37,13 +37,7 @@ use super::super::category::*;
 /// connective `op` over a Prop-ending denotation. At `Prop`, build `op(a, b)`; at
 /// an arrow, η-expand — `λx. coord(cod, a x, b x)`. So `S` conjoins to `op(P,Q)`,
 /// `VP` to `λx. op(P x, Q x)`, `TV` to `λo.λs. op(P o s, Q o s)`.
-fn generalized_coord(
-    op: &Arc<InductiveDecl>,
-    denote: &Exp,
-    a: &Exp,
-    b: &Exp,
-    depth: usize,
-) -> Option<Exp> {
+fn generalized_coord(op: &Iri, denote: &Exp, a: &Exp, b: &Exp, depth: usize) -> Option<Exp> {
     match denote {
         Exp::Sort(l) if l.is_nat(0) => {
             if std::env::var("EIGENIUS_TRACE_COORD").is_ok()
@@ -51,7 +45,11 @@ fn generalized_coord(
             {
                 eprintln!("  !! generalized_coord Sort(0) with a Lam argument: denote={denote:?}");
             }
-            Some(Exp::InductiveType(op.clone(), vec![a.clone(), b.clone()]))
+            Some(Exp::const_applied(
+                op.clone(),
+                Vec::new(),
+                vec![a.clone(), b.clone()],
+            ))
         }
         Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) => {
             let var = format!("conj{depth}");
@@ -82,12 +80,12 @@ pub fn cats_coordinate(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> bool {
 /// [`coordinate_but_not`] group path instead.)
 pub fn coordinate_but_not_sem(cat: &Exp, a: &Exp, b: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     let denote = denote_cat(cat).ok()?;
-    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
     but_not_coord(&and, &denote, a, b, 0, layer)
 }
 
 fn but_not_coord(
-    and: &Arc<InductiveDecl>,
+    and: &Iri,
     denote: &Exp,
     a: &Exp,
     b: &Exp,
@@ -95,8 +93,9 @@ fn but_not_coord(
     layer: &Arc<Layer>,
 ) -> Option<Exp> {
     match denote {
-        Exp::Sort(l) if l.is_nat(0) => Some(Exp::InductiveType(
+        Exp::Sort(l) if l.is_nat(0) => Some(Exp::const_applied(
             and.clone(),
+            Vec::new(),
             vec![a.clone(), negate(b.clone(), layer)?],
         )),
         Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) => {
@@ -131,8 +130,8 @@ pub(crate) fn sem_is_coordination(sem: &Exp) -> bool {
     while let Exp::Lam(_, body) = e {
         e = body;
     }
-    matches!(e, Exp::InductiveType(d, _)
-        if matches!(d.iri.as_str(), "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"))
+    matches!(e.as_const_spine(), Some((iri, _, _))
+        if matches!(iri.as_str(), "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"))
 }
 
 /// Build or extend a **prop-ending coordination list** `cat_coord(BaseCat, conn)` (D63 §8.4 Phase 3,
@@ -404,13 +403,13 @@ pub fn complete_coord(
     // `[λx. P₀ x, …, λx. Pₙ x]` → `λx. Or(…Or(P₀ x, P₁ x)…, Pₙ x)`. The surface connective is
     // irrelevant (union over kinds), so `conn` is not consulted here.
     if is_ctor(base_cat, "cat_mod").is_some() {
-        let or = resolve_inductive(layer, "urn:eigenius:logic:Or")?;
+        let or = inductive_iri(layer, "urn:eigenius:logic:Or")?;
         let var = "conj0";
         let app = |p: &Exp| Exp::App(Box::new(p.clone()), Box::new(Exp::Var(var.into())));
         let mut iter = members.into_iter();
         let mut acc = app(&iter.next()?);
         for m in iter {
-            acc = Exp::InductiveType(or.clone(), vec![acc, app(&m)]);
+            acc = Exp::const_applied(or.clone(), Vec::new(), vec![acc, app(&m)]);
         }
         let body = Exp::Lam(Patt::Var(var.into()), Box::new(acc));
         return Some((base_cat.clone(), body));
@@ -424,7 +423,7 @@ pub fn complete_coord(
         _ => return None,
     };
     let denote = denote_cat(base_cat).ok()?;
-    let op = resolve_inductive(layer, op_iri)?;
+    let op = inductive_iri(layer, op_iri)?;
     let mut iter = members.into_iter();
     let mut acc = iter.next()?;
     for m in iter {
@@ -721,10 +720,10 @@ fn group_conn_name(group_cat: &Exp) -> Option<&str> {
 /// Intuitionistic negation of a `Prop`: `prop → logic:False` (matching `closed-class.esl`'s
 /// `neg_sem`, `λP.λs. P(s) → logic:False`). `None` if `logic:False` is unavailable.
 fn negate(prop: Exp, layer: &Arc<Layer>) -> Option<Exp> {
-    let f = resolve_inductive(layer, "urn:eigenius:logic:False")?;
+    let f = inductive_iri(layer, "urn:eigenius:logic:False")?;
     Some(Exp::Arrow(
         Box::new(prop),
-        Box::new(Exp::InductiveType(f, vec![])),
+        Box::new(Exp::Const(f, Vec::new())),
     ))
 }
 
@@ -938,7 +937,7 @@ fn sigma_base(ty: &Exp) -> &Exp {
 /// Left-fold a non-empty list of `Prop`s with the connective `op` (`logic:And` /
 /// `logic:Or`): `op(op(p₀, p₁), p₂)…` — the left-branching coordination normal
 /// form. `None` if `preds` is empty.
-fn fold_conn(op: &Arc<InductiveDecl>, preds: Vec<Exp>) -> Option<Exp> {
+fn fold_conn(op: &Iri, preds: Vec<Exp>) -> Option<Exp> {
     if std::env::var("EIGENIUS_TRACE_COORD").is_ok()
         && preds.iter().any(|p| matches!(p, Exp::Lam(..)))
     {
@@ -951,7 +950,7 @@ fn fold_conn(op: &Arc<InductiveDecl>, preds: Vec<Exp>) -> Option<Exp> {
     let mut iter = preds.into_iter();
     let mut acc = iter.next()?;
     for p in iter {
-        acc = Exp::InductiveType(op.clone(), vec![acc, p]);
+        acc = Exp::const_applied(op.clone(), Vec::new(), vec![acc, p]);
     }
     Some(acc)
 }
@@ -973,7 +972,7 @@ pub fn distribute(
     // Contrastive `but not` (D62 §2 #8): `P(m₀) ∧ ¬P(m₁) ∧ …` — first positive, rest negated,
     // ∧-folded. Otherwise the symmetric `conn_and`/`conn_or` fold.
     if group_conn_name(group_cat) == Some("conn_but_not") {
-        let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+        let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
         let preds = but_not_preds(
             members,
             |m| Exp::App(Box::new(pred_sem.clone()), Box::new(m)),
@@ -981,7 +980,7 @@ pub fn distribute(
         )?;
         return fold_conn(&and, preds);
     }
-    let op = resolve_inductive(layer, group_conn_op(group_cat, rctx)?)?;
+    let op = inductive_iri(layer, group_conn_op(group_cat, rctx)?)?;
     let preds = members
         .into_iter()
         .map(|m| Exp::App(Box::new(pred_sem.clone()), Box::new(m)))
@@ -1032,10 +1031,10 @@ pub fn distribute_object(
     };
     // Contrastive `but not` (D62 §2 #8): `V(m₀,s) ∧ ¬V(m₁,s) ∧ …`. Otherwise the symmetric fold.
     let body = if group_conn_name(group_cat) == Some("conn_but_not") {
-        let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+        let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
         fold_conn(&and, but_not_preds(members, mk, layer)?)?
     } else {
-        let op = resolve_inductive(layer, group_conn_op(group_cat, rctx)?)?;
+        let op = inductive_iri(layer, group_conn_op(group_cat, rctx)?)?;
         fold_conn(&op, members.into_iter().map(mk).collect())?
     };
     Some(Exp::Lam(Patt::Var("DIST#subj".into()), Box::new(body)))
@@ -1067,7 +1066,7 @@ pub fn reciprocate(
     // reciprocal sentence's category is that inner `S`.
     let (_m, vp, _obj) = slash_parts(tv_cat, "fwd")?;
     let (_vm, result, _subj) = slash_parts(vp, "bwd")?;
-    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
     let mut preds = Vec::new();
     for (i, subj) in members.iter().enumerate() {
         for (j, obj) in members.iter().enumerate() {
@@ -1226,9 +1225,7 @@ pub(crate) fn is_pp_refined(ty: &Exp) -> bool {
             Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Con(_, b) | Exp::Refl(b) => {
                 mentions_prep(b)
             }
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-                args.iter().any(mentions_prep)
-            }
+            Exp::InductiveCtor(_, _, args) => args.iter().any(mentions_prep),
             Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
                 mentions_prep(a) || mentions_prep(b) || mentions_prep(c)
             }
@@ -1422,7 +1419,7 @@ pub fn relativize_appos(
     if !is_decl_clause(s) {
         return None;
     }
-    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
     // Reuse the type-raise CAT (`S/(S\NP_C)`); swap its `λP. P(r)` sem for the conjoining
     // `λP. And(P(r), body(r))` — the appositive's separate assertion rides alongside.
     let (raised_cat, _) = type_raise(np_cat, np_sem, layer)?;
@@ -1431,7 +1428,7 @@ pub fn relativize_appos(
     let body_at_r = Exp::App(Box::new(body_sem.clone()), Box::new(np_sem.clone()));
     let sem = Exp::Lam(
         Patt::Var(p.into()),
-        Box::new(Exp::InductiveType(and, vec![p_at_r, body_at_r])),
+        Box::new(Exp::const_applied(and, Vec::new(), vec![p_at_r, body_at_r])),
     );
     Some((raised_cat, sem))
 }
@@ -1459,7 +1456,7 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger") {
         return None;
     }
-    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    let and = inductive_iri(layer, "urn:eigenius:logic:And")?;
     let mood_d = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
     let fin_d = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
     let dcl = Exp::InductiveCtor(mood_d, "dcl".into(), vec![]);
@@ -1478,8 +1475,9 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     let m = "__front_m";
     let new_sem = Exp::Lam(
         Patt::Var(m.into()),
-        Box::new(Exp::InductiveType(
+        Box::new(Exp::const_applied(
             and,
+            Vec::new(),
             vec![Exp::Var(m.into()), body_at_hole],
         )),
     );
@@ -1883,15 +1881,15 @@ mod tests {
                 .expect("completes");
         assert_eq!(base, s, "completion returns the base clause category");
         let expect = |op: &Exp, args: &[Exp]| {
-            matches!(op, Exp::InductiveType(d, a)
-            if d.iri.as_str() == "urn:eigenius:logic:Or" && a.as_slice() == args)
+            matches!(op.as_const_spine(), Some((iri, _, a))
+            if iri.as_str() == "urn:eigenius:logic:Or"
+                && a.len() == args.len()
+                && a.iter().zip(args).all(|(x, y)| *x == y))
         };
-        match &folded {
-            Exp::InductiveType(d, args)
-                if d.iri.as_str() == "urn:eigenius:logic:Or" && args.len() == 2 =>
-            {
-                assert!(expect(&args[0], &[a, b]), "inner Or(A, B): {folded:?}");
-                assert_eq!(args[1], c, "outer right conjunct is C");
+        match folded.as_const_spine() {
+            Some((iri, _, args)) if iri.as_str() == "urn:eigenius:logic:Or" && args.len() == 2 => {
+                assert!(expect(args[0], &[a, b]), "inner Or(A, B): {folded:?}");
+                assert_eq!(*args[1], c, "outer right conjunct is C");
             }
             other => panic!("expected Or(Or(A,B),C), got {other:?}"),
         }

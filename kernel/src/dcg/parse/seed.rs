@@ -1157,7 +1157,7 @@ pub(super) fn cat_shape(cat: &Exp) -> String {
         head = f;
     }
     match head {
-        Exp::InductiveType(d, _) => d.iri.as_str().rsplit(':').next().unwrap_or("?").to_string(),
+        Exp::Const(iri, _) => iri.local_name().to_string(),
         Exp::InductiveCtor(_, n, _) => n.clone(),
         Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
             i.as_str().rsplit(':').next().unwrap_or("?").to_string()

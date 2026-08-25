@@ -1628,24 +1628,15 @@ impl Compiler {
                 if args.is_empty() {
                     Ok(Exp::EigonClass(iri_val))
                 } else {
-                    // Stub InductiveDecl for the App-curried encoding.
-                    // The D47 codec produces `App(App(ConstRef(iri),
-                    // a1), a2)…` and the decoder re-resolves the IRI
-                    // against the chain at use time.
-                    let short_name = iri_val.local_name().to_string();
-                    let stub = std::sync::Arc::new(InductiveDecl {
-                        iri: iri_val.clone(),
-                        name: short_name,
-                        params: Vec::new(),
-                        indices: Vec::new(),
-                        sort: Exp::sort(1),
-                        ctors: Vec::new(),
-                    });
+                    // D76 Phase B — the name, applied, which is what the D47 codec
+                    // has always produced: `App(App(ConstRef(iri), a1), a2)…`. A
+                    // stub declaration was built here only to fill the fused node's
+                    // declaration slot before being discarded by the encoder.
                     let arg_exps: Result<Vec<Exp>, EslError> = args
                         .iter()
                         .map(|a| self.lower_type_expr_to_exp(a, scope))
                         .collect();
-                    Ok(Exp::InductiveType(stub, arg_exps?))
+                    Ok(Exp::const_applied(iri_val.clone(), Vec::new(), arg_exps?))
                 }
             }
             ast::TypeExpr::Arrow {

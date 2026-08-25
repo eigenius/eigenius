@@ -314,7 +314,7 @@ impl Item {
                     match b.as_ref() {
                         Exp::Lam(..) => "λ…",
                         Exp::App(..) => "App(…)",
-                        Exp::InductiveType(d, _) => d.name.as_str(),
+                        Exp::Const(iri, _) => iri.local_name(),
                         _ => "…",
                     }
                 ),

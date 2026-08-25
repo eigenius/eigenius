@@ -135,9 +135,9 @@ pub fn derive_minor_type(
     // decls (`decl.indices.is_empty()`) this is empty and the rest
     // of the body construction degenerates to the pre-D48 shape.
     let n_params = decl.params.len();
-    let conclusion_indices: Vec<Exp> = match current {
-        Exp::InductiveType(_, all_args) if all_args.len() >= n_params => {
-            all_args[n_params..].to_vec()
+    let conclusion_indices: Vec<Exp> = match current.as_const_spine() {
+        Some((_, _, all_args)) if all_args.len() >= n_params => {
+            all_args[n_params..].iter().map(|e| (*e).clone()).collect()
         }
         _ => Vec::new(),
     };
@@ -295,7 +295,7 @@ mod tests {
 
     fn nat_decl() -> Arc<InductiveDecl> {
         let s = self_ref("Nat");
-        let nat_ty = Exp::InductiveType(s, Vec::new());
+        let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn ih_binder_does_not_capture_a_constructor_argument() {
         let s = self_ref("D");
-        let d_ty = Exp::InductiveType(s, Vec::new());
+        let d_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:D").unwrap(),
             name: "D".to_string(),
@@ -474,7 +474,7 @@ mod tests {
     fn node_minor_binder_order_is_args_then_ihs_in_arg_order() {
         // Tree { leaf : Tree, node : Tree → Tree → Tree }
         let s = self_ref("Tree");
-        let tree_ty = Exp::InductiveType(s, Vec::new());
+        let tree_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let tree = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
@@ -522,8 +522,8 @@ mod tests {
         }
         assert_eq!(domains.len(), 4, "node minor: 2 args + 2 IHs");
         // Binders 1–2: the ctor args (Tree, Tree).
-        assert!(matches!(domains[0], Exp::InductiveType(_, _)));
-        assert!(matches!(domains[1], Exp::InductiveType(_, _)));
+        assert!(domains[0].as_const_spine().is_some());
+        assert!(domains[1].as_const_spine().is_some());
         // Binder 3: IH for the FIRST recursive arg — identity motive
         // means its domain is the first arg's generic value (level 0).
         // Binder 4: IH for the second (level 1). Reversed or
@@ -551,7 +551,8 @@ mod tests {
         // List(A) cons has args [elem:A, rest:List A], one recursive ⇒
         // minor type is Π elem:A. Π rest:List(A). Π ih:motive(rest). motive(cons elem rest)
         let s = self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
@@ -603,7 +604,8 @@ mod tests {
     fn list_nil_minor_type_no_pis() {
         // nil has no non-param args ⇒ minor type = motive(nil)
         let s = self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
@@ -671,8 +673,11 @@ mod tests {
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let vec_a_unit =
-            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),

@@ -196,20 +196,6 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
                     args: spine,
                 });
             }
-            Exp::InductiveType(d, args) if d.iri == decl.iri => {
-                // An occurrence inside its own index arguments is not something the eliminator can
-                // build a hypothesis for; rejected here and diagnosed by `check_arg_positivity`.
-                let n_params = decl.params.len();
-                if args.len() < n_params
-                    || args[n_params..].iter().any(|a| has_ind_occurrence(decl, a))
-                {
-                    return None;
-                }
-                return Some(RecArgShape {
-                    binders,
-                    args: args.iter().collect(),
-                });
-            }
             _ => return None,
         }
     }
@@ -416,7 +402,11 @@ fn classify_bad_occurrence(decl: &InductiveDecl, typ: &Exp) -> BadOccurrence {
                 }
                 cursor = body;
             }
-            Exp::InductiveType(d, args) if d.iri == decl.iri => {
+            e if e
+                .as_const_spine()
+                .is_some_and(|(iri, _, _)| *iri == decl.iri) =>
+            {
+                let (_, _, args) = e.as_const_spine().expect("just matched");
                 let n_params = decl.params.len();
                 let tail = args.get(n_params..).unwrap_or(&[]);
                 return if tail.iter().any(|a| has_ind_occurrence(decl, a)) {
@@ -450,11 +440,13 @@ fn check_result_type(
         // shape*, this says *is it a valid conclusion*. All three fail by
         // over-rejecting a new form, none by admitting a bad one — the module is
         // fail-closed on shapes it does not recognise.
-        Exp::Const(iri, _) if *iri == decl.iri => Ok(()),
-        Exp::InductiveType(d, args) if d.iri == decl.iri => {
+        e if e
+            .as_const_spine()
+            .is_some_and(|(iri, _, _)| *iri == decl.iri) =>
+        {
+            let (_, _, args) = e.as_const_spine().expect("just matched");
             let upto = decl.params.len().min(args.len());
-            let prefix: Vec<&Exp> = args[..upto].iter().collect();
-            check_params_uniform(decl, ctor_name, &prefix, param_refs, "the conclusion")
+            check_params_uniform(decl, ctor_name, &args[..upto], param_refs, "the conclusion")
         }
         _ => Err(format!(
             "constructor `{}.{ctor_name}` must end in an application of `{}`",
@@ -470,9 +462,6 @@ fn check_result_type(
 /// case branch — counts.
 pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
     match exp {
-        Exp::InductiveType(d, args) => {
-            d.iri == decl.iri || args.iter().any(|a| has_ind_occurrence(decl, a))
-        }
         Exp::InductiveCtor(d, _, args) => {
             d.iri == decl.iri || args.iter().any(|a| has_ind_occurrence(decl, a))
         }
@@ -487,18 +476,6 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
                 || minors.iter().any(|m| has_ind_occurrence(decl, m))
                 || has_ind_occurrence(decl, major)
         }
-        // A declaration expression evaluates to the same type former as
-        // `Exp::InductiveType(d, [])` (see `eval`'s `Exp::Inductive`
-        // arm), so a reference to `decl` in this form IS an occurrence.
-        // Also scan the embedded declaration's constructor types: a
-        // different declaration nested in argument position may itself
-        // reference `decl`. (Self-reference stubs carry empty `ctors`,
-        // and the iri short-circuit fires first for the decl itself, so
-        // this cannot recurse unboundedly.)
-        Exp::Inductive(d) => {
-            d.iri == decl.iri || d.ctors.iter().any(|c| has_ind_occurrence(decl, &c.typ))
-        }
-
         // D78 §1 — a record's field types are subterms; any occurrence in one
         // counts, the same as under a Π or Σ.
         // D76 Phase B1 — a `Const` naming this inductive is a recursive
@@ -604,7 +581,7 @@ mod tests {
     #[test]
     fn accepts_nat() {
         let s = self_ref("Nat");
-        let nat_ty = Exp::InductiveType(s, Vec::new());
+        let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
@@ -628,7 +605,8 @@ mod tests {
     #[test]
     fn accepts_list() {
         let s = self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
@@ -668,7 +646,7 @@ mod tests {
     #[test]
     fn accepts_bool_zero_arity() {
         let s = self_ref("Bool");
-        let bool_ty = Exp::InductiveType(s, Vec::new());
+        let bool_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
@@ -693,7 +671,7 @@ mod tests {
     fn rejects_negative_occurrence() {
         // Bad : (Bad → Nat) → Bad
         let s = self_ref("Bad");
-        let bad_ty = Exp::InductiveType(s, Vec::new());
+        let bad_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Bad").unwrap(),
@@ -739,7 +717,7 @@ mod tests {
     fn accepts_higher_order_positive() {
         // Foo : (Nat → Foo) → Foo  — Foo only in the codomain
         let s = self_ref("Foo");
-        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
@@ -786,7 +764,7 @@ mod tests {
     fn rejects_negative_occurrence_in_the_same_shape() {
         // Foo : (Foo → Nat) → Foo  — Foo in the DOMAIN
         let s = self_ref("Foo");
-        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
@@ -819,8 +797,8 @@ mod tests {
         // Tree : List(Tree) → Tree
         let tree_self = self_ref("Tree");
         let list_self = self_ref("List");
-        let tree_ty = Exp::InductiveType(tree_self, Vec::new());
-        let nested = Exp::InductiveType(list_self, vec![tree_ty.clone()]);
+        let tree_ty = Exp::const_applied(tree_self.iri.clone(), Vec::new(), Vec::new());
+        let nested = Exp::const_applied(list_self.iri.clone(), Vec::new(), vec![tree_ty.clone()]);
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
@@ -869,8 +847,9 @@ mod tests {
     fn rejects_param_mismatch_in_recursive_arg() {
         // P(A : Set) { mk : P(1) → P(A) }
         let s = self_ref("P");
-        let rec_occ_wrong_param = Exp::InductiveType(s.clone(), vec![Exp::One]);
-        let conclusion = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let rec_occ_wrong_param = Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::One]);
+        let conclusion =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:P").unwrap(),
             name: "P".to_string(),
@@ -894,24 +873,22 @@ mod tests {
         assert!(err.contains("parameters through unchanged"), "got: {err}");
     }
 
-    /// Closes finding F-1 (port-fidelity analysis,
-    /// docs/notes/nbe-reorganization-analysis.md §4): `Exp::Inductive(d)`
-    /// evaluates to the same `Val::InductiveType` as
-    /// `Exp::InductiveType(d, [])` (eval.rs `Exp::Inductive` arm), so
-    /// `has_ind_occurrence` treats it as an occurrence — a negative
-    /// occurrence written in the `Exp::Inductive` form no longer evades
-    /// the checker.
+    /// **Retired premise, D76 Phase B.** This closed finding F-1 (port-fidelity
+    /// analysis, `docs/notes/nbe-reorganization-analysis.md` §4): `Exp::Inductive(d)`
+    /// evaluated to the same `Val::InductiveType` as `Exp::InductiveType(d, [])`, so
+    /// a negative occurrence written in the first form evaded the checker until
+    /// `has_ind_occurrence` learned to treat it as an occurrence.
+    ///
+    /// **The second spelling no longer exists** — one `Const` names a type former,
+    /// applied or not — so the disguise is not expressible and the finding is closed
+    /// by construction rather than by a scan. The test stays as the direct
+    /// assertion: a negative occurrence is rejected.
     #[test]
     fn rejects_disguised_inductive_negative_occurrence() {
-        // Neg { mk : (Neg → 1) → Neg } with the negative `Neg` written
-        // as `Exp::Inductive(stub)` instead of `Exp::InductiveType`.
+        // Neg { mk : (Neg → 1) → Neg }, the negative `Neg` in a Π domain.
         let s = self_ref("Neg");
-        let neg_ty = Exp::InductiveType(s.clone(), Vec::new());
-        let disguised_negative = Exp::Pi(
-            Patt::Unit,
-            Box::new(Exp::Inductive(s)), // ← same type former, non-canonical spelling
-            Box::new(Exp::One),
-        );
+        let neg_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
+        let disguised_negative = Exp::Pi(Patt::Unit, Box::new(neg_ty.clone()), Box::new(Exp::One));
         let decl = InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Neg").unwrap(),
             name: "Neg".to_string(),
@@ -923,9 +900,6 @@ mod tests {
                 typ: Exp::Pi(Patt::Unit, Box::new(disguised_negative), Box::new(neg_ty)),
             }],
         };
-        // The canonical-form spelling of the same declaration is
-        // rejected by `rejects_negative_occurrence` above; the
-        // disguised spelling must be too.
         let err = check_positivity(&decl).expect_err("disguised negative occurrence");
         assert!(err.contains("non-positive"), "got: {err}");
     }
@@ -1101,7 +1075,7 @@ mod mutual_positivity_gap {
         })
     }
     fn ty(name: &str) -> Exp {
-        Exp::InductiveType(stub(name), Vec::new())
+        Exp::const_applied(stub(name).iri.clone(), Vec::new(), Vec::new())
     }
     fn decl(name: &str, ctors: Vec<InductiveCtorDecl>) -> InductiveDecl {
         InductiveDecl {
@@ -1290,7 +1264,7 @@ mod level_slot {
 
     #[test]
     fn the_fused_form_has_nowhere_to_put_a_level_but_inside_the_declaration() {
-        // `Exp::InductiveType(decl, args)` has two slots: a declaration and
+        // `Exp::const_applied(decl.iri.clone(), Vec::new(), args)` has two slots: a declaration and
         // value arguments. A *level* argument is neither, so instantiating
         // `List.{0}` and `List.{1}` can only differ inside the declaration —
         // and declaration identity is the IRI, which does not see it.

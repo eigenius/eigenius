@@ -328,10 +328,10 @@ fn compound_shape_label(sem: &Exp) -> String {
 }
 
 fn flatten_and<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
-    if let Exp::InductiveType(decl, args) = e {
-        if decl.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
-            flatten_and(&args[0], out);
-            flatten_and(&args[1], out);
+    if let Some((iri, _, args)) = e.as_const_spine() {
+        if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
+            flatten_and(args[0], out);
+            flatten_and(args[1], out);
             return;
         }
     }

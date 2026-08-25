@@ -1584,7 +1584,7 @@ fn beta_normalize(e: &Exp) -> Exp {
             }
             Exp::Pair(a, b) => vec![a, b],
             Exp::Fst(a) | Exp::Snd(a) | Exp::Ann(a, _) => vec![a],
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            Exp::InductiveCtor(_, _, args) => args.iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -1635,10 +1635,6 @@ fn beta_normalize(e: &Exp) -> Exp {
             Exp::Fst(a) => Exp::Fst(Box::new(subst(a, name, arg))),
             Exp::Snd(a) => Exp::Snd(Box::new(subst(a, name, arg))),
             Exp::Ann(a, t) => Exp::Ann(Box::new(subst(a, name, arg)), t.clone()),
-            Exp::InductiveType(d, args) => Exp::InductiveType(
-                d.clone(),
-                args.iter().map(|x| subst(x, name, arg)).collect(),
-            ),
             Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
                 d.clone(),
                 n.clone(),
@@ -1678,9 +1674,6 @@ fn beta_normalize(e: &Exp) -> Exp {
         Exp::Pair(a, b) => Exp::Pair(Box::new(beta_normalize(a)), Box::new(beta_normalize(b))),
         Exp::Fst(a) => Exp::Fst(Box::new(beta_normalize(a))),
         Exp::Snd(a) => Exp::Snd(Box::new(beta_normalize(a))),
-        Exp::InductiveType(d, args) => {
-            Exp::InductiveType(d.clone(), args.iter().map(beta_normalize).collect())
-        }
         Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
             d.clone(),
             n.clone(),
@@ -1690,29 +1683,25 @@ fn beta_normalize(e: &Exp) -> Exp {
     }
 }
 
-fn conjoin_canonical(
-    and: &Arc<crate::nbe::term::InductiveDecl>,
-    p_body: &Exp,
-    new_restr: Exp,
-) -> Exp {
+fn conjoin_canonical(and: &crate::ontology::iri::Iri, p_body: &Exp, new_restr: Exp) -> Exp {
     fn flatten(and_iri: &str, e: &Exp, out: &mut Vec<Exp>) {
-        if let Exp::InductiveType(decl, args) = e {
-            if decl.iri.as_str() == and_iri && args.len() == 2 {
-                flatten(and_iri, &args[0], out);
-                flatten(and_iri, &args[1], out);
+        if let Some((iri, _, args)) = e.as_const_spine() {
+            if iri.as_str() == and_iri && args.len() == 2 {
+                flatten(and_iri, args[0], out);
+                flatten(and_iri, args[1], out);
                 return;
             }
         }
         out.push(e.clone());
     }
     let mut conjuncts = Vec::new();
-    flatten(and.iri.as_str(), p_body, &mut conjuncts);
+    flatten(and.as_str(), p_body, &mut conjuncts);
     conjuncts.push(new_restr);
     conjuncts.sort_by_cached_key(restrictor_key);
     let mut it = conjuncts.into_iter();
     let mut acc = it.next().expect("conjoin_canonical: at least one conjunct");
     for c in it {
-        acc = Exp::InductiveType(and.clone(), vec![acc, c]);
+        acc = Exp::const_applied(and.clone(), Vec::new(), vec![acc, c]);
     }
     acc
 }
@@ -1735,11 +1724,10 @@ fn refine_conjoin(
 ) -> Item {
     let sigma = match c {
         Exp::Sig(Patt::Var(bx), base, p_body)
-            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                .is_some() =>
+            if super::super::category::inductive_iri(layer, "urn:eigenius:logic:And").is_some() =>
         {
             let and =
-                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
+                super::super::category::inductive_iri(layer, "urn:eigenius:logic:And").unwrap();
             Exp::Sig(
                 Patt::Var(bx.clone()),
                 base.clone(),
@@ -1809,10 +1797,10 @@ pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
         return false;
     };
     fn flatten_and<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
-        if let Exp::InductiveType(decl, args) = e {
-            if decl.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
-                flatten_and(&args[0], out);
-                flatten_and(&args[1], out);
+        if let Some((iri, _, args)) = e.as_const_spine() {
+            if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
+                flatten_and(args[0], out);
+                flatten_and(args[1], out);
                 return;
             }
         }
@@ -1864,9 +1852,7 @@ pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
                 mentions_verb_frame(a) || mentions_verb_frame(b)
             }
             Exp::Fst(a) | Exp::Snd(a) => mentions_verb_frame(a),
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-                args.iter().any(mentions_verb_frame)
-            }
+            Exp::InductiveCtor(_, _, args) => args.iter().any(mentions_verb_frame),
             _ => false,
         }
     }
@@ -2586,15 +2572,10 @@ mod dispatch_tests {
 
     /// A minimal `logic:And` declaration — the bare test `layer()` does not load `logic`, so build the
     /// decl directly (as the forest tests do) to exercise `conjoin_canonical`.
-    fn and_decl() -> Arc<crate::nbe::term::InductiveDecl> {
-        Arc::new(crate::nbe::term::InductiveDecl {
-            iri: Iri::parse("urn:eigenius:logic:And").unwrap(),
-            name: "And".to_string(),
-            params: Vec::new(),
-            indices: Vec::new(),
-            sort: Exp::sort(0),
-            ctors: Vec::new(),
-        })
+    /// D76 Phase B — the connective's IRI is all `conjoin_canonical` needs. This
+    /// built a whole declaration to name one.
+    fn and_decl() -> Iri {
+        Iri::parse("urn:eigenius:logic:And").unwrap()
     }
 
     #[test]
@@ -2635,12 +2616,12 @@ mod dispatch_tests {
         // It is a FLAT left-nested And of 3 conjuncts (top And whose left operand is also an And),
         // not a nested Σ-over-Σ.
         let is_and = |e: &Exp| {
-            matches!(e,
-            Exp::InductiveType(d, args) if d.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2)
+            matches!(e.as_const_spine(),
+            Some((iri, _, args)) if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2)
         };
-        match &order1 {
-            Exp::InductiveType(_, args) if is_and(&order1) => {
-                assert!(is_and(&args[0]), "left-nested flat And of 3 conjuncts");
+        match order1.as_const_spine() {
+            Some((_, _, args)) if is_and(&order1) => {
+                assert!(is_and(args[0]), "left-nested flat And of 3 conjuncts");
             }
             _ => panic!("expected a top-level And, got {}", pretty_term(&order1)),
         }

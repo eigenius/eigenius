@@ -21,8 +21,10 @@
 //! only one, and this rule is not a positivity rule. It is the edge from the commit path to the
 //! kernel's declaration gate.
 //!
-//! **The gate already existed and was unreachable from here.** `check_type`'s `Exp::Inductive` arm
-//! is where a declaration is admitted, and `Exp::Inductive(` is constructed nowhere in
+//! **The gate already existed and was unreachable from here.** Admission is
+//! [`check_inductive_declaration`](crate::nbe::check::check_inductive_declaration)
+//! — until D76 Phase B an arm of `check_type` reached through `Exp::Inductive`,
+//! which was constructed nowhere in
 //! `kernel/src/esl/compile.rs` — a `data` declaration written in ESL becomes a resource carrying
 //! `core:type_params` / `core:ctors`, so nothing in the commit path ever called it. That is why
 //! eigenius#92's probe reported zero errors from `Validator::validate()` while the probe's own
@@ -86,8 +88,7 @@ impl Validator {
             Vec::new(),
             std::sync::Arc::clone(&self.layer),
         );
-        let decl_exp = crate::nbe::term::Exp::Inductive(decl);
-        match crate::nbe::check::check_type(&mut ctx, &decl_exp) {
+        match crate::nbe::check::check_inductive_declaration(&mut ctx, &decl) {
             Ok(()) => vec![],
             Err(e) => vec![ValidationError {
                 resource_id: res_id.clone(),

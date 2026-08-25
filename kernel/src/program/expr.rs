@@ -140,12 +140,12 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 Ok(Exp::Pi(Patt::Unit, Box::new(dom_exp), Box::new(cod_exp)))
             } else if is_a.iter().any(|s| s == wk::INDUCTIVE_ARG_TYPE) {
                 // Parametric type — e.g., `Option<Patient>`. Mirrors
-                // `decode_arg_type` in `program::ground` but without
-                // the self-reference machinery (D37 type-resources
-                // don't self-reference). Emit `Exp::InductiveType`
-                // directly with a name-only stub decl and recursively-
-                // decoded args; the type checker resolves the stub
-                // by name at use time.
+                // `decode_arg_type` in `program::ground` but without the
+                // self-reference machinery (D37 type-resources don't
+                // self-reference). Emit the NAME applied to recursively-decoded
+                // args (D76 Phase B); the type checker resolves it through
+                // `Γ_env` at use time. This built a name-only stub declaration
+                // for the same purpose.
                 // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188); the referenced type
                 // is its head. Shares `arg_type_head` with `program::ground`'s two readers.
                 let type_name = crate::program::ground::arg_type_head(r)?;
@@ -173,23 +173,14 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                     let val = resolve_class_type(&class_iri, layer)?;
                     return Ok(crate::nbe::readback::readback_val(0, &val));
                 }
-                let name_of_iri = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
-                    Some(Value::String(s)) => s.clone(),
-                    _ => class_iri.local_name().to_string(),
-                };
-                let stub = Arc::new(InductiveDecl {
-                    iri: class_iri.clone(),
-                    name: name_of_iri,
-                    params: Vec::new(),
-                    indices: Vec::new(),
-                    sort: Exp::sort(1),
-                    ctors: Vec::new(),
-                });
+                // D76 Phase B — the name, applied. This built a stub declaration
+                // (empty params/indices/ctors, `short_name` for a label) purely to
+                // have something to put in the fused node's declaration slot.
                 let sub_args: Result<Vec<Exp>, String> = type_args_arr
                     .iter()
                     .map(|a| decode_program_type(a, layer))
                     .collect();
-                Ok(Exp::InductiveType(stub, sub_args?))
+                Ok(Exp::const_applied(class_iri.clone(), Vec::new(), sub_args?))
             } else {
                 Err(format!(
                     "decode_program_type: unrecognised embedded type-resource shape with is_a={is_a:?}"
@@ -843,7 +834,7 @@ fn recursive_arg_count(decl: &InductiveDecl, ctor_typ: &Exp) -> usize {
     while let Exp::Pi(_, dom, body) = current {
         if params_to_skip > 0 {
             params_to_skip -= 1;
-        } else if matches!(dom.as_ref(), Exp::InductiveType(d, _) if d.name == decl.name) {
+        } else if matches!(dom.as_ref().as_const_spine(), Some((iri, _, _)) if *iri == decl.iri) {
             count += 1;
         }
         current = body;

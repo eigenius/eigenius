@@ -55,10 +55,10 @@ pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
         Exp::Snd(e) => Exp::Snd(Box::new(go(e))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(e, t) => Exp::Ann(Box::new(go(e)), Box::new(go(t))),
-        // Inductive nodes (e.g. `logic:And(P, Q)` as an `InductiveType`) carry subterms too — a
-        // fronted-participial conjunct nests the anaphor inside an `And`, so the freshener must
-        // descend into them (else the hole stays an unfreshened closed constant).
-        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
+        // Constructor nodes carry subterms too, so the freshener must descend into
+        // them (else the hole stays an unfreshened closed constant). An inductive
+        // *type* application — `logic:And(P, Q)` — is an `App` spine since D76
+        // Phase B and is covered by the `App` arm above.
         Exp::InductiveCtor(d, n, args) => {
             Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
         }
@@ -110,9 +110,6 @@ pub(super) fn freshen_anaphor_of(exp: &Exp) -> (Exp, Vec<(String, Exp)>) {
             Exp::Snd(x) => Exp::Snd(Box::new(walk(x, holes))),
             Exp::Pair(a, b) => Exp::Pair(Box::new(walk(a, holes)), Box::new(walk(b, holes))),
             Exp::Ann(x, t) => Exp::Ann(Box::new(walk(x, holes)), Box::new(walk(t, holes))),
-            Exp::InductiveType(d, args) => {
-                Exp::InductiveType(d.clone(), args.iter().map(|x| walk(x, holes)).collect())
-            }
             Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
                 d.clone(),
                 n.clone(),

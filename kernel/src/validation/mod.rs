@@ -1351,9 +1351,7 @@ fn first_beta_redex(e: &crate::nbe::term::Exp) -> Option<String> {
         Exp::Ann(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
             first_beta_redex(a).or_else(|| first_beta_redex(b))
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().find_map(first_beta_redex)
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().find_map(first_beta_redex),
         _ => None,
     }
 }

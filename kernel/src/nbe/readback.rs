@@ -172,16 +172,22 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         }
 
         // Inductive types (Phase 11b, D19; D48 indices).
-        // The `Exp::InductiveType` args slot carries `params ++ indices`,
-        // split on the decoder side by `decl.params.len()` (D48 Phase B).
+        // The reference's `App` spine carries `params ++ indices`, split on the
+        // decoder side by `decl.params.len()` (D48 Phase B).
         // For non-indexed declarations (`decl.indices` empty), this is
         // equivalent to the pre-D48 behaviour.
         Val::InductiveType {
             decl,
             params,
             indices,
-        } => Exp::InductiveType(
-            decl.clone(),
+        } => Exp::const_applied(
+            decl.iri.clone(),
+            // **Levels are not carried yet.** `Val::InductiveType` has no level
+            // slot, so a polymorphic instantiation would be lost here — the same
+            // gap `Neut::Const` had before this phase, and E2's to close when
+            // declarations gain `uparams`. Empty is exact today: nothing produces
+            // a non-empty level list.
+            Vec::new(),
             params
                 .iter()
                 .chain(indices.iter())

@@ -289,19 +289,23 @@ pub(crate) fn eval_impl<T: Tracer>(
         // treatment `EigonClass` and `EigonAxiom` get, and what lets a
         // declaration's own constructor types mention it before it is committed.
         Exp::Const(iri, levels) => {
-            let resolved = ctx.layer().and_then(|layer| {
-                match crate::nbe::env_global::Env::of(std::sync::Arc::clone(layer)).lookup(iri) {
-                    crate::nbe::env_global::Global::Inductive(decl) => Some(Val::InductiveType {
-                        decl,
-                        params: Vec::new(),
-                        indices: Vec::new(),
-                    }),
-                    crate::nbe::env_global::Global::Definition(v) => Some(v),
-                    crate::nbe::env_global::Global::Constraint(_)
-                    | crate::nbe::env_global::Global::Axiom
-                    | crate::nbe::env_global::Global::Absent => None,
-                }
-            });
+            // Through the context's OWN environment. This rebuilt one from
+            // `ctx.layer()`, which discards everything the environment knows that a
+            // layer does not — the intrinsic declarations, and any declaration in
+            // progress (`Env::declaring`). A name it could not find degrades to a
+            // neutral, so the loss was silent: `Nat.zero` inferred as
+            // `Nt(Const(Nat))` instead of its inductive type.
+            let resolved = match ctx.env().lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(decl) => Some(Val::InductiveType {
+                    decl,
+                    params: Vec::new(),
+                    indices: Vec::new(),
+                }),
+                crate::nbe::env_global::Global::Definition(v) => Some(v),
+                crate::nbe::env_global::Global::Constraint(_)
+                | crate::nbe::env_global::Global::Axiom
+                | crate::nbe::env_global::Global::Absent => None,
+            };
             Ok((
                 resolved.unwrap_or_else(|| {
                     Val::Nt(crate::nbe::val::Neut::Const(iri.clone(), levels.clone()))
@@ -665,71 +669,11 @@ pub(crate) fn eval_impl<T: Tracer>(
         // Step 1 lands the AST and value shells; Step 2 will add iota
         // reduction for the recursor. Pre-D48 callers always have
         // `indices: Vec::new()` (non-indexed default).
-        Exp::Inductive(decl) => Ok((
-            Val::InductiveType {
-                decl: decl.clone(),
-                params: Vec::new(),
-                indices: Vec::new(),
-            },
-            T::leaf(),
-        )),
-        Exp::InductiveType(decl, args) => {
-            // D48: `Exp::InductiveType(decl, args)` carries `params ++ indices`
-            // — `decl.params.len()` parameters followed by `decl.indices.len()`
-            // index expressions. For pre-D48 (non-indexed) decls, `indices`
-            // is empty and `args` equals the parameter prefix.
-            //
-            // The kernel uses "stub" InductiveDecls inside ctor type
-            // bodies (self-references with empty `params` / `ctors`,
-            // see `term.rs` around `InductiveDecl::PartialEq` — name-
-            // based equality). Stubs are detected by `decl.indices`
-            // being empty; for those we preserve the pre-D48 behaviour
-            // (all args treated as params, no arity check) so the
-            // stub-Arc pattern keeps working. Genuine indexed decls
-            // (`decl.indices` non-empty) get the strict split.
-            let mut vals = Vec::with_capacity(args.len());
-            let mut nodes = Vec::with_capacity(args.len());
-            for a in args {
-                let (v, n) = ev(a)?;
-                vals.push(v);
-                nodes.push(n);
-            }
-            let node = T::combine(nodes);
-            if decl.indices.is_empty() {
-                Ok((
-                    Val::InductiveType {
-                        decl: decl.clone(),
-                        params: vals,
-                        indices: Vec::new(),
-                    },
-                    node,
-                ))
-            } else {
-                let n_params = decl.params.len();
-                let n_indices = decl.indices.len();
-                let expected = n_params + n_indices;
-                if vals.len() != expected {
-                    return Err(EvalError::InvalidCaseTarget(format!(
-                        "indexed InductiveType `{}`: expected {} arg(s) \
-                         (params + indices: {} + {}), got {}",
-                        decl.name,
-                        expected,
-                        n_params,
-                        n_indices,
-                        vals.len()
-                    )));
-                }
-                let indices = vals.split_off(n_params);
-                Ok((
-                    Val::InductiveType {
-                        decl: decl.clone(),
-                        params: vals,
-                        indices,
-                    },
-                    node,
-                ))
-            }
-        }
+        // D76 Phase B — `Exp::Inductive` and `Exp::InductiveType` are gone. A
+        // reference evaluates through the `Const` arm above, which resolves it in
+        // `Γ_env`; its arguments fold on one at a time through `App`, whose
+        // `Val::InductiveType` case in `Val::app_impl` performs the
+        // `params ++ indices` split this arm did in one step.
         Exp::InductiveCtor(decl, ctor_name, args) => {
             let mut vals = Vec::with_capacity(args.len());
             let mut nodes = Vec::with_capacity(args.len());

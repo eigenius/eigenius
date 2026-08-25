@@ -118,6 +118,14 @@ impl CheckCtx {
         }
     }
 
+    /// This context with one more declaration in scope — a declaration being
+    /// checked is in scope for its own constructor types (D76 Phase B,
+    /// [`Env::declaring`](crate::nbe::env_global::Env::declaring)).
+    pub fn declaring(mut self, decl: std::sync::Arc<crate::nbe::term::InductiveDecl>) -> Self {
+        self.env = self.env.declaring(decl);
+        self
+    }
+
     /// Attach a institution index and runtime for check-time
     /// dispatch of `Constraint::Institution` predicates through
     /// `try_institution_decide` (D14 §9.2).
@@ -301,11 +309,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // (D48 Phase B) — verifies each ctor's terminal application has
         // the right `params ++ indices` shape and each index expression
         // type-checks against its declared telescope type.
-        Exp::Inductive(decl) => {
-            check_inductive_decl_telescopes(ctx, decl)?;
-            crate::nbe::positivity::check_positivity(decl)?;
-            validate_indexed_ctor_conclusions(ctx, decl)
-        }
+
         // An APPLIED inductive type. The DECL's validity is established once (at ingest, by the
         // ground resolver, plus `Exp::Inductive` above); its ARGUMENTS are supplied afresh at every
         // use site, so decl validity says nothing about them and they must be checked here.
@@ -325,7 +329,24 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // Closing the leak turned that into a `grammar-gap`, which is exactly what it always was: a
         // sentence whose only readings were ill-typed. The coordination rule now uses POINTWISE
         // conjunction (`λk. And(f(k), g(k))`), so `And` receives `Prop`s and the terms type-check.
-        Exp::InductiveType(decl, args) => check_inductive_type_args(ctx, decl, args),
+        // The node is gone but the rule stays (D76 Phase B): this arm recovers the
+        // declaration from `Γ_env` rather than reading it out of the term. A name
+        // the environment cannot resolve falls through to the general rule below,
+        // which infers its type and demands a sort — so an unresolvable name is
+        // rejected rather than silently admitted.
+        e if e.as_const_spine().is_some() => {
+            let (iri, _levels, args) = e.as_const_spine().expect("just matched");
+            match ctx.env.lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(decl) => {
+                    let owned: Vec<Exp> = args.into_iter().cloned().collect();
+                    check_inductive_type_args(ctx, &decl, &owned)
+                }
+                // A class is a type, as `EigonClass` is above. A postulate or a
+                // definition is checked by inferring its type.
+                crate::nbe::env_global::Global::Constraint(_) => Ok(()),
+                _ => ensure_infers_as_sort(ctx, e).map(|_| ()),
+            }
+        }
 
         // "Is a type" means the INFERRED type is a sort — any sort. Port of `ensure_sort`
         // (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`), which `check_declar_info` (`:165`)
@@ -341,6 +362,28 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // derive removed earlier in eigenius#188: a universe comparison written as a constant.
         a => ensure_infers_as_sort(ctx, a).map(|_| ()),
     }
+}
+
+/// **Admit an inductive declaration.** Telescopes well-formed, strictly positive,
+/// and every constructor's conclusion of the right `params ++ indices` shape.
+///
+/// D76 Phase B: this was an arm of [`check_type`] reached through
+/// `Exp::Inductive(decl)` — a declaration wrapped in an expression so the
+/// expression checker could dispatch on it. A declaration is not an expression,
+/// and the wrapper had a second cost: `Exp::Inductive(d)` evaluated to the same
+/// value as `Exp::const_applied(d.iri.clone(), Vec::new(), [])`, so it was also a second spelling of a
+/// *reference*, and a negative occurrence written that way once evaded positivity
+/// checking (`positivity::rejects_disguised_inductive_negative_occurrence`).
+///
+/// nanoda splits the same way: `check_inductive_declar` takes the declaration
+/// (`references/nanoda_lib/src/inductive.rs`), while `infer` handles expressions.
+pub fn check_inductive_declaration(
+    ctx: &mut CheckCtx,
+    decl: &std::sync::Arc<crate::nbe::term::InductiveDecl>,
+) -> Result<(), CheckError> {
+    check_inductive_decl_telescopes(ctx, decl)?;
+    crate::nbe::positivity::check_positivity(decl)?;
+    validate_indexed_ctor_conclusions(ctx, decl)
 }
 
 /// The LEVEL of the sort an expression inhabits, or an error if it does not inhabit a sort — i.e.
@@ -390,6 +433,30 @@ fn check_inductive_type_args(
     decl: &std::sync::Arc<crate::nbe::term::InductiveDecl>,
     args: &[Exp],
 ) -> Result<(), CheckError> {
+    // **Under-application, D76 Phase B.** For an INDEXED declaration, `eval`'s fused
+    // arm used to reject an argument vector that was not exactly `params ++ indices`
+    // long. De-fused, arguments arrive one at a time and a partial application is an
+    // ordinary intermediate value, so eval has no point at which it knows no more are
+    // coming — which would have dropped the check entirely. It moves here, unchanged
+    // in what it accepts.
+    //
+    // Scoped to indexed declarations, deliberately: every un-indexed one still takes
+    // the lenient path the stub-shaped `indices.is_empty()` test selected, because
+    // turning that off is B2's verdict-affecting change and runs the #194/#92
+    // protocol first.
+    if !decl.indices.is_empty() {
+        let expected = decl.params.len() + decl.indices.len();
+        if args.len() != expected {
+            return Err(CheckError::IllFormed(format!(
+                "indexed inductive `{}`: expected {expected} argument(s) \
+                 (params + indices: {} + {}), got {}",
+                decl.name,
+                decl.params.len(),
+                decl.indices.len(),
+                args.len()
+            )));
+        }
+    }
     let mut rho = ctx.rho.clone();
     for ((patt, ty), arg) in decl
         .params
@@ -773,6 +840,38 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             Ok(t_val)
         }
 
+        // A type former, applied or not — `Const(I)` and `App(Const(I), a)` alike
+        // (D76 Phase B). Its type is the declaration's `sort`, recovered from
+        // `Γ_env`.
+        //
+        // **Before the `App` arm, necessarily.** `App` infers its head and demands a
+        // Π of it; a type former's inferred type is a *sort*, so an applied former
+        // reaching that arm fails with `expected Pi type, got Sort(Zero)` — which is
+        // how the whole core ontology stopped loading when this sat after `App`. The
+        // guard tests the spine head, so an ordinary application whose head is not an
+        // inductive name falls through untouched.
+        //
+        // nanoda has no such arm: there a type former is a `Const` whose type is the
+        // Π-telescope `Π(params)(indices). Sort l`, so `infer_app` walks it and the
+        // ORDINARY application rule checks the arguments. Adopting that deletes
+        // `check_inductive_type_args` — and it is exactly B2's change, since the
+        // ordinary rule checks arity where the fused node's rule did not.
+        e if e.as_const_spine().is_some_and(|(iri, _, _)| {
+            matches!(
+                ctx.env.lookup(iri),
+                crate::nbe::env_global::Global::Inductive(_)
+            )
+        }) =>
+        {
+            let (iri, _, _) = e.as_const_spine().expect("just matched");
+            let crate::nbe::env_global::Global::Inductive(decl) = ctx.env.lookup(iri) else {
+                unreachable!("guarded above")
+            };
+            check_type(ctx, exp)?;
+            let sort = decl.sort.clone();
+            let rho = ctx.rho.clone();
+            ctx.eval(&sort, &rho).map_err(CheckError::from)
+        }
         Exp::App(e1, e2) => {
             let t1 = check_infer(ctx, e1)?;
             let (t, g) = ext_pi(&t1)?;
@@ -1032,8 +1131,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // Inductive types (Phase 11b, D19). Universe inference per D46:
         // an inductive declared with `sort = Sort(0)` is in Prop; otherwise
         // its declared sort applies. Handled below alongside other type-
-        // formers — see the `Exp::Inductive(decl)` / `Exp::InductiveType`
-        // arms in the universe-inference section.
+        // formers — see the `Const`-spine arm in the universe-inference section.
 
         // Constructor application — inference works when the inductive
         // has no parameters (the result type is fully determined).
@@ -1173,14 +1271,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitBool(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Boolean,
         )),
-        Exp::Inductive(decl) => {
-            check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
-        }
-        Exp::InductiveType(decl, _) => {
-            check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
-        }
 
         e => Err(CheckError::CannotInfer(format!(
             "cannot infer type of: {e:?}"
@@ -1483,16 +1573,17 @@ mod tests {
     // discarded. They now fall through to `check_by_inference`, which compares under `subtype_of`.
     // These four tests pin both directions of that comparison.
 
-    /// A declaration-carrying inductive at the given sort, with no constructors.
-    fn ind_at(name: &str, sort: usize) -> Exp {
-        Exp::Inductive(std::sync::Arc::new(crate::nbe::term::InductiveDecl {
-            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
-            name: name.to_string(),
-            params: Vec::new(),
-            indices: Vec::new(),
-            sort: Exp::sort(sort),
-            ctors: Vec::new(),
-        }))
+    /// A reference to an inductive declared at the given sort, together with a
+    /// context whose environment holds the declaration.
+    ///
+    /// D76 Phase B: the former names its declaration instead of carrying it, so
+    /// these tests need an environment. That is the property under test, not
+    /// scaffolding — `check_infer`'s `Const` arm reads `decl.sort` from `Γ_env`,
+    /// and if it could not find it the universe comparison would have nothing to
+    /// compare.
+    fn ind_at(name: &str, sort: usize) -> (CheckCtx, Exp) {
+        let (c, refs) = crate::nbe::check::testutil::ctx_declaring(&[(name, sort)]);
+        (c, refs.into_iter().next().expect("one declaration"))
     }
 
     /// `data D : Set` standing where a proposition is expected. `JustifiedBy(j, P)`,
@@ -1500,7 +1591,8 @@ mod tests {
     /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
     #[test]
     fn a_set_level_inductive_does_not_inhabit_prop() {
-        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::sort(0))
+        let (mut c, set_level) = ind_at("SetLevel", 1);
+        check(&mut c, &set_level, &Val::sort(0))
             .expect_err("`data D : Set` must not check against `Prop`");
     }
 
@@ -1511,11 +1603,12 @@ mod tests {
     /// them.
     #[test]
     fn a_prop_level_inductive_still_inhabits_set_and_above() {
-        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::sort(1))
+        let (mut c, prop_level) = ind_at("PropLevel", 0);
+        check(&mut c, &prop_level, &Val::sort(1))
             .expect("`data D : Prop` inhabits `Set` by cumulativity");
-        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::sort(2))
-            .expect("...and every universe above it");
-        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::sort(2))
+        check(&mut c, &prop_level, &Val::sort(2)).expect("...and every universe above it");
+        let (mut c2, set_level) = ind_at("SetLevel", 1);
+        check(&mut c2, &set_level, &Val::sort(2))
             .expect("`data D : Set` inhabits `Type 1` — the other three probe hits");
     }
 
@@ -1524,16 +1617,16 @@ mod tests {
     /// arm re-added above `check_by_inference` would break this before it broke a chain.
     #[test]
     fn check_and_infer_agree_on_type_former_universes() {
-        for (exp, label) in [
+        for ((mut c, exp), label) in [
             (ind_at("P", 0), "inductive at Prop"),
             (ind_at("S", 1), "inductive at Set"),
         ] {
-            let inferred = match check_infer(&mut ctx(), &exp).expect("inferable") {
+            let inferred = match check_infer(&mut c, &exp).expect("inferable") {
                 Val::Sort(k) => k,
                 other => panic!("{label}: expected a sort, got {other:?}"),
             };
             for m in 0..4usize {
-                let checked = check(&mut ctx(), &exp, &Val::sort(m)).is_ok();
+                let checked = check(&mut c, &exp, &Val::sort(m)).is_ok();
                 let cumulative = inferred.leq(&crate::nbe::level::Level::of_nat(m));
                 assert_eq!(
                     checked, cumulative,
@@ -3220,8 +3313,11 @@ mod tests {
             ctors: Vec::new(),
         });
         // `SimpleVec A ()` — the conclusion shape used by both ctors.
-        let vec_a_unit =
-            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
@@ -3268,7 +3364,9 @@ mod tests {
         // Vec-like indexed decl whose ctors produce the correctly-shaped
         // conclusion (`SimpleVec A ()`). Phase B validator accepts.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         let result = validate_indexed_ctor_conclusions(&mut c, &decl);
         assert!(
             result.is_ok(),
@@ -3290,7 +3388,11 @@ mod tests {
             ctors: Vec::new(),
         });
         // Conclusion has only 1 arg (the param), missing the index.
-        let bad_conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string())]);
+        let bad_conclusion = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string())],
+        );
         let decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
@@ -3330,8 +3432,9 @@ mod tests {
             ctors: Vec::new(),
         });
         // The index slot has Sort(1) instead of Unit — wrong type.
-        let bad_conclusion = Exp::InductiveType(
-            self_ref.clone(),
+        let bad_conclusion = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
             vec![Exp::Var("A".to_string()), Exp::sort(1)],
         );
         let decl = Arc::new(InductiveDecl {
@@ -3364,7 +3467,7 @@ mod tests {
         // A pre-D48 (non-indexed) inductive should pass the validator
         // without any checks — backward-compat with existing decls.
         let decl = nat_decl();
-        let mut c = ctx();
+        let mut c = ctx().declaring(decl.clone());
         validate_indexed_ctor_conclusions(&mut c, &decl).unwrap();
     }
 
@@ -3373,11 +3476,8 @@ mod tests {
         // Evaluate `SimpleVec A ()` — the resulting Val::InductiveType
         // should have `params = [A]` and `indices = [Unit]`.
         let decl = simple_vec_decl();
-        let exp = Exp::InductiveType(
-            decl.clone(),
-            vec![Exp::One, Exp::Unit], // A := 1, index := ()
-        );
-        let c = ctx();
+        let exp = Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One, Exp::Unit]);
+        let c = ctx().declaring(decl.clone());
         let v = c.eval(&exp, &Rho::Nil).unwrap();
         match v {
             Val::InductiveType {
@@ -3417,8 +3517,9 @@ mod tests {
                 typ: Exp::Pi(
                     Patt::Var("u".to_string()),
                     Box::new(Exp::One),
-                    Box::new(Exp::InductiveType(
-                        self_ref.clone(),
+                    Box::new(Exp::const_applied(
+                        self_ref.iri.clone(),
+                        Vec::new(),
                         vec![Exp::Var("u".to_string())],
                     )),
                 ),
@@ -3438,7 +3539,7 @@ mod tests {
     fn infers_indexed_ctor_result_indices() {
         let decl = flag_decl();
         let exp = Exp::InductiveCtor(decl.clone(), "mk".to_string(), vec![Exp::Unit]);
-        let mut c = ctx();
+        let mut c = ctx().declaring(decl.clone());
         let ty = check_infer(&mut c, &exp).expect("an indexed ctor must be inferable");
         match ty {
             Val::InductiveType {
@@ -3456,17 +3557,43 @@ mod tests {
     }
 
     #[test]
-    fn d48_indexed_decl_eval_rejects_wrong_arg_count() {
-        // Evaluating a SimpleVec InductiveType with too few args
-        // (only the param, no index) should error.
+    fn d48_indexed_decl_under_application_is_a_value_and_the_check_catches_it() {
+        // **Behaviour moved, D76 Phase B.** This asserted that *evaluating*
+        // `SimpleVec(One)` — one argument for a `params + indices` telescope of two
+        // — errors with an arity diagnostic. Fused, the whole argument vector
+        // arrived at once and eval could count it. De-fused, arguments arrive one
+        // at a time through `App`, so a partially applied former is an ordinary
+        // intermediate value; there is no point at which eval knows no more are
+        // coming.
+        //
+        // Arity is the type checker's business, which is where nanoda puts it: a
+        // type former's type is a Π-telescope and the ordinary application rule
+        // walks it.
         let decl = simple_vec_decl();
-        let exp = Exp::InductiveType(decl, vec![Exp::One]); // missing index
-        let c = ctx();
-        let err = c.eval(&exp, &Rho::Nil).unwrap_err();
+        let exp = Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]);
+        let c = ctx().declaring(decl.clone());
+
+        // Evaluation now succeeds and yields the partially applied former.
+        match c
+            .eval(&exp, &Rho::Nil)
+            .expect("a partial application is a value")
+        {
+            Val::InductiveType {
+                params, indices, ..
+            } => {
+                assert_eq!(params.len(), 1, "the one argument filled the parameter");
+                assert!(indices.is_empty(), "the index is still missing");
+            }
+            other => panic!("expected the partially applied former, got {other:?}"),
+        }
+
+        // And checking it as a type reports the missing index.
+        let mut cc = ctx().declaring(decl);
+        let err = check_type(&mut cc, &exp).expect_err("an under-applied former is not a type");
         let msg = err.to_string();
         assert!(
-            msg.contains("indexed InductiveType `SimpleVec`") && msg.contains("expected 2"),
-            "error should describe the arity mismatch: {msg}"
+            msg.contains("SimpleVec") && msg.contains('2'),
+            "the diagnostic should name the former and its arity: {msg}"
         );
     }
 
@@ -3479,7 +3606,9 @@ mod tests {
         // `nil A : SimpleVec A ()` — nil's declared conclusion is
         // `SimpleVec A ()`, matching the expected `SimpleVec A ()`.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         // The constructor expression: nil applied to its param A := Sort(0).
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
@@ -3501,7 +3630,9 @@ mod tests {
         // A := One from the expected param) cannot subtype-match the
         // expected `SimpleVec ⟨Sort(0)⟩ ()` because Sort(0) ≠ One.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
@@ -3529,7 +3660,9 @@ mod tests {
         // Sort(1) — a synthetic distinct value) should be rejected by
         // index unification.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
         let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
@@ -3577,7 +3710,7 @@ mod tests {
             indices: vec![Val::Unit],
         };
         // Set up a CheckCtx with `v : SimpleVec Set ()` bound.
-        let c = ctx();
+        let c = ctx().declaring(decl.clone());
         let v_val = gen_val(&c.rho);
         let rho2 = c
             .rho
@@ -3590,7 +3723,7 @@ mod tests {
             &v_val,
         )
         .unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
+        let mut c2 = CheckCtx::new(rho2, gamma2).declaring(decl.clone());
 
         // match v { nil => (); cons _ _ _ => () }
         let match_exp = Exp::Match {
@@ -3644,7 +3777,7 @@ mod tests {
             &v_val,
         )
         .unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
+        let mut c2 = CheckCtx::new(rho2, gamma2).declaring(decl.clone());
 
         let match_exp = Exp::Match {
             scrutinee: Box::new(Exp::Var("v".to_string())),
@@ -3692,7 +3825,7 @@ mod tests {
             &n_val,
         )
         .unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
+        let mut c2 = CheckCtx::new(rho2, gamma2).declaring(nat.clone());
 
         let match_exp = Exp::Match {
             scrutinee: Box::new(Exp::Var("n".to_string())),
@@ -3727,7 +3860,7 @@ mod tests {
         let mut mctx = crate::nbe::unify::MetaCtx::new();
         let m_id = mctx.fresh();
         let m = Val::Nt(crate::nbe::val::Neut::Meta(m_id, Vec::new()));
-        let mut c = ctx();
+        let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
         let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
@@ -3913,7 +4046,7 @@ mod tests {
     /// **An applied inductive type must CHECK ITS PARAMETER ARGUMENTS.**
     ///
     /// `logic:And (P : Prop, Q : Prop) : Prop`, so `And(λx. …, Q)` is ill-formed — a λ is not a
-    /// `Prop`. `check_type` used to admit it unconditionally (`Exp::InductiveType(_, _) => Ok(())`),
+    /// `Prop`. `check_type` used to admit it unconditionally (`Exp::const_applied(_.iri.clone(), Vec::new(), _) => Ok(())`),
     /// trusting declaration-site validation; but a DECL is validated once while ARGUMENTS are
     /// supplied at every use site, so decl validity says nothing about them.
     ///
@@ -3949,23 +4082,29 @@ mod tests {
             sort: Exp::sort(0),
             ctors: vec![],
         };
-        let a_prop = Exp::InductiveType(std::sync::Arc::new(prop_decl), vec![]);
-        let ok = Exp::InductiveType(std::sync::Arc::new(decl.clone()), vec![a_prop]);
-        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        // D76 Phase B: both formers are named, so both declarations go in `Γ_env`.
+        let box_decl = std::sync::Arc::new(decl.clone());
+        let prop_decl = std::sync::Arc::new(prop_decl);
+        let a_prop = Exp::Const(prop_decl.iri.clone(), Vec::new());
+        let ok = Exp::const_applied(box_decl.iri.clone(), Vec::new(), vec![a_prop]);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new())
+            .declaring(box_decl.clone())
+            .declaring(prop_decl);
         assert!(
             check(&mut ctx, &ok, &Val::sort(0)).is_ok(),
             "Box(TrueP) must remain well-formed — the check must not reject valid arguments"
         );
 
         // A λ is not a Prop, so this must be REJECTED.
-        let bad = Exp::InductiveType(
-            std::sync::Arc::new(decl),
+        let bad = Exp::const_applied(
+            box_decl.iri.clone(),
+            Vec::new(),
             vec![Exp::Lam(
                 Patt::Var("k".to_string()),
                 Box::new(Exp::Var("k".to_string())),
             )],
         );
-        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(box_decl);
         assert!(
             check(&mut ctx, &bad, &Val::sort(0)).is_err(),
             "Box(λk. k) must be rejected — accepting it lets an ill-typed proposition through the \

@@ -113,14 +113,14 @@ impl Parser {
         let nf = if variants.len() == 1 {
             variants.into_iter().next().expect("len==1")
         } else {
-            let and = super::super::category::resolve_inductive(
+            let and = super::super::category::inductive_iri(
                 &self.grammar.layer,
                 "urn:eigenius:logic:And",
             )?;
             variants
                 .into_iter()
                 .rev()
-                .reduce(|acc, v| Exp::InductiveType(Arc::clone(&and), vec![v, acc]))
+                .reduce(|acc, v| Exp::const_applied(and.clone(), Vec::new(), vec![v, acc]))
                 .expect("non-empty variants")
         };
 
@@ -580,7 +580,7 @@ impl Parser {
                 self.walk_candidates(b, vb, out, seen);
             }
             Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => self.walk_candidates(b, vb, out, seen),
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+            Exp::InductiveCtor(_, _, args) => {
                 for a in args {
                     self.walk_candidates(a, vb, out, seen);
                 }
@@ -829,9 +829,7 @@ fn closed_under(e: &Exp, bound: &mut Vec<String>) -> bool {
             closed_under(a, bound) && closed_under(b, bound)
         }
         Exp::Fst(x) | Exp::Snd(x) => closed_under(x, bound),
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().all(|a| closed_under(a, bound))
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().all(|a| closed_under(a, bound)),
         _ => true,
     }
 }

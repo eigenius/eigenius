@@ -140,18 +140,43 @@ impl Drop for GlobalMemoScope {
 #[derive(Debug, Clone, Default)]
 pub struct Env {
     layer: Option<Arc<Layer>>,
+    /// Declarations in scope that the chain does not hold — nanoda's
+    /// `temp_declars` (`references/nanoda_lib/src/env.rs:221`), consulted before
+    /// the committed ones (`:259`).
+    ///
+    /// A declaration being checked is in scope for its own constructor types
+    /// before it is committed anywhere. The stub existed to paper over exactly
+    /// that: it stood in for a declaration that was not yet resolvable. Naming it
+    /// as a `Const` moves the problem to the environment, which is where it
+    /// belongs and where nanoda already solved it.
+    locals: std::collections::BTreeMap<Iri, Arc<InductiveDecl>>,
 }
 
 impl Env {
     /// The environment that knows nothing. Every lookup is
     /// [`Global::Absent`].
     pub fn empty() -> Self {
-        Self { layer: None }
+        Self {
+            layer: None,
+            locals: Default::default(),
+        }
     }
 
     /// The environment a layer chain provides.
     pub fn of(layer: Arc<Layer>) -> Self {
-        Self { layer: Some(layer) }
+        Self {
+            layer: Some(layer),
+            locals: Default::default(),
+        }
+    }
+
+    /// This environment plus one declaration the chain does not hold.
+    ///
+    /// Shadows both the chain and the intrinsics, per nanoda's ordering: a
+    /// declaration in progress is the one in scope.
+    pub fn declaring(mut self, decl: Arc<InductiveDecl>) -> Self {
+        self.locals.insert(decl.iri.clone(), decl);
+        self
     }
 
     /// The layer this environment reads, for consumers that still need it
@@ -164,7 +189,7 @@ impl Env {
     /// not branch on this, or the "emptiness is not optionality" property is
     /// lost.
     pub fn is_empty(&self) -> bool {
-        self.layer.is_none()
+        self.layer.is_none() && self.locals.is_empty()
     }
 
     /// Is `sub` a declared subclass of `sup`?
@@ -192,6 +217,9 @@ impl Env {
     /// the distinction is made today, and a lookup that classified differently
     /// would silently disagree with every already-decoded term.
     pub fn lookup(&self, iri: &Iri) -> Global {
+        if let Some(decl) = self.locals.get(iri) {
+            return Global::Inductive(Arc::clone(decl));
+        }
         let Some(layer) = self.layer.as_ref() else {
             return Self::intrinsic(iri).unwrap_or(Global::Absent);
         };
@@ -224,8 +252,9 @@ impl Env {
     /// evaluating to a neutral.
     ///
     /// Answered by *every* environment, the empty one included: these are not
-    /// chain content and cannot be shadowed, so "knows nothing" means nothing
-    /// about the chain. `core:Option` is deliberately **not** here — it *is* a
+    /// chain content, so "knows nothing" means nothing about the chain. A
+    /// declaration in progress ([`Env::declaring`]) still shadows them, per
+    /// nanoda's `temp_declars` ordering. `core:Option` is deliberately **not** here — it *is* a
     /// chain resource, and taking the kernel's copy would hide any disagreement
     /// between the two rather than surface it
     /// (`the_chain_and_the_kernel_agree_about_option`).

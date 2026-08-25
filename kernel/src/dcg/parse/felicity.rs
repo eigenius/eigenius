@@ -284,20 +284,20 @@ pub(super) fn is_finite_clause(cat: &Exp) -> bool {
 /// that reason. Reports the connective, the argument index and the binder, which with `it.prov()`
 /// beside it names the construction.
 fn conn_over_function(e: &Exp) -> Option<String> {
-    if let Exp::InductiveType(d, args) = e {
+    if let Some((iri, _, args)) = e.as_const_spine() {
         if matches!(
-            d.iri.as_str(),
+            iri.as_str(),
             "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"
         ) {
             for (i, a) in args.iter().enumerate() {
                 if let Exp::Lam(p, body) = a {
                     return Some(format!(
                         "CONN-OVER-FUNCTION: {}(arg#{i}) is λ{p:?}. {}",
-                        d.name,
+                        iri.local_name(),
                         match body.as_ref() {
                             Exp::App(..) => "App(…)",
                             Exp::Lam(..) => "λ…",
-                            Exp::InductiveType(d2, _) => d2.name.as_str(),
+                            Exp::Const(head, _) => head.local_name(),
                             _ => "…",
                         }
                     ));

@@ -83,7 +83,11 @@ fn asserts_prop(content_iri: &str) -> Exp {
         sort: Exp::sort(0),
         ctors: Vec::new(),
     });
-    Exp::InductiveType(decl, vec![Exp::LitString(content_iri.to_string())])
+    Exp::const_applied(
+        decl.iri.clone(),
+        Vec::new(),
+        vec![Exp::LitString(content_iri.to_string())],
+    )
 }
 
 /// Commit `resources` onto the reasoning chain and return a read-only context over the result, with the

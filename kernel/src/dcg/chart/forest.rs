@@ -250,12 +250,21 @@ pub(crate) fn cat_shape(e: &Exp) -> String {
                 format!("{name}({inner})")
             }
         }
-        Exp::InductiveType(decl, args) => {
+        // A type application is a `Const`-headed `App` spine since D76 Phase B.
+        // The declaration's `short_name` equals its IRI's local name for all ten
+        // shipped inductives, so rendering the local name is exact and needs no
+        // environment lookup.
+        _ if e.as_const_spine().is_some() => {
+            let (iri, _, args) = e.as_const_spine().expect("just matched");
             if args.is_empty() {
-                decl.name.clone()
+                iri.local_name().to_string()
             } else {
-                let inner = args.iter().map(cat_shape).collect::<Vec<_>>().join(", ");
-                format!("{}({inner})", decl.name)
+                let inner = args
+                    .iter()
+                    .map(|a| cat_shape(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", iri.local_name())
             }
         }
         // Type indices / sense identities — erased.
@@ -311,12 +320,21 @@ pub(crate) fn cat_key(e: &Exp) -> String {
                 format!("{name}({inner})")
             }
         }
-        Exp::InductiveType(decl, args) => {
+        // A type application is a `Const`-headed `App` spine since D76 Phase B.
+        // The declaration's `short_name` equals its IRI's local name for all ten
+        // shipped inductives, so rendering the local name is exact and needs no
+        // environment lookup.
+        _ if e.as_const_spine().is_some() => {
+            let (iri, _, args) = e.as_const_spine().expect("just matched");
             if args.is_empty() {
-                decl.name.clone()
+                iri.local_name().to_string()
             } else {
-                let inner = args.iter().map(cat_key).collect::<Vec<_>>().join(", ");
-                format!("{}({inner})", decl.name)
+                let inner = args
+                    .iter()
+                    .map(|a| cat_key(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", iri.local_name())
             }
         }
         // KEEP the type index — the whole point of this key over `cat_shape`. Full IRI (not `local`),
@@ -396,7 +414,7 @@ mod tests {
         let plain = Item::from_parts(s_cat.clone(), Exp::Unit, Combinator::Other, Cost::ZERO);
         let conjoined = Item::from_parts(
             s_cat,
-            Exp::InductiveType(and_decl, vec![Exp::Unit, Exp::Unit]),
+            Exp::const_applied(and_decl.iri.clone(), Vec::new(), vec![Exp::Unit, Exp::Unit]),
             Combinator::Other,
             Cost::ZERO,
         );

@@ -413,7 +413,12 @@ pub(crate) fn resolve_inductive_type(
     let indices_telescope = decode_indices(class_iri, resource, layer)?;
     let sort = decode_result_sort(class_iri, resource)?;
 
-    // Build the self-reference stub used inside constructor types.
+    // The self-reference stub, D76 Phase B — **all that remains of it**. Type
+    // references inside constructor bodies are `Exp::Const` now and need no stub;
+    // this survives only for the `CtorApp` decode path, because
+    // `Exp::InductiveCtor` still carries an `Arc<InductiveDecl>`. B-b2 swaps that
+    // for the IRI and this goes with it.
+    //
     // Empty `ctors` is fine — name-based lookup is all the kernel
     // needs for inner self-refs (see Phase 11b step 2 notes).
     //
@@ -583,43 +588,28 @@ fn decode_params(
     Ok(params)
 }
 
-/// Whether `arg_iri` names a declared inductive in the chain, and if so a
-/// name-only stub `InductiveDecl` for it.
+/// Does this IRI name an inductive declared in the chain?
 ///
-/// **The one rule for a fully-qualified IRI appearing in TYPE position.**
-/// `InductiveDecl` equality is by IRI, so a stub carrying just the IRI and
-/// short name is enough for the type checker's name-based dispatch; we
-/// deliberately do NOT recurse into `resolve_inductive_type` for the target,
-/// which would loop on mutually-referential declarations.
+/// **A predicate since D76 Phase B.** It was `inductive_stub_for`, which built a
+/// hollow `Arc<InductiveDecl>` — empty params, empty indices, empty ctors — so
+/// that `Exp::InductiveType`'s declaration slot had something in it. The term
+/// names the declaration now, so the callers need the answer and not the
+/// artefact.
 ///
-/// Two decoders reach for this — `decode_arg_type` (constructor argument
-/// types) and `decode_param_kind` (parameter AND index telescopes, which are
-/// one path since eigenius#188). Three of them used to disagree:
-/// only the first consulted the chain, so an inductive named as a
-/// constructor argument decoded to `Exp::InductiveType` while the *same*
-/// inductive named as an index kind decoded to `Exp::EigonClass`. That
-/// disagreement is eigenius#199 — it made `reasoning:JustifiedBy`'s index
-/// #0 (`JustificationTerm`) an `EigonClass` that no inhabitant could check
-/// against, so the one relation carrying the platform's guarantee was the
-/// one whose type the surface language could not express.
-fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>> {
-    let resource_arc = layer.resolve(arg_iri)?;
-    let resource: &crate::ontology::resource::Resource = &resource_arc;
-    if !is_inductive_type(resource) {
-        return None;
-    }
-    let name = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
-        Some(Value::String(s)) => s.clone(),
-        _ => arg_iri.local_name().to_string(),
-    };
-    Some(Arc::new(InductiveDecl {
-        iri: arg_iri.clone(),
-        name,
-        params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::sort(1),
-        ctors: Vec::new(),
-    }))
+/// The chain consultation itself is load-bearing and predates this. Two decoders
+/// reach for it — `decode_arg_type` (constructor argument types) and
+/// `decode_param_kind` (parameter AND index telescopes, which are one path since
+/// eigenius#188). They used to disagree: only the first consulted the chain, so an
+/// inductive named as a constructor argument decoded to an inductive reference
+/// while the *same* inductive named as an index kind decoded to
+/// `Exp::EigonClass`. That disagreement is eigenius#199 — it made
+/// `reasoning:JustifiedBy`'s index #0 (`JustificationTerm`) an `EigonClass` that
+/// no inhabitant could check against, so the one relation carrying the platform's
+/// guarantee was the one whose type the surface language could not express.
+fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
+    layer
+        .resolve(arg_iri)
+        .is_some_and(|r| is_inductive_type(&r))
 }
 
 /// Decode an `InductiveParam`'s kind from its `core:param_kind` value (eigenius#188 / N4).
@@ -704,7 +694,7 @@ fn decode_ctors(
                     ));
                 }
             };
-            build_ctor_type(class_iri, self_ref, params, arg_types_arr, layer)?
+            build_ctor_type(class_iri, params, arg_types_arr, layer)?
         };
         out.push(InductiveCtorDecl {
             name,
@@ -723,7 +713,6 @@ fn decode_ctors(
 /// sized-termination entry point from the ESL surface).
 fn build_ctor_type(
     class_iri: &Iri,
-    self_ref: &Arc<InductiveDecl>,
     params: &[(Patt, Exp)],
     arg_types: &[Value],
     layer: &Layer,
@@ -736,13 +725,13 @@ fn build_ctor_type(
             _ => Exp::Unit,
         })
         .collect();
-    let mut result = Exp::InductiveType(self_ref.clone(), param_vars);
+    let mut result = Exp::const_applied(class_iri.clone(), Vec::new(), param_vars);
 
     // Decode all args upfront — preserves their shape so the wrapping
     // pass below can dispatch on positional / Pi-binder / SizedPi.
     let decoded: Vec<DecodedArg> = arg_types
         .iter()
-        .map(|a| decode_ctor_arg(class_iri, self_ref, a, layer))
+        .map(|a| decode_ctor_arg(class_iri, a, layer))
         .collect::<Result<Vec<_>, String>>()?;
 
     // Wrap in reverse so the first arg is outermost.
@@ -778,12 +767,7 @@ enum DecodedArg {
 /// additionally carries `binder_bound` emits `SizedBinder`;
 /// otherwise it emits `PiBinder` (used for size-polymorphic args
 /// without a bound).
-fn decode_ctor_arg(
-    class_iri: &Iri,
-    self_ref: &Arc<InductiveDecl>,
-    value: &Value,
-    layer: &Layer,
-) -> Result<DecodedArg, String> {
+fn decode_ctor_arg(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<DecodedArg, String> {
     let r = match value {
         Value::Embedded(r) => r.as_ref(),
         _ => return Err("InductiveArgType must be embedded".to_string()),
@@ -794,14 +778,14 @@ fn decode_ctor_arg(
     if let Some(name) = binder_name {
         // Kind is stored in `type_name`; decode in the same way as
         // a normal arg type so `Size`/`Inf`/param-refs all work.
-        let kind_exp = decode_arg_type(class_iri, self_ref, value, layer)?;
+        let kind_exp = decode_arg_type(class_iri, value, layer)?;
         Ok(DecodedArg::PiBinder {
             name,
             kind: kind_exp,
         })
     } else {
         Ok(DecodedArg::Positional(decode_arg_type(
-            class_iri, self_ref, value, layer,
+            class_iri, value, layer,
         )?))
     }
 }
@@ -857,9 +841,9 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
 /// - Bare string (no namespace separator): a parameter reference,
 ///   emitted as `Exp::Var`.
 /// - IRI equal to the enclosing inductive's IRI: a self-reference,
-///   emitted as `Exp::InductiveType(self_ref, type_args...)`.
+///   emitted as `Exp::const_applied(class_iri, [], type_args...)`.
 /// - IRI of another inductive type in the layer chain: emitted as
-///   `Exp::InductiveType(stub_decl, type_args...)` where the stub
+///   `Exp::const_applied(stub_decl.iri.clone(), Vec::new(), type_args...)` where the stub
 ///   carries the matching short name. This makes cross-inductive
 ///   constructor arguments type-check correctly without resolving
 ///   the full target decl (which would risk infinite recursion for
@@ -867,12 +851,7 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
 /// - Primitive IRI: emitted as `Exp::EigonPrimitive`.
 /// - Any other class IRI: emitted as `Exp::EigonClass(iri)` to let
 ///   the type checker resolve it via the layer chain.
-fn decode_arg_type(
-    class_iri: &Iri,
-    self_ref: &Arc<InductiveDecl>,
-    value: &Value,
-    layer: &Layer,
-) -> Result<Exp, String> {
+fn decode_arg_type(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Exp, String> {
     let r = match value {
         Value::Embedded(r) => r.as_ref(),
         _ => return Err("InductiveArgType must be embedded".to_string()),
@@ -908,9 +887,9 @@ fn decode_arg_type(
     if arg_iri == *class_iri {
         let sub_args: Result<Vec<Exp>, String> = type_args_arr
             .iter()
-            .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
+            .map(|a| decode_arg_type(class_iri, a, layer))
             .collect();
-        return Ok(Exp::InductiveType(self_ref.clone(), sub_args?));
+        return Ok(Exp::const_applied(class_iri.clone(), Vec::new(), sub_args?));
     }
 
     // Primitive type IRIs get folded to the corresponding Exp form.
@@ -924,18 +903,19 @@ fn decode_arg_type(
     }
 
     // Cross-inductive reference: the arg type is some other declared
-    // inductive in the layer. Emit an `Exp::InductiveType` with a
-    // name-only stub Arc so the type checker matches by name. We
-    // deliberately do NOT recurse into `resolve_inductive_type` for
-    // the target — the stub is enough for name-based dispatch and
-    // avoids infinite recursion on mutually-referential decls (out of
+    // inductive in the layer. Emit the NAME (D76 Phase B). This built a
+    // name-only stub `Arc<InductiveDecl>` and deliberately did not recurse into
+    // `resolve_inductive_type` for the target — the stub was enough for
+    // name-based dispatch and avoided unbounded recursion on mutually-
+    // referential decls. Naming the declaration removes both the stub and the
+    // reason for the guard (out of
     // scope but worth guarding against).
-    if let Some(stub) = inductive_stub_for(&arg_iri, layer) {
+    if names_an_inductive(&arg_iri, layer) {
         let sub_args: Result<Vec<Exp>, String> = type_args_arr
             .iter()
-            .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
+            .map(|a| decode_arg_type(class_iri, a, layer))
             .collect();
-        return Ok(Exp::InductiveType(stub, sub_args?));
+        return Ok(Exp::const_applied(arg_iri, Vec::new(), sub_args?));
     }
 
     // Any other class IRI: emit an EigonClass marker. The type
@@ -1130,23 +1110,23 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "zero");
                 assert_eq!(decl.ctors[1].name, "succ");
 
-                // zero's type: InductiveType(Nat, [])
-                match &decl.ctors[0].typ {
-                    Exp::InductiveType(d, args) => {
-                        assert_eq!(d.name, "Nat");
+                // zero's type: the bare name `Nat`
+                match decl.ctors[0].typ.as_const_spine() {
+                    Some((iri, _, args)) => {
+                        assert_eq!(iri.local_name(), "Nat");
                         assert!(args.is_empty());
                     }
-                    other => panic!("expected InductiveType for zero, got {other:?}"),
+                    None => panic!("expected a Const for zero, got {:?}", decl.ctors[0].typ),
                 }
 
                 // succ's type: Π _:Nat. Nat
                 match &decl.ctors[1].typ {
                     Exp::Pi(Patt::Unit, dom, body) => {
                         assert!(
-                            matches!(dom.as_ref(), Exp::InductiveType(d, a) if d.name == "Nat" && a.is_empty())
+                            matches!(dom.as_ref().as_const_spine(), Some((iri, _, a)) if iri.local_name() == "Nat" && a.is_empty())
                         );
                         assert!(
-                            matches!(body.as_ref(), Exp::InductiveType(d, a) if d.name == "Nat" && a.is_empty())
+                            matches!(body.as_ref().as_const_spine(), Some((iri, _, a)) if iri.local_name() == "Nat" && a.is_empty())
                         );
                     }
                     other => panic!("expected Pi for succ, got {other:?}"),
@@ -1252,8 +1232,8 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "tt");
                 assert_eq!(decl.ctors[1].name, "ff");
                 // Both ctor types are bare InductiveType — no Pi wrapping
-                assert!(matches!(decl.ctors[0].typ, Exp::InductiveType(_, _)));
-                assert!(matches!(decl.ctors[1].typ, Exp::InductiveType(_, _)));
+                assert!(decl.ctors[0].typ.as_const_spine().is_some());
+                assert!(decl.ctors[1].typ.as_const_spine().is_some());
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
         }
@@ -1335,13 +1315,13 @@ mod tests {
                     Exp::Pi(Patt::Var(pn), dom, body) => {
                         assert_eq!(pn, "A");
                         assert!(matches!(&dom.as_ref(), Exp::Sort(l) if l.is_nat(1)));
-                        match body.as_ref() {
-                            Exp::InductiveType(d, args) => {
-                                assert_eq!(d.name, "List");
+                        match body.as_ref().as_const_spine() {
+                            Some((iri, _, args)) => {
+                                assert_eq!(iri.local_name(), "List");
                                 assert_eq!(args.len(), 1);
-                                assert!(matches!(&args[0], Exp::Var(n) if n == "A"));
+                                assert!(matches!(args[0], Exp::Var(n) if n == "A"));
                             }
-                            other => panic!("expected InductiveType in nil body, got {other:?}"),
+                            None => panic!("expected a Const in nil body, got {body:?}"),
                         }
                     }
                     other => panic!("expected Pi for nil, got {other:?}"),
@@ -1355,7 +1335,9 @@ mod tests {
                     cursor = body;
                 }
                 assert_eq!(depth, 3, "cons should be a 3-binder Π-chain");
-                assert!(matches!(cursor, Exp::InductiveType(d, _) if d.name == "List"));
+                assert!(
+                    matches!(cursor.as_const_spine(), Some((iri, _, _)) if iri.local_name() == "List")
+                );
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
         }
@@ -1494,17 +1476,17 @@ mod tests {
         }
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
-        match decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap() {
-            Exp::InductiveType(decl, args) => {
-                assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term");
-                assert!(args.is_empty());
-            }
-            other => panic!("index kind naming an inductive decoded to {other:?}"),
-        }
-        match decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap() {
-            Exp::InductiveType(decl, _) => assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term"),
-            other => panic!("param kind naming an inductive decoded to {other:?}"),
-        }
+        let e = decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap();
+        let (iri, _, args) = e
+            .as_const_spine()
+            .unwrap_or_else(|| panic!("index kind naming an inductive decoded to {e:?}"));
+        assert_eq!(iri.as_str(), "urn:eigenius:t:Term");
+        assert!(args.is_empty());
+        let e = decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap();
+        let (iri, _, _) = e
+            .as_const_spine()
+            .unwrap_or_else(|| panic!("param kind naming an inductive decoded to {e:?}"));
+        assert_eq!(iri.as_str(), "urn:eigenius:t:Term");
         assert!(matches!(
             decode_param_kind(
                 &const_ref("urn:eigenius:t:PlainClass"),

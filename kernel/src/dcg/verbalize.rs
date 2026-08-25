@@ -204,7 +204,7 @@ fn child_exps(e: &Exp) -> Vec<&Exp> {
         Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
         Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => vec![b.as_ref()],
         Exp::Pair(a, b) => vec![a.as_ref(), b.as_ref()],
-        Exp::InductiveType(_, args) => args.iter().collect(),
+        e if e.as_const_spine().is_some() => e.as_const_spine().expect("just matched").2,
         _ => Vec::new(),
     }
 }
@@ -310,12 +310,12 @@ fn axiom_local(e: &Exp) -> Option<&str> {
     }
 }
 
-/// `logic:False` — the negation codomain. It is built as `Exp::InductiveType(logic:False, [])`
+/// `logic:False` — the negation codomain. It is built as `Exp::const_applied(logic:False.iri.clone(), Vec::new(), [])`
 /// (`constructions::negate_prop`), NOT as an axiom or class, so `axiom_local` never matched it and
 /// the verbaliser's negation arms were dead: every negated proposition reached the ⟦…⟧ bracket.
 fn is_false(e: &Exp) -> bool {
     match e {
-        Exp::InductiveType(d, args) => args.is_empty() && d.iri.as_str().ends_with("logic:False"),
+        Exp::Const(iri, _) => iri.as_str().ends_with("logic:False"),
         _ => axiom_local(e) == Some("False"),
     }
 }
@@ -359,22 +359,18 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         Exp::Var(_) => return String::new(), // a bound restrictor variable — carries no surface
         _ => {}
     }
-    if let Exp::InductiveType(decl, args) = sem {
-        let d = decl.iri.as_str();
+    if let Some((head, _, args)) = sem.as_const_spine() {
+        let d = head.as_str();
         if args.len() == 2 && (d.ends_with("logic:And") || d.ends_with("logic:Or")) {
             // Verb + shared-subject PP is ONE clause, not a conjunction: `And(V(subj), prep(subj, o))`
             // → "subj V prep o" (e.g. "MSI arises from Lynch syndrome"), the dominant sentence shape.
             if d.ends_with("And") {
-                if let Some(merged) = verb_pp(&args[0], &args[1], vb) {
+                if let Some(merged) = verb_pp(args[0], args[1], vb) {
                     return merged;
                 }
             }
             let op = if d.ends_with("And") { "and" } else { "or" };
-            return format!(
-                "{} {op} {}",
-                verbalize(&args[0], vb),
-                verbalize(&args[1], vb)
-            );
+            return format!("{} {op} {}", verbalize(args[0], vb), verbalize(args[1], vb));
         }
     }
     // Negation `A → False`. The Pi branch below catches the `Pi(_, A, False)` readback, but a
@@ -702,7 +698,6 @@ fn subst_var(e: &Exp, name: &str, to: &Exp) -> Exp {
         Exp::Snd(x) => Exp::Snd(Box::new(go(x))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(x, t) => Exp::Ann(Box::new(go(x)), Box::new(go(t))),
-        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
         Exp::InductiveCtor(d, n, args) => {
             Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
         }
@@ -878,10 +873,10 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
 }
 
 fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
-    if let Exp::InductiveType(decl, args) = e {
-        if decl.iri.as_str().ends_with("logic:And") && args.len() == 2 {
-            flatten_and_exp(&args[0], out);
-            flatten_and_exp(&args[1], out);
+    if let Some((iri, _, args)) = e.as_const_spine() {
+        if iri.as_str().ends_with("logic:And") && args.len() == 2 {
+            flatten_and_exp(args[0], out);
+            flatten_and_exp(args[1], out);
             return;
         }
     }
@@ -952,8 +947,9 @@ mod register_tests {
         });
         let compound = sig(
             cls("urn:eigenius:wn:n00407535"),
-            Exp::InductiveType(
-                and_decl,
+            Exp::const_applied(
+                and_decl.iri.clone(),
+                Vec::new(),
                 vec![
                     app2(
                         "urn:eigenius:ontology:compound_kind",

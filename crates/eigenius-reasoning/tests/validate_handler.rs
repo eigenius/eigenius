@@ -546,7 +546,11 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
         sort: Exp::sort(0),
         ctors: Vec::new(),
     });
-    let prop_exp = Exp::InductiveType(stub_decl, vec![Exp::LitString(target_iri_str.to_string())]);
+    let prop_exp = Exp::const_applied(
+        stub_decl.iri.clone(),
+        Vec::new(),
+        vec![Exp::LitString(target_iri_str.to_string())],
+    );
     let prop_value = encode_type(&prop_exp).expect("encode Asserts(iri)");
 
     let target_iri = Iri::parse(target_iri_str).unwrap();

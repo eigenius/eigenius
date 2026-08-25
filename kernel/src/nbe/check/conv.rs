@@ -114,9 +114,7 @@ pub fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
         Exp::Id(a, x, y) => {
             exp_mentions_var(a, name) || exp_mentions_var(x, name) || exp_mentions_var(y, name)
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().any(|a| exp_mentions_var(a, name))
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(|a| exp_mentions_var(a, name)),
         // For other Exp variants (Sort, One, Unit, Set, primitives,
         // EigonClass, etc.) there's no Var inside to find.
         _ => false,
@@ -140,16 +138,34 @@ fn patt_binds(patt: &Patt, name: &str) -> bool {
 /// false (conservatively — may reject a valid Prop arg that requires
 /// evaluation to resolve) for variables, applications, neutrals, and
 /// the universe `Sort(0)` itself (which inhabits `Sort(1)`).
-pub(super) fn is_syntactically_propositional_type(typ: &Exp) -> bool {
+///
+/// **Takes `Γ_env` since D76 Phase B.** The inductive case reads the declaration's
+/// `sort`, which the term carried inline as `Exp::const_applied(decl.iri.clone(), Vec::new(), _)` and now
+/// names as `Const`. A name the environment cannot resolve is not propositional —
+/// the same answer the fused form gave for a non-`Prop` declaration, and the
+/// conservative one here, since a wrong `true` would admit large elimination that
+/// D46 proof irrelevance makes unsound.
+pub(super) fn is_syntactically_propositional_type(
+    env: &crate::nbe::env_global::Env,
+    typ: &Exp,
+) -> bool {
     match typ {
         Exp::Id(_, _, _) => true,
-        Exp::Pi(_, _, body) => is_syntactically_propositional_type(body),
-        Exp::Arrow(_, body) => is_syntactically_propositional_type(body),
+        Exp::Pi(_, _, body) => is_syntactically_propositional_type(env, body),
+        Exp::Arrow(_, body) => is_syntactically_propositional_type(env, body),
         Exp::Sig(_, dom, body) | Exp::Times(dom, body) => {
-            is_syntactically_propositional_type(dom) && is_syntactically_propositional_type(body)
+            is_syntactically_propositional_type(env, dom)
+                && is_syntactically_propositional_type(env, body)
         }
-        Exp::InductiveType(decl, _) => matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
-        _ => false,
+        e => match e.as_const_spine() {
+            Some((iri, _, _)) => match env.lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(decl) => {
+                    matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))
+                }
+                _ => false,
+            },
+            None => false,
+        },
     }
 }
 
@@ -724,7 +740,10 @@ mod index_conversion_tests {
             iri: crate::ontology::iri::Iri::parse("urn:test:Vec").unwrap(),
             name: "Vec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
-            indices: vec![(Patt::Unit, Exp::InductiveType(nat, Vec::new()))],
+            indices: vec![(
+                Patt::Unit,
+                Exp::const_applied(nat.iri.clone(), Vec::new(), Vec::new()),
+            )],
             sort: Exp::sort(1),
             ctors: Vec::new(),
         })
@@ -877,15 +896,10 @@ mod index_conversion_tests {
     fn a_constructor_at_the_wrong_index_is_still_rejected() {
         // `data Box : 1 -> Set { mk : Box () }`: the one ctor concludes at
         // index `()`, so checking it against `Box x` for a rigid `x` fails.
-        let self_ref = Arc::new(InductiveDecl {
-            iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
-            name: "Box".to_string(),
-            params: Vec::new(),
-            indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::sort(1),
-            ctors: Vec::new(),
-        });
-        let box_unit = Exp::InductiveType(self_ref, vec![Exp::Unit]);
+        // D76 Phase B: the conclusion names `Box` rather than carrying a stub of
+        // it, so there is one declaration here where there used to be two.
+        let box_iri = crate::ontology::iri::Iri::parse("urn:test:Box").unwrap();
+        let box_unit = Exp::const_applied(box_iri.clone(), Vec::new(), vec![Exp::Unit]);
         let decl = Arc::new(InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
             name: "Box".to_string(),
@@ -897,7 +911,7 @@ mod index_conversion_tests {
                 typ: box_unit,
             }],
         });
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(decl.clone());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: Vec::new(),

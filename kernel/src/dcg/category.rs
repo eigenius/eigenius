@@ -45,14 +45,22 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         // ⟦Group(C)[_,_]⟧ = List C — a coordinated group denotes the member-retaining
         // list over its common supertype C (D63 §8.4 Phase 6, the kernel `List`);
         // the connective and number are erased by ⟦·⟧.
-        ("cat_group", [c, _conn, _num]) => Ok(Exp::InductiveType(list_decl(), vec![c.clone()])),
+        ("cat_group", [c, _conn, _num]) => Ok(Exp::const_applied(
+            list_decl().iri.clone(),
+            Vec::new(),
+            vec![c.clone()],
+        )),
         // ⟦Coord(B)[_]⟧ = List ⟦B⟧ — a coordinated PROP-ending group (clauses / VPs / predicative
         // adjectives / TVs) denotes the member-retaining list over its base category's denotation
         // (D63 §8.4 Phase 3, the list-with-operator model ported from core-en `conj.xsl`). The
         // connective is erased by ⟦·⟧; a list-completion (`complete_coord`) folds the members into
         // ⟦B⟧ with the operator. Parallel to `cat_group` (which lists an ENTITY type; this lists a
         // prop-ending category's denotation).
-        ("cat_coord", [b, _conn]) => Ok(Exp::InductiveType(list_decl(), vec![denote_cat(b)?])),
+        ("cat_coord", [b, _conn]) => Ok(Exp::const_applied(
+            list_decl().iri.clone(),
+            Vec::new(),
+            vec![denote_cat(b)?],
+        )),
         // ⟦Q(T)⟧ = T → Prop — a wh-question denotes its answer-property (the
         // predicate the answer must satisfy), over the queried type T (D63 §8.5).
         ("cat_q", [t]) => Ok(Exp::Arrow(Box::new(t.clone()), Box::new(Exp::sort(0)))),
@@ -524,6 +532,19 @@ fn is_any_feat(e: &Exp) -> bool {
 
 /// Resolve an inductive (e.g. `logic:And` / `logic:Or`, or `lexicon:Conn`) from
 /// the layer to its decl, so the combinator can build its terms.
+/// The IRI of a chain-resident inductive, **checked to exist**.
+///
+/// D76 Phase B: a type reference names its declaration (`Exp::Const`) rather than
+/// carrying it, so a rule building `logic:And(P, Q)` needs the IRI — but it still
+/// needs to know the chain declares it, which is the `None` case here. Cheaper
+/// than [`resolve_inductive`], which decodes the whole declaration including every
+/// constructor type just to be dropped into a node that no longer holds one.
+pub(crate) fn inductive_iri(layer: &Arc<Layer>, iri_str: &str) -> Option<Iri> {
+    let iri = Iri::parse(iri_str).ok()?;
+    let resource = layer.resolve(&iri)?;
+    crate::program::ground::is_inductive_type(&resource).then_some(iri)
+}
+
 pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc<InductiveDecl>> {
     let iri = Iri::parse(iri_str).ok()?;
     let resource = layer.resolve(&iri)?;
@@ -822,9 +843,7 @@ fn exp_any(e: &Exp, pred: &dyn Fn(&Exp) -> bool) -> bool {
         Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Con(_, b) | Exp::Refl(b) => {
             exp_any(b, pred)
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().any(|x| exp_any(x, pred))
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(|x| exp_any(x, pred)),
         Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
             exp_any(a, pred) || exp_any(b, pred) || exp_any(c, pred)
         }
@@ -846,12 +865,14 @@ fn is_first_order_predicate(e: &Exp) -> bool {
         | Exp::Unit => true,
         Exp::App(f, a) => is_first_order_predicate(f) && is_first_order_predicate(a),
         Exp::Con(_, b) => is_first_order_predicate(b),
-        Exp::InductiveType(d, args) => {
-            matches!(
-                d.iri.as_str(),
-                "urn:eigenius:logic:And" | "urn:eigenius:logic:Or" | "urn:eigenius:logic:Not"
-            ) && args.iter().all(is_first_order_predicate)
-        }
+        // A connective applied to its operands is an `App` spine since D76 Phase B,
+        // so the arm above walks the operands and this one admits the head. The
+        // restriction to the three logical connectives lives on the head, where it
+        // did before.
+        Exp::Const(iri, _) => matches!(
+            iri.as_str(),
+            "urn:eigenius:logic:And" | "urn:eigenius:logic:Or" | "urn:eigenius:logic:Not"
+        ),
         _ => false,
     }
 }
@@ -1177,7 +1198,7 @@ mod tests {
             sort: Exp::sort(0),
             ctors: vec![],
         });
-        Exp::InductiveType(and, vec![a, b])
+        Exp::const_applied(and.iri.clone(), Vec::new(), vec![a, b])
     }
 
     #[test]
@@ -1359,7 +1380,7 @@ mod tests {
         );
         assert_eq!(
             denote_cat(&group).expect("group denotes"),
-            Exp::InductiveType(list_decl(), vec![gene]),
+            Exp::const_applied(list_decl().iri.clone(), Vec::new(), vec![gene]),
             "⟦cat_group(Gene, _, _)⟧ must be List Gene"
         );
     }

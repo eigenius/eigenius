@@ -204,12 +204,16 @@ pub enum Exp {
     Reduce(Box<Exp>, Box<Exp>, Box<Exp>),
 
     // --- Inductive types (Phase 11b, D19) ---
-    /// Introduce an inductive type declaration.
-    /// Evaluating this form produces the type former; the declaration is
-    /// shared with constructor and recursor occurrences via `Arc`.
-    Inductive(Arc<InductiveDecl>),
-    /// Inductive type applied to parameter expressions: `I(p₁, …, pₙ)`.
-    InductiveType(Arc<InductiveDecl>, Vec<Exp>),
+    //
+    // D76 Phase B — `Inductive(decl)` and `InductiveType(decl, args)` are gone.
+    // A reference to an inductive is `Const(iri, levels)`, applied through `App`
+    // like any other reference (`Exp::const_applied` / `Exp::as_const_spine`).
+    //
+    // They were two spellings of one thing: `Inductive(d)` evaluated to the same
+    // `Val::InductiveType` as `InductiveType(d, [])`, and a negative occurrence
+    // written in the first form once evaded positivity checking
+    // (`positivity::rejects_disguised_inductive_negative_occurrence`). Neither had
+    // a slot for a level argument, which is what blocked #188's residual.
     /// Constructor application: `c(a₁, …, aₘ)` on the named inductive.
     InductiveCtor(Arc<InductiveDecl>, Name, Vec<Exp>),
     /// Recursor application: eliminate a value of the inductive with
@@ -507,7 +511,7 @@ impl Exp {
     /// A reference to a declaration, applied to arguments —
     /// `App(App(Const(iri), a₁), a₂)`.
     ///
-    /// The de-inlined form of what `Exp::InductiveType(decl, args)` fused into a
+    /// The de-inlined form of what `Exp::const_applied(decl.iri.clone(), Vec::new(), args)` fused into a
     /// single node (D76 §8 Phase B). It is also what the D47 wire has always
     /// carried: the encoder emits `ConstRef` plus an `App` spine, so this
     /// constructor produces the shape the codec already round-trips.
@@ -648,7 +652,7 @@ impl Exp {
     /// (Phase 11b step 6, D19 §9). Backed by the canonical `List`
     /// inductive declaration from [`list_decl`].
     pub fn list(element_type: Exp) -> Exp {
-        Exp::InductiveType(list_decl(), vec![element_type])
+        Exp::const_applied(list_decl().iri.clone(), Vec::new(), vec![element_type])
     }
 }
 
@@ -805,17 +809,18 @@ mod tests {
         // Phase 11b step 6: Exp::list() now produces an inductive
         // type application backed by the canonical List declaration.
         let t = Exp::list(Exp::sort(1));
-        match t {
-            Exp::InductiveType(decl, params) => {
-                assert_eq!(decl.name, "List");
-                assert_eq!(decl.ctors.len(), 2);
-                assert_eq!(decl.ctors[0].name, "nil");
-                assert_eq!(decl.ctors[1].name, "cons");
-                assert_eq!(params.len(), 1);
-                assert!(matches!(&params[0], Exp::Sort(l) if l.is_nat(1)));
-            }
-            other => panic!("expected InductiveType, got {other:?}"),
-        }
+        // D76 Phase B: the term NAMES the declaration, so this asserts the
+        // reference's shape; the declaration itself is `list_decl`, checked below.
+        let (iri, levels, params) = t.as_const_spine().expect("a const spine");
+        assert_eq!(iri, &list_decl().iri);
+        assert!(levels.is_empty());
+        assert_eq!(params.len(), 1);
+        assert!(matches!(params[0], Exp::Sort(l) if l.is_nat(1)));
+        let decl = list_decl();
+        assert_eq!(decl.name, "List");
+        assert_eq!(decl.ctors.len(), 2);
+        assert_eq!(decl.ctors[0].name, "nil");
+        assert_eq!(decl.ctors[1].name, "cons");
     }
 
     #[test]

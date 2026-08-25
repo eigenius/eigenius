@@ -106,8 +106,9 @@ fn parsed(gene: &str, activity: &str) -> Exp {
         sort: Exp::sort(0),
         ctors: Vec::new(),
     });
-    Exp::InductiveType(
-        decl,
+    Exp::const_applied(
+        decl.iri.clone(),
+        Vec::new(),
         vec![
             Exp::EigonClass(Iri::parse(gene).unwrap()),
             Exp::EigonClass(Iri::parse(activity).unwrap()),
