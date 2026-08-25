@@ -597,7 +597,8 @@ encoded term. A possible latent defect in a different subsystem.
 
 ---
 
-### Phase B — remove the self-reference stub
+### Phase B — de-inline: `Const` + `App`, stub removed, `PartialEq` structural
+*(absorbs what was Phase E1)*
 
 **⚠ Reordered `2026-08-24`, before implementation.** Phase B was placed before Phase C on the
 argument that the stub blocks everything downstream. Reading the stub's own documentation shows it
@@ -773,7 +774,7 @@ changes. Plus: no resolve on the equal path, asserted by instrumentation rather 
 
 ---
 
-### Phase E — consolidate to `Const`
+### Phase E2 — levels on the wire
 
 **Lands:** `Exp::Const(iri, levels)`; `EigonAxiom` and the inductive trio fold into it (§8a keeps
 `EigonClass` out);
@@ -891,10 +892,20 @@ its exact meaning and call site, the two-way choice becoming *`u` pinned to 0* v
 ### Ordering
 
 ```
-A (order) ──▶ C (interface) ──▶ B (stub) ──▶ D (δ in conv) ──▶ E (Const) ──▶ F (4c)
-   done          eval IS in scope     needs C      │                  │
-                                          unblocks D78 §3.1    reseed required
+A ──▶ C ──▶ B ─────────▶ D ──────────▶ E2 ─────────▶ F
+done  done  de-inline    δ in conv     levels/wire   4c
+            Const+App    │             │
+            PartialEq    unblocks      reseed
+            structural   D78 §3.1      (#188 residual)
 ```
+
+**B absorbs E1.** Replacing a stub entails de-fusing the application it heads (see Phase B), and
+`PartialEq` cannot go structural while any stub survives — so the two are one change. What remains as
+**E2** is levels on the wire, which is the only part that moves the chain format, and is #188's
+residual under another name.
+
+**D follows B**, not the reverse: §5's fast path is `conv(Const(a, ls), Const(b, ms))`, which
+presumes `Const`s exist to compare.
 
 **B and C swapped `2026-08-24`**, before implementing B — see Phase B's note and §1's Q1 correction.
 The stub's two uses both require an environment, and iota reduction puts `eval` inside the

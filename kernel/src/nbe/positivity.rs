@@ -139,13 +139,15 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
                 binders.push((patt, dom));
                 cursor = body;
             }
-            // D76 Phase B1 — a bare `Const` naming this inductive is a
-            // zero-argument recursive occurrence, the form the stub used to
-            // take. `has_ind_occurrence` alone is not enough: this classifier
-            // decides the *shape*, and an occurrence it cannot classify falls
-            // through as if it were not recursive — which silently accepted a
-            // negative occurrence written as a `Const`
-            // (`const_self_reference::positivity_still_rejects_…`).
+            // D76 Phase B — a bare `Const` naming this inductive is a
+            // zero-argument recursive occurrence, the form the stub used to take.
+            //
+            // `has_ind_occurrence` alone is not enough: this classifier decides
+            // the *shape*, and `check_arg_positivity` treats an unclassifiable
+            // occurrence as a bad one — so without this arm a strictly positive
+            // constructor written with a `Const` was **rejected**. The failure is
+            // over-strictness, not unsoundness: `None` here reaches
+            // `Err(classify_bad_occurrence(..))`, never a silent accept.
             Exp::Const(iri, _) if *iri == decl.iri => {
                 return Some(RecArgShape { binders, args: &[] });
             }
@@ -392,13 +394,14 @@ fn check_result_type(
     param_refs: &[Option<String>],
 ) -> Result<(), String> {
     match typ {
-        // D76 Phase B1 — a constructor may conclude in a bare `Const` naming its
-        // inductive, which is the zero-argument case of the application below.
-        // The third site in this module that has to know the occurrence form:
+        // D76 Phase B — a constructor may conclude in a bare `Const` naming its
+        // inductive, the zero-argument case of the application below.
+        //
+        // The third site in this module that must know the occurrence form:
         // `has_ind_occurrence` says *whether*, `recursive_arg_shape` says *what
-        // shape*, and this says *is it a valid conclusion*. Missing any one of
-        // them fails differently — this one rejected a strictly positive
-        // constructor rather than accepting a bad one.
+        // shape*, this says *is it a valid conclusion*. All three fail by
+        // over-rejecting a new form, none by admitting a bad one — the module is
+        // fail-closed on shapes it does not recognise.
         Exp::Const(iri, _) if *iri == decl.iri => Ok(()),
         Exp::InductiveType(d, args) if d.iri == decl.iri => {
             let upto = decl.params.len().min(args.len());
