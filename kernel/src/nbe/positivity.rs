@@ -1366,24 +1366,23 @@ mod level_slot {
 
         let bare =
             eval_ctx(&Exp::Const(level_iri.clone(), Vec::new()), &Rho::Nil, &ctx).expect("eval");
-        let decl = match &bare {
+        match &bare {
             Val::InductiveType {
-                decl,
-                params,
-                indices,
-            } => {
-                assert!(
-                    params.is_empty() && indices.is_empty(),
-                    "an unapplied former carries no arguments"
-                );
-                decl.clone()
-            }
+                params, indices, ..
+            } => assert!(
+                params.is_empty() && indices.is_empty(),
+                "an unapplied former carries no arguments"
+            ),
             other => panic!("expected the type former, got {other:?}"),
-        };
+        }
 
-        // Applying it one argument at a time is what an `App` spine does.
+        // Applying it one argument at a time is what an `App` spine does. `List` is
+        // the parametric former to use: `core:Level` takes NO arguments, and applying
+        // it to one was only ever accepted because the arity check was suppressed
+        // (D76 Phase B2). The check now refuses it, correctly.
+        let list_iri = crate::nbe::term::list_decl().iri.clone();
         let applied = eval_ctx(
-            &Exp::const_applied(level_iri, Vec::new(), vec![Exp::sort(1)]),
+            &Exp::const_applied(list_iri.clone(), Vec::new(), vec![Exp::sort(1)]),
             &Rho::Nil,
             &ctx,
         )
@@ -1392,11 +1391,23 @@ mod level_slot {
             Val::InductiveType {
                 decl: d, params, ..
             } => {
-                assert_eq!(d.iri, decl.iri);
+                assert_eq!(d.iri, list_iri);
                 assert_eq!(params.len(), 1, "the argument folded onto the former");
             }
             other => panic!("a de-fused application must stay a type: {other:?}"),
         }
+
+        // And the nullary former refuses an argument it has no slot for — the
+        // leniency B2 removed.
+        assert!(
+            eval_ctx(
+                &Exp::const_applied(level_iri, Vec::new(), vec![Exp::sort(1)]),
+                &Rho::Nil,
+                &ctx,
+            )
+            .is_err(),
+            "`core:Level` takes no arguments; applying one must be refused"
+        );
     }
 
     #[test]

@@ -480,29 +480,27 @@ fn check_inductive_type_args(
     decl: &std::sync::Arc<crate::nbe::term::InductiveDecl>,
     args: &[Exp],
 ) -> Result<(), CheckError> {
-    // **Under-application, D76 Phase B.** For an INDEXED declaration, `eval`'s fused
-    // arm used to reject an argument vector that was not exactly `params ++ indices`
-    // long. De-fused, arguments arrive one at a time and a partial application is an
-    // ordinary intermediate value, so eval has no point at which it knows no more are
-    // coming — which would have dropped the check entirely. It moves here, unchanged
-    // in what it accepts.
+    // **Arity, D76 Phase B2 — checked for EVERY declaration.**
     //
-    // Scoped to indexed declarations, deliberately: every un-indexed one still takes
-    // the lenient path the stub-shaped `indices.is_empty()` test selected, because
-    // turning that off is B2's verdict-affecting change and runs the #194/#92
-    // protocol first.
-    if !decl.indices.is_empty() {
-        let expected = decl.params.len() + decl.indices.len();
-        if args.len() != expected {
-            return Err(CheckError::IllFormed(format!(
-                "indexed inductive `{}`: expected {expected} argument(s) \
-                 (params + indices: {} + {}), got {}",
-                decl.name,
-                decl.params.len(),
-                decl.indices.len(),
-                args.len()
-            )));
-        }
+    // This was scoped to indexed declarations by `!decl.indices.is_empty()`, which
+    // is not a test for "indexed" at all: it is the stub-detection hack. A stub had
+    // empty indices, and so does a genuine un-indexed inductive, so the lenient path
+    // — every argument a parameter, no arity check — was taken by **every** shipped
+    // inductive, all ten of which are un-indexed. `Nat(x, y, z)` type-checked.
+    //
+    // The conflation is gone with the stub that motivated it (Phase B), so the
+    // check applies uniformly. This is a NARROWING: it can only turn accepts into
+    // rejects, which is why it was held back from Phase B's verdict-neutral sweep.
+    let expected = decl.params.len() + decl.indices.len();
+    if args.len() != expected {
+        return Err(CheckError::IllFormed(format!(
+            "inductive `{}`: expected {expected} argument(s) (params + indices: \
+             {} + {}), got {}",
+            decl.name,
+            decl.params.len(),
+            decl.indices.len(),
+            args.len()
+        )));
     }
     let mut rho = ctx.rho.clone();
     for ((patt, ty), arg) in decl

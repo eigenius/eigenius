@@ -608,13 +608,46 @@ pub(super) fn check_infer_inductive_rec(
     //    For Prop inductives, singleton-elim (D46 §7) gates large elim:
     //    if `large_elim_admitted(decl)` then the wider codomain is permitted;
     //    otherwise the motive must return Prop (Sort(0)).
-    let codomain_sort = if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))
-        && !large_elim_admitted(&ctx.env, decl)
-    {
-        Exp::sort(0)
-    } else {
-        Exp::sort(2)
-    };
+    // **D76 Phase F / Q4-4c — the codomain is DERIVED, not fixed.** It was the
+    // constant `Sort(2)`, whose ceiling is Set: a motive returning `Sort(k)` has
+    // type `Sort(k+1)`, so only `k ∈ {0,1}` passed and `Type 1` did not.
+    //
+    // Q4 adopts `I.rec.{u}` with motive `I(params) → Sort u`. Written literally
+    // that is not implementable here and does not need to be (§8 Phase F's audit):
+    // a free `u` would have to be SOLVED, since `check` compares `Sort(k+1) ≤
+    // Sort(u)` and `Level::leq` cannot discharge that for an unbound parameter —
+    // every motive would be rejected. Solving needs level metavariables, which
+    // `Level` has no constructor for and `nbe::unify` does not do; Lean solves it
+    // in the elaborator and nanoda receives it already solved.
+    //
+    // **`u` never has to be solved, because the motive determines it.** The
+    // codomain level is a fact about the motive, not an unknown: apply the motive
+    // to fresh generics — one per index, one for the major — and ask what sort the
+    // result inhabits. `λ_. Set` yields `Sort(2)`, unchanged; `λ_. Type 1` yields
+    // `Sort(3)`, which is the ceiling lifting.
+    //
+    // The motive is CHECKED and not inferred because a bare `λ_. Sort(1)` has no
+    // inferable type, which is why this applies it first and infers only the body.
+    let derived = derive_motive_codomain(ctx, decl, motive)?;
+
+    // For Prop inductives, singleton-elim (D46 §7) gates large elim: if
+    // `large_elim_admitted(decl)` the wider codomain is permitted; otherwise the
+    // motive must return Prop. Unchanged in meaning — it is now a constraint on
+    // the DERIVED level rather than a choice between two constants.
+    let prop_gated =
+        matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(&ctx.env, decl);
+    if prop_gated && !derived.is_nat(0) {
+        return Err(CheckError::IllFormed(format!(
+            "singleton-elim violation: recursor on `{}` (a Prop with {} ctor{}, \
+             failing the singleton test) requires a Prop-valued motive; this one \
+             returns a type in `Sort({})`",
+            decl.name,
+            decl.ctors.len(),
+            if decl.ctors.len() == 1 { "" } else { "s" },
+            derived.simplify()
+        )));
+    }
+    let codomain_sort = Exp::Sort(derived);
     //    D48/eigenius#138: for an INDEXED family the motive is index-aware —
     //
     //        Π (i₁ : I₁) … (i_m : I_m). D(params)(i₁ … i_m) → Sort
@@ -717,6 +750,48 @@ pub(super) fn check_infer_inductive_rec(
 /// occur in an ESL identifier (`esl/lexer.rs:485`), so an index binder cannot capture a parameter
 /// name referenced by a LATER index's type. Same discipline as `gen_val`'s `TC#` and readback's
 /// `G#`, and distinct from both so the three cannot collide.
+/// The sort a recursor motive's result inhabits — Q4/4c's `u`, read off the motive
+/// rather than solved for (D76 Phase F).
+///
+/// Applies the motive to fresh generics, one per index and one for the major, then
+/// asks what sort the result inhabits. That is the level the motive needs, and it
+/// is a *fact about the motive*: nothing here unifies or guesses.
+///
+/// **Why not infer the motive directly.** A bare `λ_. Sort(1)` has no inferable
+/// type — which is why the motive is checked against an expected type in the first
+/// place. Applying it first sidesteps that: only the body is inferred, and the body
+/// is a type.
+///
+/// Both failure modes are reported here, not swallowed.
+fn derive_motive_codomain(
+    ctx: &mut CheckCtx,
+    decl: &Arc<InductiveDecl>,
+    motive: &Exp,
+) -> Result<crate::nbe::level::Level, CheckError> {
+    let mut applied = ctx.eval(motive, &ctx.rho.clone())?;
+    // One generic per index, then one for the major.
+    let arity = decl.indices.len() + 1;
+    for _ in 0..arity {
+        let gen = gen_val(&ctx.rho);
+        applied = ctx.app(applied, gen).map_err(|e| {
+            CheckError::IllFormed(format!(
+                "recursor on `{}`: the motive must take {arity} argument(s) — {} index/indices \
+                 and the major — but it does not: {e}",
+                decl.name,
+                decl.indices.len()
+            ))
+        })?;
+    }
+    let body = readback_val(ctx.rho.len(), &applied);
+    super::ensure_infers_as_sort(ctx, &body).map_err(|e| {
+        CheckError::IllFormed(format!(
+            "recursor on `{}`: the motive must return a TYPE — its result is the recursor's \
+             result type — but it does not: {e}",
+            decl.name
+        ))
+    })
+}
+
 fn motive_type_exp(
     decl: &Arc<InductiveDecl>,
     params: &[Val],
@@ -1917,6 +1992,49 @@ mod tests {
         let rho = Rho::Nil.extend(Patt::Var("n".to_string()), nat_val);
         let ctx = CheckCtx::new(rho, gamma).declaring(nat.clone());
         (nat, ctx)
+    }
+
+    /// **D76 Phase F / Q4-4c — the elimination ceiling is lifted.**
+    ///
+    /// The motive codomain was the constant `Sort(2)`, so a motive returning
+    /// `Sort(k)` — whose type is `Sort(k+1)` — passed only for `k ∈ {0,1}`. `Type 1`
+    /// was rejected. The codomain is derived from the motive now, so any level
+    /// passes.
+    ///
+    /// **This replaces `level::recursor_elimination_ceiling`'s marker**, which
+    /// asserted `Level::of_nat(k+1).leq(&Level::of_nat(2))` — pure arithmetic
+    /// *modelling* the constant, and true regardless of what the recursor does. It
+    /// could not flip because it never ran a recursor. This one does.
+    #[test]
+    fn a_type_1_valued_motive_is_admitted() {
+        let (nat, mut c) = ctx_with_nat_var();
+
+        // `k = 1` is the control — the constant admitted it. `k = 2` and `k = 3`
+        // are `Type 1` and `Type 2`, which it refused.
+        for k in 1..4usize {
+            // motive `λ_. Sort(k)` — the recursor's result type is a type at level k.
+            let motive = Exp::Lam(Patt::Unit, Box::new(Exp::sort(k)));
+            // A minor must INHABIT the motive's result, so it is a type at level k:
+            // `Sort(k-1) : Sort(k)`. (`Sort(k)` itself would not do — a universe
+            // lives strictly above itself.)
+            let zero_minor = Exp::sort(k - 1);
+            let succ_minor = Exp::Lam(
+                Patt::Unit,
+                Box::new(Exp::Lam(Patt::Unit, Box::new(Exp::sort(k - 1)))),
+            );
+            let exp = Exp::InductiveRec {
+                iri: nat.iri.clone(),
+                motive: Box::new(motive),
+                minors: vec![zero_minor, succ_minor],
+                major: Box::new(Exp::Var("n".to_string())),
+            };
+            let typ = check_infer(&mut c, &exp)
+                .unwrap_or_else(|e| panic!("motive returning Sort({k}) must be admitted: {e}"));
+            assert!(
+                matches!(&typ, Val::Sort(l) if l.is_nat(k)),
+                "the recursor's result type is the motive's codomain, Sort({k}); got {typ:?}"
+            );
+        }
     }
 
     #[test]

@@ -84,7 +84,13 @@ pass. 4c makes it a level parameter, `I.rec.{u}` with motive `I(params) → Sort
 `Const(iri, levels)`. `large_elim_admitted` keeps its exact meaning and call site — the two-way choice
 between `sort(0)` and `sort(2)` becomes *`u` pinned to 0* vs *`u` free*.
 
-**Signal:** `large_elimination_is_capped_at_set_not_type_n` (`nbe/level.rs`) must flip.
+**Signal:** ~~`large_elimination_is_capped_at_set_not_type_n` must flip~~ — **it could not, and the
+marker was wrong.** It asserts `Level::of_nat(k+1).leq(&Level::of_nat(2))`, a fact about `leq` that
+stays true however the recursor behaves: it *modelled* the constant instead of exercising it, so
+removing the constant left it green. Replaced by
+`check::inductive::tests::a_type_1_valued_motive_is_admitted`, which runs an actual recursor at each
+level; the arithmetic is kept in `nbe/level.rs` as
+`a_fixed_sort_2_codomain_would_cap_elimination_at_set`, renamed so it no longer claims to gate.
 
 ### 2.3 #188's residual — declaration-level `uparams` and level arguments
 
@@ -1203,8 +1209,55 @@ constant whose ceiling is Set (§2.2).
 
 **Last, and gated on Phase E** — it needs `Const(iri, levels)` to exist.
 
-**Gate:** `large_elimination_is_capped_at_set_not_type_n` must **flip**; `large_elim_admitted` keeps
-its exact meaning and call site, the two-way choice becoming *`u` pinned to 0* vs *`u` free*.
+**Gate:** a recursor with a `Type 1`-valued motive type-checks
+(`a_type_1_valued_motive_is_admitted`); `large_elim_admitted` keeps its exact meaning and call site,
+the two-way choice becoming *`u` pinned to 0* vs *`u` free*. **The originally-named signal could not
+serve** — see §2.2.
+
+**Status: complete `2026-08-25`.**
+
+**⚠ Audit `2026-08-25`, before implementation — two corrections.**
+
+*1. The stated dependency is wrong.* *"Last, and gated on Phase E — it needs `Const(iri, levels)` to
+exist."* The slot has existed since Phase B, and the codomain never reaches the wire: `codomain_sort`
+is a **local `Exp`** built at `check/inductive.rs:611`, used to construct the motive's expected type
+and discarded. Nothing persists it. F was never gated on E2 — E2 landing first was fine, but not for
+this reason.
+
+*2. `I.rec.{u}` as written is not implementable, and does not need to be.* Making the codomain
+`Sort(Param(u))` for a free `u` requires **solving** for `u` from the motive, because
+`check(motive, … → Sort(u))` compares `Sort(k+1) ≤ Sort(u)`, which `Level::leq` cannot discharge for
+an unbound parameter — every motive would be rejected. Solving needs **level metavariables**
+(`Level::Meta` + unification), which Eigenius does not have: `nbe::unify` solves *value* metas, and
+`Level` has no meta constructor. Lean does this in the **elaborator**; nanoda is a kernel and receives
+the level already solved inside the `Const`.
+
+Nor can the recursor carry the level as an argument today: `Exp::InductiveRec { iri, motive, minors,
+major }` has no level slot, and adding one would need surface syntax to author it — N3 §3 deferred
+use-site instantiation (`.{u}`) precisely until a consumer needed it.
+
+**But `u` never has to be solved, because the motive determines it.** The codomain level is not an
+unknown to unify — it is a *fact about the motive*, readable by applying the motive to fresh generics
+(one per index, one for the major) and asking what sort the result inhabits. That is
+`ensure_infers_as_sort`, which already exists and already returns the level.
+
+So Phase F is: **derive the codomain rather than fix it**.
+
+| motive | derived codomain | today (`Sort(2)`) |
+|---|---|---|
+| `λ_. Prop` | `Sort(1)` | accepted |
+| `λ_. Set` | `Sort(2)` | accepted |
+| `λ_. Type 1` | `Sort(3)` | **rejected** — the ceiling |
+| `λx. Nat` | `Sort(1)` | accepted |
+
+The first, second and fourth rows are unchanged, so this is backwards-compatible by construction; the
+third is the ceiling lifting. **A bare `λ_. Sort(1)` is not inferable as a whole** — which is why the
+motive is *checked* and not inferred, and why the derivation applies it to generics first and infers
+only the body.
+
+The Prop gate is unchanged in meaning and becomes a constraint on the derived level: for a `Prop`
+inductive failing singleton-elim, the derived level must be `0`. `large_elim_admitted` keeps its
+signature and its one call site, exactly as this phase requires.
 
 ---
 

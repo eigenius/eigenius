@@ -361,14 +361,17 @@ impl Val {
             // `App`, so the split happens here and a partially applied former is
             // a legitimate intermediate value rather than an error.
             //
-            // **Arity behaviour is reproduced exactly, conflation included.**
-            // Today an over-application is refused only when `decl.indices` is
-            // non-empty — a test that cannot tell an un-indexed inductive from
-            // the stub it was written for (Phase B audit). All ten shipped
-            // inductives are un-indexed, so every one of them takes the lenient
-            // path. Changing that is B2's, which runs the #194/#92 measurement
-            // protocol first; Phase B is a representation change and moves no
-            // verdict.
+            // **D76 Phase B2 — over-application is refused for every declaration.**
+            // The guard was `decl.indices.is_empty()`, which is not a test for
+            // "indexed" but the stub-detection hack: a stub had empty indices and so
+            // does a genuine un-indexed inductive, so every shipped inductive took
+            // the lenient path and `Nat(x, y, z)` evaluated happily. The stub is
+            // gone, so the conflation goes with it.
+            //
+            // UNDER-application is still fine here and is checked by
+            // `check_inductive_type_args`: arguments arrive one at a time, so a
+            // partially applied former is an ordinary intermediate value and eval
+            // has no point at which it knows no more are coming.
             Val::InductiveType {
                 decl,
                 mut params,
@@ -376,14 +379,11 @@ impl Val {
             } => {
                 if params.len() < decl.params.len() {
                     params.push(v);
-                } else if decl.indices.is_empty() {
-                    // Lenient path: no arity check, every argument a parameter.
-                    params.push(v);
                 } else if indices.len() < decl.indices.len() {
                     indices.push(v);
                 } else {
                     return Err(EvalError::InvalidCaseTarget(format!(
-                        "indexed InductiveType `{}`: over-applied past {} arg(s) \
+                        "inductive `{}`: over-applied past {} arg(s) \
                          (params + indices: {} + {})",
                         decl.name,
                         decl.params.len() + decl.indices.len(),
