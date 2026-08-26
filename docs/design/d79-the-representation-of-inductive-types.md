@@ -80,27 +80,28 @@ the type's ctors and `arg_types`, and Rule 21 (`check_type_expr_well_typed`) dec
 | declaration | count | validated | indexed |
 |---|---|---|---|
 | `core:inductive` | **5** | Rules 16 + 21 | no — and says so |
-| `core:resource` | **23** | Rule 21 | **claims to be, isn't** |
-| `core:resource_array` | **1** | Rule 21 | **claims to be, isn't** |
+| `core:resource` | **22** | Rule 21 | **claims to be, isn't** |
 | `core:json` (no `class_types`) | 1 — `core:ctor_type` | **nothing** | no |
+
+Every misdeclaration is `core:resource`; **none is `core:resource_array`** (§2.1.1).
 
 Correct today: `eigentt:axiom_statement`, `definition_type`, `definition_body`,
 `formulas:operator_signature`, `lean:proposition`. Everything else reaches for `core:resource` —
 `core:resource` is the default and `core:inductive` is the exception, which is why an earlier draft of
-this section, working from a sample, reported four misdeclared properties rather than twenty-four:
+this section, working from a sample, reported four misdeclared properties rather than twenty-two:
 
 | namespace | misdeclared properties |
 |---|---|
 | `lexicon` | `cat`, `sem_type`, `term`, `prop` |
 | `reasoning` | `proposition`, `candidate_proposition`, `certificate`, `justification` |
 | `stats` | `sample_set_value`, `effect_size`, `variance_assumption`, `directionality`, `outlier_exclusion`, `multiple_comparison_correction`, `autocorrelation_structure` |
-| `objective` | `proposition`, `option_claim`, `selected`, `options` *(the one `resource_array`)* |
+| `objective` | `proposition`, `option_claim` |
 | `core` | `type_name`, `param_kind`, `result_sort` |
 | `reflection` / `enc` | `canonical_proposition`, `antecedent_term` |
 
 Note the range targets are not only `eigentt:TypeExpr`: `core:result_sort` ranges at `core:Level`,
-`objective:selected` / `options` at `core:Option`, and the seven `stats` properties at their own
-institution inductives. The defect is about the *declared data type*, not about which inductive.
+`reasoning:justification` at `reasoning:JustificationTerm`, and the seven `stats` properties at their
+own institution inductives. The defect is about the *declared data type*, not about which inductive.
 
 The `core:inductive` row is honest — its own description says *"the wire shape is opaque JSON to
 surrounding chain queries."* That sentence was a decision, and this document is the case against it.
@@ -121,7 +122,7 @@ the `declaration_order` walker.
 `core:ctor_type` is the outlier that forced that walker: `core:json`, no `class_types`, so no rule
 validates it at all.
 
-**Decision: normalise all 25 onto `core:inductive`**, each keeping its own `class_types` target.
+**Decision: normalise all 23 onto `core:inductive`**, each keeping its own `class_types` target.
 `core:ctor_type` additionally gains `class_types eigentt:TypeExpr`, which it has never had. This is a
 bootstrap-ontology edit and therefore requires a reseed.
 
@@ -130,6 +131,33 @@ inputs — the sample set, the effect size, the variance assumption. Those are t
 computed from, and they are exactly what
 [D80](d80-witness-and-institution-machinery.md) §3 needs to enumerate. They are unindexed today for
 this reason and no other.
+
+#### 2.1.1 There is no `core:inductive_array`, and there should not be
+
+The question the inventory raises: `core:resource` has an array partner, so does `core:inductive` need
+one? **No.**
+
+First, nothing asks for it. The one apparent case —
+`objective:options : core:resource_array + class_types objective:Option` — is not one: `objective:Option`
+is a `class`, so that declaration is already correct. It appeared in a draft of the table because the
+scan matched ESL qualified names by local-name suffix and confused it with the kernel's `core:Option`.
+Every real misdeclaration is scalar.
+
+Second, and the reason it would be wrong even with a case: **a list of terms is itself a term.**
+`core:resource_array` and `core:value_array` exist because a reference and a scalar have no
+representation *inside* the term language — the ontology layer has to express multiplicity for them.
+A D47-encoded value does not have that problem: `List A` is an inductive like any other, so "several
+of these" is already sayable in the thing being stored. Adding `core:inductive_array` would put a type
+constructor at the ontology's data-type layer, duplicating one the type theory already owns, and would
+produce a shape the kernel type-checks as an array of terms rather than as the single term it is.
+
+**One gap if the case ever arrives.** `core:List` is kernel-intrinsic — answered by `Env::intrinsic` in
+every environment and special-cased at `program/eigentt_type_mirror.rs:947` — and is **not declared as
+a chain `InductiveType`**. So `class_types core:List` would not resolve today:
+`class_types_inductive_target` resolves through `self.layer.resolve` (`validation/rules/inductive.rs:94`),
+a chain lookup. The fix, when something needs a list-valued term slot, is to *declare* `core:List` in
+the core ontology so the declaration layer can name what the kernel already has — **not** to add an
+array data type. Recorded here so the next person reaches for the right one.
 
 ### 2.2 The indexer arm
 
@@ -239,14 +267,16 @@ seven audits corrected something the design had asserted.
   its constructor set with it. Measured at zero violations, so it lands before anything depends on it.
   Gate: the rule fires on a hand-built violating layer; the full workspace suite, the demo and the
   parse gate are unperturbed. **No reseed** — it adds a rule, not an ontology edit.
-- **P2 — the declarations** (§2.1). All 24 `core:resource` / `core:resource_array` properties ranged
-  at an `InductiveType` become `core:inductive`, each keeping its own `class_types` target;
+- **P2 — the declarations** (§2.1). All 22 `core:resource` properties ranged at an `InductiveType`
+  become `core:inductive`, each keeping its own `class_types` target;
   `core:ctor_type` becomes `core:inductive` + `class_types eigentt:TypeExpr`. **Bootstrap edit, so a
   reseed**; batch with any other pending bootstrap change. Gates: reseed completes at the current
   resource count with 0 errors; `ctor_type` now reaches Rules 16/21, asserted by a malformed
   `ctor_type` that previously loaded and now does not; and the scan that produced §2.1's inventory
   re-runs clean — **zero properties ranged at an `InductiveType` still declared `core:resource`**, so
-  the next one added is caught rather than sampled for.
+  the next one added is caught rather than sampled for. The scan must resolve `class_types` by full
+  IRI: an earlier version matched ESL qualified names by local-name suffix and reported
+  `objective:options -> core:Option`, which is `objective:Option`, a **class** (§2.1.1).
 - **P3 — the indexer arm** (§2.2). `wk::INDUCTIVE` in `extract_indexable_triples`, emitting deduped
   `core:mentions` triples and skipping sealed objects. Gate: index growth on the lexicon chain is
   **measured, not estimated**, against the ~1-2-per-entry prediction; `declaration_order`'s bespoke
