@@ -291,6 +291,13 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
     };
 
     let mut triples = Vec::new();
+    // D79 §2.2 — term references, collected here and filtered after the loop so each
+    // distinct mention IRI is resolved **once per layer** rather than once per
+    // occurrence. On a lexicon chain the same few dozen declarations are named by
+    // millions of entries; resolving inside the loop would multiply the cost by the
+    // entry count for no additional information.
+    let mut mention_pairs: Vec<(Iri, Iri)> = Vec::new();
+    let mut distinct_mentions: BTreeSet<Iri> = BTreeSet::new();
     for (subject_iri, resource) in layer.iter_resources() {
         for (predicate_iri, value) in resource.properties() {
             // Inline the indexability check rather than calling
@@ -326,6 +333,17 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                     }),
                     _ => {}
                 },
+                // D79 §2.2 — a term-valued property. Its `Value::Json` names
+                // declarations, and before this arm those references produced no
+                // triples at all, so nothing could ask what depends on a term.
+                wk::INDUCTIVE => {
+                    let mut names = BTreeSet::new();
+                    crate::layer::term_mentions::json_mentions_of_value(value, &mut names);
+                    for name in names {
+                        distinct_mentions.insert(name.clone());
+                        mention_pairs.push((subject_iri.clone(), name));
+                    }
+                }
                 wk::RESOURCE_ARRAY => {
                     if let Value::Array(items) = value {
                         for item in items {
@@ -343,6 +361,39 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    // **The seal (D79 §2.3) is what makes this affordable.** A mention whose object
+    // is an `InductiveType` can never be rebound — P1 refuses any layer that tries —
+    // so no query will ever ask for its posting list, and on a lexicon chain those
+    // are exactly the lists with millions of members: every entry's `cat` names
+    // `lexicon:Cat` and `lexicon:Num`. Dropping them keeps the retained edges to the
+    // ones a rebinding can actually break, which over the lexicon is the entry's
+    // sense class.
+    let inductive_type = Iri::parse(wk::INDUCTIVE_TYPE).ok();
+    let sealed: BTreeSet<Iri> = match &inductive_type {
+        None => BTreeSet::new(),
+        Some(it) => distinct_mentions
+            .iter()
+            .filter(|m| {
+                layer
+                    .resolve(m)
+                    .is_some_and(|r| r.is_a().iter().any(|c| c == it))
+            })
+            .cloned()
+            .collect(),
+    };
+    if let Ok(mentions) = Iri::parse(wk::MENTIONS) {
+        for (subject, object) in mention_pairs {
+            if sealed.contains(&object) {
+                continue;
+            }
+            triples.push(OwnedTriple {
+                subject,
+                predicate: mentions.clone(),
+                object,
+            });
         }
     }
     triples
@@ -1447,5 +1498,125 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, iri("urn:eigenius:test:rex"));
         assert_eq!(hits[0].1, *layer.id());
+    }
+}
+
+#[cfg(test)]
+mod mentions_tests {
+    //! **D79 §2.2 / P3.** Before this, a `core:inductive`-typed property contributed
+    //! **no triples at all** — encoded terms live in `Value::Json`, and the indexer
+    //! matched only `Value::ResourceRef` under `resource` / `resource_array`. So
+    //! "which resources mention declaration `i`" had no index answer, and the only
+    //! way to ask was a full-chain walk.
+    use crate::layer::{extract_indexable_triples, Layer, LayerBuilder, LayerStorage};
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::ontology::well_known as wk;
+    use std::sync::Arc;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).expect("static iri")
+    }
+
+    /// `test:tx : core:inductive`, plus an inductive `test:Colour` (**sealed**) and a
+    /// plain class `test:Topic` (**not** sealed) for the objects to point at.
+    fn base() -> Arc<Layer> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut b = LayerBuilder::new("mentions_base", Some(head));
+
+        let mut prop = Resource::new(iri("urn:eigenius:test:tx"));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::SHORT_NAME), Value::String("tx".into()));
+        prop.set(
+            iri(wk::DATA_TYPE_PROP),
+            Value::ResourceRef(iri(wk::INDUCTIVE)),
+        );
+        prop.set(
+            iri(wk::CLASS_TYPES),
+            Value::Array(vec![Value::ResourceRef(iri(
+                "urn:eigenius:eigentt:TypeExpr",
+            ))]),
+        );
+        b.add_resource(prop).unwrap();
+
+        let mut colour = Resource::new(iri("urn:eigenius:test:Colour"));
+        colour.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+        );
+        colour.set(iri(wk::SHORT_NAME), Value::String("Colour".into()));
+        colour.set(iri(wk::TYPE_PARAMS), Value::Array(vec![]));
+        colour.set(iri(wk::CTORS), Value::Array(vec![]));
+        b.add_resource(colour).unwrap();
+
+        let mut topic = Resource::new(iri("urn:eigenius:test:Topic"));
+        topic.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        );
+        b.add_resource(topic).unwrap();
+
+        Arc::new(b.build(LayerStorage::in_memory()))
+    }
+
+    fn mentions_of(term: serde_json::Value) -> Vec<String> {
+        let mut b = LayerBuilder::new("mentions_top", Some(base()));
+        let mut holder = Resource::new(iri("urn:eigenius:test:holder"));
+        holder.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+        );
+        holder.set(iri("urn:eigenius:test:tx"), Value::Json(term));
+        b.add_resource(holder).unwrap();
+        let layer = b.build(LayerStorage::in_memory());
+        extract_indexable_triples(&layer)
+            .into_iter()
+            .filter(|t| t.predicate.as_str() == wk::MENTIONS)
+            .map(|t| t.object.as_str().to_string())
+            .collect()
+    }
+
+    /// The case that had no index answer at all.
+    #[test]
+    fn a_term_reference_becomes_a_mentions_triple() {
+        let m = mentions_of(serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"],
+        }));
+        assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
+    }
+
+    /// **The seal is what keeps the index affordable** (D79 §2.3). `test:Colour` is
+    /// an `InductiveType`, so P1 refuses any layer that rebinds it — no query can
+    /// ever ask for its posting list, and on a lexicon chain those lists have
+    /// millions of members.
+    #[test]
+    fn a_mention_of_a_sealed_inductive_is_dropped() {
+        let m = mentions_of(serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Colour"],
+        }));
+        assert!(m.is_empty(), "sealed objects must not be indexed: {m:?}");
+    }
+
+    /// A `cat_np(Topic, Colour)`-shaped term: the unsealed class survives, the
+    /// sealed inductive does not. This is the per-entry shape D79 §2.3 predicts.
+    #[test]
+    fn a_mixed_term_keeps_only_the_rebindable_edge() {
+        let m = mentions_of(serde_json::json!({"ctor": "App", "args": [
+            {"ctor": "CtorApp", "args": ["urn:eigenius:test:Colour", "red"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]}]}));
+        assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
+    }
+
+    /// Deduplicated per subject: naming the same declaration twice in one term is
+    /// one dependency, not two.
+    #[test]
+    fn repeated_mentions_of_one_iri_yield_one_triple() {
+        let m = mentions_of(serde_json::json!({"ctor": "App", "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]}]}));
+        assert_eq!(m.len(), 1, "{m:?}");
     }
 }

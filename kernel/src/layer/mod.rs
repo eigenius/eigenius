@@ -38,6 +38,7 @@ pub mod merge;
 mod redirect;
 mod storage;
 mod supporting;
+pub mod term_mentions;
 mod text_index;
 mod value_index;
 mod vector_index;

@@ -132,29 +132,15 @@ fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
         }
         Value::Array(items) => items.iter().for_each(|i| value_refs(i, out)),
         Value::Embedded(inner) => references(inner.as_ref(), out),
-        // D47-encoded terms. Any string that parses as an IRI is a reference —
-        // `ConstRef`'s argument, an inductive's `type_name`, and so on.
-        Value::Json(j) => json_refs(j, out),
+        // D47-encoded terms. Shared with the indexer since D79 §2.2 — this
+        // descent used to live here, and having one copy is what lets
+        // `core:mentions` and `MutualInductives` agree about what a term names.
+        Value::Json(j) => crate::layer::term_mentions::json_mentions(j, out),
         Value::String(_)
         | Value::Integer(_)
         | Value::Float(_)
         | Value::Boolean(_)
         | Value::Vector { .. } => {}
-    }
-}
-
-fn json_refs(j: &serde_json::Value, out: &mut BTreeSet<Iri>) {
-    match j {
-        serde_json::Value::String(s) => {
-            if s.starts_with("urn:") {
-                if let Ok(iri) = Iri::parse(s) {
-                    out.insert(iri);
-                }
-            }
-        }
-        serde_json::Value::Array(items) => items.iter().for_each(|i| json_refs(i, out)),
-        serde_json::Value::Object(map) => map.values().for_each(|v| json_refs(v, out)),
-        _ => {}
     }
 }
 
