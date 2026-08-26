@@ -228,9 +228,11 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
     if let Ok(rd) = std::fs::read_dir(&root) {
         for e in rd.flatten() {
             let name = e.file_name();
+            // `<pid>-<seq>`: take the pid, ignore the per-copy sequence.
             let Some(pid) = name
                 .to_str()
                 .and_then(|n| n.strip_prefix("eigenius-snapshot-work-"))
+                .map(|rest| rest.split('-').next().unwrap_or(rest))
             else {
                 continue;
             };
@@ -244,7 +246,20 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
             }
         }
     }
-    let dst = root.join(format!("eigenius-snapshot-work-{}", std::process::id()));
+    // **Per-copy, not per-process.** This was keyed on `process::id()` alone, which is
+    // the same for every test in one binary — so two snapshot-using tests running in
+    // parallel computed the SAME destination, and the `remove_dir_all` below deleted
+    // the other's in-flight copy out from under `cp`. That surfaced as an intermittent
+    // "failed to copy snapshot" in whichever test lost, with the count varying run to
+    // run; single-threaded runs always passed, which is what made it look
+    // environmental. The pid stays first so the stale-copy reaper above can still ask
+    // whether the owning process is alive.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dst = root.join(format!(
+        "eigenius-snapshot-work-{}-{seq}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dst);
     let t = std::time::Instant::now();
     // `--reflink=auto`: instant on a CoW filesystem, a plain copy elsewhere.
