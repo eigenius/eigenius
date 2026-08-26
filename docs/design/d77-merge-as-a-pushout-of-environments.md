@@ -246,6 +246,32 @@ Neither changes this document's scope. Adding `scan_predicate` improves the line
 identically and belongs there, not here — it is a missing *range method* over triples that already
 exist, unrelated to §4, which is about triples that are never emitted.
 
+### 3.6 A rename resolution does not rewrite term references — and cannot be fixed before D79
+
+Found while landing D79 P3. Two functions in `layer/merge/resolve.rs` decide and perform an
+IRI rename, and both stop at `Value::Json`:
+
+| function | line | `Value::Json` |
+|---|---|---|
+| `value_mentions_iri` — *does this resource reference the IRI?* | `:448` | `_ => false` |
+| `substitute_iri_in_value` — *rewrite every reference* | `:~478` | `other => other.clone()` |
+
+So a resource whose only reference to a renamed IRI is inside an encoded term is **not selected**
+for rewriting, and would not be rewritten if it were. The merge commits reporting a completed rename
+while the term still names the old IRI. That is worse than the missed invalidation §3 is about — it
+is a dangling reference written into the chain, not a stale check.
+
+**The fix is gated on D79 §2.1, and would have been unsafe before it.** The correct rule is *descend
+into `Value::Json` only when the carrying property is declared `core:inductive`* — a `core:json`
+value is an opaque payload (a solver result, a `*_kv` map) whose IRI-shaped strings are **data**, and
+rewriting one would corrupt it. Before D79 P2 the carrier's declared data type could not make that
+distinction: twenty-two term-valued properties were declared `core:resource` and `core:ctor_type` was
+`core:json`. A term-aware rename written then would have had to choose between missing terms and
+corrupting blobs.
+
+`json_mentions` (D79 §2.2) answers the first column. The second needs a *rewriting* walker, which
+D79 does not build — detection and substitution are different traversals. F1's audit should size it.
+
 ## 4. Does merge gain a validation pass, or *is* the pushout obligation the pass?
 
 D75 §7 left this open. **The answer is that it gains one, and the pushout obligation is its
@@ -292,7 +318,8 @@ seven audits corrected something the design had asserted.
   `dispatch_auto_on_load_for_layer` (`phases.rs:411`) in the audit** — D80 §3.3 row 1 shows merge
   currently skips AutoOnLoad entirely, which is a live hole (a) closes and (b) does not. Output is a
   decision between §4's (a) and (b), with the cost of each measured rather than estimated. **No code.**
-- **F1 — the rebound set.** `rebound_A` / `rebound_B` from `MergeSpan` + the LCA, with
+- **F1 — the rebound set**, and audit §3.6's rename path while in this file. `rebound_A` /
+  `rebound_B` `rebound_A` / `rebound_B` from `MergeSpan` + the LCA, with
   `conjunction_entails` deciding weakening. Pure function, unit-testable against the #225 fixture.
   Gate: `a_reference_meeting_a_redefinition_raises_no_conflict` **flips** — renamed, since after this
   it raises one.
