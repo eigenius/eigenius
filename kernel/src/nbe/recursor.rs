@@ -135,9 +135,9 @@ pub fn derive_minor_type(
     // decls (`decl.indices.is_empty()`) this is empty and the rest
     // of the body construction degenerates to the pre-D48 shape.
     let n_params = decl.params.len();
-    let conclusion_indices: Vec<Exp> = match current {
-        Exp::InductiveType(_, all_args) if all_args.len() >= n_params => {
-            all_args[n_params..].to_vec()
+    let conclusion_indices: Vec<Exp> = match current.as_const_spine() {
+        Some((_, _, all_args)) if all_args.len() >= n_params => {
+            all_args[n_params..].iter().map(|e| (*e).clone()).collect()
         }
         _ => Vec::new(),
     };
@@ -152,7 +152,7 @@ pub fn derive_minor_type(
         });
 
     // Result type: motive idx_1 ... idx_m (cⱼ args)
-    let ctor_app = Exp::InductiveCtor(decl.clone(), ctor.name.clone(), arg_var_exps.clone());
+    let ctor_app = Exp::InductiveCtor(decl.iri.clone(), ctor.name.clone(), arg_var_exps.clone());
     let mut body_exp = Exp::App(Box::new(motive_at_concl_indices), Box::new(ctor_app));
 
     // Wrap one IH binder per recursive argument, in original order
@@ -204,7 +204,10 @@ pub fn derive_minor_type(
 
         // D48: `motive idx₁ … idx_m` at the occurrence's own indices. These sit INSIDE the
         // binders above, since an index expression may mention them.
-        let arg_idx_exps: Vec<Exp> = shape.args[n_params.min(shape.args.len())..].to_vec();
+        let arg_idx_exps: Vec<Exp> = shape.args[n_params.min(shape.args.len())..]
+            .iter()
+            .map(|e| (*e).clone())
+            .collect();
         let motive_at_arg_indices = arg_idx_exps.iter().fold(motive_exp.clone(), |acc, i| {
             Exp::App(Box::new(acc), Box::new(i.clone()))
         });
@@ -281,6 +284,7 @@ mod tests {
 
     fn self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
@@ -292,8 +296,9 @@ mod tests {
 
     fn nat_decl() -> Arc<InductiveDecl> {
         let s = self_ref("Nat");
-        let nat_ty = Exp::InductiveType(s, Vec::new());
+        let nat_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
@@ -352,8 +357,9 @@ mod tests {
     #[test]
     fn ih_binder_does_not_capture_a_constructor_argument() {
         let s = self_ref("D");
-        let d_ty = Exp::InductiveType(s, Vec::new());
+        let d_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:D").unwrap(),
             name: "D".to_string(),
             params: Vec::new(),
@@ -391,7 +397,7 @@ mod tests {
             Rho::Nil,
         ));
 
-        let minor = derive_minor_type(&decl, 1, &[], &motive, &EvalCtx::Pure)
+        let minor = derive_minor_type(&decl, 1, &[], &motive, &EvalCtx::pure())
             .expect("derive_minor_type for `step`");
 
         // Walk the three binders — the `One` argument, the recursive `D` argument, the IH —
@@ -438,7 +444,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         let typ =
-            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive_minor_type");
+            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::pure()).expect("derive_minor_type");
         assert!(
             matches!(&typ, Val::Sort(l) if l.is_nat(1)),
             "expected Set, got {typ:?}"
@@ -451,7 +457,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         let typ =
-            derive_minor_type(&nat, 1, &[], &motive, &EvalCtx::Pure).expect("derive_minor_type");
+            derive_minor_type(&nat, 1, &[], &motive, &EvalCtx::pure()).expect("derive_minor_type");
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 2, "expected 2 Π binders, got {count}");
         assert!(
@@ -471,8 +477,9 @@ mod tests {
     fn node_minor_binder_order_is_args_then_ihs_in_arg_order() {
         // Tree { leaf : Tree, node : Tree → Tree → Tree }
         let s = self_ref("Tree");
-        let tree_ty = Exp::InductiveType(s, Vec::new());
+        let tree_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let tree = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
             params: Vec::new(),
@@ -504,7 +511,7 @@ mod tests {
             Exp::Var("x".to_string()),
             Rho::Nil,
         ));
-        let typ = derive_minor_type(&tree, 1, &[], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&tree, 1, &[], &motive, &EvalCtx::pure())
             .expect("derive_minor_type for node");
 
         // Walk the Pi chain, applying distinguishable generic values.
@@ -519,8 +526,8 @@ mod tests {
         }
         assert_eq!(domains.len(), 4, "node minor: 2 args + 2 IHs");
         // Binders 1–2: the ctor args (Tree, Tree).
-        assert!(matches!(domains[0], Exp::InductiveType(_, _)));
-        assert!(matches!(domains[1], Exp::InductiveType(_, _)));
+        assert!(domains[0].as_const_spine().is_some());
+        assert!(domains[1].as_const_spine().is_some());
         // Binder 3: IH for the FIRST recursive arg — identity motive
         // means its domain is the first arg's generic value (level 0).
         // Binder 4: IH for the second (level 1). Reversed or
@@ -548,8 +555,10 @@ mod tests {
         // List(A) cons has args [elem:A, rest:List A], one recursive ⇒
         // minor type is Π elem:A. Π rest:List(A). Π ih:motive(rest). motive(cons elem rest)
         let s = self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -586,7 +595,7 @@ mod tests {
         // suffices for the shape check; element types do not matter for
         // counting Π binders.
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 1, &[Val::sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 1, &[Val::sort(1)], &motive, &EvalCtx::pure())
             .expect("derive_minor_type");
         let (count, body) = count_pi_chain(typ);
         assert_eq!(count, 3, "expected 3 Π binders, got {count}");
@@ -600,8 +609,10 @@ mod tests {
     fn list_nil_minor_type_no_pis() {
         // nil has no non-param args ⇒ minor type = motive(nil)
         let s = self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -617,7 +628,7 @@ mod tests {
             }],
         });
         let motive = const_set_motive();
-        let typ = derive_minor_type(&list, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&list, 0, &[Val::sort(1)], &motive, &EvalCtx::pure())
             .expect("derive_minor_type");
         assert!(
             matches!(&typ, Val::Sort(l) if l.is_nat(1)),
@@ -630,7 +641,7 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         let typs =
-            derive_minor_types(&nat, &[], &motive, &EvalCtx::Pure).expect("derive_minor_types");
+            derive_minor_types(&nat, &[], &motive, &EvalCtx::pure()).expect("derive_minor_types");
         assert_eq!(typs.len(), 2);
         // zero minor: Set
         assert!(matches!(&&typs[0], Val::Sort(l) if l.is_nat(1)));
@@ -644,7 +655,8 @@ mod tests {
         let nat = nat_decl();
         let motive = const_set_motive();
         // Nat takes no params; passing one should error.
-        let err = derive_minor_type(&nat, 0, &[Val::sort(1)], &motive, &EvalCtx::Pure).unwrap_err();
+        let err =
+            derive_minor_type(&nat, 0, &[Val::sort(1)], &motive, &EvalCtx::pure()).unwrap_err();
         match err {
             EvalError::InvalidCaseTarget(msg) => assert!(msg.contains("params")),
             other => panic!("expected InvalidCaseTarget, got {other:?}"),
@@ -660,6 +672,7 @@ mod tests {
     /// and `cons : (h : 1) → A → SimpleVec A () → SimpleVec A ()`.
     fn simple_vec_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -667,9 +680,13 @@ mod tests {
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let vec_a_unit =
-            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -728,7 +745,7 @@ mod tests {
         let motive = vec_motive();
         // Reducing the minor at evaluation time produces `motive () (nil A)`
         // which (with the const motive `λ _ _. Set`) collapses to `Set`.
-        let typ = derive_minor_type(&decl, 0, &[Val::sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 0, &[Val::sort(0)], &motive, &EvalCtx::pure())
             .expect("derive nil minor");
         // The minor type is `Π A:Set. motive () (nil A)` — a Pi over
         // the ctor's value-arg telescope (here just the A binder).
@@ -764,7 +781,7 @@ mod tests {
         // The const motive `λ _ _. Set` reduces all `motive () _` to Sort(1).
         let decl = simple_vec_decl();
         let motive = vec_motive();
-        let typ = derive_minor_type(&decl, 1, &[Val::sort(0)], &motive, &EvalCtx::Pure)
+        let typ = derive_minor_type(&decl, 1, &[Val::sort(0)], &motive, &EvalCtx::pure())
             .expect("derive cons minor");
         // Verify the minor type starts with a Pi — `cons` has non-param
         // value args (h : 1, x : A, xs : SimpleVec A ()) plus an IH for
@@ -787,7 +804,7 @@ mod tests {
         let motive = const_set_motive();
         // zero's minor: no args, result is `motive zero` → Sort(1) under const.
         let zero_typ =
-            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive zero minor");
+            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::pure()).expect("derive zero minor");
         assert!(
             matches!(&zero_typ, Val::Sort(l) if l.is_nat(1)),
             "Nat.zero minor should reduce to Sort(1) under const-Set motive; got {zero_typ:?}"

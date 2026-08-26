@@ -41,6 +41,7 @@ const DRIVE: &str = "urn:eigenius:pub:wrn:dd_drive";
 
 fn decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: Iri::parse("urn:eigenius:reasoning:JustificationTerm").unwrap(),
         name: "JustificationTerm".to_string(),
         params: Vec::new(),
@@ -50,7 +51,7 @@ fn decl() -> Arc<InductiveDecl> {
     })
 }
 fn ctor(name: &str, args: Vec<Exp>) -> Exp {
-    Exp::InductiveCtor(decl(), name.to_string(), args)
+    Exp::InductiveCtor(decl().iri.clone(), name.to_string(), args)
 }
 fn leaf(name: &str, iri: &str) -> Exp {
     ctor(name, vec![Exp::LitString(iri.to_string())])

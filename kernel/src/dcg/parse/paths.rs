@@ -172,7 +172,7 @@ impl Parser {
         // (`EntityRef`, pronoun/possessor → D64) hole remains; the bare-plural/mass quantification hole
         // was retired with the kind-predication reshape (Phase B).
         let entity_ty = Exp::EigonClass(iri(ENTITY_IRI));
-        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok();
+        let types_ok = eval_env(&entity_ty, &Rho::Nil, &self.grammar.env()).is_ok();
         let mut hole_specs: Vec<(String, Exp, HoleKind)> = Vec::new();
         if types_ok {
             for i in 0..n {
@@ -302,7 +302,7 @@ impl Parser {
         let entity_ty = Exp::EigonClass(iri(ENTITY_IRI));
         // Degenerate guard (preserved): if the hole type can't even be evaluated, fall back to the
         // closed-only path. Normally it evals fine.
-        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok();
+        let types_ok = eval_env(&entity_ty, &Rho::Nil, &self.grammar.env()).is_ok();
         let mut hole_specs: Vec<(String, Exp, HoleKind)> = Vec::new();
         if types_ok {
             for i in 0..n {

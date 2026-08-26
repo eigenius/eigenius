@@ -476,3 +476,37 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod recursor_elimination_ceiling {
+    use super::Level;
+
+    /// **The ceiling this pinned is gone (D76 Phase F).** The recursor motive's
+    /// codomain was the constant `Sort(2)`, so a motive returning `Sort(k)` — whose
+    /// type is `Sort(k+1)` — passed only for `k ∈ {0,1}`: Prop and Set. `Type 1` was
+    /// refused. `check/inductive.rs` derives the codomain from the motive now, and
+    /// `check::inductive::tests::a_type_1_valued_motive_is_admitted` runs an actual
+    /// recursor at each level to show it.
+    ///
+    /// **What stays here is the arithmetic, and why it could never have been the
+    /// gate.** D76 §8 named this test a progress marker that "must flip". It could
+    /// not: it asserts `Level::of_nat(k+1).leq(&Level::of_nat(2))`, which is a fact
+    /// about `leq` and stays true however the recursor behaves. It *modelled* the
+    /// constant rather than exercising it, so removing the constant leaves it
+    /// green. Kept as a statement of the arithmetic the old ceiling followed from,
+    /// renamed so it no longer claims to gate anything.
+    #[test]
+    fn a_fixed_sort_2_codomain_would_cap_elimination_at_set() {
+        let demanded = Level::of_nat(2);
+        let accepts = |k: usize| Level::of_nat(k + 1).leq(&demanded);
+
+        assert!(accepts(0), "a Prop-valued motive fits under Sort(2)");
+        assert!(accepts(1), "as does a Set-valued one");
+        assert!(
+            !accepts(2),
+            "but Type 1 (= Sort(2)) does not — which is why a FIXED Sort(2) capped \
+             elimination at Set. The recursor no longer fixes it."
+        );
+        assert!(!accepts(3), "and everything above it");
+    }
+}

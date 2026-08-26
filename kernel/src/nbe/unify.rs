@@ -156,6 +156,11 @@ impl std::error::Error for UnifyError {}
 ///
 /// `level` is the current de Bruijn level (number of binders in scope) —
 /// passed through for readback and equality.
+/// **Takes no environment**, for the same reason [`eq_nf`] does not (D76 Phase D):
+/// unification falls back to `eq_nf` and otherwise recurses, and never reaches the
+/// one arm that consults `Γ_env` — `Refine` subtyping. Threading one in left a
+/// parameter used only by the recursion, which clippy reported and which would
+/// have been a parameter that lies about what the function needs.
 pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(), UnifyError> {
     let lhs = mctx.zonk(lhs);
     let rhs = mctx.zonk(rhs);
@@ -217,17 +222,17 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
         // Both are InductiveVal — same decl + ctor + recurse on args.
         (
             Val::InductiveVal {
-                decl: ld,
+                iri: ld,
                 ctor_name: lc,
                 args: la,
             },
             Val::InductiveVal {
-                decl: rd,
+                iri: rd,
                 ctor_name: rc,
                 args: ra,
             },
         ) => {
-            if ld.name != rd.name || lc != rc {
+            if ld != rd || lc != rc {
                 return Err(mismatch(level, &lhs, &rhs));
             }
             if la.len() != ra.len() {
@@ -434,11 +439,11 @@ fn zonk_val(mctx: &MetaCtx, val: &Val) -> Val {
             indices: indices.iter().map(|i| zonk_val(mctx, i)).collect(),
         },
         Val::InductiveVal {
-            decl,
+            iri,
             ctor_name,
             args,
         } => Val::InductiveVal {
-            decl: decl.clone(),
+            iri: iri.clone(),
             ctor_name: ctor_name.clone(),
             args: args.iter().map(|a| zonk_val(mctx, a)).collect(),
         },
@@ -465,6 +470,7 @@ mod tests {
 
     fn nat_decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
@@ -485,7 +491,7 @@ mod tests {
 
     fn nat_zero(decl: &Arc<InductiveDecl>) -> Val {
         Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "zero".to_string(),
             args: Vec::new(),
         }
@@ -493,7 +499,7 @@ mod tests {
 
     fn nat_succ(decl: &Arc<InductiveDecl>, n: Val) -> Val {
         Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "succ".to_string(),
             args: vec![n],
         }
@@ -713,6 +719,7 @@ mod tests {
 
     fn vec_decl_named(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],

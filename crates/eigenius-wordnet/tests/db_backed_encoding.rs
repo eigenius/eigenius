@@ -228,9 +228,11 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
     if let Ok(rd) = std::fs::read_dir(&root) {
         for e in rd.flatten() {
             let name = e.file_name();
+            // `<pid>-<seq>`: take the pid, ignore the per-copy sequence.
             let Some(pid) = name
                 .to_str()
                 .and_then(|n| n.strip_prefix("eigenius-snapshot-work-"))
+                .map(|rest| rest.split('-').next().unwrap_or(rest))
             else {
                 continue;
             };
@@ -244,7 +246,20 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
             }
         }
     }
-    let dst = root.join(format!("eigenius-snapshot-work-{}", std::process::id()));
+    // **Per-copy, not per-process.** This was keyed on `process::id()` alone, which is
+    // the same for every test in one binary — so two snapshot-using tests running in
+    // parallel computed the SAME destination, and the `remove_dir_all` below deleted
+    // the other's in-flight copy out from under `cp`. That surfaced as an intermittent
+    // "failed to copy snapshot" in whichever test lost, with the count varying run to
+    // run; single-threaded runs always passed, which is what made it look
+    // environmental. The pid stays first so the stale-copy reaper above can still ask
+    // whether the owning process is alive.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dst = root.join(format!(
+        "eigenius-snapshot-work-{}-{seq}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dst);
     let t = std::time::Instant::now();
     // `--reflink=auto`: instant on a CoW filesystem, a plain copy elsewhere.
@@ -2517,7 +2532,7 @@ fn collect_iris(e: &Exp, out: &mut std::collections::BTreeSet<String>) {
             collect_iris(t, out);
             collect_iris(b, out);
         }
-        E::InductiveCtor(_, _, args) | E::InductiveType(_, args) => {
+        E::InductiveCtor(_, _, args) => {
             for a in args {
                 collect_iris(a, out);
             }
@@ -3371,7 +3386,7 @@ fn wrn_first_page_over_full_lexicon() {
                 // Worth its keep: the pretty printer renders `logic:And(P, Q)` and an ordinary
                 // application identically, so a term that looked like an ill-typed `And(λ…, …)` could
                 // not be diagnosed from the printed form alone. The `{:?}` showed it was
-                // `Exp::InductiveType(AndDecl{params:[(P,Sort(0)),(Q,Sort(0))]}, [Lam(…), …])`, which
+                // `Exp::const_applied(AndDecl{params:[(P,Sort(0)),(Q,Sort(0))]}.iri.clone(), Vec::new(), [Lam(…), …])`, which
                 // located the real defect in `check_type` — an applied inductive type was admitted
                 // without checking its parameter arguments. Reach for this before theorising about a
                 // skeleton string.
@@ -7160,5 +7175,118 @@ fn coordination_may_not_strand_a_modifier() {
     assert!(
         !skeletons("MSI and MMR deficiency create vulnerabilities.").is_empty(),
         "coordinating two unrefined conjuncts of unlike kind must still parse"
+    );
+}
+
+/// **D76 §4.2 — is the `Global` memo bounded by declarations or by resources?**
+///
+/// §4.2 flags this memo as the one that *"grows with every resolved IRI"*, unlike
+/// `CLASS_FIELDS_MEMO` which grows with the ontology's class count, and calls that
+/// "the cost that has to be justified rather than assumed". It stayed assumed
+/// through three reseeds: the memo is a thread-local inside a containerized kernel
+/// and `entry_count()` had no caller.
+///
+/// **This replicates `Validator::validate`'s body rather than calling it**, and the
+/// reason is a bug this test had on the first attempt. `validate` installs its own
+/// `GlobalMemoScope`; a test that installs one *and then calls it* gets the inner
+/// scope collecting every entry and restoring the outer on drop, so the test reads
+/// the outer and sees **0 for every layer**. The nesting-safety that makes the
+/// guards composable is exactly what defeats measuring from outside.
+///
+/// Samples rather than walking all 9.4M resources: the **bootstrap** layers carry
+/// declarations and type expressions, the **lexicon** layers carry `sem`/`cat` terms
+/// in bulk, and those are the two populations the question is about.
+#[test]
+fn the_global_memo_is_bounded_by_declarations_not_resources() {
+    use eigenius_kernel::nbe::env_global::GlobalMemoScope;
+
+    let Some(path) = snapshot_path() else {
+        return;
+    };
+    let Some((head, _backend)) = open_head_and_backend(&path) else {
+        return;
+    };
+
+    let mut chain: Vec<Arc<Layer>> = Vec::new();
+    let mut cursor = Some(Arc::clone(&head));
+    while let Some(l) = cursor {
+        cursor = l.parent().cloned();
+        chain.push(l);
+    }
+    chain.reverse();
+
+    // Every bootstrap layer (the term-bearing ontologies, all small), plus the
+    // largest lexicon layer (the bulk population).
+    let biggest = chain
+        .iter()
+        .max_by_key(|l| l.iter_resources().count())
+        .map(|l| l.id().clone());
+    let sample: Vec<&Arc<Layer>> = chain
+        .iter()
+        .filter(|l| {
+            let n = l.iter_resources().count();
+            n > 0 && (n < 5_000 || Some(l.id().clone()) == biggest)
+        })
+        .collect();
+
+    let mut worst = 0.0_f64;
+    let mut worst_entries = 0usize;
+    let mut biggest_sample: Option<(usize, usize)> = None;
+    for layer in sample {
+        let resources = layer.iter_resources().count();
+        let validator = eigenius_kernel::validation::Validator::new(Arc::clone(layer));
+
+        // `Validator::validate`'s body, inlined so the scope is OURS and nothing
+        // nests. Keep the three in step with it.
+        let _resolve = eigenius_kernel::layer::ResolveMemoScope::new();
+        let _class_fields = eigenius_kernel::validation::ClassFieldsScope::new();
+        let _globals = GlobalMemoScope::new();
+        let mut errs = 0usize;
+        for arc in layer.iter_resources().map(|(_, r)| r) {
+            errs += validator.validate_resource(&arc).len();
+        }
+        let entries = GlobalMemoScope::entry_count().expect("our scope");
+        let ratio = entries as f64 / resources as f64;
+        worst = worst.max(ratio);
+        worst_entries = worst_entries.max(entries);
+        if biggest_sample.is_none_or(|(_, r)| resources > r) {
+            biggest_sample = Some((entries, resources));
+        }
+        eprintln!(
+            "GLOBAL MEMO  {entries:>6} entries / {resources:>7} resources  ({ratio:.5}/res)  \
+             {errs} err  layer {}",
+            &layer.id().to_string()[..12]
+        );
+    }
+
+    eprintln!("GLOBAL MEMO worst per-layer ratio: {worst:.5} (informational — see the gate below)");
+
+    // **The gate is the LARGEST layer, and the first version of this test got that
+    // wrong.** It gated on the worst per-layer ratio, which failed on a 4-resource
+    // layer with 4 entries: ratio 1.0, and completely bounded — 4 is 4. A ratio
+    // carries scaling information only where resources ≫ declarations, so gating it
+    // on a tiny layer measures nothing and rejects a healthy memo.
+    //
+    // Boundedness is a statement about GROWTH, so it is tested where there is growth
+    // to observe.
+    let (biggest_entries, biggest_resources) = biggest_sample.expect("a large layer was sampled");
+    assert!(
+        biggest_resources > 100_000,
+        "the bound needs a layer with enough scale to be informative; largest was \
+         {biggest_resources} resources"
+    );
+    assert!(
+        (biggest_entries as f64) < (biggest_resources as f64) / 1_000.0,
+        "the memo is meant to be bounded by the DECLARATIONS terms mention, not by \
+         the resources validated: {biggest_entries} entries over {biggest_resources} \
+         resources on the largest layer"
+    );
+
+    // And the absolute ceiling across every sampled layer, which is the number that
+    // actually bounds memory. Declarations in the shipped chain number in the
+    // hundreds; a memo holding thousands would mean it is keyed by something else.
+    assert!(
+        worst_entries < 1_000,
+        "no layer should populate more than a few hundred entries; worst was {worst_entries}"
     );
 }

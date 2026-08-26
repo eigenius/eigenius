@@ -75,6 +75,15 @@ impl DetTemplates {
 /// lookup grew a chart parser in the first place. `Grammar` closes that door: it carries the ontology
 /// chain (for `⟦·⟧`, unification, subsumption), the reserved-word table (rule triggers — grammar, not
 /// lexicon), and the resolved templates. No lexicon.
+impl Grammar {
+    /// The typing environment the chain provides (D76). Rules that evaluate a
+    /// term need this: a `Const` looked up in an empty environment degrades to a
+    /// neutral, which reads as "not a type" downstream rather than as an error.
+    pub(crate) fn env(&self) -> crate::nbe::env_global::Env {
+        crate::nbe::env_global::Env::of(Arc::clone(&self.layer))
+    }
+}
+
 pub(crate) struct Grammar {
     /// The chain the rules resolve against: inductive decls, class subsumption, the `⟦·⟧` recursor.
     pub(crate) layer: Arc<Layer>,

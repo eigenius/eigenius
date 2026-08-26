@@ -219,6 +219,10 @@ pub const INDICES: &str = "urn:eigenius:core:indices";
 /// so `data X : Sort u` is expressible (eigenius#188). Absent defaults
 /// to `Succ(Zero)`, the level of `Set`.
 pub const RESULT_SORT: &str = "urn:eigenius:core:result_sort";
+
+/// The level variables an inductive declaration binds (eigenius#188, D76 Phase
+/// E2). Ordered — a reference instantiates by position.
+pub const UNIVERSE_PARAMS: &str = "urn:eigenius:core:universe_params";
 /// Typed-ctor full Π-telescope encoded via the D47 type-fragment codec
 /// (eigenius#72 Layer 2). Present on `InductiveCtor` resources that
 /// were authored with the `name : <type-expr>` surface form. When
@@ -410,6 +414,19 @@ pub const RESOURCE: &str = "urn:eigenius:core:resource";
 pub const RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
 pub const VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
 pub const JSON: &str = "urn:eigenius:core:json";
+
+/// **D79 §2.2 — the synthetic index predicate for term references.**
+///
+/// `(R, core:mentions, i)` means *`R` carries a D47-encoded term that names `i`*.
+/// Emitted by `extract_indexable_triples` for `core:inductive`-typed values and
+/// resolvable with `scan_predicate_object(core:mentions, i)` — "which resources
+/// mention declaration `i`", the question the retroactive scan and a merge's
+/// rebound-set pass both ask.
+///
+/// **Deliberately not declared as a `core:Property`.** No resource carries it; it
+/// exists only in the triple index. Declaring it would say resources *may* carry
+/// it, which is the same kind of misleading declaration D79 §2.1 exists to remove.
+pub const MENTIONS: &str = "urn:eigenius:core:mentions";
 pub const INDUCTIVE: &str = "urn:eigenius:core:inductive";
 pub const TEMPLATE: &str = "urn:eigenius:core:template";
 

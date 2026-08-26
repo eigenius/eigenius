@@ -202,10 +202,12 @@ fn is_axiom(resource: &Resource, axiom_class: &Iri) -> bool {
 fn type_check_axiom_statement(exp: &Exp, layer: &Arc<Layer>) -> Result<Val, String> {
     use crate::nbe::check::{check_type, CheckCtx};
     use crate::nbe::env::Rho;
-    use crate::nbe::eval::eval;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(layer));
     check_type(&mut ctx, exp).map_err(|e| e.to_string())?;
-    eval(exp, &ctx.rho).map_err(|e| e.to_string())
+    // Through the check context, so the axiom's statement is evaluated in the
+    // same environment it was checked in.
+    let rho = ctx.rho.clone();
+    ctx.eval(exp, &rho).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

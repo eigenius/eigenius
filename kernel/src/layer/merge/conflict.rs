@@ -763,6 +763,82 @@ mod tests {
     use crate::storage::memory::MemoryPersistentBackend;
     use std::sync::Arc;
 
+    /// D75 §3.5 — a *reference* meeting a *redefinition* is invisible to conflict
+    /// classification, because `shared_iris` is the set INTERSECTION of the two
+    /// sides' contributed IRIs and the hazard has an empty intersection.
+    ///
+    /// LCA defines class `C`. Branch A redefines it. Branch B adds `R`, which
+    /// references `C` but does not define it. In the merge, `C` resolves to A's
+    /// version while `R` was validated against the LCA's — and along `R`'s own
+    /// path `C` was never rebound, so Rule 22's retroactive scan never fires
+    /// either.
+    #[test]
+    fn a_reference_meeting_a_redefinition_raises_no_conflict() {
+        let class_c = "urn:test:C";
+        let name = "urn:test:name";
+        let owner = "urn:test:owner";
+
+        let requires = |props: &[&str]| {
+            Value::Array(props.iter().map(|p| Value::ResourceRef(iri(p))).collect())
+        };
+
+        let (span, backend) = build_span(
+            // LCA: C requires {name, owner}.
+            vec![make_resource(
+                class_c,
+                &[wk::CLASS],
+                &[(wk::REQUIRES, requires(&[name, owner]))],
+            )],
+            // Branch A: C redefined, WIDENED — `owner` dropped, so strictly more
+            // things are C. Anything universally quantified over C is a stronger
+            // claim afterwards.
+            vec![make_resource(
+                class_c,
+                &[wk::CLASS],
+                &[(wk::REQUIRES, requires(&[name]))],
+            )],
+            // Branch B: a resource that REFERENCES C without defining it.
+            vec![make_resource(
+                "urn:test:R",
+                &[wk::DECLARED_RESOURCE],
+                &[("urn:test:about", Value::ResourceRef(iri(class_c)))],
+            )],
+        );
+
+        // The two sides touch disjoint IRIs — {C} and {R} — so the intersection
+        // the classifier walks is empty.
+        assert!(
+            span.shared_iris().is_empty(),
+            "the hazard is precisely the case with no shared IRI; got {:?}",
+            span.shared_iris()
+        );
+
+        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        assert!(
+            conflicts.is_empty(),
+            "current behaviour: zero conflicts, though R was checked against the LCA's C and \
+             will resolve to A's. Conflict detection is definition-vs-definition; a reference \
+             meeting a redefinition is not seen. See D75 §3.5. Got {conflicts:?}"
+        );
+
+        // And with no conflict there is no resolution, so cascade analysis —
+        // which walks each resolution's targets — never runs. The merge commits.
+        let outcome = crate::layer::merge::merge_with_resolutions(
+            &span,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            LayerStorage::in_memory(),
+            &backend,
+        )
+        .expect("merge must succeed — nothing objects");
+        assert!(
+            matches!(outcome, MergeOutcome::Merged { .. }),
+            "the merge completes with no validation pass over the merged layer \
+             (`builder.build` → `store_layer`, D75 §3.5); got {outcome:?}"
+        );
+    }
+
     #[test]
     fn disjoint_branches_produce_no_conflicts() {
         // Branch A adds class X; branch B adds class Y. No overlap.

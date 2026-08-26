@@ -570,12 +570,34 @@ impl<'a> Lexer<'a> {
             Some(c) if c.is_ascii_alphabetic() || c == b'_' => {
                 self.advance(); // ':'
                 let mut name = String::new();
-                while let Some(ch) = self.peek() {
-                    if ch.is_ascii_alphanumeric() || ch == b'_' {
-                        name.push(ch as char);
-                        self.advance();
-                    } else {
-                        break;
+                loop {
+                    while let Some(ch) = self.peek() {
+                        if ch.is_ascii_alphanumeric() || ch == b'_' {
+                            name.push(ch as char);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    // **eigenius#24 — a further TIGHT `:segment` continues the name.**
+                    // `ex:Nat:succ` lexes as one `QualName("ex", "Nat:succ")`, which is
+                    // what lets a constructor be named by its type when two inductives
+                    // in one file declare the same short name — the case
+                    // `resolve_ctor_iri` currently tells the author to work around by
+                    // renaming.
+                    //
+                    // Safe because **tightness is already the discriminator**: this
+                    // function only runs on a `:` with no whitespace before it, and the
+                    // language already requires spaces around a binder / annotation
+                    // colon (`x:T` has always lexed as `QualName("x", "T")`). So
+                    // `ex:Nat : Prop` is untouched — the annotation colon is
+                    // space-surrounded and never reaches here.
+                    match (self.peek(), self.peek_at(1)) {
+                        (Some(b':'), Some(c2)) if c2.is_ascii_alphabetic() || c2 == b'_' => {
+                            self.advance(); // ':'
+                            name.push(':');
+                        }
+                        _ => break,
                     }
                 }
                 Ok(Some(name))

@@ -113,6 +113,25 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         Val::One => Exp::One,
         Val::Fun(cases, rho) => try_readback_fun(level, cases, rho)?,
         Val::Data(summands, rho) => try_readback_data(level, summands, rho)?,
+        // D78 §1 — walk the telescope, instantiating each binder at a fresh
+        // generic so a later field's type reads back against the same binders it
+        // was written against. Field order is already canonical (`Exp::record`
+        // establishes it), so readback preserves it and `eq_nf`'s syntactic
+        // comparison decides record equality with no bespoke conversion arm.
+        Val::Refine(carrier, classes) => {
+            Exp::Refine(Box::new(try_readback_val(level, carrier)?), classes.clone())
+        }
+        Val::Record(fields, rho) => {
+            let mut out: Vec<(crate::ontology::iri::Iri, Patt, Exp)> = Vec::new();
+            let mut env = rho.clone();
+            for (i, (iri, patt, ty)) in fields.iter().enumerate() {
+                let lvl = level + i;
+                let ty_val = crate::nbe::eval::eval(ty, &env)?;
+                out.push((iri.clone(), gen_patt(lvl), try_readback_val(lvl, &ty_val)?));
+                env = env.extend(patt.clone(), gen_val(lvl));
+            }
+            Exp::Record(out)
+        }
         Val::Nt(k) => try_readback_neut(level, k)?,
 
         // Identity type
@@ -153,16 +172,22 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         }
 
         // Inductive types (Phase 11b, D19; D48 indices).
-        // The `Exp::InductiveType` args slot carries `params ++ indices`,
-        // split on the decoder side by `decl.params.len()` (D48 Phase B).
+        // The reference's `App` spine carries `params ++ indices`, split on the
+        // decoder side by `decl.params.len()` (D48 Phase B).
         // For non-indexed declarations (`decl.indices` empty), this is
         // equivalent to the pre-D48 behaviour.
         Val::InductiveType {
             decl,
             params,
             indices,
-        } => Exp::InductiveType(
-            decl.clone(),
+        } => Exp::const_applied(
+            decl.iri.clone(),
+            // **Levels are not carried yet.** `Val::InductiveType` has no level
+            // slot, so a polymorphic instantiation would be lost here — the same
+            // gap `Neut::Const` had before this phase, and E2's to close when
+            // declarations gain `uparams`. Empty is exact today: nothing produces
+            // a non-empty level list.
+            Vec::new(),
             params
                 .iter()
                 .chain(indices.iter())
@@ -170,11 +195,11 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
                 .collect::<Result<Vec<_>, EvalError>>()?,
         ),
         Val::InductiveVal {
-            decl,
+            iri,
             ctor_name,
             args,
         } => Exp::InductiveCtor(
-            decl.clone(),
+            iri.clone(),
             ctor_name.clone(),
             args.iter()
                 .map(|a| try_readback_val(level, a))
@@ -210,6 +235,8 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
 /// Port of `rbN` from the reference.
 pub fn try_readback_neut(level: usize, neut: &Neut) -> Result<Exp, EvalError> {
     Ok(match neut {
+        // D76 Phase B1 — an unresolved named reference reads back as itself.
+        Neut::Const(iri, levels) => Exp::Const(iri.clone(), levels.clone()),
         Neut::Gen(j, name) => Exp::Var(format!("{name}{j}")),
         // D48 Phase C: an unsolved metavariable reads back as a fresh
         // variable name (`?<id>`) plus the spine applied. Solved metas
@@ -256,7 +283,7 @@ pub fn try_readback_neut(level: usize, neut: &Neut) -> Result<Exp, EvalError> {
             minors,
             major,
         } => Exp::InductiveRec {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             motive: Box::new(try_readback_val(level, motive)?),
             minors: minors
                 .iter()
@@ -471,5 +498,476 @@ mod tests {
         ));
         let e = readback_val(0, &v);
         assert!(matches!(e, Exp::Reduce(_, _, _)));
+    }
+}
+
+#[cfg(test)]
+mod record_round_trip {
+    use crate::nbe::check::eq_nf;
+    use crate::nbe::env::Rho;
+    use crate::nbe::eval::eval;
+    use crate::nbe::term::{Exp, Patt};
+    use crate::ontology::iri::Iri;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn plain(name: &str, binder: &str) -> (Iri, Patt, Exp) {
+        (iri(name), Patt::Var(binder.into()), Exp::sort(1))
+    }
+    /// A field whose type mentions an earlier binder.
+    fn dependent(name: &str, binder: &str, on: &str) -> (Iri, Patt, Exp) {
+        (
+            iri(name),
+            Patt::Var(binder.into()),
+            Exp::Times(Box::new(Exp::Var(on.into())), Box::new(Exp::sort(1))),
+        )
+    }
+
+    #[test]
+    fn a_record_survives_eval_and_readback() {
+        let e = Exp::record(vec![plain("urn:t:a", "a"), plain("urn:t:b", "b")]).unwrap();
+        let v = eval(&e, &Rho::Nil).unwrap();
+        let back = super::readback_val(0, &v);
+        match back {
+            Exp::Record(fs) => {
+                let names: Vec<&str> = fs.iter().map(|(i, _, _)| i.as_str()).collect();
+                assert_eq!(
+                    names,
+                    ["urn:t:a", "urn:t:b"],
+                    "field keys and order survive"
+                );
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_dependent_field_reads_back_against_its_binder() {
+        // `b`'s type mentions `a`'s binder. Readback instantiates each binder at
+        // a fresh generic, so the mention must survive as a bound occurrence
+        // rather than dangling.
+        let e = Exp::record(vec![plain("urn:t:a", "a"), dependent("urn:t:b", "b", "a")]).unwrap();
+        let v = eval(&e, &Rho::Nil).unwrap();
+        let back = super::readback_val(0, &v);
+        match &back {
+            Exp::Record(fs) => {
+                assert_eq!(fs.len(), 2);
+                let mentions = crate::nbe::subst::free_vars(&fs[1].2);
+                assert!(
+                    !mentions.is_empty(),
+                    "the dependency must survive readback: {:?}",
+                    fs[1].2
+                );
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_order_makes_two_spellings_convertible() {
+        // The payoff of D78 §1's invariant: `eq_nf` compares by readback and
+        // syntactic equality, so the same field set written two ways must
+        // converge with no bespoke conversion arm for records.
+        let a = Exp::record(vec![plain("urn:t:a", "a"), plain("urn:t:b", "b")]).unwrap();
+        let b = Exp::record(vec![plain("urn:t:b", "b"), plain("urn:t:a", "a")]).unwrap();
+        let va = eval(&a, &Rho::Nil).unwrap();
+        let vb = eval(&b, &Rho::Nil).unwrap();
+        assert!(
+            eq_nf(0, &va, &vb).is_ok(),
+            "two spellings of one field set must be convertible"
+        );
+    }
+
+    #[test]
+    fn records_over_different_field_sets_are_not_convertible() {
+        let a = Exp::record(vec![plain("urn:t:a", "a")]).unwrap();
+        let b = Exp::record(vec![plain("urn:t:b", "b")]).unwrap();
+        let va = eval(&a, &Rho::Nil).unwrap();
+        let vb = eval(&b, &Rho::Nil).unwrap();
+        assert!(
+            eq_nf(0, &va, &vb).is_err(),
+            "different field keys must not be convertible"
+        );
+    }
+
+    #[test]
+    fn field_identity_is_the_full_iri_not_the_local_name() {
+        // The collision `find_sigma_field` has today: it projects by
+        // `local_name()`, so these two would be the same field. Keyed by IRI
+        // they are not (D78 §9).
+        let a = Exp::record(vec![plain("urn:eigenius:a:name", "n")]).unwrap();
+        let b = Exp::record(vec![plain("urn:eigenius:b:name", "n")]).unwrap();
+        let va = eval(&a, &Rho::Nil).unwrap();
+        let vb = eval(&b, &Rho::Nil).unwrap();
+        assert!(
+            eq_nf(0, &va, &vb).is_err(),
+            "same local name, different namespace — must not be convertible"
+        );
+    }
+}
+
+#[cfg(test)]
+mod refine_semantics {
+    //! D78 §3 — `Val::Refine` carries a *set* of class constraints.
+
+    use crate::nbe::check::{eq_nf, subtype_of};
+    use crate::nbe::env::Rho;
+    use crate::nbe::eval::eval;
+    use crate::nbe::term::{Exp, Patt};
+    use crate::ontology::iri::Iri;
+    use std::collections::BTreeSet;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn set(names: &[&str]) -> BTreeSet<Iri> {
+        names.iter().map(|n| iri(n)).collect()
+    }
+    fn rec(fields: &[&str]) -> Exp {
+        Exp::record(
+            fields
+                .iter()
+                .map(|f| (iri(f), Patt::Var(f.to_string()), Exp::sort(1)))
+                .collect(),
+        )
+        .unwrap()
+    }
+    fn v(e: &Exp) -> crate::nbe::val::Val {
+        eval(e, &Rho::Nil).unwrap()
+    }
+
+    #[test]
+    fn the_empty_constraint_set_degenerates_to_the_carrier() {
+        // D78 §3 reason 2 for the flat form: "0 or more constraints" needs no
+        // special case, and there is only one representation of zero.
+        let carrier = rec(&["urn:t:a"]);
+        let refined = Exp::Refine(Box::new(carrier.clone()), BTreeSet::new());
+        assert!(
+            eq_nf(0, &v(&refined), &v(&carrier)).is_ok(),
+            "Refine(R, {{}}) must be R"
+        );
+    }
+
+    #[test]
+    fn constraint_identity_is_nominal_not_structural() {
+        // The measured case: 749 of 894 shipped classes have identical (empty)
+        // field sets, so only the names distinguish them (D78 §1.2).
+        let carrier = rec(&["urn:t:a"]);
+        let alpha = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Alpha"]));
+        let beta = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Beta"]));
+        assert!(
+            eq_nf(0, &v(&alpha), &v(&beta)).is_err(),
+            "same carrier, different class — must not be convertible"
+        );
+    }
+
+    #[test]
+    fn constraint_order_does_not_matter() {
+        // A `BTreeSet` has one representation, which is why the flat form beats
+        // nesting: `Refine(Refine(R,C),D)` and `Refine(Refine(R,D),C)` would be
+        // two spellings of one type (D78 §3 reason 1).
+        let carrier = rec(&["urn:t:a"]);
+        let cd = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C", "urn:t:D"]));
+        let dc = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:D", "urn:t:C"]));
+        assert!(eq_nf(0, &v(&cd), &v(&dc)).is_ok());
+    }
+
+    #[test]
+    fn forgetting_constraints_is_safe_but_inventing_them_is_not() {
+        let carrier = rec(&["urn:t:a"]);
+        let refined = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &v(&carrier)
+            )
+            .is_ok(),
+            "Refine(R, S) <: R — a refined record flows into a plain-record context"
+        );
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&carrier),
+                &v(&refined)
+            )
+            .is_err(),
+            "R <: Refine(R, S) must NOT hold — that would invent a claim"
+        );
+    }
+
+    #[test]
+    fn a_larger_constraint_set_is_a_subtype() {
+        let carrier = rec(&["urn:t:a"]);
+        let more = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C", "urn:t:D"]));
+        let fewer = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&more),
+                &v(&fewer)
+            )
+            .is_ok(),
+            "satisfying more constraints is satisfying fewer"
+        );
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&fewer),
+                &v(&more)
+            )
+            .is_err(),
+            "the converse must not hold"
+        );
+    }
+
+    /// **D78 §9's antichain deferral, reviewed after D76 Phase D.**
+    ///
+    /// §9 keeps a redundant member — `Refine(R, {Pup, Dog})` where `Pup ⊨ Dog` —
+    /// because dropping it would discard a declared fact, and records the
+    /// consequence as *"that type and `Refine(R, {Pup})` have identical inhabitants
+    /// and are not equal"*, to revisit only if the inequality causes friction.
+    ///
+    /// Phase D sharpens the consequence, so it is worth pinning rather than
+    /// leaving as prose. Entailment is decidable in conversion now, so the two are
+    /// **mutually subtypes**: `{Pup,Dog} ⊇ {Pup}` gives one direction by inclusion,
+    /// and `⋀{Pup} ⊨ Dog` gives the other by entailment. Before Phase D only the
+    /// first held.
+    ///
+    /// Mutual subtyping without equality is what nominal identity means and is not
+    /// friction — a subtyping system routinely has distinct types that admit each
+    /// other. Recorded so a future reader sees the state Phase D left, not the
+    /// weaker one §9 was written against.
+    #[test]
+    fn a_redundant_refinement_member_is_mutually_a_subtype_but_not_equal() {
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::{Resource, Value};
+        use crate::ontology::well_known as wk;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(LayerStorage::in_memory()));
+
+        let property = |id: &str| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            );
+            r
+        };
+        let class_with = |id: &str, reqs: Vec<&str>| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            );
+            r.set(
+                iri(wk::REQUIRES),
+                Value::Array(
+                    reqs.into_iter()
+                        .map(|p| Value::ResourceRef(iri(p)))
+                        .collect(),
+                ),
+            );
+            r
+        };
+        let mut d = LayerBuilder::new("t", Some(core));
+        for r in [
+            property("urn:t:name"),
+            property("urn:t:tag"),
+            class_with("urn:t:Dog", vec!["urn:t:name"]),
+            class_with("urn:t:Pup", vec!["urn:t:name", "urn:t:tag"]),
+        ] {
+            d.add_resource(r).unwrap();
+        }
+        let env = crate::nbe::env_global::Env::of(std::sync::Arc::new(
+            d.build(LayerStorage::in_memory()),
+        ));
+
+        let carrier = rec(&["urn:t:a"]);
+        let both = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Pup", "urn:t:Dog"]));
+        let just_pup = Exp::Refine(Box::new(carrier), set(&["urn:t:Pup"]));
+
+        assert!(
+            subtype_of(&env, 0, &v(&both), &v(&just_pup)).is_ok(),
+            "{{Pup,Dog}} ⊇ {{Pup}} — one direction by set inclusion"
+        );
+        assert!(
+            subtype_of(&env, 0, &v(&just_pup), &v(&both)).is_ok(),
+            "and ⋀{{Pup}} ⊨ Dog gives the other by entailment — new since D76 Phase D"
+        );
+        assert!(
+            eq_nf(0, &v(&both), &v(&just_pup)).is_err(),
+            "yet they are not EQUAL: the declared set is part of the type's identity, \
+             which is what D78 §9 chose to keep"
+        );
+    }
+
+    #[test]
+    fn a_refinement_flows_into_a_nominal_class_context_by_its_constraint_set() {
+        // D78 Phase E. `Construct C {}` yields `Refine(record, {C})`, and an
+        // inductive constructor's parameter is `EigonClass(C)`. What makes the
+        // one an inhabitant of the other is the **constraint set**, not the
+        // carrier.
+        //
+        // Forgetting the set and comparing carriers is wrong against a *nominal*
+        // supertype, and since Phase C a no-`requires` class carries an empty
+        // record — so the comparison became `Record([]) ≠ EigonClass(C)` and a
+        // well-typed composition was rejected
+        // (`felicity_filter_accepts_well_typed_composition`).
+        let carrier = rec(&["urn:t:a"]);
+        let refined = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:C"]));
+        let as_class = crate::nbe::val::Val::EigonClass(iri("urn:t:C"));
+
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &as_class
+            )
+            .is_ok(),
+            "a record declaring C must flow into a context expecting class C"
+        );
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &crate::nbe::val::Val::EigonClass(iri("urn:t:Other"))
+            )
+            .is_err(),
+            "but not into a class it does not declare"
+        );
+
+        // The empty carrier is the case that actually broke: 749 of 894 shipped
+        // classes have no `requires`.
+        let empty = Exp::Refine(Box::new(Exp::record(vec![]).unwrap()), set(&["urn:t:C"]));
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&empty),
+                &as_class
+            )
+            .is_ok(),
+            "an empty record declaring C is still an instance of C"
+        );
+
+        // Forgetting still applies against a structural supertype.
+        assert!(
+            subtype_of(
+                &crate::nbe::env_global::Env::empty(),
+                0,
+                &v(&refined),
+                &v(&carrier)
+            )
+            .is_ok(),
+            "Refine(R, S) <: R must keep working"
+        );
+    }
+
+    /// D76 Phase D — the parked obligation, discharged.
+    ///
+    /// This asserted the *incompleteness*: `Refine(R, {Pup}) <: Refine(R, {Dog})`
+    /// was rejected because deciding `Pup ⊨ Dog` resolves class IRIs and
+    /// conversion had no environment. It now decides it, and the assertion is
+    /// inverted.
+    ///
+    /// **Set inclusion stays the fast path.** The environment is consulted only
+    /// where inclusion fails — that is, only where the conservative rule was about
+    /// to reject — which is how conversion still resolves nothing on the equal
+    /// path (D76 §5).
+    #[test]
+    fn entailment_beyond_set_inclusion_is_now_decided() {
+        // `Pup` requires everything `Dog` does and more, so `⋀{Pup} ⊨ Dog` — but
+        // `{Pup} ⊉ {Dog}`, so set inclusion alone rejects it.
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::{Resource, Value};
+        use crate::ontology::well_known as wk;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(LayerStorage::in_memory()));
+
+        // Two properties. `constraint_fields` reads `requires` and collects IRIs,
+        // so no range is needed to decide entailment (D78 §4.1: the per-field
+        // variance clause is vacuous because a field's type is a function of the
+        // property, not of the class).
+        let property = |id: &str| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            );
+            r
+        };
+
+        let class_with = |id: &str, reqs: Vec<&str>| {
+            let mut r = Resource::new(iri(id));
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            );
+            r.set(
+                iri(wk::REQUIRES),
+                Value::Array(
+                    reqs.into_iter()
+                        .map(|p| Value::ResourceRef(iri(p)))
+                        .collect(),
+                ),
+            );
+            r
+        };
+
+        let mut d = LayerBuilder::new("t", Some(core));
+        for r in [
+            property("urn:t:name"),
+            property("urn:t:tag"),
+            class_with("urn:t:Dog", vec!["urn:t:name"]),
+            class_with("urn:t:Pup", vec!["urn:t:name", "urn:t:tag"]),
+            class_with("urn:t:Cat", vec!["urn:t:tag"]),
+        ] {
+            d.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(d.build(LayerStorage::in_memory()));
+        let env = crate::nbe::env_global::Env::of(layer);
+
+        let carrier = rec(&["urn:t:a"]);
+        let pup = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Pup"]));
+        let dog = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Dog"]));
+        let cat = Exp::Refine(Box::new(carrier.clone()), set(&["urn:t:Cat"]));
+
+        assert!(
+            subtype_of(&env, 0, &v(&pup), &v(&dog)).is_ok(),
+            "Pup's fields cover Dog's, so ⋀{{Pup}} ⊨ Dog — legal since D76 Phase D"
+        );
+        assert!(
+            subtype_of(&env, 0, &v(&dog), &v(&pup)).is_err(),
+            "and not the converse: Dog does not require `tag`"
+        );
+        assert!(
+            subtype_of(&env, 0, &v(&cat), &v(&dog)).is_err(),
+            "nor between classes whose fields merely overlap"
+        );
+
+        // The empty environment decides nothing, so the conservative rule stands —
+        // an environment omitted by accident cannot silently widen what is legal.
+        assert!(
+            subtype_of(&crate::nbe::env_global::Env::empty(), 0, &v(&pup), &v(&dog)).is_err(),
+            "with no environment, entailment is undecidable and inclusion governs"
+        );
     }
 }

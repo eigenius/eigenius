@@ -101,59 +101,84 @@ use crate::ontology::iri::Iri;
 use crate::program::trace::Trace;
 use std::sync::Arc;
 
-/// Evaluation context controlling what effects are available.
+/// Evaluation context: the environment the evaluator reads, plus whatever
+/// effect capability it was given.
 ///
-/// `Pure` is standard NbE — no side effects, no chain access (the type
-/// checker's default). `Effectful` carries an [`EffectHooks`]
-/// implementation ([`crate::institution::eval_hooks::InstitutionEngine`])
-/// that the three effectful expression forms delegate to; the
-/// capability tier (full IO vs. check-time institution deciding) is a
-/// property of the hooks impl, not the enum. Optional `layer` gives the
-/// evaluator read access to the chain for the few places that need it.
-#[derive(Clone)]
-pub enum EvalCtx {
-    /// Standard NbE: normalize terms, check types. No side effects.
-    Pure,
-    /// Effectful evaluation: institution dispatch / IO component
-    /// invocation delegated to `hooks`.
-    Effectful {
-        layer: Option<Arc<Layer>>,
-        hooks: Arc<dyn EffectHooks>,
-    },
+/// **The environment is not part of the capability tier.** This was an enum —
+/// `Pure` with nothing, `Effectful { layer, hooks }` — which filed chain access
+/// under effects and left the type checker's `Pure` evaluator unable to resolve a
+/// name. The two are independent: a pure evaluation needs `Γ_env` exactly as much
+/// as an effectful one, and what `Effectful` adds is IO. So `env` is a field of
+/// every context and `hooks` is the optional part (D76 §8 Phase B audit, the Q1
+/// correction's second surface).
+///
+/// `hooks` is an [`EffectHooks`] implementation
+/// ([`crate::institution::eval_hooks::InstitutionEngine`]) that the three
+/// effectful expression forms delegate to; the capability tier (full IO vs.
+/// check-time institution deciding) is a property of the hooks impl, not of this
+/// type.
+#[derive(Clone, Default)]
+pub struct EvalCtx {
+    env: crate::nbe::env_global::Env,
+    hooks: Option<Arc<dyn EffectHooks>>,
 }
 
 impl EvalCtx {
-    /// A static Pure context for convenience.
+    /// No environment, no effects — for a closed term with no global references.
+    ///
+    /// Prefer [`EvalCtx::in_env`] wherever an environment is in hand: a name this
+    /// context cannot resolve evaluates to a neutral rather than an error, so an
+    /// environment omitted by accident is silent.
     pub fn pure() -> Self {
-        EvalCtx::Pure
+        Self::default()
+    }
+
+    /// Effect-free evaluation in an environment. The type checker's context.
+    pub fn in_env(env: crate::nbe::env_global::Env) -> Self {
+        Self { env, hooks: None }
     }
 
     /// Construct an effectful context from a hooks implementation.
     pub fn effectful(layer: Option<Arc<Layer>>, hooks: Arc<dyn EffectHooks>) -> Self {
-        EvalCtx::Effectful { layer, hooks }
+        Self {
+            env: layer.map_or_else(
+                crate::nbe::env_global::Env::empty,
+                crate::nbe::env_global::Env::of,
+            ),
+            hooks: Some(hooks),
+        }
     }
 
-    /// Layer for this evaluation context, if any.
+    /// The environment this context reads.
+    pub fn env(&self) -> &crate::nbe::env_global::Env {
+        &self.env
+    }
+
+    /// Layer for this evaluation context, if any. For consumers that still want
+    /// the chain itself rather than the environment over it.
     pub fn layer(&self) -> Option<&Arc<Layer>> {
-        match self {
-            EvalCtx::Pure => None,
-            EvalCtx::Effectful { layer, .. } => layer.as_ref(),
-        }
+        self.env.layer()
     }
 
     /// Effect hooks for this context, if effectful.
     pub fn hooks(&self) -> Option<&Arc<dyn EffectHooks>> {
-        match self {
-            EvalCtx::Pure => None,
-            EvalCtx::Effectful { hooks, .. } => Some(hooks),
-        }
+        self.hooks.as_ref()
     }
 }
 
 /// Evaluate an expression in an environment to produce a semantic value.
 /// Pure mode — no IO, no layer access. Used by the type checker.
 pub fn eval(exp: &Exp, rho: &Rho) -> Result<Val, EvalError> {
-    eval_ctx(exp, rho, &EvalCtx::Pure)
+    eval_ctx(exp, rho, &EvalCtx::pure())
+}
+
+/// Evaluate in an environment, with no effects — the form most callers want.
+///
+/// `eval(exp, rho)` resolves no names: a `Const` it cannot look up stays a
+/// neutral, silently. Reach for that only when the term is closed by
+/// construction (D76 Phase B).
+pub fn eval_env(exp: &Exp, rho: &Rho, env: &crate::nbe::env_global::Env) -> Result<Val, EvalError> {
+    eval_ctx(exp, rho, &EvalCtx::in_env(env.clone()))
 }
 
 /// Evaluate an expression with a capability mode.
@@ -200,13 +225,16 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::LitBool(b) => Ok((Val::LitBool(*b), T::leaf())),
 
         Exp::Dec(d, e) => {
-            match ctx {
-                EvalCtx::Pure => {
-                    // Pure mode: lazy evaluation via UpDec (standard
+            // Branching on the *capability*, not on the environment (D76 Phase B):
+            // effect-free evaluation is lazy via `UpDec`; an effectful one forces
+            // the declaration so dispatch happens in the right context.
+            match ctx.hooks() {
+                None => {
+                    // No effects: lazy evaluation via UpDec (standard
                     // EigenTT). No Let node — the value is not forced here.
                     eval_impl::<T>(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
                 }
-                _ => {
+                Some(_) => {
                     // Effectful: eagerly evaluate the declaration value
                     // so that effect dispatch happens in the correct context.
                     match d {
@@ -245,6 +273,90 @@ pub(crate) fn eval_impl<T: Tracer>(
             ))
         }
 
+        // D78 §1 — a record type is inert at evaluation, like `Data`: the field
+        // list plus the environment its types are read in. Field types are
+        // evaluated lazily, as the telescope is walked, because field `i`'s type
+        // may mention any earlier binder.
+        // D76 Phase B1 — a named reference to a chain-resident declaration.
+        //
+        // Resolves through the environment when there is one, and otherwise
+        // stays a neutral. That is the Q1 correction (D76 §1) in the one place
+        // it bites: an inductive reference must reach its declaration for
+        // `iota_reduce` to have `decl.ctors`, so evaluation is a consumer of the
+        // environment and not exempt from it.
+        //
+        // Without an environment this is inert rather than an error — the same
+        // treatment `EigonClass` and `EigonAxiom` get, and what lets a
+        // declaration's own constructor types mention it before it is committed.
+        Exp::Const(iri, levels) => {
+            // Through the context's OWN environment. This rebuilt one from
+            // `ctx.layer()`, which discards everything the environment knows that a
+            // layer does not — the intrinsic declarations, and any declaration in
+            // progress (`Env::declaring`). A name it could not find degrades to a
+            // neutral, so the loss was silent: `Nat.zero` inferred as
+            // `Nt(Const(Nat))` instead of its inductive type.
+            let resolved = match ctx.env().lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(decl) => {
+                    // **Universe instantiation** (eigenius#188, D76 Phase E2). The
+                    // reference's level arguments replace the declaration's
+                    // `uparams`, by position. Both empty is every shipped
+                    // declaration, and `instantiate_levels` returns the declaration
+                    // untouched in that case.
+                    //
+                    // An arity mismatch is left to `check`, which can name the
+                    // reference; silently padding here would make `List.{}` and
+                    // `List.{0}` the same value and lose the distinction the slot
+                    // exists for (`nbe::positivity::level_slot`).
+                    let decl = if decl.uparams.len() == levels.len() && !levels.is_empty() {
+                        std::sync::Arc::new(decl.instantiate_levels(levels))
+                    } else {
+                        decl
+                    };
+                    Some(Val::InductiveType {
+                        decl,
+                        params: Vec::new(),
+                        indices: Vec::new(),
+                    })
+                }
+                crate::nbe::env_global::Global::Definition(v) => Some(v),
+                // **A rigid name has ONE value form.** An axiom — or a definition
+                // its author flagged opaque, which `lookup` classifies as one —
+                // is `Neut::EigonAxiom`, the form `Exp::EigonAxiom` already
+                // evaluates to. Falling through to `Neut::Const` below would mint
+                // a *second* neutral meaning "rigid name, compare by IRI", and the
+                // two do not compare equal: they read back as `EigonAxiom(x)` and
+                // `Const(x, [])`. Which one a term got would then depend on
+                // whether it reached the kernel through `resolve_const_ref` (which
+                // emits `EigonAxiom`) or named the same thing as a `Const`.
+                // Found by D76 Phase D's audit; two forms for one thing is the
+                // stub's own failure mode.
+                crate::nbe::env_global::Global::Axiom => {
+                    Some(Val::Nt(crate::nbe::val::Neut::EigonAxiom(iri.clone())))
+                }
+                crate::nbe::env_global::Global::Constraint(_)
+                | crate::nbe::env_global::Global::Absent => None,
+            };
+            Ok((
+                resolved.unwrap_or_else(|| {
+                    Val::Nt(crate::nbe::val::Neut::Const(iri.clone(), levels.clone()))
+                }),
+                T::leaf(),
+            ))
+        }
+
+        Exp::Record(fields) => Ok((Val::Record(fields.clone(), rho.clone()), T::leaf())),
+
+        // D78 §3 — `Refine(R, ∅)` degenerates to `R`, so the empty set has one
+        // representation rather than two.
+        Exp::Refine(carrier, classes) => {
+            let (r, node) = ev(carrier)?;
+            if classes.is_empty() {
+                Ok((r, node))
+            } else {
+                Ok((Val::Refine(Box::new(r), classes.clone()), node))
+            }
+        }
+
         Exp::Sig(p, a, b) => {
             let (a_val, a_node) = ev(a)?;
             Ok((
@@ -277,7 +389,7 @@ pub(crate) fn eval_impl<T: Tracer>(
             // reach institutions only via `Exp::InstitutionInvoke`
             // (comorphisms) and `Exp::NativeDecide` (Decidable
             // QueryClasses).
-            if let (EvalCtx::Effectful { hooks, .. }, Exp::Var(name)) = (ctx, e1.as_ref()) {
+            if let (Some(hooks), Exp::Var(name)) = (ctx.hooks(), e1.as_ref()) {
                 if hooks.is_component(name) {
                     let (arg_val, arg_node) = ev(e2)?;
                     let (val, comp_trace) = hooks.dispatch_component(name, &arg_val)?;
@@ -297,9 +409,9 @@ pub(crate) fn eval_impl<T: Tracer>(
 
         Exp::Var(x) => match rho.get(x) {
             Ok(val) => Ok((val, T::leaf())),
-            Err(e) => match ctx {
-                EvalCtx::Pure => Err(EvalError::UnboundVariable(e)),
-                _ => {
+            Err(e) => match ctx.hooks() {
+                None => Err(EvalError::UnboundVariable(e)),
+                Some(_) => {
                     // Effectful: unbound variables may be component IRIs
                     // that will be intercepted at the App level.
                     Ok((Val::Nt(Neut::Gen(usize::MAX, x.clone())), T::leaf()))
@@ -587,28 +699,12 @@ pub(crate) fn eval_impl<T: Tracer>(
         // Step 1 lands the AST and value shells; Step 2 will add iota
         // reduction for the recursor. Pre-D48 callers always have
         // `indices: Vec::new()` (non-indexed default).
-        Exp::Inductive(decl) => Ok((
-            Val::InductiveType {
-                decl: decl.clone(),
-                params: Vec::new(),
-                indices: Vec::new(),
-            },
-            T::leaf(),
-        )),
-        Exp::InductiveType(decl, args) => {
-            // D48: `Exp::InductiveType(decl, args)` carries `params ++ indices`
-            // — `decl.params.len()` parameters followed by `decl.indices.len()`
-            // index expressions. For pre-D48 (non-indexed) decls, `indices`
-            // is empty and `args` equals the parameter prefix.
-            //
-            // The kernel uses "stub" InductiveDecls inside ctor type
-            // bodies (self-references with empty `params` / `ctors`,
-            // see `term.rs` around `InductiveDecl::PartialEq` — name-
-            // based equality). Stubs are detected by `decl.indices`
-            // being empty; for those we preserve the pre-D48 behaviour
-            // (all args treated as params, no arity check) so the
-            // stub-Arc pattern keeps working. Genuine indexed decls
-            // (`decl.indices` non-empty) get the strict split.
+        // D76 Phase B — `Exp::Inductive` and `Exp::InductiveType` are gone. A
+        // reference evaluates through the `Const` arm above, which resolves it in
+        // `Γ_env`; its arguments fold on one at a time through `App`, whose
+        // `Val::InductiveType` case in `Val::app_impl` performs the
+        // `params ++ indices` split this arm did in one step.
+        Exp::InductiveCtor(iri, ctor_name, args) => {
             let mut vals = Vec::with_capacity(args.len());
             let mut nodes = Vec::with_capacity(args.len());
             for a in args {
@@ -616,53 +712,13 @@ pub(crate) fn eval_impl<T: Tracer>(
                 vals.push(v);
                 nodes.push(n);
             }
-            let node = T::combine(nodes);
-            if decl.indices.is_empty() {
-                Ok((
-                    Val::InductiveType {
-                        decl: decl.clone(),
-                        params: vals,
-                        indices: Vec::new(),
-                    },
-                    node,
-                ))
-            } else {
-                let n_params = decl.params.len();
-                let n_indices = decl.indices.len();
-                let expected = n_params + n_indices;
-                if vals.len() != expected {
-                    return Err(EvalError::InvalidCaseTarget(format!(
-                        "indexed InductiveType `{}`: expected {} arg(s) \
-                         (params + indices: {} + {}), got {}",
-                        decl.name,
-                        expected,
-                        n_params,
-                        n_indices,
-                        vals.len()
-                    )));
-                }
-                let indices = vals.split_off(n_params);
-                Ok((
-                    Val::InductiveType {
-                        decl: decl.clone(),
-                        params: vals,
-                        indices,
-                    },
-                    node,
-                ))
-            }
-        }
-        Exp::InductiveCtor(decl, ctor_name, args) => {
-            let mut vals = Vec::with_capacity(args.len());
-            let mut nodes = Vec::with_capacity(args.len());
-            for a in args {
-                let (v, n) = ev(a)?;
-                vals.push(v);
-                nodes.push(n);
-            }
+            // D76 Phase B: the value names its inductive too, so there is nothing
+            // to resolve here and evaluation stays total. Holding the declaration
+            // made this a lookup, which fails without an environment — and readback
+            // applies closures with none, deliberately, since it must not unfold.
             Ok((
                 Val::InductiveVal {
-                    decl: decl.clone(),
+                    iri: iri.clone(),
                     ctor_name: ctor_name.clone(),
                     args: vals,
                 },
@@ -670,11 +726,21 @@ pub(crate) fn eval_impl<T: Tracer>(
             ))
         }
         Exp::InductiveRec {
-            decl,
+            iri,
             motive,
             minors,
             major,
         } => {
+            let decl = match ctx.env().lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(d) => d,
+                _ => {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                        "recursor on `{iri}`, which this environment does not \
+                         declare as an inductive"
+                    )))
+                }
+            };
+            let decl = &decl;
             let (motive_val, motive_node) = ev(motive)?;
             let mut minor_vals = Vec::with_capacity(minors.len());
             let mut nodes = vec![motive_node];
@@ -1234,7 +1300,11 @@ mod tests {
         let (ctx, rho, identity_call) = f5_setup();
         let nat = nat_decl();
         let exp = Exp::Match {
-            scrutinee: Box::new(Exp::InductiveCtor(nat.clone(), "zero".to_string(), vec![])),
+            scrutinee: Box::new(Exp::InductiveCtor(
+                nat.iri.clone(),
+                "zero".to_string(),
+                vec![],
+            )),
             arms: vec![
                 crate::nbe::term::MatchArm {
                     ctor_name: "zero".to_string(),

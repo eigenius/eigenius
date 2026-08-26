@@ -781,7 +781,7 @@ class stats:SampleSetResource : reflection:ObservedResource {
     recommends stats:observations_source, stats:observations_column;
 }
 
-property stats:sample_set_value : core:resource {
+property stats:sample_set_value : core:inductive {
     description = "The SampleSet inductive value (axis-product + observations) this resource carries. Encoded as a D32 §3.7 chain inductive ctor — typically produced by a smart-constructor macro call like `stats:SingleSampleEstimate(...)`.";
     class_types stats:SampleSet;
     domain stats:SampleSetResource;
@@ -931,37 +931,37 @@ property stats:alpha : core:float {
     domain stats:StatisticalAnalysisPlan;
 }
 
-property stats:effect_size : core:resource {
+property stats:effect_size : core:inductive {
     description = "The effect size the claim asserts (absolute / relative / standardized). Standardized forms carry their input components so the verifier can check both input recovery against the SampleSet and the derivation arithmetic (D52 §12 #4).";
     class_types stats:EffectSize;
     domain stats:StatisticalAnalysisPlan;
 }
 
-property stats:directionality : core:resource {
+property stats:directionality : core:inductive {
     description = "Two-sided by default. OneSidedWitnessed requires a chain-resident impossibility-witness IRI that the verifier checks resolves to a committed proof that the inverse direction is impossible within the system under study (D52 §7.1).";
     class_types stats:Directionality;
     domain stats:StatisticalAnalysisPlan;
 }
 
-property stats:variance_assumption : core:resource {
+property stats:variance_assumption : core:inductive {
     description = "Which statistical test family the verifier dispatches to (Pooled / Welch / NonParametric / RankBased). Author-asserted so the verifier output is fully deterministic — AIC-style automatic test selection would make the verdict non-reproducible by hand.";
     class_types stats:VarianceAssumption;
     domain stats:StatisticalAnalysisPlan;
 }
 
-property stats:outlier_exclusion : core:resource {
+property stats:outlier_exclusion : core:inductive {
     description = "Identity (no exclusion) for the standard case. Non-Identity exclusions trigger the dual-verdict commit shape (D52 §7.2): the kernel computes the claim both with and without the exclusion functor and commits both DerivedResources, linked via stats:dual_verdict_pair.";
     class_types stats:OutlierExclusion;
     domain stats:StatisticalAnalysisPlan;
 }
 
-property stats:autocorrelation_structure : core:resource {
+property stats:autocorrelation_structure : core:inductive {
     description = "Required when the SampleSet's repeated_measures axis is Longitudinal; absent for cross-sectional claims. Author-asserted (AR1 / CompoundSymmetry / Unstructured) so the verifier is fully deterministic — the verifier rejects with EpistemicScopeViolation if the field is missing for a longitudinal claim.";
     class_types stats:AutocorrelationStructure;
     domain stats:StatisticalAnalysisPlan;
 }
 
-property stats:multiple_comparison_correction : core:resource {
+property stats:multiple_comparison_correction : core:inductive {
     description = "Family-wise alpha control policy for multi-effect dispatches (factorial, split-plot, repeated-measures with multiple effects). Read by the verifier when emitting per-effect StatisticalAnalysisResults — each effect's per-effect Holds/Fails is determined after the correction is applied. Defaults to NoCorrection when absent (acceptable for single-effect dispatches and for exploratory analyses with no FWER constraint). Pre-registration of this slot is required by ICH E9(R1) for confirmatory analyses.";
     class_types stats:MultipleComparisonCorrection;
     domain stats:StatisticalAnalysisPlan;

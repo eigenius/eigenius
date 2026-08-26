@@ -124,7 +124,7 @@ fn collect_free(e: &Exp, bound: &mut BTreeSet<String>, out: &mut BTreeSet<String
                 collect_free(x, bound, out);
             }
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+        Exp::InductiveCtor(_, _, args) => {
             for x in args {
                 collect_free(x, bound, out);
             }
@@ -182,10 +182,6 @@ fn subst_inner(
         Exp::Refl(a) => Exp::Refl(Box::new(go(a)?)),
         Exp::Id(a, b, c) => Exp::Id(Box::new(go(a)?), Box::new(go(b)?), Box::new(go(c)?)),
 
-        Exp::InductiveType(d, args) => Exp::InductiveType(
-            d.clone(),
-            args.iter().map(&go).collect::<Result<Vec<_>, _>>()?,
-        ),
         Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
             d.clone(),
             n.clone(),
@@ -225,7 +221,6 @@ fn variant_name(e: &Exp) -> &'static str {
         Exp::Construct(..) => "Construct",
         Exp::Map(..) => "Map",
         Exp::Reduce(..) => "Reduce",
-        Exp::Inductive(..) => "Inductive",
         Exp::InductiveRec { .. } => "InductiveRec",
         Exp::Match { .. } => "Match",
         _ => "unknown",

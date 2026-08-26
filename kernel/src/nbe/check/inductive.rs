@@ -52,14 +52,19 @@ use std::sync::Arc;
 /// Any other shape (≥ 2 ctors, or 1 ctor with a non-Prop argument that
 /// is not a conclusion index) returns false, restricting motives of the
 /// corresponding recursor / match to Prop.
-pub fn large_elim_admitted(decl: &InductiveDecl) -> bool {
+pub fn large_elim_admitted(env: &crate::nbe::env_global::Env, decl: &InductiveDecl) -> bool {
     if decl.ctors.is_empty() {
         return true;
     }
     if decl.ctors.len() != 1 {
         return false;
     }
-    ctor_args_pass_singleton_b(&decl.ctors[0].typ, decl.params.len(), decl.indices.len())
+    ctor_args_pass_singleton_b(
+        env,
+        &decl.ctors[0].typ,
+        decl.params.len(),
+        decl.indices.len(),
+    )
 }
 
 /// Singleton-elim Case B check (D46 §7) for a single-constructor
@@ -79,7 +84,12 @@ pub fn large_elim_admitted(decl: &InductiveDecl) -> bool {
 /// For non-indexed decls (`num_indices == 0`), the second clause is
 /// vacuous and the check is equivalent to "all args are propositional"
 /// — preserving pre-D48 behavior.
-fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: usize) -> bool {
+fn ctor_args_pass_singleton_b(
+    env: &crate::nbe::env_global::Env,
+    ctor_typ: &Exp,
+    num_params: usize,
+    num_indices: usize,
+) -> bool {
     // Walk the telescope; collect each non-param arg's (binder name,
     // type). Anonymous binders get an empty name (which never matches
     // a Var lookup, so they can only pass the test if propositional).
@@ -99,10 +109,10 @@ fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: us
         current = body;
     }
     // Extract the conclusion's index expressions (trailing
-    // `num_indices` args of the `Exp::InductiveType(_, all_args)`).
-    let index_exps: Vec<&Exp> = match current {
-        Exp::InductiveType(_, all_args) if all_args.len() >= num_params + num_indices => {
-            all_args[num_params..].iter().collect()
+    // `num_indices` args of the conclusion's `Const`-headed application).
+    let index_exps: Vec<&Exp> = match current.as_const_spine() {
+        Some((_, _, all_args)) if all_args.len() >= num_params + num_indices => {
+            all_args[num_params..].to_vec()
         }
         _ => Vec::new(),
     };
@@ -115,7 +125,7 @@ fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: us
     // would let large elimination distinguish proofs that D46 proof
     // irrelevance makes definitionally equal.
     for (i, (name, typ)) in non_param_args.iter().enumerate() {
-        let propositional = is_syntactically_propositional_type(typ);
+        let propositional = is_syntactically_propositional_type(env, typ);
         // A later binder with the same name shadows this one —
         // `Var(name)` in the conclusion then refers to the later arg.
         let shadowed = non_param_args[i + 1..]
@@ -161,7 +171,7 @@ enum CtorArg {
 /// For each ctor:
 /// 1. Peel the Π-telescope past the parameter prefix, collecting the
 ///    constructor's value arguments.
-/// 2. The terminal residual must be `Exp::InductiveType(d, args)` with
+/// 2. The terminal residual must be `Exp::const_applied(d.iri.clone(), Vec::new(), args)` with
 ///    `d.name == decl.name` (positivity already checks this) and
 ///    `args.len() == decl.params.len() + decl.indices.len()`.
 /// 3. The last `decl.indices.len()` args are the ctor's index expressions.
@@ -188,8 +198,8 @@ pub(super) fn validate_indexed_ctor_conclusions(
         // The conclusion must be an InductiveType application of `decl`
         // with the right arg count. Positivity already verified the name
         // matches; we add the arg-count check here.
-        let conclusion_args = match residual {
-            Exp::InductiveType(d, args) if d.iri == decl.iri => args,
+        let conclusion_args = match residual.as_const_spine() {
+            Some((iri, _, args)) if *iri == decl.iri => args,
             _ => {
                 return Err(CheckError::IllFormed(format!(
                     "constructor `{}.{}`: conclusion must be `{}(...)` — \
@@ -244,7 +254,7 @@ pub(super) fn validate_indexed_ctor_conclusions(
                         decl.name, ctor.name
                     )
                 })?;
-            check(&mut inner_ctx, &index_args[i], &idx_type_val).map_err(|e| {
+            check(&mut inner_ctx, index_args[i], &idx_type_val).map_err(|e| {
                 format!(
                     "constructor `{}.{}`: index #{i} expression doesn't match \
                      declared index telescope type: {e}",
@@ -492,15 +502,14 @@ pub(super) fn check_inductive_ctor_args(
     };
     // Parameter telescope only — the index telescope is settled by the D48
     // Phase D unification below, which can instantiate metavariables that
-    // `subtype_of_with_hyps`'s definitional index comparison would reject.
-    subtype_of_deferring_indices(ctx.rho.len(), &actual_result, &expected_result).map_err(
-        |err| {
+    // `subtype_of_deferring_indices`' definitional index comparison would reject.
+    subtype_of_deferring_indices(&ctx.env, ctx.rho.len(), &actual_result, &expected_result)
+        .map_err(|err| {
             CheckError::TypeMismatch(format!(
                 "InductiveCtor `{}.{ctor_name}`: result type mismatch ({err})",
                 decl.name
             ))
-        },
-    )?;
+        })?;
 
     // D48 Phase D — index unification. For indexed inductives
     // (`decl.indices` non-empty), unify each actual conclusion index
@@ -582,17 +591,47 @@ pub(super) fn check_infer_inductive_rec(
     }
 
     // 2. Motive : I(params) → Sort(<codomain>).
-    //    For non-Prop inductives, codomain is Sort(2) — any sort body
-    //    is admitted via cumulativity (Set, Type(n) all inhabit Sort(2)).
-    //    For Prop inductives, singleton-elim (D46 §7) gates large elim:
-    //    if `large_elim_admitted(decl)` then any sort is permitted;
-    //    otherwise the motive must return Prop (Sort(0)).
-    let codomain_sort =
-        if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(decl) {
-            Exp::sort(0)
-        } else {
-            Exp::sort(2)
-        };
+    //
+    // **D76 Phase F / Q4-4c — the codomain is DERIVED, not fixed.** It was the
+    // constant `Sort(2)`, whose ceiling is Set: a motive returning `Sort(k)` has
+    // type `Sort(k+1)`, so only `k ∈ {0,1}` passed and `Type 1` did not.
+    //
+    // Q4 adopts `I.rec.{u}` with motive `I(params) → Sort u`. Written literally
+    // that is not implementable here and does not need to be (§8 Phase F's audit):
+    // a free `u` would have to be SOLVED, since `check` compares `Sort(k+1) ≤
+    // Sort(u)` and `Level::leq` cannot discharge that for an unbound parameter —
+    // every motive would be rejected. Solving needs level metavariables, which
+    // `Level` has no constructor for and `nbe::unify` does not do; Lean solves it
+    // in the elaborator and nanoda receives it already solved.
+    //
+    // **`u` never has to be solved, because the motive determines it.** The
+    // codomain level is a fact about the motive, not an unknown: apply the motive
+    // to fresh generics — one per index, one for the major — and ask what sort the
+    // result inhabits. `λ_. Set` yields `Sort(2)`, unchanged; `λ_. Type 1` yields
+    // `Sort(3)`, which is the ceiling lifting.
+    //
+    // The motive is CHECKED and not inferred because a bare `λ_. Sort(1)` has no
+    // inferable type, which is why this applies it first and infers only the body.
+    let derived = derive_motive_codomain(ctx, decl, motive)?;
+
+    // For Prop inductives, singleton-elim (D46 §7) gates large elim: if
+    // `large_elim_admitted(decl)` the wider codomain is permitted; otherwise the
+    // motive must return Prop. Unchanged in meaning — it is now a constraint on
+    // the DERIVED level rather than a choice between two constants.
+    let prop_gated =
+        matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(&ctx.env, decl);
+    if prop_gated && !derived.is_nat(0) {
+        return Err(CheckError::IllFormed(format!(
+            "singleton-elim violation: recursor on `{}` (a Prop with {} ctor{}, \
+             failing the singleton test) requires a Prop-valued motive; this one \
+             returns a type in `Sort({})`",
+            decl.name,
+            decl.ctors.len(),
+            if decl.ctors.len() == 1 { "" } else { "s" },
+            derived.simplify()
+        )));
+    }
+    let codomain_sort = Exp::Sort(derived);
     //    D48/eigenius#138: for an INDEXED family the motive is index-aware —
     //
     //        Π (i₁ : I₁) … (i_m : I_m). D(params)(i₁ … i_m) → Sort
@@ -621,7 +660,8 @@ pub(super) fn check_infer_inductive_rec(
     let motive_typ_exp = motive_type_exp(decl, &params, codomain_sort, ctx.rho.len());
     let motive_typ = ctx.eval(&motive_typ_exp, &motive_rho)?;
     check(ctx, motive, &motive_typ).map_err(|e| {
-        if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(decl) {
+        if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)) && !large_elim_admitted(&ctx.env, decl)
+        {
             CheckError::IllFormed(format!(
                 "singleton-elim violation: recursor on `{}` (a Prop with {} \
                  ctor{}, failing the singleton test) requires a Prop-valued \
@@ -645,7 +685,7 @@ pub(super) fn check_infer_inductive_rec(
         )));
     }
     let motive_val = ctx.eval(motive, &ctx.rho)?;
-    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::Pure)?;
+    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::pure())?;
     for (minor, expected_typ) in minors.iter().zip(expected_minor_types.iter()) {
         check(ctx, minor, expected_typ)?;
     }
@@ -664,9 +704,9 @@ pub(super) fn check_infer_inductive_rec(
     let major_val = ctx.eval(major, &ctx.rho)?;
     let mut result = motive_val;
     for idx in major_indices {
-        result = result.app(idx).map_err(CheckError::from)?;
+        result = ctx.app(result, idx).map_err(CheckError::from)?;
     }
-    result.app(major_val).map_err(CheckError::from)
+    ctx.app(result, major_val).map_err(CheckError::from)
 }
 
 /// Build the motive's type for a recursor on `decl` at concrete `params`:
@@ -694,6 +734,48 @@ pub(super) fn check_infer_inductive_rec(
 /// occur in an ESL identifier (`esl/lexer.rs:485`), so an index binder cannot capture a parameter
 /// name referenced by a LATER index's type. Same discipline as `gen_val`'s `TC#` and readback's
 /// `G#`, and distinct from both so the three cannot collide.
+/// The sort a recursor motive's result inhabits — Q4/4c's `u`, read off the motive
+/// rather than solved for (D76 Phase F).
+///
+/// Applies the motive to fresh generics, one per index and one for the major, then
+/// asks what sort the result inhabits. That is the level the motive needs, and it
+/// is a *fact about the motive*: nothing here unifies or guesses.
+///
+/// **Why not infer the motive directly.** A bare `λ_. Sort(1)` has no inferable
+/// type — which is why the motive is checked against an expected type in the first
+/// place. Applying it first sidesteps that: only the body is inferred, and the body
+/// is a type.
+///
+/// Both failure modes are reported here, not swallowed.
+fn derive_motive_codomain(
+    ctx: &mut CheckCtx,
+    decl: &Arc<InductiveDecl>,
+    motive: &Exp,
+) -> Result<crate::nbe::level::Level, CheckError> {
+    let mut applied = ctx.eval(motive, &ctx.rho.clone())?;
+    // One generic per index, then one for the major.
+    let arity = decl.indices.len() + 1;
+    for _ in 0..arity {
+        let gen = gen_val(&ctx.rho);
+        applied = ctx.app(applied, gen).map_err(|e| {
+            CheckError::IllFormed(format!(
+                "recursor on `{}`: the motive must take {arity} argument(s) — {} index/indices \
+                 and the major — but it does not: {e}",
+                decl.name,
+                decl.indices.len()
+            ))
+        })?;
+    }
+    let body = readback_val(ctx.rho.len(), &applied);
+    super::ensure_infers_as_sort(ctx, &body).map_err(|e| {
+        CheckError::IllFormed(format!(
+            "recursor on `{}`: the motive must return a TYPE — its result is the recursor's \
+             result type — but it does not: {e}",
+            decl.name
+        ))
+    })
+}
+
 fn motive_type_exp(
     decl: &Arc<InductiveDecl>,
     params: &[Val],
@@ -707,7 +789,7 @@ fn motive_type_exp(
     dom_args.extend(index_names.iter().map(|n| Exp::Var(n.clone())));
     decl.indices.iter().zip(index_names.iter()).rev().fold(
         Exp::Arrow(
-            Box::new(Exp::InductiveType(decl.clone(), dom_args)),
+            Box::new(Exp::const_applied(decl.iri.clone(), Vec::new(), dom_args)),
             Box::new(codomain_sort),
         ),
         |body, ((_, idx_typ), name)| {
@@ -780,7 +862,7 @@ pub(super) fn check_match(
     // Singleton-elim (D46 §7): a Prop-typed inductive that fails the
     // singleton test cannot be matched into a non-Prop result type.
     if matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))
-        && !large_elim_admitted(&decl)
+        && !large_elim_admitted(&ctx.env, &decl)
         && !is_propositional_in_ctx(ctx, expected)?
     {
         return Err(CheckError::IllFormed(format!(
@@ -828,7 +910,7 @@ pub(super) fn check_match(
         let mut arm_ctx = CheckCtx {
             rho: ctx.rho.clone(),
             gamma: ctx.gamma.clone(),
-            layer: ctx.layer.clone(),
+            env: ctx.env.clone(),
             type_cache: ctx.type_cache.clone(),
             institution_index: ctx.institution_index.clone(),
             institution_runtime: ctx.institution_runtime.clone(),
@@ -1098,6 +1180,7 @@ mod tests {
     /// REDUCTION over an indexed family while type-checking one was impossible.
     fn simple_vec() -> std::sync::Arc<InductiveDecl> {
         let self_ref = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1105,8 +1188,13 @@ mod tests {
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let vec_a_unit = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1151,8 +1239,16 @@ mod tests {
         Exp::Ann(
             // No args: in checking mode the parameter comes from the expected type, so `nil`'s
             // argument list is its NON-parameter arguments, of which it has none.
-            Box::new(Exp::InductiveCtor(decl.clone(), "nil".to_string(), vec![])),
-            Box::new(Exp::InductiveType(decl.clone(), vec![Exp::One, Exp::Unit])),
+            Box::new(Exp::InductiveCtor(
+                decl.iri.clone(),
+                "nil".to_string(),
+                vec![],
+            )),
+            Box::new(Exp::const_applied(
+                decl.iri.clone(),
+                Vec::new(),
+                vec![Exp::One, Exp::Unit],
+            )),
         )
     }
 
@@ -1176,7 +1272,7 @@ mod tests {
     fn inductive_rec_over_an_indexed_family_type_checks() {
         let decl = simple_vec();
         let rec = Exp::InductiveRec {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             // λ_idx. λ_v. One
             motive: Box::new(lams(2, Exp::One)),
             minors: vec![
@@ -1189,7 +1285,9 @@ mod tests {
             // parameterised constructor has no inferable type on its own.
             major: Box::new(vec_nil_at_one(&decl)),
         };
-        let result = check_infer(&mut ctx(), &rec)
+        // D76 Phase B: the term names `SimpleVec`, so the declaration has to be in
+        // the environment for the checker to reach it.
+        let result = check_infer(&mut ctx().declaring(decl.clone()), &rec)
             .expect("an InductiveRec over an indexed family must type-check");
         assert!(
             matches!(result, Val::One),
@@ -1214,7 +1312,7 @@ mod tests {
     fn a_unary_motive_is_rejected_for_an_indexed_family() {
         let decl = simple_vec();
         let rec = Exp::InductiveRec {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             motive: Box::new(lams(1, Exp::One)),
             minors: vec![Exp::Unit, lams(4, Exp::Unit)],
             major: Box::new(vec_nil_at_one(&decl)),
@@ -1238,6 +1336,7 @@ mod tests {
     #[test]
     fn motive_domain_is_not_captured_by_a_shadowing_index_binder() {
         let shadow = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Shadow").unwrap(),
             name: "Shadow".to_string(),
             // Parameter `A` and index `A` — the same name, deliberately.
@@ -1254,12 +1353,12 @@ mod tests {
         let Exp::Arrow(dom, _) = *body else {
             panic!("expected `D(...) -> Sort`");
         };
-        let Exp::InductiveType(_, args) = *dom else {
+        let Some((_, _, args)) = dom.as_const_spine() else {
             panic!("expected an applied inductive domain");
         };
         assert_eq!(args.len(), 2, "one parameter + one index");
         assert_eq!(
-            args[0],
+            *args[0],
             Exp::One,
             "the parameter slot must carry the PARAMETER value (`One`), not the index binder; \
              got {:?}",
@@ -1277,6 +1376,7 @@ mod tests {
     #[test]
     fn motive_domain_handles_an_anonymous_parameter_binder() {
         let anon = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Anon").unwrap(),
             name: "Anon".to_string(),
             params: vec![(Patt::Unit, Exp::sort(1))],
@@ -1288,11 +1388,11 @@ mod tests {
         let Exp::Arrow(dom, _) = exp else {
             panic!("no indices, so no Pi: expected `D(param) -> Sort`");
         };
-        let Exp::InductiveType(_, args) = *dom else {
+        let Some((_, _, args)) = dom.as_const_spine() else {
             panic!("expected an applied inductive domain");
         };
         assert_eq!(
-            args,
+            args.iter().map(|e| (*e).clone()).collect::<Vec<_>>(),
             vec![Exp::One],
             "the parameter value, not a placeholder"
         );
@@ -1305,6 +1405,7 @@ mod tests {
         ctors: Vec<crate::nbe::term::InductiveCtorDecl>,
     ) -> crate::nbe::term::InductiveDecl {
         crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
@@ -1318,7 +1419,10 @@ mod tests {
     fn large_elim_zero_ctors_admitted() {
         // False : Prop with zero ctors — Case A.
         let decl = mk_prop_decl("False", Vec::new());
-        assert!(large_elim_admitted(&decl));
+        assert!(large_elim_admitted(
+            &crate::nbe::env_global::Env::empty(),
+            &decl
+        ));
     }
 
     #[test]
@@ -1341,7 +1445,10 @@ mod tests {
                 },
             ],
         );
-        assert!(!large_elim_admitted(&decl));
+        assert!(!large_elim_admitted(
+            &crate::nbe::env_global::Env::empty(),
+            &decl
+        ));
     }
 
     #[test]
@@ -1358,7 +1465,10 @@ mod tests {
                 typ: ctor_typ,
             }],
         );
-        assert!(large_elim_admitted(&decl));
+        assert!(large_elim_admitted(
+            &crate::nbe::env_global::Env::empty(),
+            &decl
+        ));
     }
 
     #[test]
@@ -1374,7 +1484,10 @@ mod tests {
                 typ: ctor_typ,
             }],
         );
-        assert!(!large_elim_admitted(&decl));
+        assert!(!large_elim_admitted(
+            &crate::nbe::env_global::Env::empty(),
+            &decl
+        ));
     }
 
     // ──────────────────────────────────────────────────────────────────
@@ -1394,6 +1507,7 @@ mod tests {
     fn eq_decl() -> std::sync::Arc<crate::nbe::term::InductiveDecl> {
         // Self-ref for the ctor's conclusion.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1405,8 +1519,9 @@ mod tests {
             ctors: Vec::new(),
         });
         // refl(a) : Eq A a a — conclusion supplies `a` in both indices.
-        let conclusion = Exp::InductiveType(
-            self_ref.clone(),
+        let conclusion = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
             vec![
                 Exp::Var("A".to_string()),
                 Exp::Var("a".to_string()),
@@ -1423,6 +1538,7 @@ mod tests {
             )),
         );
         std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1446,7 +1562,7 @@ mod tests {
         // With D48 Phase H, the extended Case B admits it.
         let decl = eq_decl();
         assert!(
-            large_elim_admitted(&decl),
+            large_elim_admitted(&crate::nbe::env_global::Env::empty(), &decl),
             "Eq must admit large elim under D48 Phase H — refl's `a` arg appears in indices"
         );
     }
@@ -1458,6 +1574,7 @@ mod tests {
         // index expressions. Even with the Phase H extension, this
         // should still be rejected.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
@@ -1467,7 +1584,7 @@ mod tests {
         });
         // Conclusion: BadIxProp () — the index is the constant `()`,
         // not mentioning any ctor arg.
-        let conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Unit]);
+        let conclusion = Exp::const_applied(self_ref.iri.clone(), Vec::new(), vec![Exp::Unit]);
         // Ctor: takes a non-Prop arg `_:1` (Unit type, in Set) that
         // doesn't appear in conclusion.
         let ctor_typ = Exp::Pi(
@@ -1476,6 +1593,7 @@ mod tests {
             Box::new(conclusion),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
@@ -1487,7 +1605,7 @@ mod tests {
             }],
         };
         assert!(
-            !large_elim_admitted(&decl),
+            !large_elim_admitted(&crate::nbe::env_global::Env::empty(), &decl),
             "BadIxProp must NOT admit large elim — the non-Prop arg doesn't appear in indices"
         );
     }
@@ -1510,7 +1628,10 @@ mod tests {
                 typ: ctor_typ,
             }],
         );
-        assert!(large_elim_admitted(&decl));
+        assert!(large_elim_admitted(
+            &crate::nbe::env_global::Env::empty(),
+            &decl
+        ));
     }
 
     /// Closes finding F-4 (port-fidelity analysis,
@@ -1525,6 +1646,7 @@ mod tests {
         // P : 1 → Prop with ctor `mk : (n : 1) → P (n, ())` — the index
         // expression `(n, ())` mentions `n` but is not `n` itself.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
             name: "MentionsIx".to_string(),
             params: Vec::new(),
@@ -1533,13 +1655,14 @@ mod tests {
             ctors: Vec::new(),
         });
         let index_exp = Exp::Pair(Box::new(Exp::Var("n".to_string())), Box::new(Exp::Unit));
-        let conclusion = Exp::InductiveType(self_ref, vec![index_exp]);
+        let conclusion = Exp::const_applied(self_ref.iri.clone(), Vec::new(), vec![index_exp]);
         let ctor_typ = Exp::Pi(
             Patt::Var("n".to_string()),
             Box::new(Exp::One), // non-propositional per is_syntactically_propositional_type
             Box::new(conclusion),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
             name: "MentionsIx".to_string(),
             params: Vec::new(),
@@ -1551,7 +1674,7 @@ mod tests {
             }],
         };
         assert!(
-            !large_elim_admitted(&decl),
+            !large_elim_admitted(&crate::nbe::env_global::Env::empty(), &decl),
             "an index that merely mentions the arg must not admit large elim"
         );
     }
@@ -1565,6 +1688,7 @@ mod tests {
         // — the index `n` refers to the SECOND (propositional) binder;
         // the first, non-Prop `n` is shadowed and unrecoverable.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:ShadowIx").unwrap(),
             name: "ShadowIx".to_string(),
             params: Vec::new(),
@@ -1572,7 +1696,11 @@ mod tests {
             sort: Exp::sort(0),
             ctors: Vec::new(),
         });
-        let conclusion = Exp::InductiveType(self_ref, vec![Exp::Var("n".to_string())]);
+        let conclusion = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("n".to_string())],
+        );
         let id_typ = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
         let ctor_typ = Exp::Pi(
             Patt::Var("n".to_string()),
@@ -1584,6 +1712,7 @@ mod tests {
             )),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:ShadowIx").unwrap(),
             name: "ShadowIx".to_string(),
             params: Vec::new(),
@@ -1595,7 +1724,7 @@ mod tests {
             }],
         };
         assert!(
-            !large_elim_admitted(&decl),
+            !large_elim_admitted(&crate::nbe::env_global::Env::empty(), &decl),
             "a shadowed arg is not recoverable from the indices"
         );
     }
@@ -1609,6 +1738,7 @@ mod tests {
     fn rejects_nonuniform_conclusion_params() {
         // Q(A : Set) { mk : Q(1) } — conclusion `Q(1)`, not `Q(A)`.
         let s = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
             name: "Q".to_string(),
             params: Vec::new(),
@@ -1617,6 +1747,7 @@ mod tests {
             ctors: Vec::new(),
         });
         let decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
             name: "Q".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1627,12 +1758,17 @@ mod tests {
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
                     Box::new(Exp::sort(1)),
-                    Box::new(Exp::InductiveType(s, vec![Exp::One])),
+                    Box::new(Exp::const_applied(
+                        s.iri.clone(),
+                        Vec::new(),
+                        vec![Exp::One],
+                    )),
                 ),
             }],
         });
-        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
-        let err = check_type(&mut ctx, &Exp::Inductive(decl))
+        // A declaration is in scope while its own constructor types are checked.
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let err = check_inductive_declaration(&mut ctx, &decl)
             .expect_err("non-uniform conclusion params")
             .to_string();
         assert!(err.contains("parameters through unchanged"), "got: {err}");
@@ -1644,6 +1780,7 @@ mod tests {
         // at all — large_elim_admitted is only consulted for Prop decls.
         // Smoke-test the function returns sensibly regardless.
         let set_decl = crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
@@ -1671,7 +1808,10 @@ mod tests {
         // For a non-Prop inductive the singleton test is not load-bearing,
         // but the algorithm still runs correctly: Nat has 2 ctors, so the
         // test returns false (as it would for any 2-ctor Prop).
-        assert!(!large_elim_admitted(&set_decl));
+        assert!(!large_elim_admitted(
+            &crate::nbe::env_global::Env::empty(),
+            &set_decl
+        ));
     }
 
     // --- Inductive type checking (Phase 11b step 5) ---
@@ -1679,7 +1819,7 @@ mod tests {
     use crate::nbe::term::InductiveCtorDecl;
 
     fn nat_succ_exp(decl: &Arc<InductiveDecl>, n: Exp) -> Exp {
-        Exp::InductiveCtor(decl.clone(), "succ".to_string(), vec![n])
+        Exp::InductiveCtor(decl.iri.clone(), "succ".to_string(), vec![n])
     }
 
     /// Constant `λ_. Set` motive — applied to anything yields `Set`.
@@ -1695,7 +1835,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         check(&mut c, &nat_zero_exp(&nat), &nat_ty).expect("zero : Nat");
     }
 
@@ -1708,7 +1848,7 @@ mod tests {
             indices: Vec::new(),
         };
         let exp = nat_succ_exp(&nat, nat_zero_exp(&nat));
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         check(&mut c, &exp, &nat_ty).expect("succ zero : Nat");
     }
 
@@ -1721,7 +1861,7 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::sort(1)]);
+        let bogus = Exp::InductiveCtor(nat.iri.clone(), "succ".to_string(), vec![Exp::sort(1)]);
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         assert!(check(&mut c, &bogus, &nat_ty).is_err());
     }
@@ -1734,8 +1874,8 @@ mod tests {
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let bogus = Exp::InductiveCtor(nat.clone(), "two".to_string(), Vec::new());
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let bogus = Exp::InductiveCtor(nat.iri.clone(), "two".to_string(), Vec::new());
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         let err = check(&mut c, &bogus, &nat_ty).unwrap_err().to_string();
         assert!(err.contains("no constructor"), "unexpected: {err}");
     }
@@ -1745,8 +1885,9 @@ mod tests {
         // Construct a Bool decl, then try to type-check Bool's True against Nat.
         let nat = nat_decl();
         let bs = ind_self_ref("Bool");
-        let bool_ty_exp = Exp::InductiveType(bs, Vec::new());
+        let bool_ty_exp = Exp::const_applied(bs.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
@@ -1757,13 +1898,15 @@ mod tests {
                 typ: bool_ty_exp,
             }],
         });
-        let true_exp = Exp::InductiveCtor(bool_decl, "True".to_string(), Vec::new());
+        let true_exp = Exp::InductiveCtor(bool_decl.iri.clone(), "True".to_string(), Vec::new());
         let nat_ty = Val::InductiveType {
-            decl: nat,
+            decl: nat.clone(),
             params: Vec::new(),
             indices: Vec::new(),
         };
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![])
+            .declaring(nat)
+            .declaring(bool_decl);
         let err = check(&mut c, &true_exp, &nat_ty).unwrap_err().to_string();
         assert!(err.contains("does not match"), "unexpected: {err}");
     }
@@ -1772,7 +1915,7 @@ mod tests {
     fn infer_ctor_succeeds_for_non_parametric_inductive() {
         // Nat has no params → inference returns InductiveType{Nat, []}.
         let nat = nat_decl();
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(nat.clone());
         let typ = check_infer(&mut c, &nat_zero_exp(&nat)).expect("infer Nat.zero");
         match typ {
             Val::InductiveType {
@@ -1790,8 +1933,10 @@ mod tests {
     #[test]
     fn infer_ctor_fails_for_parametric_inductive() {
         let s = ind_self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1806,8 +1951,10 @@ mod tests {
                 ),
             }],
         });
-        let nil_exp = Exp::InductiveCtor(list_decl, "nil".to_string(), Vec::new());
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let nil_exp = Exp::InductiveCtor(list_decl.iri.clone(), "nil".to_string(), Vec::new());
+        // The FULL declaration, not the ctor-less self-reference helper: the
+        // checker resolves the name through `Γ_env` and needs the constructor.
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(list_decl.clone());
         let err = check_infer(&mut c, &nil_exp).unwrap_err().to_string();
         assert!(err.contains("checking mode"), "unexpected: {err}");
     }
@@ -1821,13 +1968,57 @@ mod tests {
             indices: Vec::new(),
         };
         let nat_val = Val::InductiveVal {
-            decl: nat.clone(),
+            iri: nat.iri.clone(),
             ctor_name: "zero".to_string(),
             args: Vec::new(),
         };
         let gamma: Gamma = vec![("n".to_string(), nat_ty)];
         let rho = Rho::Nil.extend(Patt::Var("n".to_string()), nat_val);
-        (nat, CheckCtx::new(rho, gamma))
+        let ctx = CheckCtx::new(rho, gamma).declaring(nat.clone());
+        (nat, ctx)
+    }
+
+    /// **D76 Phase F / Q4-4c — the elimination ceiling is lifted.**
+    ///
+    /// The motive codomain was the constant `Sort(2)`, so a motive returning
+    /// `Sort(k)` — whose type is `Sort(k+1)` — passed only for `k ∈ {0,1}`. `Type 1`
+    /// was rejected. The codomain is derived from the motive now, so any level
+    /// passes.
+    ///
+    /// **This replaces `level::recursor_elimination_ceiling`'s marker**, which
+    /// asserted `Level::of_nat(k+1).leq(&Level::of_nat(2))` — pure arithmetic
+    /// *modelling* the constant, and true regardless of what the recursor does. It
+    /// could not flip because it never ran a recursor. This one does.
+    #[test]
+    fn a_type_1_valued_motive_is_admitted() {
+        let (nat, mut c) = ctx_with_nat_var();
+
+        // `k = 1` is the control — the constant admitted it. `k = 2` and `k = 3`
+        // are `Type 1` and `Type 2`, which it refused.
+        for k in 1..4usize {
+            // motive `λ_. Sort(k)` — the recursor's result type is a type at level k.
+            let motive = Exp::Lam(Patt::Unit, Box::new(Exp::sort(k)));
+            // A minor must INHABIT the motive's result, so it is a type at level k:
+            // `Sort(k-1) : Sort(k)`. (`Sort(k)` itself would not do — a universe
+            // lives strictly above itself.)
+            let zero_minor = Exp::sort(k - 1);
+            let succ_minor = Exp::Lam(
+                Patt::Unit,
+                Box::new(Exp::Lam(Patt::Unit, Box::new(Exp::sort(k - 1)))),
+            );
+            let exp = Exp::InductiveRec {
+                iri: nat.iri.clone(),
+                motive: Box::new(motive),
+                minors: vec![zero_minor, succ_minor],
+                major: Box::new(Exp::Var("n".to_string())),
+            };
+            let typ = check_infer(&mut c, &exp)
+                .unwrap_or_else(|e| panic!("motive returning Sort({k}) must be admitted: {e}"));
+            assert!(
+                matches!(&typ, Val::Sort(l) if l.is_nat(k)),
+                "the recursor's result type is the motive's codomain, Sort({k}); got {typ:?}"
+            );
+        }
     }
 
     #[test]
@@ -1836,13 +2027,13 @@ mod tests {
         // Motive : Nat → Set, zero minor : Set, succ minor : Nat → Set → Set,
         // result type: Set.
         let (nat, mut c) = ctx_with_nat_var();
-        let nat_ty_exp = Exp::InductiveType(nat.clone(), Vec::new());
+        let nat_ty_exp = Exp::const_applied(nat.iri.clone(), Vec::new(), Vec::new());
         let succ_minor = Exp::Lam(
             Patt::Unit,
             Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp.clone()))),
         );
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![nat_ty_exp, succ_minor],
             major: Box::new(Exp::Var("n".to_string())),
@@ -1858,9 +2049,13 @@ mod tests {
     fn infer_rec_wrong_minor_count() {
         let (nat, mut c) = ctx_with_nat_var();
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
-            minors: vec![Exp::InductiveType(nat_decl(), Vec::new())], // only 1 minor, needs 2
+            minors: vec![Exp::const_applied(
+                nat_decl().iri.clone(),
+                Vec::new(),
+                Vec::new(),
+            )], // only 1 minor, needs 2
             major: Box::new(Exp::Var("n".to_string())),
         };
         let err = check_infer(&mut c, &exp).unwrap_err().to_string();
@@ -1871,13 +2066,13 @@ mod tests {
     fn infer_rec_minor_type_mismatch() {
         // Wrong type for the zero minor — supply Unit instead of a Set.
         let (nat, mut c) = ctx_with_nat_var();
-        let nat_ty_exp = Exp::InductiveType(nat.clone(), Vec::new());
+        let nat_ty_exp = Exp::const_applied(nat.iri.clone(), Vec::new(), Vec::new());
         let succ_minor = Exp::Lam(
             Patt::Unit,
             Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp))),
         );
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![Exp::Unit, succ_minor],
             major: Box::new(Exp::Var("n".to_string())),
@@ -1889,20 +2084,23 @@ mod tests {
     fn infer_rec_major_wrong_type() {
         // Major has type 1 (One), not Nat — must fail with the inductive-type message.
         let nat = nat_decl();
-        let nat_ty_exp = Exp::InductiveType(nat.clone(), Vec::new());
+        let nat_ty_exp = Exp::const_applied(nat.iri.clone(), Vec::new(), Vec::new());
         let succ_minor = Exp::Lam(
             Patt::Unit,
             Box::new(Exp::Lam(Patt::Unit, Box::new(nat_ty_exp.clone()))),
         );
         let exp = Exp::InductiveRec {
-            decl: nat,
+            iri: nat.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![nat_ty_exp, succ_minor],
             major: Box::new(Exp::Var("u".to_string())),
         };
         let gamma: Gamma = vec![("u".to_string(), Val::One)];
         let rho = Rho::Nil.extend(Patt::Var("u".to_string()), Val::Unit);
-        let mut c = CheckCtx::new(rho, gamma);
+        // `Nat` IS declared — the error under test is the MAJOR's type, not a
+        // missing declaration, and the two diagnostics would otherwise be
+        // indistinguishable.
+        let mut c = CheckCtx::new(rho, gamma).declaring(nat.clone());
         let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(
             err.contains("expected an inductive type"),
@@ -1913,10 +2111,11 @@ mod tests {
     #[test]
     fn infer_rec_decl_mismatch() {
         // n : Nat but recursor uses Bool decl.
-        let (_nat, mut c) = ctx_with_nat_var();
+        let (_nat, c) = ctx_with_nat_var();
         let bs = ind_self_ref("Bool");
-        let bool_ty = Exp::InductiveType(bs, Vec::new());
+        let bool_ty = Exp::const_applied(bs.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
@@ -1934,11 +2133,14 @@ mod tests {
             ],
         });
         let exp = Exp::InductiveRec {
-            decl: bool_decl,
+            iri: bool_decl.iri.clone(),
             motive: Box::new(const_set_motive_exp()),
             minors: vec![bool_ty.clone(), bool_ty],
             major: Box::new(Exp::Var("n".to_string())),
         };
+        // Both declarations are in scope — the mismatch under test is between the
+        // recursor's inductive and the major's, not a missing declaration.
+        let mut c = c.declaring(bool_decl.clone());
         let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(err.contains("declaration mismatch"), "unexpected: {err}");
     }

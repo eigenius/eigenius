@@ -359,15 +359,17 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
 pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Option<[u8; 32]> {
     let asserts_iri = Iri::parse(wk::ASSERTS).ok()?;
     let asserts_resource = layer.resolve(&asserts_iri)?;
-    let val =
-        crate::program::ground::resolve_inductive_type(&asserts_iri, &asserts_resource, layer)
-            .ok()?;
-    let decl = match val {
-        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
-        _ => return None,
-    };
-    let proposition = crate::nbe::term::Exp::InductiveType(
-        decl,
+    // The declaration need only *exist* — D76 Phase B: the term names it rather
+    // than carrying it, so the full decode this used to do was dropped into a slot
+    // that no longer exists. The encoded form is unchanged (`ConstRef` + an `App`
+    // spine either way), so the witness hash is too — `witness_hash_agreement` is
+    // the gate on that.
+    if !crate::program::ground::is_inductive_type(&asserts_resource) {
+        return None;
+    }
+    let proposition = crate::nbe::term::Exp::const_applied(
+        asserts_iri,
+        Vec::new(),
         vec![crate::nbe::term::Exp::LitString(
             target_iri.as_str().to_string(),
         )],
@@ -387,15 +389,12 @@ pub fn default_asserts_proposition(
 ) -> Option<crate::nbe::term::Exp> {
     let asserts_iri = Iri::parse(wk::ASSERTS).ok()?;
     let asserts_resource = layer.resolve(&asserts_iri)?;
-    let val =
-        crate::program::ground::resolve_inductive_type(&asserts_iri, &asserts_resource, layer)
-            .ok()?;
-    let decl = match val {
-        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
-        _ => return None,
-    };
-    Some(crate::nbe::term::Exp::InductiveType(
-        decl,
+    if !crate::program::ground::is_inductive_type(&asserts_resource) {
+        return None;
+    }
+    Some(crate::nbe::term::Exp::const_applied(
+        asserts_iri,
+        Vec::new(),
         vec![crate::nbe::term::Exp::LitString(
             target_iri.as_str().to_string(),
         )],
@@ -1051,6 +1050,143 @@ mod tests {
         assert!(
             !lookup_chain_witness(&layer, &declared_key),
             "IsVerifiedAs must not coerce to IsDeclaredAs (no such subclass relation)"
+        );
+    }
+
+    // ─── Environment-blindness of proposition identity (see
+    //     docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md §3.4) ──────────────────────
+
+    /// A class resource requiring the listed properties.
+    fn class_requiring(class_iri: &str, requires: &[&str]) -> Resource {
+        let mut r = Resource::new(iri(class_iri));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        );
+        r.set(
+            iri(wk::REQUIRES),
+            Value::Array(
+                requires
+                    .iter()
+                    .map(|p| Value::ResourceRef(iri(p)))
+                    .collect(),
+            ),
+        );
+        r
+    }
+
+    const SUBJECT_CLASS: &str = "urn:eigenius:example:Dog";
+
+    /// Two versions of `Dog`, differing in *extension*. `WIDE` drops a required
+    /// property, so strictly more things are Dogs under it.
+    const NARROW: &[&str] = &["urn:eigenius:example:name", "urn:eigenius:example:owner"];
+    const WIDE: &[&str] = &["urn:eigenius:example:name"];
+
+    /// `Π(x : Dog). Prop` — a proposition quantifying over a class, so its
+    /// meaning depends on what `Dog` is.
+    fn quantified_over_subject_class() -> Exp {
+        Exp::Pi(
+            crate::nbe::term::Patt::Var("x".into()),
+            Box::new(Exp::EigonClass(iri(SUBJECT_CLASS))),
+            Box::new(Exp::sort(0)),
+        )
+    }
+
+    #[test]
+    fn redefining_a_class_does_not_change_the_hash_of_a_proposition_over_it() {
+        // The defining layer is not an input to the hash: `hash_proposition_exp`
+        // takes `&Exp`, and a class reference encodes as a bare `ConstRef(iri)`.
+        // So a proposition quantifying over `Dog` hashes identically before and
+        // after `Dog` is redefined — the term is unchanged while its meaning is
+        // not.
+        let prop = quantified_over_subject_class();
+        let encoded = encode_type(&prop).unwrap();
+        let owner = iri("urn:eigenius:example:claim");
+
+        let mut b1 = LayerBuilder::new("dog-v1", None);
+        b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
+            .unwrap();
+        let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
+
+        let mut b2 = LayerBuilder::new("dog-v2", Some(Arc::clone(&l1)));
+        b2.add_resource(class_requiring(SUBJECT_CLASS, WIDE))
+            .unwrap();
+        let l2 = Arc::new(b2.build(LayerStorage::in_memory()));
+
+        // Precondition: the redefinition is real — `Dog` resolves differently
+        // in the two layers. Without this the hash comparison proves nothing.
+        assert_ne!(
+            l1.resolve(&iri(SUBJECT_CLASS))
+                .unwrap()
+                .get(&iri(wk::REQUIRES)),
+            l2.resolve(&iri(SUBJECT_CLASS))
+                .unwrap()
+                .get(&iri(wk::REQUIRES)),
+            "test setup: Dog must differ between the two layers"
+        );
+
+        let h1 = hash_stored_proposition(&l1, &owner, &encoded)
+            .expect("proposition must hash against dog-v1");
+        let h2 = hash_stored_proposition(&l2, &owner, &encoded)
+            .expect("proposition must hash against dog-v2");
+
+        assert_eq!(
+            h1, h2,
+            "proposition identity is environment-blind: `Π(x : Dog). Prop` hashes the same \
+             after Dog is redefined. This is the current behaviour, not the desired one — see \
+             docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md §3.4. If this assertion starts failing, the \
+             environment has become part of proposition identity and §6.2 needs revisiting."
+        );
+    }
+
+    #[test]
+    fn witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over() {
+        // The module doc argues first-hit-wins is sound "because Layer
+        // immutability means a once-admitted witness stays admitted in all
+        // descendants". Immutability makes the *record* stable; it does not
+        // make the *meaning* of what was recorded stable, because a descendant
+        // can rebind a name the proposition mentions.
+        //
+        // The direction of the rebinding is what makes this unsound rather than
+        // merely stale. `Dog` here is *widened* — a required property is
+        // dropped, so more things are Dogs in v2 than in v1. `Π(x : Dog). P` is
+        // therefore a strictly stronger claim in v2, and the credit was earned
+        // against the weaker one. (Narrowing the class would shrink the domain
+        // and leave the stale credit sound by accident, which is why this test
+        // does not narrow.)
+        let prop = quantified_over_subject_class();
+        let target = "urn:eigenius:example:every-dog-claim";
+
+        let mut b1 = LayerBuilder::new("credit-v1", None);
+        b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
+            .unwrap();
+        b1.add_resource(target_resource_with_canonical_prop(target, &prop))
+            .unwrap();
+        b1.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:every-dog-claim-decl-trace",
+        ))
+        .unwrap();
+        let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
+
+        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        assert!(
+            layer_admits_witness(&l1, &key),
+            "test setup: the witness must be admitted against Dog-v1"
+        );
+
+        // A descendant widens the class the proposition quantifies over.
+        let mut b2 = LayerBuilder::new("credit-v2", Some(Arc::clone(&l1)));
+        b2.add_resource(class_requiring(SUBJECT_CLASS, WIDE))
+            .unwrap();
+        let l2 = Arc::new(b2.build(LayerStorage::in_memory()));
+
+        assert!(
+            lookup_chain_witness(&l2, &key),
+            "current behaviour: credit granted under the narrower Dog is still found from a \
+             layer where Dog is wider, so `Π(x : Dog). P` is now a stronger claim than the one \
+             that earned the credit. Nothing rechecks the proposition against the rebinding. \
+             See docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md §3.4."
         );
     }
 }

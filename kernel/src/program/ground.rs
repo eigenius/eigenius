@@ -22,7 +22,7 @@
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, Patt, PrimitiveType};
-use crate::nbe::val::{Clos, Val};
+use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
@@ -60,31 +60,138 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
         return resolve_inductive_type(class_iri, resource, layer);
     }
 
-    let (required, recommended) = collect_properties(class_iri, layer)?;
+    // D78 Phase C — the class's constraint is a RECORD over its `requires`.
+    //
+    // Three deletions from the Σ-chain this replaces:
+    //
+    // - **`recommends` no longer contributes a field.** It was Option-wrapped
+    //   into the chain, which says the record *has* a field holding `some x` or
+    //   `none`; a resource that omits the property has no field at all, and only
+    //   absence is what `recommends` describes (D78 §1.1). `Option` survives
+    //   where it belongs — the Julia and Lean mirror generators emit closed
+    //   target-language structs, which do need a nullable slot.
+    // - **No `Val::One` short-circuit for an empty class.** All 749 shipped
+    //   classes with no `requires` resolved to the *same* `Val::One` and were
+    //   definitionally equal to one another; an empty record is per-class
+    //   (D78 §1.2, §5.1).
+    // - **No right-nested Σ.** `build_sigma_chain` bound `local_name()`, so two
+    //   properties sharing a local name across namespaces were one field to a
+    //   projection. A record is keyed by full IRI (D78 §9).
+    let (required, _recommended) = collect_properties(class_iri, layer)?;
 
-    let mut props: Vec<(Iri, Val)> = Vec::new();
-
-    // Required properties — direct types
+    let mut fields: Vec<(Iri, Patt, Exp)> = Vec::new();
     for prop_iri in &required {
         let prop_type = resolve_property_type(prop_iri, layer)?;
-        props.push((prop_iri.clone(), prop_type));
+        // The field's type is closed — a class field's type is a function of the
+        // *property*, never of an earlier field (D78 §4.1) — so reading it back
+        // into an `Exp` loses nothing, and the telescope carries no dependency
+        // until conditional requirements land (D78 §1.3).
+        let ty = crate::nbe::readback::readback_val(0, &prop_type);
+        fields.push((
+            prop_iri.clone(),
+            Patt::Var(prop_iri.local_name().to_string()),
+            ty,
+        ));
     }
 
-    // Recommended properties — wrapped in Option (Sum(some T | none 1))
-    for prop_iri in &recommended {
-        if required.contains(prop_iri) {
-            continue; // Already included as required
-        }
-        let prop_type = resolve_property_type(prop_iri, layer)?;
-        let option_type = make_option_type(prop_type);
-        props.push((prop_iri.clone(), option_type));
-    }
+    let record_exp = Exp::record(fields).map_err(|e| e.to_string())?;
+    crate::nbe::eval::eval(&record_exp, &crate::nbe::env::Rho::Nil)
+        .map_err(|e| format!("could not evaluate class record for '{class_iri}': {e:?}"))
+}
 
-    if props.is_empty() {
-        return Ok(Val::One);
+/// D78 §5 / Phase E — a resource's **own** record: the union of the fields it
+/// actually carries, each at the property's declared type.
+///
+/// This is what closes D75 §3.8. `resolve_class_type` answers "what does this
+/// class demand", which is the declared *minimum*; this answers "what does this
+/// resource *have*", which is the whole of it. An undeclared property — one the
+/// resource carries that its classes neither require nor recommend — is a field
+/// here and is therefore projectable, where the class type could never mention
+/// it.
+///
+/// **Every property, `is_a` among them.** `is_a` is itself a declared
+/// `core:Property` (`data_type: resource_array`, `class_types: [core:Class]`), so
+/// under "everything is a Resource" it is a field like any other. There is no
+/// redundancy with the refinement that wraps this: the *field* says the resource
+/// has an `is_a` holding an array of classes; the *refinement* says which
+/// constraints it satisfies.
+///
+/// A property whose type cannot be resolved is **skipped rather than fatal**:
+/// Rule 22 §c already rejects an undeclared property key at commit, so a
+/// resource reaching here with one is a chain that failed validation, and
+/// refusing to type the rest of it would report the same defect twice.
+pub fn resource_record(
+    resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
+) -> Result<Val, String> {
+    let mut fields: Vec<(Iri, Patt, Exp)> = Vec::new();
+    for prop_iri in resource.properties().keys() {
+        let Ok(prop_type) = resolve_property_type(prop_iri, layer) else {
+            continue;
+        };
+        fields.push((
+            prop_iri.clone(),
+            Patt::Var(prop_iri.local_name().to_string()),
+            crate::nbe::readback::readback_val(0, &prop_type),
+        ));
     }
+    let record_exp = Exp::record(fields).map_err(|e| e.to_string())?;
+    crate::nbe::eval::eval(&record_exp, &crate::nbe::env::Rho::Nil)
+        .map_err(|e| format!("could not evaluate the resource record: {e:?}"))
+}
 
-    build_sigma_chain(&props)
+/// D78 §4 — the field set a constraint demands.
+///
+/// **`requires` only.** `recommends` contributes nothing at the type level
+/// (D78 §1.1): it names properties that may be absent, and *if present, well
+/// typed* is what Rule 3 already checks for any property regardless of class.
+/// A recommended property is not a field of the constraint.
+///
+/// Transitive: `collect_properties` walks `subclass_of`, so a subclass's field
+/// set includes its ancestors'.
+pub fn constraint_fields(class_iri: &Iri, layer: &Layer) -> Result<BTreeSet<Iri>, String> {
+    Ok(collect_properties(class_iri, layer)?.0)
+}
+
+/// D78 §4 — does `sub` entail `sup`? That is: does every record satisfying
+/// `sub` satisfy `sup`?
+///
+/// `fields(sup) ⊆ fields(sub)`, and **nothing else**. The rule as first drafted
+/// carried a per-field variance clause, `type_sub(ℓ) <: type_sup(ℓ)`; it is
+/// **vacuous** and deliberately absent (D78 §4.1). A field's type is a function
+/// of the *property* — `resolve_property_type` takes only a property IRI, and
+/// `collect_properties_inner` collects IRIs without types — so there is no
+/// per-`(class, property)` type for two constraints to disagree about. Adding
+/// the clause back would be adding a check that cannot fail.
+pub fn entails(sub: &Iri, sup: &Iri, layer: &Layer) -> Result<bool, String> {
+    let needed = constraint_fields(sup, layer)?;
+    let have = constraint_fields(sub, layer)?;
+    Ok(needed.is_subset(&have))
+}
+
+/// D78 §3 — does the **conjunction** of `constraints` entail `sup`?
+///
+/// This is the judgment that earns its place. Over `subclass_of` declarations
+/// entailment is automatic — `collect_properties` walks the relation, so a
+/// declared subclass includes its parent's fields by construction, which is why
+/// D78 ships no validation rule for it. The real use is `Refine` subtyping,
+/// where the two constraint sets come from `is_a` lists and are **not
+/// necessarily related by `subclass_of`**: whether the union of one set's fields
+/// covers another's has no structural guarantee behind it.
+///
+/// A constraint is a field set, so `fields(⋀S) = ⋃_{C∈S} fields(C)` and §4's
+/// rule applies to that union unchanged.
+pub fn conjunction_entails(
+    constraints: &BTreeSet<Iri>,
+    sup: &Iri,
+    layer: &Layer,
+) -> Result<bool, String> {
+    let needed = constraint_fields(sup, layer)?;
+    let mut have: BTreeSet<Iri> = BTreeSet::new();
+    for c in constraints {
+        have.extend(constraint_fields(c, layer)?);
+    }
+    Ok(needed.is_subset(&have))
 }
 
 /// Collect required and recommended properties for a class (including inherited).
@@ -243,22 +350,6 @@ fn resolve_array_element_type(
     Ok(Val::sort(1))
 }
 
-/// Make an Option type: Sum(some T | none 1)
-fn make_option_type(inner: Val) -> Val {
-    // Store the inner type as a value in the environment rather than
-    // round-tripping through readback, which can introduce generated
-    // variable names (e.g. __data_0) that fail to resolve in Rho::Nil.
-    let var_name = "__option_inner".to_string();
-    let rho = Rho::Nil.extend(Patt::Var(var_name.clone()), inner);
-    Val::Data(
-        vec![
-            ("some".to_string(), Exp::Var(var_name)),
-            ("none".to_string(), Exp::One),
-        ],
-        rho,
-    )
-}
-
 /// Make a list type wrapping an element type.
 ///
 /// Wraps the canonical `List(A)` inductive declaration from
@@ -287,26 +378,6 @@ fn make_union_type(iris: &[Iri]) -> Val {
         .map(|iri| (iri.local_name().to_string(), Exp::EigonClass(iri.clone())))
         .collect();
     Val::Data(summands, Rho::Nil)
-}
-
-/// Build a nested Sigma chain from a list of (property_iri, type) pairs.
-fn build_sigma_chain(props: &[(Iri, Val)]) -> Result<Val, String> {
-    if props.is_empty() {
-        return Ok(Val::One);
-    }
-    let (prop_iri, prop_type) = &props[0];
-    let rest_type = build_sigma_chain(&props[1..])?;
-    // Store the rest type in the closure's environment rather than
-    // round-tripping through readback. The rest type doesn't depend on
-    // the current property's value, but we still need a well-formed closure.
-    let rest_var = "__sigma_rest".to_string();
-    let rho = Rho::Nil.extend(Patt::Var(rest_var.clone()), rest_type);
-    let closure = Clos::new(
-        Patt::Var(prop_iri.local_name().to_string()),
-        Exp::Var(rest_var),
-        rho,
-    );
-    Ok(Val::Sig(Box::new(prop_type.clone()), closure))
 }
 
 /// Check whether a resource represents an inductive type declaration
@@ -341,28 +412,12 @@ pub(crate) fn resolve_inductive_type(
     let params_telescope = decode_params(class_iri, resource, layer)?;
     let indices_telescope = decode_indices(class_iri, resource, layer)?;
     let sort = decode_result_sort(class_iri, resource)?;
+    let uparams = decode_universe_params(class_iri, resource)?;
 
-    // Build the self-reference stub used inside constructor types.
-    // Empty `ctors` is fine — name-based lookup is all the kernel
-    // needs for inner self-refs (see Phase 11b step 2 notes).
-    //
-    // Stub-Arc preservation (eigenius#72 Layer 2 / D48): the stub
-    // carries the real `indices` telescope so that ctor-internal
-    // self-references like `Vec(A, n)` decode against the same shape
-    // the kernel's check pass expects. `params` stays empty in the
-    // stub since references inside ctor bodies thread params lexically.
-    let self_ref = Arc::new(InductiveDecl {
-        iri: class_iri.clone(),
-        name: short_name.clone(),
-        params: Vec::new(),
-        indices: indices_telescope.clone(),
-        sort: sort.clone(),
-        ctors: Vec::new(),
-    });
-
-    let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope, layer)?;
+    let ctors = decode_ctors(class_iri, resource, &params_telescope, layer)?;
 
     let decl = Arc::new(InductiveDecl {
+        uparams,
         iri: class_iri.clone(),
         name: short_name,
         params: params_telescope,
@@ -446,6 +501,48 @@ fn decode_indices(
 /// resource (eigenius#72 Layer 2). Recognised forms: `"Prop"`,
 /// `"Set"`, `"Type:N"`. Absent or unrecognised → `Sort(1)` (the
 /// pre-Layer-2 default).
+/// The level variables a declaration binds (eigenius#188, D76 Phase E2).
+///
+/// Absent means monomorphic, which is every shipped declaration — so the common
+/// path is an absent property and an empty list, and substitution over it is the
+/// identity.
+///
+/// **A duplicate is rejected.** Instantiation is by position, so `[u, u]` makes
+/// the second argument unreachable and the first apply twice; nanoda asserts the
+/// same at declaration admission (`no_dupes_all_params`, `tc.rs:167`). The ESL
+/// compiler generalises without duplicates by construction, so this catches an
+/// authored or hand-edited resource rather than its own emitter.
+fn decode_universe_params(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Result<Vec<String>, String> {
+    let Some(v) = resource.get(&Iri::parse(wk::UNIVERSE_PARAMS).unwrap()) else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(items) = v else {
+        return Err(format!(
+            "inductive type '{class_iri}' has a `universe_params` that is not an array: {v:?}"
+        ));
+    };
+    let mut out: Vec<String> = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::String(name) = item else {
+            return Err(format!(
+                "inductive type '{class_iri}' has a non-string `universe_params` entry: {item:?}"
+            ));
+        };
+        if out.contains(name) {
+            return Err(format!(
+                "inductive type '{class_iri}' declares the level variable `{name}` twice — \
+                 `universe_params` is ordered and instantiated by position, so a duplicate \
+                 makes substitution ambiguous"
+            ));
+        }
+        out.push(name.clone());
+    }
+    Ok(out)
+}
+
 fn decode_result_sort(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
@@ -512,43 +609,28 @@ fn decode_params(
     Ok(params)
 }
 
-/// Whether `arg_iri` names a declared inductive in the chain, and if so a
-/// name-only stub `InductiveDecl` for it.
+/// Does this IRI name an inductive declared in the chain?
 ///
-/// **The one rule for a fully-qualified IRI appearing in TYPE position.**
-/// `InductiveDecl` equality is by IRI, so a stub carrying just the IRI and
-/// short name is enough for the type checker's name-based dispatch; we
-/// deliberately do NOT recurse into `resolve_inductive_type` for the target,
-/// which would loop on mutually-referential declarations.
+/// **A predicate since D76 Phase B.** It was `inductive_stub_for`, which built a
+/// hollow `Arc<InductiveDecl>` — empty params, empty indices, empty ctors — so
+/// that `Exp::InductiveType`'s declaration slot had something in it. The term
+/// names the declaration now, so the callers need the answer and not the
+/// artefact.
 ///
-/// Two decoders reach for this — `decode_arg_type` (constructor argument
-/// types) and `decode_param_kind` (parameter AND index telescopes, which are
-/// one path since eigenius#188). Three of them used to disagree:
-/// only the first consulted the chain, so an inductive named as a
-/// constructor argument decoded to `Exp::InductiveType` while the *same*
-/// inductive named as an index kind decoded to `Exp::EigonClass`. That
-/// disagreement is eigenius#199 — it made `reasoning:JustifiedBy`'s index
-/// #0 (`JustificationTerm`) an `EigonClass` that no inhabitant could check
-/// against, so the one relation carrying the platform's guarantee was the
-/// one whose type the surface language could not express.
-fn inductive_stub_for(arg_iri: &Iri, layer: &Layer) -> Option<Arc<InductiveDecl>> {
-    let resource_arc = layer.resolve(arg_iri)?;
-    let resource: &crate::ontology::resource::Resource = &resource_arc;
-    if !is_inductive_type(resource) {
-        return None;
-    }
-    let name = match resource.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
-        Some(Value::String(s)) => s.clone(),
-        _ => arg_iri.local_name().to_string(),
-    };
-    Some(Arc::new(InductiveDecl {
-        iri: arg_iri.clone(),
-        name,
-        params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::sort(1),
-        ctors: Vec::new(),
-    }))
+/// The chain consultation itself is load-bearing and predates this. Two decoders
+/// reach for it — `decode_arg_type` (constructor argument types) and
+/// `decode_param_kind` (parameter AND index telescopes, which are one path since
+/// eigenius#188). They used to disagree: only the first consulted the chain, so an
+/// inductive named as a constructor argument decoded to an inductive reference
+/// while the *same* inductive named as an index kind decoded to
+/// `Exp::EigonClass`. That disagreement is eigenius#199 — it made
+/// `reasoning:JustifiedBy`'s index #0 (`JustificationTerm`) an `EigonClass` that
+/// no inhabitant could check against, so the one relation carrying the platform's
+/// guarantee was the one whose type the surface language could not express.
+fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
+    layer
+        .resolve(arg_iri)
+        .is_some_and(|r| is_inductive_type(&r))
 }
 
 /// Decode an `InductiveParam`'s kind from its `core:param_kind` value (eigenius#188 / N4).
@@ -570,7 +652,6 @@ fn decode_param_kind(value: &Value, class_iri: &Iri, layer: &Layer) -> Result<Ex
 fn decode_ctors(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
-    self_ref: &Arc<InductiveDecl>,
     params: &[(Patt, Exp)],
     layer: &Layer,
 ) -> Result<Vec<InductiveCtorDecl>, String> {
@@ -608,19 +689,14 @@ fn decode_ctors(
         // type checker takes it from there.
         let ctor_typ_iri = Iri::parse(wk::CTOR_TYPE).unwrap();
         let ctor_typ = if let Some(ct) = cr.get(&ctor_typ_iri) {
-            // Self-reference threading: the codec needs to know it's
-            // decoding a ctor for the in-construction `class_iri` so
-            // that ConstRef / CtorApp targets matching `class_iri`
-            // short-circuit to the stub `self_ref` instead of
-            // recursively re-entering `resolve_inductive_type`. Without
-            // this, any ctor body that mentions its own decl
-            // (e.g. `cons : ... -> Vec(A, n)`) loops unboundedly.
-            crate::program::eigentt_type_mirror::decode_type_with_self_ref(
-                ct,
-                layer,
-                Some((class_iri, self_ref)),
-            )
-            .map_err(|e| {
+            // **No self-reference threading, D76 Phase B.** The codec used to need
+            // telling that it was decoding a ctor for the in-construction
+            // `class_iri`, so that `ConstRef` / `CtorApp` targets matching it
+            // short-circuited to a stub declaration instead of re-entering
+            // `resolve_inductive_type` — without which any ctor body mentioning its
+            // own decl (`cons : … -> Vec(A, n)`) looped unboundedly. A reference
+            // decodes to its IRI now, so nothing is resolved and nothing recurses.
+            crate::program::eigentt_type_mirror::decode_type(ct, layer).map_err(|e| {
                 format!("inductive type '{class_iri}.{name}' has malformed `ctor_type`: {e:?}")
             })?
         } else {
@@ -633,7 +709,7 @@ fn decode_ctors(
                     ));
                 }
             };
-            build_ctor_type(class_iri, self_ref, params, arg_types_arr, layer)?
+            build_ctor_type(class_iri, params, arg_types_arr, layer)?
         };
         out.push(InductiveCtorDecl {
             name,
@@ -652,7 +728,6 @@ fn decode_ctors(
 /// sized-termination entry point from the ESL surface).
 fn build_ctor_type(
     class_iri: &Iri,
-    self_ref: &Arc<InductiveDecl>,
     params: &[(Patt, Exp)],
     arg_types: &[Value],
     layer: &Layer,
@@ -665,13 +740,13 @@ fn build_ctor_type(
             _ => Exp::Unit,
         })
         .collect();
-    let mut result = Exp::InductiveType(self_ref.clone(), param_vars);
+    let mut result = Exp::const_applied(class_iri.clone(), Vec::new(), param_vars);
 
     // Decode all args upfront — preserves their shape so the wrapping
     // pass below can dispatch on positional / Pi-binder / SizedPi.
     let decoded: Vec<DecodedArg> = arg_types
         .iter()
-        .map(|a| decode_ctor_arg(class_iri, self_ref, a, layer))
+        .map(|a| decode_ctor_arg(class_iri, a, layer))
         .collect::<Result<Vec<_>, String>>()?;
 
     // Wrap in reverse so the first arg is outermost.
@@ -707,12 +782,7 @@ enum DecodedArg {
 /// additionally carries `binder_bound` emits `SizedBinder`;
 /// otherwise it emits `PiBinder` (used for size-polymorphic args
 /// without a bound).
-fn decode_ctor_arg(
-    class_iri: &Iri,
-    self_ref: &Arc<InductiveDecl>,
-    value: &Value,
-    layer: &Layer,
-) -> Result<DecodedArg, String> {
+fn decode_ctor_arg(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<DecodedArg, String> {
     let r = match value {
         Value::Embedded(r) => r.as_ref(),
         _ => return Err("InductiveArgType must be embedded".to_string()),
@@ -723,14 +793,14 @@ fn decode_ctor_arg(
     if let Some(name) = binder_name {
         // Kind is stored in `type_name`; decode in the same way as
         // a normal arg type so `Size`/`Inf`/param-refs all work.
-        let kind_exp = decode_arg_type(class_iri, self_ref, value, layer)?;
+        let kind_exp = decode_arg_type(class_iri, value, layer)?;
         Ok(DecodedArg::PiBinder {
             name,
             kind: kind_exp,
         })
     } else {
         Ok(DecodedArg::Positional(decode_arg_type(
-            class_iri, self_ref, value, layer,
+            class_iri, value, layer,
         )?))
     }
 }
@@ -786,9 +856,9 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
 /// - Bare string (no namespace separator): a parameter reference,
 ///   emitted as `Exp::Var`.
 /// - IRI equal to the enclosing inductive's IRI: a self-reference,
-///   emitted as `Exp::InductiveType(self_ref, type_args...)`.
+///   emitted as `Exp::const_applied(class_iri, [], type_args...)`.
 /// - IRI of another inductive type in the layer chain: emitted as
-///   `Exp::InductiveType(stub_decl, type_args...)` where the stub
+///   `Exp::const_applied(stub_decl.iri.clone(), Vec::new(), type_args...)` where the stub
 ///   carries the matching short name. This makes cross-inductive
 ///   constructor arguments type-check correctly without resolving
 ///   the full target decl (which would risk infinite recursion for
@@ -796,12 +866,7 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
 /// - Primitive IRI: emitted as `Exp::EigonPrimitive`.
 /// - Any other class IRI: emitted as `Exp::EigonClass(iri)` to let
 ///   the type checker resolve it via the layer chain.
-fn decode_arg_type(
-    class_iri: &Iri,
-    self_ref: &Arc<InductiveDecl>,
-    value: &Value,
-    layer: &Layer,
-) -> Result<Exp, String> {
+fn decode_arg_type(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Exp, String> {
     let r = match value {
         Value::Embedded(r) => r.as_ref(),
         _ => return Err("InductiveArgType must be embedded".to_string()),
@@ -837,9 +902,9 @@ fn decode_arg_type(
     if arg_iri == *class_iri {
         let sub_args: Result<Vec<Exp>, String> = type_args_arr
             .iter()
-            .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
+            .map(|a| decode_arg_type(class_iri, a, layer))
             .collect();
-        return Ok(Exp::InductiveType(self_ref.clone(), sub_args?));
+        return Ok(Exp::const_applied(class_iri.clone(), Vec::new(), sub_args?));
     }
 
     // Primitive type IRIs get folded to the corresponding Exp form.
@@ -853,18 +918,19 @@ fn decode_arg_type(
     }
 
     // Cross-inductive reference: the arg type is some other declared
-    // inductive in the layer. Emit an `Exp::InductiveType` with a
-    // name-only stub Arc so the type checker matches by name. We
-    // deliberately do NOT recurse into `resolve_inductive_type` for
-    // the target — the stub is enough for name-based dispatch and
-    // avoids infinite recursion on mutually-referential decls (out of
+    // inductive in the layer. Emit the NAME (D76 Phase B). This built a
+    // name-only stub `Arc<InductiveDecl>` and deliberately did not recurse into
+    // `resolve_inductive_type` for the target — the stub was enough for
+    // name-based dispatch and avoided unbounded recursion on mutually-
+    // referential decls. Naming the declaration removes both the stub and the
+    // reason for the guard (out of
     // scope but worth guarding against).
-    if let Some(stub) = inductive_stub_for(&arg_iri, layer) {
+    if names_an_inductive(&arg_iri, layer) {
         let sub_args: Result<Vec<Exp>, String> = type_args_arr
             .iter()
-            .map(|a| decode_arg_type(class_iri, self_ref, a, layer))
+            .map(|a| decode_arg_type(class_iri, a, layer))
             .collect();
-        return Ok(Exp::InductiveType(stub, sub_args?));
+        return Ok(Exp::const_applied(arg_iri, Vec::new(), sub_args?));
     }
 
     // Any other class IRI: emit an EigonClass marker. The type
@@ -884,7 +950,7 @@ mod tests {
     use crate::ontology::eigon_json;
     use std::sync::Arc;
 
-    fn build_test_layer() -> Arc<Layer> {
+    pub(super) fn build_test_layer() -> Arc<Layer> {
         let core_json = include_str!("../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
         let mut builder = LayerBuilder::new("core", None);
@@ -915,8 +981,19 @@ mod tests {
         let layer = build_test_layer();
         let iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
         let typ = resolve_class_type(&iri, &layer).unwrap();
-        // Dog has 2 required properties (name from Animal, breed from Dog)
-        assert!(matches!(typ, Val::Sig(_, _)));
+        // D78 Phase C — a record now, and keyed by full IRI. Dog requires two
+        // properties: `name`, inherited from Animal, and its own `breed`.
+        match typ {
+            Val::Record(fields, _) => {
+                let keys: Vec<&str> = fields.iter().map(|(i, _, _)| i.as_str()).collect();
+                assert_eq!(
+                    keys,
+                    ["urn:eigenius:example:breed", "urn:eigenius:example:name"],
+                    "canonical order is IRI order for independent fields"
+                );
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
     }
 
     #[test]
@@ -952,40 +1029,48 @@ mod tests {
         );
     }
 
-    #[test]
-    fn option_type_has_two_constructors() {
-        let opt = make_option_type(Val::EigonPrimitive(PrimitiveType::String));
-        match opt {
-            Val::Data(summands, _) => {
-                assert_eq!(summands.len(), 2);
-                assert_eq!(summands[0].0, "some");
-                assert_eq!(summands[1].0, "none");
-            }
-            _ => panic!("expected Sum type for Option"),
-        }
-    }
+    // `option_type_has_two_constructors` was removed with `make_option_type` in
+    // D78 Phase C. It asserted that a `recommends` property became an
+    // `Option`-typed field of the class type; under clause 8 a recommended
+    // property is not a field of the constraint at all (D78 §1.1), so there is
+    // no Option to have two constructors. `Option` survives in the Julia and
+    // Lean mirror generators, which emit closed structs and do need a nullable
+    // slot — it is not the class type's business.
 
     #[test]
     fn readback_class_with_recommends_roundtrips() -> Result<(), Box<dyn std::error::Error>> {
-        // This tests the exact path that caused the __data_0 crash:
-        // resolve a class with recommends → readback → re-evaluate
+        // The path that caused the __data_0 crash: resolve a class → readback →
+        // re-evaluate, which is what parse_program does.
+        //
+        // D78 Phase C changed what this produces. `core:Class` recommends
+        // several properties it does not require, and those used to become
+        // `Option`-typed fields — the source of the crash. They are no longer
+        // fields at all (§1.1), so the regression this guards can no longer
+        // arise from `recommends`; the round-trip itself is still worth pinning.
         let layer = build_test_layer();
-        // core:Class has recommends, so it will have Option types
         let iri = Iri::parse(wk::CLASS).unwrap();
         let typ = resolve_class_type(&iri, &layer)?;
 
-        // Readback to expression
         let exp = crate::nbe::readback::readback_val(0, &typ);
-
-        // Re-evaluate — this is what parse_program does, and it used to crash
         let val = crate::nbe::eval::eval(&exp, &Rho::Nil)?;
 
-        // Should still be a Sigma type
-        assert!(
-            matches!(val, Val::Sig(_, _)),
-            "re-evaluated class type should be Sig, got {:?}",
-            val
-        );
+        let (before, after) = match (&typ, &val) {
+            (Val::Record(a, _), Val::Record(b, _)) => (a.len(), b.len()),
+            other => panic!("expected records, got {other:?}"),
+        };
+        assert_eq!(before, after, "the round-trip must preserve the field set");
+
+        // And no recommended-only property is among them.
+        let (required, recommended) = collect_properties(&iri, &layer)?;
+        if let Val::Record(fields, _) = &val {
+            for (f, _, _) in fields {
+                assert!(required.contains(f), "unexpected field {f}");
+                assert!(
+                    !(recommended.contains(f) && !required.contains(f)),
+                    "a recommended-only property must not be a field: {f}"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -1040,23 +1125,23 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "zero");
                 assert_eq!(decl.ctors[1].name, "succ");
 
-                // zero's type: InductiveType(Nat, [])
-                match &decl.ctors[0].typ {
-                    Exp::InductiveType(d, args) => {
-                        assert_eq!(d.name, "Nat");
+                // zero's type: the bare name `Nat`
+                match decl.ctors[0].typ.as_const_spine() {
+                    Some((iri, _, args)) => {
+                        assert_eq!(iri.local_name(), "Nat");
                         assert!(args.is_empty());
                     }
-                    other => panic!("expected InductiveType for zero, got {other:?}"),
+                    None => panic!("expected a Const for zero, got {:?}", decl.ctors[0].typ),
                 }
 
                 // succ's type: Π _:Nat. Nat
                 match &decl.ctors[1].typ {
                     Exp::Pi(Patt::Unit, dom, body) => {
                         assert!(
-                            matches!(dom.as_ref(), Exp::InductiveType(d, a) if d.name == "Nat" && a.is_empty())
+                            matches!(dom.as_ref().as_const_spine(), Some((iri, _, a)) if iri.local_name() == "Nat" && a.is_empty())
                         );
                         assert!(
-                            matches!(body.as_ref(), Exp::InductiveType(d, a) if d.name == "Nat" && a.is_empty())
+                            matches!(body.as_ref().as_const_spine(), Some((iri, _, a)) if iri.local_name() == "Nat" && a.is_empty())
                         );
                     }
                     other => panic!("expected Pi for succ, got {other:?}"),
@@ -1162,8 +1247,8 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "tt");
                 assert_eq!(decl.ctors[1].name, "ff");
                 // Both ctor types are bare InductiveType — no Pi wrapping
-                assert!(matches!(decl.ctors[0].typ, Exp::InductiveType(_, _)));
-                assert!(matches!(decl.ctors[1].typ, Exp::InductiveType(_, _)));
+                assert!(decl.ctors[0].typ.as_const_spine().is_some());
+                assert!(decl.ctors[1].typ.as_const_spine().is_some());
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
         }
@@ -1245,13 +1330,13 @@ mod tests {
                     Exp::Pi(Patt::Var(pn), dom, body) => {
                         assert_eq!(pn, "A");
                         assert!(matches!(&dom.as_ref(), Exp::Sort(l) if l.is_nat(1)));
-                        match body.as_ref() {
-                            Exp::InductiveType(d, args) => {
-                                assert_eq!(d.name, "List");
+                        match body.as_ref().as_const_spine() {
+                            Some((iri, _, args)) => {
+                                assert_eq!(iri.local_name(), "List");
                                 assert_eq!(args.len(), 1);
-                                assert!(matches!(&args[0], Exp::Var(n) if n == "A"));
+                                assert!(matches!(args[0], Exp::Var(n) if n == "A"));
                             }
-                            other => panic!("expected InductiveType in nil body, got {other:?}"),
+                            None => panic!("expected a Const in nil body, got {body:?}"),
                         }
                     }
                     other => panic!("expected Pi for nil, got {other:?}"),
@@ -1265,7 +1350,9 @@ mod tests {
                     cursor = body;
                 }
                 assert_eq!(depth, 3, "cons should be a 3-binder Π-chain");
-                assert!(matches!(cursor, Exp::InductiveType(d, _) if d.name == "List"));
+                assert!(
+                    matches!(cursor.as_const_spine(), Some((iri, _, _)) if iri.local_name() == "List")
+                );
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
         }
@@ -1404,17 +1491,17 @@ mod tests {
         }
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
-        match decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap() {
-            Exp::InductiveType(decl, args) => {
-                assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term");
-                assert!(args.is_empty());
-            }
-            other => panic!("index kind naming an inductive decoded to {other:?}"),
-        }
-        match decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap() {
-            Exp::InductiveType(decl, _) => assert_eq!(decl.iri.as_str(), "urn:eigenius:t:Term"),
-            other => panic!("param kind naming an inductive decoded to {other:?}"),
-        }
+        let e = decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap();
+        let (iri, _, args) = e
+            .as_const_spine()
+            .unwrap_or_else(|| panic!("index kind naming an inductive decoded to {e:?}"));
+        assert_eq!(iri.as_str(), "urn:eigenius:t:Term");
+        assert!(args.is_empty());
+        let e = decode_param_kind(&const_ref("urn:eigenius:t:Term"), &probe_iri(), &layer).unwrap();
+        let (iri, _, _) = e
+            .as_const_spine()
+            .unwrap_or_else(|| panic!("param kind naming an inductive decoded to {e:?}"));
+        assert_eq!(iri.as_str(), "urn:eigenius:t:Term");
         assert!(matches!(
             decode_param_kind(
                 &const_ref("urn:eigenius:t:PlainClass"),
@@ -1438,5 +1525,382 @@ mod tests {
             .unwrap(),
             Exp::EigonClass(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod record_agrees_with_sigma_chain {
+    //! D78 §7 Phase A gate: a class's record and its Σ-chain must carry the same
+    //! `(field, type)` pairs.
+    //!
+    //! Not `eq_nf` equality — a record and a Σ-chain are different types and will
+    //! never compare equal. The assertion is that the two carry the same content,
+    //! which is what makes Phase C a substitution rather than a rewrite.
+
+    use super::tests::build_test_layer;
+    use super::*;
+    use crate::nbe::term::{Exp, Patt};
+
+    /// Flatten a class Σ-chain into `(binder name, field type)` pairs.
+    ///
+    /// Note what this can extract and what it cannot: `build_sigma_chain` binds
+    /// `prop_iri.local_name()` (`:305`), so the **IRI is not recoverable** from
+    /// the chain — the local-name collision D78 §9 records. And its own comment
+    /// at `:299-301` states the rest type does not depend on the current binder,
+    /// so the chain is a flat product wearing Σ clothing.
+    fn sigma_fields(v: &Val) -> Vec<(String, Val)> {
+        let mut out = Vec::new();
+        let mut cur = v.clone();
+        loop {
+            match cur {
+                Val::Sig(t, g) => {
+                    let name = match &g.patt {
+                        Patt::Var(n) => n.clone(),
+                        other => panic!("unexpected Σ binder {other:?}"),
+                    };
+                    out.push((name, *t));
+                    match crate::nbe::eval::eval(&g.body, &g.env) {
+                        Ok(rest) => cur = rest,
+                        Err(e) => panic!("could not walk the chain: {e:?}"),
+                    }
+                }
+                Val::One => break,
+                other => panic!("chain ended in {other:?}, expected Val::One"),
+            }
+        }
+        out
+    }
+
+    #[test]
+    #[ignore = "D78 Phase C landed: resolve_class_type returns a record, so there is no Σ-chain \
+                left to compare against. Kept as the record of the Phase A gate that licensed the \
+                switch; `a_class_resolves_to_a_record_over_its_requires` is its successor."]
+    fn a_class_record_carries_the_same_fields_as_its_sigma_chain() {
+        let layer = build_test_layer();
+        let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
+
+        let chain = resolve_class_type(&dog, &layer).unwrap();
+        let from_chain: Vec<String> = sigma_fields(&chain).into_iter().map(|(n, _)| n).collect();
+
+        // Build the record the same collection would produce.
+        let (required, _recommended) = collect_properties(&dog, &layer).unwrap();
+        let fields: Vec<(Iri, Patt, Exp)> = required
+            .iter()
+            .map(|p| {
+                (
+                    p.clone(),
+                    Patt::Var(p.local_name().to_string()),
+                    Exp::sort(1),
+                )
+            })
+            .collect();
+        let record = Exp::record(fields).unwrap();
+        let from_record: Vec<String> = match &record {
+            Exp::Record(fs) => fs
+                .iter()
+                .map(|(i, _, _)| i.local_name().to_string())
+                .collect(),
+            other => panic!("expected a record, got {other:?}"),
+        };
+
+        let mut a = from_chain.clone();
+        let mut b = from_record.clone();
+        a.sort();
+        b.sort();
+        assert_eq!(
+            a, b,
+            "record and Σ-chain must agree on the field set: chain={from_chain:?} record={from_record:?}"
+        );
+        assert!(
+            !a.is_empty(),
+            "Dog must have required fields, or this proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_class_with_no_requires_is_now_an_empty_record_not_val_one() {
+        // **Flipped by D78 Phase C, as written to.** 749 of 894 shipped classes
+        // have no `requires` (§1.2). They used to resolve to the *same*
+        // `Val::One` and were definitionally equal to one another; an empty
+        // record is per-class.
+        let layer = build_test_layer();
+        let any = Iri::parse("urn:eigenius:core:Resource").unwrap();
+        let resolved = resolve_class_type(&any, &layer).unwrap();
+        match resolved {
+            Val::Record(fields, _) => assert!(
+                fields.is_empty(),
+                "core:Resource requires nothing, so its record is empty; got {fields:?}"
+            ),
+            other => panic!("expected an empty record, not {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_class_resolves_to_a_record_over_its_requires() {
+        // Successor to the Phase A alongside gate: the field set that gate
+        // compared against the Σ-chain is now what `resolve_class_type` returns.
+        let layer = build_test_layer();
+        let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let resolved = resolve_class_type(&dog, &layer).unwrap();
+        let (required, _) = collect_properties(&dog, &layer).unwrap();
+        match resolved {
+            Val::Record(fields, _) => {
+                let keys: std::collections::BTreeSet<Iri> =
+                    fields.iter().map(|(i, _, _)| i.clone()).collect();
+                assert_eq!(keys, required, "the record is exactly the required set");
+                assert!(!keys.is_empty(), "Dog must require something");
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod entailment {
+    //! D78 §4 / §4.1 — `C ⊨ D` is field-set inclusion, and its real use is the
+    //! **non-`subclass_of`** case.
+
+    use super::tests::build_test_layer;
+    use super::*;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::ontology::well_known as wk;
+
+    fn i(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    /// A class requiring exactly the listed properties, with no `subclass_of`.
+    /// Unrelated by declaration is the point: entailment must decide on fields.
+    fn cls(id: &str, requires: &[&str]) -> Resource {
+        let mut r = Resource::new(i(id));
+        r.set(
+            i(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(i(wk::CLASS))]),
+        );
+        r.set(
+            i(wk::SHORT_NAME),
+            Value::String(id.rsplit(':').next().unwrap().into()),
+        );
+        r.set(i(wk::DESCRIPTION), Value::String("test class".into()));
+        r.set(
+            i(wk::REQUIRES),
+            Value::Array(requires.iter().map(|p| Value::ResourceRef(i(p))).collect()),
+        );
+        r
+    }
+
+    /// Layer with four classes over the animals properties, none related by
+    /// `subclass_of`.
+    fn layer() -> Arc<Layer> {
+        const NAME: &str = "urn:eigenius:example:name";
+        const BREED: &str = "urn:eigenius:example:breed";
+        let mut b = crate::layer::LayerBuilder::new("entailment", Some(build_test_layer()));
+        b.add_resource(cls("urn:t:Both", &[NAME, BREED])).unwrap();
+        b.add_resource(cls("urn:t:JustName", &[NAME])).unwrap();
+        b.add_resource(cls("urn:t:JustBreed", &[BREED])).unwrap();
+        b.add_resource(cls("urn:t:Nothing", &[])).unwrap();
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn a_constraint_entails_itself() {
+        let l = layer();
+        assert!(entails(&i("urn:t:Both"), &i("urn:t:Both"), &l).unwrap());
+    }
+
+    #[test]
+    fn more_fields_entails_fewer_without_any_subclass_declaration() {
+        // The actual use (§4.1): `Both` and `JustName` are unrelated by
+        // `subclass_of`, so nothing structural guarantees this — it is decided
+        // on fields.
+        let l = layer();
+        assert!(entails(&i("urn:t:Both"), &i("urn:t:JustName"), &l).unwrap());
+        assert!(
+            !entails(&i("urn:t:JustName"), &i("urn:t:Both"), &l).unwrap(),
+            "fewer fields must not entail more"
+        );
+    }
+
+    #[test]
+    fn disjoint_constraints_do_not_entail_each_other() {
+        let l = layer();
+        assert!(!entails(&i("urn:t:JustName"), &i("urn:t:JustBreed"), &l).unwrap());
+        assert!(!entails(&i("urn:t:JustBreed"), &i("urn:t:JustName"), &l).unwrap());
+    }
+
+    #[test]
+    fn everything_entails_the_empty_constraint() {
+        // §4.1 — `Any` is the top of the entailment order automatically, with no
+        // declared edge, because `fields(Any) = ∅` is a subset of everything.
+        let l = layer();
+        for c in ["urn:t:Both", "urn:t:JustName", "urn:t:Nothing"] {
+            assert!(
+                entails(&i(c), &i("urn:t:Nothing"), &l).unwrap(),
+                "{c} must entail the empty constraint"
+            );
+        }
+        assert!(
+            entails(&i("urn:t:Both"), &i("urn:eigenius:core:Resource"), &l).unwrap(),
+            "core:Resource is the shipped `Any` and requires nothing"
+        );
+    }
+
+    #[test]
+    fn a_conjunction_entails_what_no_member_does_alone() {
+        // The case with no structural guarantee, and the reason the judgment
+        // exists: neither `JustName` nor `JustBreed` covers `Both`, but together
+        // they do.
+        let l = layer();
+        let both = i("urn:t:Both");
+        assert!(!entails(&i("urn:t:JustName"), &both, &l).unwrap());
+        assert!(!entails(&i("urn:t:JustBreed"), &both, &l).unwrap());
+
+        let pair: BTreeSet<Iri> = [i("urn:t:JustName"), i("urn:t:JustBreed")]
+            .into_iter()
+            .collect();
+        assert!(
+            conjunction_entails(&pair, &both, &l).unwrap(),
+            "fields(⋀S) is the union of the members' fields"
+        );
+    }
+
+    #[test]
+    fn a_declared_subclass_entails_its_parent_automatically() {
+        // Why D78 ships no validation rule over `subclass_of` (§4.1):
+        // `collect_properties` walks the relation, so the inclusion holds by
+        // construction and a rule would always pass.
+        let l = build_test_layer();
+        let dog = i("urn:eigenius:example:Dog");
+        let animal = i("urn:eigenius:example:Animal");
+        assert!(
+            constraint_fields(&animal, &l)
+                .unwrap()
+                .is_subset(&constraint_fields(&dog, &l).unwrap()),
+            "Dog inherits Animal's requirements transitively"
+        );
+        assert!(entails(&dog, &animal, &l).unwrap());
+    }
+
+    #[test]
+    fn recommends_does_not_enter_the_field_set() {
+        // D78 §1.1 — a recommended property is not a field of the constraint.
+        let l = build_test_layer();
+        let class_iri = i(wk::CLASS);
+        let fields = constraint_fields(&class_iri, &l).unwrap();
+        let (required, recommended) = collect_properties(&class_iri, &l).unwrap();
+
+        assert_eq!(
+            fields, required,
+            "constraint_fields is exactly the required set"
+        );
+
+        // `core:Class` recommends `subclass_of`, `requires`, `recommends` and
+        // more, none of which it requires — so the recommended-only set is
+        // non-empty and disjoint from the constraint's fields.
+        let recommended_only: BTreeSet<&Iri> = recommended.difference(&required).collect();
+        assert!(
+            !recommended_only.is_empty(),
+            "core:Class must recommend something it does not require, or this proves nothing"
+        );
+        for r in recommended_only {
+            assert!(
+                !fields.contains(r),
+                "a recommended-only property must not be a constraint field: {r}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod list_decoder_agreement {
+    //! **D79 P7's discriminating gate.** `core:List` was resolved by *two* decoders
+    //! that disagreed, and nothing asserted they agreed:
+    //!
+    //! | decoder | `core:List` became |
+    //! |---|---|
+    //! | `eigentt_type_mirror`'s `ConstRef` arm | `Exp::Const` — the inductive |
+    //! | `ground::decode_arg_type` (this module) | `Exp::EigonClass` — a class marker |
+    //!
+    //! The second had no `List` arm, so it fell past the five primitives to
+    //! `names_an_inductive` — a chain lookup, which failed because `List` was not a
+    //! chain resource — and landed on the `EigonClass` fallthrough. Same IRI, two
+    //! meanings, no error. The comment at the *first* site stated the principle the
+    //! second violated: *"the two must agree, or a name means one thing to the
+    //! decoder and another to the type checker."* D76 Phase B fixed the
+    //! environment-versus-decoder divergence and did not look for this one.
+    //!
+    //! Declaring `core:List` in the core ontology removes the divergence at its
+    //! source — both decoders now resolve it the same way, through the chain — and
+    //! this test is what would have caught it.
+    use super::tests::build_test_layer;
+    use super::*;
+    use crate::ontology::resource::Resource;
+
+    /// Both decoders, same reference, same answer.
+    #[test]
+    fn both_decoders_agree_that_core_list_is_an_inductive() {
+        let layer = build_test_layer();
+        let list = Iri::parse(wk::LIST).unwrap();
+
+        // Decoder 1: the D47 `ConstRef` path.
+        let via_const_ref = crate::program::eigentt_type_mirror::decode_type(
+            &Value::Json(serde_json::json!({
+                "ctor": "ConstRef", "args": [wk::LIST],
+            })),
+            &layer,
+        )
+        .expect("core:List must decode");
+
+        // Decoder 2: the constructor-argument path.
+        let mut arg = Resource::new_embedded();
+        arg.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse(wk::INDUCTIVE_ARG_TYPE).unwrap(),
+            )]),
+        );
+        arg.set(
+            Iri::parse(wk::ARG_NAME).unwrap(),
+            Value::String("xs".into()),
+        );
+        arg.set(
+            Iri::parse(wk::TYPE_NAME).unwrap(),
+            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::LIST]})),
+        );
+        let holder = Iri::parse("urn:eigenius:test:Holder").unwrap();
+        let via_arg_type = decode_arg_type(&holder, &Value::Embedded(Box::new(arg)), &layer)
+            .expect("core:List must decode as an argument type");
+
+        assert_eq!(
+            via_const_ref, via_arg_type,
+            "the two decoders must produce the same Exp for the same IRI; before D79 P7 one \
+             produced Const(core:List) and the other EigonClass(core:List)"
+        );
+        assert!(
+            matches!(&via_arg_type, Exp::Const(i, _) if *i == list),
+            "and the agreed answer must be the inductive, not a class marker: {via_arg_type:?}"
+        );
+    }
+
+    /// **D79 §2.1.1's premise, now true.** That section argues against adding a
+    /// `core:inductive_array` on the grounds that a list of terms is itself a term —
+    /// and notes the one thing standing in the way: `class_types core:List` could not
+    /// resolve, because `class_types_inductive_target` goes through `layer.resolve`
+    /// and `List` was not a chain resource. It is now, so a list-valued term slot is
+    /// expressible without an array data type.
+    #[test]
+    fn core_list_resolves_as_a_class_types_target() {
+        let layer = build_test_layer();
+        let list = Iri::parse(wk::LIST).unwrap();
+        let resolved = layer
+            .resolve(&list)
+            .expect("core:List must resolve in the chain");
+        assert!(
+            resolved
+                .is_a()
+                .iter()
+                .any(|c| c.as_str() == wk::INDUCTIVE_TYPE),
+            "and must resolve to an InductiveType, which is what class_types requires"
+        );
     }
 }

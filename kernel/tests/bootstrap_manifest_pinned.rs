@@ -77,28 +77,27 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "\
-core:116e8a49bf13080f2da0b6f96a7f931197f3bf6e21aa31123c2c329ba75ca7b2
-eigentt-type-fragment:e1a41cdf9560e1b4412328988fcc82651073d74796e630d6d03ccf67d01b19f8
-program:224bb234a8651afdeb5144dca0e609afded5a633dd6495f4ae588e44bf855d4e
-reflection:c4c613c9b8391371f6c3346c2248f79f846ae674f5022b629665eee556cdb9a8
-obo:b0fccf59c68bc65d7b311d4a02d500b6ce2aba908a1824856392188130de1ddf
-institution:27871f87612484d6469b66a4b0379731152af0c1f8eb04007c8b0343f4648c13
-runtime:4c05dc3b114acb2554e8f8d594a6878f94e8f60f3a512d46eb816d3a030f26cc
-formulas:d7b4d67937d215eaadbad7e71f7afe6cdeed3128c589f3ad92df6d80c675fe27
-lean-expressions:88e53197dff41f07f1e075d0fa13fe6cd7de05b32fad45df38752aa43a5297a6
-lean-runtime-classes:11de512ae4aea72e0865a19becdefd4daed9c9f6cdf2abd5af3b88d17078294e
-lean-institution:e48be69b9df06f02232feac048fc4ec5bdebcf62b8a50b90145b9f62176610dc
-reasoning:9f05a417f5167ce2eda033cba984c30b412a3807aa26d210563ab39c81b23c20
-statistics:0e179b5ef88c9e01399a84d6c863b6ddb4fe38859374c45b3f685175d584af3b
-notebook:376c2726292782680b5534319890b63af0a70d6e8f5938972be6ee2d30d635e9
-ingest:67534b5bcf3478a18bd5df2a3c856132e8702dd3f9d3e8727b40179794ae0aba
-reference:3df0920240eac8e23d79ab4892b58052f2a273897cd73c8a39ae1c75b647e372
-logic:bde155e5644cb03e236cd94a501301b878832707d0ba9c6a361fa204ce9e813d
-lexicon:51aa4972dd065159a0124ed22e776819a9016d92a4fdfb4d8841ad56581e81fa
-ontology:12321a1bb48ad9f89071cd6500a0791f4a33a60ced9c4fdaf0e82e6dae9faa70
-closed-class:7c15f2350e7de9e4e1af0291f2cedc2753867265841d09c3be7192dc7f91813d
-encoding:eba8626de510a15d3c66811db50847b7a6bd93ed4d39eb9718d04368a6ba608a
+const EXPECTED: &str = "core:1c79fd45c0cd0c16564a0d54904bac00cddf07c95f7457a179a06101aa13bd4d
+eigentt-type-fragment:304d1a49596612b0a202b5c6417e1e57fd5fa8545a1baf83e7ef8348f627082f
+program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
+reflection:9caa85d85e3104b0e612128e8fef1ecef027ee957c327ad18e6f5fbffacea178
+obo:cb157be55245c9ac73385e0ac0c605f0cde8ecb9d1246b07226008cbf8cf4d76
+institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
+runtime:5ef02306d25bc1b52e517114c8b7f2280ca20ad1d70607255198b4d54d8b4bfc
+formulas:2073d36b31311e89803a78f20dc28f376197d89eb75a384dbd429d2203455817
+lean-expressions:2b084735d270d8d1078e69e67de342b5d221f5f7a4939598582190f4c017d8f6
+lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
+lean-institution:41c7dce62971e48bd5bdd08e97bac59e72f27fc38a7e36c4afdfcb3edc0e8d34
+reasoning:b49a9cfd74311d782bd3d37d0dab46811029b37bcb59180f423f4ce01d937dc9
+statistics:c46a2a2881ffb120a5b82cb95eff9caff4cc296be67bbcdbb8196c4b7f889bd3
+notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
+ingest:6b3b1de79a7b69ffa60337824a82598b26fa2e99166a18f19bb27f1d07e72b0a
+reference:f57afb5d36519ef867ebc8ac974b744992eb0fcf70b45f0cda68c6265976c1fd
+logic:e23ffb70b63f80cea1a7287fa67f47d34f13270118e9c72f5904814470cec36a
+lexicon:bf3e48392eab09c1e298b7a2265dd72eb765c846af8f5c79562bb43c69b6c37c
+ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
+closed-class:cbac8f32e15ae7b013a723ccca044dc165099fd8edc7204a7255f095bb04dbc2
+encoding:bdddc2b68ac92a6636a26d5304ce10caf53ed75b43f51b31980ceda813e12350
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On
@@ -142,9 +141,12 @@ fn bootstrap_manifest_is_pinned() {
          1. reseed — scripts/reseed-lexicon-db.sh --umls-all, then build-alignment-snapshot.sh\n  \
          2. re-point anything pinning a snapshot path (demo/prose-to-formulas-v2/run.sh)\n  \
          3. re-record any LLM draws that MISS against the changed forest, in ONE pass\n  \
-         4. update EXPECTED in this file, in the SAME commit as the ontology edit",
+         4. update EXPECTED in this file, in the SAME commit as the ontology edit\n\n\
+         The new manifest, ready to paste into EXPECTED:\n\
+         ----8<----\n{}----8<----",
         moved.len(),
-        moved.join("\n")
+        moved.join("\n"),
+        actual
     );
 }
 

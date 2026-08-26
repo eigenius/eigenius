@@ -250,12 +250,21 @@ pub(crate) fn cat_shape(e: &Exp) -> String {
                 format!("{name}({inner})")
             }
         }
-        Exp::InductiveType(decl, args) => {
+        // A type application is a `Const`-headed `App` spine since D76 Phase B.
+        // The declaration's `short_name` equals its IRI's local name for all ten
+        // shipped inductives, so rendering the local name is exact and needs no
+        // environment lookup.
+        _ if e.as_const_spine().is_some() => {
+            let (iri, _, args) = e.as_const_spine().expect("just matched");
             if args.is_empty() {
-                decl.name.clone()
+                iri.local_name().to_string()
             } else {
-                let inner = args.iter().map(cat_shape).collect::<Vec<_>>().join(", ");
-                format!("{}({inner})", decl.name)
+                let inner = args
+                    .iter()
+                    .map(|a| cat_shape(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", iri.local_name())
             }
         }
         // Type indices / sense identities — erased.
@@ -311,12 +320,21 @@ pub(crate) fn cat_key(e: &Exp) -> String {
                 format!("{name}({inner})")
             }
         }
-        Exp::InductiveType(decl, args) => {
+        // A type application is a `Const`-headed `App` spine since D76 Phase B.
+        // The declaration's `short_name` equals its IRI's local name for all ten
+        // shipped inductives, so rendering the local name is exact and needs no
+        // environment lookup.
+        _ if e.as_const_spine().is_some() => {
+            let (iri, _, args) = e.as_const_spine().expect("just matched");
             if args.is_empty() {
-                decl.name.clone()
+                iri.local_name().to_string()
             } else {
-                let inner = args.iter().map(cat_key).collect::<Vec<_>>().join(", ");
-                format!("{}({inner})", decl.name)
+                let inner = args
+                    .iter()
+                    .map(|a| cat_key(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", iri.local_name())
             }
         }
         // KEEP the type index — the whole point of this key over `cat_shape`. Full IRI (not `local`),
@@ -347,7 +365,7 @@ mod tests {
     use std::sync::Arc;
 
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
     fn cls(iri: &str) -> Exp {
         Exp::EigonClass(Iri::parse(iri).unwrap())
@@ -384,6 +402,7 @@ mod tests {
     #[test]
     fn node_sig_separates_a_coordination_sem_from_a_plain_one_at_the_same_cat() {
         let and_decl = Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:logic:And").unwrap(),
             name: "And".to_string(),
             params: Vec::new(),
@@ -396,7 +415,7 @@ mod tests {
         let plain = Item::from_parts(s_cat.clone(), Exp::Unit, Combinator::Other, Cost::ZERO);
         let conjoined = Item::from_parts(
             s_cat,
-            Exp::InductiveType(and_decl, vec![Exp::Unit, Exp::Unit]),
+            Exp::const_applied(and_decl.iri.clone(), Vec::new(), vec![Exp::Unit, Exp::Unit]),
             Combinator::Other,
             Cost::ZERO,
         );
@@ -442,11 +461,15 @@ mod tests {
                 Box::new(restr),
             );
             leaf(Exp::InductiveCtor(
-                crate::nbe::term::list_decl(),
+                crate::nbe::term::list_decl().iri.clone(),
                 "cat_n".into(),
                 vec![
                     sig_ty,
-                    Exp::InductiveCtor(crate::nbe::term::list_decl(), "sg".into(), vec![]),
+                    Exp::InductiveCtor(
+                        crate::nbe::term::list_decl().iri.clone(),
+                        "sg".into(),
+                        vec![],
+                    ),
                 ],
             ))
         };

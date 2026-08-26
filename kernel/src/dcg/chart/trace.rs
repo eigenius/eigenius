@@ -298,7 +298,7 @@ mod tests {
     use crate::ontology::iri::Iri;
 
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
     fn cls(iri: &str) -> Exp {
         Exp::EigonClass(Iri::parse(iri).unwrap())

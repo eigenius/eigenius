@@ -22,8 +22,7 @@ use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
 use crate::nbe::readback::readback_val;
-use crate::nbe::term::{list_decl, Exp, InductiveDecl, Name};
-use crate::nbe::val::Val;
+use crate::nbe::term::{list_decl, Exp, Name};
 use crate::ontology::iri::Iri;
 
 /// A category type-variable binding: schematic `Exp::Var` name → concrete type.
@@ -45,14 +44,22 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         // ⟦Group(C)[_,_]⟧ = List C — a coordinated group denotes the member-retaining
         // list over its common supertype C (D63 §8.4 Phase 6, the kernel `List`);
         // the connective and number are erased by ⟦·⟧.
-        ("cat_group", [c, _conn, _num]) => Ok(Exp::InductiveType(list_decl(), vec![c.clone()])),
+        ("cat_group", [c, _conn, _num]) => Ok(Exp::const_applied(
+            list_decl().iri.clone(),
+            Vec::new(),
+            vec![c.clone()],
+        )),
         // ⟦Coord(B)[_]⟧ = List ⟦B⟧ — a coordinated PROP-ending group (clauses / VPs / predicative
         // adjectives / TVs) denotes the member-retaining list over its base category's denotation
         // (D63 §8.4 Phase 3, the list-with-operator model ported from core-en `conj.xsl`). The
         // connective is erased by ⟦·⟧; a list-completion (`complete_coord`) folds the members into
         // ⟦B⟧ with the operator. Parallel to `cat_group` (which lists an ENTITY type; this lists a
         // prop-ending category's denotation).
-        ("cat_coord", [b, _conn]) => Ok(Exp::InductiveType(list_decl(), vec![denote_cat(b)?])),
+        ("cat_coord", [b, _conn]) => Ok(Exp::const_applied(
+            list_decl().iri.clone(),
+            Vec::new(),
+            vec![denote_cat(b)?],
+        )),
         // ⟦Q(T)⟧ = T → Prop — a wh-question denotes its answer-property (the
         // predicate the answer must satisfy), over the queried type T (D63 §8.5).
         ("cat_q", [t]) => Ok(Exp::Arrow(Box::new(t.clone()), Box::new(Exp::sort(0)))),
@@ -167,6 +174,11 @@ fn denote_mood(mood: &Exp) -> Result<Exp, String> {
 
 /// Definitional equality of two closed type expressions, via NbE normal forms
 /// (so `A -> B` and `Pi _:A. B` compare equal).
+///
+/// **Env-independent, deliberately (D76 Phase B).** With no environment a `Const`
+/// normalizes to itself on both sides, so the comparison stays structural — which
+/// is the equality this function is for. Genuine δ-equality (two names that unfold
+/// alike) is `conv`'s job and arrives with Phase D.
 pub fn type_eq(a: &Exp, b: &Exp) -> bool {
     let norm = |e: &Exp| eval(e, &Rho::Nil).map(|v| readback_val(0, &v));
     matches!((norm(a), norm(b)), (Ok(x), Ok(y)) if x == y)
@@ -232,7 +244,7 @@ pub const MODE_APP: &str = "m_app";
 /// `None` if the `lexicon:Mode` inductive doesn't resolve in the layer chain.
 pub fn mode_value(layer: &Arc<Layer>, name: &str) -> Option<Exp> {
     Some(Exp::InductiveCtor(
-        resolve_inductive(layer, "urn:eigenius:lexicon:Mode")?,
+        inductive_iri(layer, "urn:eigenius:lexicon:Mode")?,
         name.to_string(),
         vec![],
     ))
@@ -519,13 +531,17 @@ fn is_any_feat(e: &Exp) -> bool {
 
 /// Resolve an inductive (e.g. `logic:And` / `logic:Or`, or `lexicon:Conn`) from
 /// the layer to its decl, so the combinator can build its terms.
-pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc<InductiveDecl>> {
+/// The IRI of a chain-resident inductive, **checked to exist**.
+///
+/// D76 Phase B: a type reference names its declaration (`Exp::Const`) rather than
+/// carrying it, so a rule building `logic:And(P, Q)` needs the IRI — but it still
+/// needs to know the chain declares it, which is the `None` case here. Cheaper
+/// than [`resolve_inductive`], which decodes the whole declaration including every
+/// constructor type just to be dropped into a node that no longer holds one.
+pub(crate) fn inductive_iri(layer: &Arc<Layer>, iri_str: &str) -> Option<Iri> {
     let iri = Iri::parse(iri_str).ok()?;
     let resource = layer.resolve(&iri)?;
-    match crate::program::ground::resolve_inductive_type(&iri, &resource, layer).ok()? {
-        Val::InductiveType { decl, .. } => Some(decl),
-        _ => None,
-    }
+    crate::program::ground::is_inductive_type(&resource).then_some(iri)
 }
 
 /// The transparent **adverb modifier** categories (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
@@ -557,10 +573,10 @@ pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc
 /// adjective-modifier cat ([`adverb_modifier_cats`]) and the D63 denominal `X-based` adjective
 /// (`docs/notes/d63-compound-morphology.md` §3, Slice 2). `None` if the inductives don't resolve.
 pub fn predicative_adjective_cat(layer: &Arc<Layer>) -> Option<Exp> {
-    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
-    let num = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
+    let num = inductive_iri(layer, "urn:eigenius:lexicon:Num")?;
     let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let adj = Exp::InductiveCtor(fin, "adj".to_string(), vec![]);
@@ -579,9 +595,9 @@ pub fn predicative_adjective_cat(layer: &Arc<Layer>) -> Option<Exp> {
 }
 
 pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
-    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
     let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
@@ -620,9 +636,9 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
 /// clause feature is `fin_any` so they wrap any finite declarative. Identity sem (transparent).
 /// Used in addition to [`adverb_modifier_cats`] for lexicalized discourse adverbs.
 pub fn sentence_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
-    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
-    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
-    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = inductive_iri(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = inductive_iri(layer, "urn:eigenius:lexicon:Fin")?;
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
     let fin_any = Exp::InductiveCtor(fin, "fin_any".to_string(), vec![]);
     let s = Exp::InductiveCtor(cat.clone(), "cat_s".to_string(), vec![dcl, fin_any]);
@@ -817,9 +833,7 @@ fn exp_any(e: &Exp, pred: &dyn Fn(&Exp) -> bool) -> bool {
         Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Con(_, b) | Exp::Refl(b) => {
             exp_any(b, pred)
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().any(|x| exp_any(x, pred))
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(|x| exp_any(x, pred)),
         Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
             exp_any(a, pred) || exp_any(b, pred) || exp_any(c, pred)
         }
@@ -841,12 +855,14 @@ fn is_first_order_predicate(e: &Exp) -> bool {
         | Exp::Unit => true,
         Exp::App(f, a) => is_first_order_predicate(f) && is_first_order_predicate(a),
         Exp::Con(_, b) => is_first_order_predicate(b),
-        Exp::InductiveType(d, args) => {
-            matches!(
-                d.iri.as_str(),
-                "urn:eigenius:logic:And" | "urn:eigenius:logic:Or" | "urn:eigenius:logic:Not"
-            ) && args.iter().all(is_first_order_predicate)
-        }
+        // A connective applied to its operands is an `App` spine since D76 Phase B,
+        // so the arm above walks the operands and this one admits the head. The
+        // restriction to the three logical connectives lives on the head, where it
+        // did before.
+        Exp::Const(iri, _) => matches!(
+            iri.as_str(),
+            "urn:eigenius:logic:And" | "urn:eigenius:logic:Or" | "urn:eigenius:logic:Not"
+        ),
         _ => false,
     }
 }
@@ -1003,16 +1019,13 @@ mod tests {
     #[test]
     fn governed_preposition_test_refuses_the_prep_any_wildcard() {
         fn ctor(name: &str, args: Vec<Exp>) -> Exp {
-            // A minimal `lexicon:Cat` inductive — the predicate only reads ctor names.
-            let decl = Arc::new(InductiveDecl {
-                iri: Iri::parse("urn:eigenius:lexicon:Cat").expect("iri"),
-                name: "Cat".into(),
-                params: vec![],
-                indices: vec![],
-                sort: Exp::sort(0),
-                ctors: vec![],
-            });
-            Exp::InductiveCtor(decl, name.to_string(), args)
+            // The node carries the inductive's IRI (D76 Phase B); this built a
+            // whole minimal `lexicon:Cat` declaration to hold the same string.
+            Exp::InductiveCtor(
+                Iri::parse("urn:eigenius:lexicon:Cat").expect("iri"),
+                name.to_string(),
+                args,
+            )
         }
         let vp = ctor(
             "bwd",
@@ -1057,8 +1070,14 @@ mod tests {
     #[test]
     fn every_connective_the_parser_builds_is_declared_in_the_ontology() {
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
-        let decl =
-            resolve_inductive(ctx.head(), "urn:eigenius:lexicon:Conn").expect("Conn resolves");
+        // The test needs the DECLARATION, not just the name — it enumerates the
+        // constructors — so it resolves through the environment (D76 Phase B).
+        let decl = match crate::nbe::env_global::Env::of(ctx.head().clone())
+            .lookup(&Iri::parse("urn:eigenius:lexicon:Conn").unwrap())
+        {
+            crate::nbe::env_global::Global::Inductive(d) => d,
+            other => panic!("lexicon:Conn must be an inductive, got {other:?}"),
+        };
         let declared: Vec<&str> = decl.ctors.iter().map(|c| c.name.as_str()).collect();
         // The exhaustive set of names the coordination builders can emit: `coordinate_prop` /
         // `coordinate_np` map an `op_iri` to one of the first three; `coordinate_but_not` emits the last.
@@ -1143,13 +1162,17 @@ mod tests {
         // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
         // the call sites keep reading as `A/B` / `A\\B`.
         let args = if name == "fwd" || name == "bwd" {
-            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            let mut v = vec![Exp::InductiveCtor(
+                list_decl().iri.clone(),
+                "m_all".into(),
+                Vec::new(),
+            )];
             v.extend(args);
             v
         } else {
             args
         };
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
 
     // ── D1 modifier-restrictor discriminator (nominal-modification NF §5/§8 D1) ──
@@ -1163,16 +1186,9 @@ mod tests {
         Exp::App(Box::new(f), Box::new(a))
     }
     fn and2(a: Exp, b: Exp) -> Exp {
-        // A minimal `logic:And` inductive — `modifier_class` only reads `decl.iri`.
-        let and = Arc::new(InductiveDecl {
-            iri: Iri::parse("urn:eigenius:logic:And").expect("iri"),
-            name: "And".into(),
-            params: vec![],
-            indices: vec![],
-            sort: Exp::sort(0),
-            ctors: vec![],
-        });
-        Exp::InductiveType(and, vec![a, b])
+        // `modifier_class` reads the IRI, which the term now carries directly.
+        let and = Iri::parse("urn:eigenius:logic:And").expect("iri");
+        Exp::const_applied(and.clone(), Vec::new(), vec![a, b])
     }
 
     #[test]
@@ -1354,7 +1370,7 @@ mod tests {
         );
         assert_eq!(
             denote_cat(&group).expect("group denotes"),
-            Exp::InductiveType(list_decl(), vec![gene]),
+            Exp::const_applied(list_decl().iri.clone(), Vec::new(), vec![gene]),
             "⟦cat_group(Gene, _, _)⟧ must be List Gene"
         );
     }

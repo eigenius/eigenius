@@ -393,7 +393,7 @@ resource lexicon:form_text_index : core:TextIndex {
 // property in the core ontology (`core:description_text_index`), not in this domain layer. Grounding
 // eligibility (a lexicon concept vs an arbitrary description-bearing resource) is a resolver-side `is_a`
 // filter, not the index's concern (D63 lexicon-augmentation §6a index c).
-property lexicon:cat : core:resource {
+property lexicon:cat : core:inductive {
     description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
     class_types eigentt:TypeExpr;
     domain lexicon:LexicalEntry;
@@ -402,7 +402,7 @@ property lexicon:sem : core:resource {
     description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), a committed resource (named entity → ResourceRef), or a `lexicon:SemTerm` holding an inline EigenTT λ-term (a function word → its λ-semantics, e.g. a determiner). `sem` is uniformly a reference; resolve_sem dispatches on what is referenced.";
     domain lexicon:LexicalEntry;
 }
-property lexicon:sem_type : core:resource {
+property lexicon:sem_type : core:inductive {
     description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:TypeExpr). The machine-readable felicity obligation: typeof(sem) = this.";
     class_types eigentt:TypeExpr;
     domain lexicon:LexicalEntry;
@@ -496,7 +496,7 @@ class lexicon:SemTerm {
     description = "A committed EigenTT term referenced as a lexical entry's `sem` (a function word's λ-semantics). Kernel-gated at commit.";
     requires lexicon:term;
 }
-property lexicon:term : core:resource {
+property lexicon:term : core:inductive {
     description = "The EigenTT term, as a `type_expr` (eigentt:TypeExpr). For an unsynthesizable λ-term, author it annotated: `(fun … => … : T)`.";
     class_types eigentt:TypeExpr;
     domain lexicon:SemTerm;
@@ -511,7 +511,7 @@ property lexicon:gloss : core:string {
     description = "Human-readable gloss of the sentence.";
     domain lexicon:Sentence;
 }
-property lexicon:prop : core:resource {
+property lexicon:prop : core:inductive {
     description = "The assembled proposition (eigentt:TypeExpr) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
     class_types eigentt:TypeExpr;
     domain lexicon:Sentence;

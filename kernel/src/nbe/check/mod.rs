@@ -37,7 +37,11 @@ use inductive::{
 
 use crate::layer::Layer;
 use crate::nbe::env::{gen_val, lookup_gamma, up_gamma, Gamma, Rho};
-use crate::nbe::eval::{eval, eval_ctx};
+// D76 Phase B: the bare `eval` is deliberately NOT imported here. Every
+// evaluation the checker performs goes through `CheckCtx::eval`, which carries
+// `Γ_env`; an env-less call would leave a de-inlined `Const` as a neutral
+// instead of the declaration it names. Tests import it explicitly.
+use crate::nbe::eval::eval_ctx;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::{Decl, Exp, Patt};
 use crate::nbe::val::{Clos, Val};
@@ -60,16 +64,22 @@ use std::sync::Arc;
 pub struct CheckCtx {
     pub rho: Rho,
     pub gamma: Gamma,
-    /// Optional layer for ontology resolution. `None` is the "pure"
-    /// case used by tests that don't touch EigonClass resolution.
-    pub layer: Option<Arc<Layer>>,
+    /// D76 Phase C — `Γ_env`, the global environment of the judgment.
+    ///
+    /// Was `layer: Option<Arc<Layer>>`. The `Option` is gone from the
+    /// judgment's view: a caller with nothing to resolve holds
+    /// [`Env::empty()`](crate::nbe::env_global::Env::empty), and looks up to get
+    /// `Absent` rather than branching on whether it has a layer. Every
+    /// layer-less construction in the tree is a test — production always
+    /// supplied one — so this removes a mode only tests took.
+    pub env: crate::nbe::env_global::Env,
     /// Per-check memoization of resolved class types, keyed by class IRI string.
     type_cache: BTreeMap<String, Val>,
     /// institution index — derived view of the layer chain. When
     /// attached together with `institution_runtime`,
     /// `Constraint::Institution` predicates dispatch through
     /// `try_institution_decide` (D14 §9.2). Without these, constraints stay
-    /// as passthrough neutrals — what `EvalCtx::Pure` does anyway.
+    /// as passthrough neutrals — what `EvalCtx::pure()` does anyway.
     pub institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
     /// institution runtime — registry of `Institution` trait
     /// objects keyed by institution IRI. See `institution_index`.
@@ -87,7 +97,7 @@ impl CheckCtx {
         Self {
             rho,
             gamma,
-            layer: None,
+            env: crate::nbe::env_global::Env::empty(),
             type_cache: BTreeMap::new(),
             institution_index: None,
             institution_runtime: None,
@@ -100,12 +110,67 @@ impl CheckCtx {
         Self {
             rho,
             gamma,
-            layer: Some(layer),
+            env: crate::nbe::env_global::Env::of(layer),
             type_cache: BTreeMap::new(),
             institution_index: None,
             institution_runtime: None,
             hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
         }
+    }
+
+    /// Instantiate a closure under this context's environment.
+    ///
+    /// D76 Phase B: `Clos::apply` defaults to an *effect-free and environment-free*
+    /// evaluation, which is the `EvalCtx::Pure` conflation one level down — a
+    /// closure captures its `Rho` but the global environment is ambient, so
+    /// applying one without it leaves any name in the body a neutral. The checker
+    /// applies Π-closures constantly, so it goes through here.
+    pub fn apply(
+        &self,
+        clos: &crate::nbe::val::Clos,
+        v: Val,
+    ) -> Result<Val, crate::nbe::eval::EvalError> {
+        clos.apply_ctx(v, &self.eval_ctx())
+    }
+
+    /// Apply a value to an argument under this context's environment. See
+    /// [`CheckCtx::apply`].
+    pub fn app(&self, f: Val, v: Val) -> Result<Val, crate::nbe::eval::EvalError> {
+        f.app_ctx(v, &self.eval_ctx())
+    }
+
+    /// The declaration `iri` names, or a diagnostic saying what the environment
+    /// found instead.
+    ///
+    /// D76 Phase B: a term names its inductive rather than carrying it, so every
+    /// consumer that needs the telescope or the constructor list comes through
+    /// here. Failing loudly matters — an unresolved name that fell through would
+    /// leave the checker with no constructors and no arity, which reads downstream
+    /// as "this constructor does not exist" rather than "this inductive is not
+    /// declared".
+    pub fn lookup_inductive(
+        &self,
+        iri: &Iri,
+    ) -> Result<std::sync::Arc<crate::nbe::term::InductiveDecl>, CheckError> {
+        match self.env.lookup(iri) {
+            crate::nbe::env_global::Global::Inductive(d) => Ok(d),
+            other => Err(CheckError::ExpectedInductive(format!(
+                "`{iri}` does not name an inductive in this environment — \
+                 it resolves to {}",
+                match other {
+                    crate::nbe::env_global::Global::Absent => "nothing".to_string(),
+                    o => format!("{o:?}"),
+                }
+            ))),
+        }
+    }
+
+    /// This context with one more declaration in scope — a declaration being
+    /// checked is in scope for its own constructor types (D76 Phase B,
+    /// [`Env::declaring`](crate::nbe::env_global::Env::declaring)).
+    pub fn declaring(mut self, decl: std::sync::Arc<crate::nbe::term::InductiveDecl>) -> Self {
+        self.env = self.env.declaring(decl);
+        self
     }
 
     /// Attach a institution index and runtime for check-time
@@ -127,19 +192,24 @@ impl CheckCtx {
     /// Returns an effectful context backed by a check-time
     /// [`InstitutionEngine`](crate::institution::eval_hooks::InstitutionEngine)
     /// when an institution index/runtime is attached; otherwise
-    /// `EvalCtx::Pure`. All internal `eval` calls in the checker route
+    /// `EvalCtx::pure()`. All internal `eval` calls in the checker route
     /// through this so institution-dispatched constraints fire at check
     /// time rather than deferring to runtime.
     pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
         if self.institution_index.is_some() && self.institution_runtime.is_some() {
             let engine = crate::institution::eval_hooks::InstitutionEngine::for_check(
-                self.layer.clone(),
+                self.env.layer().cloned(),
                 self.institution_index.clone(),
                 self.institution_runtime.clone(),
             );
-            crate::nbe::eval::EvalCtx::effectful(self.layer.clone(), Arc::new(engine))
+            crate::nbe::eval::EvalCtx::effectful(self.env.layer().cloned(), Arc::new(engine))
         } else {
-            crate::nbe::eval::EvalCtx::Pure
+            // D76 Phase B: the *environment* is not a capability, so an
+            // effect-free checker still evaluates inside `Γ_env`. Handing
+            // `EvalCtx::pure()` down here is what left a de-inlined `Const` with
+            // nothing to resolve against — it would evaluate to a neutral instead
+            // of the inductive it names.
+            crate::nbe::eval::EvalCtx::in_env(self.env.clone())
         }
     }
 
@@ -163,7 +233,7 @@ impl CheckCtx {
         Ok(CheckCtx {
             rho: rho1,
             gamma: gamma1,
-            layer: self.layer.clone(),
+            env: self.env.clone(),
             type_cache: self.type_cache.clone(),
             institution_index: self.institution_index.clone(),
             institution_runtime: self.institution_runtime.clone(),
@@ -172,18 +242,46 @@ impl CheckCtx {
     }
 
     /// Resolve an EigonClass IRI to a EigenTT Sigma type, with caching.
+    /// D76 Phase C — resolve a class through the environment.
+    ///
+    /// Goes through [`Env::lookup`](crate::nbe::env_global::Env::lookup) rather
+    /// than `CheckHooks::resolve_class`, so `check` and `conv` consult one
+    /// definition of what a global is instead of two.
+    ///
+    /// **Only `Global::Constraint` answers here.** A class resolves to its
+    /// record and never unfolds in conversion (D75 §8 Q2); an inductive, an
+    /// axiom or a definition reaching this path is a caller error, not a class
+    /// whose resolution failed, and says so. The old code could not tell those
+    /// apart — `resolve_class` returned a bare `Val`.
+    ///
+    /// The "no layer access in pure check mode" error is gone: an empty
+    /// environment yields `Absent`, which reads as "not resolvable here" like
+    /// any other miss. Nothing asserted on that message, and its one swallowing
+    /// caller (`find_sigma_field`, via `.ok()?`) allocated it only to discard it.
     fn resolve_class_cached(&mut self, iri: &Iri) -> Result<Val, CheckError> {
-        let layer = self.layer.as_ref().ok_or_else(|| {
-            format!(
-                "cannot resolve class '{}' — no layer access in pure check mode",
-                iri
-            )
-        })?;
         let key = iri.as_str().to_string();
         if let Some(cached) = self.type_cache.get(&key) {
             return Ok(cached.clone());
         }
-        let v = self.hooks.resolve_class(iri, layer)?;
+        let v = match self.env.lookup(iri) {
+            crate::nbe::env_global::Global::Constraint(v) => v,
+            crate::nbe::env_global::Global::Absent => {
+                return Err(CheckError::from(format!(
+                    "cannot resolve class '{iri}' in this environment"
+                )))
+            }
+            other => {
+                return Err(CheckError::from(format!(
+                    "'{iri}' is not a class — the environment classifies it as {}",
+                    match other {
+                        crate::nbe::env_global::Global::Definition(_) => "a definition",
+                        crate::nbe::env_global::Global::Axiom => "an axiom",
+                        crate::nbe::env_global::Global::Inductive(_) => "an inductive",
+                        _ => unreachable!("Constraint and Absent handled above"),
+                    }
+                )))
+            }
+        };
         self.type_cache.insert(key, v.clone());
         Ok(v)
     }
@@ -258,11 +356,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // (D48 Phase B) — verifies each ctor's terminal application has
         // the right `params ++ indices` shape and each index expression
         // type-checks against its declared telescope type.
-        Exp::Inductive(decl) => {
-            check_inductive_decl_telescopes(ctx, decl)?;
-            crate::nbe::positivity::check_positivity(decl)?;
-            validate_indexed_ctor_conclusions(ctx, decl)
-        }
+
         // An APPLIED inductive type. The DECL's validity is established once (at ingest, by the
         // ground resolver, plus `Exp::Inductive` above); its ARGUMENTS are supplied afresh at every
         // use site, so decl validity says nothing about them and they must be checked here.
@@ -282,7 +376,24 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // Closing the leak turned that into a `grammar-gap`, which is exactly what it always was: a
         // sentence whose only readings were ill-typed. The coordination rule now uses POINTWISE
         // conjunction (`λk. And(f(k), g(k))`), so `And` receives `Prop`s and the terms type-check.
-        Exp::InductiveType(decl, args) => check_inductive_type_args(ctx, decl, args),
+        // The node is gone but the rule stays (D76 Phase B): this arm recovers the
+        // declaration from `Γ_env` rather than reading it out of the term. A name
+        // the environment cannot resolve falls through to the general rule below,
+        // which infers its type and demands a sort — so an unresolvable name is
+        // rejected rather than silently admitted.
+        e if e.as_const_spine().is_some() => {
+            let (iri, _levels, args) = e.as_const_spine().expect("just matched");
+            match ctx.env.lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(decl) => {
+                    let owned: Vec<Exp> = args.into_iter().cloned().collect();
+                    check_inductive_type_args(ctx, &decl, &owned)
+                }
+                // A class is a type, as `EigonClass` is above. A postulate or a
+                // definition is checked by inferring its type.
+                crate::nbe::env_global::Global::Constraint(_) => Ok(()),
+                _ => ensure_infers_as_sort(ctx, e).map(|_| ()),
+            }
+        }
 
         // "Is a type" means the INFERRED type is a sort — any sort. Port of `ensure_sort`
         // (`references/nanoda_lib/src/tc.rs:244` at `6ae1f0c`), which `check_declar_info` (`:165`)
@@ -298,6 +409,28 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         // derive removed earlier in eigenius#188: a universe comparison written as a constant.
         a => ensure_infers_as_sort(ctx, a).map(|_| ()),
     }
+}
+
+/// **Admit an inductive declaration.** Telescopes well-formed, strictly positive,
+/// and every constructor's conclusion of the right `params ++ indices` shape.
+///
+/// D76 Phase B: this was an arm of [`check_type`] reached through
+/// `Exp::Inductive(decl)` — a declaration wrapped in an expression so the
+/// expression checker could dispatch on it. A declaration is not an expression,
+/// and the wrapper had a second cost: `Exp::Inductive(d)` evaluated to the same
+/// value as `Exp::const_applied(d.iri.clone(), Vec::new(), [])`, so it was also a second spelling of a
+/// *reference*, and a negative occurrence written that way once evaded positivity
+/// checking (`positivity::rejects_disguised_inductive_negative_occurrence`).
+///
+/// nanoda splits the same way: `check_inductive_declar` takes the declaration
+/// (`references/nanoda_lib/src/inductive.rs`), while `infer` handles expressions.
+pub fn check_inductive_declaration(
+    ctx: &mut CheckCtx,
+    decl: &std::sync::Arc<crate::nbe::term::InductiveDecl>,
+) -> Result<(), CheckError> {
+    check_inductive_decl_telescopes(ctx, decl)?;
+    crate::nbe::positivity::check_positivity(decl)?;
+    validate_indexed_ctor_conclusions(ctx, decl)
 }
 
 /// The LEVEL of the sort an expression inhabits, or an error if it does not inhabit a sort — i.e.
@@ -347,6 +480,28 @@ fn check_inductive_type_args(
     decl: &std::sync::Arc<crate::nbe::term::InductiveDecl>,
     args: &[Exp],
 ) -> Result<(), CheckError> {
+    // **Arity, D76 Phase B2 — checked for EVERY declaration.**
+    //
+    // This was scoped to indexed declarations by `!decl.indices.is_empty()`, which
+    // is not a test for "indexed" at all: it is the stub-detection hack. A stub had
+    // empty indices, and so does a genuine un-indexed inductive, so the lenient path
+    // — every argument a parameter, no arity check — was taken by **every** shipped
+    // inductive, all ten of which are un-indexed. `Nat(x, y, z)` type-checked.
+    //
+    // The conflation is gone with the stub that motivated it (Phase B), so the
+    // check applies uniformly. This is a NARROWING: it can only turn accepts into
+    // rejects, which is why it was held back from Phase B's verdict-neutral sweep.
+    let expected = decl.params.len() + decl.indices.len();
+    if args.len() != expected {
+        return Err(CheckError::IllFormed(format!(
+            "inductive `{}`: expected {expected} argument(s) (params + indices: \
+             {} + {}), got {}",
+            decl.name,
+            decl.params.len(),
+            decl.indices.len(),
+            args.len()
+        )));
+    }
     let mut rho = ctx.rho.clone();
     for ((patt, ty), arg) in decl
         .params
@@ -385,13 +540,16 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, t, &gen)?;
-            check(&mut inner, e, &g.apply(gen)?)
+            check(&mut inner, e, &ctx.apply(g, gen)?)
         }
 
         // Pair against Sigma type
         (Exp::Pair(e1, e2), Val::Sig(t, g)) => {
             check(ctx, e1, t)?;
-            check(ctx, e2, &g.apply(ctx.eval(e1, &ctx.rho)?)?)
+            {
+                let arg = ctx.eval(e1, &ctx.rho)?;
+                check(ctx, e2, &ctx.apply(g, arg)?)
+            }
         }
 
         // Constructor against Sum type
@@ -491,7 +649,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             let mut inner = CheckCtx {
                 rho: Rho::UpDec(Box::new(ctx.rho.clone()), d.clone()),
                 gamma: gamma1,
-                layer: ctx.layer.clone(),
+                env: ctx.env.clone(),
                 type_cache: ctx.type_cache.clone(),
                 institution_index: ctx.institution_index.clone(),
                 institution_runtime: ctx.institution_runtime.clone(),
@@ -593,21 +751,28 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // each constructor argument is checked against its declared
         // type (with parameters substituted).
         (
-            Exp::InductiveCtor(decl, ctor_name, args),
+            Exp::InductiveCtor(iri, ctor_name, args),
             Val::InductiveType {
                 decl: expected_decl,
                 params,
                 indices,
             },
-        ) => check_inductive_ctor_args(
-            ctx,
-            decl,
-            ctor_name,
-            args,
-            expected_decl,
-            params,
-            Some(indices),
-        )
+        ) => {
+            // D76 Phase B: the term names the inductive, so the declaration comes
+            // from `Γ_env`. A name the environment cannot resolve is an error here
+            // rather than a silent fallthrough — a constructor of an unknown
+            // inductive has no type to check against.
+            let decl = ctx.lookup_inductive(iri)?;
+            check_inductive_ctor_args(
+                ctx,
+                &decl,
+                ctor_name,
+                args,
+                expected_decl,
+                params,
+                Some(indices),
+            )
+        }
         .map(|_| ()),
 
         // Pattern-match elimination with motive inferred from the
@@ -632,7 +797,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             let inhabits = r
                 .is_a()
                 .iter()
-                .any(|c| c == sup || ctx.layer.as_ref().is_some_and(|l| l.is_subclass_of(c, sup)));
+                .any(|c| c == sup || ctx.env.is_subclass_of(c, sup));
             if inhabits {
                 Ok(())
             } else {
@@ -659,15 +824,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         // or not peelable to a class) the term falls back to plain inference, so
         // `kind_of(K) : Entity` keeps typing through the axiom's codomain as before.
         (Exp::App(f, k), Val::EigonClass(sup)) if is_kind_of_axiom(f) => match kind_base_class(k) {
-            Some(base)
-                if base == sup
-                    || ctx
-                        .layer
-                        .as_ref()
-                        .is_some_and(|l| l.is_subclass_of(base, sup)) =>
-            {
-                Ok(())
-            }
+            Some(base) if base == sup || ctx.env.is_subclass_of(base, sup) => Ok(()),
             _ => check_by_inference(ctx, exp, typ),
         },
 
@@ -688,13 +845,13 @@ fn check_by_inference(ctx: &mut CheckCtx, e: &Exp, t: &Val) -> Result<(), CheckE
     // relaxation lives ONLY at the directional check boundary; definitional
     // equality (`eq_nf`) stays exact.
     if let (Val::EigonClass(sub), Val::EigonClass(sup)) = (&t1, t) {
-        if let Some(layer) = &ctx.layer {
-            if layer.is_subclass_of(sub, sup) {
+        {
+            if ctx.env.is_subclass_of(sub, sup) {
                 return Ok(());
             }
         }
     }
-    subtype_of(ctx.rho.len(), &t1, t)
+    subtype_of(&ctx.env, ctx.rho.len(), &t1, t)
 }
 
 /// Is `e` the `ontology:kind_of` nominalization axiom (Chierchia's ∩, `Set -> Entity`)?
@@ -738,11 +895,46 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             Ok(t_val)
         }
 
+        // A type former, applied or not — `Const(I)` and `App(Const(I), a)` alike
+        // (D76 Phase B). Its type is the declaration's `sort`, recovered from
+        // `Γ_env`.
+        //
+        // **Before the `App` arm, necessarily.** `App` infers its head and demands a
+        // Π of it; a type former's inferred type is a *sort*, so an applied former
+        // reaching that arm fails with `expected Pi type, got Sort(Zero)` — which is
+        // how the whole core ontology stopped loading when this sat after `App`. The
+        // guard tests the spine head, so an ordinary application whose head is not an
+        // inductive name falls through untouched.
+        //
+        // nanoda has no such arm: there a type former is a `Const` whose type is the
+        // Π-telescope `Π(params)(indices). Sort l`, so `infer_app` walks it and the
+        // ORDINARY application rule checks the arguments. Adopting that deletes
+        // `check_inductive_type_args` — and it is exactly B2's change, since the
+        // ordinary rule checks arity where the fused node's rule did not.
+        e if e.as_const_spine().is_some_and(|(iri, _, _)| {
+            matches!(
+                ctx.env.lookup(iri),
+                crate::nbe::env_global::Global::Inductive(_)
+            )
+        }) =>
+        {
+            let (iri, _, _) = e.as_const_spine().expect("just matched");
+            let crate::nbe::env_global::Global::Inductive(decl) = ctx.env.lookup(iri) else {
+                unreachable!("guarded above")
+            };
+            check_type(ctx, exp)?;
+            let sort = decl.sort.clone();
+            let rho = ctx.rho.clone();
+            ctx.eval(&sort, &rho).map_err(CheckError::from)
+        }
         Exp::App(e1, e2) => {
             let t1 = check_infer(ctx, e1)?;
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
-            Ok(g.apply(ctx.eval(e2, &ctx.rho)?)?)
+            {
+                let arg = ctx.eval(e2, &ctx.rho)?;
+                Ok(ctx.apply(&g, arg)?)
+            }
         }
 
         Exp::Fst(e) => {
@@ -754,7 +946,10 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::Snd(e) => {
             let t = check_infer(ctx, e)?;
             let (_, g) = ext_sig(&t)?;
-            Ok(g.apply(ctx.eval(e, &ctx.rho)?.vfst()?)?)
+            {
+                let arg = ctx.eval(e, &ctx.rho)?.vfst()?;
+                Ok(ctx.apply(&g, arg)?)
+            }
         }
 
         // Eigenius: property/observation access type inference.
@@ -765,10 +960,9 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // We dispatch on the inferred type of the target.
         Exp::PropAccess(e, prop) => {
             let t = check_infer(ctx, e)?;
-            let prop_name = prop.local_name();
 
-            // Fall back to the existing Sigma / resource behaviour.
-            find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
+            // D78 §9 — keyed by the full IRI, not `prop.local_name()`.
+            find_record_field(ctx, &t, prop).ok_or_else(|| {
                 CheckError::IllFormed(format!(
                     "property '{}' not found in type {:?}",
                     prop,
@@ -787,27 +981,81 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                     "cannot infer Construct type for '{class_iri}': {e}"
                 ))
             })?;
-            // Check each field against the resolved class type
-            let mut remaining = class_type;
+            // D78 Phase C — a record is flat, so each field is looked up
+            // directly. The Σ-chain needed `advance_sigma` to walk past the
+            // field it had just checked; a record has nothing to walk.
             for (prop_iri, field_exp) in fields {
-                let field_type = find_sigma_field(ctx, &remaining, prop_iri.local_name())
-                    .ok_or_else(|| {
+                let field_type =
+                    find_record_field(ctx, &class_type, prop_iri).ok_or_else(|| {
                         format!("property '{}' not found in class '{}'", prop_iri, class_iri)
                     })?;
                 check(ctx, field_exp, &field_type)?;
-                // Advance through the Sigma chain
-                remaining = advance_sigma(&remaining, prop_iri.local_name(), field_exp, &ctx.rho);
             }
-            Ok(Val::EigonClass(class_iri.clone()))
+            // D78 §3 / 7b — the constructed thing's type is the record of the
+            // fields given, refined by the class it was built against. Returning
+            // the bare class (the prior behaviour) re-imposed the class's type on
+            // the instance, which is D75 §3.8; returning a bare record would drop
+            // the nominal claim, which D75 §8 Q2 forbids.
+            let built: Vec<(Iri, Patt, Exp)> = fields
+                .iter()
+                .map(|(prop_iri, _)| {
+                    let ty = find_record_field(ctx, &class_type, prop_iri)
+                        .map(|v| readback_val(ctx.rho.len(), &v))
+                        .unwrap_or_else(|| Exp::sort(1));
+                    (
+                        prop_iri.clone(),
+                        Patt::Var(prop_iri.local_name().to_string()),
+                        ty,
+                    )
+                })
+                .collect();
+            let record = Exp::record(built)
+                .map_err(|e| CheckError::CannotInfer(e.to_string()))
+                .and_then(|e| {
+                    ctx.eval(&e, &Rho::Nil)
+                        .map_err(|e| CheckError::CannotInfer(format!("{e:?}")))
+                })?;
+            Ok(Val::Refine(
+                Box::new(record),
+                std::iter::once(class_iri.clone()).collect(),
+            ))
         }
 
-        // EigonResource(r): infer class from r.is_a().first()
+        // D78 Phase E — a resource's type is its OWN record, refined by the
+        // whole of its `is_a`.
+        //
+        // This replaces `Val::EigonClass(classes.first())`, which typed a
+        // resource by one arbitrarily-chosen class and discarded the rest.
+        // 2120 of 2903 shipped resources (73 %) declare more than one `is_a`,
+        // so the choice was being made constantly, not rarely.
+        //
+        // Two things change together. The record is the union of the fields the
+        // resource actually carries, so an undeclared property is projectable
+        // (D75 §3.8); and the refinement carries every constraint it claims, so
+        // nothing is dropped.
+        //
+        // Without a layer there is nothing to resolve property types against, so
+        // fall back to the old shape rather than fail — `check` in pure mode is
+        // a legitimate caller (tests that never touch chain resolution).
         Exp::EigonResource(r) => {
             let classes = r.is_a();
-            let class_iri = classes
-                .first()
-                .ok_or_else(|| "EigonResource has no is_a class".to_string())?;
-            Ok(Val::EigonClass(class_iri.clone()))
+            match ctx.env.layer() {
+                Some(layer) => {
+                    let record = crate::program::ground::resource_record(r, layer)
+                        .map_err(CheckError::CannotInfer)?;
+                    if classes.is_empty() {
+                        Ok(record)
+                    } else {
+                        Ok(Val::Refine(Box::new(record), classes.into_iter().collect()))
+                    }
+                }
+                None => {
+                    let class_iri = classes
+                        .first()
+                        .ok_or_else(|| "EigonResource has no is_a class".to_string())?;
+                    Ok(Val::EigonClass(class_iri.clone()))
+                }
+            }
         }
 
         // Template(lit, refs): templates always produce String
@@ -882,7 +1130,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             // J reduces to d(x) when p = refl(x), so the result type
             // is the return type of d applied to x.
             match d_type {
-                Val::Pi(_, g) => g.apply(x_val).map_err(CheckError::from),
+                Val::Pi(_, g) => ctx.apply(&g, x_val).map_err(CheckError::from),
                 _ => Ok(Val::sort(1)), // conservative fallback
             }
         }
@@ -908,7 +1156,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 )
             })?;
             // Compute result element type B by applying closure to a dummy
-            let b = b_clos.apply(gen_val(&ctx.rho))?;
+            let b = ctx.apply(&b_clos, gen_val(&ctx.rho))?;
             // Build list type with element type B
             let list_exp = Exp::list(readback_val(ctx.rho.len(), &b));
             ctx.eval(&list_exp, &ctx.rho).map_err(CheckError::from)
@@ -923,7 +1171,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 )
             })?;
             // f's return must be a function A → B
-            let inner_type = inner_clos.apply(gen_val(&ctx.rho))?;
+            let inner_type = ctx.apply(&inner_clos, gen_val(&ctx.rho))?;
             let (_a_inner, _b_ret_clos) = ext_pi(&inner_type).map_err(|_| {
                 "Reduce: first argument must be a curried function (B → A → B)".to_string()
             })?;
@@ -944,14 +1192,14 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // Inductive types (Phase 11b, D19). Universe inference per D46:
         // an inductive declared with `sort = Sort(0)` is in Prop; otherwise
         // its declared sort applies. Handled below alongside other type-
-        // formers — see the `Exp::Inductive(decl)` / `Exp::InductiveType`
-        // arms in the universe-inference section.
+        // formers — see the `Const`-spine arm in the universe-inference section.
 
         // Constructor application — inference works when the inductive
         // has no parameters (the result type is fully determined).
         // Parameterised inductives need an expected type to drive
         // parameter inference; require checking mode for those.
-        Exp::InductiveCtor(decl, ctor_name, args) => {
+        Exp::InductiveCtor(iri, ctor_name, args) => {
+            let decl = ctx.lookup_inductive(iri)?;
             if !decl.params.is_empty() {
                 return Err(CheckError::CannotInfer(format!(
                     "InductiveCtor: cannot infer type of `{}.{ctor_name}` — \
@@ -965,7 +1213,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             // arguments IS the answer — including its indices, which the previous
             // `indices: Vec::new()` silently discarded. Lean's `infer_app` does exactly this
             // (`inst(fun, ctx)`), which is why it needs no special case for indexed inductives.
-            check_inductive_ctor_args(ctx, decl, ctor_name, args, decl, &[], None)
+            check_inductive_ctor_args(ctx, &decl, ctor_name, args, &decl, &[], None)
         }
 
         // Recursor application — Phase 11b step 5.
@@ -977,11 +1225,14 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         //    [`derive_minor_types`](super::recursor).
         // 4. The result type is `motive(major)`.
         Exp::InductiveRec {
-            decl,
+            iri,
             motive,
             minors,
             major,
-        } => check_infer_inductive_rec(ctx, decl, motive, minors, major),
+        } => {
+            let decl = ctx.lookup_inductive(iri)?;
+            check_infer_inductive_rec(ctx, &decl, motive, minors, major)
+        }
 
         // Pattern-match without an explicit motive cannot run in
         // inference mode — its result type is determined by checking-
@@ -1056,7 +1307,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         // reference (the chain was supposed to admit it but didn't),
         // also an error.
         Exp::EigonAxiom(iri) => {
-            let layer = ctx.layer.as_ref().ok_or_else(|| {
+            let layer = ctx.env.layer().ok_or_else(|| {
                 format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
             })?;
             let env = layer.axiom_env();
@@ -1085,14 +1336,6 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitBool(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Boolean,
         )),
-        Exp::Inductive(decl) => {
-            check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
-        }
-        Exp::InductiveType(decl, _) => {
-            check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
-        }
 
         e => Err(CheckError::CannotInfer(format!(
             "cannot infer type of: {e:?}"
@@ -1108,6 +1351,18 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
 /// fix for issue #12 item 1 (D18 §5).
 fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<Val> {
     match typ {
+        // D78 Phase C — a class resolves to a record, and a record is keyed by
+        // the **full IRI**. This arm is unreachable from `PropAccess`, which
+        // routes through `find_record_field`; it exists for callers that still
+        // hold only a local name, and matches on the binder for them.
+        Val::Record(fields, rho) => {
+            let (_, patt, ty) = fields
+                .iter()
+                .find(|(_, patt, _)| matches!(patt, Patt::Var(n) if n == field_name))?;
+            let _ = patt;
+            ctx.eval(ty, rho).ok()
+        }
+        Val::Refine(carrier, _) => find_sigma_field(ctx, carrier, field_name),
         Val::Sig(t, g) => {
             if g.patt == Patt::Var(field_name.to_string()) {
                 // Found — return the field's type
@@ -1116,7 +1371,7 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
                 // Not this field — apply the closure with a dummy value
                 // and search the rest of the chain
                 let gen = gen_val(&g.env);
-                let rest = g.apply(gen).ok()?;
+                let rest = ctx.apply(g, gen).ok()?;
                 find_sigma_field(ctx, &rest, field_name)
             }
         }
@@ -1129,26 +1384,29 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
     }
 }
 
-/// Advance past one field in a Sigma chain. After `find_sigma_field`
-/// found `field_name`, this returns the rest of the Sigma: applies
-/// the closure with the field's value and recurses.
-fn advance_sigma(typ: &Val, field_name: &str, field_exp: &Exp, rho: &Rho) -> Val {
+/// D78 §9 — look a field up by its **full IRI**.
+///
+/// `find_sigma_field` matches on the binder, which `build_sigma_chain` set to
+/// `prop_iri.local_name()`: two properties sharing a local name across
+/// namespaces were one field to a projection. A record carries the IRI, so this
+/// lookup cannot confuse them.
+///
+/// Forgetting a refinement is safe here for the same reason it is safe in
+/// subtyping — the constraints do not change what fields the carrier has.
+fn find_record_field(ctx: &mut CheckCtx, typ: &Val, field: &Iri) -> Option<Val> {
     match typ {
-        Val::Sig(_, g) => {
-            if g.patt == Patt::Var(field_name.to_string()) {
-                match eval(field_exp, rho).and_then(|v| g.apply(v)) {
-                    Ok(v) => v,
-                    Err(_) => typ.clone(),
-                }
-            } else {
-                let gen = gen_val(&g.env);
-                match g.apply(gen) {
-                    Ok(rest) => advance_sigma(&rest, field_name, field_exp, rho),
-                    Err(_) => typ.clone(),
-                }
-            }
+        Val::Record(fields, rho) => {
+            let (_, _, ty) = fields.iter().find(|(iri, _, _)| iri == field)?;
+            ctx.eval(ty, rho).ok()
         }
-        _ => typ.clone(),
+        Val::Refine(carrier, _) => find_record_field(ctx, carrier, field),
+        Val::EigonClass(iri) => {
+            let resolved = ctx.resolve_class_cached(iri).ok()?;
+            find_record_field(ctx, &resolved, field)
+        }
+        // Anonymous pairs still carry only a binder name, so fall back.
+        Val::Sig(..) => find_sigma_field(ctx, typ, field.local_name()),
+        _ => None,
     }
 }
 
@@ -1195,6 +1453,7 @@ mod tests {
     use super::testutil::*;
     use super::witness::try_synthesize_chain_witness;
     use super::*;
+    use crate::nbe::eval::eval;
     use crate::nbe::eval::EvalCtx;
     use crate::nbe::term::PrimitiveType;
     use crate::nbe::term::{InductiveCtorDecl, InductiveDecl};
@@ -1333,8 +1592,13 @@ mod tests {
             for m in 0..6 {
                 let checked = check(&mut ctx(), &Exp::sort(n), &Val::sort(m)).is_ok();
                 let inferred = check_infer(&mut ctx(), &Exp::sort(n)).unwrap();
-                let subsumed =
-                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::sort(m)).is_ok();
+                let subsumed = crate::nbe::check::conv::subtype_of(
+                    &crate::nbe::env_global::Env::empty(),
+                    0,
+                    &inferred,
+                    &Val::sort(m),
+                )
+                .is_ok();
                 assert_eq!(
                     checked, subsumed,
                     "Sort({n}) against Sort({m}): check mode says {checked}, \
@@ -1379,16 +1643,17 @@ mod tests {
     // discarded. They now fall through to `check_by_inference`, which compares under `subtype_of`.
     // These four tests pin both directions of that comparison.
 
-    /// A declaration-carrying inductive at the given sort, with no constructors.
-    fn ind_at(name: &str, sort: usize) -> Exp {
-        Exp::Inductive(std::sync::Arc::new(crate::nbe::term::InductiveDecl {
-            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).unwrap(),
-            name: name.to_string(),
-            params: Vec::new(),
-            indices: Vec::new(),
-            sort: Exp::sort(sort),
-            ctors: Vec::new(),
-        }))
+    /// A reference to an inductive declared at the given sort, together with a
+    /// context whose environment holds the declaration.
+    ///
+    /// D76 Phase B: the former names its declaration instead of carrying it, so
+    /// these tests need an environment. That is the property under test, not
+    /// scaffolding — `check_infer`'s `Const` arm reads `decl.sort` from `Γ_env`,
+    /// and if it could not find it the universe comparison would have nothing to
+    /// compare.
+    fn ind_at(name: &str, sort: usize) -> (CheckCtx, Exp) {
+        let (c, refs) = crate::nbe::check::testutil::ctx_declaring(&[(name, sort)]);
+        (c, refs.into_iter().next().expect("one declaration"))
     }
 
     /// `data D : Set` standing where a proposition is expected. `JustifiedBy(j, P)`,
@@ -1396,7 +1661,8 @@ mod tests {
     /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
     #[test]
     fn a_set_level_inductive_does_not_inhabit_prop() {
-        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::sort(0))
+        let (mut c, set_level) = ind_at("SetLevel", 1);
+        check(&mut c, &set_level, &Val::sort(0))
             .expect_err("`data D : Set` must not check against `Prop`");
     }
 
@@ -1407,11 +1673,12 @@ mod tests {
     /// them.
     #[test]
     fn a_prop_level_inductive_still_inhabits_set_and_above() {
-        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::sort(1))
+        let (mut c, prop_level) = ind_at("PropLevel", 0);
+        check(&mut c, &prop_level, &Val::sort(1))
             .expect("`data D : Prop` inhabits `Set` by cumulativity");
-        check(&mut ctx(), &ind_at("PropLevel", 0), &Val::sort(2))
-            .expect("...and every universe above it");
-        check(&mut ctx(), &ind_at("SetLevel", 1), &Val::sort(2))
+        check(&mut c, &prop_level, &Val::sort(2)).expect("...and every universe above it");
+        let (mut c2, set_level) = ind_at("SetLevel", 1);
+        check(&mut c2, &set_level, &Val::sort(2))
             .expect("`data D : Set` inhabits `Type 1` — the other three probe hits");
     }
 
@@ -1420,16 +1687,16 @@ mod tests {
     /// arm re-added above `check_by_inference` would break this before it broke a chain.
     #[test]
     fn check_and_infer_agree_on_type_former_universes() {
-        for (exp, label) in [
+        for ((mut c, exp), label) in [
             (ind_at("P", 0), "inductive at Prop"),
             (ind_at("S", 1), "inductive at Set"),
         ] {
-            let inferred = match check_infer(&mut ctx(), &exp).expect("inferable") {
+            let inferred = match check_infer(&mut c, &exp).expect("inferable") {
                 Val::Sort(k) => k,
                 other => panic!("{label}: expected a sort, got {other:?}"),
             };
             for m in 0..4usize {
-                let checked = check(&mut ctx(), &exp, &Val::sort(m)).is_ok();
+                let checked = check(&mut c, &exp, &Val::sort(m)).is_ok();
                 let cumulative = inferred.leq(&crate::nbe::level::Level::of_nat(m));
                 assert_eq!(
                     checked, cumulative,
@@ -1471,8 +1738,13 @@ mod tests {
             for m in 0..6 {
                 let checked = check(&mut ctx(), exp, &Val::sort(m)).is_ok();
                 let inferred = check_infer(&mut ctx(), exp).unwrap();
-                let subsumed =
-                    crate::nbe::check::conv::subtype_of(0, &inferred, &Val::sort(m)).is_ok();
+                let subsumed = crate::nbe::check::conv::subtype_of(
+                    &crate::nbe::env_global::Env::empty(),
+                    0,
+                    &inferred,
+                    &Val::sort(m),
+                )
+                .is_ok();
                 assert_eq!(
                     checked, subsumed,
                     "{exp:?} against Sort({m}): check mode says {checked}, \
@@ -2126,6 +2398,406 @@ mod tests {
     }
 
     #[test]
+    fn an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected() {
+        // The open-world / closed-type disagreement (D75 §3.8).
+        //
+        // Rule 22 §c admits a property whose key resolves to a declared
+        // `core:Property` even when the resource's classes neither require nor
+        // recommend it — that is what open-world validation means. The value
+        // keeps it: a resource marshals to `Val::ResourceVal` carrying the whole
+        // `Resource`.
+        //
+        // The type does not. `resolve_class_type` is a function of the CLASS
+        // (`ground.rs:37` takes a `&Iri`, not a resource), so its record is built
+        // from `requires` alone — since D78 Phase C; it was a Σ-chain over
+        // `requires` + Option-wrapped `recommends` before. The extra field is in
+        // the value and absent from the type, so the lookup misses and
+        // `Exp::PropAccess` reports `IllFormed`.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            builder.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let animal_resources = eigon_json::parse_document(animals_json).unwrap();
+        let mut domain_builder = LayerBuilder::new("animals", Some(core));
+        for r in animal_resources {
+            domain_builder.add_resource(r).unwrap();
+        }
+        let animals =
+            std::sync::Arc::new(domain_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        // A perfectly well-formed property that `Dog` does not mention.
+        let nickname = Iri::parse("urn:eigenius:example:nickname").unwrap();
+        let mut prop = crate::ontology::resource::Resource::new(nickname.clone());
+        prop.set(
+            Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::ResourceRef(
+                    Iri::parse(crate::ontology::well_known::PROPERTY).unwrap(),
+                ),
+            ]),
+        );
+        prop.set(
+            Iri::parse(crate::ontology::well_known::SHORT_NAME).unwrap(),
+            crate::ontology::resource::Value::String("nickname".into()),
+        );
+        prop.set(
+            Iri::parse(crate::ontology::well_known::DESCRIPTION).unwrap(),
+            crate::ontology::resource::Value::String("an informal name".into()),
+        );
+        prop.set(
+            Iri::parse(crate::ontology::well_known::DATA_TYPE_PROP).unwrap(),
+            crate::ontology::resource::Value::ResourceRef(
+                Iri::parse(crate::ontology::well_known::STRING).unwrap(),
+            ),
+        );
+        let mut top = LayerBuilder::new("nickname", Some(animals));
+        top.add_resource(prop).unwrap();
+        let layer = std::sync::Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        // Vocabulary side: the key resolves to a declared `core:Property`, which
+        // is the whole of what Rule 22 §c asks. Nothing about `Dog` is consulted.
+        assert!(
+            layer.resolve(&nickname).is_some(),
+            "test setup: nickname must be a declared property on the chain"
+        );
+
+        // Type side: `Dog`'s Σ-chain is built from requires + recommends, so it
+        // has no `nickname` field for a projection to land on.
+        let dog_type = Val::EigonClass(Iri::parse("urn:eigenius:example:Dog").unwrap());
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], std::sync::Arc::clone(&layer));
+        assert!(
+            find_sigma_field(&mut c, &dog_type, "name").is_some(),
+            "test setup: a DECLARED field must be projectable, or this proves nothing"
+        );
+        assert!(
+            find_sigma_field(&mut c, &dog_type, "nickname").is_none(),
+            "current behaviour: a declared property that Dog does not require or recommend is \
+             not in Dog's type, so `dog.nickname` is IllFormed even though a Dog carrying it \
+             validates. The value has a field the type cannot mention — see D75 §3.8. If this \
+             starts failing, a resource's type has become a function of its fields."
+        );
+    }
+
+    #[test]
+    fn a_class_and_its_own_unfolding_are_not_definitionally_equal() {
+        // δ is implemented for classes in `check` and absent from `eq_nf`
+        // (D75 §3.3).
+        //
+        // `CheckCtx` unfolds an `EigonClass` to its record through the environment
+        // whenever inference needs a field. `eq_nf` compares
+        // `Val::EigonClass(iri)` opaquely. The two halves of the checker therefore
+        // disagree about what a class *is*.
+        //
+        // **Re-examined at D76 Phase D and deliberately unchanged.** `eq_nf` now
+        // takes `Γ_env`, so the old reason — *"it takes no context at all"* — no
+        // longer holds; the behaviour does, because Q2 requires it. Unfolding a
+        // class in conversion would make class identity structural, and 749 of 894
+        // shipped classes have identical (empty) field sets
+        // (`unfolding_a_class_would_collapse_two_nominally_distinct_classes`, just
+        // below). The environment reaching conversion is what makes the *choice*
+        // to stay opaque, rather than the absence of a layer making it for us.
+        //
+        // The reconciliation Q2 names is still outstanding and is still `check`'s
+        // side: stop treating a class's unfolding as definitional equality.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        let dog = Iri::parse("urn:eigenius:example:Dog").unwrap();
+        let folded = Val::EigonClass(dog.clone());
+        let unfolded = crate::program::ground::resolve_class_type(&dog, &layer).unwrap();
+
+        // The check side does unfold: `find_sigma_field` reaches the fields.
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], std::sync::Arc::clone(&layer));
+        assert!(
+            find_sigma_field(&mut c, &folded, "name").is_some(),
+            "test setup: check-side δ must be live, or this proves nothing"
+        );
+        // D78 Phase C — a record now, not a Σ-chain. The finding is unchanged:
+        // what a class unfolds *to* is not what makes `check` and `eq_nf`
+        // disagree; that they disagree at all is.
+        assert!(
+            matches!(unfolded, Val::Record(..)),
+            "test setup: Dog must unfold to a record, got {unfolded:?}"
+        );
+
+        assert!(
+            eq_nf(0, &folded, &folded).is_ok(),
+            "test setup: a class is equal to itself"
+        );
+        assert!(
+            eq_nf(0, &folded, &unfolded).is_err(),
+            "current behaviour: `eq_nf` does not unfold a class, so a type written folded and the \
+             same type produced unfolded do not compare equal. See D75 §3.3 — the δ-policy has to \
+             reconcile this, by making `check` stop treating its unfolding as definitional equality \
+             rather than by making `eq_nf` unfold. Survived the Σ-chain → record switch unchanged."
+        );
+    }
+
+    #[test]
+    fn unfolding_a_class_would_collapse_two_nominally_distinct_classes() {
+        // Why classes must stay δ-opaque (D75 §3.3, Q2).
+        //
+        // `Alpha` and `Beta` are different classes requiring the same single
+        // property. Folded, they are distinct — `eq_nf` compares IRIs. Unfolded,
+        // their Σ-chains are identical, so `eq_nf` accepts them as the same type.
+        //
+        // So making classes transparent under δ does not merely reconcile
+        // `check` with `eq_nf`: it silently makes class identity STRUCTURAL,
+        // which is the nominal-vs-structural decision deferred to
+        // docs/notes/nominal-vs-structural-subtyping.md. `subclass_of` is
+        // nominal and load-bearing for Rule 22, `class_types` and institution
+        // dispatch, so the reconciliation has to go the other way: `check` must
+        // stop treating its unfolding as definitional equality.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::ontology::resource::{Resource, Value as RV};
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        let animals = std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        let name_prop = Iri::parse("urn:eigenius:example:name").unwrap();
+        let twin = |class_iri: &str, short: &str| {
+            let mut r = Resource::new(Iri::parse(class_iri).unwrap());
+            r.set(
+                Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
+                RV::Array(vec![RV::ResourceRef(
+                    Iri::parse(crate::ontology::well_known::CLASS).unwrap(),
+                )]),
+            );
+            r.set(
+                Iri::parse(crate::ontology::well_known::SHORT_NAME).unwrap(),
+                RV::String(short.into()),
+            );
+            r.set(
+                Iri::parse(crate::ontology::well_known::DESCRIPTION).unwrap(),
+                RV::String("structurally identical to its twin".into()),
+            );
+            r.set(
+                Iri::parse(crate::ontology::well_known::REQUIRES).unwrap(),
+                RV::Array(vec![RV::ResourceRef(name_prop.clone())]),
+            );
+            r
+        };
+        let mut t = LayerBuilder::new("twins", Some(animals));
+        t.add_resource(twin("urn:eigenius:example:Alpha", "Alpha"))
+            .unwrap();
+        t.add_resource(twin("urn:eigenius:example:Beta", "Beta"))
+            .unwrap();
+        let layer = std::sync::Arc::new(t.build(crate::layer::LayerStorage::in_memory()));
+
+        let alpha = Iri::parse("urn:eigenius:example:Alpha").unwrap();
+        let beta = Iri::parse("urn:eigenius:example:Beta").unwrap();
+
+        assert!(
+            eq_nf(
+                0,
+                &Val::EigonClass(alpha.clone()),
+                &Val::EigonClass(beta.clone())
+            )
+            .is_err(),
+            "folded: two distinct classes must not be definitionally equal"
+        );
+        assert!(
+            eq_nf(
+                0,
+                &crate::program::ground::resolve_class_type(&alpha, &layer).unwrap(),
+                &crate::program::ground::resolve_class_type(&beta, &layer).unwrap()
+            )
+            .is_ok(),
+            "unfolded: identical field sets ARE definitionally equal — which is why δ for classes \
+             would make class identity structural. See D75 §3.3."
+        );
+    }
+
+    #[test]
+    fn an_undeclared_property_is_projectable_off_the_resource_but_not_off_the_class() {
+        // **D78 Phase E closes D75 §3.8.** The companion to
+        // `an_undeclared_property_is_admitted_by_validation_but_cannot_be_projected`,
+        // which asserts the class side and stays true forever: a class type is
+        // the declared *minimum*, so projecting a property `Dog` does not
+        // declare must fail off `Dog` before and after.
+        //
+        // What Phase E changes is the resource side. A resource's type is now
+        // the union of the fields it actually carries, so a property its classes
+        // never mention is a field of *its* record — at the property's own type
+        // `T`, not `Option T`.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::ontology::resource::{Resource, Value as RV};
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+        let animals_json = include_str!("../../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core));
+        for r in eigon_json::parse_document(animals_json).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        let animals = std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        // A perfectly well-formed property that `Dog` neither requires nor
+        // recommends — the open-world case Rule 22 §c admits.
+        let nickname = Iri::parse("urn:eigenius:example:nickname").unwrap();
+        let mut prop = Resource::new(nickname.clone());
+        prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RV::Array(vec![RV::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        prop.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            RV::String("nickname".into()),
+        );
+        prop.set(
+            Iri::parse(wk::DESCRIPTION).unwrap(),
+            RV::String("an informal name".into()),
+        );
+        prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            RV::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+        );
+        let mut top = LayerBuilder::new("nickname", Some(animals));
+        top.add_resource(prop).unwrap();
+        let layer = std::sync::Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        // A Dog that carries it.
+        let mut rex = Resource::new(Iri::parse("urn:eigenius:example:rex").unwrap());
+        rex.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RV::Array(vec![RV::ResourceRef(
+                Iri::parse("urn:eigenius:example:Dog").unwrap(),
+            )]),
+        );
+        rex.set(
+            Iri::parse("urn:eigenius:example:name").unwrap(),
+            RV::String("Rex".into()),
+        );
+        rex.set(
+            Iri::parse("urn:eigenius:example:breed").unwrap(),
+            RV::String("collie".into()),
+        );
+        rex.set(nickname.clone(), RV::String("Rexy".into()));
+
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], std::sync::Arc::clone(&layer));
+
+        // ── the resource side: NOW projectable ──────────────────────────────
+        let rex_type = check_infer(&mut c, &Exp::EigonResource(Box::new(rex.clone())))
+            .expect("a resource must infer a type");
+        let projected = find_record_field(&mut c, &rex_type, &nickname);
+        assert!(
+            projected.is_some(),
+            "D78 Phase E: an undeclared property the resource carries must be projectable off it; \
+             got None from {rex_type:?}"
+        );
+        assert!(
+            !matches!(projected.as_ref().unwrap(), Val::Data(..)),
+            "and at the property's own type, not Option-wrapped: {:?}",
+            projected.unwrap()
+        );
+
+        // Its declared fields project too — the record is the union, not a swap.
+        for declared in ["urn:eigenius:example:name", "urn:eigenius:example:breed"] {
+            assert!(
+                find_record_field(&mut c, &rex_type, &Iri::parse(declared).unwrap()).is_some(),
+                "{declared} must still project"
+            );
+        }
+
+        // ── the class side: STILL not projectable, permanently ──────────────
+        let dog_type = Val::EigonClass(Iri::parse("urn:eigenius:example:Dog").unwrap());
+        assert!(
+            find_record_field(&mut c, &dog_type, &nickname).is_none(),
+            "a class type is the declared minimum — `nickname` must never project off `Dog`"
+        );
+        assert!(
+            find_record_field(
+                &mut c,
+                &dog_type,
+                &Iri::parse("urn:eigenius:example:name").unwrap()
+            )
+            .is_some(),
+            "but Dog's own declared fields must, or this proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_resource_carries_every_class_it_declares_not_just_the_first() {
+        // 73 % of shipped resources declare more than one `is_a`; the prior
+        // inference kept `classes.first()` and dropped the rest.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::ontology::resource::{Resource, Value as RV};
+
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let layer = std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut r = Resource::new(Iri::parse("urn:t:two_classes").unwrap());
+        r.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            RV::Array(vec![
+                RV::ResourceRef(Iri::parse(wk::DECLARED_RESOURCE).unwrap()),
+                RV::ResourceRef(Iri::parse(wk::CLASS).unwrap()),
+            ]),
+        );
+        r.set(
+            Iri::parse(wk::SHORT_NAME).unwrap(),
+            RV::String("two".into()),
+        );
+
+        let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        let t = check_infer(&mut c, &Exp::EigonResource(Box::new(r))).unwrap();
+        match t {
+            Val::Refine(_, classes) => {
+                assert_eq!(
+                    classes.len(),
+                    2,
+                    "both declared classes must survive: {classes:?}"
+                );
+            }
+            other => panic!("expected a Refine over both classes, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn find_sigma_field_without_layer_returns_none_for_eigon_class() {
         // Without a layer, EigonClass resolution should fail gracefully
         let dog_iri = Iri::parse("urn:eigenius:example:Dog").unwrap();
@@ -2368,7 +3040,7 @@ mod tests {
 
     #[test]
     fn decide_without_registry_is_undecidable() {
-        // Bare `EvalCtx::Pure` has no registry → institution-dispatched
+        // Bare `EvalCtx::pure()` has no registry → institution-dispatched
         // constraint falls through to `Undecidable`, reducing to the
         // passthrough neutral.
         let constraint = Constraint::Institution {
@@ -2376,7 +3048,7 @@ mod tests {
             args: vec![],
         };
         let exp = Exp::NativeDecide(constraint, Box::new(wrap_int(7)));
-        let v = eval_ctx(&exp, &Rho::Nil, &EvalCtx::Pure).expect("eval");
+        let v = eval_ctx(&exp, &Rho::Nil, &EvalCtx::pure()).expect("eval");
         assert!(
             matches!(v, Val::Nt(crate::nbe::val::Neut::Gen(_, ref n)) if n == "__constraint_undecidable")
         );
@@ -2498,9 +3170,13 @@ mod tests {
         let ctx = check_ctx_for(fake.clone(), 1);
 
         let succ_zero_exp = Exp::InductiveCtor(
-            nat.clone(),
+            nat.iri.clone(),
             "succ".to_string(),
-            vec![Exp::InductiveCtor(nat, "zero".to_string(), Vec::new())],
+            vec![Exp::InductiveCtor(
+                nat.iri.clone(),
+                "zero".to_string(),
+                Vec::new(),
+            )],
         );
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:pose").unwrap(),
@@ -2719,6 +3395,7 @@ mod tests {
     /// without requiring `Nat`. Phase D will pull in real `Nat` indices.
     fn simple_vec_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -2727,9 +3404,13 @@ mod tests {
             ctors: Vec::new(),
         });
         // `SimpleVec A ()` — the conclusion shape used by both ctors.
-        let vec_a_unit =
-            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -2775,7 +3456,9 @@ mod tests {
         // Vec-like indexed decl whose ctors produce the correctly-shaped
         // conclusion (`SimpleVec A ()`). Phase B validator accepts.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         let result = validate_indexed_ctor_conclusions(&mut c, &decl);
         assert!(
             result.is_ok(),
@@ -2789,6 +3472,7 @@ mod tests {
         // conclusion `SimpleVec A` (missing the index) supplies only 1.
         // Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -2797,8 +3481,13 @@ mod tests {
             ctors: Vec::new(),
         });
         // Conclusion has only 1 arg (the param), missing the index.
-        let bad_conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string())]);
+        let bad_conclusion = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string())],
+        );
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -2829,6 +3518,7 @@ mod tests {
         // conclusion supplies a Sort(1) value in the index slot —
         // type mismatch. Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -2837,11 +3527,13 @@ mod tests {
             ctors: Vec::new(),
         });
         // The index slot has Sort(1) instead of Unit — wrong type.
-        let bad_conclusion = Exp::InductiveType(
-            self_ref.clone(),
+        let bad_conclusion = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
             vec![Exp::Var("A".to_string()), Exp::sort(1)],
         );
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -2871,7 +3563,7 @@ mod tests {
         // A pre-D48 (non-indexed) inductive should pass the validator
         // without any checks — backward-compat with existing decls.
         let decl = nat_decl();
-        let mut c = ctx();
+        let mut c = ctx().declaring(decl.clone());
         validate_indexed_ctor_conclusions(&mut c, &decl).unwrap();
     }
 
@@ -2880,11 +3572,8 @@ mod tests {
         // Evaluate `SimpleVec A ()` — the resulting Val::InductiveType
         // should have `params = [A]` and `indices = [Unit]`.
         let decl = simple_vec_decl();
-        let exp = Exp::InductiveType(
-            decl.clone(),
-            vec![Exp::One, Exp::Unit], // A := 1, index := ()
-        );
-        let c = ctx();
+        let exp = Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One, Exp::Unit]);
+        let c = ctx().declaring(decl.clone());
         let v = c.eval(&exp, &Rho::Nil).unwrap();
         match v {
             Val::InductiveType {
@@ -2906,6 +3595,7 @@ mod tests {
     /// `Flag : One -> Type 0` with `mk : Π (u : One). Flag u`.
     fn flag_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Flag").unwrap(),
             name: "Flag".to_string(),
             params: Vec::new(),
@@ -2914,6 +3604,7 @@ mod tests {
             ctors: Vec::new(),
         });
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Flag").unwrap(),
             name: "Flag".to_string(),
             params: Vec::new(),
@@ -2924,8 +3615,9 @@ mod tests {
                 typ: Exp::Pi(
                     Patt::Var("u".to_string()),
                     Box::new(Exp::One),
-                    Box::new(Exp::InductiveType(
-                        self_ref.clone(),
+                    Box::new(Exp::const_applied(
+                        self_ref.iri.clone(),
+                        Vec::new(),
                         vec![Exp::Var("u".to_string())],
                     )),
                 ),
@@ -2944,8 +3636,8 @@ mod tests {
     #[test]
     fn infers_indexed_ctor_result_indices() {
         let decl = flag_decl();
-        let exp = Exp::InductiveCtor(decl.clone(), "mk".to_string(), vec![Exp::Unit]);
-        let mut c = ctx();
+        let exp = Exp::InductiveCtor(decl.iri.clone(), "mk".to_string(), vec![Exp::Unit]);
+        let mut c = ctx().declaring(decl.clone());
         let ty = check_infer(&mut c, &exp).expect("an indexed ctor must be inferable");
         match ty {
             Val::InductiveType {
@@ -2963,17 +3655,43 @@ mod tests {
     }
 
     #[test]
-    fn d48_indexed_decl_eval_rejects_wrong_arg_count() {
-        // Evaluating a SimpleVec InductiveType with too few args
-        // (only the param, no index) should error.
+    fn d48_indexed_decl_under_application_is_a_value_and_the_check_catches_it() {
+        // **Behaviour moved, D76 Phase B.** This asserted that *evaluating*
+        // `SimpleVec(One)` — one argument for a `params + indices` telescope of two
+        // — errors with an arity diagnostic. Fused, the whole argument vector
+        // arrived at once and eval could count it. De-fused, arguments arrive one
+        // at a time through `App`, so a partially applied former is an ordinary
+        // intermediate value; there is no point at which eval knows no more are
+        // coming.
+        //
+        // Arity is the type checker's business, which is where nanoda puts it: a
+        // type former's type is a Π-telescope and the ordinary application rule
+        // walks it.
         let decl = simple_vec_decl();
-        let exp = Exp::InductiveType(decl, vec![Exp::One]); // missing index
-        let c = ctx();
-        let err = c.eval(&exp, &Rho::Nil).unwrap_err();
+        let exp = Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]);
+        let c = ctx().declaring(decl.clone());
+
+        // Evaluation now succeeds and yields the partially applied former.
+        match c
+            .eval(&exp, &Rho::Nil)
+            .expect("a partial application is a value")
+        {
+            Val::InductiveType {
+                params, indices, ..
+            } => {
+                assert_eq!(params.len(), 1, "the one argument filled the parameter");
+                assert!(indices.is_empty(), "the index is still missing");
+            }
+            other => panic!("expected the partially applied former, got {other:?}"),
+        }
+
+        // And checking it as a type reports the missing index.
+        let mut cc = ctx().declaring(decl);
+        let err = check_type(&mut cc, &exp).expect_err("an under-applied former is not a type");
         let msg = err.to_string();
         assert!(
-            msg.contains("indexed InductiveType `SimpleVec`") && msg.contains("expected 2"),
-            "error should describe the arity mismatch: {msg}"
+            msg.contains("SimpleVec") && msg.contains('2'),
+            "the diagnostic should name the former and its arity: {msg}"
         );
     }
 
@@ -2986,11 +3704,13 @@ mod tests {
         // `nil A : SimpleVec A ()` — nil's declared conclusion is
         // `SimpleVec A ()`, matching the expected `SimpleVec A ()`.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         // The constructor expression: nil applied to its param A := Sort(0).
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::sort(0)],
@@ -3008,8 +3728,10 @@ mod tests {
         // A := One from the expected param) cannot subtype-match the
         // expected `SimpleVec ⟨Sort(0)⟩ ()` because Sort(0) ≠ One.
         let decl = simple_vec_decl();
-        let mut c = ctx();
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::One],
@@ -3036,10 +3758,12 @@ mod tests {
         // Sort(1) — a synthetic distinct value) should be rejected by
         // index unification.
         let decl = simple_vec_decl();
-        let mut c = ctx();
+        // D76 Phase B: the ctor's declared conclusion names `SimpleVec`, so the
+        // declaration must be in `Γ_env` for the checker to evaluate it.
+        let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::sort(0)],
@@ -3058,7 +3782,7 @@ mod tests {
         // pre-D48 — the new index-unification path is a no-op when
         // `decl.indices.is_empty()`.
         let nat = nat_decl();
-        let mut c = ctx();
+        let mut c = ctx().declaring(nat.clone());
         let zero = nat_zero_exp(&nat);
         let expected = Val::InductiveType {
             decl: nat.clone(),
@@ -3084,7 +3808,7 @@ mod tests {
             indices: vec![Val::Unit],
         };
         // Set up a CheckCtx with `v : SimpleVec Set ()` bound.
-        let c = ctx();
+        let c = ctx().declaring(decl.clone());
         let v_val = gen_val(&c.rho);
         let rho2 = c
             .rho
@@ -3097,7 +3821,7 @@ mod tests {
             &v_val,
         )
         .unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
+        let mut c2 = CheckCtx::new(rho2, gamma2).declaring(decl.clone());
 
         // match v { nil => (); cons _ _ _ => () }
         let match_exp = Exp::Match {
@@ -3151,7 +3875,7 @@ mod tests {
             &v_val,
         )
         .unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
+        let mut c2 = CheckCtx::new(rho2, gamma2).declaring(decl.clone());
 
         let match_exp = Exp::Match {
             scrutinee: Box::new(Exp::Var("v".to_string())),
@@ -3199,7 +3923,7 @@ mod tests {
             &n_val,
         )
         .unwrap();
-        let mut c2 = CheckCtx::new(rho2, gamma2);
+        let mut c2 = CheckCtx::new(rho2, gamma2).declaring(nat.clone());
 
         let match_exp = Exp::Match {
             scrutinee: Box::new(Exp::Var("n".to_string())),
@@ -3234,10 +3958,10 @@ mod tests {
         let mut mctx = crate::nbe::unify::MetaCtx::new();
         let m_id = mctx.fresh();
         let m = Val::Nt(crate::nbe::val::Neut::Meta(m_id, Vec::new()));
-        let mut c = ctx();
+        let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
         // the expected type, not the user expression.
-        let nil_app = Exp::InductiveCtor(decl.clone(), "nil".to_string(), Vec::new());
+        let nil_app = Exp::InductiveCtor(decl.iri.clone(), "nil".to_string(), Vec::new());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::sort(0)],
@@ -3263,6 +3987,7 @@ mod tests {
         use crate::nbe::term::{Exp as TermExp, InductiveDecl};
         Val::InductiveType {
             decl: Arc::new(InductiveDecl {
+                uparams: Vec::new(),
                 iri: crate::ontology::iri::Iri::parse(&format!(
                     "urn:eigenius:reasoning:ChainWitness:{category_short_name}"
                 ))
@@ -3420,7 +4145,7 @@ mod tests {
     /// **An applied inductive type must CHECK ITS PARAMETER ARGUMENTS.**
     ///
     /// `logic:And (P : Prop, Q : Prop) : Prop`, so `And(λx. …, Q)` is ill-formed — a λ is not a
-    /// `Prop`. `check_type` used to admit it unconditionally (`Exp::InductiveType(_, _) => Ok(())`),
+    /// `Prop`. `check_type` used to admit it unconditionally (`Exp::const_applied(_.iri.clone(), Vec::new(), _) => Ok(())`),
     /// trusting declaration-site validation; but a DECL is validated once while ARGUMENTS are
     /// supplied at every use site, so decl validity says nothing about them.
     ///
@@ -3437,6 +4162,7 @@ mod tests {
     fn applied_inductive_type_checks_its_parameter_arguments() {
         // data Box (P : Prop) : Prop — one Prop parameter, mirroring `logic:And`'s telescope.
         let decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:test:Box").unwrap(),
             name: "Box".to_string(),
             params: vec![(Patt::Var("P".to_string()), Exp::sort(0))],
@@ -3449,6 +4175,7 @@ mod tests {
         // per the `(Exp::One, Val::Sort(l)) if l.is_nat(1)` arm — so this needs a parameterless inductive in
         // `Sort(0)`.)
         let prop_decl = InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:test:TrueP").unwrap(),
             name: "TrueP".to_string(),
             params: vec![],
@@ -3456,23 +4183,29 @@ mod tests {
             sort: Exp::sort(0),
             ctors: vec![],
         };
-        let a_prop = Exp::InductiveType(std::sync::Arc::new(prop_decl), vec![]);
-        let ok = Exp::InductiveType(std::sync::Arc::new(decl.clone()), vec![a_prop]);
-        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        // D76 Phase B: both formers are named, so both declarations go in `Γ_env`.
+        let box_decl = std::sync::Arc::new(decl.clone());
+        let prop_decl = std::sync::Arc::new(prop_decl);
+        let a_prop = Exp::Const(prop_decl.iri.clone(), Vec::new());
+        let ok = Exp::const_applied(box_decl.iri.clone(), Vec::new(), vec![a_prop]);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new())
+            .declaring(box_decl.clone())
+            .declaring(prop_decl);
         assert!(
             check(&mut ctx, &ok, &Val::sort(0)).is_ok(),
             "Box(TrueP) must remain well-formed — the check must not reject valid arguments"
         );
 
         // A λ is not a Prop, so this must be REJECTED.
-        let bad = Exp::InductiveType(
-            std::sync::Arc::new(decl),
+        let bad = Exp::const_applied(
+            box_decl.iri.clone(),
+            Vec::new(),
             vec![Exp::Lam(
                 Patt::Var("k".to_string()),
                 Box::new(Exp::Var("k".to_string())),
             )],
         );
-        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(box_decl);
         assert!(
             check(&mut ctx, &bad, &Val::sort(0)).is_err(),
             "Box(λk. k) must be rejected — accepting it lets an ill-typed proposition through the \

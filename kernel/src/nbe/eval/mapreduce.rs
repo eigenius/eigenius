@@ -49,7 +49,7 @@ pub(super) fn eval_map_impl<T: Tracer>(
                 ))),
             }
         }
-        Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+        Val::InductiveVal { ref iri, .. } if iri.local_name() == "List" => {
             match crate::nbe::val::inductive_list_to_vec(&coll) {
                 Some(items) => map_items(items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
@@ -105,7 +105,7 @@ pub(super) fn eval_reduce_impl<T: Tracer>(
                 ))),
             }
         }
-        Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
+        Val::InductiveVal { ref iri, .. } if iri.local_name() == "List" => {
             match crate::nbe::val::inductive_list_to_vec(&coll) {
                 Some(items) => fold_items(acc, items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
@@ -272,13 +272,13 @@ mod tests {
     fn ind_list(items: Vec<Val>) -> Val {
         let list = crate::nbe::term::list_decl();
         let mut current = Val::InductiveVal {
-            decl: list.clone(),
+            iri: list.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
         for item in items.into_iter().rev() {
             current = Val::InductiveVal {
-                decl: list.clone(),
+                iri: list.iri.clone(),
                 ctor_name: "cons".to_string(),
                 args: vec![item, current],
             };
@@ -295,7 +295,7 @@ mod tests {
             Rho::Nil,
         ));
         let lst = ind_list(vec![Val::Unit, Val::Unit, Val::Unit]);
-        let result = eval_map(id_lam, lst, &EvalCtx::Pure).expect("eval_map");
+        let result = eval_map(id_lam, lst, &EvalCtx::pure()).expect("eval_map");
         match result {
             Val::List(items) => assert_eq!(items.len(), 3),
             other => panic!("expected List, got {other:?}"),
@@ -312,7 +312,7 @@ mod tests {
             Exp::Lam(Patt::Unit, Box::new(Exp::Var("acc".to_string()))),
             Rho::Nil,
         ));
-        let result = eval_reduce(f, Val::sort(1), lst, &EvalCtx::Pure).expect("eval_reduce");
+        let result = eval_reduce(f, Val::sort(1), lst, &EvalCtx::pure()).expect("eval_reduce");
         assert!(matches!(&result, Val::Sort(l) if l.is_nat(1)));
     }
 
@@ -324,7 +324,7 @@ mod tests {
             Rho::Nil,
         ));
         let lst = ind_list(Vec::new());
-        let result = eval_map(id_lam, lst, &EvalCtx::Pure).expect("eval_map");
+        let result = eval_map(id_lam, lst, &EvalCtx::pure()).expect("eval_map");
         match result {
             Val::List(items) => assert!(items.is_empty()),
             other => panic!("expected empty List, got {other:?}"),

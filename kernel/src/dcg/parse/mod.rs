@@ -68,7 +68,7 @@ use std::sync::Arc;
 use crate::layer::Layer;
 use crate::nbe::check::{check, exp_mentions_var, CheckCtx};
 use crate::nbe::env::Rho;
-use crate::nbe::eval::eval;
+use crate::nbe::eval::eval_env;
 use crate::nbe::readback::{readback_val, try_readback_val};
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Neut, Val};
@@ -1166,7 +1166,7 @@ impl Parser {
             }
             Exp::Pi(_, a, b) | Exp::Sig(_, a, b) => vec![a.as_ref(), b.as_ref()],
             Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            Exp::InductiveCtor(_, _, args) => args.iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -1325,6 +1325,7 @@ mod tests {
 
         fn decl(local: &str) -> Arc<InductiveDecl> {
             Arc::new(InductiveDecl {
+                uparams: Vec::new(),
                 iri: Iri::parse(&format!("urn:eigenius:lexicon:{local}")).unwrap(),
                 name: Name::from(local),
                 params: Vec::new(),
@@ -1333,8 +1334,9 @@ mod tests {
                 ctors: Vec::new(),
             })
         }
-        let ctor =
-            |local: &str, args: Vec<Exp>| Exp::InductiveCtor(decl(local), Name::from(local), args);
+        let ctor = |local: &str, args: Vec<Exp>| {
+            Exp::InductiveCtor(decl(local).iri.clone(), Name::from(local), args)
+        };
         let m = ctor("m_all", vec![]);
         let vp = ctor(
             "bwd",

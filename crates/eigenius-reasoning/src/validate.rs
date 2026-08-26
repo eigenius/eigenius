@@ -40,7 +40,7 @@ use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::institution::runtime::{Institution, QueryOutcome};
 use eigenius_kernel::nbe::check::{check, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
-use eigenius_kernel::nbe::eval::eval;
+use eigenius_kernel::nbe::eval::eval_env;
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
@@ -112,7 +112,13 @@ pub fn do_validate_justification(
             "proposition does not type-check at Prop: {e}"
         )));
     }
-    let proposition_val = match eval(&proposition_exp, &Rho::Nil) {
+    // In the chain's environment, not an empty one: the proposition names
+    // declarations, and an env-less eval would leave each a neutral (D76).
+    let proposition_val = match eval_env(
+        &proposition_exp,
+        &Rho::Nil,
+        &eigenius_kernel::nbe::env_global::Env::of(ctx.head().clone()),
+    ) {
         Ok(v) => v,
         Err(e) => {
             return Err(InstitutionError::ComputationFailed(format!(

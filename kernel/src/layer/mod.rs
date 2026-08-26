@@ -30,6 +30,7 @@
 mod bloom;
 mod cache;
 mod consolidate;
+pub mod declaration_order;
 mod handle;
 mod index;
 mod index_discovery;
@@ -37,6 +38,7 @@ pub mod merge;
 mod redirect;
 mod storage;
 mod supporting;
+pub mod term_mentions;
 mod text_index;
 mod value_index;
 mod vector_index;

@@ -96,6 +96,7 @@ fn build_chain() -> Arc<Layer> {
 fn parsed(gene: &str, activity: &str) -> Exp {
     let i = Iri::parse("urn:eigenius:demo:ont:requires").unwrap();
     let decl = Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: i.clone(),
         name: i.local_name().to_string(),
         params: Vec::new(),
@@ -106,8 +107,9 @@ fn parsed(gene: &str, activity: &str) -> Exp {
         sort: Exp::sort(0),
         ctors: Vec::new(),
     });
-    Exp::InductiveType(
-        decl,
+    Exp::const_applied(
+        decl.iri.clone(),
+        Vec::new(),
         vec![
             Exp::EigonClass(Iri::parse(gene).unwrap()),
             Exp::EigonClass(Iri::parse(activity).unwrap()),

@@ -200,7 +200,7 @@ fn enumerate_dependents(
 /// brand-new IRI. Bloom-gated `resolve`, so this is ~O(chain depth), not O(resources).
 /// Under reference integrity (Rule 22), only a redefinition can have lower instances or
 /// referrers, so this gates the expensive case-(1)/(3) scans.
-fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Iri) -> bool {
+pub(in crate::validation) fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Iri) -> bool {
     // A *shadowing* definition is not automatically a *changed* one. Re-loading an
     // ontology that is already resident (the bootstrap chain, or an idempotent
     // re-import) shadows every IRI it declares with a byte-identical definition. If
@@ -237,6 +237,30 @@ fn revalidate_pending(
     ws: &mut CommitWorkingSet,
 ) -> Result<(), WorkingSetExhausted> {
     let validator = Validator::new(Arc::clone(new_layer));
+
+    // **The same three memos `Validator::validate` installs, and for the same
+    // reason.** This loop calls `validate_resource` directly, so it was the one
+    // validation path running with no memoization at all: every dependent
+    // re-resolved its property definitions, rebuilt each class's field set, and
+    // re-decoded every declaration its terms mention.
+    //
+    // The soundness condition is identical and holds here — `new_layer` is an
+    // immutable `Arc` held for the whole loop — and the guards are nesting-safe, so
+    // a caller that already installed them is unaffected
+    // (`env_global::tests::the_memo_scope_nests_and_restores`).
+    //
+    // Usually small: Rule 22 scopes retroactive validation to redefinitions. The
+    // cost is not usually-small — a redefinition with many dependents is exactly
+    // the D65 load-scaling shape, one full walk per dependent.
+    //
+    // Found while chasing a reseed timing anomaly that turned out to be machine
+    // conditions. Recorded then rather than fixed, because the evidence did not
+    // support the fix; fixed now on the argument that stands on its own — two
+    // validation paths should not disagree about whether memoization applies.
+    let _resolve = crate::layer::ResolveMemoScope::new();
+    let _class_fields = crate::validation::ClassFieldsScope::new();
+    let _globals = crate::nbe::env_global::GlobalMemoScope::new();
+
     while let Some(iri) = ws.pending.pop() {
         if !ws.revalidated.insert(iri.clone())? {
             continue;

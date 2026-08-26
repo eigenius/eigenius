@@ -75,11 +75,13 @@ pub fn pretty_term(e: &Exp) -> String {
                 format!("{name}({})", join(&args.iter().collect::<Vec<_>>()))
             }
         }
-        Exp::InductiveType(decl, args) => {
+        // A type application is a `Const`-headed `App` spine since D76 Phase B.
+        e if e.as_const_spine().is_some() => {
+            let (iri, _, args) = e.as_const_spine().expect("just matched");
             if args.is_empty() {
-                decl.name.clone()
+                local(iri)
             } else {
-                format!("{}({})", decl.name, join(&args.iter().collect::<Vec<_>>()))
+                format!("{}({})", local(iri), join(&args))
             }
         }
         Exp::EigonAxiom(iri) | Exp::EigonClass(iri) => local(iri),

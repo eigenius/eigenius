@@ -165,6 +165,18 @@ pub enum ValidationRule {
     /// The last is what separates an opaque definition from an axiom: an axiom is asserted and the
     /// kernel takes it on trust, whereas a definition's body is checked here and only then sealed.
     DefinitionMalformed,
+    /// **D79 §2.3 — a `core:InductiveType` declaration may not be redefined.**
+    ///
+    /// A layer shadows an `InductiveType` its ancestors already declare, with a
+    /// *different* body. Constructors have no chain-resolvable identity of their
+    /// own (`nbe/term.rs:507`), so redefining the type is the only way to change
+    /// them and it replaces the whole constructor set at once — every committed
+    /// term mentioning the type silently means something else afterwards.
+    ///
+    /// For a `core:Class`, "add a parent" is a monotone edit the alignment layers
+    /// depend on, which is why classes stay redefinable. For an inductive there is
+    /// no monotone edit: changing constructors changes the type.
+    InductiveRedefinition,
 }
 
 impl fmt::Display for ValidationError {
@@ -187,6 +199,69 @@ impl fmt::Display for ValidationError {
 /// `CheckCtx` that owns the layer reference. Callers passing an
 /// already-Arc'd layer should `Arc::clone` it; callers with a fresh
 /// `Layer` should wrap in `Arc::new`.
+/// D78 Phase D — class IRI → the field set its record demands, memoized for the
+/// duration of a validation pass.
+///
+/// Routing membership through `resolve_class_type` is the unification: one
+/// definition of "what does `C` require", shared with the kernel instead of
+/// re-walked here. But that call reads back and re-evaluates a telescope, which
+/// is far heavier than the `BTreeSet` union it replaces, and the pass runs over
+/// 9.4M resources. Memoizing per **class** rather than per resource is what
+/// keeps the unification affordable: ~894 distinct classes against millions of
+/// instances.
+///
+/// **Thread-local with an RAII scope, keyed by layer — the same shape as
+/// [`crate::layer::ResolveMemoScope`], and for the same reasons.** A `RefCell`
+/// field on `Validator` would have been simpler and would have silently made a
+/// public type `!Sync`; this keeps `Validator` a plain `Arc<Layer>` wrapper.
+/// No-op when no scope is installed, so a direct `validate_resource` call still
+/// works — it just recomputes.
+///
+/// Soundness is `ResolveMemoScope`'s: correct only while the chain does not
+/// change, which holds across a pass over immutable `Arc<Layer>`s.
+/// `BTreeMap`, per the project convention — deterministic iteration order and
+/// better locality. The perf argument is close to a wash at this size (~894
+/// classes): `Iri` keys share long prefixes (`urn:eigenius:core:…`), so
+/// comparisons do not short-circuit early and a B-tree lookup reads more bytes
+/// than one hash would. Determinism and consistency with the surrounding code —
+/// the value is already a `BTreeSet` — decide it.
+///
+/// Note `RESOLVE_MEMO` uses `HashMap`; this does not follow it there.
+type ClassFieldsMemo = std::collections::BTreeMap<
+    crate::layer::LayerId,
+    std::collections::BTreeMap<Iri, BTreeSet<Iri>>,
+>;
+
+thread_local! {
+    static CLASS_FIELDS_MEMO: std::cell::RefCell<Option<ClassFieldsMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard installing a [`CLASS_FIELDS_MEMO`] for its lifetime. Nesting-safe:
+/// the previous memo is restored on drop, so a re-entrant pass gets its own.
+pub struct ClassFieldsScope {
+    prev: Option<ClassFieldsMemo>,
+}
+
+impl ClassFieldsScope {
+    pub fn new() -> Self {
+        let prev = CLASS_FIELDS_MEMO.with(|m| m.borrow_mut().replace(ClassFieldsMemo::new()));
+        Self { prev }
+    }
+}
+
+impl Default for ClassFieldsScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ClassFieldsScope {
+    fn drop(&mut self) {
+        CLASS_FIELDS_MEMO.with(|m| *m.borrow_mut() = self.prev.take());
+    }
+}
+
 pub struct Validator {
     pub(crate) layer: Arc<Layer>,
 }
@@ -204,12 +279,148 @@ impl Validator {
         // walked once instead of millions of times (D65 load-scaling fix). Dropped
         // at end of scope, releasing the cached `Arc`s.
         let _memo = crate::layer::ResolveMemoScope::new();
+        // D78 Phase D — same lifetime, same soundness condition: memoize each
+        // class's record field set so the telescope is built once per class
+        // rather than once per resource.
+        let _class_fields = ClassFieldsScope::new();
+        // D76 Phase B — same lifetime and soundness condition again: memoize the
+        // environment's answers so a declaration is decoded once per pass rather
+        // than once per occurrence.
+        let _globals = crate::nbe::env_global::GlobalMemoScope::new();
         let mut errors = Vec::new();
+        let mut resources = 0_u64;
         for arc_resource in self.layer.iter_resources().map(|(_, r)| r) {
             let resource: &Resource = &arc_resource;
+            resources += 1;
             errors.extend(self.validate_resource(resource));
         }
+
+        // **D76 §4.2's boundedness question, reported rather than argued.** That
+        // section flags the `(LayerId, Iri) → Global` memo as growing with every
+        // *resolved* IRI — unlike `CLASS_FIELDS_MEMO`, which grows with the
+        // ontology's class count — and calls that "the cost that has to be
+        // justified rather than assumed".
+        //
+        // It stayed assumed through three reseeds for a mundane reason: the memo is
+        // a thread-local inside a containerized kernel and nothing read it back.
+        // `entry_count()` existed and had no caller. One line closes that: the
+        // ratio of memo entries to resources validated is the measurement, and a
+        // pass over a real layer prints it.
+        //
+        // Bounded looks like entries ≪ resources — the key set tracking the
+        // *declarations* terms mention. Unbounded looks like the two rising
+        // together.
+        if let Some(entries) = crate::nbe::env_global::GlobalMemoScope::entry_count() {
+            tracing::info!(
+                { crate::observability::field::OPERATION } = "kernel.validate.memo",
+                { crate::observability::field::LAYER_ID } = %self.layer.id(),
+                { crate::observability::field::COUNT } = entries as u64,
+                resources = resources,
+                "validate.global_memo"
+            );
+        }
         errors
+    }
+
+    /// D78 §5 — the field set clause 8 tests against, for this resource.
+    ///
+    /// The class constraints' fields (transitive over `subclass_of`), plus the
+    /// conditional requirements whose `when_property` matches this resource's
+    /// values. `recommends` contributes nothing (§1.1): it names properties that
+    /// may be absent, and *if present, well typed* is Rule 3's job for any
+    /// property regardless of class.
+    ///
+    /// This is the same set the two prior walks produced —
+    /// `collect_effective_properties` chained with `evaluate_conditional_requires`
+    /// — reached through one definition rather than two. `shadow_required_fields`
+    /// asserts the agreement in tests.
+    fn effective_record_fields(&self, class_refs: &[&Iri], resource: &Resource) -> BTreeSet<Iri> {
+        let mut fields: BTreeSet<Iri> = BTreeSet::new();
+        for class_iri in class_refs {
+            self.extend_with_record_fields(class_iri, &mut fields);
+        }
+        let (conditional, _) = self.evaluate_conditional_requires(class_refs, resource);
+        fields.extend(conditional);
+        fields
+    }
+
+    /// The field set of one class's record, cached per class.
+    ///
+    /// An unresolvable class contributes nothing: Rule 14 and Rule 22 report the
+    /// dangling reference, and reporting it twice as a missing-property error
+    /// would be noise.
+    fn extend_with_record_fields(&self, class_iri: &Iri, out: &mut BTreeSet<Iri>) {
+        // Extend from inside the borrow rather than returning a `BTreeSet`.
+        // `Iri` is a `String` newtype, so handing back an owned set would clone
+        // the tree *and* a `String` per field on every lookup — once per
+        // resource, which is most of what the memo was meant to avoid.
+        let hit = CLASS_FIELDS_MEMO.with(|m| {
+            m.borrow().as_ref().and_then(|memo| {
+                memo.get(self.layer.id())
+                    .and_then(|inner| inner.get(class_iri))
+                    .map(|fields| {
+                        out.extend(fields.iter().cloned());
+                    })
+            })
+        });
+        if hit.is_some() {
+            return;
+        }
+
+        let fields: BTreeSet<Iri> =
+            match crate::program::ground::resolve_class_type(class_iri, &self.layer) {
+                Ok(crate::nbe::val::Val::Record(fs, _)) => {
+                    fs.iter().map(|(i, _, _)| i.clone()).collect()
+                }
+                // Primitives and inductives resolve to something other than a
+                // record and demand no fields of an instance. An unresolvable
+                // class contributes nothing either: Rules 14 and 22 report the
+                // dangling reference, and reporting it again as a missing
+                // property would be noise.
+                Ok(_) | Err(_) => BTreeSet::new(),
+            };
+        out.extend(fields.iter().cloned());
+        CLASS_FIELDS_MEMO.with(|m| {
+            if let Some(memo) = m.borrow_mut().as_mut() {
+                memo.entry(self.layer.id().clone())
+                    .or_default()
+                    .insert(class_iri.clone(), fields);
+            }
+        });
+    }
+
+    /// The **pre-D78 path**, kept callable for the Phase D parity gate.
+    ///
+    /// This is the independent transitive walk the unification replaced:
+    /// `collect_effective_properties` chained with `evaluate_conditional_requires`,
+    /// never touching `resolve_class_type`. `effective_record_fields` now goes
+    /// through the kernel's record instead, so the two are genuinely different
+    /// code paths and comparing them is a real check rather than a tautology.
+    ///
+    /// Phase D's obligation is **verdict parity** — identical output,
+    /// resource for resource, before and after.
+    #[cfg(test)]
+    pub(crate) fn shadow_required_fields(
+        &self,
+        class_refs: &[&Iri],
+        resource: &Resource,
+    ) -> BTreeSet<Iri> {
+        let (required_props, _) = self.collect_effective_properties(class_refs);
+        let (conditional_required, _) = self.evaluate_conditional_requires(class_refs, resource);
+        required_props
+            .into_iter()
+            .chain(conditional_required)
+            .collect()
+    }
+
+    /// Test-only accessor for the unified path, so the gate can compare them.
+    #[cfg(test)]
+    pub(crate) fn record_required_fields(
+        &self,
+        class_refs: &[&Iri],
+        resource: &Resource,
+    ) -> BTreeSet<Iri> {
+        self.effective_record_fields(class_refs, resource)
     }
 
     /// Validate a single resource.
@@ -225,17 +436,17 @@ impl Validator {
         // class. (See `rules::is_a` for the full story.)
         errors.extend(self.check_missing_is_a(resource, &res_id));
 
-        // Collect effective requires/recommends from all classes + ancestors
-        let (required_props, _recommended_props) = self.collect_effective_properties(&class_refs);
-
-        // Also collect conditional requirements
-        let (conditional_required, _conditional_recommended) =
-            self.evaluate_conditional_requires(&class_refs, resource);
-
-        let all_required: BTreeSet<Iri> = required_props
-            .into_iter()
-            .chain(conditional_required)
-            .collect();
+        // D78 Phase D — the required field set is the **effective record** for
+        // this resource: clause 8's `⟨ℓ, a⟩ ∈ r` obligation, read off one
+        // definition instead of an independent transitive walk.
+        //
+        // Conditional requirements are discharged here rather than carried as
+        // dependent fields, which is D78 §1.3 case (a): with the resource in
+        // hand the condition is decided against its values before clause 8 is
+        // applied, so no dependent machinery is needed. Case (b) — the class
+        // type standing alone — is the one that needs the telescope, and M1
+        // measured it as unexercised.
+        let all_required = self.effective_record_fields(&class_refs, resource);
 
         // Rule 1+2: Required properties (including inherited)
         for req_iri in &all_required {
@@ -343,6 +554,7 @@ impl Validator {
         // Rule 23 (eigenius#92): an inductive DECLARATION is admissible to the kernel. Runs on
         // the resource rather than on a property value — the declaration is the resource.
         errors.extend(self.check_inductive_declaration(resource, &res_id));
+        errors.extend(self.check_inductive_not_redefined(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*
@@ -804,7 +1016,11 @@ impl Validator {
         };
 
         // Evaluate the declared type to a Val so `check` can use it.
-        let type_val = match crate::nbe::eval::eval(&type_exp, &crate::nbe::env::Rho::Nil) {
+        let type_val = match crate::nbe::eval::eval_env(
+            &type_exp,
+            &crate::nbe::env::Rho::Nil,
+            &crate::nbe::env_global::Env::of(Arc::clone(&self.layer)),
+        ) {
             Ok(v) => v,
             Err(eval_err) => {
                 errors.push(ValidationError {
@@ -948,7 +1164,11 @@ impl Validator {
                     return errors;
                 }
             };
-        let type_val = match crate::nbe::eval::eval(&type_exp, &crate::nbe::env::Rho::Nil) {
+        let type_val = match crate::nbe::eval::eval_env(
+            &type_exp,
+            &crate::nbe::env::Rho::Nil,
+            &crate::nbe::env_global::Env::of(Arc::clone(&self.layer)),
+        ) {
             Ok(v) => v,
             Err(e) => {
                 fail(
@@ -1171,9 +1391,7 @@ fn first_beta_redex(e: &crate::nbe::term::Exp) -> Option<String> {
         Exp::Ann(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
             first_beta_redex(a).or_else(|| first_beta_redex(b))
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().find_map(first_beta_redex)
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().find_map(first_beta_redex),
         _ => None,
     }
 }
@@ -2786,5 +3004,253 @@ mod tests {
             shape_violations.is_empty(),
             "untyped binders should pass (only present-but-wrong slots are flagged); got {shape_violations:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod phase_d_parity {
+    //! D78 Phase D gate — the unified membership path must agree with the walk
+    //! it replaced, resource for resource.
+    //!
+    //! The two paths are genuinely different: `shadow_required_fields` walks
+    //! `subclass_of` through `collect_effective_properties`; `record_fields_of`
+    //! goes through `resolve_class_type`'s record. Agreement is a real check.
+
+    use super::*;
+    use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::ontology::eigon_json;
+
+    fn core_layer() -> Arc<Layer> {
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = LayerBuilder::new("core", None);
+        for r in eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    }
+
+    fn animals_layer() -> Arc<Layer> {
+        let doc = include_str!("../../../ontologies/examples/animals.json");
+        let mut d = LayerBuilder::new("animals", Some(core_layer()));
+        for r in eigon_json::parse_document(doc).unwrap() {
+            d.add_resource(r).unwrap();
+        }
+        Arc::new(d.build(LayerStorage::in_memory()))
+    }
+
+    /// Every resource in a layer must get the same required-field set from both
+    /// paths.
+    fn assert_parity(layer: Arc<Layer>, label: &str) -> usize {
+        let v = Validator::new(Arc::clone(&layer));
+        let mut checked = 0;
+        for iri in layer.defined_iris() {
+            let Some(r) = layer.get_resource(iri) else {
+                continue;
+            };
+            let classes = r.is_a();
+            let refs: Vec<&Iri> = classes.iter().collect();
+            let old = v.shadow_required_fields(&refs, &r);
+            let new = v.record_required_fields(&refs, &r);
+            assert_eq!(
+                old, new,
+                "{label}: required-field divergence on {iri}\n  walk:   {old:?}\n  record: {new:?}"
+            );
+            checked += 1;
+        }
+        checked
+    }
+
+    #[test]
+    fn the_core_ontology_agrees_on_every_resource() {
+        let n = assert_parity(core_layer(), "core");
+        assert!(n >= 100, "core has ~120 resources, checked {n}");
+    }
+
+    #[test]
+    fn the_animals_example_agrees_on_every_resource() {
+        // Has instances, not just declarations — so the conditional and
+        // inherited paths are both exercised.
+        let layer = animals_layer();
+        let n = assert_parity(layer, "animals");
+        assert!(n > 0, "animals must have resources");
+    }
+
+    #[test]
+    fn verdicts_are_identical_over_the_core_ontology() {
+        // Field-set parity is the mechanism; verdict parity is the obligation.
+        // Nothing above proves the *errors* match, so assert that directly.
+        let errors = Validator::new(core_layer()).validate();
+        assert!(
+            errors.is_empty(),
+            "the core ontology must still validate clean after Phase D: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_conditional_requirement_still_fires_through_the_record_path() {
+        // D78 §1.3 case (a): the condition is discharged against the resource's
+        // values before clause 8 applies. If the unification dropped that, a
+        // conditionally-required property would stop being demanded.
+        let v = Validator::new(core_layer());
+
+        // `core:Property` carries a ConditionalRequirement: a `resource`-typed
+        // property must declare `class_types`.
+        let mut prop = Resource::new(Iri::parse("urn:t:some_prop").unwrap());
+        prop.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+        );
+        prop.set(
+            Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+            Value::ResourceRef(Iri::parse(wk::RESOURCE).unwrap()),
+        );
+        let classes = prop.is_a();
+        let refs: Vec<&Iri> = classes.iter().collect();
+
+        let old = v.shadow_required_fields(&refs, &prop);
+        let new = v.record_required_fields(&refs, &prop);
+        assert_eq!(old, new, "conditional requirements must survive the switch");
+    }
+}
+
+#[cfg(test)]
+mod class_fields_memo {
+    //! D78 Phase D — the memo that makes routing membership through
+    //! `resolve_class_type` affordable.
+
+    use super::*;
+
+    #[test]
+    fn validator_is_send_and_sync() {
+        // The first cut put a `RefCell` field on `Validator`, which silently
+        // made a public type `!Sync`. Nothing shared one across threads at the
+        // time, so it compiled and the capability loss would have surfaced
+        // later. The memo is a thread-local instead; this pins the property.
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Validator>();
+    }
+
+    #[test]
+    fn the_memo_is_a_no_op_without_a_scope() {
+        // `validate_resource` can be called directly, outside `validate()`.
+        // Without a scope the memo is absent and the computation still runs —
+        // the same fall-through `RESOLVE_MEMO` has.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = crate::layer::LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+        let v = Validator::new(Arc::clone(&layer));
+
+        let iri = Iri::parse("urn:eigenius:core:Class").unwrap();
+        let r = layer.get_resource(&iri).unwrap();
+        let classes = r.is_a();
+        let refs: Vec<&Iri> = classes.iter().collect();
+
+        let no_scope = v.record_required_fields(&refs, &r);
+        let with_scope = {
+            let _s = ClassFieldsScope::new();
+            let first = v.record_required_fields(&refs, &r);
+            let second = v.record_required_fields(&refs, &r); // memo hit
+            assert_eq!(first, second, "a memo hit must equal the computed value");
+            second
+        };
+        assert_eq!(
+            no_scope, with_scope,
+            "the memo must not change the answer, only the cost"
+        );
+    }
+
+    #[test]
+    fn the_memo_is_bounded_by_distinct_classes_not_by_resources() {
+        // **The bound that makes this safe.** The memo is keyed by class IRI, so
+        // it grows with the ontology's class count and not with the instance
+        // count — which is the whole point over a 9.4M-resource chain. This
+        // builds many instances over one class and asserts the memo stays small.
+        //
+        // Contrast `RESOLVE_MEMO`, which is keyed by every resolved IRI and so
+        // does grow with the chain. That cost is accepted there; it is not
+        // inherited here.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut b = crate::layer::LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        let core = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
+
+        let mut d = crate::layer::LayerBuilder::new("many", Some(core));
+        for n in 0..500 {
+            let mut r = Resource::new(Iri::parse(&format!("urn:t:inst{n}")).unwrap());
+            r.set(
+                Iri::parse(wk::IS_A).unwrap(),
+                Value::Array(vec![Value::ResourceRef(
+                    Iri::parse(wk::DECLARED_RESOURCE).unwrap(),
+                )]),
+            );
+            d.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(d.build(crate::layer::LayerStorage::in_memory()));
+
+        let _memo = crate::layer::ResolveMemoScope::new();
+        let _scope = ClassFieldsScope::new();
+        let v = Validator::new(Arc::clone(&layer));
+        let mut resources = 0;
+        for iri in layer.defined_iris() {
+            if let Some(r) = layer.get_resource(iri) {
+                let classes = r.is_a();
+                let refs: Vec<&Iri> = classes.iter().collect();
+                let _ = v.record_required_fields(&refs, &r);
+                resources += 1;
+            }
+        }
+        assert_eq!(resources, 500, "the fixture must exercise 500 resources");
+
+        let entries = CLASS_FIELDS_MEMO.with(|m| {
+            m.borrow()
+                .as_ref()
+                .unwrap()
+                .values()
+                .map(|inner| inner.len())
+                .sum::<usize>()
+        });
+        assert!(
+            entries <= 4,
+            "500 resources over one class must leave a handful of memo entries, \
+             not one per resource; got {entries}"
+        );
+    }
+
+    #[test]
+    fn the_scope_is_nesting_safe() {
+        // A re-entrant pass — cascade revalidation is the real case — must get
+        // its own memo and restore the outer one on drop.
+        let marker = crate::layer::LayerId([7u8; 32]);
+        let outer = ClassFieldsScope::new();
+        CLASS_FIELDS_MEMO.with(|m| {
+            m.borrow_mut()
+                .as_mut()
+                .unwrap()
+                .insert(marker.clone(), Default::default());
+        });
+        {
+            let _inner = ClassFieldsScope::new();
+            CLASS_FIELDS_MEMO.with(|m| {
+                assert!(
+                    m.borrow().as_ref().unwrap().is_empty(),
+                    "the inner scope starts empty"
+                );
+            });
+        }
+        CLASS_FIELDS_MEMO.with(|m| {
+            assert!(
+                m.borrow().as_ref().unwrap().contains_key(&marker),
+                "the outer memo is restored on inner drop"
+            );
+        });
+        drop(outer);
+        CLASS_FIELDS_MEMO.with(|m| {
+            assert!(m.borrow().is_none(), "no memo outside any scope");
+        });
     }
 }

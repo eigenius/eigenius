@@ -282,7 +282,8 @@ pub fn apply_witness_resolution(
     //    and evaluating in `Rho::Nil` keeps construction uniform with
     //    how the rest of the kernel produces Pi-chain Vals.
     let a_exp = Exp::EigonClass(class.clone());
-    let option_a_exp = Exp::InductiveType(option_decl(), vec![a_exp.clone()]);
+    let option_a_exp =
+        Exp::const_applied(option_decl().iri.clone(), Vec::new(), vec![a_exp.clone()]);
     let expected_exp = Exp::Pi(
         Patt::Unit,
         Box::new(a_exp.clone()),
@@ -309,8 +310,9 @@ pub fn apply_witness_resolution(
         }
     })?;
 
-    // 5. Evaluate in Pure mode — merge witnesses can't do IO.
-    let ctx = EvalCtx::Pure;
+    // 5. Effect-free — merge witnesses can't do IO — but *in the chain's
+    // environment*, since the transformation term names declarations (D76).
+    let ctx = EvalCtx::in_env(crate::nbe::env_global::Env::of(Arc::clone(&layer)));
     let term_val =
         eval_ctx(&exp, &Rho::Nil, &ctx).map_err(|e| MergeError::TransformationEvalError {
             transformation: handle.transformation.clone(),
@@ -327,12 +329,12 @@ pub fn apply_witness_resolution(
     let val_b = Val::ResourceVal(Box::new(branch_b));
     let val_opt = match ancestor {
         None => Val::InductiveVal {
-            decl: option_decl(),
+            iri: option_decl().iri.clone(),
             ctor_name: "none".to_string(),
             args: vec![a_val.clone()],
         },
         Some(r) => Val::InductiveVal {
-            decl: option_decl(),
+            iri: option_decl().iri.clone(),
             ctor_name: "some".to_string(),
             args: vec![a_val, Val::ResourceVal(Box::new(r))],
         },

@@ -31,9 +31,10 @@ impl Parser {
     /// check-mode (not `check_infer`) so a wh-question's answer-property *lambda* —
     /// which `check_infer` cannot synthesize — is checked against its expected Π/→.
     pub(super) fn reduced_felicitous(&self, it: &Item) -> Option<Item> {
+        let env = self.grammar.env();
         let expected = denote_cat(it.cat()).ok()?;
-        let expected_val = eval(&expected, &Rho::Nil).ok()?;
-        let nf = felicity_readback(&eval(it.sem(), &Rho::Nil).ok()?)?;
+        let expected_val = eval_env(&expected, &Rho::Nil, &env).ok()?;
+        let nf = felicity_readback(&eval_env(it.sem(), &Rho::Nil, &env).ok()?)?;
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
         Some(Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost()))
@@ -82,8 +83,9 @@ impl Parser {
             .iter()
             .filter(|(base, _, _)| exp_mentions_var(it.sem(), base))
             .collect();
+        let env = self.grammar.env();
         let expected = denote_cat(it.cat()).ok()?;
-        let expected_val = eval(&expected, &Rho::Nil).ok()?;
+        let expected_val = eval_env(&expected, &Rho::Nil, &env).ok()?;
         // Evaluate the assembled sem with each freshened hole base bound to a generic neutral
         // (else Pure eval errors on the free var). `Neut::Gen(0, base)` reads back as
         // `Var("{base}0")`, so the holes in the normal form carry that suffixed name.
@@ -99,7 +101,7 @@ impl Parser {
         if dbg {
             eprintln!("    [felicity] eval start");
         }
-        let evaled = eval(it.sem(), &eval_rho).ok()?;
+        let evaled = eval_env(it.sem(), &eval_rho, &env).ok()?;
         if dbg {
             eprintln!("    [felicity] readback start");
         }
@@ -164,7 +166,7 @@ impl Parser {
                 Box::new(pi_ty),
             );
         }
-        let pi_val = eval(&pi_ty, &Rho::Nil).ok()?;
+        let pi_val = eval_env(&pi_ty, &Rho::Nil, &env).ok()?;
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &abstracted, &pi_val).ok()?;
         let item = Item::from_parts(it.cat().clone(), abstracted, it.prov(), it.cost());
@@ -282,20 +284,20 @@ pub(super) fn is_finite_clause(cat: &Exp) -> bool {
 /// that reason. Reports the connective, the argument index and the binder, which with `it.prov()`
 /// beside it names the construction.
 fn conn_over_function(e: &Exp) -> Option<String> {
-    if let Exp::InductiveType(d, args) = e {
+    if let Some((iri, _, args)) = e.as_const_spine() {
         if matches!(
-            d.iri.as_str(),
+            iri.as_str(),
             "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"
         ) {
             for (i, a) in args.iter().enumerate() {
                 if let Exp::Lam(p, body) = a {
                     return Some(format!(
                         "CONN-OVER-FUNCTION: {}(arg#{i}) is λ{p:?}. {}",
-                        d.name,
+                        iri.local_name(),
                         match body.as_ref() {
                             Exp::App(..) => "App(…)",
                             Exp::Lam(..) => "λ…",
-                            Exp::InductiveType(d2, _) => d2.name.as_str(),
+                            Exp::Const(head, _) => head.local_name(),
                             _ => "…",
                         }
                     ));

@@ -20,7 +20,7 @@
 
 use crate::esl::ast;
 use crate::esl::error::{EslError, Position};
-use crate::nbe::term::{Exp, InductiveDecl, Patt};
+use crate::nbe::term::{Exp, Patt};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
@@ -88,6 +88,32 @@ fn sort_kind_level(
 /// so `data X : Sort u` had to be rejected and nothing validated the string's shape. Emitting the
 /// same `core:Level` tree every other level uses removes both problems: one representation, and
 /// the validator checks it against the ctor schema like any other inductive value.
+/// The level variables an `ast::LevelExpr` mentions, appended in first-mention
+/// order and without duplicates.
+fn level_expr_params(l: &ast::LevelExpr, out: &mut Vec<String>) {
+    match l {
+        ast::LevelExpr::Num(_) => {}
+        ast::LevelExpr::Var(v) => {
+            if !out.iter().any(|x| x == v) {
+                out.push(v.clone());
+            }
+        }
+        ast::LevelExpr::Add(inner, _) => level_expr_params(inner, out),
+        ast::LevelExpr::Max(a, b) | ast::LevelExpr::IMax(a, b) => {
+            level_expr_params(a, out);
+            level_expr_params(b, out);
+        }
+    }
+}
+
+/// The level variables a `SortKind` mentions.
+fn sort_kind_params(k: &ast::SortKind, out: &mut Vec<String>) {
+    match k {
+        ast::SortKind::Prop | ast::SortKind::Set => {}
+        ast::SortKind::Type(l) | ast::SortKind::Sort(l) => level_expr_params(l, out),
+    }
+}
+
 fn sort_kind_result_value(
     k: &ast::SortKind,
     declared: &std::collections::BTreeSet<String>,
@@ -637,6 +663,46 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
 }
 
 impl Compiler {
+    /// **Universe generalisation** — the level variables a `data` declaration
+    /// binds, in first-mention order (eigenius#188, D76 Phase E2).
+    ///
+    /// Walks the three places a declaration can mention a level: its result sort,
+    /// its parameter kinds, and its index kinds. A constructor argument cannot
+    /// introduce a *new* one — it may only mention a parameter or the declaration's
+    /// own sort — so the walk is closed over these three.
+    ///
+    /// **First-mention order is the instantiation contract.** A reference
+    /// substitutes level arguments by position (`Level::subst`), so this order is
+    /// what a `ConstRef`'s level list is understood against. A `BTreeSet` would
+    /// make it alphabetical, which is arbitrary and would silently permute a
+    /// two-parameter declaration's arguments.
+    fn declaration_universe_params(&self, decl: &ast::DataDecl) -> Result<Vec<String>, EslError> {
+        let mut out: Vec<String> = Vec::new();
+        if let Some(sort) = &decl.result_sort {
+            sort_kind_params(sort, &mut out);
+        }
+        for p in &decl.params {
+            if let ast::IndexKind::Sort(k) = &p.kind {
+                sort_kind_params(k, &mut out);
+            }
+        }
+        for ix in &decl.indices {
+            if let ast::IndexKind::Sort(k) = &ix.kind {
+                sort_kind_params(k, &mut out);
+            }
+        }
+        // Every name here already passed `lower_level`'s declared-universe check on
+        // the way to the emitted `result_sort` / `param_kind`, so an undeclared one
+        // cannot reach this point. Asserted rather than re-checked: a second,
+        // divergent check is how `decode_param_kind` and `decode_arg_type` came to
+        // disagree (eigenius#199).
+        debug_assert!(
+            out.iter().all(|u| self.declared_universes.contains(u)),
+            "generalisation found an undeclared level variable, which `lower_level` should have rejected"
+        );
+        Ok(out)
+    }
+
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
@@ -741,6 +807,60 @@ impl Compiler {
     /// — caller falls through to its non-ctor paths (variable
     /// lookup, EigonClass, etc.).
     fn resolve_ctor_iri(&self, qn: &ast::QualifiedName) -> Result<Option<String>, EslError> {
+        // **eigenius#24 — `[ns:]Type:ctor`, the fully-disambiguated form.** Until this,
+        // two inductives in one file declaring the same constructor short name could
+        // only be told apart by renaming one, which is what the ambiguity errors below
+        // told the author to do. Naming the constructor by its type is the right
+        // disambiguator because `(inductive, ctor name)` **is** a constructor's
+        // identity (D79 §2.2.1) — constructors have no IRI of their own, so there is
+        // nothing else it could be qualified by.
+        if let Some((type_local, ctor_local)) = qn.name.split_once(':') {
+            let bucket = match self.ctors_by_short_name.get(ctor_local) {
+                Some(b) => b,
+                None => return Ok(None),
+            };
+            // A candidate matches when its parent's local name is `type_local` and,
+            // when a namespace alias was given, the parent lives in that namespace.
+            let ns_uri = match &qn.namespace {
+                Some(alias) => Some(self.namespaces.get(alias).ok_or_else(|| {
+                    EslError::compiler(
+                        Some(qn.pos.clone()),
+                        format!("unknown namespace alias `{alias}`"),
+                    )
+                })?),
+                None => None,
+            };
+            let matches: Vec<&String> = bucket
+                .iter()
+                .filter(|ctor_iri| {
+                    let Some((parent, _)) = ctor_iri.rsplit_once(':') else {
+                        return false;
+                    };
+                    let Some((parent_ns, parent_local)) = parent.rsplit_once(':') else {
+                        return false;
+                    };
+                    parent_local == type_local
+                        && ns_uri
+                            .is_none_or(|u| parent_ns == u || parent.starts_with(&format!("{u}:")))
+                })
+                .collect();
+            return match matches.as_slice() {
+                [single] => Ok(Some((*single).clone())),
+                [] => Ok(None),
+                multiple => Err(EslError::compiler(
+                    Some(qn.pos.clone()),
+                    format!(
+                        "qualified constructor `{}` is ambiguous — more than one inductive named                          `{type_local}` declares `{ctor_local}`: [{}]. Add a namespace prefix.",
+                        qn.name,
+                        multiple
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                )),
+            };
+        }
         let bucket = match self.ctors_by_short_name.get(&qn.name) {
             Some(b) => b,
             None => return Ok(None),
@@ -836,23 +956,19 @@ impl Compiler {
                 format!("invalid parent IRI `{parent_iri_str}` for ctor `{ctor_name}`: {e}"),
             )
         })?;
-        // Per gh #75 the stub's `name` is the diagnostic label; the
-        // identity is the IRI. Pull the short name from the parent
-        // IRI's local part so error messages read naturally.
-        let parent_short_name = parent_iri.local_name().to_string();
-        let stub = std::sync::Arc::new(InductiveDecl {
-            iri: parent_iri,
-            name: parent_short_name,
-            params: Vec::new(),
-            indices: Vec::new(),
-            sort: Exp::sort(1),
-            ctors: Vec::new(),
-        });
+        // D76 Phase B — a constructor reference is `(inductive IRI, ctor name)`.
+        // This built a stub declaration whose only real content was that same IRI:
+        // per gh #75 the `name` was a diagnostic label and the identity was always
+        // the IRI.
         let arg_exps: Result<Vec<Exp>, EslError> = args
             .iter()
             .map(|a| self.lower_type_expr_to_exp(a, scope))
             .collect();
-        Ok(Exp::InductiveCtor(stub, ctor_name.to_string(), arg_exps?))
+        Ok(Exp::InductiveCtor(
+            parent_iri,
+            ctor_name.to_string(),
+            arg_exps?,
+        ))
     }
 
     /// Lower a `data` / `codata` parameter or index KIND to its `eigentt:TypeExpr` value.
@@ -1628,24 +1744,15 @@ impl Compiler {
                 if args.is_empty() {
                     Ok(Exp::EigonClass(iri_val))
                 } else {
-                    // Stub InductiveDecl for the App-curried encoding.
-                    // The D47 codec produces `App(App(ConstRef(iri),
-                    // a1), a2)…` and the decoder re-resolves the IRI
-                    // against the chain at use time.
-                    let short_name = iri_val.local_name().to_string();
-                    let stub = std::sync::Arc::new(InductiveDecl {
-                        iri: iri_val.clone(),
-                        name: short_name,
-                        params: Vec::new(),
-                        indices: Vec::new(),
-                        sort: Exp::sort(1),
-                        ctors: Vec::new(),
-                    });
+                    // D76 Phase B — the name, applied, which is what the D47 codec
+                    // has always produced: `App(App(ConstRef(iri), a1), a2)…`. A
+                    // stub declaration was built here only to fill the fused node's
+                    // declaration slot before being discarded by the encoder.
                     let arg_exps: Result<Vec<Exp>, EslError> = args
                         .iter()
                         .map(|a| self.lower_type_expr_to_exp(a, scope))
                         .collect();
-                    Ok(Exp::InductiveType(stub, arg_exps?))
+                    Ok(Exp::const_applied(iri_val.clone(), Vec::new(), arg_exps?))
                 }
             }
             ast::TypeExpr::Arrow {
@@ -2107,19 +2214,55 @@ impl Compiler {
             );
         }
 
-        let parent_iri_str = self.resolve(&decl.name)?;
+        // **Universe generalisation** (eigenius#188, D76 Phase E2). The level
+        // variables this declaration actually mentions become its `uparams`, in
+        // first-mention order.
+        //
+        // Generalised rather than written, per N3 §3's binder decision: `universe u;`
+        // is FILE-scoped, so a file declaring `u` does not thereby make every
+        // declaration in it polymorphic. What binds `u` on a declaration is that the
+        // declaration *uses* it — which is also what makes the common case free, since
+        // a monomorphic declaration mentions none and gets an empty list.
+        //
+        // ORDER IS THE INSTANTIATION ORDER. A reference substitutes by position, so
+        // first-mention order is the contract between this function and
+        // `Level::subst`; a set would make it arbitrary.
+        let uparams = self.declaration_universe_params(decl)?;
+        if !uparams.is_empty() {
+            r.set(
+                iri(wk::UNIVERSE_PARAMS),
+                Value::Array(uparams.into_iter().map(Value::String).collect()),
+            );
+        }
+
         let ctors: Result<Vec<Value>, EslError> = decl
             .ctors
             .iter()
             .map(|c| {
-                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name());
-                let ctor_iri = Iri::parse(&ctor_iri_str).map_err(|e| {
-                    EslError::compiler(
-                        Some(c.pos().clone()),
-                        format!("invalid ctor IRI `{ctor_iri_str}`: {e}"),
-                    )
-                })?;
-                let mut cr = Resource::new(ctor_iri);
+                // **D79 §2.2.1 — a constructor has no chain identity, and the
+                // representation now says so.** This used to be
+                // `Resource::new("{parent_iri}:{ctor_name}")`, giving every ctor
+                // payload an `@id` that looked chain-resolvable and was not: the
+                // resource is stored `Value::Embedded` inside `core:ctors`, so
+                // nothing resolves it. That `@id` was **written and never read** —
+                // every consumer goes through the `core:ctor_name` property
+                // (`ground::decode_ctors`, `esl::print`, institution dispatch), and
+                // even `external_ctors`, the one place that uses the
+                // `{parent}:{name}` string form, reconstructs it from the parent's
+                // `id()` plus `ctor_name` rather than reading the `@id` beside it.
+                //
+                // It is removed because it asserted the wrong thing. Constructors
+                // are *closed*: a type's constructors are exhaustively given by its
+                // declaration, which is what makes case analysis and the recursor
+                // sound. That is exactly what distinguishes them from resources,
+                // which are open-world — anyone may add an instance of a class in a
+                // later layer, and nobody may add a constructor to an inductive in a
+                // later layer. A chain IRI states openness.
+                //
+                // The validator still reaches these: its embedded-resource recursion
+                // gates on `is_a`, not on `@id` (`validation/mod.rs:559`), and
+                // attributes any error to the nearest ancestor that has one.
+                let mut cr = Resource::new_embedded();
                 set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
                 cr.set(iri(wk::CTOR_NAME), Value::String(c.name().to_string()));
                 match c {
@@ -4736,11 +4879,17 @@ mod tests {
             Value::Embedded(r) => r.as_ref(),
             _ => panic!("ctor must be embedded"),
         };
-        // Each ctor carries an IRI derived from parent + local name
-        // (Phase 11b step 9 — IRI as canonical identity).
+        // **No `@id`** (D79 §2.2.1). A constructor has no chain identity: its
+        // identity is `(inductive IRI, ctor_name)`, which is what the D47 wire
+        // carries as `CtorApp(D, c)`. Until D79 P4 this asserted
+        // `urn:eigenius:example:Nat:zero` — an `@id` that looked chain-resolvable,
+        // was stored `Value::Embedded` so nothing resolved it, and was read by no
+        // consumer. Constructors are *closed*, resources are open-world; a chain
+        // IRI stated the wrong one.
         assert_eq!(
-            zero.id().map(|i| i.as_str()),
-            Some("urn:eigenius:example:Nat:zero")
+            zero.id(),
+            None,
+            "a constructor is an embedded resource with no @id"
         );
         assert_eq!(
             zero.get(&iri("urn:eigenius:core:ctor_name"))
@@ -4758,10 +4907,7 @@ mod tests {
             Value::Embedded(r) => r.as_ref(),
             _ => panic!("ctor must be embedded"),
         };
-        assert_eq!(
-            succ.id().map(|i| i.as_str()),
-            Some("urn:eigenius:example:Nat:succ")
-        );
+        assert_eq!(succ.id(), None, "D79 §2.2.1 — no @id on a constructor");
         assert_eq!(
             succ.get(&iri("urn:eigenius:core:ctor_name"))
                 .and_then(|v| v.as_str()),
@@ -6526,5 +6672,78 @@ mod sigma_surface_tests {
     fn only_the_eigentt_projections_are_intercepted() {
         let j = axiom_statement(&format!("{NS} axiom p:t : core:Asserts(core:string)"));
         assert_eq!(j["ctor"], "App", "got {j}");
+    }
+}
+
+#[cfg(test)]
+mod qualified_ctor_tests {
+    //! **eigenius#24 / D79 P6.** Two inductives in one file declaring the same
+    //! constructor short name used to be unresolvable: `resolve_ctor_iri` reported
+    //! the ambiguity and told the author to *"rename one of the ctors as a
+    //! workaround"*. `Type:ctor` names it directly.
+    //!
+    //! `(inductive, ctor name)` **is** a constructor's identity (D79 §2.2.1) —
+    //! constructors have no IRI of their own — so the type is the only thing a
+    //! constructor reference could be qualified by. #24's own rationale argued from
+    //! the opposite premise ("each constructor has a canonical IRI … lookup is
+    //! IRI-keyed"), which P4 removed; the feature survives the correction because it
+    //! never depended on that premise, only on the pair.
+    use super::*;
+
+    fn compile(src: &str) -> Result<Vec<crate::ontology::resource::Resource>, Vec<EslError>> {
+        crate::esl::compile(src)
+    }
+
+    fn errors(src: &str) -> String {
+        match compile(src) {
+            Ok(_) => String::new(),
+            Err(es) => es
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+        }
+    }
+
+    const TWO_INDUCTIVES: &str = r#"
+namespace ex = "urn:eigenius:example";
+data ex:Colour { red, mk }
+data ex:Shape  { square, mk }
+"#;
+
+    /// The case the ambiguity error existed for.
+    #[test]
+    fn a_shared_ctor_short_name_is_ambiguous_unqualified() {
+        let src = format!(
+            "{TWO_INDUCTIVES}\naxiom ex:a : ex:Colour -> Prop\ndef ex:v : ex:Colour = mk;\n"
+        );
+        let err = errors(&src);
+        assert!(
+            err.contains("ambiguous"),
+            "expected an ambiguity diagnostic, got {err:?}"
+        );
+    }
+
+    /// And the same reference, qualified by its type, resolves.
+    #[test]
+    fn qualifying_by_the_inductive_disambiguates() {
+        let src = format!("{TWO_INDUCTIVES}\ndef ex:v : ex:Colour = ex:Colour:mk;\n");
+        assert_eq!(
+            errors(&src),
+            "",
+            "ex:Colour:mk names exactly one constructor"
+        );
+    }
+
+    /// The lexer change must not eat an annotation colon. `ex:Colour : Prop` is
+    /// space-surrounded, so it stays a binder colon — tightness is the discriminator.
+    #[test]
+    fn a_space_surrounded_annotation_colon_is_untouched() {
+        let src = format!("{TWO_INDUCTIVES}\naxiom ex:p : ex:Colour -> Prop\n");
+        assert_eq!(
+            errors(&src),
+            "",
+            "` : ` is an annotation colon, not a name separator"
+        );
     }
 }

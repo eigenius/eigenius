@@ -50,7 +50,7 @@ use std::sync::Arc;
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::nbe::env::Rho;
-use eigenius_kernel::nbe::eval::eval;
+use eigenius_kernel::nbe::eval::eval_env;
 use eigenius_kernel::nbe::term::{Exp, InductiveCtorDecl, InductiveDecl, PrimitiveType};
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
@@ -70,7 +70,12 @@ pub fn extract_justification(
     ctx: &ExecutionContext,
 ) -> Result<Val, InstitutionError> {
     let exp = justification_exp(sentence, ctx)?;
-    eval(&exp, &Rho::Nil).map_err(|e| {
+    eval_env(
+        &exp,
+        &Rho::Nil,
+        &eigenius_kernel::nbe::env_global::Env::of(ctx.head().clone()),
+    )
+    .map_err(|e| {
         InstitutionError::ComputationFailed(format!("failed to evaluate justification: {e:?}"))
     })
 }
@@ -318,7 +323,7 @@ fn decode_json(
         .collect();
 
     Ok(Exp::InductiveCtor(
-        decl.clone(),
+        decl.iri.clone(),
         ctor_name.to_string(),
         decoded_args?,
     ))
@@ -401,21 +406,28 @@ fn decode_arg(
             declared: describe_type(declared),
             details: "the kernel term language has no literal for opaque JSON".to_string(),
         }),
-        Exp::InductiveType(arg_decl, _) if arg_decl.iri == decl.iri => {
+        // A named type — `Const(I)` or an `App` spine over one (D76 Phase B).
+        e if e
+            .as_const_spine()
+            .is_some_and(|(iri, _, _)| *iri == decl.iri) =>
+        {
             if !json.is_object() {
                 return Err(mismatch());
             }
             decode_json(json, decl, path)
         }
-        Exp::InductiveType(arg_decl, _) => Err(ChainDecodeError::UnsupportedArgType {
-            path: path.to_string(),
-            declared: describe_type(declared),
-            details: format!(
-                "argument is declared at a different inductive than the enclosing `{}`; \
-                 decoding it needs the layer chain to resolve `{}`'s ctors (gh #74)",
-                decl.iri, arg_decl.iri
-            ),
-        }),
+        e if e.as_const_spine().is_some() => {
+            let (arg_iri, _, _) = e.as_const_spine().expect("just matched");
+            Err(ChainDecodeError::UnsupportedArgType {
+                path: path.to_string(),
+                declared: describe_type(declared),
+                details: format!(
+                    "argument is declared at a different inductive than the enclosing `{}`; \
+                     decoding it needs the layer chain to resolve `{}`'s ctors (gh #74)",
+                    decl.iri, arg_iri
+                ),
+            })
+        }
         // A bound type parameter or index. There is no ground type to
         // map a JSON shape onto — the slot's type depends on how the
         // inductive was instantiated, which a D32 §3.7 chain value does
@@ -452,8 +464,10 @@ fn describe_type(typ: &Exp) -> String {
         Exp::EigonPrimitive(PrimitiveType::Float) => wk::FLOAT.to_string(),
         Exp::EigonPrimitive(PrimitiveType::Boolean) => wk::BOOLEAN.to_string(),
         Exp::EigonPrimitive(PrimitiveType::Json) => wk::JSON.to_string(),
-        Exp::InductiveType(d, _) => d.iri.to_string(),
         Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => iri.to_string(),
+        e if e.as_const_spine().is_some() => {
+            e.as_const_spine().expect("just matched").0.to_string()
+        }
         Exp::Var(n) => n.clone(),
         other => format!("{other:?}"),
     }
@@ -608,8 +622,11 @@ data probe:Lits {
             .expect("SpecStr declared");
         let args = ctor_arg_types(&decl, spec_str_ctor).expect("telescope walks");
         match args.as_slice() {
-            [Exp::InductiveType(d, _), Exp::EigonPrimitive(PrimitiveType::String)] => {
-                assert_eq!(d.iri.as_str(), iris::JUSTIFICATION_TERM);
+            [first, Exp::EigonPrimitive(PrimitiveType::String)] => {
+                let (iri, _, _) = first
+                    .as_const_spine()
+                    .expect("the first argument names an inductive");
+                assert_eq!(iri.as_str(), iris::JUSTIFICATION_TERM);
             }
             other => panic!("SpecStr : J -> core:string -> J, got {other:?}"),
         }
@@ -690,7 +707,7 @@ data probe:Lits {
         match exp {
             Exp::InductiveCtor(d, name, args) => {
                 assert_eq!(name, "App");
-                assert_eq!(d.iri.as_str(), iris::JUSTIFICATION_TERM);
+                assert_eq!(d.as_str(), iris::JUSTIFICATION_TERM);
                 assert!(matches!(&args[0], Exp::InductiveCtor(_, n, _) if n == "DeclaredEvidence"));
                 match &args[1] {
                     Exp::InductiveCtor(_, n, inner) => {

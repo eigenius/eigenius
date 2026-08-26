@@ -389,6 +389,7 @@ mod tests {
 
     fn decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: Iri::parse("urn:eigenius:reasoning:JustificationTerm").unwrap(),
             name: "JustificationTerm".to_string(),
             params: Vec::new(),
@@ -400,20 +401,20 @@ mod tests {
 
     fn leaf(ctor: &str, iri: &str) -> Exp {
         Exp::InductiveCtor(
-            decl(),
+            decl().iri.clone(),
             ctor.to_string(),
             vec![Exp::LitString(iri.to_string())],
         )
     }
     fn app(a: Exp, b: Exp) -> Exp {
-        Exp::InductiveCtor(decl(), "App".to_string(), vec![a, b])
+        Exp::InductiveCtor(decl().iri.clone(), "App".to_string(), vec![a, b])
     }
     fn sum(a: Exp, b: Exp) -> Exp {
-        Exp::InductiveCtor(decl(), "Sum".to_string(), vec![a, b])
+        Exp::InductiveCtor(decl().iri.clone(), "Sum".to_string(), vec![a, b])
     }
     fn spec(j: Exp, tag: &str) -> Exp {
         Exp::InductiveCtor(
-            decl(),
+            decl().iri.clone(),
             "SpecStr".to_string(),
             vec![j, Exp::LitString(tag.to_string())],
         )
@@ -558,11 +559,19 @@ mod tests {
             Err(ProjectError::NotATerm)
         );
         assert_eq!(
-            support(&Exp::InductiveCtor(decl(), "Nope".into(), vec![])),
+            support(&Exp::InductiveCtor(
+                decl().iri.clone(),
+                "Nope".into(),
+                vec![]
+            )),
             Err(ProjectError::UnknownCtor("Nope".into()))
         );
         assert_eq!(
-            support(&Exp::InductiveCtor(decl(), "App".into(), vec![])),
+            support(&Exp::InductiveCtor(
+                decl().iri.clone(),
+                "App".into(),
+                vec![]
+            )),
             Err(ProjectError::Arity {
                 ctor: "App".into(),
                 got: 0

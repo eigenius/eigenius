@@ -22,11 +22,23 @@ use crate::nbe::env::gen_val;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::Val;
+use crate::ontology::iri::Iri;
 
 /// Check type equality by normalization.
 ///
 /// Port of `eqNf` from the reference: normalize both sides
 /// and compare syntactically.
+///
+/// **Deliberately takes no environment**, unlike `subtype_of` (D76 Phase D).
+/// Phase D's spec listed `eq_nf` among the functions to thread; it does not need
+/// one, and clippy said so — the parameter went unread.
+///
+/// The reason is that entailment is a *subtyping* notion. `⋀S ⊨ D` decides
+/// whether one constraint set is at least as strong as another, which is the
+/// asymmetric question. For **equality** the sets must match, and relaxing that to
+/// mutual entailment would make refinement identity structural — the same
+/// objection Q2 raises against unfolding classes, where 749 of 894 shipped classes
+/// have identical field sets.
 pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), CheckError> {
     // D49 §8 — ChainWitness values are opaque kernel-internal markers
     // that intentionally do not read back into surface syntax. Equality
@@ -114,9 +126,7 @@ pub fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
         Exp::Id(a, x, y) => {
             exp_mentions_var(a, name) || exp_mentions_var(x, name) || exp_mentions_var(y, name)
         }
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().any(|a| exp_mentions_var(a, name))
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(|a| exp_mentions_var(a, name)),
         // For other Exp variants (Sort, One, Unit, Set, primitives,
         // EigonClass, etc.) there's no Var inside to find.
         _ => false,
@@ -140,16 +150,34 @@ fn patt_binds(patt: &Patt, name: &str) -> bool {
 /// false (conservatively — may reject a valid Prop arg that requires
 /// evaluation to resolve) for variables, applications, neutrals, and
 /// the universe `Sort(0)` itself (which inhabits `Sort(1)`).
-pub(super) fn is_syntactically_propositional_type(typ: &Exp) -> bool {
+///
+/// **Takes `Γ_env` since D76 Phase B.** The inductive case reads the declaration's
+/// `sort`, which the term carried inline as `Exp::const_applied(decl.iri.clone(), Vec::new(), _)` and now
+/// names as `Const`. A name the environment cannot resolve is not propositional —
+/// the same answer the fused form gave for a non-`Prop` declaration, and the
+/// conservative one here, since a wrong `true` would admit large elimination that
+/// D46 proof irrelevance makes unsound.
+pub(super) fn is_syntactically_propositional_type(
+    env: &crate::nbe::env_global::Env,
+    typ: &Exp,
+) -> bool {
     match typ {
         Exp::Id(_, _, _) => true,
-        Exp::Pi(_, _, body) => is_syntactically_propositional_type(body),
-        Exp::Arrow(_, body) => is_syntactically_propositional_type(body),
+        Exp::Pi(_, _, body) => is_syntactically_propositional_type(env, body),
+        Exp::Arrow(_, body) => is_syntactically_propositional_type(env, body),
         Exp::Sig(_, dom, body) | Exp::Times(dom, body) => {
-            is_syntactically_propositional_type(dom) && is_syntactically_propositional_type(body)
+            is_syntactically_propositional_type(env, dom)
+                && is_syntactically_propositional_type(env, body)
         }
-        Exp::InductiveType(decl, _) => matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0)),
-        _ => false,
+        e => match e.as_const_spine() {
+            Some((iri, _, _)) => match env.lookup(iri) {
+                crate::nbe::env_global::Global::Inductive(decl) => {
+                    matches!(&decl.sort, Exp::Sort(l) if l.is_nat(0))
+                }
+                _ => false,
+            },
+            None => false,
+        },
     }
 }
 
@@ -287,25 +315,32 @@ enum Indices {
 /// COVARIANT at `SizeSort` positions — `T(s) <: T(ŝ s) <: T(∞)`, the driving motivation for
 /// sized types (D19 §8.3). Sized types are gone (#218), so no parameter position is covariant
 /// any more and parameters are invariant exactly as indices always were (eigenius#137).
-pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), CheckError> {
-    subtype_of_inner(level, sub, super_, Indices::Compare)
+pub fn subtype_of(
+    env: &crate::nbe::env_global::Env,
+    level: usize,
+    sub: &Val,
+    super_: &Val,
+) -> Result<(), CheckError> {
+    subtype_of_inner(env, level, sub, super_, Indices::Compare)
 }
 
-/// Constructor-site subtyping: [`subtype_of_with_hyps`] with the index
-/// telescope left to the caller.
+/// Constructor-site subtyping: [`subtype_of`] with the index telescope left to
+/// the caller.
 ///
 /// Only sound when the caller compares the indices itself. The one caller
 /// is `check_inductive_ctor_args`, which runs D48 Phase D index unification
 /// on the same pair of values on the next statement.
 pub(super) fn subtype_of_deferring_indices(
+    env: &crate::nbe::env_global::Env,
     level: usize,
     sub: &Val,
     super_: &Val,
 ) -> Result<(), CheckError> {
-    subtype_of_inner(level, sub, super_, Indices::DeferToCaller)
+    subtype_of_inner(env, level, sub, super_, Indices::DeferToCaller)
 }
 
 fn subtype_of_inner(
+    env: &crate::nbe::env_global::Env,
     level: usize,
     sub: &Val,
     super_: &Val,
@@ -318,6 +353,101 @@ fn subtype_of_inner(
     // `Ord` — the derived order is structural (discriminant, then fields) and is not the universe
     // order at all: it would rank `Param("u")` against `Max(..)` by variant position. It happens
     // to agree on `Succ`-chains, which is exactly why the bug would not have shown up in a test.
+    // ── D78 §3 — refinement subtyping ─────────────────────────────────────
+    //
+    // `Refine(R, S) <: EigonClass(C)` when `C ∈ S`.
+    //
+    // **This arm must precede forgetting.** A class reference is a *nominal*
+    // supertype: what makes a refined record an inhabitant of `C` is the
+    // constraint set, not the carrier. Forgetting `S` and comparing `R` against
+    // `EigonClass(C)` discards precisely the claim being tested — and since
+    // Phase C a no-`requires` class carries an empty record, so the comparison
+    // becomes `Record([]) ≠ EigonClass(C)` and a well-typed composition is
+    // rejected. Caught by `felicity_filter_accepts_well_typed_composition`.
+    //
+    // Sound because a record satisfying every constraint in `S`, with `C ∈ S`,
+    // satisfies `C`. Membership rather than entailment for the same reason the
+    // `Refine <: Refine` arm uses inclusion: deciding `⋀S ⊨ C` needs the layer,
+    // which conversion does not have (§3.1, parked as D76 §2.1). Incomplete in
+    // the same direction, never unsound.
+    if let (Val::Refine(_, classes), Val::EigonClass(c)) = (sub, super_) {
+        return if classes.contains(c) {
+            Ok(())
+        } else {
+            Err(CheckError::TypeMismatch(format!(
+                "a record satisfying {{{}}} is not an instance of `{c}` — it does not declare it. \
+                 (Conversion cannot yet decide entailment; see D78 §3.1.)",
+                classes
+                    .iter()
+                    .map(|i| i.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+        };
+    }
+    // `Refine(R, S) <: R`: forgetting constraints is safe when the supertype is
+    // structural — that is how a refined record flows into a plain-record
+    // context. It is *not* safe against a nominal supertype, which the arm above
+    // handles first.
+    if let Val::Refine(carrier, _) = sub {
+        if !matches!(super_, Val::Refine(..)) {
+            return subtype_of_inner(env, level, carrier, super_, index_policy);
+        }
+    }
+    // `Refine(R, S) <: Refine(R′, S′)`.
+    //
+    // **D78 §3's rule, complete since D76 Phase D:** `R <: R′` and `⋀S ⊨ D` for
+    // every `D ∈ S′`.
+    //
+    // Set inclusion `S ⊇ S′` stays the **fast path**, and not only for speed: a
+    // constraint present in `S` is trivially entailed by `⋀S`, so inclusion is the
+    // sound-and-cheap majority case, and taking it first means the environment is
+    // consulted **only where the conservative rule was about to reject**. That is
+    // how §5's "conversion must not resolve on the equal path" is honoured here —
+    // by the shape of the rule rather than by a δ mechanism (see §8 Phase D's
+    // audit: δ never reaches conversion, so there is no folded-definition case to
+    // be lazy about).
+    //
+    // What the entailment fallback adds is the case D78 §3 named and could not
+    // decide: `S` entails `D` without containing it. `Pup ⊨ Dog` when `Pup`'s
+    // fields cover `Dog`'s. Rejecting that was an incompleteness — legal programs
+    // refused — never an unsound admission, which is why it could ship parked.
+    //
+    // The alternative — precomputing each constraint's field set into the value so
+    // conversion needs no layer — is exactly the inline-the-environment antipattern
+    // D75 §3.1 diagnoses as the root defect, and is not taken.
+    if let (Val::Refine(r_sub, s_sub), Val::Refine(r_super, s_super)) = (sub, super_) {
+        if !s_super.is_subset(s_sub) {
+            let undecided: Vec<&Iri> = s_super.difference(s_sub).collect();
+            let entailed = match env.layer() {
+                Some(layer) => undecided.iter().try_fold(true, |acc, d| {
+                    crate::program::ground::conjunction_entails(s_sub, d, layer).map(|ok| acc && ok)
+                }),
+                // An empty environment decides nothing, so the conservative rule
+                // stands. Reported as such rather than as a refinement mismatch.
+                None => Ok(false),
+            };
+            match entailed {
+                Ok(true) => {}
+                Ok(false) => {
+                    let missing: Vec<&str> = undecided.iter().map(|i| i.as_str()).collect();
+                    return Err(CheckError::TypeMismatch(format!(
+                        "refinement mismatch: the subtype does not declare {}, and its \
+                         constraints do not entail {} either (D78 §3).",
+                        missing.join(", "),
+                        if missing.len() == 1 { "it" } else { "them" }
+                    )));
+                }
+                Err(e) => {
+                    return Err(CheckError::TypeMismatch(format!(
+                        "refinement mismatch: entailment could not be decided: {e}"
+                    )));
+                }
+            }
+        }
+        return subtype_of_inner(env, level, r_sub, r_super, index_policy);
+    }
+
     if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
         if m.leq(n) {
             return Ok(());
@@ -483,13 +613,25 @@ mod tests {
         // the Sort(n) : Sort(n+1) rule) and as a subtype rule (Sort(0) <:
         // Sort(1) by D46 §3.2 cumulativity).
         check(&mut ctx(), &Exp::sort(0), &Val::sort(1)).unwrap();
-        subtype_of(0, &Val::sort(0), &Val::sort(1)).unwrap();
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::sort(0),
+            &Val::sort(1),
+        )
+        .unwrap();
     }
 
     #[test]
     fn sort_strict_cumulativity_set_not_subtype_of_prop() {
         // Sort(1) is NOT a subtype of Sort(0). Catches the wrong direction.
-        assert!(subtype_of(0, &Val::sort(1), &Val::sort(0)).is_err());
+        assert!(subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::sort(1),
+            &Val::sort(0)
+        )
+        .is_err());
     }
 
     // ---------- D46 §5 — proof irrelevance tests ----------
@@ -524,6 +666,7 @@ mod tests {
         // An inductive declared with sort = Sort(0) is propositional — caught
         // by the structural fast-path on Val::InductiveType.
         let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MyProp").unwrap(),
             name: "MyProp".to_string(),
             params: Vec::new(),
@@ -543,6 +686,7 @@ mod tests {
     fn proof_irrelevance_does_not_fire_for_set_typed_inductive() {
         // An inductive declared with sort = Sort(1) is NOT propositional.
         let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:MyData").unwrap(),
             name: "MyData".to_string(),
             params: Vec::new(),
@@ -603,7 +747,7 @@ mod tests {
         let sub = mk_two_param(decl.clone(), Val::One, Val::One);
         let sup = mk_two_param(decl, Val::One, Val::sort(1));
         assert!(
-            subtype_of(0, &sub, &sup).is_err(),
+            subtype_of(&crate::nbe::env_global::Env::empty(), 0, &sub, &sup).is_err(),
             "element type mismatch must be rejected"
         );
     }
@@ -612,8 +756,20 @@ mod tests {
     fn subtype_non_inductive_falls_back_to_eq_nf() {
         // Simple non-inductive types fall through to `eq_nf` —
         // equal types accept, mismatched types reject.
-        subtype_of(0, &Val::One, &Val::One).expect("1 <: 1");
-        assert!(subtype_of(0, &Val::One, &Val::sort(1)).is_err());
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::One,
+            &Val::One,
+        )
+        .expect("1 <: 1");
+        assert!(subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &Val::One,
+            &Val::sort(1)
+        )
+        .is_err());
     }
 
     #[test]
@@ -623,6 +779,7 @@ mod tests {
         // rejects them.
         let decl_a = two_param_decl();
         let decl_b = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:OtherStream").unwrap(),
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
@@ -632,7 +789,7 @@ mod tests {
         });
         let sub = mk_two_param(decl_a, Val::One, Val::One);
         let sup = mk_two_param(decl_b, Val::One, Val::One);
-        assert!(subtype_of(0, &sub, &sup).is_err());
+        assert!(subtype_of(&crate::nbe::env_global::Env::empty(), 0, &sub, &sup).is_err());
     }
 }
 
@@ -651,10 +808,14 @@ mod index_conversion_tests {
     fn vec_decl() -> Arc<InductiveDecl> {
         let nat = nat_decl();
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Vec").unwrap(),
             name: "Vec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
-            indices: vec![(Patt::Unit, Exp::InductiveType(nat, Vec::new()))],
+            indices: vec![(
+                Patt::Unit,
+                Exp::const_applied(nat.iri.clone(), Vec::new(), Vec::new()),
+            )],
             sort: Exp::sort(1),
             ctors: Vec::new(),
         })
@@ -675,7 +836,8 @@ mod index_conversion_tests {
         let nat = nat_decl();
         let c = CheckCtx::new(Rho::Nil, vec![]);
         let zero_exp = nat_zero_exp(&nat);
-        let one_exp = Exp::InductiveCtor(nat, "succ".to_string(), vec![zero_exp.clone()]);
+        let one_exp =
+            Exp::InductiveCtor(nat.iri.clone(), "succ".to_string(), vec![zero_exp.clone()]);
         let zero = c.eval(&zero_exp, &Rho::Nil).unwrap();
         let one = c.eval(&one_exp, &Rho::Nil).unwrap();
         (zero, one)
@@ -683,7 +845,7 @@ mod index_conversion_tests {
 
     /// `Vec A 0` and `Vec A 1` are different types.
     ///
-    /// The inductive case of [`subtype_of_with_hyps`] returned `Ok(())` right
+    /// The inductive case of [`subtype_of`] returned `Ok(())` right
     /// after the parameter telescope, never reaching the `eq_nf` fallback that
     /// compares indices, so this pair was definitionally equal on every path
     /// that goes through conversion — every expression form without a
@@ -692,8 +854,13 @@ mod index_conversion_tests {
     fn vec_at_distinct_indices_is_not_convertible() {
         let decl = vec_decl();
         let (zero, one) = zero_and_one();
-        let err = subtype_of(0, &vec_at(&decl, zero), &vec_at(&decl, one))
-            .expect_err("`Vec A 0 <: Vec A 1` must be rejected");
+        let err = subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &vec_at(&decl, zero),
+            &vec_at(&decl, one),
+        )
+        .expect_err("`Vec A 0 <: Vec A 1` must be rejected");
         assert!(
             format!("{err:?}").contains("index #0 mismatch"),
             "expected an index-mismatch diagnostic, got: {err:?}"
@@ -705,8 +872,13 @@ mod index_conversion_tests {
     fn vec_at_equal_indices_is_convertible() {
         let decl = vec_decl();
         let (zero, _) = zero_and_one();
-        subtype_of(0, &vec_at(&decl, zero.clone()), &vec_at(&decl, zero))
-            .expect("`Vec A 0 <: Vec A 0` must hold");
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &vec_at(&decl, zero.clone()),
+            &vec_at(&decl, zero),
+        )
+        .expect("`Vec A 0 <: Vec A 0` must hold");
     }
 
     /// `data P : core:string -> Prop` — zero parameters, one index. The shape
@@ -714,6 +886,7 @@ mod index_conversion_tests {
     /// `screen:HasLowIC50`, `bench:concerns`, …).
     fn string_predicate_decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:HasLowIC50").unwrap(),
             name: "HasLowIC50".to_string(),
             params: Vec::new(),
@@ -735,14 +908,24 @@ mod index_conversion_tests {
             params: Vec::new(),
             indices: vec![Val::LitString(s.to_string())],
         };
-        let err = subtype_of(0, &at("compound-A"), &at("compound-B"))
-            .expect_err("HasLowIC50(\"compound-A\") <: HasLowIC50(\"compound-B\") is rejected");
+        let err = subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &at("compound-A"),
+            &at("compound-B"),
+        )
+        .expect_err("HasLowIC50(\"compound-A\") <: HasLowIC50(\"compound-B\") is rejected");
         assert!(
             format!("{err:?}").contains("index #0 mismatch"),
             "expected an index-mismatch diagnostic, got: {err:?}"
         );
-        subtype_of(0, &at("compound-A"), &at("compound-A"))
-            .expect("the same application converts with itself");
+        subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &at("compound-A"),
+            &at("compound-A"),
+        )
+        .expect("the same application converts with itself");
     }
 
     /// A two-index family rejects a mismatch in the *second* index — the shape
@@ -751,6 +934,7 @@ mod index_conversion_tests {
     #[test]
     fn a_mismatch_in_a_later_index_is_rejected() {
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Concerns").unwrap(),
             name: "Concerns".to_string(),
             params: Vec::new(),
@@ -766,8 +950,13 @@ mod index_conversion_tests {
             params: Vec::new(),
             indices: vec![Val::LitString(a.to_string()), Val::LitString(b.to_string())],
         };
-        let err = subtype_of(0, &at("WRN", "MSI"), &at("WRN", "MSS"))
-            .expect_err("a second-index mismatch must be rejected");
+        let err = subtype_of(
+            &crate::nbe::env_global::Env::empty(),
+            0,
+            &at("WRN", "MSI"),
+            &at("WRN", "MSS"),
+        )
+        .expect_err("a second-index mismatch must be rejected");
         assert!(
             format!("{err:?}").contains("index #1 mismatch"),
             "expected an index-#1 diagnostic, got: {err:?}"
@@ -807,16 +996,12 @@ mod index_conversion_tests {
     fn a_constructor_at_the_wrong_index_is_still_rejected() {
         // `data Box : 1 -> Set { mk : Box () }`: the one ctor concludes at
         // index `()`, so checking it against `Box x` for a rigid `x` fails.
-        let self_ref = Arc::new(InductiveDecl {
-            iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
-            name: "Box".to_string(),
-            params: Vec::new(),
-            indices: vec![(Patt::Unit, Exp::One)],
-            sort: Exp::sort(1),
-            ctors: Vec::new(),
-        });
-        let box_unit = Exp::InductiveType(self_ref, vec![Exp::Unit]);
+        // D76 Phase B: the conclusion names `Box` rather than carrying a stub of
+        // it, so there is one declaration here where there used to be two.
+        let box_iri = crate::ontology::iri::Iri::parse("urn:test:Box").unwrap();
+        let box_unit = Exp::const_applied(box_iri.clone(), Vec::new(), vec![Exp::Unit]);
         let decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Box").unwrap(),
             name: "Box".to_string(),
             params: Vec::new(),
@@ -827,13 +1012,13 @@ mod index_conversion_tests {
                 typ: box_unit,
             }],
         });
-        let mut c = CheckCtx::new(Rho::Nil, vec![]);
+        let mut c = CheckCtx::new(Rho::Nil, vec![]).declaring(decl.clone());
         let expected = Val::InductiveType {
             decl: decl.clone(),
             params: Vec::new(),
             indices: vec![gen_val(&Rho::Nil)],
         };
-        let ctor = Exp::InductiveCtor(decl, "mk".to_string(), Vec::new());
+        let ctor = Exp::InductiveCtor(decl.iri.clone(), "mk".to_string(), Vec::new());
         let err = check(&mut c, &ctor, &expected)
             .expect_err("`Box.mk : Box ()` must not check against `Box x`");
         assert!(
@@ -848,6 +1033,7 @@ mod index_conversion_tests {
     /// (`ontologies/logic/logic.esl:38`).
     fn and_decl() -> std::sync::Arc<InductiveDecl> {
         std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:eigenius:logic:And").unwrap(),
             name: "And".to_string(),
             params: vec![
@@ -886,6 +1072,7 @@ mod index_conversion_tests {
         // parameter that genuinely is a proof reaches irrelevance through that rule instead.
         assert!(
             subtype_of(
+                &crate::nbe::env_global::Env::empty(),
                 0,
                 &and_of("urn:test:A", "urn:test:B"),
                 &and_of("urn:test:C", "urn:test:D")
@@ -900,6 +1087,7 @@ mod index_conversion_tests {
         // The guard against over-correcting: removing the arm must not make a family
         // non-reflexive.
         subtype_of(
+            &crate::nbe::env_global::Env::empty(),
             0,
             &and_of("urn:test:A", "urn:test:B"),
             &and_of("urn:test:A", "urn:test:B"),

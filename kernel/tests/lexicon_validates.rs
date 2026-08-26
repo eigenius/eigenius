@@ -1849,8 +1849,13 @@ fn treetest_entails(
     let p = first_prop(&index.parse(premise, &Identity), "premise");
     let h = first_prop(&index.parse(hypothesis, &Identity), "hypothesis");
     let arrow = Exp::Arrow(Box::new(p), Box::new(h));
-    let ty = eval(&arrow, &Rho::Nil).map_err(|e| format!("eval entailment type: {e}"))?;
+    // In the chain's environment (D76 Phase B): the entailment type names
+    // `logic:And`, and an env-less eval would leave it a neutral — at which point
+    // `match` sees a scrutinee whose type is not an inductive.
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    let ty = ctx
+        .eval(&arrow, &Rho::Nil)
+        .map_err(|e| format!("eval entailment type: {e}"))?;
     check(&mut ctx, witness, &ty).map_err(|e| e.to_string())
 }
 

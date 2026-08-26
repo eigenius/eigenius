@@ -203,6 +203,15 @@ unpick.
 
 ## 6. Recommendation
 
+> **⚠ SUPERSEDED `2026-08-25` by decision, not by evidence.** #188 was picked up as D76 Phase E2 while
+> none of the three triggers below had fired. Recorded plainly so the next reader is not left
+> reconciling a "hold" against a landed implementation: the recommendation was overridden, and the
+> measurement that produced it still stands. See slice 5 in §8.
+>
+> The nearest thing to a trigger was structural rather than one of these three: D76's phases A–D
+> removed every obstacle — one `Const`, the environment in the judgment, a slot for level arguments —
+> so the cost side of this recommendation had changed even though the demand side had not.
+
 **Hold #188. Do not implement on the current evidence.** Record on the issue that the trigger is
 measured and has not fired, so the next reader does not re-measure it.
 
@@ -227,8 +236,12 @@ representation independently.
   citations pinned at the current submodule revision.
 - `Exp::Sort(Level)`; `conv.rs`'s integer cumulativity replaced by `leq`; `check_infer`'s
   `Sort(n) : Sort(n+1)` by `Sort(l) : Sort(Succ(l))`.
-- Declarations carry `uparams`; the elaborator generalises free levels; **no new ESL syntax.**
-- The decoder accepts the legacy integer form; verified against a served snapshot, not only the repo.
+- Declarations carry `uparams`; the elaborator generalises free levels. **~~no new ESL syntax~~** —
+  **superseded by §3's `2026-08-23` revision**, which adopts Lean's surface syntax; this line was
+  never updated and contradicted it.
+- ~~The decoder accepts the legacy integer form~~ — **withdrawn by slice 4's build log**, which
+  removed that arm as a bridge on top of a design already concluded: the manifest move makes the old
+  stores unresumable, so the state it served cannot arise.
 - One reseed, shared with **#213**.
 - `cargo test --workspace`, `clippy -D warnings`, `fmt`, plus the WRN demo and both parse baselines
   on the reseeded snapshot.
@@ -278,6 +291,44 @@ Two corrections this slice forced:
   This is the "bridge on top of a design already concluded" shape the project posture names; the
   giveaway was calling it "permanent rather than a migration window" while the state it served
   could not arise.
+
+**Slice 5 — `uparams` and instantiation (`2026-08-25`).** Picked up as D76 Phase E2, **overriding §6's
+"hold"** — a decision, recorded here so the contradiction is not left for a reader to resolve.
+
+**The audit found most of slice 5 already landed.** §3's ESL half was done by 5c and the "remaining
+slices" list above was stale: `SortKind` already has `Sort(LevelExpr)`, `LevelExpr` has
+`Var`/`Add`/`Max`/`IMax`, and `lower_level` already produces `Level::Param`. Measured rather than
+assumed — `data p:Box(A : Sort u) : Sort u { mk(A), }` **already compiled, persisted and validated
+with zero errors**. The gap was entirely on the reference side: nothing bound `u` and nothing
+instantiated it, which is precisely the "implemented and unreachable" state §3 warned about, one step
+further along than §3 describes it.
+
+So the slice reduced to four things:
+
+- **`uparams` on `InductiveDecl`**, generalised at compile in **first-mention order**. `universe u;`
+  is file-scoped, so what binds `u` on a declaration is that the declaration *uses* it. The order is
+  the instantiation contract — a reference substitutes by position — and a `BTreeSet` would make it
+  alphabetical, silently permuting a two-parameter declaration's arguments.
+- **`core:universe_params`** on the wire, plus `instantiate_levels`, which **consumes** the
+  parameters so a declaration cannot be instantiated twice.
+- **`Exp::subst_levels`**, written with **no catch-all arm**: a future level-carrying variant must
+  fail to compile there rather than silently keep an uninstantiated `Param`.
+- **Levels as an OPTIONAL TRAILING `ConstRef` argument.** Emitting `[]` unconditionally is more
+  uniform and was rejected: it rewrites every `ConstRef` on the chain, and every one is monomorphic.
+  Keeping those bytes identical is what lets the reseed's parity check stay a *comparison* rather than
+  a wholesale rewrite in which nothing could be noticed.
+
+One error caught in review: `core:string_array` was invented as `universe_params`' datatype. It does
+not exist — the declared array types are `resource_array` and `value_array`, and `value_array` carries
+a conditional `then_requires: element_type`. Corrected to `value_array` + `element_type: string`.
+
+The manifest moved on `core` (the property is declared there, because `result_sort` already needs
+`core:Level`), so the pin was updated in the same commit as the ontology edit, per
+`bootstrap_manifest_pinned`'s own instructions.
+
+Pinned by `nbe::positivity::universe_polymorphism`: a declaration binds what it mentions, a reference
+instantiates at its level argument (`Box.{0}` and `Box.{1}` differ — #188's residual, closed), and
+level arguments round-trip through the wire while a monomorphic `ConstRef` keeps its single argument.
 
 **Remaining slices**, in order:
 

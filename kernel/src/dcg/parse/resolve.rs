@@ -113,19 +113,19 @@ impl Parser {
         let nf = if variants.len() == 1 {
             variants.into_iter().next().expect("len==1")
         } else {
-            let and = super::super::category::resolve_inductive(
+            let and = super::super::category::inductive_iri(
                 &self.grammar.layer,
                 "urn:eigenius:logic:And",
             )?;
             variants
                 .into_iter()
                 .rev()
-                .reduce(|acc, v| Exp::InductiveType(Arc::clone(&and), vec![v, acc]))
+                .reduce(|acc, v| Exp::const_applied(and.clone(), Vec::new(), vec![v, acc]))
                 .expect("non-empty variants")
         };
 
         let expected = denote_cat(open.item.cat()).ok()?;
-        let expected_val = eval(&expected, &Rho::Nil).ok()?;
+        let expected_val = eval_env(&expected, &Rho::Nil, &self.grammar.env()).ok()?;
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
@@ -155,7 +155,10 @@ impl Parser {
             };
             term = Exp::App(Box::new(term), Box::new(arg.clone()));
         }
-        Some(readback_val(0, &eval(&term, &Rho::Nil).ok()?))
+        Some(readback_val(
+            0,
+            &eval_env(&term, &Rho::Nil, &self.grammar.env()).ok()?,
+        ))
     }
 
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
@@ -239,7 +242,7 @@ impl Parser {
     /// (the soundness authority for direct callers); [`Self::resolve_with`] uses it to filter
     /// each hole's candidates BEFORE the assignment search.
     fn hole_accepts(&self, hole: &HoleInfo, ante: &Exp) -> bool {
-        let Ok(ty_val) = eval(&hole.ty, &Rho::Nil) else {
+        let Ok(ty_val) = eval_env(&hole.ty, &Rho::Nil, &self.grammar.env()) else {
             return false;
         };
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
@@ -577,7 +580,7 @@ impl Parser {
                 self.walk_candidates(b, vb, out, seen);
             }
             Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => self.walk_candidates(b, vb, out, seen),
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+            Exp::InductiveCtor(_, _, args) => {
                 for a in args {
                     self.walk_candidates(a, vb, out, seen);
                 }
@@ -826,9 +829,7 @@ fn closed_under(e: &Exp, bound: &mut Vec<String>) -> bool {
             closed_under(a, bound) && closed_under(b, bound)
         }
         Exp::Fst(x) | Exp::Snd(x) => closed_under(x, bound),
-        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-            args.iter().all(|a| closed_under(a, bound))
-        }
+        Exp::InductiveCtor(_, _, args) => args.iter().all(|a| closed_under(a, bound)),
         _ => true,
     }
 }

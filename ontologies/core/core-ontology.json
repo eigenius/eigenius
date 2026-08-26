@@ -500,7 +500,8 @@
       "urn:eigenius:core:ctors"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:core:type_params"
+      "urn:eigenius:core:type_params",
+      "urn:eigenius:core:universe_params"
     ]
   },
   {
@@ -886,7 +887,7 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce — a core:Level value. Carried a STRING (`Prop` / `Set` / `Type:N`) until eigenius#188; that grammar could not express a level VARIABLE, so `data X : Sort u` was inexpressible, and nothing validated the string's shape. Now an inductive value like any other: the validator checks it against core:Level's ctor schema, and `data X : Sort (max u v)` is as writable as `data X : Set`.",
     "urn:eigenius:core:short_name": "result_sort",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:Level"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
@@ -900,9 +901,10 @@
   {
     "@id": "urn:eigenius:core:ctor_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The encoded type expression (eigentt) of a constructor — the full arrow type a constructor inhabits. Carried as the tagged-dict JSON encoding the kernel decoder parses back.",
+    "urn:eigenius:core:description": "The encoded type expression (eigentt) of a constructor — the full arrow type a constructor inhabits. A D47-encoded `eigentt:TypeExpr`, so `core:inductive` rather than `core:json`: until D79 §2.1 this was declared `core:json`, which is 'not validated by the ontology', so no rule checked it and the mutual-inductive walker in `layer::declaration_order` had to descend into it by hand.",
     "urn:eigenius:core:short_name": "ctor_type",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:json"
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"]
   },
   {
     "@id": "urn:eigenius:core:macro_decl_json",
@@ -919,6 +921,15 @@
     "urn:eigenius:core:short_name": "type_params",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:InductiveParam"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
+  },
+  {
+    "@id": "urn:eigenius:core:universe_params",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Ordered list of UNIVERSE parameters an InductiveType binds \u2014 the level variables its `result_sort`, parameter kinds and constructor types may mention (eigenius#188). nanoda's `uparams`. ORDER IS SIGNIFICANT and duplicates are rejected, because a reference instantiates by position: a `ConstRef` carrying level arguments substitutes the i-th argument for the i-th parameter. Absent or empty on every monomorphic declaration, which is all ten shipped ones, so substitution over it is the identity on the common path. Distinct from core:type_params, which lists VALUE-level parameters: a type parameter is a binder in the term, a universe parameter is a binder in the sort.",
+    "urn:eigenius:core:short_name": "universe_params",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
@@ -942,7 +953,7 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Either a class IRI or a bare parameter name from the enclosing inductive's type parameters.",
     "urn:eigenius:core:short_name": "type_name",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
   },
@@ -976,7 +987,7 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "The kind of an InductiveParam, as an eigentt:TypeExpr value. Carried a STRING until eigenius#188 — a three-way union of class IRI, bare parameter name, and sort keyword — which could not express a level variable, and whose decoder fell through to `Sort(1)`, silently typing a class-typed parameter `Set`. A parameter reference is now `Var`, a class `ConstRef`, a sort `Sort(level)`; all three are checkable.",
     "urn:eigenius:core:short_name": "param_kind",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
   },
@@ -997,6 +1008,53 @@
     "urn:eigenius:core:ctors": []
   },
 
+  {
+    "@id": "urn:eigenius:core:List",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "List",
+    "urn:eigenius:core:description": "The standard cons-list parametric inductive: a value of `List(A)` is either `nil` or `cons(head: A, tail: List(A))`. Mirrors the kernel-side declaration at `crate::nbe::term::list_decl`, and must keep mirroring it — `the_chain_and_the_kernel_agree_about_list` fails otherwise. Declared here as of D79 §2.1.2: `List` used to exist ONLY kernel-side, special-cased by `Env::intrinsic` and again by the D47 `ConstRef` decoder, while appearing in authored ESL (`core:List(lexicon:Entity) -> Prop`) and therefore in persisted terms. Two decoders disagreed about it — one produced the inductive, the other an `EigonClass` marker — and nothing outside the kernel could resolve it at all. Same reasoning as `core:Option`: the chain is the single answer, so a disagreement surfaces instead of being papered over by preferring the kernel's copy.",
+    "urn:eigenius:core:type_params": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
+        "urn:eigenius:core:param_name": "A",
+        "urn:eigenius:core:param_kind": {
+          "ctor": "Sort",
+          "args": [{ "ctor": "Succ", "args": [{ "ctor": "Zero", "args": [] }] }]
+        }
+      }
+    ],
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "nil"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "cons",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "head",
+            "urn:eigenius:core:type_name": { "ctor": "Var", "args": ["A"] }
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "tail",
+            "urn:eigenius:core:type_name": {
+              "ctor": "ConstRef",
+              "args": ["urn:eigenius:core:List"]
+            },
+            "urn:eigenius:core:type_args": [
+              {
+                "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+                "urn:eigenius:core:type_name": { "ctor": "Var", "args": ["A"] }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
   {
     "@id": "urn:eigenius:core:Option",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],

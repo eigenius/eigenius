@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// `mⱼ(args, ih₁, …, ihₘ)` where each `ihᵢ` is the recursor applied to a
 /// recursive sub-argument of `cⱼ`. Recursive sub-arguments are identified
 /// by walking the constructor's type telescope: any binder (after the
-/// parameter prefix) whose type is a self-reference `Exp::InductiveType(I, _)`
+/// parameter prefix) whose type is a self-reference `Exp::const_applied(I.iri.clone(), Vec::new(), _)`
 /// contributes one IH, computed by recursing into `iota_reduce` for
 /// constructor sub-values or producing a blocked `Neut::NtRec` for
 /// neutrals.
@@ -195,7 +195,7 @@ fn higher_order_ih(
             Exp::App(Box::new(acc), Box::new(Exp::Var(n.clone())))
         });
     let mut body = Exp::InductiveRec {
-        decl: decl.clone(),
+        iri: decl.iri.clone(),
         motive: Box::new(Exp::Var("HV#".to_string())),
         minors: minor_names.iter().map(|n| Exp::Var(n.clone())).collect(),
         major: Box::new(major),
@@ -274,8 +274,9 @@ mod tests {
     fn higher_order_positive_arg_gets_a_function_typed_ih_in_both_sites() {
         // inductive Foo { base : Foo, rall : (Set -> Foo) -> Foo }
         let s = ind_self_ref("Foo");
-        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let foo = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
@@ -311,7 +312,7 @@ mod tests {
 
         // 1. How many binders does the minor derivation ask for?
         let minor_ty =
-            crate::nbe::recursor::derive_minor_type(&foo, 1, &[], &motive, &EvalCtx::Pure)
+            crate::nbe::recursor::derive_minor_type(&foo, 1, &[], &motive, &EvalCtx::pure())
                 .expect("derive_minor_type for `rall`");
         let mut arity = 0usize;
         let mut cursor = minor_ty;
@@ -339,7 +340,7 @@ mod tests {
         // The constructor argument: `λ_. Foo.base`, a value of type `Set -> Foo`.
         let arg = Val::Lam(crate::nbe::val::Clos::new(
             Patt::Unit,
-            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Exp::InductiveCtor(foo.iri.clone(), "base".to_string(), Vec::new()),
             Rho::Nil,
         ));
 
@@ -349,7 +350,7 @@ mod tests {
             &[base_minor, rall_minor],
             "rall",
             &[arg],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce over `rall`");
         assert!(
@@ -372,8 +373,9 @@ mod tests {
     #[test]
     fn iota_recurses_through_a_higher_order_argument() {
         let s = ind_self_ref("Foo");
-        let foo_ty = Exp::InductiveType(s, Vec::new());
+        let foo_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let foo = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
@@ -417,7 +419,7 @@ mod tests {
         // The constructor argument `λ_. base`, so the recursive call lands on `base`.
         let f = Val::Lam(crate::nbe::val::Clos::new(
             Patt::Unit,
-            Exp::InductiveCtor(foo.clone(), "base".to_string(), Vec::new()),
+            Exp::InductiveCtor(foo.iri.clone(), "base".to_string(), Vec::new()),
             Rho::Nil,
         ));
 
@@ -427,7 +429,8 @@ mod tests {
             &[base_minor, rall_minor],
             "rall",
             &[f],
-            &EvalCtx::Pure,
+            // The IH recurses into `Foo`, so the declaration must be reachable.
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(foo.clone())),
         )
         .expect("iota over `rall` with a hypothesis that recurses");
         match result {
@@ -444,8 +447,9 @@ mod tests {
         // inductive Bool { True, False }
         // Bool.rec C true_minor false_minor True ↝ true_minor
         let s = ind_self_ref("Bool");
-        let bool_ty = Exp::InductiveType(s, Vec::new());
+        let bool_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
@@ -470,7 +474,7 @@ mod tests {
             &[true_minor, false_minor],
             "True",
             &[],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
         match result {
@@ -488,10 +492,10 @@ mod tests {
 
         // succ_minor body: succ (succ ih)
         let succ_body = Exp::InductiveCtor(
-            nat.clone(),
+            nat.iri.clone(),
             "succ".to_string(),
             vec![Exp::InductiveCtor(
-                nat.clone(),
+                nat.iri.clone(),
                 "succ".to_string(),
                 vec![Exp::Var("ih".to_string())],
             )],
@@ -509,7 +513,7 @@ mod tests {
             &[zero_minor, succ_minor],
             "succ",
             &[nat_n(&nat, 1)],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
 
@@ -529,8 +533,9 @@ mod tests {
     fn iota_two_recursive_args_ih_order_matches_minor_binders() {
         // Tree { leaf : Tree, node : Tree → Tree → Tree }
         let s = ind_self_ref("Tree");
-        let tree_ty = Exp::InductiveType(s, Vec::new());
+        let tree_ty = Exp::const_applied(s.iri.clone(), Vec::new(), Vec::new());
         let tree = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
             params: Vec::new(),
@@ -556,12 +561,12 @@ mod tests {
             ],
         });
         let leaf = Val::InductiveVal {
-            decl: tree.clone(),
+            iri: tree.iri.clone(),
             ctor_name: "leaf".to_string(),
             args: Vec::new(),
         };
         let node = |l: Val, r: Val| Val::InductiveVal {
-            decl: tree.clone(),
+            iri: tree.iri.clone(),
             ctor_name: "node".to_string(),
             args: vec![l, r],
         };
@@ -594,7 +599,7 @@ mod tests {
             &[leaf_minor, node_minor],
             "node",
             &[node(leaf.clone(), leaf.clone()), leaf],
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
         // rec(node(node(leaf,leaf), leaf)) = (rec(node(leaf,leaf)), rec(leaf))
@@ -617,8 +622,10 @@ mod tests {
         // List.rec zero (λa rest ih. succ ih) [_, _, _] = succ (succ (succ zero))
         let nat = nat_decl();
         let s = ind_self_ref("List");
-        let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let list_ty =
+            Exp::const_applied(s.iri.clone(), Vec::new(), vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -654,12 +661,12 @@ mod tests {
 
         let elem = Val::Unit;
         let nil_val = Val::InductiveVal {
-            decl: list_decl.clone(),
+            iri: list_decl.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
         let cons = |a: Val, l: Val| Val::InductiveVal {
-            decl: list_decl.clone(),
+            iri: list_decl.iri.clone(),
             ctor_name: "cons".to_string(),
             args: vec![a, l],
         };
@@ -674,7 +681,7 @@ mod tests {
                 Box::new(Exp::Lam(
                     Patt::Var("ih".to_string()),
                     Box::new(Exp::InductiveCtor(
-                        nat.clone(),
+                        nat.iri.clone(),
                         "succ".to_string(),
                         vec![Exp::Var("ih".to_string())],
                     )),
@@ -693,7 +700,7 @@ mod tests {
             &[nil_minor, cons_minor],
             "cons",
             &three_args,
-            &EvalCtx::Pure,
+            &EvalCtx::pure(),
         )
         .expect("iota_reduce");
 
@@ -720,7 +727,7 @@ mod tests {
             .extend(Patt::Var("zero_min".to_string()), zero_minor)
             .extend(Patt::Var("succ_min".to_string()), succ_minor);
         let exp = Exp::InductiveRec {
-            decl: nat.clone(),
+            iri: nat.iri.clone(),
             motive: Box::new(Exp::sort(1)),
             minors: vec![
                 Exp::Var("zero_min".to_string()),
@@ -728,7 +735,14 @@ mod tests {
             ],
             major: Box::new(Exp::Var("n".to_string())),
         };
-        let result = eval_ctx(&exp, &rho, &EvalCtx::Pure).expect("eval");
+        let result = eval_ctx(
+            &exp,
+            &rho,
+            // D76 Phase B: the recursor names its inductive, so the declaration
+            // has to be in `Γ_env` for `iota_reduce` to reach its ctors.
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(nat.clone())),
+        )
+        .expect("eval");
         match result {
             Val::Nt(Neut::NtRec { decl: d, .. }) => assert_eq!(d.name, "Nat"),
             other => panic!("expected NtRec, got {other:?}"),
@@ -741,6 +755,7 @@ mod tests {
     /// can be verified against the same shape.
     fn simple_vec_decl_for_eval() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -748,9 +763,13 @@ mod tests {
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let vec_a_unit =
-            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        let vec_a_unit = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string()), Exp::Unit],
+        );
         Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -801,7 +820,7 @@ mod tests {
         // result must reduce to Unit.
         let decl = simple_vec_decl_for_eval();
         let nil_val = Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
@@ -831,7 +850,7 @@ mod tests {
             .extend(Patt::Var("nil_min".to_string()), nil_minor)
             .extend(Patt::Var("cons_min".to_string()), cons_minor);
         let rec_exp = Exp::InductiveRec {
-            decl,
+            iri: decl.iri.clone(),
             motive: Box::new(Exp::Var("m".to_string())),
             minors: vec![
                 Exp::Var("nil_min".to_string()),
@@ -839,7 +858,12 @@ mod tests {
             ],
             major: Box::new(Exp::Var("v".to_string())),
         };
-        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::Pure).expect("iota nil");
+        let result = eval_ctx(
+            &rec_exp,
+            &rho,
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(decl.clone())),
+        )
+        .expect("iota nil");
         // For nil with no value-args, the minor is applied to nothing —
         // the result is nil_minor itself, which is Unit.
         assert!(
@@ -857,12 +881,12 @@ mod tests {
         // result is Unit regardless of the IH value.
         let decl = simple_vec_decl_for_eval();
         let nil_val = Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "nil".to_string(),
             args: Vec::new(),
         };
         let cons_val = Val::InductiveVal {
-            decl: decl.clone(),
+            iri: decl.iri.clone(),
             ctor_name: "cons".to_string(),
             args: vec![Val::Unit, Val::Unit, nil_val],
         };
@@ -889,7 +913,7 @@ mod tests {
             .extend(Patt::Var("nil_min".to_string()), nil_minor)
             .extend(Patt::Var("cons_min".to_string()), cons_minor);
         let rec_exp = Exp::InductiveRec {
-            decl,
+            iri: decl.iri.clone(),
             motive: Box::new(Exp::Var("m".to_string())),
             minors: vec![
                 Exp::Var("nil_min".to_string()),
@@ -897,7 +921,12 @@ mod tests {
             ],
             major: Box::new(Exp::Var("v".to_string())),
         };
-        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::Pure).expect("iota cons");
+        let result = eval_ctx(
+            &rec_exp,
+            &rho,
+            &EvalCtx::in_env(crate::nbe::env_global::Env::empty().declaring(decl.clone())),
+        )
+        .expect("iota cons");
         assert!(
             matches!(result, Val::Unit),
             "expected iota(rec on cons) to reduce to Unit (const cons_minor); got {result:?}"

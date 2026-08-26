@@ -641,7 +641,8 @@ fn check_and_migrate_schema_version(
 }
 
 /// The **bootstrap manifest**: newline-separated `<name>:<sha256_hex>` over [`BOOTSTRAP_CHAIN`] in
-/// chain order, hashing each embedded ontology's raw source.
+/// chain order, hashing each embedded ontology's CONTENT — see [`content_hash`] for what that
+/// means per format and why it is not the raw source bytes (eigenius#213).
 ///
 /// This is the content-drift signal a persisted store is stamped with, and the value
 /// [`bootstrap_persistent`] compares on resume — a mismatch is `BootstrapError::ManifestDrift` and the
@@ -650,18 +651,70 @@ fn check_and_migrate_schema_version(
 /// its snapshot is current) should be able to read the same value the drift check uses, rather than
 /// discovering drift by failing to open something.
 pub fn current_manifest() -> Vec<u8> {
-    // Newline-separated "<name>:<sha256_hex>" lines over the single-source-of-
-    // truth [`BOOTSTRAP_CHAIN`], in chain order. Hashing the raw source bytes is
-    // exactly the content-drift signal we want for both JSON and ESL layers — a
-    // change to any embedded ontology bumps the manifest, forcing a SEED rebuild
-    // against a stale persistent DB (D13 §8).
     let mut out = String::new();
     for spec in BOOTSTRAP_CHAIN {
-        use sha2::Digest;
-        let hash = sha2::Sha256::digest(spec.source.as_bytes());
-        out.push_str(&format!("{}:{}\n", spec.name, hex::encode(hash)));
+        out.push_str(&format!(
+            "{}:{}\n",
+            spec.name,
+            hex::encode(content_hash(spec))
+        ));
     }
     out.into_bytes()
+}
+
+/// The content hash of one embedded ontology (eigenius#213).
+///
+/// **This used to hash `spec.source.as_bytes()`**, and the comment above it claimed raw bytes were
+/// "exactly the content-drift signal we want". Raw bytes are a SUPERSET of content drift: every
+/// real change is caught, and so is every change that is not. Reindenting a JSON array, rewrapping
+/// a comment, adding a trailing newline — each made every persisted store unresumable and forced a
+/// ~40-minute reseed plus the aligned snapshot, the demo artifacts and the parse baselines. Both
+/// false positives on `2026-08-22` were of that kind, one a comment reword and one a
+/// `json.dumps(indent=2)` reflow that produced ~900 diff lines for five semantic changes.
+///
+/// Each format is reduced to a form that discards presentation and keeps meaning:
+///
+/// - **JSON** — parsed to resources and canonicalised (`eigon_json::canonicalize`, the same
+///   byte form the witness index hashes). Indentation, key order within a resource and inline-vs-
+///   expanded arrays all vanish; resource ORDER is preserved, because core's declaration order is
+///   load-bearing (D47 §211).
+/// - **ESL** — the TOKEN KINDS, in order. The lexer discards comments and whitespace by
+///   construction, so a reworded comment or a reflowed line is invisible; every semantic edit
+///   still moves the stream. `Token::pos` is deliberately excluded — hashing it would reintroduce
+///   line-number sensitivity and defeat the point.
+///
+/// **Neither form needs the layer chain**, which is what makes this affordable on the resume path.
+/// A stronger notion — the compiled resources of an ESL layer — would need the parent built, since
+/// `load_esl_layer` uses `compile_against_layer`, and resume exists precisely to avoid rebuilding.
+///
+/// A source that cannot be read is a broken build, not a drift signal: the bootstrap would fail on
+/// it moments later, so this asserts rather than falling back to raw bytes, which would silently
+/// change the hash basis for that layer alone.
+fn content_hash(spec: &BootstrapOntology) -> [u8; 32] {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    match spec.format {
+        OntologyFormat::Json => {
+            let resources = crate::ontology::eigon_json::parse_document(spec.source)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "embedded ontology `{}` is not valid Eigon-JSON: {e:?}",
+                        spec.name
+                    )
+                });
+            for r in &resources {
+                h.update(crate::ontology::eigon_json::canonicalize(r));
+            }
+        }
+        OntologyFormat::Esl => {
+            let tokens = crate::esl::lexer::tokenize(spec.source)
+                .unwrap_or_else(|e| panic!("embedded ontology `{}` does not lex: {e}", spec.name));
+            for t in &tokens {
+                h.update(format!("{:?}\n", t.kind));
+            }
+        }
+    }
+    h.finalize().into()
 }
 
 fn seed_backend(
@@ -791,6 +844,86 @@ fn resume_from_backend(
 
 #[cfg(test)]
 mod tests {
+
+    use super::{content_hash, BootstrapOntology, OntologyFormat};
+
+    fn json_spec(src: &'static str) -> BootstrapOntology {
+        BootstrapOntology {
+            name: "probe",
+            source: src,
+            format: OntologyFormat::Json,
+        }
+    }
+    fn esl_spec(src: &'static str) -> BootstrapOntology {
+        BootstrapOntology {
+            name: "probe",
+            source: src,
+            format: OntologyFormat::Esl,
+        }
+    }
+
+    /// **eigenius#213 — reformatting must not force a reseed.**
+    ///
+    /// The manifest hashed raw source bytes, so any byte change made every persisted store
+    /// unresumable and cost a ~40-minute reseed plus the aligned snapshot, the demo artifacts and
+    /// the parse baselines. Both false positives on `2026-08-22` were presentation-only: a comment
+    /// reword, and a `json.dumps(indent=2)` reflow that produced ~900 diff lines for five semantic
+    /// changes.
+    ///
+    /// These four assertions are the property that fix has to have: presentation is invisible,
+    /// meaning is not.
+    #[test]
+    fn the_manifest_hashes_content_not_presentation() {
+        // JSON — inline vs expanded array, different indentation, reordered keys WITHIN a
+        // resource. All presentation; `canonicalize` sorts keys and minifies.
+        let compact = r#"[{"@id":"urn:eigenius:p:A","urn:eigenius:core:is_a":["urn:eigenius:core:Class"],"urn:eigenius:core:short_name":"A"}]"#;
+        let expanded = r#"[
+          {
+            "urn:eigenius:core:short_name": "A",
+            "@id": "urn:eigenius:p:A",
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:Class"
+            ]
+          }
+        ]"#;
+        assert_eq!(
+            content_hash(&json_spec(compact)),
+            content_hash(&json_spec(expanded)),
+            "a JSON reflow is presentation and must not move the manifest"
+        );
+
+        // …but a real edit does.
+        let renamed = r#"[{"@id":"urn:eigenius:p:A","urn:eigenius:core:is_a":["urn:eigenius:core:Class"],"urn:eigenius:core:short_name":"B"}]"#;
+        assert_ne!(
+            content_hash(&json_spec(compact)),
+            content_hash(&json_spec(renamed)),
+            "changing a property value IS content and must move the manifest"
+        );
+
+        // ESL — comments and whitespace are discarded by the lexer.
+        let plain = r#"namespace p = "urn:eigenius:p";
+class p:Dog { description = "a dog"; }"#;
+        let commented = r#"// A reworded comment — the exact shape that forced a reseed on 2026-08-22.
+namespace p = "urn:eigenius:p";
+
+/* block comment */
+class p:Dog {
+    description = "a dog";
+}"#;
+        assert_eq!(
+            content_hash(&esl_spec(plain)),
+            content_hash(&esl_spec(commented)),
+            "comments and layout are presentation and must not move the manifest"
+        );
+
+        let edited = r#"namespace p = "urn:eigenius:p";
+class p:Cat { description = "a dog"; }"#;
+        assert_ne!(
+            content_hash(&esl_spec(plain)),
+            content_hash(&esl_spec(edited)),
+            "renaming a class IS content and must move the manifest"
+        );
+    }
 
     use super::*;
     use crate::ontology::iri::Iri;

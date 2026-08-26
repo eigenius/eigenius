@@ -783,9 +783,9 @@ fn refine_rules() -> &'static [CatRule] {
 
 /// Pull the head noun's `decl` (from `noun`'s category ctor) and the `C` / `num` metavariables the
 /// trigger bound — the shared preamble of the refine builders.
-fn noun_parts(noun: &Item, binds: &CatSubst) -> (Arc<crate::nbe::term::InductiveDecl>, Exp, Exp) {
+fn noun_parts(noun: &Item, binds: &CatSubst) -> (crate::ontology::iri::Iri, Exp, Exp) {
     let decl = match noun.cat() {
-        Exp::InductiveCtor(d, _, _) => d.clone(),
+        Exp::InductiveCtor(iri, _, _) => iri.clone(),
         _ => unreachable!("a refine rule matched a non-inductive noun category"),
     };
     let c = binds.get("C").expect("refine trigger binds C").clone();
@@ -799,7 +799,11 @@ fn noun_parts(noun: &Item, binds: &CatSubst) -> (Arc<crate::nbe::term::Inductive
 /// coordinate without introducing an abstract `C`. Rust-only ctor (categories are name-keyed on the
 /// shared `list_decl`), so no ontology edit / reseed.
 pub(crate) fn cat_mod_cat() -> Exp {
-    Exp::InductiveCtor(crate::nbe::term::list_decl(), "cat_mod".into(), Vec::new())
+    Exp::InductiveCtor(
+        crate::nbe::term::list_decl().iri.clone(),
+        "cat_mod".into(),
+        Vec::new(),
+    )
 }
 
 /// **Modifier lift** (M1: adjectives): re-categorise a modifier-eligible item into a standalone
@@ -1426,10 +1430,9 @@ pub fn apply_core(
     };
     // The composed RESULT carries the rule's keyed modality, exactly as Baldridge writes it:
     // `X/⋄Y Y/⋄Z ⇒B X/⋄Z` (194), `X/×Y Y\×Z ⇒B X\×Z` (200a). It is NOT inherited from the inputs.
-    let mk =
-        |decl: &Arc<crate::nbe::term::InductiveDecl>, ctor: &str, mode: &Exp, a: Exp, b: Exp| {
-            Exp::InductiveCtor(decl.clone(), ctor.into(), vec![mode.clone(), a, b])
-        };
+    let mk = |iri: &crate::ontology::iri::Iri, ctor: &str, mode: &Exp, a: Exp, b: Exp| {
+        Exp::InductiveCtor(iri.clone(), ctor.into(), vec![mode.clone(), a, b])
+    };
 
     // Forward family: left is the primary functor `A/B` (fwd); not itself a composition output.
     if !primary_blocked(left.prov()) {
@@ -1584,7 +1587,7 @@ fn beta_normalize(e: &Exp) -> Exp {
             }
             Exp::Pair(a, b) => vec![a, b],
             Exp::Fst(a) | Exp::Snd(a) | Exp::Ann(a, _) => vec![a],
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            Exp::InductiveCtor(_, _, args) => args.iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -1635,10 +1638,6 @@ fn beta_normalize(e: &Exp) -> Exp {
             Exp::Fst(a) => Exp::Fst(Box::new(subst(a, name, arg))),
             Exp::Snd(a) => Exp::Snd(Box::new(subst(a, name, arg))),
             Exp::Ann(a, t) => Exp::Ann(Box::new(subst(a, name, arg)), t.clone()),
-            Exp::InductiveType(d, args) => Exp::InductiveType(
-                d.clone(),
-                args.iter().map(|x| subst(x, name, arg)).collect(),
-            ),
             Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
                 d.clone(),
                 n.clone(),
@@ -1678,9 +1677,6 @@ fn beta_normalize(e: &Exp) -> Exp {
         Exp::Pair(a, b) => Exp::Pair(Box::new(beta_normalize(a)), Box::new(beta_normalize(b))),
         Exp::Fst(a) => Exp::Fst(Box::new(beta_normalize(a))),
         Exp::Snd(a) => Exp::Snd(Box::new(beta_normalize(a))),
-        Exp::InductiveType(d, args) => {
-            Exp::InductiveType(d.clone(), args.iter().map(beta_normalize).collect())
-        }
         Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
             d.clone(),
             n.clone(),
@@ -1690,29 +1686,25 @@ fn beta_normalize(e: &Exp) -> Exp {
     }
 }
 
-fn conjoin_canonical(
-    and: &Arc<crate::nbe::term::InductiveDecl>,
-    p_body: &Exp,
-    new_restr: Exp,
-) -> Exp {
+fn conjoin_canonical(and: &crate::ontology::iri::Iri, p_body: &Exp, new_restr: Exp) -> Exp {
     fn flatten(and_iri: &str, e: &Exp, out: &mut Vec<Exp>) {
-        if let Exp::InductiveType(decl, args) = e {
-            if decl.iri.as_str() == and_iri && args.len() == 2 {
-                flatten(and_iri, &args[0], out);
-                flatten(and_iri, &args[1], out);
+        if let Some((iri, _, args)) = e.as_const_spine() {
+            if iri.as_str() == and_iri && args.len() == 2 {
+                flatten(and_iri, args[0], out);
+                flatten(and_iri, args[1], out);
                 return;
             }
         }
         out.push(e.clone());
     }
     let mut conjuncts = Vec::new();
-    flatten(and.iri.as_str(), p_body, &mut conjuncts);
+    flatten(and.as_str(), p_body, &mut conjuncts);
     conjuncts.push(new_restr);
     conjuncts.sort_by_cached_key(restrictor_key);
     let mut it = conjuncts.into_iter();
     let mut acc = it.next().expect("conjoin_canonical: at least one conjunct");
     for c in it {
-        acc = Exp::InductiveType(and.clone(), vec![acc, c]);
+        acc = Exp::const_applied(and.clone(), Vec::new(), vec![acc, c]);
     }
     acc
 }
@@ -1727,7 +1719,7 @@ fn conjoin_canonical(
 /// consumes (the bare-mass `And` over-generation used to be the only other flattener; see
 /// `experiments/parsing/near-encoded-bucket-analysis.md`). Sem is the Σ itself; provenance `Compound`.
 fn refine_conjoin(
-    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    decl: &crate::ontology::iri::Iri,
     c: &Exp,
     noun_num: &Exp,
     layer: &Arc<Layer>,
@@ -1735,11 +1727,10 @@ fn refine_conjoin(
 ) -> Item {
     let sigma = match c {
         Exp::Sig(Patt::Var(bx), base, p_body)
-            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                .is_some() =>
+            if super::super::category::inductive_iri(layer, "urn:eigenius:logic:And").is_some() =>
         {
             let and =
-                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
+                super::super::category::inductive_iri(layer, "urn:eigenius:logic:And").unwrap();
             Exp::Sig(
                 Patt::Var(bx.clone()),
                 base.clone(),
@@ -1809,10 +1800,10 @@ pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
         return false;
     };
     fn flatten_and<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
-        if let Exp::InductiveType(decl, args) = e {
-            if decl.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
-                flatten_and(&args[0], out);
-                flatten_and(&args[1], out);
+        if let Some((iri, _, args)) = e.as_const_spine() {
+            if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
+                flatten_and(args[0], out);
+                flatten_and(args[1], out);
                 return;
             }
         }
@@ -1864,9 +1855,7 @@ pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
                 mentions_verb_frame(a) || mentions_verb_frame(b)
             }
             Exp::Fst(a) | Exp::Snd(a) => mentions_verb_frame(a),
-            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
-                args.iter().any(mentions_verb_frame)
-            }
+            Exp::InductiveCtor(_, _, args) => args.iter().any(mentions_verb_frame),
             _ => false,
         }
     }
@@ -1957,6 +1946,11 @@ fn cat_arity(c: &Exp) -> Option<usize> {
 /// Leading-λ count of a sem's VALUE — how many arguments it actually takes. Evaluated, because an
 /// `Exp::App` given too few arguments is syntactically an application and only becomes a closure
 /// under evaluation; a syntactic λ-count cannot see it.
+/// **Env-independent, deliberately (D76 Phase B).** Evaluated with no environment:
+/// the leading-λ count is unchanged by whether a `Const` resolves, since neither a
+/// resolved `Val::InductiveType` nor an unresolved neutral is a `Val::Lam`. A
+/// definition that unfolds *to* a lambda would matter, but `decode_type` inlines
+/// transparent definitions at decode time, so none reaches here as a `Const`.
 fn sem_arity(sem: &Exp) -> Option<usize> {
     let mut v = crate::nbe::eval::eval(sem, &crate::nbe::env::Rho::Nil).ok()?;
     let mut n = 0;
@@ -2091,13 +2085,17 @@ mod dispatch_tests {
         // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
         // the call sites keep reading as `A/B` / `A\\B`.
         let args = if name == "fwd" || name == "bwd" {
-            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            let mut v = vec![Exp::InductiveCtor(
+                list_decl().iri.clone(),
+                "m_all".into(),
+                Vec::new(),
+            )];
             v.extend(args);
             v
         } else {
             args
         };
-        Exp::InductiveCtor(list_decl(), name.into(), args)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), args)
     }
     fn cls(s: &str) -> Exp {
         Exp::EigonClass(Iri::parse(s).unwrap())
@@ -2581,15 +2579,10 @@ mod dispatch_tests {
 
     /// A minimal `logic:And` declaration — the bare test `layer()` does not load `logic`, so build the
     /// decl directly (as the forest tests do) to exercise `conjoin_canonical`.
-    fn and_decl() -> Arc<crate::nbe::term::InductiveDecl> {
-        Arc::new(crate::nbe::term::InductiveDecl {
-            iri: Iri::parse("urn:eigenius:logic:And").unwrap(),
-            name: "And".to_string(),
-            params: Vec::new(),
-            indices: Vec::new(),
-            sort: Exp::sort(0),
-            ctors: Vec::new(),
-        })
+    /// D76 Phase B — the connective's IRI is all `conjoin_canonical` needs. This
+    /// built a whole declaration to name one.
+    fn and_decl() -> Iri {
+        Iri::parse("urn:eigenius:logic:And").unwrap()
     }
 
     #[test]
@@ -2630,12 +2623,12 @@ mod dispatch_tests {
         // It is a FLAT left-nested And of 3 conjuncts (top And whose left operand is also an And),
         // not a nested Σ-over-Σ.
         let is_and = |e: &Exp| {
-            matches!(e,
-            Exp::InductiveType(d, args) if d.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2)
+            matches!(e.as_const_spine(),
+            Some((iri, _, args)) if iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2)
         };
-        match &order1 {
-            Exp::InductiveType(_, args) if is_and(&order1) => {
-                assert!(is_and(&args[0]), "left-nested flat And of 3 conjuncts");
+        match order1.as_const_spine() {
+            Some((_, _, args)) if is_and(&order1) => {
+                assert!(is_and(args[0]), "left-nested flat And of 3 conjuncts");
             }
             _ => panic!("expected a top-level And, got {}", pretty_term(&order1)),
         }
@@ -2999,9 +2992,13 @@ mod dispatch_tests {
     /// A slash carrying an EXPLICIT modality — `ct` injects the permissive `m_all`, so mode-licensing
     /// tests need to name the mode themselves.
     fn ct_mode(name: &str, mode: &str, args: Vec<Exp>) -> Exp {
-        let mut v = vec![Exp::InductiveCtor(list_decl(), mode.into(), Vec::new())];
+        let mut v = vec![Exp::InductiveCtor(
+            list_decl().iri.clone(),
+            mode.into(),
+            Vec::new(),
+        )];
         v.extend(args);
-        Exp::InductiveCtor(list_decl(), name.into(), v)
+        Exp::InductiveCtor(list_decl().iri.clone(), name.into(), v)
     }
 
     // ── multimodal slash licensing (Baldridge 2002 §5.2) ─────────────────────────────────────────

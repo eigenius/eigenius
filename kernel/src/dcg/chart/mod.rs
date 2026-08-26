@@ -163,11 +163,11 @@ mod tests {
     /// A seeded multiword `cat_n` leaf (the number/class are irrelevant to span detection).
     fn cat_n_leaf() -> Item {
         let cat = Exp::InductiveCtor(
-            list_decl(),
+            list_decl().iri.clone(),
             "cat_n".into(),
             vec![
                 Exp::EigonClass(Iri::parse("urn:eigenius:umlscui:C1").unwrap()),
-                Exp::InductiveCtor(list_decl(), "sg".into(), vec![]),
+                Exp::InductiveCtor(list_decl().iri.clone(), "sg".into(), vec![]),
             ],
         );
         Item::from_parts(cat, Exp::Unit, Combinator::Other, Cost::ZERO)

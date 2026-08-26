@@ -42,6 +42,55 @@ pub enum Exp {
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
     Sig(Patt, Box<Exp>, Box<Exp>),
+    /// D76 Phase B1 — a reference to a chain-resident declaration, by name.
+    ///
+    /// **The form nanoda uses.** `ind_consts.push(mk_const(ind.name, uparams))`
+    /// (`references/nanoda_lib/src/inductive.rs:506`): a constructor's type names
+    /// its own inductive with an ordinary `Const`, the same form as any other
+    /// reference. There is no hollowed-out declaration because none is needed.
+    ///
+    /// **What it replaces.** Eigenius wrote a *stub* — an `Arc<InductiveDecl>`
+    /// with the parts it could not supply left empty — because
+    /// `Exp::InductiveType`'s slot holds a declaration, so a self-reference had
+    /// to *be* one. Three sites then disagreed about which parts "could not
+    /// supply" means (D76 §8 Phase B), because the concept was never defined:
+    /// D19 does not mention it and D48 records it only as a preserved artifact.
+    ///
+    /// **`levels` is empty until #188's residual.** The wire form already carries
+    /// the IRI — `encode_type_json` emits `ConstRef(iri)` for an
+    /// `InductiveType` — so a level-free `Const` round-trips through the
+    /// existing codec unchanged. Levels are what makes this a chain-format
+    /// change, and they are Phase E2.
+    Const(Iri, Vec<crate::nbe::level::Level>),
+    /// Record type: a **named**, canonically-ordered dependent telescope (D78 §1).
+    ///
+    /// Each entry is `(field IRI, binder, field type)`, and a later field's type
+    /// may mention earlier binders — the same dependency `Sig` expresses, but
+    /// keyed by IRI rather than by position.
+    ///
+    /// **Canonical order is an invariant**: the topological order induced by the
+    /// dependency relation, ties broken by IRI. Because `eq_nf` compares by
+    /// readback and syntactic equality, canonical order is what makes two
+    /// spellings of the same field set compare equal without a bespoke
+    /// conversion arm. Build with [`Exp::record`], which establishes it.
+    ///
+    /// Distinct from `Sig`, which survives for *anonymous* pairs (`Exp::Times`).
+    /// Records subsume the class use of `Sig`, not the pair use — D78 §5.1.
+    Record(Vec<(Iri, Patt, Exp)>),
+    /// Refinement: a record type together with the **set** of class constraints
+    /// it satisfies (D78 §3). `Construct` returns one of these (D75 §8 Q7, 7b).
+    ///
+    /// A set, not a nest. `is_a` is a list, so a record may satisfy several
+    /// classes; `Refine(R, {C, D})` is the direct image of that, has one
+    /// representation where nesting would have two, and degenerates to `R` at
+    /// the empty set — which is the "0 or more constraints" of D75 §6.3 with no
+    /// special case.
+    ///
+    /// The constraint set is carried as **IRIs**, not as resolved field sets.
+    /// Nominal identity (D75 §8 Q2) requires it: `Refine(R, {Alpha})` and
+    /// `Refine(R, {Beta})` must differ even when `Alpha` and `Beta` have the same
+    /// fields — which, measured, is the case for 749 of 894 shipped classes.
+    Refine(Box<Exp>, std::collections::BTreeSet<Iri>),
     /// Unit type: 1
     One,
     /// Unit value: ()
@@ -155,18 +204,36 @@ pub enum Exp {
     Reduce(Box<Exp>, Box<Exp>, Box<Exp>),
 
     // --- Inductive types (Phase 11b, D19) ---
-    /// Introduce an inductive type declaration.
-    /// Evaluating this form produces the type former; the declaration is
-    /// shared with constructor and recursor occurrences via `Arc`.
-    Inductive(Arc<InductiveDecl>),
-    /// Inductive type applied to parameter expressions: `I(p₁, …, pₙ)`.
-    InductiveType(Arc<InductiveDecl>, Vec<Exp>),
-    /// Constructor application: `c(a₁, …, aₘ)` on the named inductive.
-    InductiveCtor(Arc<InductiveDecl>, Name, Vec<Exp>),
+    //
+    // D76 Phase B — `Inductive(decl)` and `InductiveType(decl, args)` are gone.
+    // A reference to an inductive is `Const(iri, levels)`, applied through `App`
+    // like any other reference (`Exp::const_applied` / `Exp::as_const_spine`).
+    //
+    // They were two spellings of one thing: `Inductive(d)` evaluated to the same
+    // `Val::InductiveType` as `InductiveType(d, [])`, and a negative occurrence
+    // written in the first form once evaded positivity checking
+    // (`positivity::rejects_disguised_inductive_negative_occurrence`). Neither had
+    // a slot for a level argument, which is what blocked #188's residual.
+    /// Constructor application: `c(a₁, …, aₘ)` on the **named** inductive.
+    ///
+    /// D76 Phase B: the inductive's IRI, not its declaration. A constructor's
+    /// identity is `(inductive IRI, constructor name)`, which is what the D47 wire
+    /// has always carried — `CtorApp(D, c)` plus an `App` spine. Holding the
+    /// declaration here meant the codec had to *decode* the target inductive, every
+    /// constructor type of it, to build a reference; and for a self-reference it
+    /// had nothing to decode yet, which is what the stub was for.
+    ///
+    /// nanoda goes further and gives each constructor its own `Const`, but its
+    /// constructors are environment entries with names. Here they are not
+    /// chain-resident — `InductiveCtorDecl { name, typ }` lives *inside* the
+    /// inductive's resource and has no IRI — so minting constructor IRIs is a
+    /// chain-format change and belongs with E2.
+    InductiveCtor(Iri, Name, Vec<Exp>),
     /// Recursor application: eliminate a value of the inductive with
     /// motive and one minor per constructor.
     InductiveRec {
-        decl: Arc<InductiveDecl>,
+        /// The inductive's IRI (D76 Phase B), resolved through `Γ_env`.
+        iri: Iri,
         motive: Box<Exp>,
         minors: Vec<Exp>,
         major: Box<Exp>,
@@ -210,7 +277,7 @@ pub enum Exp {
     /// at the caller-named IRI.
     ///
     /// Without a institution index/runtime attached (bare
-    /// `EvalCtx::Pure` used at type-check time), the expression
+    /// `EvalCtx::pure()` used at type-check time), the expression
     /// reduces to a passthrough neutral so the conversion checker can
     /// compare two `InstitutionInvoke`s structurally. Runtime callers
     /// attach the index/runtime via an effectful `EvalCtx` (the IO or check-time institution engine).
@@ -351,6 +418,19 @@ pub struct InductiveDecl {
     /// readable when unambiguous, but never the identifier.
     pub name: Name,
     /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
+    /// **Universe parameters** — the level variables this declaration binds
+    /// (eigenius#188, D76 Phase E2). nanoda's `uparams`
+    /// (`references/nanoda_lib/src/env.rs:38`).
+    ///
+    /// **Ordered, and a duplicate is a bug**, because a reference instantiates by
+    /// position: `Const(iri, levels)` substitutes `levels[i]` for `uparams[i]`.
+    /// nanoda asserts the same at declaration admission (`no_dupes_all_params`,
+    /// `tc.rs:167`).
+    ///
+    /// Empty for every monomorphic declaration, which is all ten shipped ones —
+    /// so `subst` over an empty list is the identity and the common path is
+    /// untouched.
+    pub uparams: Vec<Name>,
     pub params: Vec<(Patt, Exp)>,
     /// Index telescope — varies per constructor (D48). Empty for non-
     /// indexed declarations (the default; matches D19's pre-D48 shape).
@@ -360,6 +440,53 @@ pub struct InductiveDecl {
     /// Universe of the type former — `Exp::Sort(n)`.
     pub sort: Exp,
     pub ctors: Vec<InductiveCtorDecl>,
+}
+
+impl InductiveDecl {
+    /// Instantiate this declaration's universe parameters with `levels`
+    /// (eigenius#188, D76 Phase E2) — nanoda's `subst_declar_info_levels`.
+    ///
+    /// **By position**, against `uparams`. Returns the declaration unchanged when
+    /// it binds nothing, which is every shipped one, so the common path allocates
+    /// nothing.
+    ///
+    /// **Arity is the caller's to check.** A wrong-length level list is a type
+    /// error at the reference site, where the diagnostic can name the reference;
+    /// silently padding or truncating here would turn `List.{}` into `List.{0}`
+    /// and lose exactly the distinction Phase B built the slot for.
+    pub fn instantiate_levels(&self, levels: &[crate::nbe::level::Level]) -> InductiveDecl {
+        if self.uparams.is_empty() {
+            return self.clone();
+        }
+        let ks = &self.uparams;
+        InductiveDecl {
+            // The parameters are CONSUMED by instantiation: the result is a
+            // monomorphic declaration, and leaving them would let it be
+            // instantiated twice.
+            uparams: Vec::new(),
+            iri: self.iri.clone(),
+            name: self.name.clone(),
+            params: self
+                .params
+                .iter()
+                .map(|(p, k)| (p.clone(), k.subst_levels(ks, levels)))
+                .collect(),
+            indices: self
+                .indices
+                .iter()
+                .map(|(p, k)| (p.clone(), k.subst_levels(ks, levels)))
+                .collect(),
+            sort: self.sort.subst_levels(ks, levels),
+            ctors: self
+                .ctors
+                .iter()
+                .map(|c| InductiveCtorDecl {
+                    name: c.name.clone(),
+                    typ: c.typ.subst_levels(ks, levels),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl PartialEq for InductiveDecl {
@@ -397,6 +524,54 @@ impl Patt {
 
 // --- Convenience constructors ---
 
+/// Why a record could not be built in canonical order (D78 §1).
+///
+/// A cycle is a malformed *class declaration* — the dependency edges come from
+/// `class_types` references and `when_property` conditions, both ontology data —
+/// so the primary gate is a validation rule on the commit path. This type is the
+/// kernel's defence in depth: [`Exp::record`] returns an error rather than
+/// panicking, so a hand-built record cannot smuggle one past.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordError {
+    /// Fields whose types depend on each other, directly or transitively.
+    DependencyCycle(Vec<Iri>),
+    /// The same field IRI appears twice. Union semantics has no reading for this.
+    DuplicateField(Iri),
+    /// Two fields bind the same name, so a later type mentioning it is ambiguous.
+    DuplicateBinder {
+        name: String,
+        first: Iri,
+        second: Iri,
+    },
+}
+
+impl std::fmt::Display for RecordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DependencyCycle(iris) => {
+                let names: Vec<&str> = iris.iter().map(|i| i.as_str()).collect();
+                write!(
+                    f,
+                    "record field dependency cycle among: {}",
+                    names.join(", ")
+                )
+            }
+            Self::DuplicateField(iri) => write!(f, "duplicate record field `{iri}`"),
+            Self::DuplicateBinder {
+                name,
+                first,
+                second,
+            } => write!(
+                f,
+                "fields `{first}` and `{second}` both bind `{name}`; a later field's type \
+                 mentioning it would be ambiguous"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RecordError {}
+
 impl Exp {
     /// `Sort` at the numeral level `n` — `sort(0)` is `Prop`, `sort(1)` is `Set`.
     ///
@@ -405,6 +580,260 @@ impl Exp {
     /// other [`Level`](crate::nbe::level::Level) forms directly.
     pub fn sort(n: usize) -> Exp {
         Exp::Sort(crate::nbe::level::Level::of_nat(n))
+    }
+
+    /// A reference to a declaration, applied to arguments —
+    /// `App(App(Const(iri), a₁), a₂)`.
+    ///
+    /// The de-inlined form of what `Exp::const_applied(decl.iri.clone(), Vec::new(), args)` fused into a
+    /// single node (D76 §8 Phase B). It is also what the D47 wire has always
+    /// carried: the encoder emits `ConstRef` plus an `App` spine, so this
+    /// constructor produces the shape the codec already round-trips.
+    pub fn const_applied(iri: Iri, levels: Vec<crate::nbe::level::Level>, args: Vec<Exp>) -> Exp {
+        args.into_iter().fold(Exp::Const(iri, levels), |head, arg| {
+            Exp::App(Box::new(head), Box::new(arg))
+        })
+    }
+
+    /// Peel an application spine down to a [`Exp::Const`] head, returning the
+    /// head's IRI and levels and the arguments **in application order**.
+    ///
+    /// `None` when the head is anything else. The reversal matters: a spine peels
+    /// outermost-first, so the arguments come off backwards relative to how they
+    /// were applied — a caller that pairs them against a parameter telescope
+    /// without reversing pairs each argument with the wrong binder.
+    pub fn as_const_spine(&self) -> Option<(&Iri, &[crate::nbe::level::Level], Vec<&Exp>)> {
+        let mut args: Vec<&Exp> = Vec::new();
+        let mut head = self;
+        while let Exp::App(f, x) = head {
+            args.push(x.as_ref());
+            head = f.as_ref();
+        }
+        let Exp::Const(iri, levels) = head else {
+            return None;
+        };
+        args.reverse();
+        Some((iri, levels.as_slice(), args))
+    }
+
+    /// Substitute level arguments for level parameters throughout this expression
+    /// (eigenius#188, D76 Phase E2).
+    ///
+    /// **Positional**, matching `Level::subst`: `vs[i]` replaces `Param(ks[i])`.
+    /// A `Param` not in `ks` is left alone, which is what makes this safe to run
+    /// over a term that mentions an outer declaration's parameters.
+    ///
+    /// Only two variants carry a level — `Sort` and `Const` — and everything else
+    /// either has none or is a container. **Written without a catch-all arm on
+    /// purpose:** a new level-carrying variant must then fail to compile here
+    /// rather than silently keeping an uninstantiated `Param`, which is the failure
+    /// mode this whole phase exists to make impossible.
+    pub fn subst_levels(&self, ks: &[Name], vs: &[crate::nbe::level::Level]) -> Exp {
+        if ks.is_empty() {
+            return self.clone();
+        }
+        let go = |e: &Exp| e.subst_levels(ks, vs);
+        let bx = |e: &Exp| Box::new(e.subst_levels(ks, vs));
+        match self {
+            Exp::Sort(l) => Exp::Sort(l.subst(ks, vs)),
+            Exp::Const(iri, levels) => Exp::Const(
+                iri.clone(),
+                levels.iter().map(|l| l.subst(ks, vs)).collect(),
+            ),
+
+            Exp::Lam(p, b) => Exp::Lam(p.clone(), bx(b)),
+            Exp::Pi(p, a, b) => Exp::Pi(p.clone(), bx(a), bx(b)),
+            Exp::Sig(p, a, b) => Exp::Sig(p.clone(), bx(a), bx(b)),
+            Exp::Record(fs) => Exp::Record(
+                fs.iter()
+                    .map(|(i, p, t)| (i.clone(), p.clone(), go(t)))
+                    .collect(),
+            ),
+            Exp::Refine(c, s) => Exp::Refine(bx(c), s.clone()),
+            Exp::Pair(a, b) => Exp::Pair(bx(a), bx(b)),
+            Exp::Con(n, b) => Exp::Con(n.clone(), bx(b)),
+            Exp::Data(ss) => Exp::Data(
+                ss.iter()
+                    .map(|s| Summand {
+                        name: s.name.clone(),
+                        typ: go(&s.typ),
+                    })
+                    .collect(),
+            ),
+            Exp::Case(bs) => Exp::Case(
+                bs.iter()
+                    .map(|b| Branch {
+                        name: b.name.clone(),
+                        body: go(&b.body),
+                    })
+                    .collect(),
+            ),
+            Exp::Fst(a) => Exp::Fst(bx(a)),
+            Exp::Snd(a) => Exp::Snd(bx(a)),
+            Exp::App(f, a) => Exp::App(bx(f), bx(a)),
+            Exp::Ann(a, t) => Exp::Ann(bx(a), bx(t)),
+            Exp::Dec(d, b) => Exp::Dec(
+                match d {
+                    Decl::Def(p, t, v) => Decl::Def(p.clone(), bx(t), bx(v)),
+                    Decl::Drec(p, t, v) => Decl::Drec(p.clone(), bx(t), bx(v)),
+                },
+                bx(b),
+            ),
+            Exp::Id(a, x, y) => Exp::Id(bx(a), bx(x), bx(y)),
+            Exp::Refl(a) => Exp::Refl(bx(a)),
+            Exp::IdJ(six) => Exp::IdJ(Box::new([
+                go(&six[0]),
+                go(&six[1]),
+                go(&six[2]),
+                go(&six[3]),
+                go(&six[4]),
+                go(&six[5]),
+            ])),
+            Exp::NativeDecide(c, b) => Exp::NativeDecide(c.clone(), bx(b)),
+            Exp::DecEq(a, b, c) => Exp::DecEq(bx(a), bx(b), bx(c)),
+            Exp::Arrow(a, b) => Exp::Arrow(bx(a), bx(b)),
+            Exp::Times(a, b) => Exp::Times(bx(a), bx(b)),
+            Exp::PropAccess(a, i) => Exp::PropAccess(bx(a), i.clone()),
+            Exp::Template(t, fs) => Exp::Template(
+                t.clone(),
+                fs.iter().map(|(i, e)| (i.clone(), bx(e))).collect(),
+            ),
+            Exp::Construct(c, fs) => Exp::Construct(
+                c.clone(),
+                fs.iter().map(|(i, e)| (i.clone(), bx(e))).collect(),
+            ),
+            Exp::Map(f, c) => Exp::Map(bx(f), bx(c)),
+            Exp::Reduce(f, i, c) => Exp::Reduce(bx(f), bx(i), bx(c)),
+            Exp::InductiveCtor(iri, n, args) => {
+                Exp::InductiveCtor(iri.clone(), n.clone(), args.iter().map(go).collect())
+            }
+            Exp::InductiveRec {
+                iri,
+                motive,
+                minors,
+                major,
+            } => Exp::InductiveRec {
+                iri: iri.clone(),
+                motive: bx(motive),
+                minors: minors.iter().map(go).collect(),
+                major: bx(major),
+            },
+            Exp::Match { scrutinee, arms } => Exp::Match {
+                scrutinee: bx(scrutinee),
+                arms: arms
+                    .iter()
+                    .map(|a| MatchArm {
+                        ctor_name: a.ctor_name.clone(),
+                        bindings: a.bindings.clone(),
+                        body: go(&a.body),
+                    })
+                    .collect(),
+            },
+            Exp::InstitutionInvoke {
+                comorphism_iri,
+                source,
+                target_iri,
+            } => Exp::InstitutionInvoke {
+                comorphism_iri: comorphism_iri.clone(),
+                source: bx(source),
+                target_iri: target_iri.clone(),
+            },
+
+            // Level-free leaves.
+            Exp::One
+            | Exp::Unit
+            | Exp::Var(_)
+            | Exp::EigonClass(_)
+            | Exp::EigonAxiom(_)
+            | Exp::EigonPrimitive(_)
+            | Exp::EigonResource(_)
+            | Exp::LitString(_)
+            | Exp::LitInt(_)
+            | Exp::LitFloat(_)
+            | Exp::LitBool(_) => self.clone(),
+        }
+    }
+
+    /// Build an [`Exp::Record`] in **canonical order** (D78 §1), or report a
+    /// dependency cycle.
+    ///
+    /// Canonical order is the topological order induced by the dependency
+    /// relation — field `b` follows field `a` when `b`'s type mentions `a`'s
+    /// binder — with ties broken by field IRI. Two properties make it the right
+    /// invariant:
+    ///
+    /// - **Deterministic.** The same field set always yields the same telescope,
+    ///   so `eq_nf`'s readback-and-compare decides record equality with no
+    ///   bespoke conversion arm. This is what D78 §3.7 means by turning the
+    ///   `BTreeMap`-ordering accident into a stated invariant.
+    /// - **Dependency-respecting.** A field never precedes one its type mentions.
+    ///   Sorting by IRI alone would not guarantee this, and rejecting the records
+    ///   where it fails would be a wedge — the dependency is legitimate.
+    ///
+    /// Cycle detection is free: a cycle is exactly a topological sort that cannot
+    /// place every field.
+    pub fn record(fields: Vec<(Iri, Patt, Exp)>) -> Result<Exp, RecordError> {
+        // Binder name → the index that binds it. A field's type depending on an
+        // earlier binder is what induces an edge.
+        let mut binder_of: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for (i, (_, patt, _)) in fields.iter().enumerate() {
+            if let Patt::Var(name) = patt {
+                if let Some(prev) = binder_of.insert(name.clone(), i) {
+                    return Err(RecordError::DuplicateBinder {
+                        name: name.clone(),
+                        first: fields[prev].0.clone(),
+                        second: fields[i].0.clone(),
+                    });
+                }
+            }
+        }
+        let mut seen_iris: std::collections::BTreeSet<&Iri> = std::collections::BTreeSet::new();
+        for (iri, _, _) in &fields {
+            if !seen_iris.insert(iri) {
+                return Err(RecordError::DuplicateField(iri.clone()));
+            }
+        }
+
+        // deps[i] = the set of field indices field i's type depends on.
+        let deps: Vec<std::collections::BTreeSet<usize>> = fields
+            .iter()
+            .map(|(_, _, ty)| {
+                crate::nbe::subst::free_vars(ty)
+                    .iter()
+                    .filter_map(|v| binder_of.get(v).copied())
+                    .collect()
+            })
+            .collect();
+
+        // Kahn's algorithm, choosing the IRI-least ready field at each step so
+        // the result is canonical and not merely valid.
+        let mut placed: Vec<bool> = vec![false; fields.len()];
+        let mut order: Vec<usize> = Vec::with_capacity(fields.len());
+        while order.len() < fields.len() {
+            let next = (0..fields.len())
+                .filter(|&i| !placed[i] && deps[i].iter().all(|d| placed[*d]))
+                .min_by(|&a, &b| fields[a].0.as_str().cmp(fields[b].0.as_str()));
+            match next {
+                Some(i) => {
+                    placed[i] = true;
+                    order.push(i);
+                }
+                None => {
+                    let stuck: Vec<Iri> = (0..fields.len())
+                        .filter(|&i| !placed[i])
+                        .map(|i| fields[i].0.clone())
+                        .collect();
+                    return Err(RecordError::DependencyCycle(stuck));
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(fields.len());
+        for i in order {
+            out.push(fields[i].clone());
+        }
+        Ok(Exp::Record(out))
     }
 
     /// Non-dependent function type: A → B
@@ -435,7 +864,7 @@ impl Exp {
     /// (Phase 11b step 6, D19 §9). Backed by the canonical `List`
     /// inductive declaration from [`list_decl`].
     pub fn list(element_type: Exp) -> Exp {
-        Exp::InductiveType(list_decl(), vec![element_type])
+        Exp::const_applied(list_decl().iri.clone(), Vec::new(), vec![element_type])
     }
 }
 
@@ -443,10 +872,9 @@ impl Exp {
 ///
 /// Returns the same `Arc<InductiveDecl>` on every call so that all
 /// list types and constructors throughout the kernel reference one
-/// declaration. The inner self-reference inside the constructor types
-/// uses the "stub Arc" pattern (an empty-ctors `Arc<InductiveDecl>`
-/// with matching name) — Phase 11b's name-based lookups handle this
-/// without needing genuinely cyclic Arc allocation.
+/// declaration. The self-references inside the constructor types are
+/// `Exp::Const` naming the IRI (D76 Phase B), which is why no stub
+/// declaration is needed and no cyclic `Arc` allocation is either.
 pub fn list_decl() -> Arc<InductiveDecl> {
     static LIST_DECL: OnceLock<Arc<InductiveDecl>> = OnceLock::new();
     LIST_DECL.get_or_init(build_list_decl).clone()
@@ -454,16 +882,13 @@ pub fn list_decl() -> Arc<InductiveDecl> {
 
 fn build_list_decl() -> Arc<InductiveDecl> {
     let list_iri = Iri::parse("urn:eigenius:core:List").expect("static List IRI");
-    let self_ref = Arc::new(InductiveDecl {
-        iri: list_iri.clone(),
-        name: "List".to_string(),
-        params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::sort(1),
-        ctors: Vec::new(),
-    });
-    let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
+    let list_a_typ = Exp::const_applied(
+        list_iri.clone(),
+        Vec::new(),
+        vec![Exp::Var("A".to_string())],
+    );
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: list_iri,
         name: "List".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -505,8 +930,8 @@ fn build_list_decl() -> Arc<InductiveDecl> {
 /// Used by the merge-witness type-check (Phase 15b step 3, D20 §6.1):
 /// a `MergeComorphism`'s transformation must have signature
 /// `(A, A, Option(A)) -> A`, where the third argument carries the
-/// optional ancestor value. Same stub-Arc / name-based-equality
-/// pattern as [`list_decl`].
+/// optional ancestor value. Self-references are `Exp::Const`, as in
+/// [`list_decl`].
 pub fn option_decl() -> Arc<InductiveDecl> {
     static OPTION_DECL: OnceLock<Arc<InductiveDecl>> = OnceLock::new();
     OPTION_DECL.get_or_init(build_option_decl).clone()
@@ -514,16 +939,13 @@ pub fn option_decl() -> Arc<InductiveDecl> {
 
 fn build_option_decl() -> Arc<InductiveDecl> {
     let option_iri = Iri::parse(crate::ontology::well_known::OPTION).expect("static Option IRI");
-    let self_ref = Arc::new(InductiveDecl {
-        iri: option_iri.clone(),
-        name: "Option".to_string(),
-        params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::sort(1),
-        ctors: Vec::new(),
-    });
-    let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
+    let option_a_typ = Exp::const_applied(
+        option_iri.clone(),
+        Vec::new(),
+        vec![Exp::Var("A".to_string())],
+    );
     Arc::new(InductiveDecl {
+        uparams: Vec::new(),
         iri: option_iri,
         name: "Option".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -601,17 +1023,18 @@ mod tests {
         // Phase 11b step 6: Exp::list() now produces an inductive
         // type application backed by the canonical List declaration.
         let t = Exp::list(Exp::sort(1));
-        match t {
-            Exp::InductiveType(decl, params) => {
-                assert_eq!(decl.name, "List");
-                assert_eq!(decl.ctors.len(), 2);
-                assert_eq!(decl.ctors[0].name, "nil");
-                assert_eq!(decl.ctors[1].name, "cons");
-                assert_eq!(params.len(), 1);
-                assert!(matches!(&params[0], Exp::Sort(l) if l.is_nat(1)));
-            }
-            other => panic!("expected InductiveType, got {other:?}"),
-        }
+        // D76 Phase B: the term NAMES the declaration, so this asserts the
+        // reference's shape; the declaration itself is `list_decl`, checked below.
+        let (iri, levels, params) = t.as_const_spine().expect("a const spine");
+        assert_eq!(iri, &list_decl().iri);
+        assert!(levels.is_empty());
+        assert_eq!(params.len(), 1);
+        assert!(matches!(params[0], Exp::Sort(l) if l.is_nat(1)));
+        let decl = list_decl();
+        assert_eq!(decl.name, "List");
+        assert_eq!(decl.ctors.len(), 2);
+        assert_eq!(decl.ctors[0].name, "nil");
+        assert_eq!(decl.ctors[1].name, "cons");
     }
 
     #[test]
@@ -639,5 +1062,147 @@ mod tests {
         let a = option_decl();
         let b = option_decl();
         assert!(Arc::ptr_eq(&a, &b));
+    }
+}
+
+#[cfg(test)]
+mod record_canonical_order {
+    use super::*;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn v(n: &str) -> Patt {
+        Patt::Var(n.to_string())
+    }
+    /// A field whose type mentions `dep`, if given — the shape that induces a
+    /// dependency edge.
+    fn field(name: &str, binder: &str, dep: Option<&str>) -> (Iri, Patt, Exp) {
+        let ty = match dep {
+            Some(d) => Exp::App(
+                Box::new(Exp::Var("F".into())),
+                Box::new(Exp::Var(d.to_string())),
+            ),
+            None => Exp::sort(1),
+        };
+        (iri(name), v(binder), ty)
+    }
+    fn iris_of(e: &Exp) -> Vec<String> {
+        match e {
+            Exp::Record(fs) => fs.iter().map(|(i, _, _)| i.as_str().to_string()).collect(),
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn independent_fields_sort_by_iri() {
+        let r = Exp::record(vec![
+            field("urn:t:c", "c", None),
+            field("urn:t:a", "a", None),
+            field("urn:t:b", "b", None),
+        ])
+        .unwrap();
+        assert_eq!(iris_of(&r), ["urn:t:a", "urn:t:b", "urn:t:c"]);
+    }
+
+    #[test]
+    fn field_order_is_independent_of_input_order() {
+        // The property that makes `eq_nf`'s readback-and-compare decide record
+        // equality: the same field set always yields the same telescope.
+        let a = Exp::record(vec![
+            field("urn:t:a", "a", None),
+            field("urn:t:b", "b", Some("a")),
+            field("urn:t:c", "c", None),
+        ])
+        .unwrap();
+        let b = Exp::record(vec![
+            field("urn:t:c", "c", None),
+            field("urn:t:b", "b", Some("a")),
+            field("urn:t:a", "a", None),
+        ])
+        .unwrap();
+        assert_eq!(a, b, "the same field set must produce the same record");
+    }
+
+    #[test]
+    fn a_dependency_outranks_iri_order() {
+        // `urn:t:a` depends on `urn:t:z`, so IRI order alone would put it first
+        // and produce an ill-formed telescope. Topological order wins.
+        let r = Exp::record(vec![
+            field("urn:t:a", "a", Some("z")),
+            field("urn:t:z", "z", None),
+        ])
+        .unwrap();
+        assert_eq!(
+            iris_of(&r),
+            ["urn:t:z", "urn:t:a"],
+            "a field must never precede one its type mentions"
+        );
+    }
+
+    #[test]
+    fn ties_among_ready_fields_break_by_iri() {
+        // Both `b` and `c` become ready once `a` is placed; the IRI-least goes
+        // first, so the order is total rather than merely valid.
+        let r = Exp::record(vec![
+            field("urn:t:c", "c", Some("a")),
+            field("urn:t:b", "b", Some("a")),
+            field("urn:t:a", "a", None),
+        ])
+        .unwrap();
+        assert_eq!(iris_of(&r), ["urn:t:a", "urn:t:b", "urn:t:c"]);
+    }
+
+    #[test]
+    fn a_dependency_cycle_is_rejected() {
+        let e = Exp::record(vec![
+            field("urn:t:a", "a", Some("b")),
+            field("urn:t:b", "b", Some("a")),
+        ])
+        .unwrap_err();
+        match e {
+            RecordError::DependencyCycle(iris) => {
+                assert_eq!(iris.len(), 2, "both fields are stuck: {iris:?}");
+            }
+            other => panic!("expected a cycle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_self_dependency_is_a_cycle() {
+        let e = Exp::record(vec![field("urn:t:a", "a", Some("a"))]).unwrap_err();
+        assert!(matches!(e, RecordError::DependencyCycle(_)), "got {e:?}");
+    }
+
+    #[test]
+    fn duplicate_fields_and_binders_are_rejected() {
+        // Union semantics has no reading for a repeated field.
+        let dup_field = Exp::record(vec![
+            field("urn:t:a", "a", None),
+            field("urn:t:a", "b", None),
+        ])
+        .unwrap_err();
+        assert!(
+            matches!(dup_field, RecordError::DuplicateField(_)),
+            "got {dup_field:?}"
+        );
+
+        // Two fields binding one name makes a later mention ambiguous.
+        let dup_binder = Exp::record(vec![
+            field("urn:t:a", "x", None),
+            field("urn:t:b", "x", None),
+        ])
+        .unwrap_err();
+        assert!(
+            matches!(dup_binder, RecordError::DuplicateBinder { .. }),
+            "got {dup_binder:?}"
+        );
+    }
+
+    #[test]
+    fn the_empty_record_is_well_formed() {
+        // 749 of 894 shipped classes have no `requires` (D78 §1.2), so this is
+        // the common case, not an edge case.
+        assert_eq!(Exp::record(vec![]).unwrap(), Exp::Record(vec![]));
     }
 }

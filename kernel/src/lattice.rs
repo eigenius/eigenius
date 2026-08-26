@@ -1552,12 +1552,27 @@ pub fn merge_independent_heads(
                         "resource {iri} expected at layer {source_layer_id} during merge"
                     )))
                 })?;
-            // CoreNamespaceViolation cannot trigger here: merges have
-            // parents (non-root), and core IRIs would have been
-            // rejected when the source layer was originally committed.
-            builder
-                .add_resource(resource)
-                .expect("builder accepts resource (non-root merge layer)");
+            // **This used to `expect`**, on the argument that
+            // `CoreNamespaceViolation` "cannot trigger here: merges have parents
+            // (non-root), and core IRIs would have been rejected when the source
+            // layer was originally committed". That reasoning is sound for any
+            // well-formed store — and a store is not always well-formed. It
+            // triggered on 2026-08-26 against a RocksDB whose files had been deleted
+            // and re-copied underneath it by a demo re-run (fixed in
+            // `demo/prose-to-formulas-v2/run.sh`), and the panic named only the IRI.
+            //
+            // The layer id is the fact that separates "the merge is wrong" from "the
+            // store is corrupt", and it cost an hour of chasing the wrong one. So the
+            // failure now carries its source layer and is returned rather than
+            // raised: a corrupt store should fail the request, not the process.
+            builder.add_resource(resource).map_err(|e| {
+                MergeError::InvalidHeads(format!(
+                    "merge layer rejected `{iri}` contributed by layer {source_layer_id}: {e}. \
+                     Heads: {heads:?}. If this is a `core:` IRI, some non-root layer is being \
+                     credited with defining it — the merge is not the defect, the source \
+                     attribution is."
+                ))
+            })?;
         }
     }
     // Propagate top-of-stack tombstones from each branch into the

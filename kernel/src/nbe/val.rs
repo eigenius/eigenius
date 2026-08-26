@@ -43,6 +43,23 @@ pub enum Val {
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
     Sig(Box<Val>, Clos),
+    /// Record type — the semantic counterpart of [`Exp::Record`] (D78 §1).
+    ///
+    /// A named dependent telescope in canonical order, carried as a flat field
+    /// list plus one shared environment — the same shape [`Val::Data`] uses.
+    ///
+    /// A per-field `Clos` cannot express this: field *i*'s type may mention any
+    /// earlier binder, not just the immediately preceding one, so each closure
+    /// would need an environment that does not exist until the earlier fields
+    /// are known. Sharing one `Rho` and extending it as the telescope is walked
+    /// is what gives full dependency, exactly as `Sig`'s nesting does.
+    ///
+    /// The `Iri` is the field key projection matches on. Keying by IRI rather
+    /// than by local name is what closes the collision `find_sigma_field` has
+    /// today (D78 §9).
+    Record(Vec<(crate::ontology::iri::Iri, Patt, Exp)>, Rho),
+    /// Refinement — the semantic counterpart of [`Exp::Refine`] (D78 §3).
+    Refine(Box<Val>, std::collections::BTreeSet<Iri>),
     /// Unit type
     One,
     /// Case function (from Sum): maps constructor names to branches
@@ -97,9 +114,19 @@ pub enum Val {
         params: Vec<Val>,
         indices: Vec<Val>,
     },
-    /// Constructor value: `c(args)` on the named inductive.
+    /// Constructor value: `c(args)` on the **named** inductive.
+    ///
+    /// D76 Phase B: the IRI, matching `Exp::InductiveCtor`. Holding the declaration
+    /// made evaluating a constructor application a *lookup*, which fails without an
+    /// environment — and readback applies closures with none, deliberately, since
+    /// it must not unfold. The alternative was threading an environment through all
+    /// 114 `readback_val` call sites to serve four consumers that read the
+    /// declaration; the four get it from `Γ_env`, and eval becomes total again.
+    ///
+    /// `iota_reduce` is unaffected: it takes the declaration from the *recursor*,
+    /// which resolves it where the environment is in hand.
     InductiveVal {
-        decl: Arc<InductiveDecl>,
+        iri: Iri,
         ctor_name: Name,
         args: Vec<Val>,
     },
@@ -142,6 +169,17 @@ impl std::fmt::Display for MetaId {
 /// Neutral terms — computations that cannot reduce further.
 #[derive(Debug, Clone)]
 pub enum Neut {
+    /// D76 Phase B — an unresolved named reference. A `Const` whose IRI the
+    /// environment cannot resolve stays neutral rather than erroring, which is
+    /// what lets a declaration's constructor types mention it before it is
+    /// committed.
+    ///
+    /// **Carries its levels.** Without them readback reconstructs
+    /// `Exp::Const(iri, vec![])` and the level arguments are silently gone —
+    /// harmless while nothing produces non-empty levels, wrong the moment E2
+    /// does. Phase B is what makes `Const` load-bearing, so the field belongs
+    /// here rather than left as a trap for the phase that fills it.
+    Const(crate::ontology::iri::Iri, Vec<crate::nbe::level::Level>),
     /// Generated variable (de Bruijn level + name for readback)
     Gen(usize, Name),
     /// Unification metavariable (D48 Phase C) optionally applied to a
@@ -237,7 +275,7 @@ impl Clos {
 
     /// Instantiate the closure with a value (Pure mode).
     pub fn apply(&self, v: Val) -> Result<Val, EvalError> {
-        self.apply_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
+        self.apply_ctx(v, &crate::nbe::eval::EvalCtx::pure())
     }
 
     /// Instantiate the closure with a value and capability context.
@@ -271,7 +309,7 @@ impl Val {
 
     /// Function application: (λ f) v = f * v; (fun ...) ($c v) = ...; neutral app
     pub fn app(self, v: Val) -> Result<Val, EvalError> {
-        self.app_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
+        self.app_ctx(v, &crate::nbe::eval::EvalCtx::pure())
     }
 
     /// Function application with capability context.
@@ -314,6 +352,53 @@ impl Val {
                 } else {
                     Err(EvalError::InvalidCaseTarget(format!("{v:?}")))
                 }
+            }
+            // D76 Phase B — a type former applied to one argument.
+            //
+            // Fused, `Exp::InductiveType(decl, args)` evaluated the whole
+            // argument vector at once and split it into `params ++ indices` in a
+            // single step. De-fused, the arguments arrive one at a time through
+            // `App`, so the split happens here and a partially applied former is
+            // a legitimate intermediate value rather than an error.
+            //
+            // **D76 Phase B2 — over-application is refused for every declaration.**
+            // The guard was `decl.indices.is_empty()`, which is not a test for
+            // "indexed" but the stub-detection hack: a stub had empty indices and so
+            // does a genuine un-indexed inductive, so every shipped inductive took
+            // the lenient path and `Nat(x, y, z)` evaluated happily. The stub is
+            // gone, so the conflation goes with it.
+            //
+            // UNDER-application is still fine here and is checked by
+            // `check_inductive_type_args`: arguments arrive one at a time, so a
+            // partially applied former is an ordinary intermediate value and eval
+            // has no point at which it knows no more are coming.
+            Val::InductiveType {
+                decl,
+                mut params,
+                mut indices,
+            } => {
+                if params.len() < decl.params.len() {
+                    params.push(v);
+                } else if indices.len() < decl.indices.len() {
+                    indices.push(v);
+                } else {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                        "inductive `{}`: over-applied past {} arg(s) \
+                         (params + indices: {} + {})",
+                        decl.name,
+                        decl.params.len() + decl.indices.len(),
+                        decl.params.len(),
+                        decl.indices.len()
+                    )));
+                }
+                Ok((
+                    Val::InductiveType {
+                        decl,
+                        params,
+                        indices,
+                    },
+                    arg_node,
+                ))
             }
             Val::Nt(k) => Ok((Val::Nt(Neut::App(Box::new(k), Box::new(v))), arg_node)),
             other => Err(EvalError::NotAFunction(format!("{other:?}"))),
@@ -365,7 +450,7 @@ pub fn cons_to_vec(val: &Val) -> Option<Vec<Val>> {
 
 /// Convert a canonical-`List` inductive value to a `Vec`.
 ///
-/// Recognises `Val::InductiveVal { decl, ctor_name, args }` where
+/// Recognises `Val::InductiveVal { iri, ctor_name, args }` where
 /// `decl.name == "List"` and `ctor_name` is `nil` or `cons`. The `cons`
 /// case expects exactly two args: head and tail (where tail is itself
 /// a list value to recurse into).
@@ -383,20 +468,20 @@ pub fn inductive_list_to_vec(val: &Val) -> Option<Vec<Val>> {
     loop {
         match current {
             Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
-            } if decl.name == "List" && ctor_name == "nil" => {
+            } if iri.local_name() == "List" && ctor_name == "nil" => {
                 if !args.is_empty() {
                     return None;
                 }
                 return Some(items);
             }
             Val::InductiveVal {
-                decl,
+                iri,
                 ctor_name,
                 args,
-            } if decl.name == "List" && ctor_name == "cons" => {
+            } if iri.local_name() == "List" && ctor_name == "cons" => {
                 if args.len() != 2 {
                     return None;
                 }

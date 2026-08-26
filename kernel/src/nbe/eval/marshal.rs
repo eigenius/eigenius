@@ -110,13 +110,13 @@ pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
         // institutions inspect by position, not by user-chosen names
         // (which the kernel doesn't record on ctor args).
         Val::InductiveVal {
-            decl,
+            iri,
             ctor_name,
             args,
         } => {
             use crate::ontology::well_known as wk;
             let mut r = crate::ontology::resource::Resource::new_embedded();
-            let qualified = format!("{}:{}", decl.name, ctor_name);
+            let qualified = format!("{}:{}", iri.local_name(), ctor_name);
             r.set(
                 crate::ontology::iri::Iri::parse(wk::IS_A).unwrap(),
                 RVal::Array(vec![RVal::String(qualified)]),

@@ -124,6 +124,31 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
                 encode_type_json(body)?,
             ],
         )),
+        // D78 §1 — a record encodes as a flat list of `[iri, binder, type]`
+        // triples, in the canonical order the term already carries. Decode
+        // rebuilds through `Exp::record`, which re-establishes that order, so a
+        // hand-written or corrupted encoding cannot introduce a non-canonical
+        // one.
+        Exp::Record(fields) => {
+            let mut items = Vec::with_capacity(fields.len());
+            for (iri, patt, ty) in fields {
+                items.push(json!([
+                    iri.as_str(),
+                    binder_name(patt),
+                    encode_type_json(ty)?
+                ]));
+            }
+            Ok(ctor("Record", vec![json!(items)]))
+        }
+        // D78 §3 — the constraint set encodes as a sorted IRI array. `BTreeSet`
+        // already gives one order, so the wire form is canonical for free.
+        Exp::Refine(carrier, classes) => Ok(ctor(
+            "Refine",
+            vec![
+                encode_type_json(carrier)?,
+                json!(classes.iter().map(|i| i.as_str()).collect::<Vec<_>>()),
+            ],
+        )),
         Exp::Arrow(a, b) => encode_type_json(&Exp::Pi(Patt::Unit, a.clone(), b.clone())),
         Exp::Times(a, b) => encode_type_json(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
@@ -165,22 +190,32 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             };
             Ok(ctor("ConstRef", vec![json!(iri_str)]))
         }
-        Exp::InductiveType(decl, args) => {
-            // Encode `I(a1, a2, ...)` as
-            //   App(App(...App(ConstRef(I.iri), a1)..., a_{n-1}), a_n)
+        // D76 Phase B1 — a named reference encodes as the `ConstRef` the wire
+        // already uses. This is why de-inlining is *not* a chain-format change
+        // (D76 §8 Phase E): these are the bytes `InductiveType` has always
+        // produced for its head.
+        Exp::Const(iri, levels) => {
+            // **Level arguments are an OPTIONAL TRAILING argument** (eigenius#188,
+            // D76 Phase E2): `ConstRef(iri)` when the reference is monomorphic,
+            // `ConstRef(iri, [l₁, …])` when it is not.
             //
-            // gh #75: read `decl.iri` (the stable identifier) rather
-            // than `decl.name` (the diagnostic label). Using `name`
-            // here produced decoder-incompatible short-name shapes for
-            // chain-resolved decls and silently broke the witness-
-            // index hash equality on Phase 9's synthesize path.
-            let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
-            for arg in args {
-                current = ctor("App", vec![current, encode_type_json(arg)?]);
+            // Emitting `[]` unconditionally would have been more uniform and is not
+            // taken, because it rewrites every `ConstRef` already on the chain —
+            // and every one of them is monomorphic. Keeping those bytes identical
+            // is what lets the reseed's parity check stay a comparison rather than
+            // becoming a wholesale rewrite in which nothing could be noticed.
+            if levels.is_empty() {
+                Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
+            } else {
+                Ok(ctor(
+                    "ConstRef",
+                    vec![
+                        json!(iri.as_str()),
+                        serde_json::Value::Array(levels.iter().map(encode_level_json).collect()),
+                    ],
+                ))
             }
-            Ok(current)
         }
-
         // ── D48 / eigenius#71 — term-level value encoding ─────────
         // Lets indexed inductive applications with concrete index values
         // (Vec Nat 3, AssayShape 3, etc.) round-trip through the codec.
@@ -197,12 +232,12 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         // `demo/prose-to-chain`, on «MSI cancer models required the helicase activity of WRN»).
         Exp::Fst(p) => Ok(ctor("Fst", vec![encode_type_json(p)?])),
         Exp::Snd(p) => Ok(ctor("Snd", vec![encode_type_json(p)?])),
-        Exp::InductiveCtor(decl, ctor_name, args) => {
+        Exp::InductiveCtor(iri, ctor_name, args) => {
             // Encode `D.c(a1, ..., aN)` as
             //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
-            // gh #75: read decl.iri (stable identifier) — see the
-            // matching comment on the InductiveType arm above.
-            let mut current = ctor("CtorApp", vec![json!(decl.iri.as_str()), json!(ctor_name)]);
+            // gh #75: the stable identifier is the IRI, which the node now carries
+            // directly (D76 Phase B) instead of inside a declaration.
+            let mut current = ctor("CtorApp", vec![json!(iri.as_str()), json!(ctor_name)]);
             for arg in args {
                 current = ctor("App", vec![current, encode_type_json(arg)?]);
             }
@@ -425,43 +460,27 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
-/// Context threaded through the recursive decoder. Carries the
-/// layer for `ConstRef` resolution plus an optional "self-reference"
-/// stub for the in-construction inductive — when present, any
-/// `ConstRef` whose IRI matches `self_ref.0` short-circuits to the
-/// stub instead of recursively calling `resolve_inductive_type`
-/// (which would loop unboundedly while decoding the inductive's own
-/// constructor types). Mirrors the self-reference short-circuit
-/// `ground::decode_arg_type` uses for the Layer-1 positional
-/// `arg_types` form.
+/// Context threaded through the recursive decoder: the layer for `ConstRef`
+/// resolution.
+///
+/// **It used to carry a self-reference stub too** — an `Arc<InductiveDecl>` for
+/// the in-construction inductive, so that a `ConstRef` naming it short-circuited
+/// instead of calling `resolve_inductive_type` and looping unboundedly while
+/// decoding that inductive's own constructor types. D76 Phase B removes the need:
+/// a reference decodes to `Exp::Const`/`Exp::InductiveCtor` carrying the IRI, so
+/// nothing is resolved here and there is nothing to recurse into.
 #[derive(Clone, Copy)]
 struct DecodeCtx<'a> {
     layer: &'a Layer,
-    self_ref: Option<(&'a Iri, &'a std::sync::Arc<crate::nbe::term::InductiveDecl>)>,
 }
 
 /// Decode a chain-resident `eigentt:TypeExpr` value back to an
 /// EigenTT `Exp`.
 ///
-/// `App`-spines whose head is a `ConstRef` pointing to a parametric
-/// `InductiveType` or `CodataType` are folded into a single
-/// `Exp::InductiveType(decl, args)` / `Exp::CodataType(decl, args)`
-/// node, matching the encoder's currying convention (D47 §3.1).
+/// An `App` spine over a `ConstRef` decodes to the same spine over an
+/// `Exp::Const` — the wire's currying convention (D47 §3.1) and the term's are the
+/// same shape since D76 Phase B, so no folding happens here any more.
 pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
-    decode_type_with_self_ref(value, layer, None)
-}
-
-/// Like [`decode_type`] but with the self-reference short-circuit
-/// described on [`DecodeCtx`]. Required when decoding a constructor
-/// `core:ctor_type` payload whose body may reference the inductive
-/// being assembled — pass the stub Arc so the ConstRef arm resolves
-/// to the stub rather than recursively re-running
-/// `resolve_inductive_type` for the same IRI.
-pub fn decode_type_with_self_ref(
-    value: &Value,
-    layer: &Layer,
-    self_ref: Option<(&Iri, &std::sync::Arc<crate::nbe::term::InductiveDecl>)>,
-) -> Result<Exp, DecodeError> {
     let json = match value {
         Value::Json(j) => j,
         other => {
@@ -470,7 +489,7 @@ pub fn decode_type_with_self_ref(
             )));
         }
     };
-    let ctx = DecodeCtx { layer, self_ref };
+    let ctx = DecodeCtx { layer };
     decode_type_json(json, &ctx)
 }
 
@@ -531,6 +550,94 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             };
             Ok(Exp::Sig(patt, Box::new(dom), Box::new(body)))
         }
+        "Record" => {
+            expect_arg_count("Record", 1, args)?;
+            let items = args[0]
+                .as_array()
+                .ok_or_else(|| DecodeError::WrongArgShape {
+                    ctor: "Record",
+                    slot: 0,
+                    details: "expected an array of fields".into(),
+                })?;
+            let mut fields = Vec::with_capacity(items.len());
+            for (i, item) in items.iter().enumerate() {
+                let triple = item.as_array().filter(|t| t.len() == 3).ok_or_else(|| {
+                    DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: "field must be [iri, binder, type]".into(),
+                    }
+                })?;
+                let iri_str = triple[0]
+                    .as_str()
+                    .ok_or_else(|| DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: "iri must be a string".into(),
+                    })?;
+                let iri = crate::ontology::iri::Iri::parse(iri_str).map_err(|e| {
+                    DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: format!("bad iri `{iri_str}`: {e}"),
+                    }
+                })?;
+                let name = triple[1]
+                    .as_str()
+                    .ok_or_else(|| DecodeError::WrongArgShape {
+                        ctor: "Record",
+                        slot: i,
+                        details: "binder must be a string".into(),
+                    })?;
+                let patt = if name.is_empty() {
+                    Patt::Unit
+                } else {
+                    Patt::Var(name.to_string())
+                };
+                fields.push((iri, patt, decode_type_json(&triple[2], ctx)?));
+            }
+            // Rebuild through the canonicalising constructor rather than
+            // trusting the wire order (D78 §1).
+            // Rebuilding through the canonicalising constructor also rejects
+            // cycles and duplicates that the wire form could carry.
+            Exp::record(fields).map_err(|e| DecodeError::WrongArgShape {
+                ctor: "Record",
+                slot: 0,
+                details: e.to_string(),
+            })
+        }
+        "Refine" => {
+            expect_arg_count("Refine", 2, args)?;
+            let carrier = decode_type_json(&args[0], ctx)?;
+            let names = args[1]
+                .as_array()
+                .ok_or_else(|| DecodeError::WrongArgShape {
+                    ctor: "Refine",
+                    slot: 1,
+                    details: "expected an array of class IRIs".into(),
+                })?;
+            let mut classes = std::collections::BTreeSet::new();
+            for (i, n) in names.iter().enumerate() {
+                let s = n.as_str().ok_or_else(|| DecodeError::WrongArgShape {
+                    ctor: "Refine",
+                    slot: 1,
+                    details: format!("class {i} must be a string"),
+                })?;
+                classes.insert(crate::ontology::iri::Iri::parse(s).map_err(|e| {
+                    DecodeError::WrongArgShape {
+                        ctor: "Refine",
+                        slot: 1,
+                        details: format!("bad class iri `{s}`: {e}"),
+                    }
+                })?);
+            }
+            // `Refine(R, ∅) = R` — one representation, matching eval.
+            if classes.is_empty() {
+                Ok(carrier)
+            } else {
+                Ok(Exp::Refine(Box::new(carrier), classes))
+            }
+        }
         "Lam" => {
             expect_arg_count("Lam", 3, args)?;
             let name = arg_string("Lam", 0, &args[0])?;
@@ -566,10 +673,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             // InductiveCtor, append arg to its args list. Otherwise
             // produce a plain App.
             match head {
-                Exp::InductiveType(decl, mut existing) => {
-                    existing.push(arg);
-                    Ok(Exp::InductiveType(decl, existing))
-                }
                 Exp::InductiveCtor(decl, name, mut existing) => {
                     // D48 / eigenius#71: CtorApp via App-currying. The
                     // bottom of the App spine is `CtorApp(D, c)`
@@ -587,12 +690,45 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             }
         }
         "ConstRef" => {
-            expect_arg_count("ConstRef", 1, args)?;
+            // One or two arguments: the IRI, and optionally its level arguments.
+            // See the encode arm — the second is emitted only when non-empty, so a
+            // monomorphic reference is byte-identical to what shipped before
+            // eigenius#188's residual.
+            if args.len() != 1 && args.len() != 2 {
+                return Err(DecodeError::WrongArgCount {
+                    ctor: "ConstRef",
+                    expected: 1,
+                    actual: args.len(),
+                });
+            }
             let iri_str = arg_string("ConstRef", 0, &args[0])?;
             let iri = Iri::parse(&iri_str).map_err(|e| {
                 wrong_shape("ConstRef", 0, &format!("invalid IRI `{iri_str}`: {e}"))
             })?;
-            resolve_const_ref(iri, ctx)
+            let levels: Vec<crate::nbe::level::Level> = match args.get(1) {
+                None => Vec::new(),
+                Some(serde_json::Value::Array(ls)) => ls
+                    .iter()
+                    .map(decode_level_json)
+                    .collect::<Result<Vec<_>, _>>()?,
+                Some(other) => {
+                    return Err(wrong_shape(
+                        "ConstRef",
+                        1,
+                        &format!("level arguments must be an array, got {other}"),
+                    ))
+                }
+            };
+            if levels.is_empty() {
+                resolve_const_ref(iri, ctx)
+            } else {
+                // A level-carrying reference names its declaration and keeps its
+                // arguments; it does not unfold here. Resolution and instantiation
+                // happen in `Γ_env`, which is the whole point of D76 — the decoder
+                // deciding it would be the inline-the-environment antipattern with
+                // levels attached.
+                Ok(Exp::Const(iri, levels))
+            }
         }
 
         // ── D48 / eigenius#71 — term-level value decoding ─────────
@@ -630,8 +766,16 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             // are layered via App on the decode side (see the "App" arm
             // above, which folds args into Exp::InductiveCtor's args
             // vec); CtorApp produces the nullary base.
-            let decl = resolve_inductive_decl_for_ctor(&decl_iri, &ctor_name, ctx)?;
-            Ok(Exp::InductiveCtor(decl, ctor_name, Vec::new()))
+            //
+            // **D76 Phase B — no resolution here.** This called
+            // `resolve_inductive_decl_for_ctor`, which decoded the ENTIRE target
+            // inductive, every constructor type of it, to fill a declaration slot
+            // the node no longer has; and short-circuited to the self-reference stub
+            // when the target was the inductive being assembled, because otherwise
+            // it recursed unboundedly. It also verified the constructor name — which
+            // the type checker does anyway (`check_ctor_unknown_name`), and does with
+            // the environment in hand rather than at decode time.
+            Ok(Exp::InductiveCtor(decl_iri, ctor_name, Vec::new()))
         }
         // eigenius#71 — literal primitive values. The matching encode
         // arms emit `{"ctor": "LitString", "args": [<json-value>]}`
@@ -690,57 +834,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
 
         other => Err(DecodeError::UnknownCtor(other.to_string())),
     }
-}
-
-fn resolve_inductive_decl_for_ctor(
-    decl_iri: &Iri,
-    ctor_name: &str,
-    ctx: &DecodeCtx<'_>,
-) -> Result<std::sync::Arc<crate::nbe::term::InductiveDecl>, DecodeError> {
-    // Self-reference short-circuit: when the CtorApp targets the
-    // inductive currently being assembled, return the stub Arc rather
-    // than recursing into `resolve_inductive_type`. The stub has empty
-    // ctors so we can't verify the name in the usual way; the encoder
-    // is the authority here, and a `core:ctor_type` body that names a
-    // ctor on its own decl is by construction well-formed.
-    if let Some((self_iri, stub)) = ctx.self_ref {
-        if decl_iri == self_iri {
-            return Ok(stub.clone());
-        }
-    }
-    let resource = ctx
-        .layer
-        .resolve(decl_iri)
-        .ok_or_else(|| DecodeError::UnresolvedConstRef(decl_iri.clone()))?;
-    use crate::ontology::well_known as wk;
-    if !resource.is_instance_of(&wk::iri(wk::INDUCTIVE_TYPE)) {
-        return Err(DecodeError::ConstRefWrongClass {
-            iri: decl_iri.clone(),
-            found_classes: resource.is_a().to_vec(),
-        });
-    }
-    let val = crate::program::ground::resolve_inductive_type(decl_iri, &resource, ctx.layer)
-        .map_err(|e| DecodeError::ConstRefWrongClass {
-            iri: decl_iri.clone(),
-            found_classes: vec![wk::iri(&format!("resolution error: {e}"))],
-        })?;
-    let decl = match val {
-        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
-        other => {
-            return Err(DecodeError::ConstRefWrongClass {
-                iri: decl_iri.clone(),
-                found_classes: vec![wk::iri(&format!("unexpected resolution: {other:?}"))],
-            });
-        }
-    };
-    if !decl.ctors.iter().any(|c| c.name == ctor_name) {
-        return Err(DecodeError::CtorAppUnknownCtor {
-            decl_iri: decl_iri.clone(),
-            ctor_name: ctor_name.to_string(),
-            available: decl.ctors.iter().map(|c| c.name.clone()).collect(),
-        });
-    }
-    Ok(decl)
 }
 
 /// `urn:eigenius:eigentt:Definition` — the class decode unfolds (D66).
@@ -828,19 +921,12 @@ fn peel_and_substitute(head: Exp, arg: Exp) -> Result<Exp, DecodeError> {
 }
 
 fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
-    // Self-reference short-circuit: when the ConstRef points to the
-    // inductive currently being assembled, emit
-    // `Exp::InductiveType(stub, [])` and let the surrounding App
-    // spine fold args onto it. Without this short-circuit, decoding a
-    // ctor body like `ex:SortIdx(p)` would re-enter
-    // `resolve_inductive_type` for the same IRI and recurse
-    // unboundedly. Mirrors `ground::decode_arg_type`'s
-    // `arg_iri == *class_iri` guard on the Layer-1 positional path.
-    if let Some((self_iri, stub)) = ctx.self_ref {
-        if &iri == self_iri {
-            return Ok(Exp::InductiveType(stub.clone(), Vec::new()));
-        }
-    }
+    // D76 Phase B — no self-reference short-circuit is needed any more. It existed
+    // because resolving a `ConstRef` produced a *declaration*, so decoding a ctor
+    // body that mentioned its own inductive re-entered `resolve_inductive_type`
+    // and recursed unboundedly; the stub was the base case. A reference now
+    // resolves to `Exp::Const(iri, …)`, which names the declaration without
+    // decoding it, so there is nothing to recurse into.
     // Primitive IRIs short-circuit to `Exp::EigonPrimitive` ahead of the
     // layer lookup. The five core primitive `DataType` resources resolve
     // to the corresponding primitive enum value; without this, the
@@ -854,15 +940,6 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
         wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
-        // The canonical built-in `List` (not a chain resource): emit the
-        // built-in decl as a bare `InductiveType`; the App spine folds the
-        // element type onto it (`core:List(A)` → `InductiveType(List, [A])`).
-        wk::LIST => {
-            return Ok(Exp::InductiveType(
-                crate::nbe::term::list_decl(),
-                Vec::new(),
-            ))
-        }
         _ => {}
     }
     let resource = ctx
@@ -908,23 +985,11 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
         // Once EigonPrimitive encoding is implemented (PrimitiveType↔IRI
         // table), this branch produces Exp::EigonPrimitive(...).
     } else if class_iris.contains(&inductive_iri) {
-        let val = crate::program::ground::resolve_inductive_type(&iri, &resource, ctx.layer)
-            .map_err(|e| DecodeError::ConstRefWrongClass {
-                iri: iri.clone(),
-                found_classes: vec![
-                    Iri::parse(&format!("resolution error: {e}")).unwrap_or(iri.clone())
-                ],
-            })?;
-        match val {
-            crate::nbe::val::Val::InductiveType { decl, .. } => {
-                Ok(Exp::InductiveType(decl, Vec::new()))
-            }
-            other => Err(DecodeError::ConstRefWrongClass {
-                iri,
-                found_classes: vec![Iri::parse(&format!("unexpected resolution: {other:?}"))
-                    .unwrap_or_else(|_| Iri::parse("urn:_:unknown").unwrap())],
-            }),
-        }
+        // The name, not the declaration (D76 Phase B). This used to decode the
+        // whole thing — params, indices, every constructor type — to drop it into
+        // a slot the term no longer has. The type checker resolves it through
+        // `Γ_env` when it needs it, and memoizes.
+        Ok(Exp::Const(iri, Vec::new()))
     } else {
         // A resolved resource that is none of axiom/class/inductive/datatype — a plain
         // term-level *individual* (an `Entity` value). The dual of the encode-side `EigonResource →
@@ -1229,7 +1294,7 @@ mod tests {
 
     // ---------- decoder tests ----------
 
-    fn empty_layer() -> std::sync::Arc<Layer> {
+    pub(super) fn empty_layer() -> std::sync::Arc<Layer> {
         std::sync::Arc::new(
             crate::layer::LayerBuilder::new("decoder-test-empty", None)
                 .build(crate::layer::LayerStorage::in_memory()),
@@ -1378,6 +1443,7 @@ mod tests {
         // extended with literal/ctor encoding. This test exercises
         // the type-level-index case which IS supported.
         let ix_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:IxClassFamily").unwrap(),
             name: "urn:_:IxClassFamily".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1390,8 +1456,9 @@ mod tests {
         });
         // `IxClassFamily Some Other` — both param and index are
         // EigonClass IRIs (type-level).
-        let app_form = Exp::InductiveType(
-            ix_decl,
+        let app_form = Exp::const_applied(
+            ix_decl.iri.clone(),
+            Vec::new(),
             vec![
                 Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Some").unwrap()),
                 Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Other").unwrap()),
@@ -1425,6 +1492,7 @@ mod tests {
         // InductiveType(List, [Nat]) — encoded as App(ConstRef(List), ConstRef(Nat))
         // via currying. We use synthetic decls with names that read as IRIs.
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1433,6 +1501,7 @@ mod tests {
             ctors: Vec::new(),
         });
         let list_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
             name: "urn:_:List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
@@ -1440,21 +1509,25 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
-                typ: Exp::InductiveType(
+                typ: Exp::const_applied(
                     Arc::new(InductiveDecl {
+                        uparams: Vec::new(),
                         iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
                         name: "urn:_:List".to_string(),
                         params: Vec::new(),
                         indices: Vec::new(),
                         sort: Exp::sort(1),
                         ctors: Vec::new(),
-                    }),
+                    })
+                    .iri
+                    .clone(),
+                    Vec::new(),
                     vec![Exp::Var("A".to_string())],
                 ),
             }],
         });
-        let nat = Exp::InductiveType(nat_decl, Vec::new());
-        let list_nat = Exp::InductiveType(list_decl, vec![nat]);
+        let nat = Exp::const_applied(nat_decl.iri.clone(), Vec::new(), Vec::new());
+        let list_nat = Exp::const_applied(list_decl.iri.clone(), Vec::new(), vec![nat]);
         let v = encode_type(&list_nat).unwrap();
 
         let const_nat = ctor_obj("ConstRef", vec![json!("urn:_:Nat")]);
@@ -1485,6 +1558,7 @@ mod tests {
     fn encodes_nullary_inductive_ctor() {
         // Nat.zero — encoded as CtorApp(urn:_:Nat, zero) with no args.
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1495,7 +1569,7 @@ mod tests {
                 typ: Exp::sort(1),
             }],
         });
-        let zero = Exp::InductiveCtor(nat_decl, "zero".to_string(), Vec::new());
+        let zero = Exp::InductiveCtor(nat_decl.iri.clone(), "zero".to_string(), Vec::new());
         let v = encode_type(&zero).unwrap();
         assert_eq!(
             v,
@@ -1507,6 +1581,7 @@ mod tests {
     fn encodes_unary_inductive_ctor_via_app_currying() {
         // Nat.succ(x) — encoded as App(CtorApp(urn:_:Nat, succ), Var(x))
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1518,7 +1593,7 @@ mod tests {
             }],
         });
         let succ_x = Exp::InductiveCtor(
-            nat_decl,
+            nat_decl.iri.clone(),
             "succ".to_string(),
             vec![Exp::Var("x".to_string())],
         );
@@ -1577,6 +1652,7 @@ mod tests {
         // The encoder must produce a nested App spine:
         //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
         let nat_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
@@ -1594,19 +1670,21 @@ mod tests {
             ],
         });
         let assay_decl = Arc::new(InductiveDecl {
+            uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:AssayShape").unwrap(),
             name: "urn:_:AssayShape".to_string(),
             params: Vec::new(),
             indices: vec![(
                 Patt::Var("n".to_string()),
-                Exp::InductiveType(nat_decl.clone(), Vec::new()),
+                Exp::const_applied(nat_decl.iri.clone(), Vec::new(), Vec::new()),
             )],
             sort: Exp::sort(1),
             ctors: Vec::new(),
         });
-        let zero = Exp::InductiveCtor(nat_decl.clone(), "zero".to_string(), Vec::new());
-        let succ_zero = Exp::InductiveCtor(nat_decl, "succ".to_string(), vec![zero]);
-        let assay_succ_zero = Exp::InductiveType(assay_decl, vec![succ_zero]);
+        let zero = Exp::InductiveCtor(nat_decl.iri.clone(), "zero".to_string(), Vec::new());
+        let succ_zero = Exp::InductiveCtor(nat_decl.iri.clone(), "succ".to_string(), vec![zero]);
+        let assay_succ_zero =
+            Exp::const_applied(assay_decl.iri.clone(), Vec::new(), vec![succ_zero]);
 
         let encoded = encode_type(&assay_succ_zero).expect("encode AssayShape (succ zero)");
         let Value::Json(j) = encoded else {
@@ -1625,5 +1703,101 @@ mod tests {
         assert_eq!(j["args"][1]["args"][1]["ctor"], "CtorApp");
         assert_eq!(j["args"][1]["args"][1]["args"][0], "urn:_:Nat");
         assert_eq!(j["args"][1]["args"][1]["args"][1], "zero");
+    }
+}
+
+#[cfg(test)]
+mod record_codec {
+    use super::*;
+    use crate::nbe::term::{Exp, Patt};
+    use crate::ontology::iri::Iri;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+    fn plain(name: &str, binder: &str) -> (Iri, Patt, Exp) {
+        (iri(name), Patt::Var(binder.into()), Exp::sort(1))
+    }
+
+    fn round_trip(e: &Exp) -> Exp {
+        let layer = super::tests::empty_layer();
+        let encoded = encode_type(e).expect("encode");
+        decode_type(&encoded, &layer).expect("decode")
+    }
+
+    fn decode_raw(j: serde_json::Value) -> Result<Exp, DecodeError> {
+        let layer = super::tests::empty_layer();
+        decode_type(&crate::ontology::resource::Value::Json(j), &layer)
+    }
+
+    #[test]
+    fn a_record_round_trips() {
+        let e = Exp::record(vec![plain("urn:t:a", "a"), plain("urn:t:b", "b")]).unwrap();
+        assert_eq!(round_trip(&e), e);
+    }
+
+    #[test]
+    fn an_empty_record_round_trips() {
+        // The common case: 749 of 894 shipped classes have no `requires`.
+        let e = Exp::record(vec![]).unwrap();
+        assert_eq!(round_trip(&e), e);
+    }
+
+    #[test]
+    fn a_dependent_record_round_trips() {
+        let e = Exp::record(vec![
+            plain("urn:t:a", "a"),
+            // Not `Times`/`Arrow`: the encoder normalises those to `Sig`/`Pi`
+            // (`:127-128`), so they would fail this round-trip for reasons that
+            // have nothing to do with records.
+            (
+                iri("urn:t:b"),
+                Patt::Var("b".into()),
+                Exp::App(
+                    Box::new(Exp::Var("F".into())),
+                    Box::new(Exp::Var("a".into())),
+                ),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(round_trip(&e), e);
+    }
+
+    #[test]
+    fn decode_recanonicalises_a_scrambled_wire_order() {
+        // The wire form is not trusted: decoding rebuilds through
+        // `Exp::record`, so a hand-written encoding cannot introduce a
+        // non-canonical order (D78 §1).
+        let scrambled = serde_json::json!({
+            "ctor": "Record",
+            "args": [[
+                ["urn:t:z", "z", {"ctor": "Sort", "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]}],
+                ["urn:t:a", "a", {"ctor": "Sort", "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]}]
+            ]]
+        });
+        let decoded = decode_raw(scrambled).expect("decode");
+        match decoded {
+            Exp::Record(fs) => {
+                let names: Vec<&str> = fs.iter().map(|(i, _, _)| i.as_str()).collect();
+                assert_eq!(names, ["urn:t:a", "urn:t:z"], "decode must canonicalise");
+            }
+            other => panic!("expected a record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_a_cycle_the_wire_form_carries() {
+        let cyclic = serde_json::json!({
+            "ctor": "Record",
+            "args": [[
+                ["urn:t:a", "a", {"ctor": "Var", "args": ["b"]}],
+                ["urn:t:b", "b", {"ctor": "Var", "args": ["a"]}]
+            ]]
+        });
+        let err = decode_raw(cyclic).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("cycle"),
+            "a cycle must not decode: {err:?}"
+        );
     }
 }
