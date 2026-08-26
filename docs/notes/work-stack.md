@@ -15,19 +15,27 @@ any detour.
 > separable projects; it was split on `2026-08-25` into a dependency chain, and the build order is the
 > reverse of the drafting order:
 >
-> 1. **D79 — the representation of inductive types.** *This branch.* Completes the inductive-type
->    cleanup D76 began: normalise the three declarations carrying D47-encoded terms onto
->    `core:inductive`, add the indexer arm projecting term references as `core:mentions`, seal
->    inductive types and constructors against redefinition. P1 seal → P2 declarations (**the one
->    reseed**) → P3 indexer arm. Nothing here is merge-specific; #1 and #2 are wrong on the linear
->    commit path too.
+> 1. **D79 — the representation of inductive types. ✅ COMPLETE `2026-08-26`.** All seven phases
+>    landed: P1 seal, P2 declarations (23 properties), P3 `core:mentions` indexer arm, P4 vestigial
+>    ctor `@id`, P5 (already done by D76 Phase F — #228 closeable), P6 qualified ctor syntax (#24),
+>    P7 chain-declared `core:List` with both kernel special cases deleted. Reseed clean at
+>    **9,439,633 / 0 errors**; index growth measured **+128 MB (+4.7%)**; parse gate all-green;
+>    demo passes. See D79 §7 for what each phase actually did versus what was planned — three of
+>    seven differed.
 > 2. **D80 — witness and institution machinery.** Two facts earned under a binding that survive it
 >    changing: witness credit (D75 §3.4, standing test at `witness_index.rs:1184`) and institution
 >    verdicts whose bound data was rebound. Both fire on a *linear* commit. W0 (what revocation
 >    means) → W1 binding-aware lookup → W2 AutoOnLoad baseline → W3 provenance closure.
 > 3. **D77 — merge as a pushout.** #225. Last because it needs recheckers to call, and for witnesses
 >    and verdicts "recheck" was unsettled until D80 — both answers turned out to differ from the
->    resource one and from each other.
+>    resource one and from each other. §3.6's rename defect was fixed early (D79 P2 unblocked it),
+>    so F1 no longer needs to size it.
+>
+> **Loose ends from D79, none blocking:** the parse baseline records readings 613 / skeletons 170
+> and a live run now measures 688 / 180 — both within ceiling, gate green, cause unconfirmed (P7's
+> `core:List` decode is the hypothesis). Updating `baseline.json` needs a recorded **replay** draw
+> and an explanation, per its own protocol. Two selection decisions are unadjudicated in
+> `reading-adjudications.tsv`. #228 and #188 are confirmed addressed and can be closed.
 >
 > Entry 2 stays the tracker for what fusion does *not* cover.
 >
