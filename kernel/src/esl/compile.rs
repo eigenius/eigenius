@@ -2181,19 +2181,34 @@ impl Compiler {
             );
         }
 
-        let parent_iri_str = self.resolve(&decl.name)?;
         let ctors: Result<Vec<Value>, EslError> = decl
             .ctors
             .iter()
             .map(|c| {
-                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name());
-                let ctor_iri = Iri::parse(&ctor_iri_str).map_err(|e| {
-                    EslError::compiler(
-                        Some(c.pos().clone()),
-                        format!("invalid ctor IRI `{ctor_iri_str}`: {e}"),
-                    )
-                })?;
-                let mut cr = Resource::new(ctor_iri);
+                // **D79 §2.2.1 — a constructor has no chain identity, and the
+                // representation now says so.** This used to be
+                // `Resource::new("{parent_iri}:{ctor_name}")`, giving every ctor
+                // payload an `@id` that looked chain-resolvable and was not: the
+                // resource is stored `Value::Embedded` inside `core:ctors`, so
+                // nothing resolves it. That `@id` was **written and never read** —
+                // every consumer goes through the `core:ctor_name` property
+                // (`ground::decode_ctors`, `esl::print`, institution dispatch), and
+                // even `external_ctors`, the one place that uses the
+                // `{parent}:{name}` string form, reconstructs it from the parent's
+                // `id()` plus `ctor_name` rather than reading the `@id` beside it.
+                //
+                // It is removed because it asserted the wrong thing. Constructors
+                // are *closed*: a type's constructors are exhaustively given by its
+                // declaration, which is what makes case analysis and the recursor
+                // sound. That is exactly what distinguishes them from resources,
+                // which are open-world — anyone may add an instance of a class in a
+                // later layer, and nobody may add a constructor to an inductive in a
+                // later layer. A chain IRI states openness.
+                //
+                // The validator still reaches these: its embedded-resource recursion
+                // gates on `is_a`, not on `@id` (`validation/mod.rs:559`), and
+                // attributes any error to the nearest ancestor that has one.
+                let mut cr = Resource::new_embedded();
                 set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
                 cr.set(iri(wk::CTOR_NAME), Value::String(c.name().to_string()));
                 match c {
@@ -4810,11 +4825,17 @@ mod tests {
             Value::Embedded(r) => r.as_ref(),
             _ => panic!("ctor must be embedded"),
         };
-        // Each ctor carries an IRI derived from parent + local name
-        // (Phase 11b step 9 — IRI as canonical identity).
+        // **No `@id`** (D79 §2.2.1). A constructor has no chain identity: its
+        // identity is `(inductive IRI, ctor_name)`, which is what the D47 wire
+        // carries as `CtorApp(D, c)`. Until D79 P4 this asserted
+        // `urn:eigenius:example:Nat:zero` — an `@id` that looked chain-resolvable,
+        // was stored `Value::Embedded` so nothing resolved it, and was read by no
+        // consumer. Constructors are *closed*, resources are open-world; a chain
+        // IRI stated the wrong one.
         assert_eq!(
-            zero.id().map(|i| i.as_str()),
-            Some("urn:eigenius:example:Nat:zero")
+            zero.id(),
+            None,
+            "a constructor is an embedded resource with no @id"
         );
         assert_eq!(
             zero.get(&iri("urn:eigenius:core:ctor_name"))
@@ -4832,10 +4853,7 @@ mod tests {
             Value::Embedded(r) => r.as_ref(),
             _ => panic!("ctor must be embedded"),
         };
-        assert_eq!(
-            succ.id().map(|i| i.as_str()),
-            Some("urn:eigenius:example:Nat:succ")
-        );
+        assert_eq!(succ.id(), None, "D79 §2.2.1 — no @id on a constructor");
         assert_eq!(
             succ.get(&iri("urn:eigenius:core:ctor_name"))
                 .and_then(|v| v.as_str()),
