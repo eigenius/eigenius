@@ -116,56 +116,71 @@ merge pass asks is *"which resources mention declaration `i`"*, not *"which ment
 Consequences: §1.2's term-dependent enumeration becomes an index lookup rather than a chain walk, and
 `declaration_order`'s bespoke walker can be deleted in favour of the same extraction.
 
-### 2.3 Sealing the constructor vocabulary
+#### 2.2.1 What a mention names: the inductive, not the constructor
+
+An inductive type has a chain-resolvable IRI. **Its constructors do not.** `InductiveCtorDecl { name,
+typ }` lives inside the inductive's declaration and carries no IRI (`nbe/term.rs:507`); constructor
+identity is `(inductive IRI, constructor name)`, which is what the D47 wire has always carried —
+`CtorApp(D, c)` plus an `App` spine (`term.rs:220-231`).
+
+The chain does mint a label — the ESL compiler builds a `core:InductiveCtor` resource at
+`{parent_iri}:{ctor_name}` — but stores it as `Value::Embedded` inside the inductive's `core:ctors`
+array (`esl/compile.rs:2247-2250`), so it is not independently resolvable, and
+`extract_indexable_triples`' `RESOURCE_ARRAY` arm skips `Value::Embedded` anyway.
+
+**So a term mentioning `cat_np` emits a mention of `lexicon:Cat`.** The projection is coarser than
+per-constructor, and that costs nothing here: every constructor of a sealed inductive is sealed with
+it, so those mentions are dropped either way (§2.3). Where it *would* matter is a term mentioning an
+unsealed inductive — there the mention is to the type, and a dependent is enumerated whenever any
+constructor of it is rebound. That is sound (over-approximate, never missing), and inductives are
+sealed, so the over-approximation is unreachable in practice.
+
+### 2.3 Sealing the inductive vocabulary
 
 Indexing every mention naively is expensive at lexicon scale, and expensive in a specific,
-diagnosable way. A lexicon entry's `cat` is `cat_np(wn:n00001740, num_sg)`; multiplied over a
-7.6M-entry chain, the posting list for `lexicon:cat_np` has millions of members. It is not *wrong* —
-rebinding `cat_np` genuinely would invalidate every entry — but nothing can rebind `cat_np`, and
-nothing should be able to.
+diagnosable way. A lexicon entry's `cat` is `cat_np(wn:n00001740, num_sg)`, whose head and second
+argument both mention `lexicon:Cat` and `lexicon:Num` (§2.2.1); multiplied over a 7.6M-entry chain
+those posting lists have millions of members. Not *wrong* — rebinding `lexicon:Cat` genuinely would
+invalidate every entry — but nothing should be able to rebind it.
 
-**The rule: an `InductiveType` or one of its constructors may not be redefined.** D76 made the reason
-literal — the chain binds names to declarations and `Env::lookup` returns *one* `InductiveDecl`. For a
-class, "add a parent" is a monotone edit that the alignment layers depend on. For an inductive there
-is no monotone edit: changing constructors changes the type, and every committed term mentioning it
-silently means something else.
+**The rule: an `InductiveType` may not be redefined.** Constructors need no separate clause: they have
+no chain-resolvable identity of their own (§2.2.1), so redefining the inductive is the only way to
+change them, and it changes the whole constructor set at once. D76 made the reason literal — the chain
+binds names to declarations and `Env::lookup` returns *one* `InductiveDecl`. For a class, "add a
+parent" is a monotone edit the alignment layers depend on. For an inductive there is no monotone edit:
+changing constructors changes the type, and every committed term mentioning it silently means
+something else.
 
-Two static scans over the repo's ontologies, experiments and demo files (approximate — ESL
-constructor extraction undercounts bare-enum arms):
+Two static scans over the repo's ontologies, experiments and demo files:
 
 | candidate rule | scope | files that violate it today |
 |---|---|---|
 | seal **all** bootstrap IRIs (~1211) | 21 compiled-in ontologies | **6** |
-| seal **inductive types + constructors** (193 repo-wide) | the term vocabulary | **0** |
+| seal **`InductiveType` declarations** (42 ESL `data` + the JSON side) | the term vocabulary | **0** |
 
 The blanket rule is too broad, and the six say why. Five are parsing probes redefining closed-class
 *entries* (`resource lexicon:among_prep : lexicon:LexicalEntry`) — instances. The sixth is
 `ontologies/encoding/claim-kind-alignment.esl`, which is chain-loaded in the demo and redeclares
 `enc:Finding` / `Observation` / `Classification` with lexicon parents added; its header names the
 idiom as *"the layered-resolution pattern the wordnet↔umls alignment established."* Sealing all of
-bootstrap breaks that. Sealing the constructor vocabulary costs nothing — zero violations across the
-whole tree — which is the right time to impose a rule.
+bootstrap breaks that. Sealing inductive declarations costs nothing — zero violations across the whole
+tree — which is the right time to impose a rule.
 
 **What the seal buys the index.** Mentions whose object is sealed are dropped: they can never enter a
 `rebound` set, so their posting lists can never be queried. In `cat_np(wn:n00001740, num_sg)` that
-removes two of three. `wn:n00001740` survives — and must, because the alignment layer redefines
-WordNet sense classes, which is exactly the live merge hazard. Per-entry mentions fall from ~5 to
-~1-2, and every retained edge is one a merge can actually break.
+removes both inductive mentions — `lexicon:Cat` and `lexicon:Num` — and they are the ones with
+millions of members. `wn:n00001740` survives, and must: the alignment layer redefines WordNet sense
+classes, so that edge is one a rebinding can actually break.
 
-**What the seal does not do.** An earlier draft cited `layer/witness_index.rs:1133` — where witness
-credit survives redefinition of a class a proposition quantifies over — as evidence that the seal has
-standing beyond merge, and said sealing "removes it for the constructor vocabulary." That reads as if
-the seal addresses the cited case. It does not: the rebound name in that test is `Dog`, a **class**,
-and classes stay redefinable by design (§5). The seal covers only the sub-case where the rebound name
-is a constructor, which is not what that test exhibits.
+Prediction, to be confirmed by P3's measurement rather than assumed: a lexicon entry's retained
+mentions come from the *unsealed* IRIs in `cat` and `sem_type`, which is the entry's sense class and
+little else — order one per entry against the ~7.6M `lexicon:sem` triples the index already holds.
 
-The witness index is a real defect and a closely related one, but it is related as a *sibling*, not
-as something the seal fixes. D80 §2 states the relationship.
-
-**It is not a substitute for the pass.** #225's rebound IRI is a domain class, and domain classes are
-unsealed by construction — that is where modeling happens. The seal shrinks the index and removes the
-largest posting lists; it does not remove the need for §3's rebound-set pass.
-
+**What the seal does not do.** It does not address the witness defect
+(`layer/witness_index.rs:1184`), where credit survives redefinition of a class a proposition
+quantifies over. The rebound name there is `Dog`, a **class**, and classes stay redefinable by design
+(§5). That is [D80](d80-witness-and-institution-machinery.md) §2, and it is a separate defect on a
+separate trigger — related to the seal only in sharing `conjunction_entails` as its direction test.
 
 ---
 
@@ -174,8 +189,8 @@ largest posting lists; it does not remove the need for §3's rebound-set pass.
 Each phase begins with a code audit, per the discipline D76's phases established — every one of its
 seven audits corrected something the design had asserted.
 
-- **P1 — the seal** (§2.3). A validation rule refusing a layer that redefines an `InductiveType` or
-  one of its constructors. Measured at zero violations, so it lands before anything depends on it.
+- **P1 — the seal** (§2.3). A validation rule refusing a layer that redefines an `InductiveType` — which seals
+  its constructor set with it. Measured at zero violations, so it lands before anything depends on it.
   Gate: the rule fires on a hand-built violating layer; the full workspace suite, the demo and the
   parse gate are unperturbed. **No reseed** — it adds a rule, not an ontology edit.
 - **P2 — the declarations** (§2.1). `lexicon:cat`, `lexicon:sem_type`,
@@ -205,13 +220,20 @@ the indexer has a `core:inductive` predicate to match; the arm last. P2 is the o
 
 ## 5. What this does not cover
 
-- **Classes and properties stay redefinable.** §2.3 seals inductive types and constructors only.
+- **Classes and properties stay redefinable.** §2.3 seals inductive-type declarations only.
   Redefining a class to add parents is a load-bearing modeling idiom — the wordnet-umls alignment and
   `claim-kind-alignment.esl` both rely on it. Sealing more would trade a checkable hazard for a
   blocked workflow, and checking that hazard is D77's subject.
 - **Genuinely opaque JSON stays `core:json`.** The Julia solver payloads (`primal_solution_kv`,
   `witness_data`, `trajectory_u`) are institution-interpreted blobs with no typed-reference
   semantics. §2.1 moves only the properties that carry D47-encoded terms.
+- **Minting constructor IRIs, deliberately declined.** `nbe/term.rs:227-230` records that nanoda gives
+  each constructor its own `Const` while here they are not chain-resident, and that minting IRIs "is a
+  chain-format change and belongs with E2". **D76 Phase E2 shipped without it** (it carried universe
+  levels), so that pointer is stale and the item is unassigned. It stays unassigned: §2.2.1 shows the
+  finer granularity buys this document nothing, because a sealed inductive seals its constructors, and
+  a chain-format change with no consumer is not worth a reseed of its own. Reopen it when something
+  needs to reference a constructor independently of its type.
 - **Proposition identity.** Unchanged and environment-blind; that is D80's subject.
 
 ## 6. References

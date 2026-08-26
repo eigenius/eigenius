@@ -326,7 +326,7 @@ immediately; F2 onward wait on D79 P3 and D80 W0.
   honoured on lookup but written only by D20 §6.2/§6.3 merge resolutions (`layer/handle.rs:156`), so
   the case needs a branch that is itself a merge. D75 §3.5 records it as uncovered by any conflict
   kind; it stays uncovered here.
-- **Sealing more than inductives.** D79 §2.3 seals inductive types and constructors; classes and
+- **Sealing more than inductives.** D79 §2.3 seals `InductiveType` declarations; classes and
   properties stay redefinable, because redefining a class to add parents is a load-bearing modeling
   idiom. That is deliberate — a redefinable class is exactly what §3's pass exists to check.
 - **Narrowing.** A binding that *strengthens* leaves prior proofs sound, so it is not a soundness
