@@ -428,6 +428,26 @@ discipline D76's phases established and the reason they begin with one.
 | **P6** qualified ctors | **fixed at the lexer, not the parser** — #24's proposal would break annotations |
 | **P7** `core:List` | as planned; a round-trip gate caught a real defect in the first draft |
 
+### 7.0 The reseed, and P3's measurement
+
+`scripts/reseed-lexicon-db.sh --umls-all`, `2026-08-25`: **9,439,633 resources across 35 layers, 0
+errors** — identical to the pre-D79 baseline. The whole chain revalidates under the new declarations,
+the seal, and a chain-declared `core:List`, which is P2's gate.
+
+**P3's index growth, measured rather than estimated** — the number the phase deferred because it
+needs a real lexicon chain:
+
+| | store |
+|---|---|
+| before D79 | 2.741 GB |
+| after D79 | 2.869 GB |
+| **growth** | **+128.0 MB, +4.7%** — 13.6 bytes per resource |
+
+§2.3 predicted "order one [retained mention] per entry", against the ~7.6M `lexicon:sem` triples the
+index already held. At roughly 15 bytes per triple that predicts ~130 MB, so the seal is doing what
+the section claimed: without it, the `lexicon:Cat` and `lexicon:Num` posting lists alone would have
+multiplied this several-fold.
+
 ### 7.1 P2 — the count was 22, and the extra two were a scan bug
 
 §2.1's first inventory reported 24, including one `core:resource_array`
