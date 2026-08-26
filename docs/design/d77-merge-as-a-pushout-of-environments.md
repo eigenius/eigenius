@@ -395,6 +395,49 @@ the fix has the same two halves — enumerate, then invalidate credit — discha
 `retroactive_validate` rather than at `lookup_chain_witness`, which is a hot path and the wrong place
 to put a recheck.
 
+#### 4.4.1 Who owns a witness, and why the obvious fix does not work
+
+The `JustifiedBy` vocabulary belongs to the **Justification Logic institution** (D39) —
+`reasoning:reasoning_institution`, whose `ValidateJustification` QueryClass is **AutoOnLoad** and
+fires on every `ReasoningSentence` commit. But the institution declares
+`institution:runtime = runtimes:in_process` and says why: *"The validator is the kernel — no external
+runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory
+implementation."*
+
+| | owner |
+|---|---|
+| the `JustifiedBy` / `JustificationTerm` vocabulary | the reasoning ontology (the institution's) |
+| **when** a witness is demanded | the institution's `ValidateJustification`, AutoOnLoad at commit |
+| **synthesis** — inhabiting a `JustifiedBy.*` argument position | the **kernel type checker** (`nbe/check/witness.rs` → `EffectHooks::synthesize_chain_witness`) |
+| **admission** — does the chain admit this key | the **kernel** (`layer/witness_index.rs`), a pure function of Trace-class resources — *nothing persisted* |
+
+So the institution owns the vocabulary and the trigger; the kernel owns creation and checking. That
+places the reasoning institution squarely in §4.5.3's row-2 cell — in-process, AutoOnLoad, no
+`runtime_invocation` — which invites the conclusion that F6's re-dispatch covers it.
+
+**It does not, and this is the correction.** An earlier version of F5 said to "invalidate credit at
+commit." Both that and F6's re-dispatch fail here, for the same reason:
+
+- **Re-dispatching `ValidateJustification` against `Γ_merge` returns the same answer.** It decodes the
+  proposition, builds `JustifiedBy(j, p)`, type-checks the certificate, and synthesis calls
+  `lookup_chain_witness` — which walks to the ancestor, matches the key, and says yes. The key is
+  environment-blind (D75 §3.4), so re-running the check reproduces the wrong verdict rather than
+  correcting it. **The defect is not that the check was skipped; it is that re-running it does not
+  help.**
+- **Invalidating the trace is wrong on the merits.** The declaration trace attested something true —
+  `Π(x : Dog). P` *was* declared, under `Dog`-v1. What fails is the inference from that trace to
+  credit for the *stronger* proposition `Dog`-v2 induces. The trace is not the defective party.
+
+**So the fix is at the lookup.** `lookup_chain_witness` must refuse a hit from a layer that binds the
+proposition's names differently from the querying layer. The two pieces exist: §4.2's `core:mentions`
+supplies the name set for the attested proposition without decoding it, and §2.1's
+`conjunction_entails` decides whether the difference is a widening. Cost is confined to hits from a
+layer *other than* the querying one — first-hit-wins within a layer is unaffected — so the hot path
+stays hot.
+
+This is still not making the environment part of proposition identity (§7): the *key* is unchanged and
+existing witnesses are not reforked. Only the walk that consumes it becomes binding-aware.
+
 **Scope.** §4.1-4.3 are prerequisites for §3 and are in this document because §3 cannot be built
 without them. Wiring the witness invalidation is not: it is a second consumer of machinery §4 builds,
 on a different trigger, and it needs its own decision about what "revoking credit" means for
@@ -468,6 +511,12 @@ what *either branch changed*, and nothing else:
 Row 2 is the case in the question that prompted this section, and it is #225's shape exactly: the
 at-risk carrier is one *neither branch changed*, so it is not in the merge layer and no amount of
 pipeline routing reaches it. It needs the enumeration.
+
+**Row 2 does not subsume the witness case.** The reasoning institution sits in this cell — in-process,
+AutoOnLoad, no `runtime_invocation` — but re-dispatching it reproduces the wrong verdict rather than
+correcting it, because the witness key is environment-blind. §4.4.1 gives the reason and F5 the fix.
+Re-dispatch repairs a verdict whose *inputs* moved; it cannot repair one whose *lookup* is
+binding-blind.
 
 **Row 1 is a present defect, and it sharpens §5.** Merge today ends at `store_layer` (§5, failure 2),
 so `dispatch_auto_on_load_for_layer` never runs for a merge — an analysis spec contributed by a branch
@@ -558,16 +607,17 @@ seven audits corrected something the design had asserted.
 - **F4 — `InvalidatedSignature` fires.** The cascade variant carries the finding, so the resolution UI
   can surface it. Gate: the variant is constructed somewhere other than a test.
 
-- **F5 — witness credit under a widening redefinition** (§4.4), gated behind F2c. Enumerate witnessed
-  propositions mentioning a rebound IRI via `core:mentions`; invalidate credit at commit rather than
-  rechecking at `lookup_chain_witness`, which is a hot path. Needs its own decision on what revocation
-  means for already-committed `JustifiedBy` results — that decision is the phase's first output.
-  Gate: `witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over`
-  (`witness_index.rs:1184`) **flips** and is renamed, closing D75 §3.4.
+- **F5 — binding-aware witness lookup** (§4.4.1), gated behind F2c. `lookup_chain_witness` refuses a
+  hit whose layer binds a name the attested proposition mentions more widely than the querying layer
+  does — name set from `core:mentions`, comparison by `conjunction_entails`. **Not** re-dispatch (it
+  reproduces the wrong answer) and **not** trace invalidation (the trace attested a true thing).
+  Gates: `witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over`
+  (`witness_index.rs:1184`) **flips** and is renamed, closing D75 §3.4; a *narrowing* redefinition
+  still admits, since only widening is unsound; same-layer first-hit-wins is untouched, asserted by a
+  lookup benchmark on the unchanged path.
   **`redefining_a_class_does_not_change_the_hash_of_a_proposition_over_it` (`:1133`) must NOT flip** —
-  it guards proposition *identity*, which §7 keeps environment-blind. F5 revokes credit; it does not
-  refork every existing witness key. An F5 that flips both has changed the wrong thing.
-
+  it guards proposition *identity*, which §7 keeps environment-blind. F5 changes the walk, not the key.
+  An F5 that flips both has changed the wrong thing.
 - **F6 — institution verdicts under a rebound input** (§4.5), gated behind F1 — the provenance edges
   are already indexed, so this needs the rebound set but not the term arm. Transitive closure over
   `from_subject` / `runtime_invocation` / `runtime:inputs` / `derivation_trace`, bounded to that named
