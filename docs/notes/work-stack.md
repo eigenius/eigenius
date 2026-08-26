@@ -9,10 +9,27 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry 1 (`2026-08-24`), pushed on top of P2.** D75 diagnosed the two seams as one
-> problem, so the fusion work outranks the individual P2 issues it subsumes — #188's residual is
-> D76 Phase E2, and D78 §3.1 waits on D76 Phase D. Entry 2 stays the tracker for what fusion does
-> *not* cover.
+> **ACTIVE: entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
+> two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.
+> **D76 and D78 are complete.** D77 was drafted as the third follow-on and turned out to carry three
+> separable projects; it was split on `2026-08-25` into a dependency chain, and the build order is the
+> reverse of the drafting order:
+>
+> 1. **D79 — the representation of inductive types.** *This branch.* Completes the inductive-type
+>    cleanup D76 began: normalise the three declarations carrying D47-encoded terms onto
+>    `core:inductive`, add the indexer arm projecting term references as `core:mentions`, seal
+>    inductive types and constructors against redefinition. P1 seal → P2 declarations (**the one
+>    reseed**) → P3 indexer arm. Nothing here is merge-specific; #1 and #2 are wrong on the linear
+>    commit path too.
+> 2. **D80 — witness and institution machinery.** Two facts earned under a binding that survive it
+>    changing: witness credit (D75 §3.4, standing test at `witness_index.rs:1184`) and institution
+>    verdicts whose bound data was rebound. Both fire on a *linear* commit. W0 (what revocation
+>    means) → W1 binding-aware lookup → W2 AutoOnLoad baseline → W3 provenance closure.
+> 3. **D77 — merge as a pushout.** #225. Last because it needs recheckers to call, and for witnesses
+>    and verdicts "recheck" was unsettled until D80 — both answers turned out to differ from the
+>    resource one and from each other.
+>
+> Entry 2 stays the tracker for what fusion does *not* cover.
 >
 > **Superseded note (entry 2, `2026-08-22`), kept for the reasoning:** The parser-pipeline spine emptied
 > on `2026-08-20` when D71 met its gate; entries (2) and (3) below are the pre-D71 spine, assessed on
