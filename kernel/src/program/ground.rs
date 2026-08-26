@@ -1810,3 +1810,97 @@ mod entailment {
         }
     }
 }
+
+#[cfg(test)]
+mod list_decoder_agreement {
+    //! **D79 P7's discriminating gate.** `core:List` was resolved by *two* decoders
+    //! that disagreed, and nothing asserted they agreed:
+    //!
+    //! | decoder | `core:List` became |
+    //! |---|---|
+    //! | `eigentt_type_mirror`'s `ConstRef` arm | `Exp::Const` — the inductive |
+    //! | `ground::decode_arg_type` (this module) | `Exp::EigonClass` — a class marker |
+    //!
+    //! The second had no `List` arm, so it fell past the five primitives to
+    //! `names_an_inductive` — a chain lookup, which failed because `List` was not a
+    //! chain resource — and landed on the `EigonClass` fallthrough. Same IRI, two
+    //! meanings, no error. The comment at the *first* site stated the principle the
+    //! second violated: *"the two must agree, or a name means one thing to the
+    //! decoder and another to the type checker."* D76 Phase B fixed the
+    //! environment-versus-decoder divergence and did not look for this one.
+    //!
+    //! Declaring `core:List` in the core ontology removes the divergence at its
+    //! source — both decoders now resolve it the same way, through the chain — and
+    //! this test is what would have caught it.
+    use super::tests::build_test_layer;
+    use super::*;
+    use crate::ontology::resource::Resource;
+
+    /// Both decoders, same reference, same answer.
+    #[test]
+    fn both_decoders_agree_that_core_list_is_an_inductive() {
+        let layer = build_test_layer();
+        let list = Iri::parse(wk::LIST).unwrap();
+
+        // Decoder 1: the D47 `ConstRef` path.
+        let via_const_ref = crate::program::eigentt_type_mirror::decode_type(
+            &Value::Json(serde_json::json!({
+                "ctor": "ConstRef", "args": [wk::LIST],
+            })),
+            &layer,
+        )
+        .expect("core:List must decode");
+
+        // Decoder 2: the constructor-argument path.
+        let mut arg = Resource::new_embedded();
+        arg.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![Value::ResourceRef(
+                Iri::parse(wk::INDUCTIVE_ARG_TYPE).unwrap(),
+            )]),
+        );
+        arg.set(
+            Iri::parse(wk::ARG_NAME).unwrap(),
+            Value::String("xs".into()),
+        );
+        arg.set(
+            Iri::parse(wk::TYPE_NAME).unwrap(),
+            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::LIST]})),
+        );
+        let holder = Iri::parse("urn:eigenius:test:Holder").unwrap();
+        let via_arg_type = decode_arg_type(&holder, &Value::Embedded(Box::new(arg)), &layer)
+            .expect("core:List must decode as an argument type");
+
+        assert_eq!(
+            via_const_ref, via_arg_type,
+            "the two decoders must produce the same Exp for the same IRI; before D79 P7 one \
+             produced Const(core:List) and the other EigonClass(core:List)"
+        );
+        assert!(
+            matches!(&via_arg_type, Exp::Const(i, _) if *i == list),
+            "and the agreed answer must be the inductive, not a class marker: {via_arg_type:?}"
+        );
+    }
+
+    /// **D79 §2.1.1's premise, now true.** That section argues against adding a
+    /// `core:inductive_array` on the grounds that a list of terms is itself a term —
+    /// and notes the one thing standing in the way: `class_types core:List` could not
+    /// resolve, because `class_types_inductive_target` goes through `layer.resolve`
+    /// and `List` was not a chain resource. It is now, so a list-valued term slot is
+    /// expressible without an array data type.
+    #[test]
+    fn core_list_resolves_as_a_class_types_target() {
+        let layer = build_test_layer();
+        let list = Iri::parse(wk::LIST).unwrap();
+        let resolved = layer
+            .resolve(&list)
+            .expect("core:List must resolve in the chain");
+        assert!(
+            resolved
+                .is_a()
+                .iter()
+                .any(|c| c.as_str() == wk::INDUCTIVE_TYPE),
+            "and must resolve to an InductiveType, which is what class_types requires"
+        );
+    }
+}

@@ -1009,6 +1009,53 @@
   },
 
   {
+    "@id": "urn:eigenius:core:List",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "List",
+    "urn:eigenius:core:description": "The standard cons-list parametric inductive: a value of `List(A)` is either `nil` or `cons(head: A, tail: List(A))`. Mirrors the kernel-side declaration at `crate::nbe::term::list_decl`, and must keep mirroring it — `the_chain_and_the_kernel_agree_about_list` fails otherwise. Declared here as of D79 §2.1.2: `List` used to exist ONLY kernel-side, special-cased by `Env::intrinsic` and again by the D47 `ConstRef` decoder, while appearing in authored ESL (`core:List(lexicon:Entity) -> Prop`) and therefore in persisted terms. Two decoders disagreed about it — one produced the inductive, the other an `EigonClass` marker — and nothing outside the kernel could resolve it at all. Same reasoning as `core:Option`: the chain is the single answer, so a disagreement surfaces instead of being papered over by preferring the kernel's copy.",
+    "urn:eigenius:core:type_params": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
+        "urn:eigenius:core:param_name": "A",
+        "urn:eigenius:core:param_kind": {
+          "ctor": "Sort",
+          "args": [{ "ctor": "Succ", "args": [{ "ctor": "Zero", "args": [] }] }]
+        }
+      }
+    ],
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "nil"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "cons",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "head",
+            "urn:eigenius:core:type_name": { "ctor": "Var", "args": ["A"] }
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "tail",
+            "urn:eigenius:core:type_name": {
+              "ctor": "ConstRef",
+              "args": ["urn:eigenius:core:List"]
+            },
+            "urn:eigenius:core:type_args": [
+              {
+                "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+                "urn:eigenius:core:type_name": { "ctor": "Var", "args": ["A"] }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
     "@id": "urn:eigenius:core:Option",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Option",

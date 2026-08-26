@@ -940,11 +940,6 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
         wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
-        // The canonical built-in `List` is not a chain resource, so it would not
-        // resolve below. `Env::intrinsic` is the environment's matching answer —
-        // the two must agree, or a name means one thing to the decoder and another
-        // to the type checker (D76 Phase B, sixth correction).
-        wk::LIST => return Ok(Exp::Const(iri, Vec::new())),
         _ => {}
     }
     let resource = ctx
