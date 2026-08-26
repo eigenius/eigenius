@@ -100,6 +100,16 @@ SNAPSHOT="${EIGENIUS_DB_SNAPSHOT:-$(ls -1dt "$SNAPSHOT_ROOT"/wordnet-umls-aligne
     echo "ERROR: not a RocksDB store: $SNAPSHOT" >&2; exit 1
 }
 VOLUME="${VOLUME:-eigenius_eigenius_db}"
+# **Take the stack down before staging.** The staging step below is
+# `rm -rf /dst/*` on the volume, and `docker compose up -d` is a no-op against an
+# already-running container — so re-running this script without this line deletes
+# the store OUT FROM UNDER A LIVE RocksDB and then lets the same kernel keep
+# serving it. The failures that produces are arbitrary and blame the wrong thing:
+# on 2026-08-26 it surfaced as `CoreNamespaceViolation { core:Asserts }` from
+# `merge_independent_heads`, which reads as a merge defect and is not one. A run
+# that aborts part-way (the common case while iterating) leaves the container up,
+# so this is the normal path, not an edge case.
+docker compose down >/dev/null 2>&1 || true
 echo "staging $(basename "$SNAPSHOT") into volume $VOLUME (the snapshot itself is read-only)"
 docker run --rm -v "$SNAPSHOT":/src:ro -v "$VOLUME":/dst alpine \
     sh -c 'rm -rf /dst/* && cp -a /src/. /dst/' >/dev/null
