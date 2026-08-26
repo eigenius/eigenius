@@ -123,10 +123,26 @@ typ }` lives inside the inductive's declaration and carries no IRI (`nbe/term.rs
 identity is `(inductive IRI, constructor name)`, which is what the D47 wire has always carried —
 `CtorApp(D, c)` plus an `App` spine (`term.rs:220-231`).
 
-The chain does mint a label — the ESL compiler builds a `core:InductiveCtor` resource at
-`{parent_iri}:{ctor_name}` — but stores it as `Value::Embedded` inside the inductive's `core:ctors`
-array (`esl/compile.rs:2247-2250`), so it is not independently resolvable, and
-`extract_indexable_triples`' `RESOURCE_ARRAY` arm skips `Value::Embedded` anyway.
+**This is the correct shape, not an omission.** Constructors are *closed*: a type's constructors are
+exhaustively given by its declaration, which is what makes case analysis and the recursor sound. That
+closedness is exactly what distinguishes them from resources, which are open-world — anyone may add an
+instance of a class in a later layer, and nobody may add a constructor to an inductive in a later
+layer. Giving a constructor a chain IRI would state the wrong thing about it. The only information
+such an IRI could carry is a back-reference to the parent inductive, and the data structure does not
+need one: the parent is the enclosing declaration.
+
+**The representation currently says otherwise, by accident.** The ESL compiler builds each
+`core:InductiveCtor` as `Resource::new({parent_iri}:{ctor_name})` (`esl/compile.rs:2189-2197`) rather
+than `Resource::new_embedded()`, so every constructor payload carries an `@id` that looks
+chain-resolvable and is not. It is stored as `Value::Embedded` inside `core:ctors`
+(`compile.rs:2247-2250`), so nothing resolves it, and `extract_indexable_triples`' `RESOURCE_ARRAY`
+arm skips `Value::Embedded` anyway.
+
+**That `@id` is written and never read.** Every consumer goes through the `core:ctor_name` *property*
+— `decode_ctors` (`program/ground.rs`), the ESL printer, the institution dispatch paths. Even the one
+place that uses the `{parent}:{ctor_name}` string form, the compiler's `ctors_by_short_name`,
+**reconstructs** it from the parent's `resource.id()` plus the embedded ctor's `ctor_name`
+(`compile.rs:299-316`) rather than reading the `@id` that is sitting right there. P4 removes it.
 
 **So a term mentioning `cat_np` emits a mention of `lexicon:Cat`.** The projection is coarser than
 per-constructor, and that costs nothing here: every constructor of a sealed inductive is sealed with
@@ -204,8 +220,18 @@ seven audits corrected something the design had asserted.
   **measured, not estimated**, against the ~1-2-per-entry prediction; `declaration_order`'s bespoke
   walker is deleted and its `MutualInductives` tests still pass on the shared extraction.
 
+- **P4 — drop the vestigial constructor `@id`** (§2.2.1). `Resource::new(ctor_iri)` →
+  `Resource::new_embedded()` in the ESL compiler's ctor construction. Chain-format change, so it
+  **batches with P2's reseed** and costs nothing extra. Gates: the full workspace suite and the ESL
+  round-trip (print → reparse → identical term) are unperturbed — `esl/print.rs` reads `core:ctor_name`
+  and must not regress to the `@id`; `ctors_by_short_name` still resolves qualified constructor
+  references, since it reconstructs the string form from the parent's `id()` and `ctor_name`; and a
+  reseed produces ctor payloads with no `@id`.
+
 **Order is not arbitrary.** The seal first, so the indexer can rely on it; the declarations next, so
-the indexer has a `core:inductive` predicate to match; the arm last. P2 is the only reseed.
+the indexer has a `core:inductive` predicate to match; the arm last. P4 rides P2's reseed and is
+otherwise independent — it can land any time after P2 is written and before the reseed runs. P2 is the
+only reseed across all four.
 
 ---
 
@@ -227,13 +253,13 @@ the indexer has a `core:inductive` predicate to match; the arm last. P2 is the o
 - **Genuinely opaque JSON stays `core:json`.** The Julia solver payloads (`primal_solution_kv`,
   `witness_data`, `trajectory_u`) are institution-interpreted blobs with no typed-reference
   semantics. §2.1 moves only the properties that carry D47-encoded terms.
-- **Minting constructor IRIs, deliberately declined.** `nbe/term.rs:227-230` records that nanoda gives
-  each constructor its own `Const` while here they are not chain-resident, and that minting IRIs "is a
-  chain-format change and belongs with E2". **D76 Phase E2 shipped without it** (it carried universe
-  levels), so that pointer is stale and the item is unassigned. It stays unassigned: §2.2.1 shows the
-  finer granularity buys this document nothing, because a sealed inductive seals its constructors, and
-  a chain-format change with no consumer is not worth a reseed of its own. Reopen it when something
-  needs to reference a constructor independently of its type.
+- **Minting constructor IRIs — declined on principle, not on cost.** `nbe/term.rs:227-230` records
+  that nanoda gives each constructor its own `Const` while here they are not chain-resident, and that
+  minting IRIs "is a chain-format change and belongs with E2". **D76 Phase E2 shipped without it** (it
+  carried universe levels), so that pointer is stale. It stays declined, and §2.2.1 gives the reason:
+  constructors are closed and resources are open, and a chain IRI asserts openness. P4 moves the
+  representation *further* in this direction by dropping the vestigial `@id`, not closer to minting
+  real ones.
 - **Proposition identity.** Unchanged and environment-blind; that is D80's subject.
 
 ## 6. References
