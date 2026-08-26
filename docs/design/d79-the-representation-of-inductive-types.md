@@ -410,3 +410,81 @@ chain-format or bootstrap change that would otherwise need a reseed of its own.
 - `layer/index.rs` (`extract_indexable_triples`), `layer/declaration_order.rs`,
   `validation/rules/inductive.rs`, `validation/rules/eigentt_value.rs`,
   `validation/rules/reference_integrity.rs`
+
+---
+
+## 7. Build log
+
+Landed `2026-08-25`. Each phase's audit corrected something the plan asserted, which is the
+discipline D76's phases established and the reason they begin with one.
+
+| phase | outcome |
+|---|---|
+| **P1** seal | as planned. 4 tests |
+| **P2** declarations | **22, not 24** — see below. 23 properties edited (22 + `ctor_type`) |
+| **P3** indexer arm | as planned; `declaration_order`'s walker deleted in favour of the shared one |
+| **P4** ctor `@id` | as planned; also removed a `self.resolve` left unused by it |
+| **P5** recursor motive | **already implemented.** Reduced to deleting a stale comment |
+| **P6** qualified ctors | **fixed at the lexer, not the parser** — #24's proposal would break annotations |
+| **P7** `core:List` | as planned; a round-trip gate caught a real defect in the first draft |
+
+### 7.1 P2 — the count was 22, and the extra two were a scan bug
+
+§2.1's first inventory reported 24, including one `core:resource_array`
+(`objective:options -> core:Option`). That row was wrong: `objective:Option` is a **class**, and the
+scan's ESL branch had resolved `class_types` qualified names by *local-name suffix*, matching it
+against the kernel's `core:Option`. `objective:selected` fell out for the same reason.
+
+The gate is now `scripts/inductive-ranged-properties.py`, which resolves by full IRI only and is
+**both the inventory and the check** — so the two cannot drift, and the specific mistake is named in
+P2's gate text.
+
+### 7.2 P5 — #228 was closed by D76 Phase F, not merely unblocked
+
+The plan read #228 as gated on "#188's residual — declaration-level uparams and `Const(iri, levels)`"
+and scheduled the fix here once that gate lifted. It had lifted, and **the fix had already landed with
+it**: `derive_motive_codomain` (`check/inductive.rs`) applies the motive to fresh generics and infers
+what sort the result inhabits, so `Type 1` and above are admitted, and
+`check::inductive::tests::a_type_1_valued_motive_is_admitted` runs an actual recursor at each level.
+#228's other half — the comment claiming a ceiling the code did not have — was fixed in the same
+phase.
+
+What remained was a **stale comment block** still describing the removed constant, stacked directly
+above the correct one, ending *"Gated on #188's residual"* — a gate that had since lifted. Two
+contradictory explanations of the same code. **#228 is closeable.**
+
+### 7.3 P6 — #24's proposed fix would have broken annotation colons
+
+#24 specifies the change in `parse_qualified_name`: *"greedily consume additional `:Ident` chains"*.
+That eats the binder colon — the parser's own comment reserves a standalone `Colon` for `x : T`, and
+`ex:Nat : Prop` would have parsed as one name.
+
+The change belongs in the **lexer**, because tightness is already the discriminator:
+`tight_qualified_tail` only runs on a `:` with no whitespace before it, and the language has always
+required spaces around a binder colon (`x:T` lexes as `QualName("x", "T")`). Continuing the name
+across further *tight* `:segment`s gives `ex:Nat:succ` → `QualName("ex", "Nat:succ")` and leaves
+`ex:Nat : Prop` untouched, which a test pins.
+
+#24's **rationale** also needed correcting rather than implementing: it argues from *"each constructor
+has a canonical IRI … lookup is IRI-keyed"*, which §2.2.1 shows is false and P4 removed. The feature
+survives the correction because it never depended on that premise — `(inductive, ctor name)` *is* a
+constructor's identity, so the type is the only thing a constructor reference could be qualified by.
+
+### 7.4 P7 — the round-trip gate caught the declaration, not the code
+
+`every_shipped_inductive_round_trips_through_esl` (an existing test the plan did not name) refused the
+first `core:List` draft: its nested `type_args` entry carried `arg_name: "elem"`, but a **type
+argument is positional and has no name**. Fixed in the declaration rather than pinned as an exception.
+
+### 7.5 Not fixed here, found here
+
+- **A merge rename does not rewrite term references.** `value_mentions_iri` and
+  `substitute_iri_in_value` (`layer/merge/resolve.rs`) both stop at `Value::Json`, so a resource whose
+  only reference to a renamed IRI is inside a term is neither selected nor rewritten. Recorded as
+  [D77](d77-merge-as-a-pushout-of-environments.md) §3.6 — and only fixable *after* §2.1, since the
+  rule has to be "descend into `Value::Json` only when the property is declared `core:inductive`"; a
+  `core:json` payload's IRI-shaped strings are data, and rewriting one corrupts it.
+- **The `db_backed_encoding` snapshot tests race.** Two snapshot-using tests in one binary derive
+  their work directory from the *parent* pid, so both copy to the same path and the second fails.
+  Pre-existing, environmental, and unrelated to this document; single-threaded runs pass. Not fixed
+  because it is a harness bug in a file this work does not otherwise touch.
