@@ -246,7 +246,7 @@ Neither changes this document's scope. Adding `scan_predicate` improves the line
 identically and belongs there, not here — it is a missing *range method* over triples that already
 exist, unrelated to §4, which is about triples that are never emitted.
 
-### 3.6 A rename resolution does not rewrite term references — and cannot be fixed before D79
+### 3.6 A rename resolution did not rewrite term references — **fixed** `2026-08-25`
 
 Found while landing D79 P3. Two functions in `layer/merge/resolve.rs` decide and perform an
 IRI rename, and both stop at `Value::Json`:
@@ -269,8 +269,14 @@ distinction: twenty-two term-valued properties were declared `core:resource` and
 `core:json`. A term-aware rename written then would have had to choose between missing terms and
 corrupting blobs.
 
-`json_mentions` (D79 §2.2) answers the first column. The second needs a *rewriting* walker, which
-D79 does not build — detection and substitution are different traversals. F1's audit should size it.
+**Fixed once D79 P2 landed**, which is what made the distinction expressible. Both halves now take
+the side's head layer and read each property's declared `data_type`: a `core:inductive` carrier is
+descended into, a `core:json` carrier is not. Whole-string matching only — an IRI occupies a
+`ConstRef` / `CtorApp` argument entire. Pinned by `rename_reaches_terms`, whose two tests put the
+*identical* value under each declaration and assert opposite outcomes.
+
+Nothing else in this document is affected: the rename path is a resolution *transformation*, not the
+rebound-set pass §3 specifies. F1 no longer needs to size it.
 
 ## 4. Does merge gain a validation pass, or *is* the pushout obligation the pass?
 

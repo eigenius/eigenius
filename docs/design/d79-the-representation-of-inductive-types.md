@@ -498,12 +498,13 @@ argument is positional and has no name**. Fixed in the declaration rather than p
 
 ### 7.5 Not fixed here, found here
 
-- **A merge rename does not rewrite term references.** `value_mentions_iri` and
+- **A merge rename did not rewrite term references — found here, then fixed here.** `value_mentions_iri` and
   `substitute_iri_in_value` (`layer/merge/resolve.rs`) both stop at `Value::Json`, so a resource whose
-  only reference to a renamed IRI is inside a term is neither selected nor rewritten. Recorded as
-  [D77](d77-merge-as-a-pushout-of-environments.md) §3.6 — and only fixable *after* §2.1, since the
-  rule has to be "descend into `Value::Json` only when the property is declared `core:inductive`"; a
-  `core:json` payload's IRI-shaped strings are data, and rewriting one corrupts it.
+  only reference to a renamed IRI was inside a term was neither selected nor rewritten — silent
+  corruption, not a stale check. It became fixable the moment P2 landed, because the rule is "descend
+  into `Value::Json` only when the property is declared `core:inductive`" and before P2 the declared
+  type could not tell a term from an opaque payload. Both halves now take the side's head layer and
+  read the carrier's `data_type`. [D77](d77-merge-as-a-pushout-of-environments.md) §3.6 records it.
 - **The `db_backed_encoding` snapshot tests race.** Two snapshot-using tests in one binary derive
   their work directory from the *parent* pid, so both copy to the same path and the second fails.
   Pre-existing, environmental, and unrelated to this document; single-threaded runs pass. Not fixed
