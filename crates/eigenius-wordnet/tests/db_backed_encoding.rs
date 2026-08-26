@@ -7234,7 +7234,7 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
         let ratio = entries as f64 / resources as f64;
         worst = worst.max(ratio);
         worst_entries = worst_entries.max(entries);
-        if biggest_sample.map_or(true, |(_, r)| resources > r) {
+        if biggest_sample.is_none_or(|(_, r)| resources > r) {
             biggest_sample = Some((entries, resources));
         }
         eprintln!(

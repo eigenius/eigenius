@@ -200,7 +200,7 @@ fn enumerate_dependents(
 /// brand-new IRI. Bloom-gated `resolve`, so this is ~O(chain depth), not O(resources).
 /// Under reference integrity (Rule 22), only a redefinition can have lower instances or
 /// referrers, so this gates the expensive case-(1)/(3) scans.
-fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Iri) -> bool {
+pub(in crate::validation) fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Iri) -> bool {
     // A *shadowing* definition is not automatically a *changed* one. Re-loading an
     // ontology that is already resident (the bootstrap chain, or an idempotent
     // re-import) shadows every IRI it declares with a byte-identical definition. If

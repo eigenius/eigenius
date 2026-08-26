@@ -99,3 +99,201 @@ impl Validator {
         }
     }
 }
+
+// ── D79 §2.3 — the seal ───────────────────────────────────────────────
+
+impl Validator {
+    /// **D79 §2.3 — a `core:InductiveType` declaration may not be redefined.**
+    ///
+    /// Same trigger as Rule 23 above (`is_a core:InductiveType`) and a different
+    /// question: not *is this declaration admissible* but *may this layer declare
+    /// it at all*.
+    ///
+    /// **Why inductives and not classes.** D76 made the chain the typing
+    /// environment: it binds names to declarations, and `Env::lookup` returns one
+    /// `InductiveDecl`. A class admits a monotone edit — redeclaring it with a
+    /// parent added is the idiom the wordnet↔umls alignment and
+    /// `claim-kind-alignment.esl` are built on. An inductive admits none:
+    /// constructors have no chain-resolvable identity (`nbe::term::InductiveCtorDecl`
+    /// carries a name and a type, no IRI), so redefining the type is the only way
+    /// to change them and it replaces the whole constructor set at once. Every
+    /// committed term mentioning the type then means something else, with nothing
+    /// to detect it.
+    ///
+    /// **Measured before it rejected anything**, per the protocol eigenius#136
+    /// earned and Rule 23 above followed: a scan of every `InductiveType`
+    /// declaration across `ontologies/`, `experiments/` and `demo/` found **zero**
+    /// declared in more than one file. The rule costs nothing today, which is why
+    /// it lands before anything depends on it.
+    ///
+    /// **Byte-identical shadowing is not a redefinition, and that exemption is
+    /// load-bearing rather than an optimisation.** A reseed re-loads the bootstrap
+    /// chain, shadowing every `InductiveType` it declares. Without
+    /// [`redefines_ancestor`]'s canonical-CBOR comparison this rule would refuse
+    /// every reseed — including the one D79 P2 needs.
+    pub(in crate::validation) fn check_inductive_not_redefined(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        if !resource
+            .is_a()
+            .iter()
+            .any(|c| c.as_str() == wk::INDUCTIVE_TYPE)
+        {
+            return vec![];
+        }
+        let Some(iri) = res_id else {
+            // Embedded — no IRI, so nothing below it to shadow.
+            return vec![];
+        };
+        if !crate::validation::retroactive::redefines_ancestor(&self.layer, iri) {
+            return vec![];
+        }
+        vec![ValidationError {
+            resource_id: res_id.clone(),
+            property: None,
+            rule: ValidationRule::InductiveRedefinition,
+            message: format!(
+                "`{iri}` is a core:InductiveType already declared lower in the chain, and this \
+                 layer redeclares it with a different body. An inductive cannot be redefined: its \
+                 constructors have no identity apart from it, so this replaces the whole \
+                 constructor set and silently changes what every committed term mentioning \
+                 `{iri}` means. Declare a new inductive under its own IRI instead. (Classes and \
+                 properties stay redefinable — this restriction is inductives only. D79 §2.3.)"
+            ),
+        }]
+    }
+}
+
+#[cfg(test)]
+mod seal_tests {
+    use super::super::super::tests::{build_core_layer, make_resource};
+    use super::super::super::{ValidationRule, Validator};
+    use crate::layer::{Layer, LayerBuilder, LayerStorage};
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::ontology::well_known as wk;
+    use std::sync::Arc;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).expect("static iri")
+    }
+
+    /// A minimal `core:InductiveType` with one nullary ctor whose name is `ctor`.
+    /// Varying `ctor` is what makes two versions differ.
+    fn colour(ctor: &str) -> Resource {
+        let c = make_resource(
+            "urn:eigenius:test:Colour:c",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String(ctor.into())),
+                (wk::ARG_TYPES, Value::Array(vec![])),
+            ],
+        );
+        make_resource(
+            "urn:eigenius:test:Colour",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+                ),
+                (wk::SHORT_NAME, Value::String("Colour".into())),
+                (wk::TYPE_PARAMS, Value::Array(vec![])),
+                (wk::CTORS, Value::Array(vec![Value::Embedded(Box::new(c))])),
+            ],
+        )
+    }
+
+    fn chain(base_ctor: &str, child_ctor: Option<&str>) -> Arc<Layer> {
+        let mut b = LayerBuilder::new("base", Some(build_core_layer()));
+        b.add_resource(colour(base_ctor)).unwrap();
+        let base = Arc::new(b.build(LayerStorage::in_memory()));
+        match child_ctor {
+            None => base,
+            Some(c) => {
+                let mut b2 = LayerBuilder::new("child", Some(base));
+                b2.add_resource(colour(c)).unwrap();
+                Arc::new(b2.build(LayerStorage::in_memory()))
+            }
+        }
+    }
+
+    fn seal_errors(layer: Arc<Layer>) -> Vec<crate::validation::ValidationError> {
+        Validator::new(layer)
+            .validate()
+            .into_iter()
+            .filter(|e| e.rule == ValidationRule::InductiveRedefinition)
+            .collect()
+    }
+
+    #[test]
+    fn redefining_an_inductive_with_a_different_body_is_refused() {
+        let errs = seal_errors(chain("red", Some("blue")));
+        assert_eq!(
+            errs.len(),
+            1,
+            "a child layer redeclaring test:Colour with a different ctor set must be refused; \
+             got {errs:?}"
+        );
+        assert!(
+            errs[0].message.contains("cannot be redefined"),
+            "the diagnostic must say why, got {:?}",
+            errs[0].message
+        );
+    }
+
+    /// **The exemption a reseed depends on.** Re-loading the bootstrap chain shadows
+    /// every `InductiveType` it declares with a byte-identical body. If this fired,
+    /// D79 P2's reseed — and every reseed after it — would be refused.
+    #[test]
+    fn byte_identical_shadowing_is_not_a_redefinition() {
+        let errs = seal_errors(chain("red", Some("red")));
+        assert!(
+            errs.is_empty(),
+            "shadowing an inductive with an identical body is a re-load, not a redefinition; \
+             got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn a_first_declaration_is_not_a_redefinition() {
+        let errs = seal_errors(chain("red", None));
+        assert!(
+            errs.is_empty(),
+            "declaring an inductive once is fine; got {errs:?}"
+        );
+    }
+
+    /// Classes stay redefinable **on purpose** (D79 §5): redeclaring one with a
+    /// parent added is the wordnet↔umls alignment idiom, and checking that hazard is
+    /// D77's subject, not this rule's.
+    #[test]
+    fn redefining_a_class_is_still_allowed() {
+        let mk = |desc: &str| {
+            make_resource(
+                "urn:eigenius:test:Animal",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+                    ),
+                    (wk::DESCRIPTION, Value::String(desc.into())),
+                ],
+            )
+        };
+        let mut b = LayerBuilder::new("base", Some(build_core_layer()));
+        b.add_resource(mk("v1")).unwrap();
+        let base = Arc::new(b.build(LayerStorage::in_memory()));
+        let mut b2 = LayerBuilder::new("child", Some(base));
+        b2.add_resource(mk("v2")).unwrap();
+        let head = Arc::new(b2.build(LayerStorage::in_memory()));
+        assert!(
+            seal_errors(head).is_empty(),
+            "the seal is inductives only; a redefined class must pass"
+        );
+    }
+}

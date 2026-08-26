@@ -165,6 +165,18 @@ pub enum ValidationRule {
     /// The last is what separates an opaque definition from an axiom: an axiom is asserted and the
     /// kernel takes it on trust, whereas a definition's body is checked here and only then sealed.
     DefinitionMalformed,
+    /// **D79 §2.3 — a `core:InductiveType` declaration may not be redefined.**
+    ///
+    /// A layer shadows an `InductiveType` its ancestors already declare, with a
+    /// *different* body. Constructors have no chain-resolvable identity of their
+    /// own (`nbe/term.rs:507`), so redefining the type is the only way to change
+    /// them and it replaces the whole constructor set at once — every committed
+    /// term mentioning the type silently means something else afterwards.
+    ///
+    /// For a `core:Class`, "add a parent" is a monotone edit the alignment layers
+    /// depend on, which is why classes stay redefinable. For an inductive there is
+    /// no monotone edit: changing constructors changes the type.
+    InductiveRedefinition,
 }
 
 impl fmt::Display for ValidationError {
@@ -542,6 +554,7 @@ impl Validator {
         // Rule 23 (eigenius#92): an inductive DECLARATION is admissible to the kernel. Runs on
         // the resource rather than on a property value — the declaration is the resource.
         errors.extend(self.check_inductive_declaration(resource, &res_id));
+        errors.extend(self.check_inductive_not_redefined(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*
