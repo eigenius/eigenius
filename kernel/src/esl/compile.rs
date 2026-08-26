@@ -807,6 +807,60 @@ impl Compiler {
     /// — caller falls through to its non-ctor paths (variable
     /// lookup, EigonClass, etc.).
     fn resolve_ctor_iri(&self, qn: &ast::QualifiedName) -> Result<Option<String>, EslError> {
+        // **eigenius#24 — `[ns:]Type:ctor`, the fully-disambiguated form.** Until this,
+        // two inductives in one file declaring the same constructor short name could
+        // only be told apart by renaming one, which is what the ambiguity errors below
+        // told the author to do. Naming the constructor by its type is the right
+        // disambiguator because `(inductive, ctor name)` **is** a constructor's
+        // identity (D79 §2.2.1) — constructors have no IRI of their own, so there is
+        // nothing else it could be qualified by.
+        if let Some((type_local, ctor_local)) = qn.name.split_once(':') {
+            let bucket = match self.ctors_by_short_name.get(ctor_local) {
+                Some(b) => b,
+                None => return Ok(None),
+            };
+            // A candidate matches when its parent's local name is `type_local` and,
+            // when a namespace alias was given, the parent lives in that namespace.
+            let ns_uri = match &qn.namespace {
+                Some(alias) => Some(self.namespaces.get(alias).ok_or_else(|| {
+                    EslError::compiler(
+                        Some(qn.pos.clone()),
+                        format!("unknown namespace alias `{alias}`"),
+                    )
+                })?),
+                None => None,
+            };
+            let matches: Vec<&String> = bucket
+                .iter()
+                .filter(|ctor_iri| {
+                    let Some((parent, _)) = ctor_iri.rsplit_once(':') else {
+                        return false;
+                    };
+                    let Some((parent_ns, parent_local)) = parent.rsplit_once(':') else {
+                        return false;
+                    };
+                    parent_local == type_local
+                        && ns_uri
+                            .is_none_or(|u| parent_ns == u || parent.starts_with(&format!("{u}:")))
+                })
+                .collect();
+            return match matches.as_slice() {
+                [single] => Ok(Some((*single).clone())),
+                [] => Ok(None),
+                multiple => Err(EslError::compiler(
+                    Some(qn.pos.clone()),
+                    format!(
+                        "qualified constructor `{}` is ambiguous — more than one inductive named                          `{type_local}` declares `{ctor_local}`: [{}]. Add a namespace prefix.",
+                        qn.name,
+                        multiple
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                )),
+            };
+        }
         let bucket = match self.ctors_by_short_name.get(&qn.name) {
             Some(b) => b,
             None => return Ok(None),
@@ -6618,5 +6672,78 @@ mod sigma_surface_tests {
     fn only_the_eigentt_projections_are_intercepted() {
         let j = axiom_statement(&format!("{NS} axiom p:t : core:Asserts(core:string)"));
         assert_eq!(j["ctor"], "App", "got {j}");
+    }
+}
+
+#[cfg(test)]
+mod qualified_ctor_tests {
+    //! **eigenius#24 / D79 P6.** Two inductives in one file declaring the same
+    //! constructor short name used to be unresolvable: `resolve_ctor_iri` reported
+    //! the ambiguity and told the author to *"rename one of the ctors as a
+    //! workaround"*. `Type:ctor` names it directly.
+    //!
+    //! `(inductive, ctor name)` **is** a constructor's identity (D79 §2.2.1) —
+    //! constructors have no IRI of their own — so the type is the only thing a
+    //! constructor reference could be qualified by. #24's own rationale argued from
+    //! the opposite premise ("each constructor has a canonical IRI … lookup is
+    //! IRI-keyed"), which P4 removed; the feature survives the correction because it
+    //! never depended on that premise, only on the pair.
+    use super::*;
+
+    fn compile(src: &str) -> Result<Vec<crate::ontology::resource::Resource>, Vec<EslError>> {
+        crate::esl::compile(src)
+    }
+
+    fn errors(src: &str) -> String {
+        match compile(src) {
+            Ok(_) => String::new(),
+            Err(es) => es
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+        }
+    }
+
+    const TWO_INDUCTIVES: &str = r#"
+namespace ex = "urn:eigenius:example";
+data ex:Colour { red, mk }
+data ex:Shape  { square, mk }
+"#;
+
+    /// The case the ambiguity error existed for.
+    #[test]
+    fn a_shared_ctor_short_name_is_ambiguous_unqualified() {
+        let src = format!(
+            "{TWO_INDUCTIVES}\naxiom ex:a : ex:Colour -> Prop\ndef ex:v : ex:Colour = mk;\n"
+        );
+        let err = errors(&src);
+        assert!(
+            err.contains("ambiguous"),
+            "expected an ambiguity diagnostic, got {err:?}"
+        );
+    }
+
+    /// And the same reference, qualified by its type, resolves.
+    #[test]
+    fn qualifying_by_the_inductive_disambiguates() {
+        let src = format!("{TWO_INDUCTIVES}\ndef ex:v : ex:Colour = ex:Colour:mk;\n");
+        assert_eq!(
+            errors(&src),
+            "",
+            "ex:Colour:mk names exactly one constructor"
+        );
+    }
+
+    /// The lexer change must not eat an annotation colon. `ex:Colour : Prop` is
+    /// space-surrounded, so it stays a binder colon — tightness is the discriminator.
+    #[test]
+    fn a_space_surrounded_annotation_colon_is_untouched() {
+        let src = format!("{TWO_INDUCTIVES}\naxiom ex:p : ex:Colour -> Prop\n");
+        assert_eq!(
+            errors(&src),
+            "",
+            "` : ` is an annotation colon, not a name separator"
+        );
     }
 }
