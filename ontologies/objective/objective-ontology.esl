@@ -155,7 +155,7 @@ property objective:branch : core:string {
 property objective:status : core:string {
     description = "Well-posedness / progress status: open | blocked | admissible | satisfied. On the Objective (overall) and on each Milestone. Mutable progress state — a plain string, not part of the type contract.";
 }
-property objective:proposition : core:resource {
+property objective:proposition : core:inductive {
     description = "The Prop-typed proposition (eigentt:TypeExpr, encoded as for reasoning:proposition) this Milestone TARGETS or this Axiom admits. Distinct in role from reflection:canonical_proposition: this is the goal an OPEN milestone has not yet established; the discharging reasoning:ReasoningSentence ASSERTS it (carries it as canonical_proposition). On completion the two coincide — objective:satisfied_by links the milestone to that sentence.";
     class_types eigentt:TypeExpr;
 }
@@ -234,7 +234,7 @@ property objective:selected : core:resource {
     class_types objective:Option;
     domain objective:DecisionPoint;
 }
-property objective:option_claim : core:resource {
+property objective:option_claim : core:inductive {
     description = "An Option's claim, as a Prop (eigentt:TypeExpr) — never prose.";
     class_types eigentt:TypeExpr;
     domain objective:Option;

@@ -297,3 +297,99 @@ mod seal_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod ctor_type_tests {
+    //! **D79 P2's gate.** `core:ctor_type` was declared `core:json` — "an opaque
+    //! JSON value. Not validated by the ontology." — so `check_type_expr_well_typed`
+    //! (Rule 21) skipped it and `walk_inductive_value` (Rule 16) had no
+    //! `class_types` to walk against. A constructor's arrow type could be arbitrary
+    //! garbage and still commit, which is why `layer::declaration_order` had to
+    //! descend into `Value::Json` by hand to find inductive-to-inductive edges.
+    //!
+    //! P2 declares it `core:inductive` + `class_types eigentt:TypeExpr`. These tests
+    //! pin the difference: a `ctor_type` naming an IRI that does not resolve is now
+    //! refused, and a well-formed one still passes.
+    //!
+    //! The declaration is on an **embedded** `core:InductiveCtor`, which the
+    //! validator reaches through its `is_a`-gated embedded-resource recursion
+    //! (`validation/mod.rs:559`). That gate keys on `is_a`, not on `@id`, which is
+    //! also why D79 P4 can drop the constructor's vestigial `@id` without
+    //! un-validating it.
+    use super::super::super::Validator;
+    use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::ontology::well_known as wk;
+    use std::sync::Arc;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).expect("static iri")
+    }
+
+    /// An inductive `test:Box` with one ctor whose `ctor_type` is `ctor_type`.
+    fn errors_for_ctor_type(ctor_type: serde_json::Value) -> Vec<String> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut top = LayerBuilder::new("ctor_type_test", Some(head));
+
+        let mut c = Resource::new_embedded();
+        c.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+        );
+        c.set(iri(wk::CTOR_NAME), Value::String("mk".into()));
+        c.set(iri(wk::ARG_TYPES), Value::Array(vec![]));
+        c.set(iri(wk::CTOR_TYPE), Value::Json(ctor_type));
+
+        let mut b = Resource::new(iri("urn:eigenius:test:Box"));
+        b.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+        );
+        b.set(iri(wk::SHORT_NAME), Value::String("Box".into()));
+        b.set(iri(wk::TYPE_PARAMS), Value::Array(vec![]));
+        b.set(
+            iri(wk::CTORS),
+            Value::Array(vec![Value::Embedded(Box::new(c))]),
+        );
+
+        top.add_resource(b).unwrap();
+        let layer = Arc::new(top.build(LayerStorage::in_memory()));
+        Validator::new(layer)
+            .validate()
+            .into_iter()
+            .map(|e| e.message)
+            .collect()
+    }
+
+    /// The case that previously committed silently.
+    #[test]
+    fn a_ctor_type_naming_an_unresolvable_iri_is_refused() {
+        let errs = errors_for_ctor_type(serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:no-such-type"],
+        }));
+        assert!(
+            !errs.is_empty(),
+            "a ctor_type referencing an IRI that resolves to nothing must be refused now that \
+             the property is core:inductive; under core:json this committed silently"
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("no-such-type")),
+            "the diagnostic must name the unresolvable IRI, got {errs:?}"
+        );
+    }
+
+    /// And the well-formed case still passes — the rule must not reject every
+    /// `ctor_type`, which a `class_types` typo would produce and which would look
+    /// identical from the "P2 changed something" side.
+    #[test]
+    fn a_well_formed_ctor_type_still_passes() {
+        let errs = errors_for_ctor_type(serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Box"],
+        }));
+        assert!(
+            errs.is_empty(),
+            "a ctor_type naming its own inductive is well-formed; got {errs:?}"
+        );
+    }
+}

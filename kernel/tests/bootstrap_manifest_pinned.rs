@@ -77,11 +77,10 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "\
-core:4ecc1e3f87d0f0fbf6c7c2c97352933525e1cea2c5a594e6811953cd2b3d0a96
+const EXPECTED: &str = "core:d3f460f97ddaa77abf64214daf83fd415d7a49af980c5dc09f19448c433b4239
 eigentt-type-fragment:304d1a49596612b0a202b5c6417e1e57fd5fa8545a1baf83e7ef8348f627082f
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
-reflection:1396f4a1438a465a654d9db38018fac9276d876a6b5d9303c42d435b10799cb3
+reflection:9caa85d85e3104b0e612128e8fef1ecef027ee957c327ad18e6f5fbffacea178
 obo:cb157be55245c9ac73385e0ac0c605f0cde8ecb9d1246b07226008cbf8cf4d76
 institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
 runtime:5ef02306d25bc1b52e517114c8b7f2280ca20ad1d70607255198b4d54d8b4bfc
@@ -89,16 +88,16 @@ formulas:2073d36b31311e89803a78f20dc28f376197d89eb75a384dbd429d2203455817
 lean-expressions:2b084735d270d8d1078e69e67de342b5d221f5f7a4939598582190f4c017d8f6
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:41c7dce62971e48bd5bdd08e97bac59e72f27fc38a7e36c4afdfcb3edc0e8d34
-reasoning:fb5c7ec72dcd308581729c25916f2ef4813ebd0581b370c9cf735107c385f144
-statistics:7f250b815205a6e08e55ee240c96bea112ee51dad03f16caa98be63339f7d2aa
+reasoning:b49a9cfd74311d782bd3d37d0dab46811029b37bcb59180f423f4ce01d937dc9
+statistics:c46a2a2881ffb120a5b82cb95eff9caff4cc296be67bbcdbb8196c4b7f889bd3
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:6b3b1de79a7b69ffa60337824a82598b26fa2e99166a18f19bb27f1d07e72b0a
 reference:f57afb5d36519ef867ebc8ac974b744992eb0fcf70b45f0cda68c6265976c1fd
 logic:e23ffb70b63f80cea1a7287fa67f47d34f13270118e9c72f5904814470cec36a
-lexicon:f83f332a9a2ae455d9341de17a5930b22324c462ab7e514e29395ec3d3d8432a
+lexicon:bf3e48392eab09c1e298b7a2265dd72eb765c846af8f5c79562bb43c69b6c37c
 ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
 closed-class:cbac8f32e15ae7b013a723ccca044dc165099fd8edc7204a7255f095bb04dbc2
-encoding:b59e72bb3da7147f1f1dcb28d8aaece30f6a1349476aadf001fc04e834cf6d90
+encoding:bdddc2b68ac92a6636a26d5304ce10caf53ed75b43f51b31980ceda813e12350
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On
@@ -142,9 +141,12 @@ fn bootstrap_manifest_is_pinned() {
          1. reseed — scripts/reseed-lexicon-db.sh --umls-all, then build-alignment-snapshot.sh\n  \
          2. re-point anything pinning a snapshot path (demo/prose-to-formulas-v2/run.sh)\n  \
          3. re-record any LLM draws that MISS against the changed forest, in ONE pass\n  \
-         4. update EXPECTED in this file, in the SAME commit as the ontology edit",
+         4. update EXPECTED in this file, in the SAME commit as the ontology edit\n\n\
+         The new manifest, ready to paste into EXPECTED:\n\
+         ----8<----\n{}----8<----",
         moved.len(),
-        moved.join("\n")
+        moved.join("\n"),
+        actual
     );
 }
 

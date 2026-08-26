@@ -887,7 +887,7 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce — a core:Level value. Carried a STRING (`Prop` / `Set` / `Type:N`) until eigenius#188; that grammar could not express a level VARIABLE, so `data X : Sort u` was inexpressible, and nothing validated the string's shape. Now an inductive value like any other: the validator checks it against core:Level's ctor schema, and `data X : Sort (max u v)` is as writable as `data X : Set`.",
     "urn:eigenius:core:short_name": "result_sort",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:Level"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
@@ -901,9 +901,10 @@
   {
     "@id": "urn:eigenius:core:ctor_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The encoded type expression (eigentt) of a constructor — the full arrow type a constructor inhabits. Carried as the tagged-dict JSON encoding the kernel decoder parses back.",
+    "urn:eigenius:core:description": "The encoded type expression (eigentt) of a constructor — the full arrow type a constructor inhabits. A D47-encoded `eigentt:TypeExpr`, so `core:inductive` rather than `core:json`: until D79 §2.1 this was declared `core:json`, which is 'not validated by the ontology', so no rule checked it and the mutual-inductive walker in `layer::declaration_order` had to descend into it by hand.",
     "urn:eigenius:core:short_name": "ctor_type",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:json"
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"]
   },
   {
     "@id": "urn:eigenius:core:macro_decl_json",
@@ -952,7 +953,7 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Either a class IRI or a bare parameter name from the enclosing inductive's type parameters.",
     "urn:eigenius:core:short_name": "type_name",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
   },
@@ -986,7 +987,7 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "The kind of an InductiveParam, as an eigentt:TypeExpr value. Carried a STRING until eigenius#188 — a three-way union of class IRI, bare parameter name, and sort keyword — which could not express a level variable, and whose decoder fell through to `Sort(1)`, silently typing a class-typed parameter `Set`. A parameter reference is now `Var`, a class `ConstRef`, a sort `Sort(level)`; all three are checkable.",
     "urn:eigenius:core:short_name": "param_kind",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
   },

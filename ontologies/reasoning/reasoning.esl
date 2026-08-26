@@ -229,19 +229,19 @@ class reasoning:ReasoningSentence : reflection:DerivedResource {
                reasoning:refutes;
 }
 
-property reasoning:proposition : core:resource {
+property reasoning:proposition : core:inductive {
     description = "The Prop-typed EigenTT proposition this sentence asserts, encoded via the D47 codec. Also serves as the sentence's reflection:canonical_proposition for D49 §6 witness emission, so downstream DerivedEvidence citations resolve to this proposition in the witness key.";
     class_types eigentt:TypeExpr;
     domain reasoning:ReasoningSentence;
 }
 
-property reasoning:justification : core:resource {
+property reasoning:justification : core:inductive {
     description = "The agent's JustificationTerm warrant for the proposition, encoded as a chain-mirrored inductive value over the six JustificationTerm constructors (D39 §3).";
     class_types reasoning:JustificationTerm;
     domain reasoning:ReasoningSentence;
 }
 
-property reasoning:certificate : core:resource {
+property reasoning:certificate : core:inductive {
     description = "The kernel-checkable JustifiedBy certificate, encoded via the D47 codec. ValidateJustification (D39 §4.3) type-checks it against `JustifiedBy justification proposition` at commit; Fails verdicts reject the sentence.";
     class_types eigentt:TypeExpr;
     domain reasoning:ReasoningSentence;
@@ -294,7 +294,7 @@ class reasoning:EntailmentRequest : reflection:DerivedResource {
     requires reasoning:candidate_proposition;
 }
 
-property reasoning:candidate_proposition : core:resource {
+property reasoning:candidate_proposition : core:inductive {
     description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as ReasoningSentence.proposition.";
     class_types eigentt:TypeExpr;
     domain reasoning:EntailmentRequest;
