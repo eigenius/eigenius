@@ -17,6 +17,7 @@ provide:
 | 4 | every constructor payload carries a vestigial `@id` that reads as chain-resident openness | asking what a constructor's identifier is for |
 | 5 | the recursor's motive codomain is a hard-coded `Sort(2)`, capping large elimination at `Set` ([#228](https://github.com/eigenius/eigenius/issues/228)) | its stated gate lifting when D76 Phase E2 landed |
 | 6 | qualified constructor references do not parse, so same-named ctors cannot be disambiguated ([#24](https://github.com/eigenius/eigenius/issues/24)) | reading `resolve_ctor_iri`'s own error message |
+| 7 | `core:List` is kernel-intrinsic but appears in authored ESL and persisted terms, and two decoders already disagree about what it means | asking whether it crosses process boundaries |
 
 **Not covered: merge.** D77 motivated this work and consumes it, but nothing here is merge-specific —
 #1 and #2 are wrong on the linear commit path too, and #3 is a soundness rule that stands on its own.
@@ -151,13 +152,55 @@ of these" is already sayable in the thing being stored. Adding `core:inductive_a
 constructor at the ontology's data-type layer, duplicating one the type theory already owns, and would
 produce a shape the kernel type-checks as an array of terms rather than as the single term it is.
 
-**One gap if the case ever arrives.** `core:List` is kernel-intrinsic — answered by `Env::intrinsic` in
-every environment and special-cased at `program/eigentt_type_mirror.rs:947` — and is **not declared as
-a chain `InductiveType`**. So `class_types core:List` would not resolve today:
-`class_types_inductive_target` resolves through `self.layer.resolve` (`validation/rules/inductive.rs:94`),
-a chain lookup. The fix, when something needs a list-valued term slot, is to *declare* `core:List` in
-the core ontology so the declaration layer can name what the kernel already has — **not** to add an
-array data type. Recorded here so the next person reaches for the right one.
+**The real gap is `core:List` itself, and it is not hypothetical — see §2.1.2.**
+
+#### 2.1.2 `core:List` is kernel-intrinsic and already crosses process boundaries
+
+`core:List` is built by `nbe::term::list_decl()` and answered by `Env::intrinsic` in every
+environment. It is **not a chain resource**. Three consequences, all of which the codebase already
+treats as defects for the sibling case `core:Option`:
+
+**It is in authored content and in persisted terms.** `experiments/lexicon/lexicon.esl:68` declares
+`axiom lexicon:forms_complex : core:List(lexicon:Entity) -> Prop`, and `:347` puts
+`type_expr( core:List(lexicon:Entity) -> Prop )` in a `lexicon:sem_type` slot — one of §2.1's
+twenty-two. Those compile to D47 terms carrying `ConstRef("urn:eigenius:core:List")`, which is
+committed and re-read. The name is on the wire whether or not it resolves.
+
+**Two in-process decoders already disagree about it.**
+
+| decoder | `core:List` decodes to |
+|---|---|
+| `eigentt_type_mirror`'s `ConstRef` arm (`:947`) | `Exp::Const(core:List, [])` — **the inductive** |
+| `ground::decode_arg_type` (`program/ground.rs`) | `Exp::EigonClass(core:List)` — **a class marker** |
+
+The second has no `List` arm, so it falls past the five primitives to `names_an_inductive`, which is a
+chain lookup and fails, and lands on the `EigonClass` fallthrough. Same IRI, two meanings, no error.
+The comment at the *first* site states the principle the second violates:
+
+> *"The canonical built-in `List` is not a chain resource, so it would not resolve below.
+> `Env::intrinsic` is the environment's matching answer — the two must agree, or a name means one
+> thing to the decoder and another to the type checker (D76 Phase B, sixth correction)."*
+
+D76 Phase B fixed the environment-versus-decoder divergence and did not look for the
+decoder-versus-decoder one.
+
+**Out of process, nobody handles it.** A grep for `core:List` across `.rs` / `.ts` / `.jl` / `.R` /
+`.lean` outside `kernel/src` finds no handler — only uses. One of those uses is a modelling
+distortion already paid for: the Julia DiffEq ontology introduces a wrapper class rather than a
+`List<FormulaTerm>` property, explaining that it did so *"because the chain doesn't have a parametric
+`core:List<T>` surface committed yet"*
+(`julia/institutions/diffeq/declarations/diffeq-ontology.eigon.json:87`).
+
+**The fix is the one already chosen for `core:Option`.** `core:Option` is *also* parametric and *is*
+chain-declared (`core-ontology.json:1011`, with `type_params: [A]` and ctors `none` / `some`), so
+parametricity is not the obstacle the diffeq comment assumed. `Env::intrinsic`'s own doc says why the
+kernel does not keep a private copy of it:
+
+> *"`core:Option` is deliberately **not** here — it *is* a chain resource, and taking the kernel's copy
+> would hide any disagreement between the two rather than surface it."*
+
+That reasoning applies unchanged to `List`. P7 declares it, deletes both special cases, and adds the
+analogue of `the_chain_and_the_kernel_agree_about_option`.
 
 ### 2.2 The indexer arm
 
@@ -311,12 +354,23 @@ seven audits corrected something the design had asserted.
   identity. No reseed. Gate: a file with two inductives sharing a constructor name compiles, and the
   ESL round-trip preserves the qualified form.
 
+- **P7 — declare `core:List` in the core ontology** (§2.1.2). Model it on `core:Option`:
+  `is_a core:InductiveType`, `type_params [A]`, ctors `nil` / `cons`. Then **delete both special
+  cases** — `Env::intrinsic`'s `LIST` arm (`nbe/env_global.rs:262`) and the decoder's
+  (`eigentt_type_mirror.rs:947`) — so the chain is the single answer. Bootstrap edit, so it **rides
+  P2's reseed**. Gates: a `the_chain_and_the_kernel_agree_about_list` test mirroring the `Option` one;
+  `ground::decode_arg_type` and the `ConstRef` decoder now agree, asserted by decoding the *same*
+  `core:List` reference through both and comparing — the assertion that would have caught this;
+  `experiments/lexicon/lexicon.esl` still compiles and its `sem_type` still type-checks; and
+  `class_types core:List` resolves, which is what §2.1.1 said would be needed if a list-valued term
+  slot ever arrived.
+
 **Order is not arbitrary.** The seal first, so the indexer can rely on it; the declarations next, so
-the indexer has a `core:inductive` predicate to match; the arm last. P4 and P5 ride P2's reseed and are
-otherwise independent — either can land any time after P2 is written and before the reseed runs. P6
-touches neither the chain nor the index and can land whenever. **P2 is the only reseed across all six**,
-which is the reason P4 and P5 are here rather than filed for later: each is a chain-format change that
-would otherwise need a reseed of its own.
+the indexer has a `core:inductive` predicate to match; the arm last. P4, P5 and P7 ride P2's reseed and are
+otherwise independent — each can land any time after P2 is written and before the reseed runs. P6
+touches neither the chain nor the index and can land whenever. **P2 is the only reseed across all
+seven**, which is the reason P4, P5 and P7 are here rather than filed for later: each is a
+chain-format or bootstrap change that would otherwise need a reseed of its own.
 
 ---
 
