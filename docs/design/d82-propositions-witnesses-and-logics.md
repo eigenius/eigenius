@@ -110,15 +110,27 @@ index of all possible witnesses**. P7 persists the ones actually **discharged** 
 argument the checker filled — which is bounded by the number of certificates, not by the trace count.
 Different objects, different cost.
 
-**Persistence does not replace recomputation; it enables comparison.** This is what makes it worth
-doing rather than merely tidy:
+**The determinism argument against it is sound, and bounds what P7 may claim.**
+`witness_index.rs:17-20` states the case: admission is *"a pure deterministic function of that
+Layer's Trace-class resources — content-addressed transitively via the Layer's own content hash, so
+nothing here is persisted."* That is correct. For a fixed chain, recomputation cannot disagree with
+what was asserted, so **P7 buys no soundness** — and in particular it does **not** detect D80 §2's
+environment-blindness. Storing the discharge stores the same environment-blind `WitnessKey`;
+recomputing it against a rebound chain hits the same ancestor by first-hit-wins and returns the same
+answer. **S1 fixes that; P7 does not, and the two are independent.**
 
-- today a witness is recomputed against the chain *as it now stands*, so the same key silently
-  yields the same answer in a chain where the names it depends on were rebound — D80 §2's
-  environment-blindness, undetectable because nothing recorded what was asserted;
-- with the discharge stored, the asserted witness and the recomputed one can be **compared**, and a
-  divergence is exactly the signal D77's rebound-set pass is trying to construct. Locally, per
-  certificate, without a chain walk.
+**What persistence buys is that the evidence exists.** A recomputable witness is not an object —
+it is a promise that an object could be reconstructed, redeemable only where the chain is and only
+by the kernel. Three concrete consequences:
+
+- **Nothing can cite it.** A certificate records that it was accepted, not what accepted it. There
+  is no IRI for "the warrant this certificate rests on", so no resource can point at one, and §5a.3's
+  obligations have nothing to attach to.
+- **Nothing can transport it.** Merge, export, and a collaborator's institution all cross a boundary
+  the recomputation cannot: off this chain, the witness is unavailable, not false.
+- **The admitting layer is unrecoverable.** Recomputation answers *whether* some ancestor admits the
+  key, never *which* — first-hit-wins discards it. "What warranted this?" is currently unanswerable
+  even in principle.
 
 **And it makes the oracle auditable.** §2's P5 establishes that a witness is an *axiom the kernel
 asserts* — `Val::ChainWitness(key)`, an inhabitant of a zero-constructor type introduced by fiat. The
@@ -128,7 +140,7 @@ with its stated reason, in the same form as everything else.
 
 **Cost accepted:** widening `WitnessKey` later (§7 Q1) becomes a migration rather than a no-op. Under
 the pre-production posture that is a reseed, and §5a.5's relation vocabulary should therefore land
-*before* P7 rather than after.
+*before* P7 rather than after — sequencing, not dependency.
 
 **P6 — Not every warrant-producer is a logic.** An institution has a satisfaction relation.
 Abductive selection does not, unless one is supplied. Both produce chain-resident warrant records;
@@ -384,8 +396,8 @@ other logics can reach it.
   κ–τ is the acceptance test.
 - **S4 — retire the kernel lists** (§3.3a) once S3 gives institutions somewhere to declare them.
 - **S5 — the selection-record protocol** (§3.4). Independent; can run any time after S1.
-- **S5a — persist discharged witnesses** (P7). After S1, because the relation belongs in the key
-  before anything is stored under it. Unlocks the drift comparison D77/D80 both need.
+- **S5a — persist discharged witnesses** (P7). After S1 to avoid storing under a key about to
+  change — but S1 does not depend on it. Gives §5a.3's obligations something to attach to.
 - **S6 — split `reflection:Trace`** (§5a.2) and move the obligations onto refinements (§5a.3).
   Chain-vocabulary work, gated on S4 having somewhere to declare projections.
 
