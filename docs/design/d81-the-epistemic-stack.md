@@ -12,7 +12,7 @@ authority over what the system now is.
 |---|---|---|---|
 | 1 | the concept inventory | P0 | **done** |
 | 2 | four lifecycles | P1 | **done** |
-| 3 | the boundary map | P2 | **partial** — seam 1 done |
+| 3 | the boundary map | P2 | **done** |
 | 4 | findings | P3 / P4 | pending |
 
 ---
@@ -446,8 +446,65 @@ reduces to one field: external-runtime institutions populate
 implementation at all (eigenius#101 removed it; the ontology still declares it — §1.1's pattern of
 a declared-but-unbacked value, here in the institution vocabulary rather than the epistemic one).
 
+### 3.2 Kernel ↔ validator — three semantic relations that live in Rust
+
+The validator enforces this stack through three hard-coded lists. Each encodes a relation the
+ontology cannot express, and each is the sole definition of that relation.
+
+| list | where | what it decides |
+|---|---|---|
+| `PROPOSITION_SLOTS` | `kernel/src/ontology/well_known.rs:545` | which of the 28 `eigentt:TypeExpr`-ranged properties must inhabit `Prop`, not merely type-check — **6 of them** |
+| `trace_category` | `kernel/src/layer/witness_index.rs:179` | which trace class grounds which grade — the 5→4 map |
+| the self-attesting arms | `kernel/src/layer/witness_index.rs:74-88` | which classes ground a witness *without* a trace — exactly `reasoning:ReasoningSentence` and `reflection:InstitutionEmittedDerivation` |
+
+**The first is documented as a deliberate compensation for what the range cannot say:**
+
+> *"`eigentt:TypeExpr` is the range of every D47-encoded EigenTT tree, and most of those trees are
+> legitimately not propositions … The range alone therefore cannot carry the obligation; membership
+> here is what distinguishes a slot that asserts something from a slot that merely holds a term."*
+
+That reasoning is sound. What it does not address is why the distinction is a Rust array rather than
+a property on the property — the ontology already annotates properties (`core:class_types`,
+`core:domain`, `core:data_type` are all property-on-property), so *"this slot asserts"* is
+expressible in the vocabulary that exists. Whether it should be is §4's question.
+
+**The consequence is uniform across all three:** adding a proposition slot, a trace kind, or a
+self-attesting class is a **kernel edit**, not an ontology edit. An institution or a domain ontology
+cannot introduce one. The extensibility the institution mechanism provides stops at this boundary.
+
+### 3.3 Compiler ↔ kernel — the compiler is a grade author
+
+`stamp_declared` (`kernel/src/esl/compile.rs:3638`) appends `reflection:DeclaredResource` to **every
+resource compiled from ESL**, at seven call sites covering every declaration form.
+
+This is the largest single producer of epistemic grades in the system, and it is neither an
+institution nor a `ClaimGrader` — it is the surface compiler. It is also self-consistent in a way
+the other producers are not: because `DeclaredResource` `requires declared_by`, and a stamp without
+one would fail `MissingRequired` at commit, the compiler also supplies
+`reflection:agent:unattributed` when the source names no declarer
+(`kernel/src/esl/compile.rs:3588-3600`).
+
+That care is worth noting precisely because it is local. The compiler satisfies the obligation its
+own stamp creates; nothing checks that the other seven producers (§1.6) do the same.
+
+### 3.4 Chain ↔ derived — what is persisted
+
+| artifact | persisted | rebuilt from |
+|---|---|---|
+| epistemic class (`is_a`) | **yes** — part of the resource | — |
+| `reflection:*Trace` resources | **yes** | — |
+| institution `Verdict` | **yes** (provenance) | — |
+| `InstitutionEmittedDerivation` | **yes**, on `Holds` only | — |
+| **`ChainWitness` / `WitnessKey`** | **no** | recomputed per lookup from Trace-class resources and the two self-attesting classes |
+| the witness *index* | **no** — despite the file name, nothing is materialised | direct lookup per key (`kernel/src/layer/witness_index.rs:20-28`) |
+
+The asymmetry that matters: **the evidence is persisted and the entitlement is not.** A witness is a
+function of the chain, recomputed on demand, which is what makes the environment-blindness in D80 §2
+possible — the same key recomputes to the same answer in a chain where the names it depends on have
+been rebound.
+
 ---
 
 ## §4
 
-Pending. Seams 2–4 of §3 also pending: kernel ↔ validator, compiler ↔ kernel, chain ↔ derived.
+Pending — P3 (provenance) then P4 (findings).
