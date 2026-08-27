@@ -18,6 +18,56 @@ authority over what the system now is.
 
 ---
 
+## 0. Orientation — two stacks, not one
+
+The seven encodings of §1.1 are not one abstraction seen seven ways. They fall into **two groups
+that never touch each other.**
+
+### The proving stack — does the work
+
+| abstraction | role | produced by | consumed by |
+|---|---|---|---|
+| `reflection:*Trace` (the 5 attestation classes) | **the evidence.** A chain record that an event happened, pointing at the resource it attests | authors (`DeclarationTrace` in ESL); the reasoning institution mints `VerificationTrace` on a passing gate | `trace_category` → witness admission |
+| `WitnessCategory` + `WitnessKey` | **the lookup key** — `(category, grounded IRI, proposition hash)`. Kernel-internal, **never persisted** | computed from traces, plus two hard-coded self-attesting classes | `layer_admits_witness` |
+| `witness:Is{Declared,Observed,Derived,Verified}As` | **the proposition.** `Prop`-valued inductives with **zero constructors** — unconstructible at the surface | declared in `ontologies/reasoning/reasoning.esl` | the declared type of `JustifiedBy`'s evidence argument |
+| `JustifiedBy.{declared,observed,derived,verified}` | **the certificate.** The term an author writes and the kernel must check | authored ESL; built by `ClaimGrader` | the kernel type checker |
+
+This runs end to end: a trace grounds a key, the key inhabits the proposition, the proposition is the
+argument the certificate needs. Break any link and certificates stop type-checking. **This is where
+"verified" means something.**
+
+### The labelling stack — is read by nothing
+
+| abstraction | role | produced by | consumed by |
+|---|---|---|---|
+| `reflection:{Declared,Observed,Derived,Verified}Resource` | **self-description**, and the hook that pulls in `requires` obligations | **eight** writers — the ESL compiler stamps *every* compiled resource, plus institution dispatch, importers, graders, bootstrap (§1.6) | the validator's `requires` / `recommends` — **and nothing else** |
+| `reflection:epistemic_status` + `reflection:epistemic:*` individuals | **a value**, for slots where `is_a` is already spent | one Rust writer (`kernel/src/server/programs.rs:193`), plus authored ESL | other *ontologies*, via `allows_only` (`lexicon:grade`, objective milestones). **Zero Rust readers** |
+| `Grade` (`crates/eigenius-reasoning`) | intended as a construction-time projection | four sites | **nothing** — write-only (§5.3) |
+
+No reader anywhere grants an entitlement on the strength of an epistemic class. `is_a
+VerifiedResource` is an unbacked self-description, not a forged capability — which is why §5.1 rates
+the class/witness split *fine* rather than dangerous.
+
+### The two are written together and diverge silently
+
+`kernel/src/server/programs.rs:185-195` sets **three encodings at once** on one resource:
+
+```rust
+types.push(wk::DERIVED_RESOURCE);                    // the class
+output.set(DERIVATION, trace_iri);                   // the evidence pointer
+output.set(EPISTEMIC_STATUS, wk::EPISTEMIC_DERIVED); // the value
+```
+
+That is the clearest evidence the seven are **parallel projections written by producers**, not
+alternative views computed from one source. Nothing recomputes one from another, and nothing checks
+they agree — because only one of them is ever read.
+
+**Read §§1–5 with this split in view.** Most of what looks like redundancy is the labelling stack,
+which is inert; most of what carries risk is the proving stack, whose entire unifying concept lives
+in three Rust lists (§5.2).
+
+---
+
 ## 1. The concept inventory
 
 ### 1.1 The four-way distinction is encoded seven times
