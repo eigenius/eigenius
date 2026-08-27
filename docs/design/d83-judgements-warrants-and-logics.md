@@ -297,6 +297,42 @@ They are independent, not ordered: a hand-authored claim with a checked proof is
 is irrelevant to warrant.** A human writing an EigenTT term is exactly as good as a prover emitting
 one.
 
+### 3.1 The provenance axis is W3C PROV, and the warrant axis is deliberately outside it
+
+**The split is not this project's invention.** W3C PROV [PROV-O] standardises the provenance axis and
+stops exactly where warrant begins — `prov:Entity` is *deliberately opaque*, modelling identity and
+lineage rather than semantic content. An external standard drew the same line and stayed on one side
+of it, which is the strongest corroboration §3 has.
+
+**Provenance should map down to PROV**, for interoperability on the half where a collaborator most
+likely already has data:
+
+| here | PROV |
+|---|---|
+| who asserted it | `prov:wasAttributedTo` (Entity → Agent) |
+| a run that produced it | `prov:Activity`, with `prov:used` / `prov:wasGeneratedBy` |
+| where an observation came from | `prov:hadPrimarySource` |
+| **the declared procedure of §4's `Derived` row** | **`prov:Plan`**, via `prov:qualifiedAssociation` |
+
+The last row is close enough to be worth stating: *"an activity carried out by an agent following a
+plan"* is `App(Declared(proc), Observed(input))` in PROV's vocabulary. What PROV cannot add is what
+§4 turns on — **nothing states the plan's logic or checks conformance to it.**
+
+**Warrant cannot be expressed in PROV, for four structural reasons**, not vocabulary gaps:
+
+- **PROV graphs are producer-writable.** A system can assert `prov:wasDerivedFrom` *without ever
+  executing the derivation*, and the statement remains structurally valid. That is precisely the
+  self-nomination §5 forbids.
+- **`prov:wasDerivedFrom` covers truth-preserving and guessed derivations equally**, so it cannot
+  express §4's `Derived`/`Sampled` distinction — the one that decides whether anything is entailed.
+- **PROV has no proof objects and no validation relation**, so §2's proof layer has no counterpart.
+- **Multiple independent justifications for one proposition** tend to duplicate entities rather than
+  yield one claim with alternative support — the structure §3's justification terms exist to carry.
+
+**The trap to avoid:** `prov:wasDerivedFrom` shares a word with §4's `Derived` and means something
+different. Using it as a *warrant* relation would reintroduce exactly the lineage-as-grade conflation
+this design removes.
+
 ## 4. The warrant lattice is distance from proved to claimed
 
 **Every warrant proves something.** The rows differ by how far that something is from what is being
@@ -556,6 +592,12 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
 - **[BG01]** H. Barendregt and H. Geuvers. *Proof-assistants using dependent type systems.* Handbook
   of Automated Reasoning, 2001. — the de Bruijn criterion: a proof object checkable by a small,
   independent kernel.
+
+**Provenance**
+
+- **[PROV-O]** W3C. *PROV-O: The PROV Ontology.* W3C Recommendation, 2013.
+  <https://www.w3.org/TR/prov-o/>. Entities, activities, agents, and the qualified-association
+  pattern. §3.1 maps this design's provenance axis onto it, and says why the warrant axis cannot be.
 
 **Systems**
 
