@@ -60,6 +60,8 @@ The first build takes a few minutes. Subsequent ups are fast. See [Docker Compos
 - **Native dependent-type surface** — EigenTT carries an impredicative `Prop` universe with proof irrelevance, indexed inductive families with first-order pattern unification, and a chain-mirrored type fragment that lets axiom statements, propositions, and dependent motives round-trip as content-addressed chain artifacts. Authorable directly in ESL via `axiom`, indexed `data`, and `match … returning fun (i : T) => body`. ([D46](docs/design/d46-prop-universe-and-proof-irrelevance.md), [D47](docs/design/d47-chain-mirrored-eigentt-type-fragment.md), [D48](docs/design/d48-indexed-inductive-families.md))
 - **Typed program execution** with full reasoning traces, memoization, four epistemic categories enforced by the ontology, and an LLM dispatch surface (Anthropic via Vercel AI SDK, structured output via `CompleteJson`).
 - **Notebook, CLI, and TypeScript SDK** — author and run cells (ESL, EigenQL, TypeScript, programs, charts) in the browser; drive the kernel from the shell; embed it from any TS runtime via [`@eigenius/client`](clients/eigenius-ts/). ([D22](docs/design/d22-notebook-and-typescript-sdk.md))
+- **Prose to typed propositions** — a categorial-grammar parser over a WordNet + UMLS lexicon (9.4M chain resources) turns scientific English into kernel-checked EigenTT terms: surface forms carry a `lexicon:Cat` category and a semantics that must inhabit the type its category denotes, readings are selected in document context, and anaphora resolve against discourse candidates the kernel re-gates. The claims land as `enc:EncodedClaim` resources with the decision that produced them recorded on-chain. ([D62](docs/design/d62-encoding-engine-prose-to-trees.md), [D63](docs/design/d63-dcg-engine-english-grammar.md), [D64](docs/design/d64-llm-anaphora-resolution.md), [D66](docs/design/d66-definitional-lifting-and-witness-normalization.md))
+- **Justification logic as a kernel judgment** — `reasoning:JustifiedBy(j, P)` *is* Artemov's `t:F`. A certificate is a typed term the kernel checks; its `ChainWitness` arguments are synthesized from the chain's own trace and class-membership events, so "verified" is not a label a caller asserts but a proposition that had to type-check. Editing the measurement a derivation stood on makes the derivation fail to commit. ([D39](docs/design/d39-justification-logic.md), [D49](docs/design/d49-chainwitness-machinery.md), [D73](docs/design/d73-justification-logic-witnesses-and-traces.md))
 - **Runtime substrate** — heavy native libraries (SAT solvers, ODE integrators, theorem provers) hosted in sibling containers with content-addressed images and pinned environments, plus a generic `oci` tool runtime that runs any pinned containerized tool as an attested, replayable derivation with a kernel-tracked build recipe. ([D26](docs/design/d26-runtime-substrate.md), [D60](docs/design/d60-native-runtime-and-tracked-env-build.md))
 
 ## The notebook — start here
@@ -93,7 +95,7 @@ Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentati
 
 ## Status
 
-The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. Phases 0–11e are complete, plus the notebook + SDK (D22), institution realisation (D14), runtime substrate (D26 / D29 / D31), formula language (D32), and the Lean 4 verification institution (D28 / D30 / D40).
+The platform is operational end-to-end: kernel, orchestrator, LLM integration, and CLI connected via gRPC. The original phase plan (0–11e) is complete, and the work has since been tracked by design document rather than phase number. Landed since: the notebook + SDK (D22), institution realisation (D14), runtime substrate (D26 / D29 / D31), formula language (D32), the Lean 4 verification institution (D28 / D30 / D40), the dependent-type surface (D46 / D47 / D48), justification logic and the witness machinery (D39 / D49 / D73), the prose→propositions parsing pipeline (D62–D66, D71), and the type-theory/knowledge-graph fusion (D75 / D76 / D78 / D79). D77 and D80 are designed and not yet implemented.
 
 <details>
 <summary>Full capability inventory (what the system can do today)</summary>
@@ -101,9 +103,9 @@ The platform is operational end-to-end: kernel, orchestrator, LLM integration, a
 The system can:
 
 - Parse and serialize Eigon-JSON and CBOR documents
-- Load the self-describing core, program, reflection, and institution ontologies (4 bootstrap layers)
+- Load the self-describing core, program, reflection, eigentt, institution, runtime, formulas, lean, reasoning, statistics, logic, lexicon and encoding ontologies (21 bootstrap layers)
 - Build immutable layers with content-addressed identifiers (SHA-256 of CBOR)
-- Validate resources against the full ontology constraint system (12 validation rules)
+- Validate resources against the full ontology constraint system (25 validation rules, numbered through Rule 24 — including inductive-declaration admission and reference integrity on the commit path)
 - Resolve resources through parent-pointer layer chains
 - Query the knowledge graph with EigenQL (typed stratified Datalog with aggregation)
 - Type-check programs using EigenTT dependent type theory (NbE evaluator)
@@ -111,7 +113,7 @@ The system can:
 - Dispatch IO components to the Deno orchestrator via gRPC (ComponentExecutor service)
 - Call LLMs via Vercel AI SDK (Anthropic) with prompt templating and metrics
 - Generate structured LLM output via CompleteJson (JSON Schema from ontology classes)
-- Expose 14 kernel operations as MCP tools (query / inspect / load / run-program / institutions / schema / branches / tags / tasks / topology / health) for LLM agents. HTTP transport at `http://localhost:8080/mcp` when the docker stack is up (point Claude Desktop / Claude Code at the URL); stdio also available via `cd orchestration && deno task mcp` for kernel-on-host development
+- Expose 16 kernel operations as MCP tools (query / inspect / load / validate-program / run-program / institutions / schema / branches / tags / tasks / topology / formalize-document / health) for LLM agents. HTTP transport at `http://localhost:8080/mcp` when the docker stack is up (point Claude Desktop / Claude Code at the URL); stdio also available via `cd orchestration && deno task mcp` for kernel-on-host development
 - Track four epistemic categories: declared, observed, derived, verified
 - Record tree-structured reasoning traces with memoization and incremental execution
 - Validate epistemic base class requirements (DeclaredResource, DerivedResource, etc.)
@@ -279,13 +281,13 @@ The orchestrator exposes a curated subset of the kernel surface as
 agent can drive Eigenius as part of its reasoning — query the graph, run
 programs, inspect provenance, discover institutions.
 
-**14 tools** are wired across three groups:
+**16 tools** are wired across three groups:
 
 | Group | Tools |
 |---|---|
 | Explore | `eigenius_query`, `eigenius_inspect`, `eigenius_list_branches`, `eigenius_list_tags`, `eigenius_list_institutions`, `eigenius_get_schema`, `eigenius_layer_topology` |
-| Mutate  | `eigenius_load` (with D41 `policy` / `explicitTombstones`), `eigenius_validate_program`, `eigenius_run_program`, `eigenius_run_program_by_iri` |
-| Observe | `eigenius_health`, `eigenius_list_tasks`, `eigenius_get_task_status` |
+| Mutate  | `eigenius_load` (with D41 `policy` / `explicitTombstones`), `eigenius_validate_program`, `eigenius_run_program`, `eigenius_run_program_by_iri`, `eigenius_formalize_document` |
+| Observe | `eigenius_health`, `eigenius_list_tasks`, `eigenius_get_task_status`, `eigenius_get_formalization_result` |
 
 Branch / tag mutation, merge submission, consolidation, GC, and task
 cancellation are deliberately **not** exposed — those are stateful or
@@ -339,6 +341,14 @@ the client at that subprocess. See
 for the full client wiring.
 
 ### The agent guide
+
+> **The packaged skills are not currently recommended.** The MCP server itself is
+> available and works as documented above. The three agent skills that drive it —
+> `eigenius`, `grounding`, `reasoning` — are parked under
+> [`docs/method/`](docs/method/) rather than installed, because a series of in-flight
+> kernel changes makes the workflows they encode unreliable. Read them for the mental
+> model; do not rely on them as a current procedure. (`docs/method/eigenius.md` still
+> says 14 tools, and still lists WASM institutions, removed in #101.)
 
 [`docs/method/eigenius.md`](docs/method/eigenius.md) teaches a coding agent the
 platform's mental model, the three surface languages, the MCP tool selection
@@ -445,8 +455,16 @@ docs/            Documentation
   notes/           Working notes (e.g. manual-test scenarios)
   references/      BibTeX bibliography
   papers/          Drafts + working papers
-scripts/         License-header application, BibTeX-to-Markdown, citation verification
-references/      Reference implementations consulted during development (e.g. `nanoda_lib` for EigenTT)
+scripts/         License-header application, BibTeX-to-Markdown, citation verification,
+                 lexicon reseed, parse-rate measurement, alignment-snapshot build
+experiments/     Measured work with committed baselines — parsing (corpus, gold readings,
+                 recorded LLM draws), lexicon alignment, benchmark tasks, the WRN publication
+                 chain. `results/` is gitignored; the distilled baselines are not.
+website/         Astro/Starlight documentation site
+patches/         Vendored crate patches (e.g. `tonic-web`)
+data/            Small fixed inputs used by demos and tests
+references/      Reference implementations and papers consulted during development
+                 (`nanoda_lib` for EigenTT, `openccg` read-only, `publications/` PDFs)
 ```
 
 </details>
@@ -893,6 +911,33 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [Manifesto](docs/design/manifesto.md) | Project ethos and posture |
 | [Vision](docs/design/vision.md) | Long-horizon target for the platform |
 | [Life Science Requirements](docs/design/life-science-requirements.md) | Driving requirements from clinical / translational use cases |
+
+**Prose to typed propositions**
+
+| Document | Description |
+|----------|-------------|
+| [D62: Encoding Engine — prose to trees](docs/design/d62-encoding-engine-prose-to-trees.md) | The categorial-grammar approach: `lexicon:Cat` as an inductive, the ⟦cat⟧ → `sem_type` homomorphism, CN-as-types, and the felicity obligation that a lexical entry's semantics must inhabit the type its category denotes |
+| [D63: DCG engine — English grammar](docs/design/d63-dcg-engine-english-grammar.md) | The grammar itself — multimodal slashes after Baldridge, coordination, comparatives, the closed-class inventory, and lexicon augmentation from WordNet + UMLS |
+| [D64: LLM anaphora resolution](docs/design/d64-llm-anaphora-resolution.md) | The proposer suggests a referent among assembled candidates; the kernel re-gate is the veto. Holes are typed by their restrictor, so «these findings» resolves only to findings |
+| [D65: Lexicon runtime — lazy and scoped](docs/design/d65-lexicon-runtime-lazy-scoped.md) | Making a multi-million-entry lexicon usable at parse time: declared value/text indexes, lazy probing instead of full-layer scans |
+| [D66: Definitional lifting and witness normalization](docs/design/d66-definitional-lifting-and-witness-normalization.md) | Landing parsed sentences as chain resources, and normalizing the witness keys they produce |
+| [D70: Named entities — syntax vs denotation](docs/design/d70-named-entities-syntax-vs-denotation.md) | Separating how a name is spelled from what it denotes |
+| [D71: Document formalization service](docs/design/d71-document-formalization-service.md) | The pipeline as a service operation — `FormalizeDocument`, its result surface, and the MCP tools that drive it |
+
+**Reasoning, witnesses, and the fusion arc**
+
+| Document | Description |
+|----------|-------------|
+| [D52: Measurement statistics institution](docs/design/d52-measurement-statistics-institution.md) | The in-process statistics institution — ANOVA family, sample sets, effect sizes, outlier policy; emits one `InstitutionEmittedDerivation` per effect |
+| [D54: Reasoning lemma citation](docs/design/d54-reasoning-lemma-citation.md) | Citing a committed `ReasoningSentence` as a lemma, and what its witness entitles |
+| [D57: Schema.org vocabulary mapping](docs/design/d57-schema-org-vocabulary-mapping.md) | Lifting an external vocabulary through the OCI runtime as an attested derivation |
+| [D73: Justification logic — witnesses and traces](docs/design/d73-justification-logic-witnesses-and-traces.md) | The polynomial as primitive; how `JustifiedBy` relates to the trace store |
+| [D75: Fusing EigenTT and the knowledge graph](docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md) | The diagnosis: the layer chain *is* `Γ_env` and a resource *is* a record were one problem. Eight witnessed defects; three follow-ons |
+| [D76: The typing environment](docs/design/d76-the-typing-environment.md) | Seam A — the chain becomes `Γ_env`. De-inlining `Exp`, declaration-level universe parameters, `Const(iri, levels)`, δ in conversion, a derived recursor motive |
+| [D78: Resources as records](docs/design/d78-resources-as-records.md) | Seam B — validation becomes clause-8 evaluation against `Val::Record` |
+| [D79: The representation of inductive types](docs/design/d79-the-representation-of-inductive-types.md) | Completing D76 — term-valued properties onto `core:inductive`, term references projected into the index as `core:mentions`, and inductive declarations sealed against redefinition |
+| [D77: Merge as a pushout of environments](docs/design/d77-merge-as-a-pushout-of-environments.md) | **Designed, not implemented.** Merge must check that a rebinding did not invalidate what was checked against the old binding |
+| [D80: Witness and institution machinery](docs/design/d80-witness-and-institution-machinery.md) | **Designed, not implemented.** Witness credit and institution verdicts both survive a rebinding that widens; neither is repaired by revalidation |
 
 **Evaluation methodology**
 
