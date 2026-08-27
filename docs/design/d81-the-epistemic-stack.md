@@ -678,6 +678,15 @@ Found by the adversarial pass while looking for defences, and the clearest clean
 | `chain_witness_category_for_iri` (`kernel/src/ontology/well_known.rs:578`) | **zero callers.** `kernel/src/program/check_hooks.rs:93` does the identical mapping by *short name* instead |
 | `Grade` / `GradedClaim.grade` (`crates/eigenius-reasoning/src/grade.rs`) | **write-only** — set at four sites, read at exactly one, in a test. "Not two enums needing reconciliation; one live enum and one dead field. The remedy is deletion, not a `From` impl" |
 | `runtimes:wasm` | declared, no implementation (§3.1.4) |
+| `default_asserts_proposition` and `default_asserts_proposition_hash` | **public API with zero consumers** — re-exported from `kernel/src/layer/mod.rs:48` and called from nowhere in the tree, tests included. The `Asserts(iri)` fallback they expose is reached only through the module-private path inside `emit_from_trace` |
+
+**The module's whole production surface is two entry points.** `synthesize_chain_witness` is called
+from exactly one place — `kernel/src/program/check_hooks.rs:86`, implementing
+`EffectHooks::synthesize_chain_witness` — and `is_witness_candidate` from exactly one —
+`kernel/src/storage/memory.rs:242`, computing the `has_witness_candidates` bit that lets a lexicon
+layer be skipped without probing. `layer_admits_witness` and `lookup_chain_witness` are re-exported
+and used **only from test files** (`crates/eigenius-reasoning/tests/`,
+`crates/eigenius-statistics/tests/`).
 
 `Grade`'s defence is worth keeping even though the field is dead: its doc calls it *"a structural
 projection of the `JustificationTerm` constructor — not a stored field"*, i.e. a **pre-commit
