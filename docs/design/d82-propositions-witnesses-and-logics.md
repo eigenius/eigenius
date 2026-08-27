@@ -655,6 +655,50 @@ what the `proof_system` field was already shaped to record.
 
 ---
 
+### 5b.7 The institution boundary under the revised model
+
+**Criterion: an institution is a logic with a satisfaction relation the kernel cannot evaluate.** If
+the kernel can evaluate it — that is type checking — it is not an institution, it is the kernel.
+
+**Contributes:** vocabulary for its sentences; a decision procedure yielding the tri-state verdict;
+derivation resources recording what it computed (`InstitutionEmittedDerivation`, with `from_subject`
+pinning the spec it ran); optionally a proof term in EigenTT or Lean 4.
+
+**Never:** assigns a grade (computed by the kernel from evidence, §5b.6); admits a witness (the
+kernel's constant specification, §5b.4); asserts `Verified`.
+
+**Lean shows why the last one generalises.** Lean is an institution *and* a proof-term source, and
+the roles are separable. Its **verdict** does not earn `Verified`; its **term** does. Lean answering
+`Holds` while shipping no term would be `Derived`.
+
+**The boundary stated as trust:**
+
+| direction | trust required | why it is safe |
+|---|---|---|
+| `Verified` | none — the kernel re-checks the term | that is the definition |
+| `Derived` | bounded and attributed — which institution, which invocation, which subject | recorded, so a wrong answer is traceable |
+| `Fails` blocks a commit | full, on the institution's own authority | wrong-direction-safe: a bad `Fails` loses data, a bad `Holds` corrupts |
+
+So: **an institution may veto on its own authority, but may not verify on its own authority.**
+
+**Consequence — the reasoning institution is not one.** `reasoning:reasoning_institution` declares
+`runtime = in_process` and states *"the validator is the kernel"*. It has no satisfaction relation of
+its own: `JustifiedBy` checking is type checking. Under the criterion it dissolves —
+
+- `JustifiedBy` checking → kernel (already true in fact)
+- `witness:Is*As` → kernel vocabulary (§5a.4 reached this from the other side)
+- the `JustificationTerm` algebra → the justification layer, part of the kernel's type theory once
+  `JustifiedBy` is a kernel inductive
+- `project.rs`'s support algebra → a **query** over retained terms, not a logic
+- the AutoOnLoad trigger → a kernel dispatch mechanism
+
+Statistics, Lean and κ–τ remain institutions: each has a ⊨ the kernel cannot evaluate (`p < α`,
+Lean's type theory, `sc_S(φ) ≥ τ`). The encoding pipeline correctly is not one — no ⊨, and it
+produces assumptions with attribution (§5b.6's third case), which is what D71 refused institution
+status for and gave no protocol in exchange.
+
+---
+
 ## 6. Sequencing
 
 **Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
