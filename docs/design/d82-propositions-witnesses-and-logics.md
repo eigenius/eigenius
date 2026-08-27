@@ -699,6 +699,53 @@ status for and gave no protocol in exchange.
 
 ---
 
+### 5b.8 Resources that carry no proposition
+
+**The enum carries two independent questions, and only one is about propositions.**
+
+| axis | question | applies to |
+|---|---|---|
+| **provenance** | how did this artifact come to exist? | **every** resource |
+| **warrant** | what evidence exists for its proposition? | only resources carrying one |
+
+`Declared` / `Observed` / `Derived` are provenance — a person authored it, it was imported from a
+source, a program produced it — with `declared_by` / `source` / `derivation` as their attributions.
+`Verified` is not a fourth member of that series; it answers the other question. §5b.4(iii) reached
+this by inspecting the `requires` clauses; the encoding ontology reached it by hitting the limit.
+
+**The encoding ontology had to split one artifact into two resources to say both things:**
+
+- `enc:EncodedClaim : reflection:DeclaredResource` — *"the parser establishes that the text parses to
+  this well-typed term, not that the term is faithful to what the author wrote nor that what the
+  author wrote is true"*
+- `enc:ReasoningStructure : reflection:DerivedResource` — *"the output of a program run over hashed
+  input"*, owning the single `ProgramTrace`
+
+One claim, two facts: a program produced it, and an agent vouches for it. `is_a` holds one grade, so
+the provenance was pushed onto a second resource. D81 §6 called this *"where the modelling was done
+carefully"* — it is, and the split is the workaround a careful modeller writes when one field must
+answer two questions.
+
+**So a regular resource has provenance and no warrant.** For the ~9.4M lexicon entries, class
+declarations and imported concepts on the chain, *"what proves this?"* is not an under-answered
+question — it is not a question. They are not in the epistemic system at all.
+
+**Three consequences.**
+
+- **It explains D81 §5.1.** *"No reader grants an entitlement on the strength of an epistemic class"*
+  — for nearly every resource the class is provenance, which is descriptive and was never meant to
+  entitle anything.
+- **It dissolves the importer worry.** D81 asked what stops an importer stamping `VerifiedResource`
+  on anything. Under the split it cannot: `Verified` is not on the axis importers write to. The
+  missing guard becomes an unnecessary one.
+- **It kills the subsumption independently of §5b.4(i).** `VerifiedResource subclass_of
+  DerivedResource` relates two different axes, so no subsumption is available in either direction.
+
+**The test for which axis applies is mechanical and already in the tree:** does the resource carry
+`reflection:canonical_proposition`? If yes, warrant applies. If no, provenance only.
+
+---
+
 ## 6. Sequencing
 
 **Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
