@@ -269,6 +269,78 @@ Everything else below is a relocation of something that already exists.
 
 ---
 
+## 5a. Implications that follow from §2a
+
+The refinement model settles things §3 left open, and forces two conclusions D82's first draft did
+not reach.
+
+### 5a.1 A trace kind *is* a refinement declaration
+
+This is the one that changes most. `trace_category`'s five arms are already refinement declarations
+written as a Rust `match`: `DeclarationTrace → Declared`, and `ExternalExecutionTrace → Declared`
+with a five-line rationale for why the projection is *that* one (eigenius#205).
+
+Under §2a a trace class declares its own projection, exactly as an institution's witness kind does.
+The two mechanisms unify: **a trace class and an institution witness kind are the same thing — a
+named relation between a proposition and its evidence, projecting onto one of the four.** Adding a
+trace kind stops being a kernel edit.
+
+That retires `trace_category` and the self-attesting arms together (D81 §5.2), and the vocabulary is
+already chain-resident and dead: `reflection:epistemic_status` carries `allows_only` over exactly the
+four individuals and no Rust reads it.
+
+### 5a.2 `reflection:Trace` should split
+
+D81 §1.2 found three families under one name. The refinement model makes the split necessary rather
+than merely tidy:
+
+| family | what it is | under §2a |
+|---|---|---|
+| `Let`/`Map`/`Case`/`Seq`/… (11 classes) | the **inside** of one program run — a data structure | **not evidence.** Declares no projection, grounds no witness |
+| `ProgramTrace`, `ExternalExecutionTrace` | a record that a run happened | a refinement, declaring its projection |
+| `Declaration`/`Observation`/`VerificationTrace` | standalone attestations | refinements, declaring theirs |
+
+Only the last two carry a projection; the first cannot, and the fact that it cannot is the test that
+tells them apart. Calling all three "Trace" is the same category error as the two senses of
+"witness" — one word, unrelated denotations, and here it is load-bearing rather than cosmetic.
+
+### 5a.3 The obligations belong to the warrant, not the resource
+
+`DeclaredResource requires declared_by`; `ObservedResource requires source`. Read under P1 these are
+not statements about resources at all — they are *"a Declared warrant requires a named agent"* and
+*"an Observed warrant requires a source"*. The obligation attaches to the **relation**, and it is
+carried by the resource class only because that was the available hook.
+
+This dissolves D81 §2.0's asymmetry without needing the refutation. `DerivedResource` requires
+nothing *as a class* while every concrete derived path carries its own requirement — because the
+requirement was never a property of the class. Under §2a each refinement declares its own
+obligations, and the base categories need none.
+
+It also explains why the labelling stack is inert. Once the obligations move, `is_a
+reflection:DeclaredResource` carries no information a reader could act on — which is already true
+today, and would become visibly so.
+
+### 5a.4 `witness:Is*As` is kernel vocabulary, not the reasoning institution's
+
+Those four inductives *are* the four categories expressed as propositions. Under §2a they belong
+with the kernel's base vocabulary, not in `ontologies/reasoning/reasoning.esl` where they sit today.
+
+What stays with the reasoning institution is `JustifiedBy` and `JustificationTerm` — the certificate
+type and the J-family algebra (`app`, `sum_l`, `sum_r`, `spec_poly`, the evidence constructors). An
+institution referencing base vocabulary is the normal direction (D14 §1.3: institutions build fibres
+over the base), so nothing about the split is unusual — it is only currently inverted.
+
+### 5a.5 `Warrant` is the prototype and should become the declared form
+
+`Warrant::{Declared, Parsed}` with `Warrant::grade()` is exactly §2a's mechanism, built once, in one
+crate, in Rust, `#[non_exhaustive]`, on an axis its own documentation says is expected to grow — and
+which nothing outside `crates/eigenius-reasoning` can extend.
+
+Generalising it is not new design. It is taking the shape that already works and putting it where
+other logics can reach it.
+
+---
+
 ## 6. Sequencing
 
 - **S0 — the deletions.** No design content; clears noise before anything moves.
@@ -280,8 +352,14 @@ Everything else below is a relocation of something that already exists.
   κ–τ is the acceptance test.
 - **S4 — retire the kernel lists** (§3.3a) once S3 gives institutions somewhere to declare them.
 - **S5 — the selection-record protocol** (§3.4). Independent; can run any time after S1.
+- **S6 — split `reflection:Trace`** (§5a.2) and move the obligations onto refinements (§5a.3).
+  Chain-vocabulary work, gated on S4 having somewhere to declare projections.
 
 S1 before S2 is the only hard ordering. S2 alone would already close #160.
+
+**S1 is smaller than it looks now.** §5a.5 says the relation vocabulary exists as `Warrant`, and
+§5a.1 says trace kinds are the same mechanism — so S1 is generalising one enum and one `match` into
+a declared form, not inventing a notion.
 
 ---
 
