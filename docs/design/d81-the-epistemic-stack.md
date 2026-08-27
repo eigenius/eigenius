@@ -12,7 +12,7 @@ authority over what the system now is.
 |---|---|---|---|
 | 1 | the concept inventory | P0 | **done** |
 | 2 | four lifecycles | P1 | **done** |
-| 3 | the boundary map | P2 | pending |
+| 3 | the boundary map | P2 | **partial** — seam 1 done |
 | 4 | findings | P3 / P4 | pending |
 
 ---
@@ -362,6 +362,92 @@ current. Intent embedded there is indistinguishable from specification.
 
 ---
 
-## §§3–4
+## 3. The boundary map
 
-Pending. See the plan.
+### 3.1 Kernel ↔ institution — what an institution may assert
+
+**The trait is three operations.** `Institution` (`kernel/src/institution/runtime.rs:126`) exposes
+`extract_typed` (resource → `Val`), `reify` (`Val` → resource), and `query` (resource →
+`QueryOutcome`). There is no method for stamping a class on an existing resource, minting a trace,
+or writing more than its own results.
+
+**The whole write channel is `QueryOutcome`**, which has exactly two resource-bearing fields:
+
+| field | committed when | read by |
+|---|---|---|
+| `output: Resource` | always (as provenance) | the gate — `Holds` admits the commit, `Fails` rejects it |
+| `derivations: Vec<Resource>` | **only on `Holds`**; dropped on `Fails` | nothing at commit; later, the witness emitter |
+
+That is the entire surface. An institution's power over the chain is: *veto the commit*, and *emit N
+resources that survive only if it does not veto*.
+
+#### 3.1.1 The channel is untyped, and two unrelated things ride it
+
+`derivations` is documented (`runtime.rs:67`) as carrying *derived results* — statistics emits one
+`InstitutionEmittedDerivation` per ANOVA effect, whose `canonical_proposition` grounds an
+`IsDerivedAs` witness. The same comment states it is *"Empty for institutions whose only job is the
+pass/fail gate (e.g. Reasoning / Lean)"*.
+
+**That is no longer true of Reasoning.** Since eigenius#200 a passing `ValidateJustification` rides
+a `reflection:VerificationTrace` on the same field
+(`crates/eigenius-reasoning/src/validate.rs:161-166`), precisely *because* the field's
+commit-on-Holds semantics are what it wants: *"a `Fails` mints nothing, which is the point."*
+
+So one untyped channel now carries two semantically different things:
+
+| | statistics | reasoning |
+|---|---|---|
+| what rides | a **result** the institution computed | an **audit record** that a check happened |
+| carries `canonical_proposition` | yes — it is the point | no |
+| grounds a witness | `IsDerivedAs`, self-attesting | `IsVerifiedAs`, trace-attested |
+
+#### 3.1.2 The kernel stamps every passenger as a derivation
+
+`finalize_emitted_derivation` (`kernel/src/institution/dispatch.rs:517`) runs over **every** element
+of `derivations` and unconditionally adds two classes if absent:
+
+```rust
+if !has_class(&classes, wk::DERIVED_RESOURCE)             { classes.push(DERIVED_RESOURCE) }
+if !has_class(&classes, wk::INSTITUTION_EMITTED_DERIVATION) { classes.push(INSTITUTION_EMITTED_DERIVATION) }
+derivation.set(FROM_SUBJECT, subject_iri)
+```
+
+The reasoning institution's `VerificationTrace` therefore lands on the chain carrying
+`is_a = [VerificationTrace, DerivedResource, InstitutionEmittedDerivation]` — an audit record
+labelled as a computed result. `from_subject` is stamped too, so
+`InstitutionEmittedDerivation`'s required property is satisfied and the resource validates.
+
+**No live defect follows, for one contingent reason.** The self-attesting Derived route
+(`emit_from_institution_derivation`) reads `canonical_proposition`, and `verification_trace()`
+(`crates/eigenius-reasoning/src/validate.rs`) does not set one — so the emitter returns `None` and
+no spurious `Derived` witness appears. The trace is spared a second, wrong witness by an omission,
+not by a check.
+
+#### 3.1.3 There is no declared post-condition on success
+
+§2.4 established that `reasoning:qc_validate_justification` and `lean:qc_proof_check` share the
+`auto_on_load` role and diverge on what a pass means — one mints a trace, the other emits nothing.
+§3.1 explains why nothing detects that: **the dispatch protocol has a typed channel for *rejecting*
+and an untyped one for *everything else*.**
+
+`VerdictReading::{Holds, Fails, Undecidable}` is read by the pipeline and has defined consequences.
+What an institution is *entitled to assert* on `Holds` is not modelled anywhere — not on the
+`QueryClass` resource, not on the `Institution` trait, not in `QueryOutcome`'s type. It is whatever
+each handler happens to put in a `Vec<Resource>`.
+
+That is the shape of the seam: **rejection is a contract; promotion is a convention.**
+
+#### 3.1.4 in_process vs external is thinner than it looks
+
+`institution:runtime` admits `in_process`, `external` and `wasm`. Against the trait, the distinction
+reduces to one field: external-runtime institutions populate
+`QueryOutcome.partial_invocation` so the kernel can fold a `RuntimeInvocation` into the commit
+(D31 §6.3); in-process ones return `None`. Nothing else in the trait differs, and `wasm` has no
+implementation at all (eigenius#101 removed it; the ontology still declares it — §1.1's pattern of
+a declared-but-unbacked value, here in the institution vocabulary rather than the epistemic one).
+
+---
+
+## §4
+
+Pending. Seams 2–4 of §3 also pending: kernel ↔ validator, compiler ↔ kernel, chain ↔ derived.
