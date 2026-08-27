@@ -39,8 +39,24 @@ verdict. **This is why a verdict never earns `Verified` and a judgement does.**
 **Logic** — a system with its own notion of when a sentence holds. A judgement is always *in* a
 logic.
 
-**Proof system** — a logic **we hold a checker for**, named by `reflection:proof_system`. The kernel
-is a proof system and *not* an institution; statistics is an institution and *not* a proof system.
+**Proof system** — a logic supplying three things, named by `reflection:proof_system`:
+
+1. **a term syntax** — proof objects as transmissible data;
+2. **a formula syntax** — for what a proof proves (in EigenTT and Lean, the same syntax as 1);
+3. **a decidable checking relation `⊢_L t : T`**, computable from `t` and `T` alone, **against the
+   theory only**.
+
+The third is the criterion, and two clauses carry it. **Checking must be independent of finding** —
+validity is established without reproducing the search that produced the object (de Bruijn). And
+**the checker may consult the theory but not the evidence**: declarations, definitions and prior
+judgements are fine, since any checker needs an environment; measurements, samples and external state
+are not, because a relation needing an oracle is not a checking relation.
+
+The kernel is a proof system and *not* an institution. Statistics is an institution and *not* a proof
+system: it has no term syntax, borrows our `Prop`, and its check needs the dataset — so checking
+would *be* recomputing, and the recomputation establishes an arithmetic fact rather than the claim.
+"Is this a proof language?" and "what warrant does it yield?" are therefore one question, answered by
+§4's lattice.
 
 **Comorphism** — the translation carrying an institution's proposition into an EigenTT `Prop`
 (`reasoning:VerifiedPropositionView` is the Lean one). Needed exactly when a logic brings its own
@@ -303,7 +319,59 @@ found a proof, not an institution's verdict, not any class membership.
 - an institution-supplied witness-synthesis protocol — unnecessary: an institution hands over a
   judgement or it is `Derived`.
 
-## 8. Open
+## 8. Worked example: the κ–τ pilot
+
+The first outside logic proposed for the platform (arXiv:2608.08192, *rival-sensitive commitment*
+over the WRN evidence graph). A design that cannot place its first external case is not finished, so
+this section places it.
+
+**Institution: yes. Proof system: no.** `S ⊩ C_τφ ⟺ sc_S(φ) ≥ τ` is a genuine satisfaction relation
+and the kernel cannot evaluate it. But there is no term syntax, no proof object, and the check would
+need the evidence graph — so it fails §0's third condition. **Its ceiling is `Derived`
+structurally**, not by policy: there is no term for any checker to check.
+
+**It establishes `Commits(τ, φ)`, not `φ`.** This is the design's principal demand on it, and it is
+the pilot's own contribution restated — making the commitment threshold explicit. `Commits(τ, φ)` is
+a *different proposition* from `φ`, so the derivation's `canonical_proposition` must be the former.
+Recording it against `φ` would launder a commitment into a claim: the certificate/proof-term level
+error of §2, one floor up. The gap is crossed by a **declared** bridge `Commits(τ,φ) → φ` that
+someone owns by name, and the polynomial then shows that declared leaf rather than absorbing it.
+
+**Its warrant is composite and spans two rows of §4:**
+
+```
+App( Declared(κ–τ spec: w, κ, λ, τ, ε, δ),
+     [ Observed(evidence graph), Sampled(κ estimates) ] )
+```
+
+Scoring and threshold comparison are reproducible — a function of the graph and the parameters.
+The **neural κ estimates are not**: declared protocol, observed outcome, nothing entailed. The
+proposal anticipated this (*"each estimate committed as a resource with its own grade"*); §4 supplies
+the name and stops the sampled part from inheriting the reproducible part's entailment.
+
+**The projection then answers the pilot's own questions.** `survives_without(κ_estimate)` — does the
+commitment stand without this estimate? `leaves_of(term, Sampled)` — every neural estimate the
+conclusion rests on. Rival-sensitivity becomes a query over the polynomial, which works only because
+the term is composite rather than the single opaque leaf an institution emits when it collapses
+design and data into one node.
+
+**It has veto power and should not use it.** A `Fails` verdict blocks a commit; below-threshold means
+*"do not commit to φ"*, not *"this chain is invalid"*. So: `Holds` on `Commits(τ,φ)` above threshold,
+`Undecidable` below — which commits its resources without rejecting the subject.
+
+**What it needs from us: nothing new.** An ontology declaring its analysis-spec class with the six
+parameters as `requires`; `Commits` as a chain-declared `Prop` constructor; an institution
+declaration with a verifier; derivations on the existing path with `from_subject` pinning the spec.
+No protocol change and no kernel change — which is the test this section exists to run.
+
+**What this design asks of it that the present one would not:** declare which of its steps are
+reproducible (§4); emit a composite justification term rather than an atom; and state `Commits(τ,φ)`
+rather than `φ`. The third is the one to raise early — it is the framework declining to absorb the
+commitment/truth gap, which is what the pilot is *about*, so it should read as agreement.
+
+---
+
+## 9. Open
 
 1. **`Judgement` versus `Ann`.** `Ann(term, typ)` already exists inside `Term` and has the same
    shape. The difference is obligation, not structure — a `Judgement`-ranged slot must carry the

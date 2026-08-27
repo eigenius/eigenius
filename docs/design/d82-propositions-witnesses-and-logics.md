@@ -281,9 +281,10 @@ change is a relocation of something that exists.
 
 ## 4. κ–τ as the forcing case
 
-> **Superseded in part by §5b.2.** Under the `Verified`-means-proof-term decision κ–τ is a `Derived`
-> institution and needs no protocol change. The section stands as the analysis that established
-> that; it no longer motivates S3.
+> **Superseded by [D83 §8](d83-judgements-warrants-and-logics.md), which places κ–τ in the finished
+> framework.** Under the `Verified`-means-proof-term decision it is a `Derived` institution needing
+> no protocol change. This section stands as the analysis that established that; it no longer
+> motivates S3.
 
 The pilot is a good test because it needs (a) and (b) and needs the kernel unchanged.
 
