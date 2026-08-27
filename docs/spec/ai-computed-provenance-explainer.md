@@ -291,7 +291,7 @@ Summarized from [§11 of the specification](./ai-computed-provenance-1.0.md#11-s
   propositions-as-types substrate; the binding's type theory is a fragment of the Calculus of  
   Inductive Constructions, the same family underlying Rocq and Lean.  
 * Artemov, S. (2008). "The Logic of Justification", *Review of Symbolic Logic* 1(4). And Artemov, S.  
-  and Fitting, M. (2020), *Justification Logic: Reasoning with Reasons*, Cambridge University Press.  
+  and Fitting, M. (2019), *Justification Logic: Reasoning with Reasons*, Cambridge University Press.  
   The warrant calculus is a fragment of the Logic of Proofs.  
 * Goguen, J. and Burstall, R. (1992). "Institutions: Abstract Model Theory for Specification and  
   Programming", *Journal of the ACM* 39(1). Signatures, sentences, models, satisfaction, and the  

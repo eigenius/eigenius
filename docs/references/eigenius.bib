@@ -639,3 +639,148 @@
   note   = {Software},
   url    = {https://siddhartha-gadgil.github.io/trepplein4/}
 }
+
+% =============================================================
+% Justification logic — D39's primary sources, and D73's.
+% `reasoning:JustifiedBy(j, P)` IS Artemov's `t:F`; the constructor
+% set realises a fragment of the J-family.
+% =============================================================
+
+@techreport{artemov1995,
+  author      = {Artemov, Sergei},
+  title       = {Operational modal logic},
+  institution = {Mathematical Sciences Institute, Cornell University},
+  number      = {MSI 95-29},
+  year        = {1995},
+  note        = {Introduces the Logic of Proofs (LP) --- the first internalisation
+                 of evidence terms into the object language}
+}
+
+@article{artemov2008,
+  author  = {Artemov, Sergei},
+  title   = {The Logic of Justification},
+  journal = {The Review of Symbolic Logic},
+  volume  = {1},
+  number  = {4},
+  pages   = {477--513},
+  year    = {2008},
+  doi     = {10.1017/S1755020308090060}
+}
+
+@book{artemov-fitting2019,
+  author    = {Artemov, Sergei and Fitting, Melvin},
+  title     = {Justification Logic: Reasoning with Reasons},
+  series    = {Cambridge Tracts in Mathematics},
+  number    = {216},
+  publisher = {Cambridge University Press},
+  year      = {2019},
+  doi       = {10.1017/9781108348034},
+  note      = {The monograph D39 and D73 build on. Copy under
+                 references/publications/. Its copyright page reads
+                 ``First published 2019''; some design docs cite it as 2020}
+}
+
+% =============================================================
+% Categorial grammar and parsing — D62/D63's lineage. Copies of
+% Baldridge, Eisner and McLean--Horspool live under
+% references/publications/; OpenCCG under references/openccg/ is read
+% as reference only (LGPL --- reimplement, do not ship).
+% =============================================================
+
+@phdthesis{baldridge2002,
+  author  = {Baldridge, Jason},
+  title   = {Lexically Specified Derivational Control in
+             Combinatory Categorial Grammar},
+  school  = {University of Edinburgh},
+  year    = {2002},
+  note    = {The multimodal slashes `lexicon:Mode' mirrors: the modality
+             hierarchy that lets a determiner be `np/$\diamond$n' while a
+             permutative functor is not}
+}
+
+@book{steedman2000,
+  author    = {Steedman, Mark},
+  title     = {The Syntactic Process},
+  publisher = {MIT Press},
+  year      = {2000},
+  note      = {The CCG lineage `lexicon:Cat' follows}
+}
+
+@inproceedings{eisner1996,
+  author    = {Eisner, Jason},
+  title     = {Efficient Normal-Form Parsing for
+               Combinatory Categorial Grammar},
+  booktitle = {Proceedings of the 34th Annual Meeting of the
+               Association for Computational Linguistics (ACL)},
+  pages     = {79--86},
+  year      = {1996},
+  doi       = {10.3115/981863.981874},
+  note      = {Normal-form constraints on spurious ambiguity ---
+               the problem `dcg::chart' packs against}
+}
+
+@inproceedings{mclean-horspool1996,
+  author    = {McLean, Philippe and Horspool, R. Nigel},
+  title     = {A Faster {Earley} Parser},
+  booktitle = {Compiler Construction (CC~'96)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1060},
+  publisher = {Springer},
+  pages     = {281--293},
+  year      = {1996},
+  doi       = {10.1007/3-540-61053-7_68}
+}
+
+@book{huddleston-pullum2002,
+  author    = {Huddleston, Rodney and Pullum, Geoffrey K.},
+  title     = {The Cambridge Grammar of the {English} Language},
+  publisher = {Cambridge University Press},
+  year      = {2002},
+  note      = {The descriptive reference behind the closed-class
+               inventory and the D62 category features}
+}
+
+% =============================================================
+% Higher-order pattern unification --- the fragment D48's index
+% unifier is restricted to.
+% =============================================================
+
+@article{miller1991,
+  author  = {Miller, Dale},
+  title   = {A logic programming language with lambda-abstraction,
+             function variables, and simple unification},
+  journal = {Journal of Logic and Computation},
+  volume  = {1},
+  number  = {4},
+  pages   = {497--536},
+  year    = {1991},
+  doi     = {10.1093/logcom/1.4.497},
+  note    = {The ``Miller fragment'' --- each free variable applied to
+             distinct bound variables, no projections}
+}
+
+% =============================================================
+% The source document for the WRN demo and the wrn-helicase chain.
+% =============================================================
+
+@article{chan2019wrn,
+  author  = {Chan, Edmond M. and Shibue, Tsukasa and McFarland, James M.
+             and Gaeta, Benjamin and Ghandi, Mahmoud and Dumont, Nancy
+             and Gonzalez, Alfredo and McPartlan, Justine S. and Li,
+             Tianxia and Zhang, Yanxi and Liu, Jie Bin and Lazaro,
+             Jean-Bernard and Gu, Peili and Piett, Cortt G. and Apffel,
+             Annie and Ali, Siraj M. and Deasy, Rebecca and Keskula,
+             Paula and Ng, Raymond W. S. and Roberts, Justine and
+             Reddy, Alanna and Cowley, Glenn S. and Stegmaier, Kimberly
+             and Hahn, William C. and Root, David E. and Boehm, Jesse S.
+             and Vazquez, Francisca},
+  title   = {{WRN} helicase is a synthetic lethal target in
+             microsatellite unstable cancers},
+  journal = {Nature},
+  volume  = {568},
+  pages   = {551--556},
+  year    = {2019},
+  doi     = {10.1038/s41586-019-1102-x},
+  note    = {The paper demo/prose-to-formulas and
+             experiments/publications/wrn-helicase formalise}
+}

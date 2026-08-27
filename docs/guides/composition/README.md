@@ -66,7 +66,7 @@ The chapters build on each other:
    D39 `ReasoningSentence` certificate consumes the witness via
    `DerivedEvidence` → `StrongInhibitor` conclusion. No comorphism
    between the institutions; the composition runs through the shared
-   `core:EigenTTType` proposition slot.
+   `eigentt:TypeExpr` proposition slot.
 8. **[Composition patterns](08-patterns.md)** — when to share a payload
    language, when to declare a comorphism, when an OnDemand FIBER
    suffices, when chain reinsertion matters. Identity comorphisms

@@ -56,7 +56,17 @@ QUOTED ::= "'" [a-zA-Z0-9_-]+ "'"
 
 A bare identifier (`Dog`, `name`, `short_name`) is one `Ident` token. There's no distinction at the lexer level between class names, property names, variable names, and component names — the parser disambiguates by position.
 
-A **qualified name** like `core:string` or `ex:Dog` is **one `QualName` token**, not three. The lexer forms it when an identifier is immediately followed — no whitespace — by `:` and another name segment. That is what frees a space-surrounded `:` to mean the binder / annotation colon, so `base : ex:Nat` (`Ident Colon QualName`) and `ex:Nat` (`QualName`) are different token streams rather than a spacing convention.
+A **qualified name** like `core:string` or `ex:Dog` is **one `QualName` token**, not three. The lexer forms it when an identifier is immediately followed — no whitespace — by `:` and another name segment, and it **keeps going** across further tight `:segment`s. So `ex:Nat:succ` and `core:formats:date` are each one token too.
+
+That is what frees a space-surrounded `:` to mean the binder / annotation colon: `base : ex:Nat` (`Ident Colon QualName`) and `ex:Nat` (`QualName`) are different token streams rather than a spacing convention. Tightness is the whole discriminator, which is why the multi-segment form is safe — `ex:Nat : Prop` still annotates.
+
+Two things this buys (eigenius#24, eigenius#8):
+
+```esl
+def ex:v : ex:Colour = ex:Colour:mk;   // name a constructor by its type, when two
+                                       // inductives share a constructor short name
+property ex:when : core:string { format = core:formats:date; }   // multi-segment path
+```
 
 ### Quoted identifiers
 
@@ -118,8 +128,8 @@ The lexer always emits a trailing `Eof` token. Parsers that consume all tokens u
 The lexer is intentionally minimal:
 
 - **No keyword resolution beyond the fixed table.** `Dog` is `Ident("Dog")`; whether it's a class or a variable name is decided later.
-- **No qualified-name composition.** `core:string` is three tokens; the parser combines them.
-- **No size-bound parsing.** The `<` token is emitted whenever it appears; the parser decides whether `<` is a size bound (inside `{...}`) or some other use.
+- **No name resolution.** `core:string` lexes as one `QualName("core", "string")`; mapping the namespace alias to a URI is the compiler's job, not the lexer's.
+- **No operator precedence.** `<` and the other operator tokens are emitted whenever they appear; what they mean is the parser's decision. (`<` once marked a size bound in `j : Size < i`; sized types were retired in eigenius#218 and the surface no longer parses one.)
 - **No bracket matching.** Mismatched braces surface as parser errors, not lexer errors.
 
 ## 3.8. Comparison with EigenQL's lexer

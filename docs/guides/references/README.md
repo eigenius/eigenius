@@ -14,13 +14,13 @@ If you're looking up a specific work, the citation key is the lookup index — e
 
 ## Lists
 
-1. **[Cited references](01-cited.md)** — works explicitly cited from the design documents, papers, or guides. The single source of truth for `\cite{...}` calls in the LaTeX papers; new entries follow the same lowercase-key convention. **60 entries.**
+1. **[Cited references](01-cited.md)** — works explicitly cited from the design documents, papers, or guides. The single source of truth for `\cite{...}` calls in the LaTeX papers; new entries follow the same lowercase-key convention. **71 entries.**
 
 2. **[Foundational works the system relies on](02-foundational.md)** — foundational publications that Eigenius depends on conceptually (type theory, codata, Datalog, knowledge representation, LLMs, WebAssembly, SMT, RPC) but does not yet cite from any design doc, paper, or guide. **32 entries.**
 
-3. **[Philosophical and methodological precursors](03-precursors.md)** — works that situate Eigenius within a longer arc of research on Mathematical Knowledge Management, verified-at-scale formalization, Suppes-style structuralism, formal ontologies in science, the reproducibility movement, and adjacent contemporary projects. **14 entries.**
+3. **[Philosophical and methodological precursors](03-precursors.md)** — works that situate Eigenius within a longer arc of research on Mathematical Knowledge Management, verified-at-scale formalization, Suppes-style structuralism, formal ontologies in science, the reproducibility movement, and adjacent contemporary projects. **15 entries.**
 
-4. **[Contemporary related work](04-related-work.md)** — contemporary work in applied formal reasoning for science and engineering: institution theory in physics and systems engineering, higher-order logic for the natural sciences, formal ontologies for engineering and chemistry, Homotopy Type Theory and its directed and dynamic extensions, and the epistemology of formal proof. **30 entries.**
+4. **[Contemporary related work](04-related-work.md)** — contemporary work in applied formal reasoning for science and engineering: institution theory in physics and systems engineering, higher-order logic for the natural sciences, formal ontologies for engineering and chemistry, Homotopy Type Theory and its directed and dynamic extensions, and the epistemology of formal proof. **61 entries.**
 
 ## Source files
 

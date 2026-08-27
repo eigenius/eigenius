@@ -4,7 +4,7 @@ References that are explicitly cited from the design documents, papers, or guide
 
 _Generated from `docs/references/eigenius.bib` by `scripts/bib-to-md.py`. Do not edit by hand._
 
-Total entries: **61**.
+Total entries: **71**.
 
 ---
 
@@ -22,6 +22,26 @@ Aiguier, Marc and Diaconescu, Răzvan (2007). "Stratified institutions and eleme
 
 Abiteboul, Serge, Hull, Richard, and Vianu, Victor (1995). *Foundations of Databases*. Addison-Wesley.
 
+### `artemov-fitting2019`
+
+Artemov, Sergei and Fitting, Melvin (2019). *Justification Logic: Reasoning with Reasons*. Cambridge Tracts in Mathematics, Cambridge University Press.
+
+[DOI: 10.1017/9781108348034](https://doi.org/10.1017/9781108348034)
+
+> The monograph D39 and D73 build on. Copy under references/publications/. Its copyright page reads ``First published 2019''; some design docs cite it as 2020
+
+### `artemov1995`
+
+Artemov, Sergei (1995). "Operational modal logic". Mathematical Sciences Institute, Cornell University, MSI 95-29.
+
+> Introduces the Logic of Proofs (LP) — the first internalisation of evidence terms into the object language
+
+### `artemov2008`
+
+Artemov, Sergei (2008). "The Logic of Justification". *The Review of Symbolic Logic*, 1(4), pp. 477–513.
+
+[DOI: 10.1017/S1755020308090060](https://doi.org/10.1017/S1755020308090060)
+
 ### `atomicdata`
 
 Meindertsma, Joep (2020–2026). *Atomic Data: A modular specification for sharing, modifying and modeling graph data*.
@@ -29,6 +49,12 @@ Meindertsma, Joep (2020–2026). *Atomic Data: A modular specification for shari
 [Link](https://docs.atomicdata.dev/)
 
 > W3C Community Group Specification
+
+### `baldridge2002`
+
+Baldridge, Jason (2002). *Lexically Specified Derivational Control in Combinatory Categorial Grammar*. PhD thesis, University of Edinburgh.
+
+> The multimodal slashes `lexicon:Mode' mirrors: the modality hierarchy that lets a determiner be `np/$\diamond$n' while a permutative functor is not
 
 ### `basold2016`
 
@@ -59,6 +85,14 @@ Loup, Kris. *cbor-x: CBOR encoder/decoder for JavaScript*.
 [Link](https://www.npmjs.com/package/cbor-x)
 
 > Software (npm package)
+
+### `chan2019wrn`
+
+Chan, Edmond M., Shibue, Tsukasa, McFarland, James M., Gaeta, Benjamin, Ghandi, Mahmoud, Dumont, Nancy, Gonzalez, Alfredo, McPartlan, Justine S., Li, Tianxia, Zhang, Yanxi, Liu, Jie Bin, Lazaro, Jean-Bernard, Gu, Peili, Piett, Cortt G., Apffel, Annie, Ali, Siraj M., Deasy, Rebecca, Keskula, Paula, Ng, Raymond W. S., Roberts, Justine, Reddy, Alanna, Cowley, Glenn S., Stegmaier, Kimberly, Hahn, William C., Root, David E., Boehm, Jesse S., and Vazquez, Francisca (2019). "WRN helicase is a synthetic lethal target in microsatellite unstable cancers". *Nature*, 568, pp. 551–556.
+
+[DOI: 10.1038/s41586-019-1102-x](https://doi.org/10.1038/s41586-019-1102-x)
+
+> The paper demo/prose-to-formulas and experiments/publications/wrn-helicase formalise
 
 ### `cwl`
 
@@ -132,6 +166,14 @@ Diaconescu, Răzvan (2025). *Institution-independent Model Theory*. Studies in U
 
 > Second edition. Chapter 14 (`Grothendieck institutions', pp. 449–473) is the canonical reference for the Grothendieck construction on institutions, the comorphism-based variant, and the globalisation theorems for theory co-limits, model amalgamation (Thm. 14.15) and interpolation (Thm. 14.16).
 
+### `eisner1996`
+
+Eisner, Jason (1996). "Efficient Normal-Form Parsing for Combinatory Categorial Grammar". In *Proceedings of the 34th Annual Meeting of the Association for Computational Linguistics (ACL)*, pp. 79–86.
+
+[DOI: 10.3115/981863.981874](https://doi.org/10.3115/981863.981874)
+
+> Normal-form constraints on spurious ambiguity — the problem `dcg::chart' packs against
+
 ### `goguen-burstall1984`
 
 Goguen, Joseph A. and Burstall, Rod M. (1984). "Introducing institutions". In *Logics of Programs: Workshop, Carnegie Mellon University, Pittsburgh, PA, June 6–8, 1983*, ed. Clarke, Edmund and Kozen, Dexter, Lecture Notes in Computer Science 164, pp. 221–256, Springer.
@@ -153,6 +195,12 @@ Goguen, Joseph A. and Burstall, Rod M. (1992). "Institutions: Abstract model the
 ### `hancock-setzer2000`
 
 Hancock, Peter and Setzer, Anton (2000). "Interactive programs in dependent type theory". In *Computer Science Logic, CSL 2000*, Lecture Notes in Computer Science 1862, pp. 317–331, Springer.
+
+### `huddleston-pullum2002`
+
+Huddleston, Rodney and Pullum, Geoffrey K. (2002). *The Cambridge Grammar of the English Language*. Cambridge University Press.
+
+> The descriptive reference behind the closed-class inventory and the D62 category features
 
 ### `idris`
 
@@ -194,9 +242,23 @@ Liu, Jerry (2023). *LlamaIndex*.
 
 Badreddine, Samy, Garcez, Artur d'Avila, Serafini, Luciano, and Spranger, Michael (2022). "Logic tensor networks". *Artificial Intelligence*, 303.
 
+### `mclean-horspool1996`
+
+McLean, Philippe and Horspool, R. Nigel (1996). "A Faster Earley Parser". In *Compiler Construction (CC '96)*, Lecture Notes in Computer Science 1060, pp. 281–293, Springer.
+
+[DOI: 10.1007/3-540-61053-7_68](https://doi.org/10.1007/3-540-61053-7_68)
+
 ### `meseguer1989`
 
 Meseguer, José (1989). "General logics". In *Logic Colloquium '87*, ed. Ebbinghaus, H.-D., Fernandez-Prida, J., Garrido, M., Lascar, D., and Artalejo, M. R., Studies in Logic and the Foundations of Mathematics 129, pp. 275–329, Elsevier.
+
+### `miller1991`
+
+Miller, Dale (1991). "A logic programming language with lambda-abstraction, function variables, and simple unification". *Journal of Logic and Computation*, 1(4), pp. 497–536.
+
+[DOI: 10.1093/logcom/1.4.497](https://doi.org/10.1093/logcom/1.4.497)
+
+> The ``Miller fragment'' — each free variable applied to distinct bound variables, no projections
 
 ### `minitt`
 
@@ -305,6 +367,12 @@ Microsoft (2023). *Semantic Kernel*.
 ### `spivak2012`
 
 Spivak, David I. (2012). "Functorial data migration". *Information and Computation*, 217, pp. 31–51.
+
+### `steedman2000`
+
+Steedman, Mark (2000). *The Syntactic Process*. MIT Press.
+
+> The CCG lineage `lexicon:Cat' follows
 
 ### `tikv`
 
