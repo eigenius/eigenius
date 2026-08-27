@@ -33,13 +33,28 @@ makes an analysis argue for its conclusion instead of reporting.
 
 ## 2. Method
 
-**Read the code, then the design docs — in that order.** The design corpus for this area is large
-(D6b, D14, D31, D39, D46, D49, D52, D54, D73) and partly aspirational. Reading it first would seed
-the description with intentions rather than behaviour. Read it second, as a *diff*: where the docs
-and the code disagree, that disagreement is itself a finding.
+**The implementation is the guiding artifact. The design docs are secondary.**
+
+D81 describes what the system *is*. That is settled by the code, the ontologies and the tests —
+nothing else. The design corpus for this area is large (D6b, D14, D31, D39, D46, D49, D52, D54,
+D73) and each document records **intentions at the time that feature was planned**. The
+implementation has drifted from them, and drift is the expected state, not a defect list.
+
+Three consequences, and they are the operative rule of this analysis:
+
+- **A design doc cannot establish that current behaviour is wrong.** Where a doc and the code
+  disagree, the code is the architecture. The disagreement is a fact about the *doc*.
+- **Docs are read for provenance, not for validation** — to answer *why does this shape exist*
+  when the code does not say, and to surface intentions that were **abandoned**. An abandoned
+  intention is information: it usually means the system met something the plan had not
+  anticipated, and that encounter is often the thing worth recording.
+- **Read them last, and only where the code leaves a "why" open.** Reading them earlier would seed
+  the description with intentions rather than behaviour, and a description assembled from intent
+  is precisely how the README drifted.
 
 **Every claim carries a `file:line`.** A description without references cannot be checked and will
-rot the way the README did.
+rot the way the README did. A claim whose only support is a design document is not a description of
+the architecture — it is a quotation, and must be marked as one.
 
 **Distinguish three failure modes, because they want different fixes.**
 
@@ -108,9 +123,10 @@ container.
 
 ### 3.5 The reasoning institution's relationship to the kernel is unusual
 
-D80 §2.1 already established, for the witness case: the institution owns the **vocabulary** and the
-**trigger** (`ValidateJustification`, AutoOnLoad), the kernel owns **synthesis** and **checking**,
-and nothing is persisted. That is a specific and defensible split.
+D80 §2.1 recorded, for the witness case: the institution owns the **vocabulary** and the **trigger**
+(`ValidateJustification`, AutoOnLoad), the kernel owns **synthesis** and **checking**, and nothing is
+persisted. That reading was taken from code and is recent, but it is a **claim to re-verify**, not a
+premise to inherit — §2's rule applies to D80 exactly as it applies to D39.
 
 **To answer:** does it generalise? Is the statistics institution (in-process, `ndarray`/`statrs`,
 `crates/eigenius-statistics/`) split the same way, or differently? Is "in-process institution" one
@@ -132,8 +148,13 @@ Each phase produces a section of D81 and can be stopped at.
   21, 22, and the AutoOnLoad phase at `kernel/src/commit/phases.rs:411`), compiler ↔ kernel (what
   `kernel/src/esl/compile.rs` stamps and why), chain ↔ everything (what is persisted vs derived).
   **Output:** D81 §3.
-- **P3 — the design-doc diff.** Read D6b, D14, D31, D39, D46, D49, D52, D54, D73 against P0–P2.
-  Record every disagreement. **Output:** feeds D81 §4.
+- **P3 — provenance pass, narrow and last.** Consult D6b, D14, D31, D39, D46, D49, D52, D54, D73
+  **only against the open "why" questions P0–P2 leave behind** — not as a sweep, and not to check
+  the description. Two things are worth extracting: the reason a shape exists where the code is
+  silent, and intentions that were abandoned. Everything else in those documents is history.
+  **Output:** annotations on D81 §§1–3, plus any abandoned intention that explains a seam.
+  **Gate:** P3 adds no claim to the description — it may only explain a claim P0–P2 already
+  established.
 - **P4 — findings.** Classify each candidate as redundant / ambiguous / unowned / fine, with
   evidence. **Output:** D81 §4.
 
@@ -141,7 +162,9 @@ Each phase produces a section of D81 and can be stopped at.
 
 Named up front, because each is a way to produce a document that reads well and helps nobody.
 
-- **Describing the design instead of the code.** Guarded by the read-order rule and by P1's gate.
+- **Describing the design instead of the code.** The likeliest failure, because the design corpus is
+  articulate and the code is not. Guarded by §2's operative rule, by P1's gate, and by P3 being
+  forbidden from adding claims.
 - **Finding overlap because the hypothesis asked for it.** Guarded by requiring a "genuinely fine"
   verdict to be as reportable as a merge proposal, and by requiring evidence per finding.
 - **Stopping at the vocabulary.** Five names for one concept is a finding only if the analysis also
@@ -152,6 +175,12 @@ Named up front, because each is a way to produce a document that reads well and 
 ## 6. Sequencing
 
 P0 first and alone — it is mechanical and it settles §3.3, which otherwise pollutes every search.
-P1 and P2 can interleave. P3 last of the reading phases, deliberately. P4 only after P3.
+P1 and P2 can interleave; **between them they must fully determine D81 §§1–3.** If they do not, the
+gap is closed by reading more code, not by consulting a design document.
+
+P3 is last, narrow, and additive only. **P4 does not depend on P3** — a finding is a finding on the
+strength of the code, and if P3 were to vanish the findings would stand. It runs before P4 solely
+because an abandoned intention occasionally explains a seam that would otherwise read as an
+accident, and that explanation belongs in the record.
 
 Not gated on any code change, and produces none.
