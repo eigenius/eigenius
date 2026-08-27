@@ -746,6 +746,52 @@ question — it is not a question. They are not in the epistemic system at all.
 
 ---
 
+### 5b.9 `eigentt:TypeExpr` is untyped, and `PROPOSITION_SLOTS` is the patch
+
+Rule 21's third step is a hardcoded special case:
+
+```rust
+if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str())
+    && !matches!(&inferred, Val::Sort(l) if l.is_nat(0))
+```
+
+**The oddness is the symptom; the cause is that a property's range cannot say what type its
+EigenTT value must have.** `class_types ∋ eigentt:TypeExpr` says only *"an EigenTT tree"* — and that
+range covers propositions, types and terms alike, so the one thing the kernel is best at computing
+is exactly the thing the ontology cannot express. It is then patched back in Rust, **for one case
+out of five**.
+
+**The other four are silently unchecked.** Rule 21 runs `check_infer` and, for any property not in
+the list, **discards the inferred type**:
+
+| property | declared intent | actually checked |
+|---|---|---|
+| `canonical_proposition`, `reasoning:proposition`, … | inhabits `Prop` | yes — via the Rust list |
+| `lexicon:cat` | *"a value of the inductive `lexicon:Cat` … Kernel-checked"* | **no** |
+| `lexicon:sem_type` | the EigenTT type `⟦cat⟧` | **no** |
+| `eigentt:axiom_statement` / `definition_type` | `Sort(1)` / `Sort(2)` | **no** |
+
+`type_expr(42)` in a `lexicon:cat` slot passes Rule 21 today. `lexicon:cat` is written by
+`dcg/glossary.rs`, `dcg/augment.rs` and `lexicon-align/emit.rs`, and read by the parser
+(`dcg/lexicon.rs`), so the ontology's *"Kernel-checked"* is half true: the value is well-formed
+EigenTT, but nothing establishes it is a `Cat`. `PROPOSITION_SLOTS` is therefore not *"the
+propositions we are strict about"* — it is **the one typed obligation that got encoded**.
+
+**The fix, and why it subsumes §5b.6.** Let an EigenTT-valued property declare the type its values
+must inhabit; Rule 21 becomes `check(ctx, exp, expected)` — the entry point already exists at
+`nbe/check/mod.rs:523` — instead of `check_infer` plus a list. The rows above become declarations.
+And **the proof term is the same mechanism with a dependent expected type**: not a constant, but the
+value of the sibling `proposition` slot on the same resource. One extra form, and §5b.6's
+"nowhere to put a proof term" stops being new machinery and becomes the general case of a rule that
+should have been uniform from the start.
+
+**It also deletes a kernel-only list rather than adding a fourth**, which is the direction §5b.4
+argues for — and the distinction matters: an *obligation declared by the property and discharged by
+the kernel* is safe, unlike a *grade declared by a resource and thereby received* (§5b.4(ii)). The
+first is a typing constraint the kernel enforces; the second is self-nomination.
+
+---
+
 ## 6. Sequencing
 
 **Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
@@ -754,6 +800,9 @@ architecturally tidy. D81 §5.6's own handoff — *"three dead artifacts to dele
 assertions to correct, three untested claims to pin, and one design question"* — is strand one, and
 is the part backed by measurement.
 
+- **S4b — typed ranges for `eigentt:TypeExpr` properties** (§5b.9). Precedes S4a: declare the
+  expected type per property, switch Rule 21 to `check`, retire `PROPOSITION_SLOTS`. Closes four
+  silently-unchecked obligations and makes S4a a dependent instance rather than new machinery.
 - **S4a — give the kernel lane a real proof term** (§5b.6), then key `Verified` to it. **First**:
   the only step that closes a live wrong answer. A field on `ReasoningSentence` carrying an EigenTT
   term checked against `proposition`; `Verified` iff that check passed. Subsumes the earlier
