@@ -531,19 +531,42 @@ justification in Artemov's sense."* Both halves are wrong, and the declaration s
 its proposition; it records that `j` grounds a claim to it. And non-factive justification is squarely
 Artemov's — J, JD and J4 are his systems too. `declared` sitting in J is exactly right.
 
-**What survives is sharper, and §5b makes it actionable.** Factivity is precisely what separates a
-declaration from a proof, and this system has no way to say it. The four groundings are structurally
-identical — each takes an `Is*As` witness and returns a `JustifiedBy` — so **nothing downstream can
-ask whether a certificate is factive.** `app` will compose a declared rule with a verified sentence
-and hand back a certificate whose weakest link is a declaration, unrecorded.
+**A second retraction, on the same paragraph.** It went on to claim that `app` *"will compose a
+declared rule with a verified sentence and hand back a certificate whose weakest link is a
+declaration, unrecorded"*, and that a factivity predicate *"becomes definable for the first time"*.
+Both false. **The polynomial is the recording**, which is the point of proof polynomials: `App(
+DeclaredEvidence(rule), VerifiedEvidence(sentence))` carries both leaves, labelled by family, and
+the weakest link is a question *about the term*.
 
-That gap was unfixable while `verified` meant *"emitted by something we trust"*. Under §5b it means
-*"the kernel holds a term it checked"*, which is a **checkable** property — so a factivity predicate
-over justification terms becomes definable for the first time: `verified` is factive modulo the
-checker, `derived` modulo the institution, `declared` and `observed` not at all. A consumer that
-wants to **use** `P` rather than record it could then demand a factive grounding. That is the real
-question §2a never asked — not whether four categories are *enough*, but whether they are **one
-kind**.
+**And the fold is built.** `crates/eigenius-reasoning/src/project.rs` computes `support(t)` — the
+disjunctive normal form, the set of alternative minimal leaf-sets any one of which carries the
+conclusion:
+
+| term | support |
+|---|---|
+| leaf `L` | `{{L}}` |
+| `App(a, b)` | `{ sa ∪ sb : … }` — conjunctive, both needed |
+| `Sum(a, b)` | `support(a) ∪ support(b)` — **disjunctive, either suffices** |
+| `SpecStr(j, tag)` | `support(j)` |
+
+`is_fully_verified`, `survives_without`, `leaves_of` and `cited_iris` read it, and
+`qc_project_justification` exposes it as a query. `Sum`'s disjunctivity is handled exactly right —
+`Sum(VerifiedEvidence(a), DeclaredEvidence(b))` **is** verified because the `a` branch alone carries
+it, and the module notes that reading `Sum` conjunctively is the error D39 §8 made. The cap is an
+error rather than a silent truncation.
+
+**The real point, which is narrower and sharper than either wrong version.** `is_fully_verified`
+trusts the **label** on the leaf: `VerifiedEvidence(iri)` is factive only if whatever graded `iri`
+as `Verified` was entitled to. That is precisely §5b.1's defect —
+`emit_from_reasoning_sentence` grading from class membership. So the projection algebra is correct
+and complete, sitting on an admission layer that can be fooled, and **S4a is what makes
+`is_fully_verified` mean what its name says.** The analysis layer was built right; its inputs are
+what needs fixing.
+
+The open question §2a never asked therefore stands, but smaller: not whether the four categories are
+*enough*, and not whether the polynomial records them — it does — but whether `Declared` and
+`Observed`, being attributions rather than proofs, should carry the same *admission* discipline as
+the two that are checkable.
 
 **And the oracle has a name in this literature.** LP justifies axioms by **proof constants** under a
 **constant specification** — you stipulate `c:A` because `A` cannot be proved from below. `Val::ChainWitness`
