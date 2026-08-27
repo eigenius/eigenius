@@ -520,12 +520,38 @@ plausibly what D81 §1 was seeing when it found the four-way encoded nine times.
 visible: institutions touch only the last two, and the first two are not institution outputs
 **because they are not derivations at all — they are attributions**.
 
-**The follow-through, not resolved here.** `JustifiedBy.{declared,observed,derived,verified}` treats
-the four as four of a kind. If two are attributions and two are proofs, they are not.
-`JustifiedBy.declared(w, P)` asserts `P` on the strength of someone having said so, which is not
-justification in Artemov's sense. Whether the J-family should carry attribution constructors at all
-is the question §2a's *"no evidence for a fifth category"* did not think to ask — it checked whether
-the four were **enough**, never whether they were **one kind**.
+**The follow-through — corrected.** An earlier version of this paragraph said
+`JustifiedBy.declared(w, P)` *"asserts `P` on the strength of someone having said so, which is not
+justification in Artemov's sense."* Both halves are wrong, and the declaration says why.
+
+`JustifiedBy` has **no factivity rule**. Its seven constructors are the four groundings, `app`,
+`sum_l`/`sum_r` and `spec_poly` (`ontologies/reasoning/reasoning.esl:112-190`) — there is no
+`JustifiedBy(j, P) → P`, and no positive introspection. So the system implements **J**, the
+*non-factive* base of the justification-logic family, not **LP** (= JT4). A certificate never asserts
+its proposition; it records that `j` grounds a claim to it. And non-factive justification is squarely
+Artemov's — J, JD and J4 are his systems too. `declared` sitting in J is exactly right.
+
+**What survives is sharper, and §5b makes it actionable.** Factivity is precisely what separates a
+declaration from a proof, and this system has no way to say it. The four groundings are structurally
+identical — each takes an `Is*As` witness and returns a `JustifiedBy` — so **nothing downstream can
+ask whether a certificate is factive.** `app` will compose a declared rule with a verified sentence
+and hand back a certificate whose weakest link is a declaration, unrecorded.
+
+That gap was unfixable while `verified` meant *"emitted by something we trust"*. Under §5b it means
+*"the kernel holds a term it checked"*, which is a **checkable** property — so a factivity predicate
+over justification terms becomes definable for the first time: `verified` is factive modulo the
+checker, `derived` modulo the institution, `declared` and `observed` not at all. A consumer that
+wants to **use** `P` rather than record it could then demand a factive grounding. That is the real
+question §2a never asked — not whether four categories are *enough*, but whether they are **one
+kind**.
+
+**And the oracle has a name in this literature.** LP justifies axioms by **proof constants** under a
+**constant specification** — you stipulate `c:A` because `A` cannot be proved from below. `Val::ChainWitness`
+*is* a proof constant and `layer_admits_witness` *is* the constant specification. LP's soundness
+condition is that the specification be **axiomatically appropriate**: constants only for genuine
+axioms. `emit_from_reasoning_sentence` minting `Verified` from class membership (§5b.1) is therefore
+not merely unrecorded — it is an **inappropriate constant specification**, which is the precise name
+for the defect D81 §5.2 found and could not characterise.
 
 ---
 
