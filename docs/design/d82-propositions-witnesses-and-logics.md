@@ -63,7 +63,34 @@ language it owns.
 proposition in EigenTT, that *is* verification, and needs no institution. Everything else is a
 logic's business.
 
-**P5 — Not every warrant-producer is a logic.** An institution has a satisfaction relation.
+**P5 — The generalized-witness *mechanism* is a kernel capability; justification logic is not.**
+These are separable and D82 separates them, because conflating them is what put the four categories
+in a kernel enum.
+
+*The kernel cannot delegate the judgment that a term is well-typed.* It follows that it cannot
+delegate the judgment that a witness position has been discharged — that judgment is part of the
+type check. So **an argument position discharged by an oracle rather than by a term is a kernel
+concept**, and must be.
+
+What is *not* a kernel concept: which logics have witnesses, what those witnesses are called, what
+discharges them, and how they stratify. The J-family, `JustifiedBy`'s connectives, and the four
+categories *as a stratification* are justification logic — one logic among the possible ones, and
+the reasoning institution's business.
+
+**The kernel already has the mechanism, in degenerate form.** `CheckHooks::synthesize_chain_witness`
+is generic in shape, but:
+
+- it recognises a witness position by matching **four hard-coded short names**
+  (`chain_witness_category_for_short_name`, `kernel/src/program/check_hooks.rs:34`) — so *any*
+  inductive anywhere named `IsVerifiedAs` enters the path (D81 §5.5), a rule looser than the IRIs
+  everything else uses;
+- the categories it yields come from the kernel's own `WitnessCategory`;
+- there is exactly one implementor.
+
+Generalising it — recognition by **declared** witness type, categories owned by the declaring logic,
+N implementors — is the kernel change this document needs. It is also the **only** one.
+
+**P6 — Not every warrant-producer is a logic.** An institution has a satisfaction relation.
 Abductive selection does not, unless one is supplied. Both produce chain-resident warrant records;
 only one is an institution.
 
@@ -90,6 +117,10 @@ refused institution status by D71 and given no protocol in exchange.
 - `Exp` / `Val` / conversion / the type checker;
 - **one** witness rule: *a term that type-checks against P at `Prop` discharges a witness for P*;
 - the commit pipeline, dispatch, and the tri-state verdict.
+
+**The generalized-witness mechanism (P5) sits here**, not with the institutions: recognising that an
+argument position expects a witness, and admitting an inhabitant obtained from outside the term
+language. What the kernel must *not* own is which logic supplies it.
 
 **This subsumes the reasoning institution's actual work.** D81 §2.4 route A is already the kernel
 checking a certificate; the institution supplies vocabulary and a trigger. Under P4 that becomes
@@ -166,7 +197,7 @@ The pilot is a good test because it needs (a) and (b) and needs the kernel uncha
 | honest provenance for neural-estimated `κ` | already right in the proposal — each estimate committed as a resource with its own grade |
 | to promote nothing | correct under today's protocol, and the reason it needs no kernel change |
 
-It also demonstrates P5 from the other side: **abduction becomes an institution exactly when given a
+It also demonstrates P6 from the other side: **abduction becomes an institution exactly when given a
 satisfaction relation.** Our encoding pipeline has no ⊨ and is correctly not an institution; κ–τ
 supplies one by replacing *best explanation* with *score over threshold*, and qualifies.
 
@@ -177,12 +208,17 @@ supplies one by replacing *best explanation* with *score over threshold*, and qu
 **Does not change:** the four grades (composition, not replacement); `Exp`/`Val`/conversion;
 the tri-state verdict; the commit pipeline's shape; any chain data.
 
+**One kernel change, and it is the only one** (P5): the checker's *recognition* of a witness
+position generalises from four hard-coded short names to a declared witness type. The **dispatch
+stays kernel-side** — it is part of the type check and cannot leave. Only the *handlers* relocate.
+Everything else below is a relocation of something that already exists.
+
 **Relocations** — each moves something that already exists:
 
 | from | to |
 |---|---|
 | `trace_category`, the self-attesting arms (Rust) | declared relations, using `epistemic_status`'s existing vocabulary |
-| witness synthesis (kernel-only, one impl) | per-institution handlers behind the existing `CheckHooks` seam |
+| witness synthesis *handlers* (kernel-only, one impl) | per-institution, behind the existing `CheckHooks` seam |
 | promotion (handler convention) | a declared `QueryClass` post-condition the kernel enforces |
 | the reasoning institution's checking role | acknowledged as kernel capability; the institution keeps the `JustificationTerm` algebra |
 
@@ -220,6 +256,9 @@ S1 before S2 is the only hard ordering. S2 alone would already close #160.
    (*"lemma-citability ⇔ proposition-bearing + kernel-warranted"*) suggests it must.
 3. **Does `Verified` stay a grade, or become "witnessed by the kernel"?** Under P4 they are the same
    thing, which would make the fourth grade a derived notion rather than a primitive.
+3a. **If the four categories move to the reasoning institution (P5), what does the kernel call its
+   own witness kind?** It needs one — the term-checked position of P4 — and calling it `Verified`
+   re-imports the stratification P5 just exported.
 4. **What happens to `epistemic_status` once relations are declared?** It is currently written by one
    site and read by none; either it becomes the declared vocabulary of §3.3a or it should be deleted.
 
