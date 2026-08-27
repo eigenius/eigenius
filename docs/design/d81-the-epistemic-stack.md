@@ -15,6 +15,7 @@ authority over what the system now is.
 | 3 | the boundary map | P2 | **done** |
 | 4 | provenance — why the shapes exist | P3 | **done** |
 | 5 | findings | P4 | **done** |
+| 6 | the encoding ontology — a counter-example | — | **done** |
 
 ---
 
@@ -792,3 +793,73 @@ A cleanup proposal is out of scope here, as §1 of the plan states. What this se
 successor is: three dead artifacts to delete, three stale assertions to correct, three untested
 claims to pin, and **one design question** — whether AutoOnLoad should have a declared
 post-condition on success, which is the root the other findings hang from.
+
+
+---
+
+## 6. The encoding ontology — where the modelling was done carefully
+
+`ontologies/encoding/encoding.esl` (550 lines) is the chain vocabulary of the prose→propositions
+pipeline, and therefore **the largest producer into this stack**: one `EncodedClaim` per parsed
+sentence. It is also the one place in the tree that reasons explicitly about the distinctions
+§§1–5 find missing elsewhere — which makes it both a counter-example to the hypothesis and the
+sharpest evidence for §5.2.
+
+### 6.1 It splits its output into two objects with opposite grades
+
+| class | grade | why |
+|---|---|---|
+| `enc:ReasoningStructure` | `reflection:DerivedResource` | *"Applying the parse engine to bytes is a program run: a function of (engine, source_sha256) → structure. That is Derived in the plain sense, witnessed by ONE `reflection:ProgramTrace` for the run."* |
+| `enc:EncodedClaim` | `reflection:DeclaredResource` | *"The parser chooses the FORM; it does not assert the content."* |
+
+`ReasoningStructure` **requires `reflection:derivation`** — so unlike the base `DerivedResource`
+(§2.0), this concrete derived class does carry an evidential obligation, and the validator enforces
+it.
+
+### 6.2 It states the distinction the vocabulary cannot
+
+> *"Three propositions stay distinct and must not collapse into one witness:*
+> *1. this text parses to this well-typed term — the artifact fact, witnessed by the `ProgramTrace`
+> on the ENCODING artifact, bounded by the program's type*
+> *2. this encoding is faithful to what the author wrote — D61, unwarranted today*
+> *3. what the author wrote is true — never established by either; only ever declared"*
+
+The parser is *"a FORMULATION INSTRUMENT: it produces a well-formed proposition and a fidelity
+record. It does not produce a warrant … Since the parse cannot warrant fidelity, the only honest
+status for its output is Declared: some agent takes responsibility."*
+
+**This is three-way, and the stack's vocabulary is one-way.** A `WitnessKey` is
+`(category, iri, proposition hash)` — it can say *this resource is Derived with respect to that
+proposition*, and cannot say *with respect to which of three propositions about it*. The
+distinction survives here as a **prose comment**, because there is nowhere else to put it.
+
+### 6.3 It records having had the bug this analysis hunts — and fixed it
+
+> *"Until 2026-08-22 the artifact had this exactly inverted at the level that mattered: no trace on
+> the structure at all, and N `ProgramTrace`s on the CLAIMS — one per sentence — each minting
+> `IsDerivedAs(claim, P)` where P was a proposition about the world. **Wrong on both counts.** Wrong
+> CARDINALITY, because one parse run is one program execution, not one per sentence; and wrong
+> PROPOSITION, because what the run establishes is that this structure came out of this engine over
+> these bytes, never that any claim in it is true."*
+
+A producer minting witnesses at the wrong cardinality, whose proposition was about the wrong thing,
+and nothing in the stack detected it — the witnesses were well-formed. It was caught by a person
+reasoning about the ontology, and the fix was to re-shape what the producer emits.
+
+That is the concrete cost §5.1 said the seven encodings had not yet been shown to have. It is not a
+cost of the *encodings*; it is a cost of the **proposition slot being unconstrained**. Nothing
+anywhere states which proposition a given trace kind is entitled to witness.
+
+### 6.4 It practises "reuse, don't mint" — and shows where reuse runs out
+
+The file opens with the rule (`ontologies/encoding/encoding.esl:15`): *"REUSE, DON'T MINT. Grades
+reuse `reflection:EpistemicStatus`; the encoded proposition reuses
+`reflection:canonical_proposition`."* It follows it — and the two-axis claim model (§2.1) is the
+result of following it into a place the epistemic vocabulary does not reach: the discourse kind
+needed its own axis because `is_a` was already carrying the grade.
+
+**The pattern across §6 is one thing.** Every distinction this ontology needed and could express, it
+expressed in the shared vocabulary. Every distinction it needed and could *not* express — which
+proposition a trace witnesses, why a parse warrants form but not content — it wrote in comments.
+§5.2's finding is the same observation from the other end: the vocabulary for *"this trace kind
+grounds that grade"* is absent, and here is the ontology that most needed it, compensating in prose.
