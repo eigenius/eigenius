@@ -186,8 +186,14 @@ architecture makes the need for expansion **detectable**, which is more than the
 | tier | discharges a witness by | grade it can reach | examples |
 |---|---|---|---|
 | **kernel** | type-checking a term against the proposition | `Verified` | a `JustifiedBy` certificate; any EigenTT derivation |
-| **institution** (has ⊨) | evaluating its own satisfaction relation | a **declared refinement** projecting onto one of the four | statistics, Lean, κ–τ |
+| **institution** (has ⊨) | evaluating its own satisfaction relation | `Derived`; or `Verified` **only** by surrendering a checkable proof term (§5b) | statistics and κ–τ (`Derived`); Lean (`Verified`) |
 | **selection producer** (no ⊨) | recording a constrained choice and its authority | `Declared`, with an auditable record | the encoding pipeline |
+
+**Corrected by §5b.** An earlier draft of this row read *"a declared refinement projecting onto one
+of the four"*, which would have let an institution nominate its own grade. It cannot: `Verified` is
+reached only through a proof term the kernel checks, and everything else an institution produces is
+`Derived`. Lean is on the middle tier and reaches `Verified` because it hands over a Lean 4 term —
+not because it declared that it could.
 
 The middle tier is where the current protocol lives and the outer two are the ones it does not
 model. Tier 1 is currently *dressed* as an institution — `reasoning:reasoning_institution` declares
