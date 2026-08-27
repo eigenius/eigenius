@@ -1,17 +1,50 @@
 # D83 — Judgements, warrants, and logics
 
-**Status: design.** No code. The target shape for the epistemic machinery, to be built by replacement
-rather than migration. [D81](d81-the-epistemic-stack.md) is the description of what exists;
-[D82](d82-propositions-witnesses-and-logics.md) is the derivation record — how this shape was
-reached, including the readings that were tried and withdrawn. **This document states the design and
-nothing else.** Where it and D82 differ, this one is current.
+**Status: design. No code yet.** The target shape for how this system records *why* something is
+believed, to be built by replacement rather than migration.
 
-**The thesis.** Two things were conflated: a *proof* that `P` holds, and a *record* of why `P` is
-believed. Both are wanted, they obey different rules, and every defect in D81 follows from expressing
-them in one vocabulary. The design separates them, gives each a checkable form, and makes every
-epistemic grade a **computed function of what exists** rather than a label anyone applies.
+**Self-contained.** Everything needed to read this is defined here or anchored in §10's references.
+Two companion documents exist internally — a description of the current implementation, and the
+derivation record showing how this shape was reached, including readings tried and withdrawn — but
+neither is required, and where they differ from this document, this one is current.
+
+**The thesis.** Two things have been conflated: a **proof** that `P` holds, and a **record of why**
+`P` is believed. Both are wanted and they obey different rules. The design separates them, gives each
+a checkable form, and makes every epistemic grade a **computed function of what the system holds**
+rather than a label anyone applies.
 
 ---
+
+## Context: the system this describes
+
+Enough to read the rest; no further familiarity is assumed.
+
+**Eigenius is a typed knowledge graph.** Its store is an **immutable chain of layers**, each layer a
+set of **resources** — records with a URI identity, a set of classes (`is_a`), and typed properties.
+A layer may declare classes and properties, and a class may state which properties its instances
+`requires`. Adding a layer is a **commit**, and validation runs at commit time; a rejected layer does
+not land. Nothing is mutated, so a resource is identified by content and everything is auditable
+after the fact.
+
+**The kernel implements a dependent type theory** — called EigenTT here — in the Martin-Löf tradition
+[MLTT]: Π and Σ types, inductive families, a universe hierarchy, and normalization-by-evaluation for
+definitional equality. **`Prop` is its universe of propositions**, and under propositions-as-types a
+proof of `P` is a term `t` with `t : P`.
+
+**The two are fused**: EigenTT terms can be stored as resource property values, so a proposition is
+chain data, and the type checker runs over terms the graph holds. This is what makes the questions in
+this document concrete rather than architectural taste — the system already stores propositions,
+already stores things that are supposed to be evidence for them, and has to decide what that evidence
+licenses.
+
+**External logics participate as institutions** (§6), in the Goguen–Burstall sense [GB92]. One is
+built: a Lean 4 verification institution, where Lean proof terms are committed as resources and
+re-checked in-process by `nanoda_lib` [ND], a Lean kernel reimplementation. Others exist for
+statistics and for prose-to-proposition encoding.
+
+**The system already implements justification logic** [AF19] as chain vocabulary: an inductive family
+`JustifiedBy(j, P)` whose constructors are the introduction rules, over an algebra of justification
+terms with application and sum. §3 and §5 are largely about what that layer does and does not mean.
 
 ---
 
@@ -145,8 +178,9 @@ a warrant-producer a logic; the encoding pipeline has none and is correctly not 
 
 **`eigentt:Term`** — one syntactic category, mirroring the kernel's `Exp`. Types, propositions,
 lambdas, literals and inductive values are all terms; EigenTT has no separate type syntax and neither
-does its chain mirror. (Replaces `eigentt:TypeExpr`, whose name and stated scope — *"the type-level
-subset"* — stopped matching its 20 constructors.)
+does its chain mirror. (Replaces a class named for *type* expressions and documented as covering
+only *"the type-level subset"*, whose 20 constructors — lambda, pair, projections, literals —
+long ago stopped matching that description.)
 
 **A term alone is syntax and cannot be checked.** A bare `Lam` has no inferable type; inference is
 the wrong mode for exactly the terms that matter, which are lambdas — definitions and proofs.
@@ -251,9 +285,13 @@ They are one error with three instances: **warranting `P` and recording it again
 
 **`Sampled` is not the row without a proof.** `⊢ run r produced X` is perfectly provable, and should
 be recorded. What is missing is any licence to get from there to `X` — the run is an event, and
-re-running draws another sample rather than reproducing. `reflection:ExternalExecutionTrace` states
-the criterion — *"no `f : I -> O`, so no specification, so nothing entailed"* — but tests for it with
-*"the kernel did not initiate it"*, a proxy that fails on any nondeterministic in-kernel call.
+re-running draws another sample rather than reproducing.
+
+The current implementation states this criterion exactly right in one place — a trace class for
+externally-run computations, documented as *"no `f : I -> O`, so no specification, so nothing
+entailed"* — but then **tests for it with the wrong predicate**: whether the system itself initiated
+the run. Initiation is a proxy for functionhood, and the two come apart on any nondeterministic call
+the system *does* initiate, which is every LLM invocation in the pipeline.
 
 **So the operative question per procedure is reproducibility**, and the procedure declares it. When
 it holds, the justification term takes the `App(Declared(proc), Observed(input))` form and the
@@ -311,10 +349,11 @@ Statistics already implements this and the vocabulary should not blur it:
 | **the immediate statement** | the `canonical_proposition` — a **domain** claim at a declared epistemic scope, warranted when p crosses α | `IsDerivedAs`, gated by `check_epistemic_scope` |
 | **the translation** | what it means for, say, the efficacy of a compound | a further claim across a **declared bridge**, owned by someone else |
 
-`check_epistemic_scope` (`crates/eigenius-statistics/src/validate.rs:883`) reads the head predicate's
-scope marker against the replication structure and fails the gate on `EpistemicScopeViolation`; an
-unmarked predicate defaults to `PopulationLevel`, the more restrictive admissibility. **The
-institution already refuses to warrant past its design.**
+The statistics institution already enforces this: before running a test it compares the claimed
+proposition's head predicate against a **scope marker** (sample-level versus population-level) and
+fails the gate when the replication structure does not support the scope claimed. An unmarked
+predicate defaults to the more restrictive reading. **The institution already refuses to warrant past
+its design** — this design generalises that, it does not introduce it.
 
 **`Derived` attaches to the immediate statement**, as `App(Declared(analysis plan), Observed(sample
 set))` — the plan's specification is §4's bridge, scope marker included. **The translation is not a
@@ -358,16 +397,25 @@ base, and the argument for each belongs with the institution that brings them.
 
 ## 7. What this replaces
 
-- grades assigned by class membership, by trace declaration, or by importer — replaced by computation
-  from evidence;
-- a certificate serving as proof term, derivation and justification at once — replaced by §2's
-  layering, which makes the substitution unstatable;
-- `VerifiedResource subclass_of DerivedResource` — the two are different axes (§3), so no subsumption
-  exists in either direction;
-- inference plus a hardcoded slot list plus per-property exemptions — replaced by §1's single
-  check-mode rule;
-- an institution-supplied witness-synthesis protocol — unnecessary: an institution hands over a
-  judgement or it is `Derived`.
+Each item is a pattern the current implementation contains; the point is what the design does
+instead, which stands without knowing the details.
+
+- **Grades assigned by class membership, by a trace declaring its own grade, or by whichever importer
+  wrote the resource.** Replaced by computation from what the system holds (§5). Nothing nominates
+  its own warrant, so there is no path by which asserting a class confers evidential standing.
+- **One artifact serving as proof term, derivation record and justification at once.** Replaced by
+  §2's layering, which makes the substitution *unstatable* rather than merely discouraged: a proof of
+  `JustifiedBy(j,P)` and a proof of `P` have different types and no rewriting between them.
+- **`Verified` declared a subclass of `Derived`,** so that a verified thing inherits a derived
+  thing's obligations. Replaced by §3: the two answer different questions — *what evidence exists*
+  versus *what produced this artifact* — so no subsumption exists in either direction.
+- **Type inference plus a hardcoded list of "these slots must be propositions" plus per-property
+  exemptions for the slots inference cannot handle.** Replaced by §1's single check-mode rule.
+  Inference is the wrong mode for exactly the terms that matter — a bare lambda has no inferable
+  type — and the exemption list is where that broke down, patched one property at a time.
+- **A protocol for institutions to supply their own witness kinds.** Unnecessary under §6: an
+  institution hands over a judgement in a logic we can check, or its output is `Derived`. There is no
+  third thing to extend the type system with.
 
 ## 8. Worked example: the κ–τ pilot
 
@@ -438,3 +486,46 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
    institution, or on the trace kind.
 4. **How provenance and warrant are carried** now that they are independent: two fields, or `is_a`
    for provenance and a property for warrant.
+
+---
+
+## 10. References
+
+**Institutions and general logics**
+
+- **[GB84]** J. A. Goguen and R. M. Burstall. *Introducing institutions.* Logics of Programs
+  Workshop, LNCS 164, 1984.
+- **[GB92]** J. A. Goguen and R. M. Burstall. *Institutions: abstract model theory for specification
+  and programming.* Journal of the ACM 39(1), 1992. — signatures, sentences, models, `⊨`, and the
+  satisfaction condition.
+- **[Mes89]** J. Meseguer. *General logics.* Logic Colloquium '87, North-Holland, 1989. — a *logical
+  system* as an institution plus an entailment system plus the soundness condition linking them; the
+  `⊨`/`⊢` separation §5.1 turns on.
+- **[Dia08]** R. Diaconescu. *Institution-independent Model Theory.* Birkhäuser, 2008.
+- **[MML07]** T. Mossakowski, C. Maeder and K. Lüttich. *The heterogeneous tool set, Hets.* TACAS
+  2007, LNCS 4424. — comorphisms between logics, in practice.
+
+**Justification logic**
+
+- **[Art95]** S. Artemov. *Operational modal logic.* Technical report, 1995. — the Logic of Proofs.
+- **[Art08]** S. Artemov. *The logic of justification.* Review of Symbolic Logic 1(4), 2008.
+- **[AF19]** S. Artemov and M. Fitting. *Justification Logic: Reasoning with Reasons.* Cambridge
+  University Press, 2019. — the `J` / `JT` / `J4` / `LP` family, application `·`, sum `+`, the proof
+  checker `!`, factivity, and constant specifications. §3's vocabulary is this book's.
+
+**Type theory and constructive semantics**
+
+- **[MLTT]** P. Martin-Löf. *Intuitionistic Type Theory.* Bibliopolis, 1984.
+- **[TvD88]** A. S. Troelstra and D. van Dalen. *Constructivism in Mathematics: An Introduction.*
+  North-Holland, 1988. — the BHK interpretation, on which §5.1 rests.
+- **[BG01]** H. Barendregt and H. Geuvers. *Proof-assistants using dependent type systems.* Handbook
+  of Automated Reasoning, 2001. — the de Bruijn criterion: a proof object checkable by a small,
+  independent kernel.
+
+**Systems**
+
+- **[ND]** `nanoda_lib` — a Lean 4 kernel reimplementation in Rust.
+  <https://github.com/ammkrn/nanoda_lib>. What makes re-checking a Lean proof term an in-process
+  operation rather than a round trip to Lean.
+- **[KT]** The κ–τ pilot, arXiv:2608.08192 — rival-sensitive commitment. §8's account of it comes
+  from the collaborator's pilot proposal rather than from an independent reading.
