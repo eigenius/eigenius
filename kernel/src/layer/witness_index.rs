@@ -26,6 +26,13 @@
 //! carrying no reason. Direct lookup is O(1) in memory and holds the specific resource at the point
 //! of the decision (D66 slice 0).
 //!
+//! **What is being decided here is whether to assert an axiom.** The `witness:Is*As` types have zero
+//! constructors (`ontologies/reasoning/reasoning.esl:52`), so no term inhabits them and this
+//! function is the only way one comes into existence — see `Val::ChainWitness` in `nbe/val.rs` for
+//! the full anatomy. Consequently **this module is inside the TCB**: everything above a witness is
+//! type-checked, the witness itself is postulated, and a wrong admission cannot be caught
+//! downstream because an axiom has no proof to re-check.
+//!
 //! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)` tries each Layer top-down,
 //! returning true on first hit. First-hit-wins is sound because Layer immutability means a
 //! once-admitted witness stays admitted in all descendants.

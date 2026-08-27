@@ -31,6 +31,14 @@ any detour.
 >    resource one and from each other. §3.6's rename defect was fixed early (D79 P2 unblocked it),
 >    so F1 no longer needs to size it.
 >
+> **Detour taken `2026-08-26`, on top of the above:** D80's W-phases were not started. Instead the
+> stack was analysed first (`docs/notes/d81-epistemic-stack-analysis-plan.md` → **D81**, a
+> description of the epistemic machinery as implemented), and the user then reframed the whole area:
+> the system was anchored on *resources* but is about *propositions and how they came to be
+> warranted*. That produced **D82** (design, no code) with a seven-step sequence S0–S6. **D80 and
+> D77 are now downstream of D82's S1** — the witnessed relation in `WitnessKey` is the fix for the
+> environment-blindness D80 W1 was going to address, so W1 should not be built before S1 lands.
+>
 > **Loose ends from D79, none blocking:** the parse baseline records readings 613 / skeletons 170
 > and a live run now measures 688 / 180 — both within ceiling, gate green, cause unconfirmed (P7's
 > `core:List` decode is the hypothesis). Updating `baseline.json` needs a recorded **replay** draw
