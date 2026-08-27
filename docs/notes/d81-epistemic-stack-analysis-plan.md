@@ -129,8 +129,8 @@ Each phase produces a section of D81 and can be stopped at.
   **Output:** D81 §2. **Gate:** each lifecycle is walked against a test or a demo artifact that
   actually exists — no path is described from the design docs alone.
 - **P2 — the boundary map.** kernel ↔ institution (both runtimes), kernel ↔ validator (Rules 16,
-  21, 22, and the AutoOnLoad phase at `commit/phases.rs:411`), compiler ↔ kernel (what
-  `esl/compile.rs` stamps and why), chain ↔ everything (what is persisted vs derived).
+  21, 22, and the AutoOnLoad phase at `kernel/src/commit/phases.rs:411`), compiler ↔ kernel (what
+  `kernel/src/esl/compile.rs` stamps and why), chain ↔ everything (what is persisted vs derived).
   **Output:** D81 §3.
 - **P3 — the design-doc diff.** Read D6b, D14, D31, D39, D46, D49, D52, D54, D73 against P0–P2.
   Record every disagreement. **Output:** feeds D81 §4.
