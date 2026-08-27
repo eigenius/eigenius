@@ -149,19 +149,22 @@ proposition have one. *Independent of provenance*: a hand-authored claim with a 
 
 **Verified** — a judgement `⊢_L t : P` exists in a logic we check. Entails `P`.
 
-**Computed** — a **reproducible** procedure applied to inputs: `App(Declared(proc), Observed(input))`.
-Entails `P` relative to the declared procedure. Named for the act, like its neighbours, and
-deliberately **not** *"Derived"*: that word names artifact lineage (§3), collides with
-`prov:wasDerivedFrom` (§3.1), and carries a *follows-from* overtone this row does not earn.
+**Observed** — something was recorded: an instrument reading, an assay result, a model's output. The
+*protocol or instrument that produced it is provenance*, not part of the warrant. Entails only that
+the recording happened.
 
-**Sampled** — a declared protocol and an observed outcome, with **no `f : I → O`**. Entails nothing.
-*Not a weaker `Computed`* — a different claim, and the distinction is reproducibility. You **compute**
-a function; you **sample** a process.
+**Declared** — an agent asserted it. Entails only that they did.
 
-**Declared / Observed** — attribution: who asserted it, where it came from. Entails nothing.
+**Computed** and **Sampled** are **not grounds and not stored** — they are names for whether an
+application could be formed (§4). `Computed` names the shape `App(Declared(f : I → O),
+Observed(input))`: a plan declared *as a function*, applied to an observed input. `Sampled` names
+having no such shape available, because a stochastic protocol cannot carry that specification — so
+you are left holding the observation. **You compute a function; you sample a process**, and which one
+you have is structural rather than assigned.
 
-**Reproducible** — a procedure is reproducible when it denotes a function: same inputs, same output.
-Declared by the procedure, not inferred from who invoked it.
+**Reproducible** — a procedure denotes a function: same inputs, same output. **Not a separate
+premise**: declaring a plan's specification as `I → O` *is* the reproducibility claim, since a
+stochastic protocol cannot carry that type.
 
 ### Institutions
 
@@ -351,13 +354,23 @@ row removes the trap rather than documenting it.
 **Every warrant proves something.** The rows differ by how far that something is from what is being
 claimed, and each gap is closed — if at all — by a *declared* premise:
 
-| warrant | what is actually established | bridge to the claim |
+**There are three grounds:**
+
+| ground | what is actually established | bridge to the claim |
 |---|---|---|
 | **Verified** | `t : P` | **none** — the same proposition |
-| **Computed** | `output = f(input)` for a declared `f` | `f`'s specification |
-| **Sampled** | `run r under protocol Q produced X` | **nothing licenses it** |
-| **Observed** | `instrument i recorded X` | instrument reliability |
+| **Observed** | this was recorded | whatever premise you supply |
 | **Declared** | `agent a asserted P` | trust in `a` |
+
+**`Computed` and `Sampled` are not among them.** They name *whether an application could be formed*:
+
+| name | shape | why |
+|---|---|---|
+| **Computed** | `App(Declared(f : I → O), Observed(input))` | the plan is declared **as a function**, so it is an implication and can be applied |
+| **Sampled** | a bare `Observed` leaf | a stochastic protocol cannot carry an `I → O` specification, so there is nothing to apply |
+
+This is structural, not assigned. `App` requires `j₁ : (A → B)`; you can only apply a plan that *is*
+an implication. That single fact carries the whole distinction, and neither name is stored anywhere.
 
 **The rows are named for the act that produced the evidence** — an agent *declared*, an instrument
 *observed*, a process was *sampled*, a function was *computed*. `Verified` is the deliberate
@@ -390,49 +403,59 @@ entailed"* — but then **tests for it with the wrong predicate**: whether the s
 the run. Initiation is a proxy for functionhood, and the two come apart on any nondeterministic call
 the system *does* initiate, which is every LLM invocation in the pipeline.
 
-**So the operative question per procedure is reproducibility**, and the procedure declares it. When
-it holds, the justification term takes the `App(Declared(proc), Observed(input))` form and the
-conclusion follows relative to the declared specification; when it does not, the outcome is a leaf
-and nothing follows. *"Is this reproducible?"* is then a question about the polynomial, answered by
-the same projection algebra as everything else, and a sampled step cannot silently inherit a
-reproducible one's entailment.
+**So the operative question is whether the plan carries an `I → O` specification**, which someone
+declares (§4.1). When it does, the term takes the `App(Declared(f : I → O), Observed(input))` form and
+the conclusion follows relative to that specification; when it does not, no application can be formed
+and the outcome stays an observation. *"Is this reproducible?"* is then a question about the
+polynomial — is there an application, and what is at its head — answered by the same projection
+algebra as everything else. A sampled step cannot silently inherit a computed one's entailment,
+because it cannot form the application at all.
 
-**Nothing on this axis is nominated.** Each row is a function of what the chain holds. No
-institution, trace, class or importer assigns a warrant.
+**Nothing on this axis is nominated.** Every ground is a function of what the chain holds, and
+`Computed`/`Sampled` are readings of term shape. No institution, trace, class or importer assigns a
+warrant.
 
-### 4.1 Reproducibility is a declared proposition, not a flag
+### 4.1 The plan is provenance of the observation, and its specification is the premise
 
-It cannot be computed: whether a procedure denotes a function is not decidable by inspecting it, and
-for a model-mediated step it is a fact about the world rather than about the code. So it is
-**asserted** — and an assertion is a claim with an owner, not a configuration bit.
+**A protocol is not a warrant leaf.** How a recording came about — under which protocol, on which
+instrument, in which run — is *provenance* (`prov:hadPlan`, §3.1). So a sampled outcome is a **single
+ground**, `Observed(the run produced X)`, with the protocol hanging off it as provenance. An earlier
+draft made the protocol a second leaf beside the observation; that was a category error, putting a
+provenance relation into the justification term.
 
-**About the plan, not the code.** The parse pipeline forces this: the same binary is deterministic in
-its grammar and nondeterministic when a model-mediated ranking step is enabled. Reproducibility is a
-property of *procedure plus configuration* — precisely `prov:Plan` (§3.1).
+**Which means `Sampled` and `Observed` are the same ground.** An instrument reading and a model's
+output are both *something was recorded*, each with a plan in its provenance. Nothing at the warrant
+level separates them — §4.1a reaches this from the domain side.
 
-**It is a leaf, not a side condition.** The `Computed` support set is three conjunctive leaves:
+**Reproducibility is not a separate premise.** For `App` to apply a plan, the plan must be an
+implication: `Declared(f : I → O)`. **Declaring that specification *is* the reproducibility claim**,
+because a stochastic protocol cannot carry that type — the claim and the specification are one
+assertion, not two. So the support set for a computed conclusion is two leaves, not three:
 
 ```
-{ Declared(a asserts Reproducible(f)),  Declared(f's specification),  Observed(input) }
+{ Declared(f : I → O),  Observed(input) }
 ```
 
-If it were a condition on the *reading* instead, `survives_without` could not see it — and answering
-*"what if `f` turns out not to be a function?"* is the reason to make it explicit at all.
+`survives_without(the specification)` still answers *"what if `f` is not a function?"*, because the
+specification is a leaf.
 
-**`Reproducible(f)` is itself subject to §4**, with no special case, and lands in different rows by
-how it was established: `Declared` when the plan's author asserts it (the common case); `Verified`
-when the plan *is* an EigenTT term, since determinism is then definitional; `Sampled` when it rests
-on repeated runs agreeing, which is evidence about those runs and worth exactly that.
+**It cannot be inferred, only asserted.** Whether a procedure denotes a function is not decidable by
+inspecting it, and for a model-mediated step it is a fact about the world rather than the code. So
+someone declares it and is on record — *"temperature 0, fixed seed"* is a claim of exactly this kind,
+not a property the system reads off a configuration.
 
-**The regress terminates**, at `Declared` and `Observed`, whose bridge is trust in an agent or
-instrument reliability rather than a further proposition. That is the same place §6's witness oracle
-bottoms out — one termination mechanism, not two.
+**About the plan, not the code.** The parse pipeline forces this: one binary is deterministic in its
+grammar and not when a model-mediated ranking step is enabled. The specification belongs to
+*procedure plus configuration* — `prov:Plan`.
 
-**And it forces an admission worth making plainly: `Computed` is not stronger than `Declared`.** It is
-`Declared` about the procedure *twice over* — the specification and its reproducibility — plus
-`Observed` about the inputs. §4's table is therefore not ordered by strength of ground, which is
-consistent with its own reframing: `Computed` has a **shorter bridge** than `Sampled`, not a firmer
-footing.
+**And it is subject to §4 like anything else**, landing in different grounds by how it was
+established: `Declared` when the plan's author asserts it (the common case); `Verified` when the plan
+*is* an EigenTT term, since determinism is then definitional; and resting on `Observed` runs when it
+comes from repeated executions agreeing, which is evidence about those runs and worth exactly that.
+
+**The regress terminates** at `Declared` and `Observed`, whose bridge is trust in an agent or
+instrument reliability rather than a further proposition — the same place §6's witness oracle bottoms
+out. One termination mechanism, not two.
 
 ### 4.1a Sampling is substrate-independent
 
@@ -448,8 +471,8 @@ One run establishes it no better than one mouse does. Measuring a pipeline compo
 **institution job**, not an ad-hoc harness.
 
 **"Temperature 0, fixed seed" is a claim, not a fact the system can read off.** It is §4.1's
-`Reproducible(plan)`, asserted by someone who is then on record — the same kind of statement as *"this
-assay gives the same reading every time"*.
+`Declared(f : I → O)`, asserted by someone who is then on record — the same kind of statement as
+*"this assay gives the same reading every time"*.
 
 **The route out of `Sampled` is the same in both cases, and lands in `Computed`:**
 
@@ -457,17 +480,19 @@ assay gives the same reading every time"*.
 App( Declared(statistical bridge),  [ Observed(run 1), …, Observed(run N) ] )
 ```
 
-The test is a function of the samples, so the population claim is `Computed`, with the inductive
-bridge declared and owned. This is §5's three-level analysis reappearing for model evaluation.
+The test is a function of the samples, so the population claim has the `Computed` shape, with the
+inductive bridge declared and owned. This is §5's three-level analysis reappearing for model
+evaluation. Note the runs enter as `Observed` grounds and the protocol does not enter the term at
+all — it is their provenance (§4.1).
 
 **And the dividing line is not computational versus physical — it is whether the protocol pins a
 function.** A deterministic computation does; a stochastic one does not; a physical protocol
 essentially never does. Substrate drops out of the taxonomy.
 
 One asymmetry, which does not change the structure: a computational protocol can in principle pin
-everything — weights hash, prompt bytes, temperature, seed — which makes `Reproducible(plan)`
-*assertable*. A physical protocol cannot, so it is not. Same warrant shape; different reachability of
-the premise.
+everything — weights hash, prompt bytes, temperature, seed — which makes the `I → O` specification
+*assertable*. A physical protocol cannot pin everything, so it is not. Same shape; different
+reachability of the specification.
 
 ### 4.2 Store the relations; compute both summaries
 
@@ -487,8 +512,9 @@ resource carrying a `Verified` stamp with no proof anywhere is a state the curre
 permits and a rule must catch. Here there is no field to put it in — the bad state is not forbidden,
 it is **inexpressible**.
 
-**And warrant tracks evidence as evidence changes.** Withdraw `Reproducible(f)` and every claim
-computed under `f` re-reads as `Sampled`, with no resource edited and none to hunt down. That is
+**And warrant tracks evidence as evidence changes.** Withdraw the declared `f : I → O` and every
+application headed by it loses its head — the conclusions fall back to the observations they rest on,
+with no resource edited and none to hunt down. That is
 epistemically right: learning that a procedure is not a function *should* downgrade what it produced.
 A stored grade would need a migration, and one you would have to know to run. The same holds for a
 retracted dataset or a withdrawn bridge premise.
@@ -506,11 +532,11 @@ at or below its own layer — but it does not stratify *warrants*, because warra
 
 ### 4.3 Well-foundedness: a premise may not rest on what it licenses
 
-**The exposure.** Suppose a claim `C` in layer 3 is computed under plan `f`, with `Reproducible(f)`
-not yet asserted, so `C` reads `Sampled`. In layer 5 someone asserts `Reproducible(f)`, citing `C`.
-`C` now re-reads as `Computed` — the premise exists — while `Reproducible(f)`'s own support contains
-`C`, whose warrant depends on `Reproducible(f)`. Nothing is established, and the layer order did not
-prevent it.
+**The exposure.** Suppose a claim `C` in layer 3 rests on runs of plan `f`, with `f : I → O` not yet
+declared — so no application can be formed and `C` is a bare observation. In layer 5 someone declares
+`f : I → O`, citing `C` as their evidence. `C` now supports an application, while the specification's
+own support contains `C`, whose reading depends on that specification. Nothing is established, and the
+layer order did not prevent it.
 
 **The condition:** *a premise's support may not transitively include the premise.* A justification
 that violates it is rejected at commit — a genuine well-formedness condition on justification terms,
@@ -713,14 +739,16 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
 2. ~~**Duplication.**~~ **Not a new cost.** An annotated term already carries its type inline, so
    whatever duplication a judgement introduces is the duplication annotation has always had, and it
    is erased at runtime. This stops being an argument against the design.
-3. ~~**Where the reproducibility declaration lives.**~~ **Resolved — see §4.1.** Not a flag anywhere:
-   a declared proposition `Reproducible(plan)`, about the **plan** (procedure *plus* configuration,
-   i.e. `prov:Plan`) rather than the code, entering the justification term as a leaf.
+3. ~~**Where the reproducibility declaration lives.**~~ **Resolved — see §4.1.** Not a flag, and not
+   a separate premise: it *is* the plan's declared specification `f : I → O`, about the **plan**
+   (procedure *plus* configuration, i.e. `prov:Plan`) rather than the code, entering the justification
+   term as a leaf. A stochastic protocol cannot carry that type, which is the whole of the
+   distinction.
 4. ~~**How provenance and warrant are carried.**~~ **Resolved — see §4.2.** Neither is a field.
    Store the relations; compute both summaries.
 5. ~~**Is `Computed` a witness ground at all?**~~ **Resolved: no — three grounds.** Keeping it as an
-   opaque ground contradicts §4.1, which makes the `Computed` support set three conjunctive leaves;
-   an opaque leaf leaves the reproducibility premise nowhere to go and keeps
+   opaque ground contradicts §4.1, which makes the computed support set two conjunctive leaves;
+   an opaque leaf leaves the declared specification nowhere to go and keeps
    `survives_without(input)` answering wrongly. Giving its constructor the sub-warrants collapses
    into `app`, which the term algebra already has — the only non-redundant part is a check that the
    cited plan and inputs match a recorded run, and that belongs in validation.
@@ -737,13 +765,14 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
    is provenance, not warrant** (§3). For a stochastic process the outcome is *not* determined by the
    input, so the record of the actual run **is** the evidence — an observation, not an application.
 
-   **Candidate, flagged not adopted:** `Sampled` may not be a ground either. Every non-`Verified` row
-   looks like *an observation plus a declared premise about what produced it* — `Computed` = observed
-   input + *`f` is a function*; `Observed` = instrument reading + *the instrument is calibrated*;
-   `Sampled` = observed outcome + **no premise**, which is exactly what §4 gives as its bridge.
-   §4.1a reaches the same collapse from the domain side. Adopting it would make instrument
-   calibration a first-class premise, which is defensible but changes how observations are recorded;
-   it should be checked against something that depends on `Observed` being unconditioned.
+   **This was extended once more and adopted (§4.1):** `Sampled` is not a ground either. The protocol
+   is *provenance of the observation*, not a second leaf, so a sampled outcome is a bare `Observed`
+   ground — the same ground an instrument reading has. `Computed` and `Sampled` are therefore names
+   for whether an application could be formed, and the grounds are `Verified`, `Observed`, `Declared`.
+   What remains genuinely open is whether **instrument reliability** should become an explicit
+   declared premise on an observation, parallel to a plan's `I → O` specification. It is the same
+   shape, but it changes how every observation is recorded, and nothing has been checked against
+   consumers that assume `Observed` is unconditioned.
 6. ~~**Cross-claim circularity.**~~ **Resolved — see §4.3.** A well-foundedness condition rejects a
    premise whose support transitively includes it, checked one step for the case that arises, and
    vacuous on `Declared` premises where justification logic requires self-reference to stay legal.
