@@ -434,6 +434,41 @@ bottoms out — one termination mechanism, not two.
 consistent with its own reframing: `Computed` has a **shorter bridge** than `Sampled`, not a firmer
 footing.
 
+### 4.1a Sampling is substrate-independent
+
+**An LLM invocation and a wet-lab assay are the same shape.** A declared protocol, a run under it, an
+observed outcome, and no `f : I → O` — so nothing about the protocol tells you what the next run
+gives. They differ in substrate and in nothing the warrant depends on.
+
+**So the statistics apparatus applies to model runs unchanged.** Replication structure, the
+sample-level/population-level scope marker, α, effect size — that machinery exists to get from
+individual samples to a population claim, and a model run is a sample. *"The reranker improves
+resolution"* needs what *"the compound is efficacious"* needs: many runs, a declared scope, a test.
+One run establishes it no better than one mouse does. Measuring a pipeline component is therefore an
+**institution job**, not an ad-hoc harness.
+
+**"Temperature 0, fixed seed" is a claim, not a fact the system can read off.** It is §4.1's
+`Reproducible(plan)`, asserted by someone who is then on record — the same kind of statement as *"this
+assay gives the same reading every time"*.
+
+**The route out of `Sampled` is the same in both cases, and lands in `Computed`:**
+
+```
+App( Declared(statistical bridge),  [ Observed(run 1), …, Observed(run N) ] )
+```
+
+The test is a function of the samples, so the population claim is `Computed`, with the inductive
+bridge declared and owned. This is §5's three-level analysis reappearing for model evaluation.
+
+**And the dividing line is not computational versus physical — it is whether the protocol pins a
+function.** A deterministic computation does; a stochastic one does not; a physical protocol
+essentially never does. Substrate drops out of the taxonomy.
+
+One asymmetry, which does not change the structure: a computational protocol can in principle pin
+everything — weights hash, prompt bytes, temperature, seed — which makes `Reproducible(plan)`
+*assertable*. A physical protocol cannot, so it is not. Same warrant shape; different reachability of
+the premise.
+
 ### 4.2 Store the relations; compute both summaries
 
 Neither axis is a field on a resource.
@@ -683,11 +718,32 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
    i.e. `prov:Plan`) rather than the code, entering the justification term as a leaf.
 4. ~~**How provenance and warrant are carried.**~~ **Resolved — see §4.2.** Neither is a field.
    Store the relations; compute both summaries.
-5. **Is `Computed` a witness ground at all?** §4 makes it a *composite* —
-   `App(Declared(plan), Observed(input))` — but the witness family has one grounding constructor per
-   row, including `IsComputedAs`. Either that witness attests the composite and its constructor takes
-   the sub-warrants, or only `Declared`, `Observed` and `Verified` are grounds and the family shrinks
-   from four to three. The second matches §4; it touches §6 and the certificate's constructor set.
+5. ~~**Is `Computed` a witness ground at all?**~~ **Resolved: no — three grounds.** Keeping it as an
+   opaque ground contradicts §4.1, which makes the `Computed` support set three conjunctive leaves;
+   an opaque leaf leaves the reproducibility premise nowhere to go and keeps
+   `survives_without(input)` answering wrongly. Giving its constructor the sub-warrants collapses
+   into `app`, which the term algebra already has — the only non-redundant part is a check that the
+   cited plan and inputs match a recorded run, and that belongs in validation.
+
+   So `Declared`, `Observed` and `Verified` are grounds; **`Computed` is a reading of a term shape.**
+   Concretely: the justification-term constructors go 7 → 6, the witness family and the certificate's
+   grounding constructors go 4 → 3, the projection algebra's ground enum goes 4 → 3, institutions
+   emit a composite rather than an atom, and existing composite-as-atom data is invalidated — a
+   reseed, which the posture accepts.
+
+   **What makes this clearly right rather than merely tidier:** under it a `Computed` warrant does not
+   depend on the run having happened. `App` needs a declared plan *as an implication* and an observed
+   input; if the plan is a function, the output is determined whether or not anyone ran it. **The run
+   is provenance, not warrant** (§3). For a stochastic process the outcome is *not* determined by the
+   input, so the record of the actual run **is** the evidence — an observation, not an application.
+
+   **Candidate, flagged not adopted:** `Sampled` may not be a ground either. Every non-`Verified` row
+   looks like *an observation plus a declared premise about what produced it* — `Computed` = observed
+   input + *`f` is a function*; `Observed` = instrument reading + *the instrument is calibrated*;
+   `Sampled` = observed outcome + **no premise**, which is exactly what §4 gives as its bridge.
+   §4.1a reaches the same collapse from the domain side. Adopting it would make instrument
+   calibration a first-class premise, which is defensible but changes how observations are recorded;
+   it should be checked against something that depends on `Observed` being unconditioned.
 6. ~~**Cross-claim circularity.**~~ **Resolved — see §4.3.** A well-foundedness condition rejects a
    premise whose support transitively includes it, checked one step for the case that arises, and
    vacuous on `Declared` premises where justification logic requires self-reference to stay legal.
