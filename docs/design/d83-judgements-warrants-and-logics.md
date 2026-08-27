@@ -3,7 +3,7 @@
 **Status: design. No code yet.** The target shape for how this system records *why* something is
 believed, to be built by replacement rather than migration.
 
-**Self-contained.** Everything needed to read this is defined here or anchored in §10's references.
+**Self-contained.** Everything needed to read this is defined here or anchored in §9's references.
 Two companion documents exist internally — a description of the current implementation, and the
 derivation record showing how this shape was reached, including readings tried and withdrawn — but
 neither is required, and where they differ from this document, this one is current.
@@ -261,6 +261,10 @@ with no new rule at all.
 **`Ann` is therefore the EigenTT-internal case of `Judgement`, already implemented and already in
 check mode.** The design generalises it in one dimension rather than introducing a parallel notion.
 
+**A judgement carrying its own type is not a new storage cost.** An annotated term already holds its
+type inline, and `Ann` is erased on evaluation, so whatever duplication a judgement introduces is the
+duplication annotation has always had. It is not an argument against the design.
+
 **One validation rule.** Every `Judgement`-ranged slot is decoded, its `type` checked as a type, and
 its `term` **checked against that type** — check mode, never infer. This replaces the
 proposition-slot special case, the separate definition-body rule, and every exemption carved out
@@ -372,18 +376,23 @@ claimed, and each gap is closed — if at all — by a *declared* premise:
 This is structural, not assigned. `App` requires `j₁ : (A → B)`; you can only apply a plan that *is*
 an implication. That single fact carries the whole distinction, and neither name is stored anywhere.
 
-**The rows are named for the act that produced the evidence** — an agent *declared*, an instrument
-*observed*, a process was *sampled*, a function was *computed*. `Verified` is the deliberate
-exception: it names a status rather than an act, which is defensible because it is the one row whose
-bridge has length zero. And the two middle rows are natural opposites in the vocabulary itself — **you
-compute a function; you sample a process** — so the distinction §4 works hardest to make is carried
-by the words rather than by a paragraph.
+**The grounds are named for the act that produced the evidence** — an agent *declared*, something was
+*observed*. `Verified` is the deliberate exception, naming a status rather than an act, which is
+defensible because it is the one ground whose bridge has length zero. The two shape-names are natural
+opposites in the vocabulary itself: **you compute a function; you sample a process.**
 
-**`Computed` is a composite, not a leaf.** Its form is `App(Declared(proc), Observed(input))`: the
-grounds are the declared procedure and the observed inputs, and *computed* names what composing them
-yields. This matters for §3's justification terms — a system that emits a single opaque `computed`
-leaf has discarded the two things a reader would want to interrogate, and `survives_without(input)`
-then answers wrongly.
+**Why `Computed` is a shape and not a ground.** Two alternatives were considered and both fail. Making
+it an opaque ground leaves the declared specification nowhere to sit, so `survives_without(input)`
+answers wrongly — the defect this section exists to name. Giving it a constructor that takes the
+sub-warrants collapses into `App`, which the term algebra already has; the only non-redundant part is
+a check that the cited plan and inputs match a recorded run, and that belongs in validation.
+
+**And the decisive argument: a computed conclusion does not depend on the run having happened.** `App`
+needs a declared plan *as an implication* and an observed input. If the plan is a function, the output
+is determined **whether or not anyone ran it** — so the run is provenance, not warrant (§3). For a
+stochastic process the outcome is *not* determined by the input, so the record of the actual run
+**is** the evidence: an observation, not an application. That asymmetry is the whole of the
+`Computed`/`Sampled` distinction, and it is why they cannot share a ground.
 
 **The design rule this yields, which replaces several:** *the chain records the proposition actually
 established, and every bridge is a declared premise someone owns by name.*
@@ -544,10 +553,15 @@ layer order did not prevent it.
 that violates it is rejected at commit — a genuine well-formedness condition on justification terms,
 of the same kind as a positivity check on an inductive declaration.
 
-**It is cheaper than it sounds.** The general form needs the transitive expansion the support algebra
-does not have (§9.6), but the case that actually arises is one step: *does this premise's support
-contain a claim whose warrant depends on this premise?* Full closure is not required to catch a
-premise cited by the claims it licenses.
+**It is cheaper than it sounds.** The general form needs a transitive expansion the support algebra
+does not have — support is the normal form of *one* term and does not chase a leaf into the
+justification of the claim it names. But the case that actually arises is **one step**: *does this
+premise's support contain a claim whose reading depends on this premise?* Full closure is not
+required to catch a premise cited by the claims it licenses.
+
+**Unsettled, and worth trying to break before building:** whether one step is genuinely sufficient, or
+whether a constructible case needs the full expansion. This is the one place in the design where the
+argument is "no counterexample came to mind" rather than a construction.
 
 **And it is vacuous exactly where justification logic requires self-reference to be legal.** A
 `Declared` premise has no support to inspect — its bridge is trust in an agent, not a further
@@ -676,6 +690,20 @@ instead, which stands without knowing the details.
   institution hands over a judgement in a logic we can check, or its output is `Computed`. There is no
   third thing to extend the type system with.
 
+**What §4's three grounds cost concretely**, since it is the largest single change here:
+
+| | before | after |
+|---|---|---|
+| justification-term constructors | 7 | **6** — the derived/computed leaf is deleted |
+| the witness family `Is*As` | 4 | **3** |
+| the certificate's grounding constructors | 4 | **3** |
+| the projection algebra's ground enum | 4 | **3** |
+| what an institution emits | one atom | **a composite application** |
+
+Plus a reseed: every existing composite-as-atom leaf becomes invalid. Under the project's
+pre-production posture that is acceptable, and it is why this design is stated as replacement rather
+than migration.
+
 ## 8. Worked example: the κ–τ pilot
 
 The first outside logic proposed for the platform (arXiv:2608.08192, *rival-sensitive commitment*
@@ -732,61 +760,7 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
 
 ---
 
-## 9. Open
-
-1. ~~**`Judgement` versus `Ann`.**~~ **Resolved — see §1.1.** For the EigenTT lane the annotation
-   constructor already is the judgement, and the change is *"require annotation"* rather than
-   *"introduce a pairing"*. `Judgement` survives only for what annotation cannot express: the logic
-   parameter, and reification as a citable object.
-2. ~~**Duplication.**~~ **Not a new cost.** An annotated term already carries its type inline, so
-   whatever duplication a judgement introduces is the duplication annotation has always had, and it
-   is erased at runtime. This stops being an argument against the design.
-3. ~~**Where the reproducibility declaration lives.**~~ **Resolved — see §4.1.** Not a flag, and not
-   a separate premise: it *is* the plan's declared specification `f : I → O`, about the **plan**
-   (procedure *plus* configuration, i.e. `prov:Plan`) rather than the code, entering the justification
-   term as a leaf. A stochastic protocol cannot carry that type, which is the whole of the
-   distinction.
-4. ~~**How provenance and warrant are carried.**~~ **Resolved — see §4.2.** Neither is a field.
-   Store the relations; compute both summaries.
-5. ~~**Is `Computed` a witness ground at all?**~~ **Resolved: no — three grounds.** Keeping it as an
-   opaque ground contradicts §4.1, which makes the computed support set two conjunctive leaves;
-   an opaque leaf leaves the declared specification nowhere to go and keeps
-   `survives_without(input)` answering wrongly. Giving its constructor the sub-warrants collapses
-   into `app`, which the term algebra already has — the only non-redundant part is a check that the
-   cited plan and inputs match a recorded run, and that belongs in validation.
-
-   So `Declared`, `Observed` and `Verified` are grounds; **`Computed` is a reading of a term shape.**
-   Concretely: the justification-term constructors go 7 → 6, the witness family and the certificate's
-   grounding constructors go 4 → 3, the projection algebra's ground enum goes 4 → 3, institutions
-   emit a composite rather than an atom, and existing composite-as-atom data is invalidated — a
-   reseed, which the posture accepts.
-
-   **What makes this clearly right rather than merely tidier:** under it a `Computed` warrant does not
-   depend on the run having happened. `App` needs a declared plan *as an implication* and an observed
-   input; if the plan is a function, the output is determined whether or not anyone ran it. **The run
-   is provenance, not warrant** (§3). For a stochastic process the outcome is *not* determined by the
-   input, so the record of the actual run **is** the evidence — an observation, not an application.
-
-   **This was extended once more and adopted (§4.1):** `Sampled` is not a ground either. The protocol
-   is *provenance of the observation*, not a second leaf, so a sampled outcome is a bare `Observed`
-   ground — the same ground an instrument reading has. `Computed` and `Sampled` are therefore names
-   for whether an application could be formed, and the grounds are `Verified`, `Observed`, `Declared`.
-   An earlier draft left open whether *"instrument reliability"* should be a first-class premise on
-   an observation. **That question was malformed and is withdrawn.** The phrase was invented here as
-   a plausible bridge for the `Observed` row; it appears in neither PROV nor the chain vocabulary,
-   and it contradicts §4 — if `Sampled` and `Observed` are one ground they cannot have different
-   bridges. The general rule already covers the case: any premise licensing generalisation from an
-   observation is a `Declared` leaf with an owner, whether it concerns a calibration, a population,
-   or a plan's `I → O` specification. Instruments are not structurally special.
-6. ~~**Cross-claim circularity.**~~ **Resolved — see §4.3.** A well-foundedness condition rejects a
-   premise whose support transitively includes it, checked one step for the case that arises, and
-   vacuous on `Declared` premises where justification logic requires self-reference to stay legal.
-   What remains open is narrower: whether the one-step check is *sufficient*, or whether a
-   constructible case needs the full transitive expansion the support algebra lacks.
-
----
-
-## 10. References
+## 9. References
 
 **Institutions and general logics**
 
