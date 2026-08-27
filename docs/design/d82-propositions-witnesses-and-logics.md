@@ -609,6 +609,52 @@ structure, and it needs no new vocabulary. It goes first.
 
 ---
 
+### 5b.6 The root: the kernel's "proof term" proves the wrong proposition
+
+A hand-authored proposition supplied with a hand-authored **matching** proof term would be
+`Verified`, correctly and with no further machinery. Authorship is irrelevant to §5b — a human
+writing an EigenTT term is exactly as good as Lean producing one. *Matching* is the whole content:
+the term must inhabit **`P`**.
+
+The kernel's verification lane does not do that. `validate.rs:186` mints the `VerificationTrace` on a
+passing `ValidateJustification` with:
+
+- `proof_system = urn:eigenius:kernel`
+- `proof_term = <the sentence's own IRI>` — *"the certificate lives on the sentence, so the sentence
+  IS the proof term's location"*
+
+The certificate has type `JustifiedBy(j, P)`. The proposition is `P : Prop`. `JustifiedBy` is
+declared `JustificationTerm -> Prop -> Type 2`, and §5b.4 established there is **no factivity rule**
+— no `JustifiedBy(j, P) → P`. So the certificate is not a proof of `P` and cannot be turned into
+one. **Kernel-verification certifies a different proposition than the one it names**: it proves
+*"`j` justifies `P`"*, and when `j = DeclaredEvidence(x)` that is a perfectly valid proof that
+someone declared `P`.
+
+This is the root of §5b.5's laundering, one level below `emit_from_reasoning_sentence`. The
+`VerificationTrace` is not missing — it is minted, and its `proof_term` points at a proof of the
+wrong statement. The ontology encodes the same confusion, so §5b.1's *"the rule is already
+declared"* was too generous here: *"the kernel itself, whose type-checked `JustifiedBy` certificate
+**IS the proof term**"* is the error, in the declaration.
+
+**What the fix requires.** For `proof_system = kernel`, `proof_term` must name a term `t` that the
+kernel type-checked at `t : P`, where `P` is the sentence's `proposition`. Today **there is nowhere
+to put such a term**: `reasoning:certificate` holds a `JustifiedBy` value, and no field carries an
+EigenTT inhabitant of `P`. The Lean lane has this right — `LeanProofTerm` carries an actual proof of
+the mirrored proposition — so the gap is the kernel lane only.
+
+So the change is additive and small: a field on `ReasoningSentence` (or a sibling class) carrying an
+EigenTT term, checked against `proposition` at commit. A sentence that supplies one is `Verified`;
+one that does not is graded by its justification — `Declared` for `DeclaredEvidence`, and so on.
+That subsumes S4a: keying `Verified` to the `VerificationTrace` is only correct once the trace's
+`proof_term` means what it says.
+
+**And it makes the hand-authored path first-class**, which it is not today. A human can currently
+reach `Verified` only by routing through Lean. With a checked EigenTT term on the sentence, an
+author can discharge `P` directly in the kernel's own language — which is what P4 always implied and
+what the `proof_system` field was already shaped to record.
+
+---
+
 ## 6. Sequencing
 
 **Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
@@ -617,8 +663,11 @@ architecturally tidy. D81 §5.6's own handoff — *"three dead artifacts to dele
 assertions to correct, three untested claims to pin, and one design question"* — is strand one, and
 is the part backed by measurement.
 
-- **S4a — key `Verified` to the checked certificate** (§5b.5). **First**: the only step that closes
-  a live wrong answer. Everything else below is structure.
+- **S4a — give the kernel lane a real proof term** (§5b.6), then key `Verified` to it. **First**:
+  the only step that closes a live wrong answer. A field on `ReasoningSentence` carrying an EigenTT
+  term checked against `proposition`; `Verified` iff that check passed. Subsumes the earlier
+  "key `Verified` to the `VerificationTrace`" formulation, which is correct only once the trace's
+  `proof_term` proves `P` rather than `JustifiedBy(j, P)`.
 - **S0 — the deletions.** No design content; clears noise before anything moves.
 - **S1 — the witnessed relation** (§3.5). Everything else can be expressed once this exists; nothing
   should be built on a key that cannot say what it witnesses.
