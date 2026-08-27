@@ -383,7 +383,7 @@ resources that survive only if it does not veto*.
 
 #### 3.1.1 The channel is untyped, and two unrelated things ride it
 
-`derivations` is documented (`runtime.rs:67`) as carrying *derived results* — statistics emits one
+`derivations` is documented (`kernel/src/institution/runtime.rs:67`) as carrying *derived results* — statistics emits one
 `InstitutionEmittedDerivation` per ANOVA effect, whose `canonical_proposition` grounds an
 `IsDerivedAs` witness. The same comment states it is *"Empty for institutions whose only job is the
 pass/fail gate (e.g. Reasoning / Lean)"*.
