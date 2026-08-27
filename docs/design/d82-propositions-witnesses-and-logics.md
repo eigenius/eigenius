@@ -270,6 +270,10 @@ change is a relocation of something that exists.
 
 ## 4. κ–τ as the forcing case
 
+> **Superseded in part by §5b.2.** Under the `Verified`-means-proof-term decision κ–τ is a `Derived`
+> institution and needs no protocol change. The section stands as the analysis that established
+> that; it no longer motivates S3.
+
 The pilot is a good test because it needs (a) and (b) and needs the kernel unchanged.
 
 | what it needs | status |
@@ -385,16 +389,103 @@ other logics can reach it.
 
 ---
 
+## 5b. The bridge: the design is mostly already declared
+
+**Decided `2026-08-26`.** An institution produces exactly two grades: **Derived** or **Verified**.
+`Verified` means the kernel holds a proof term it can check — an **EigenTT** term, or a **Lean 4**
+term accepted as a substitute and checked in-process via `nanoda_lib`. Nothing else is `Verified`.
+`Declared` and `Observed` are not institution outputs at all.
+
+This is not new design. `reflection:VerificationTrace` already declares it
+(`ontologies/reflection/reflection-ontology.json`), `requires` **`proof_term`** and
+**`proof_system`**, and its description states the two-verifier rule verbatim:
+
+> *"TWO VERIFIERS PRODUCE THIS, distinguished by `proof_system`, not by class: an external prover
+> (lean4, coq, agda) whose exported proof blob is checked, and the kernel itself, whose type-checked
+> `JustifiedBy` certificate IS the proof term. Kernel-checking is verification"* (eigenius#200).
+
+D28 built the external half — proof terms commit as chain resources and the kernel re-checks them
+in-process. The rule is declared, validator-enforced through `requires`, and has a working
+precedent.
+
+### 5b.1 The method this suggests
+
+Both findings examined so far have the same shape, and it is not the shape D82 §1 assumed:
+
+| finding | the rule, already declared | what the code does |
+|---|---|---|
+| §5.2 — *"three semantic relations are kernel-only"* | `reflection:epistemic_status`, `allows_only` over exactly the four grades, attached to `ProgramTrace`'s `recommends` | `trace_category`'s hard-coded match; `grep epistemic_status` over `*.rs` returns **zero hits** |
+| §5.2 — *"`Verified` rests on a conjunction nothing records"* | `VerificationTrace requires proof_term + proof_system` | `emit_from_reasoning_sentence` (`witness_index.rs:262`) mints `Verified` from `is_a == ReasoningSentence` plus a hashable proposition — **no proof term, no trace, no `proof_system`** |
+
+So the bridge from findings to design is not *"invent the right shape"*. For each finding, ask:
+**is the correct rule already declared in the chain vocabulary, and is Rust routing around it?**
+Twice out of twice, it is. The revised design is then **make the declarations load-bearing and
+delete the shortcuts** — which is §5a.5's move (*"taking the shape that already works and putting it
+where other logics can reach it"*) generalised into the working method.
+
+This is also the only bridge consistent with the project's posture. The ontology is executable and
+validator-checked; a design document is neither. Where the two disagree the ontology is the design,
+and D82's remaining job is to say which Rust shortcuts contradict it.
+
+### 5b.2 What the decision does to this document
+
+- **P3 narrows.** Institutions do not declare witness kinds with a projection. They land in `Derived`
+  or `Verified`, and `Verified` is *defined* by kernel-checkability — not chosen by the producer.
+- **P4 is promoted from a lane to a definition.** "Where the kernel can type-check a term against a
+  proposition, that *is* verification" stops describing the kernel's own corner and becomes the
+  admission rule for everyone.
+- **S3 largely evaporates.** There is nothing for an institution to supply a *synthesis* for: it
+  either hands over a checkable proof term, or it is `Derived`. The `CheckHooks` extension S3
+  proposed is not needed for the cases in hand.
+- **κ–τ needs no protocol change.** Its score is not a proof term, so it is a `Derived` institution
+  and the existing `InstitutionEmittedDerivation` path already carries it. §4's forcing case turns
+  out to force nothing — which is the honest outcome, and better than extending a protocol for it.
+- **The defect list gets one hard entry.** `emit_from_reasoning_sentence` violates the declared rule.
+  The certificate it should be keyed to *does* exist — a `ReasoningSentence` only commits if
+  AutoOnLoad's `ValidateJustification` type-checked its `JustifiedBy` certificate, and the ontology
+  says that certificate **is** the proof term. The arm is not unfounded; it is **unrecorded**, which
+  is exactly what D81 §5.2 found and could not name. Keying it to the checked certificate rather
+  than to `is_a` closes the finding and makes the relation intrinsic (§3.5).
+
+### 5b.3 Q1 answered by derivation
+
+§7 Q1 asked whether the witnessed relation belongs in `WitnessKey` or beside it. Under this
+decision it belongs in **neither**, per lane:
+
+- **`Verified`** — the relation is carried by the **proof term's type**. Checking the term against
+  the proposition *is* establishing the relation, so there is nothing to record separately and no
+  subject problem: a mismatched subject fails the check.
+- **`Derived`** — the relation is a property of the emitted derivation resource, where
+  `epistemic_status` already sits unread.
+- **`Declared` / `Observed`** — trace-grounded, same vocabulary on the trace class, replacing
+  `trace_category`'s hard-coded lists.
+
+So `WitnessKey` is not widened, and S5a's migration cost (§7 Q1) does not arise.
+
+---
+
 ## 6. Sequencing
+
+**Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
+S3 and S4 are superseded by it, and the ordering now follows what is *earned* rather than what is
+architecturally tidy. D81 §5.6's own handoff — *"three dead artifacts to delete, three stale
+assertions to correct, three untested claims to pin, and one design question"* — is strand one, and
+is the part backed by measurement.
 
 - **S0 — the deletions.** No design content; clears noise before anything moves.
 - **S1 — the witnessed relation** (§3.5). Everything else can be expressed once this exists; nothing
   should be built on a key that cannot say what it witnesses.
 - **S2 — declared post-condition on `Holds`** (§3.3b). Smallest change with the largest reach: it
   makes the Lean gap (#160) a declaration error rather than an omission nobody notices.
-- **S3 — institution-supplied witness synthesis** (§3.3a), through the existing `CheckHooks` seam.
-  κ–τ is the acceptance test.
-- **S4 — retire the kernel lists** (§3.3a) once S3 gives institutions somewhere to declare them.
+- ~~**S3 — institution-supplied witness synthesis.**~~ **Superseded by §5b.2.** An institution
+  hands over a checkable proof term or it is `Derived`; there is no synthesis to supply.
+- **S4 — retire the kernel lists**, re-motivated: not "give institutions somewhere to declare
+  projections" but **read the vocabulary the ontology already declares** — `epistemic_status` in
+  place of `trace_category`'s match. Strand one; D81 §5.2 earned it.
+- **S4a — key `Verified` to the checked certificate.** Replace
+  `emit_from_reasoning_sentence`'s `is_a` test (`witness_index.rs:262`) with the `VerificationTrace`
+  the ontology already requires. Closes D81 §5.2's standing finding and the §3.5 subject problem in
+  the one lane where a subject mismatch is detectable.
 - **S5 — the selection-record protocol** (§3.4). Independent; can run any time after S1.
 - **S5a — persist discharged witnesses** (P7). After S1 to avoid storing under a key about to
   change — but S1 does not depend on it. Gives §5a.3's obligations something to attach to.
@@ -411,14 +502,15 @@ a declared form, not inventing a notion.
 
 ## 7. Open questions
 
-1. **Does the witnessed relation belong in the key or beside it?** Widening `WitnessKey` re-forks
-   every existing witness; a companion resource does not, but weakens the "witness is a term" story.
-   **P7 raises the stakes**: once discharges are persisted, this is a migration. Sequence the
-   relation vocabulary before persistence.
-2. **Can an institution's witness be trusted, or must the kernel re-check it?** Statistics is
-   recompute-checkable, Lean's proof term is re-checkable, κ–τ's score is recomputable — but nothing
-   in the protocol *requires* a witness to be either. D54 §4.3's principle
-   (*"lemma-citability ⇔ proposition-bearing + kernel-warranted"*) suggests it must.
+1. ~~**Does the witnessed relation belong in the key or beside it?**~~ **Resolved by §5b.3** —
+   neither. Per lane: carried by the proof term's type (`Verified`), by the emitted derivation
+   resource (`Derived`), or by the trace class (`Declared`/`Observed`). `WitnessKey` is not widened,
+   so P7's migration cost does not arise.
+2. ~~**Can an institution's witness be trusted, or must the kernel re-check it?**~~ **Resolved by
+   §5b** — an institution produces `Derived` or `Verified`; `Verified` requires a proof term the
+   kernel checks (EigenTT, or Lean 4 via `nanoda_lib`). Recomputability is *not* sufficient, so
+   statistics and κ–τ are `Derived`. This is D54 §4.3's *"lemma-citability ⇔ proposition-bearing +
+   kernel-warranted"* made into an admission rule.
 3. ~~**Does `Verified` stay a grade, or become "witnessed by the kernel"?**~~ **Resolved by P3/§2a.**
    The four are kernel-core, so `Verified` stays a grade *and* the kernel's own term-checking is a
    refinement projecting onto it. No conflict.
