@@ -13,6 +13,114 @@ epistemic grade a **computed function of what exists** rather than a label anyon
 
 ---
 
+---
+
+## 0. Glossary
+
+Organised around the pairs this design exists to separate. Each entry says what the thing is and,
+where it matters, what it is **not**.
+
+### The proof layer
+
+**Term** (`eigentt:Term`) — a syntax tree mirroring the kernel's `Exp`. **One** category: types,
+propositions, lambdas and literals are all terms. *Not checkable on its own* — a bare `Lam` has no
+inferable type, which is why a term alone can carry no obligation.
+
+**Judgement** (`eigentt:Judgement`) — `⊢_L t : T`: a term, a type, and the **logic** in which a
+checker established that the one inhabits the other. The smallest checkable unit, and the reification
+of justification logic's `!` operator (§1).
+
+**Verdict** — the tri-state answer (`Holds` / `Fails` / `Undecidable`) an institution returns about a
+subject. **An assertion, backed by the institution's authority**, participating in the commit
+protocol. *Not a judgement*: it carries no term, so nothing can re-check it, and it is therefore
+trusted rather than verified. Lean returns both a verdict and a judgement; statistics returns only a
+verdict. **This is why a verdict never earns `Verified` and a judgement does.**
+
+**Logic** — a system with its own notion of when a sentence holds. A judgement is always *in* a
+logic.
+
+**Proof system** — a logic **we hold a checker for**, named by `reflection:proof_system`. The kernel
+is a proof system and *not* an institution; statistics is an institution and *not* a proof system.
+
+**Comorphism** — the translation carrying an institution's proposition into an EigenTT `Prop`
+(`reasoning:VerifiedPropositionView` is the Lean one). Needed exactly when a logic brings its own
+proposition language.
+
+### The justification layer
+
+**`JustifiedBy(j, P)`** — the reification of justification logic's `j:P`, *"`j` grounds a claim to
+`P`"*. An inductive whose constructors are JL's introduction rules.
+
+**J** — basic justification logic: application, sum, grounding constants, and **no factivity**. What
+`JustifiedBy` implements. LP = J + factivity + `!`.
+
+**Factivity** — the axiom `t:F → F`. Present in LP, absent in J, and **deliberately absent here**: a
+certificate records grounds and never asserts its proposition.
+
+**Certificate** — a term inhabiting `JustifiedBy(j, P)`. A proof **about `P`'s grounds**. *Not a
+proof term*: no rewriting turns it into a proof of `P`, and conflating the two is the defect §2
+exists to make unstatable.
+
+**Proof term** — a term inhabiting **`P` itself**.
+
+**Justification term / proof polynomial** (`JustificationTerm`) — the audit structure: `App`, `Sum`,
+`SpecStr`, and the four grounding leaves. Keeps *why*, where a scalar grade would keep only *what*.
+
+**Support** — the disjunctive normal form of a justification term: the alternative minimal leaf-sets,
+any one of which carries the conclusion. `App` is conjunctive, `Sum` disjunctive.
+
+### Evidence about the chain
+
+**Trace** — the chain-resident record of an **event**: something happened, here is what and when.
+
+**Witness** — a proof of a proposition **about the chain**: `IsDeclaredAs(iri, P)` says the chain
+contains evidence that `iri` is declared as `P`. It does **not** say `P`. *Not a trace*: a trace is
+the evidence, a witness is the entitlement the evidence licenses.
+
+**Proof constant / constant specification** — LP's mechanism for justifying an axiom by stipulation:
+`c:A` is postulated because `A` cannot be proved from below. The kernel's witness admission for
+`Declared` and `Observed` *is* a constant specification, and its soundness condition is that it be
+*axiomatically appropriate* — constants only for what genuinely holds.
+
+**TCB** — what must be correct for a `Verified` claim to be sound: the kernel's type checker, each
+proof checker we host, each comorphism, and the constant specification for attributions. Nothing
+else — not a prover, not a verdict, not a class.
+
+### Grading
+
+**Provenance** — how an **artifact** came to exist. Every resource has one.
+
+**Warrant** — what evidence exists for a resource's **proposition**. Only resources carrying a
+proposition have one. *Independent of provenance*: a hand-authored claim with a checked proof is
+`Verified`; a machine-generated one without a proof is not.
+
+**Verified** — a judgement `⊢_L t : P` exists in a logic we check. Entails `P`.
+
+**Derived** — a **reproducible** procedure applied to inputs: `App(Declared(proc), Observed(input))`.
+Entails `P` relative to the declared procedure.
+
+**Sampled** — a declared protocol and an observed outcome, with **no `f : I → O`**. Entails nothing.
+*Not a weaker `Derived`* — a different claim, and the distinction is reproducibility.
+
+**Declared / Observed** — attribution: who asserted it, where it came from. Entails nothing.
+
+**Reproducible** — a procedure is reproducible when it denotes a function: same inputs, same output.
+Declared by the procedure, not inferred from who invoked it.
+
+### Institutions
+
+**Institution** — a logic with a **satisfaction relation the kernel cannot evaluate**. If the kernel
+can evaluate it — that is type checking — it is not an institution.
+
+**Satisfaction relation (⊨)** — an institution's own criterion for when its sentences hold:
+`p < α` for statistics, `sc_S(φ) ≥ τ` for κ–τ, Lean's type theory for Lean. Having one is what makes
+a warrant-producer a logic; the encoding pipeline has none and is correctly not an institution.
+
+**Veto** — a `Fails` verdict blocking a commit. An institution may veto on its own authority
+(wrong-direction-safe) but **may not verify** on its own authority.
+
+---
+
 ## 1. Terms and judgements
 
 **`eigentt:Term`** — one syntactic category, mirroring the kernel's `Exp`. Types, propositions,
@@ -31,7 +139,17 @@ data eigentt:Judgement {
 }
 ```
 
-`⊢_L t : T`, reified. The `logic` parameter is what makes it general:
+`⊢_L t : T`, reified. **This is justification logic's `!` operator.** LP's positive-introspection
+axiom is `t:F → !t:(t:F)` — *"`!t` is evidence that `t` is a proof of `F`"* — which is exactly what a
+proof checker returns when it runs `t` against `F`; Artemov names the operator after it. Our
+`JustificationTerm` has `App` and `Sum` but no `!`, so the system today **runs the checker at commit
+and discards its result**. A `Judgement` is where that result is kept.
+
+It also places the system precisely: no `!` and no factivity is **J**; adding judgements supplies `!`
+(**J4**); and `Verified` is where factivity genuinely holds because a real `t : P` exists. §4's
+lattice is, in these terms, *which fragment each grounding lives in*.
+
+The `logic` parameter is what makes it general:
 
 | `logic` | checked by | comorphism needed |
 |---|---|---|
