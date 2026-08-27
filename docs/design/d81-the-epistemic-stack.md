@@ -14,7 +14,7 @@ authority over what the system now is.
 | 2 | four lifecycles | P1 | **done** |
 | 3 | the boundary map | P2 | **done** |
 | 4 | provenance — why the shapes exist | P3 | **done** |
-| 5 | findings | P4 | pending |
+| 5 | findings | P4 | **done** |
 
 ---
 
@@ -197,11 +197,19 @@ evidence the grade implies:
 | `VerifiedResource` *(⊂ Derived)* | `derivation`, `verification` | — |
 
 `DerivedResource` — the grade meaning *the kernel computed this* — is the only one of the four with
-no required property. That `derivation` is recommended rather than required is deliberate and
-documented at `kernel/src/validation/mod.rs:1518`: substrate-produced resources from `FIBER … INTO`
-and post-translation comorphism reify outputs "are derived by construction but may not have a
-kernel-generated `ProgramTrace` yet". The consequence stands regardless of the reason: nothing at
-commit distinguishes those from a resource that simply claims the grade.
+no required property. That `derivation` is recommended rather than required is deliberate, is
+documented in the ontology itself (`ontologies/reflection/reflection-ontology.json:32`) and at
+`kernel/src/validation/mod.rs:1518`, and is pinned by a test named for the behaviour:
+substrate-produced resources from `FIBER … INTO` and comorphism reify outputs "are derived by
+construction but may not have a kernel-generated `ProgramTrace` yet".
+
+**An earlier draft called this an "inverted obligation table". §5 refutes that framing**, and the
+refutation is worth keeping in view while reading the rest of this section: the *abstract* class is
+permissive, but **every concrete derived-by-kernel path carries a requirement of its own** —
+`InstitutionEmittedDerivation` requires `from_subject`, `ReasoningSentence` requires proposition +
+justification + certificate, `VerifiedResource` requires `derivation` + `verification`. Requiring
+`derivation` on the base class would force `ReasoningSentence` and `VerificationTrace` to point the
+slot at themselves, a fiction the tree declines twice in writing.
 
 ### 2.1 Declared — `demo/prose-to-formulas-v2/claims-intact.esl`
 
@@ -219,10 +227,14 @@ resource v2:trace_1 : reflection:DeclarationTrace {
 1. **Grade by class.** `enc:EncodedClaim : reflection:DeclaredResource`
    (`ontologies/encoding/encoding.esl:366`) — inherited, not stated. `declared_by` is required and
    present.
-2. **Two axes on purpose.** `encoding:Observation` here is a **discourse kind** (`enc:Observation :
-   enc:Claim`), not the epistemic `reflection:ObservedResource`. The ontology states the convention
-   at `ontologies/encoding/encoding.esl:377`: *"A landed claim carries BOTH axes as classes: `is_a = [enc:EncodedClaim,
-   enc:<Kind>]`"*. The word *Observation* therefore denotes two unrelated things one file apart.
+2. **Two axes on purpose, and correctly separated.** `encoding:Observation` here is a **discourse
+   kind** (`enc:Observation : enc:Claim`), not an epistemic grade. An earlier draft of this section
+   called that a harmful name collision with `reflection:ObservedResource`; **§5 refutes it** — the
+   `reflection` ontology declares no class named `Observation`, the two identifiers differ in
+   namespace *and* in string, and the orthogonality is stated at the point of definition
+   (`ontologies/encoding/encoding.esl:369-379`) and again per member: `enc:Finding` reads *"Discourse
+   kind, not epistemic grade: a finding may land Derived or Observed"*. The convention is working as
+   designed.
 3. **Witness by trace.** `v2:trace_1` is a `DeclarationTrace` whose `reflection:resource` points at
    the claim. `layer_admits_witness` takes the trace-attested route: `any_trace_targeting` finds it
    (`reflection:resource` is `core:resource`-typed, hence in the triple index), `trace_category`
@@ -611,6 +623,113 @@ requires a resolvable agent.
 
 ---
 
-## §5
+## 5. Findings
 
-Pending — P4 findings, awaiting the adversarial pass.
+Every candidate from §§1–3 was put to an adversarial pass instructed to **default to "not a
+defect"** and to concede only where it had looked for a defence and failed. **Two were refuted, six
+weakened, two stand.** The refutations are recorded as corrections in §2.0 and §2.1 rather than
+buried here.
+
+Classified as the method requires: *redundant* (two names, one denotation) · *ambiguous* (one name,
+two denotations) · *unowned* (a decision made in N places with no authority) · *fine*.
+
+### 5.1 Fine — and the hypothesis was wrong about them
+
+| candidate | why it stands as-is |
+|---|---|
+| `DerivedResource` requires nothing | Deliberate, documented in the chain-resident ontology, pinned by a named test — and every *concrete* derived path carries its own requirement. Requiring `derivation` on the base would force `ReasoningSentence` and `VerificationTrace` to point the slot at themselves |
+| `encoding:Observation` vs `reflection:ObservedResource` | No collision exists. Different namespace, different string; orthogonality stated at the point of definition and per member |
+| seven encodings, rows 1 · 3 · 5 · 6 | Non-substitutable syntactic categories. Row 5 is a `Prop`-valued inductive, row 6 a constructor **taking row 5 as an argument** — a type and its argument cannot be one artifact. The 5→4 collapse carries a five-line rationale and a test |
+| row 2, `reflection:epistemic:*` individuals | Load-bearing where `is_a` is already spent: `lexicon:grade` uses them with `allows_only`, and says why — *"the SAME `reflection:EpistemicStatus` the rest of the stack uses (not a parallel enum)"* |
+| two senses of "witness" | Zero mechanical risk. Every `Witness*` error is a `MergeError`; the chain-side senses live under different namespace prefixes. A readability cost only — and the overload is in fact **three-way** (`objective:witness`), the third pre-empting confusion in its own description |
+
+**§1.1's headline was too strong.** Seven encodings is not seven-way redundancy. What survives is
+two dead artifacts (§5.3).
+
+### 5.2 Unowned — the two that stand
+
+**`Verified` rests on a conjunction nothing records.** `emit_from_reasoning_sentence` grants the
+grade to any `ReasoningSentence` with a hashable proposition; that is sound only because the
+AutoOnLoad gate blocks a failing commit. The skeptic found two partial defences — the ontology link
+is protected by the manifest pin, and the gate's status is recorded once on an IRI constant
+(*"Load-bearing — every committed ReasoningSentence triggers it"*,
+`crates/eigenius-reasoning/src/institution.rs:50`) — and neither closes it: the emitter's own doc
+never mentions the gate. It also found the conjunction **weaker than §2.4 credited**:
+`dispatch_auto_on_load_for_layer` has one call site and **no test**, and the only test of
+`Fails → InstitutionValidation` goes through the *per-resource* entry point, not the layer path the
+commit actually uses (`kernel/tests/dock_assay_demo.rs:699`).
+
+**Three semantic relations are kernel-only, and one needn't be.** `PROPOSITION_SLOTS` is well
+argued and commit-enforced. The self-attesting arms have a *plausible* soundness reason — an
+ontology that could declare its own class self-attesting could mint `Verified` at will — but the
+skeptic searched `kernel/src/layer/witness_index.rs`, `kernel/src/witness/mod.rs`, `kernel/src/ontology/well_known.rs` and D49 and **found that
+argument stated nowhere**. Against `trace_category` the candidate got *stronger*: the ontology
+already declares `reflection:epistemic_status` with `allows_only` over exactly the four grade
+individuals, and already attaches it to `ProgramTrace`'s `recommends` as *"Epistemic status of the
+traced output"* — **the vocabulary for "this trace grounds that grade" exists, is chain-resident,
+and no Rust file reads it.** `grep epistemic_status` over `*.rs`: zero hits.
+
+### 5.3 Dead — three artifacts with no consumer
+
+Found by the adversarial pass while looking for defences, and the clearest cleanup targets.
+
+| artifact | state |
+|---|---|
+| `chain_witness_category_for_iri` (`kernel/src/ontology/well_known.rs:578`) | **zero callers.** `kernel/src/program/check_hooks.rs:93` does the identical mapping by *short name* instead |
+| `Grade` / `GradedClaim.grade` (`crates/eigenius-reasoning/src/grade.rs`) | **write-only** — set at four sites, read at exactly one, in a test. "Not two enums needing reconciliation; one live enum and one dead field. The remedy is deletion, not a `From` impl" |
+| `runtimes:wasm` | declared, no implementation (§3.1.4) |
+
+`Grade`'s defence is worth keeping even though the field is dead: its doc calls it *"a structural
+projection of the `JustificationTerm` constructor — not a stored field"*, i.e. a **pre-commit
+construction-time** label against `WitnessCategory`'s **post-commit chain-derived** key. Different
+inputs, different times; a conversion between them would be a category error.
+
+### 5.4 Stale — assertions the code has falsified
+
+| where | says | actual |
+|---|---|---|
+| `kernel/src/institution/runtime.rs:69` | derivations are *"Empty for institutions whose only job is the pass/fail gate (e.g. Reasoning / Lean)"* | falsified by `crates/eigenius-reasoning/src/validate.rs:163` since eigenius#200 |
+| `reasoning:VerifiedPropositionView`'s description | the emitter *"looks up the view … and reads `canonical_proposition`"* | no such lookup exists (§2.4 route B) |
+| `kernel/src/layer/witness_index.rs` — the filename | an index | nothing is materialised (§3.4, §4.4) |
+
+The second is the serious one, for the reason §2.4 gives: an ontology is chain-resident and reads as
+current in a way a code comment does not.
+
+### 5.5 Untested — where a claim rests on nothing executable
+
+- The **committed shape** of a stamped `VerificationTrace` is untested: every test takes
+  `outcome.derivations[0]` *pre-stamp* (`crates/eigenius-reasoning/tests/validate_handler.rs:907`),
+  so nothing exercises the resource as it lands with `DerivedResource` +
+  `InstitutionEmittedDerivation` on it.
+- `dispatch_auto_on_load_for_layer` — the commit's actual path — has **no test** (§5.2).
+- `kernel/src/program/check_hooks.rs:93` dispatches witness synthesis on an inductive's **short name**, so any inductive
+  anywhere named `IsVerifiedAs` enters the path. Not a defect found in the wild; a matching rule
+  looser than the IRIs everything else uses.
+
+### 5.6 What the analysis concludes
+
+The hypothesis was *unclear boundaries, overlapping abstractions, unclear responsibilities*. Against
+the code:
+
+**Overlap: mostly refuted.** The seven encodings are seven syntactic categories doing seven jobs, and
+the pass defended five of them from the code. What is genuinely duplicated is small and dead (§5.3).
+
+**Unclear boundaries: one, and it is real.** *Rejection is a contract; promotion is a convention*
+(§3.1.3) — with §4.3 showing this is the corpus's own division, the kernel half simply never built.
+Everything downstream of it (the untyped channel, the self-attesting arms, the missing Lean route)
+descends from that one gap.
+
+**Unclear responsibility: one, and it is narrower than expected.** Not *"who assigns a grade"* —
+eight writers with one trait sounds worse than it is, since no reader grants anything on a class
+(§5.1). It is *"who may say that a trace kind grounds a grade"*: the answer is the kernel, in three
+Rust lists, while the ontology already has the vocabulary and no code reads it (§5.2).
+
+**The most useful single sentence in the analysis is §4.4's**: the concept the ontology lacks is the
+residue of a uniformity that was supposed to make naming it unnecessary. Every kernel-only list in
+§5.2 is a shard of one emitter that was specified to be uniform and never was, because the
+`ProgramTrace` it routed through was never produced.
+
+A cleanup proposal is out of scope here, as §1 of the plan states. What this section hands a
+successor is: three dead artifacts to delete, three stale assertions to correct, three untested
+claims to pin, and **one design question** — whether AutoOnLoad should have a declared
+post-condition on success, which is the root the other findings hang from.
