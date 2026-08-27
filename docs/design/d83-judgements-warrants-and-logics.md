@@ -43,24 +43,20 @@ logic.
 
 1. **a term syntax** — proof objects as transmissible data;
 2. **a formula syntax** — for what a proof proves (in EigenTT and Lean, the same syntax as 1);
-3. **a decidable checking relation `⊢_L t : T`**, computable from `t` and `T` alone, **against the
-   theory only**.
+3. **a decidable checking relation `⊢_L t : T`**.
 
-The third is the criterion, and two clauses carry it. **Checking must be independent of finding** —
-validity is established without reproducing the search that produced the object (de Bruijn). And
-**the checker may consult the theory but not the evidence**: declarations, definitions and prior
-judgements are fine, since any checker needs an environment; measurements, samples and external state
-are not, because a relation needing an oracle is not a checking relation.
+That is the whole definition. Earlier drafts added *"checking must be independent of finding"* and
+*"the checker may consult the theory but not the evidence"*; both are wrong. The first excludes
+proofs by computation, which are proofs. The second draws a line that does not exist — **a dataset
+committed as a term is a term**, and `p(D, spec) < α` is then a closed proposition the kernel can
+decide by evaluation, yielding a real proof term and a real `Verified`.
 
-The kernel is a proof system and *not* an institution. Statistics is an institution and *not* a proof
-system: it has no term syntax, borrows our `Prop`, and its check needs the dataset — so checking
-would *be* recomputing, and the recomputation establishes an arithmetic fact rather than the claim.
-"Is this a proof language?" and "what warrant does it yield?" are therefore one question, answered by
-§4's lattice.
+**What separates statistics from Lean is therefore not the proof — it is the proposition proved.**
+`refl : p(D,spec) < α` establishes a fact *about D*, not *"the effect is real"*, and no computation
+closes that gap. See §4: the lattice measures the distance between the proposition established and
+the proposition claimed.
 
-**Comorphism** — the translation carrying an institution's proposition into an EigenTT `Prop`
-(`reasoning:VerifiedPropositionView` is the Lean one). Needed exactly when a logic brings its own
-proposition language.
+The kernel is a proof system and *not* an institution.
 
 ### The justification layer
 
@@ -224,34 +220,42 @@ They are independent, not ordered: a hand-authored claim with a checked proof is
 is irrelevant to warrant.** A human writing an EigenTT term is exactly as good as a prover emitting
 one.
 
-## 4. The warrant lattice is entailment strength
+## 4. The warrant lattice is distance from proved to claimed
 
-| warrant | form | entailed |
+**Every warrant proves something.** The rows differ by how far that something is from what is being
+claimed, and each gap is closed — if at all — by a *declared* premise:
+
+| warrant | what is actually established | bridge to the claim |
 |---|---|---|
-| **Verified** | `Judgement(L, t, P)` in a logic we check | `P`, deductively |
-| **Derived** | `App(Declared(procedure), Observed(input))` | `P`, relative to the declared procedure |
-| **Sampled** | `Declared(protocol)` + `Observed(outcome)` | **nothing** |
-| **Declared** / **Observed** | attribution | nothing |
+| **Verified** | `t : P` | **none** — the same proposition |
+| **Derived** | `output = f(input)` for a declared `f` | `f`'s specification |
+| **Sampled** | `run r under protocol Q produced X` | **nothing licenses it** |
+| **Observed** | `instrument i recorded X` | instrument reliability |
+| **Declared** | `agent a asserted P` | trust in `a` |
 
-**`Derived` requires a function.** *"I ran this analysis over this dataset"* composes: the spec is a
-declared implication, the data an observed antecedent, and the conclusion is Artemov application. A
-statistical verdict is this shape, and so is a deterministic parse.
+**The design rule this yields, which replaces several:** *the chain records the proposition actually
+established, and every bridge is a declared premise someone owns by name.*
 
-**`Sampled` is what remains when there is no `f : I → O`.** *"I ran this protocol — prompt, model,
-parameters — and this is what I observed."* Re-running draws another sample rather than reproducing.
-The protocol is declared, the outcome observed, and **nothing is entailed**; the run is an event, not
-a derivation. `reflection:ExternalExecutionTrace` already states the criterion — *"no `f : I -> O`,
-so no specification, so nothing entailed"* — but tests for it with *"the kernel did not initiate
-it"*, which is a proxy that fails on any nondeterministic in-kernel call.
+That one rule covers what were three separate defects — a certificate proving `JustifiedBy(j,P)` and
+being recorded as warrant for `P`; a statistical test proving `p < α` and being recorded as warrant
+for the scientific claim; κ–τ establishing `Commits(τ,φ)` and being recorded as warrant for `φ`.
+They are one error with three instances: **warranting `P` and recording it against `Q`.**
 
-**So the test is reproducibility, and a procedure declares it.** The justification term takes the
-`App` form only when the procedure is a function; otherwise the outcome is a leaf. *"Is this
-reproducible?"* then becomes a question about the polynomial, answerable by the same projection
-algebra as everything else, and a sampled step cannot silently inherit a derived step's entailment.
+**`Sampled` is not the row without a proof.** `⊢ run r produced X` is perfectly provable, and should
+be recorded. What is missing is any licence to get from there to `X` — the run is an event, and
+re-running draws another sample rather than reproducing. `reflection:ExternalExecutionTrace` states
+the criterion — *"no `f : I -> O`, so no specification, so nothing entailed"* — but tests for it with
+*"the kernel did not initiate it"*, a proxy that fails on any nondeterministic in-kernel call.
 
-**Nothing on this axis is nominated.** Each row is a function of what the chain holds — a checked
-judgement, a declared-function procedure with its operands, a protocol with an outcome, an
-attribution. No institution, trace, class or importer assigns a warrant.
+**So the operative question per procedure is reproducibility**, and the procedure declares it. When
+it holds, the justification term takes the `App(Declared(proc), Observed(input))` form and the
+conclusion follows relative to the declared specification; when it does not, the outcome is a leaf
+and nothing follows. *"Is this reproducible?"* is then a question about the polynomial, answered by
+the same projection algebra as everything else, and a sampled step cannot silently inherit a
+reproducible one's entailment.
+
+**Nothing on this axis is nominated.** Each row is a function of what the chain holds. No
+institution, trace, class or importer assigns a warrant.
 
 ## 5. Institutions
 
@@ -290,6 +294,13 @@ stipulated:** those are the logics in which we hold something to check.
 A logic that brings a proof language we hold no checker for lands `Derived`. A proof we cannot check
 is not a proof we hold.
 
+**Statistics is not barred from producing judgements.** With its dataset committed as a term, the
+arithmetic facts it computes — `p(D, spec) < α` — are closed propositions the kernel can decide, and
+those are genuinely `Verified`. What stays `Derived` is the *scientific claim*, reached from the
+arithmetic fact across a declared inductive bridge. The same holds for κ–τ (§8). This is the general
+shape, not a concession: **an institution may verify the propositions it actually proves, and the
+step to the proposition anyone cares about is a premise someone owns.**
+
 ## 6. Witnesses
 
 `witness:Is*As` is kernel vocabulary — the four categories expressed as propositions **about the
@@ -325,10 +336,14 @@ The first outside logic proposed for the platform (arXiv:2608.08192, *rival-sens
 over the WRN evidence graph). A design that cannot place its first external case is not finished, so
 this section places it.
 
-**Institution: yes. Proof system: no.** `S ⊩ C_τφ ⟺ sc_S(φ) ≥ τ` is a genuine satisfaction relation
-and the kernel cannot evaluate it. But there is no term syntax, no proof object, and the check would
-need the evidence graph — so it fails §0's third condition. **Its ceiling is `Derived`
-structurally**, not by policy: there is no term for any checker to check.
+**Institution: yes.** `S ⊩ C_τφ ⟺ sc_S(φ) ≥ τ` is a genuine satisfaction relation and the kernel
+cannot evaluate it.
+
+**Proof system: not as proposed, and it could become one — for the wrong proposition.** With the
+evidence graph and the parameters committed as terms, `sc_S(φ) ≥ τ` is decidable by evaluation, so
+κ–τ could hand over a real proof term and earn `Verified` **for `Commits(τ, φ)`**. That is correct
+and worth having. It does not make `φ` verified, and the pilot does not claim otherwise — which is
+exactly why it is a good first external case.
 
 **It establishes `Commits(τ, φ)`, not `φ`.** This is the design's principal demand on it, and it is
 the pilot's own contribution restated — making the commitment threshold explicit. `Commits(τ, φ)` is
