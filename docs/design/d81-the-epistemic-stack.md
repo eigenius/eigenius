@@ -592,9 +592,22 @@ own stamp creates; nothing checks that the other seven producers (§1.6) do the 
 | the witness *index* | **no** — despite the file name, nothing is materialised | direct lookup per key (`kernel/src/layer/witness_index.rs:20-28`) |
 
 The asymmetry that matters: **the evidence is persisted and the entitlement is not.** A witness is a
-function of the chain, recomputed on demand, which is what makes the environment-blindness in D80 §2
-possible — the same key recomputes to the same answer in a chain where the names it depends on have
-been rebound.
+function of the chain, recomputed on demand.
+
+**That is not the cause of D80 §2's environment-blindness**, though an earlier draft of this section
+said it was. The cause is that `WitnessKey` records the category, the IRI and a hash of the
+proposition **term** — and nothing about the environment those names resolve in
+(`kernel/src/witness/mod.rs`). The same key therefore denotes a different proposition after a
+rebinding while hashing identically. Persisting the discharge would not change that: it stores the
+same blind key, and recomputing it against the rebound chain still hits the same ancestor by
+first-hit-wins and still returns the same answer. Non-persistence and environment-blindness are
+independent facts, and only the second is a soundness problem.
+
+What non-persistence *does* cost is that the entitlement has no existence outside the recomputation:
+nothing can cite a witness (there is no IRI for the warrant a certificate rests on), nothing can
+transport one across a merge or an export, and the admitting layer is unrecoverable — first-hit-wins
+answers *whether* some ancestor admits the key, never *which*. D82 P7 proposes persisting discharged
+witnesses on those grounds; D82 S1 is the separate fix for the blindness.
 
 ---
 
