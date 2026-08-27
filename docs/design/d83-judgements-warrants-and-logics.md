@@ -141,11 +141,14 @@ proposition have one. *Independent of provenance*: a hand-authored claim with a 
 
 **Verified** — a judgement `⊢_L t : P` exists in a logic we check. Entails `P`.
 
-**Derived** — a **reproducible** procedure applied to inputs: `App(Declared(proc), Observed(input))`.
-Entails `P` relative to the declared procedure.
+**Computed** — a **reproducible** procedure applied to inputs: `App(Declared(proc), Observed(input))`.
+Entails `P` relative to the declared procedure. Named for the act, like its neighbours, and
+deliberately **not** *"Derived"*: that word names artifact lineage (§3), collides with
+`prov:wasDerivedFrom` (§3.1), and carries a *follows-from* overtone this row does not earn.
 
 **Sampled** — a declared protocol and an observed outcome, with **no `f : I → O`**. Entails nothing.
-*Not a weaker `Derived`* — a different claim, and the distinction is reproducibility.
+*Not a weaker `Computed`* — a different claim, and the distinction is reproducibility. You **compute**
+a function; you **sample** a process.
 
 **Declared / Observed** — attribution: who asserted it, where it came from. Entails nothing.
 
@@ -312,7 +315,7 @@ likely already has data:
 | who asserted it | `prov:wasAttributedTo` (Entity → Agent) |
 | a run that produced it | `prov:Activity`, with `prov:used` / `prov:wasGeneratedBy` |
 | where an observation came from | `prov:hadPrimarySource` |
-| **the declared procedure of §4's `Derived` row** | **`prov:Plan`**, via `prov:qualifiedAssociation` |
+| **the declared procedure of §4's `Computed` row** | **`prov:Plan`**, via `prov:qualifiedAssociation` |
 
 The last row is close enough to be worth stating: *"an activity carried out by an agent following a
 plan"* is `App(Declared(proc), Observed(input))` in PROV's vocabulary. What PROV cannot add is what
@@ -324,14 +327,16 @@ plan"* is `App(Declared(proc), Observed(input))` in PROV's vocabulary. What PROV
   executing the derivation*, and the statement remains structurally valid. That is precisely the
   self-nomination §5 forbids.
 - **`prov:wasDerivedFrom` covers truth-preserving and guessed derivations equally**, so it cannot
-  express §4's `Derived`/`Sampled` distinction — the one that decides whether anything is entailed.
+  express §4's `Computed`/`Sampled` distinction — the one that decides whether anything is entailed.
 - **PROV has no proof objects and no validation relation**, so §2's proof layer has no counterpart.
 - **Multiple independent justifications for one proposition** tend to duplicate entities rather than
   yield one claim with alternative support — the structure §3's justification terms exist to carry.
 
-**The trap to avoid:** `prov:wasDerivedFrom` shares a word with §4's `Derived` and means something
-different. Using it as a *warrant* relation would reintroduce exactly the lineage-as-grade conflation
-this design removes.
+**And this is why §4's row is called `Computed`.** An earlier draft named it *"Derived"*, one word
+away from `prov:wasDerivedFrom` and meaning something materially different — a warrant versus a
+lineage relation. The collision was live: the current implementation's `Derived` grade is glossed as
+*"produced by a typed program from other resources"*, which is PROV's sense, not §4's. Renaming the
+row removes the trap rather than documenting it.
 
 ## 4. The warrant lattice is distance from proved to claimed
 
@@ -341,10 +346,23 @@ claimed, and each gap is closed — if at all — by a *declared* premise:
 | warrant | what is actually established | bridge to the claim |
 |---|---|---|
 | **Verified** | `t : P` | **none** — the same proposition |
-| **Derived** | `output = f(input)` for a declared `f` | `f`'s specification |
+| **Computed** | `output = f(input)` for a declared `f` | `f`'s specification |
 | **Sampled** | `run r under protocol Q produced X` | **nothing licenses it** |
 | **Observed** | `instrument i recorded X` | instrument reliability |
 | **Declared** | `agent a asserted P` | trust in `a` |
+
+**The rows are named for the act that produced the evidence** — an agent *declared*, an instrument
+*observed*, a process was *sampled*, a function was *computed*. `Verified` is the deliberate
+exception: it names a status rather than an act, which is defensible because it is the one row whose
+bridge has length zero. And the two middle rows are natural opposites in the vocabulary itself — **you
+compute a function; you sample a process** — so the distinction §4 works hardest to make is carried
+by the words rather than by a paragraph.
+
+**`Computed` is a composite, not a leaf.** Its form is `App(Declared(proc), Observed(input))`: the
+grounds are the declared procedure and the observed inputs, and *computed* names what composing them
+yields. This matters for §3's justification terms — a system that emits a single opaque `computed`
+leaf has discarded the two things a reader would want to interrogate, and `survives_without(input)`
+then answers wrongly.
 
 **The design rule this yields, which replaces several:** *the chain records the proposition actually
 established, and every bridge is a declared premise someone owns by name.*
@@ -395,7 +413,7 @@ itself**, in-process. Nothing else is verification, however rigorous the institu
 | | trust required | why it is safe |
 |---|---|---|
 | `Verified` | none — the kernel re-checks the term | that is the definition |
-| `Derived` / `Sampled` | bounded and attributed: which institution, which invocation, which subject | recorded, so a wrong answer is traceable |
+| `Computed` / `Sampled` | bounded and attributed: which institution, which invocation, which subject | recorded, so a wrong answer is traceable |
 | a `Fails` verdict blocking a commit | full, on the institution's own authority | wrong-direction-safe: a bad `Fails` loses data, a bad `Holds` corrupts |
 
 **An institution may veto on its own authority; it may not verify on its own authority.**
@@ -408,7 +426,7 @@ procedure, so it needs no comorphism and has no judgement form. Its `p < α` is 
 checking a proof. **The restriction of `Verified` to EigenTT and Lean 4 is therefore forced, not
 stipulated:** those are the logics in which we hold something to check.
 
-A logic that brings a proof language we hold no checker for lands `Derived`. A proof we cannot check
+A logic that brings a proof language we hold no checker for lands `Computed`. A proof we cannot check
 is not a proof we hold.
 
 **An institution's authority ends at its declared scope, and there are three levels, not two.**
@@ -417,7 +435,7 @@ Statistics already implements this and the vocabulary should not blur it:
 | | what it is | how it is carried |
 |---|---|---|
 | **numerics** | `(statistic, p_value)` | audit fields on the result resource |
-| **the immediate statement** | the `canonical_proposition` — a **domain** claim at a declared epistemic scope, warranted when p crosses α | `IsDerivedAs`, gated by `check_epistemic_scope` |
+| **the immediate statement** | the `canonical_proposition` — a **domain** claim at a declared epistemic scope, warranted when p crosses α | an `IsComputedAs` witness, gated by the scope check |
 | **the translation** | what it means for, say, the efficacy of a compound | a further claim across a **declared bridge**, owned by someone else |
 
 The statistics institution already enforces this: before running a test it compares the claimed
@@ -426,15 +444,15 @@ fails the gate when the replication structure does not support the scope claimed
 predicate defaults to the more restrictive reading. **The institution already refuses to warrant past
 its design** — this design generalises that, it does not introduce it.
 
-**`Derived` attaches to the immediate statement**, as `App(Declared(analysis plan), Observed(sample
+**`Computed` attaches to the immediate statement**, as `App(Declared(analysis plan), Observed(sample
 set))` — the plan's specification is §4's bridge, scope marker included. **The translation is not a
 row.** It is one more `App` out, with its own declared leaf, and `is_fully_verified` reports false
-because that leaf is `Declared`. Calling a bridged claim `Derived` would re-collapse it into the
+because that leaf is `Declared`. Calling a bridged claim `Computed` would re-collapse it into the
 opaque atom §4 exists to eliminate.
 
 **And an institution may verify the propositions it actually proves.** With its data committed as
 terms the numerics become decidable closed propositions, genuinely `Verified` — for *those*
-propositions. That changes nothing above: the immediate statement is still `Derived` relative to the
+propositions. That changes nothing above: the immediate statement is still `Computed` relative to the
 plan, and the translation still needs its bridge. The same holds for κ–τ (§8).
 
 ## 6. Witnesses
@@ -477,15 +495,15 @@ instead, which stands without knowing the details.
 - **One artifact serving as proof term, derivation record and justification at once.** Replaced by
   §2's layering, which makes the substitution *unstatable* rather than merely discouraged: a proof of
   `JustifiedBy(j,P)` and a proof of `P` have different types and no rewriting between them.
-- **`Verified` declared a subclass of `Derived`,** so that a verified thing inherits a derived
-  thing's obligations. Replaced by §3: the two answer different questions — *what evidence exists*
+- **A `Verified` resource class declared a subclass of a `Derived` resource class** (the current
+  implementation's names), so that a verified thing inherits a derived thing's obligations. Replaced by §3: the two answer different questions — *what evidence exists*
   versus *what produced this artifact* — so no subsumption exists in either direction.
 - **Type inference plus a hardcoded list of "these slots must be propositions" plus per-property
   exemptions for the slots inference cannot handle.** Replaced by §1's single check-mode rule.
   Inference is the wrong mode for exactly the terms that matter — a bare lambda has no inferable
   type — and the exemption list is where that broke down, patched one property at a time.
 - **A protocol for institutions to supply their own witness kinds.** Unnecessary under §6: an
-  institution hands over a judgement in a logic we can check, or its output is `Derived`. There is no
+  institution hands over a judgement in a logic we can check, or its output is `Computed`. There is no
   third thing to extend the type system with.
 
 ## 8. Worked example: the κ–τ pilot
