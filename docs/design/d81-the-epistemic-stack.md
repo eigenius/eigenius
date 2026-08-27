@@ -260,7 +260,11 @@ The only lifecycle where the kernel both produces the resource and grants the wi
    returns `None` — no witness, no error. The doc comment names two causes: "kernel merge dropped
    it, or the institution didn't supply one".
 
-### 2.4 Verified — `reasoning:ReasoningSentence`
+### 2.4 Verified — two intended producers, one of which does not exist
+
+`Verified` is the only grade with more than one route, and the routes are in very different states.
+
+#### Route A — the reasoning institution (works)
 
 1. **Witness, self-attesting.** `emit_from_reasoning_sentence`
    (`kernel/src/layer/witness_index.rs:255`) grants `WitnessCategory::Verified` to **any**
@@ -277,11 +281,49 @@ facts in four files: the QueryClass's `dispatch_role`, the dispatch phase runnin
 blocking the commit, and `emit_from_reasoning_sentence` relying on all three by omission. Nothing
 links them; nothing fails if a link is removed.
 
+3. **The other trace producer.** A passing `ValidateJustification` also mints a
+   `reflection:VerificationTrace` (`crates/eigenius-reasoning/src/validate.rs:151`). This is the
+   *only* producer of that class in the tree.
+
 One consequence is already known and belongs to a sibling document rather than here: merge ends at
 `store_layer` and never runs `dispatch_auto_on_load_for_layer` (D80 §3.3), so a `ReasoningSentence`
 materialised into a merge layer is not re-validated against the merged chain. It *was* validated —
 on its branch, against a different environment. That is D77's subject, not a defect of this
 lifecycle.
+
+#### Route B — the Lean institution (absent in the middle)
+
+The canonical verification story — a machine-checked proof — reaches the grade through a three-step
+path of which **only the first step exists**.
+
+| step | intended | actual |
+|---|---|---|
+| 1. Lean checks the proof term, returns a `Verdict` | `do_proof_check` (`crates/eigenius-lean/src/institution.rs:306`) | **exists** |
+| 2. a `lean_to_reasoning` comorphism reifies a `reasoning:VerifiedPropositionView` | D49 §7 | **does not exist** — the identifier appears nowhere in the tree except one ontology comment |
+| 3. the witness emitter looks the view up by `source_verified_resource` and reads its `canonical_proposition` | D49 §7 | **does not exist** — `target_proposition_hash` (`kernel/src/layer/witness_index.rs:317`) has three slots: `canonical_proposition`, `reasoning:proposition`, and the `Asserts(iri)` default. The view is not among them |
+
+Nothing Lean-side stamps `reflection:VerifiedResource`, mints a `VerificationTrace`, or reifies a
+view — `grep` over `crates/eigenius-lean/` for all three returns nothing. A `Holds` verdict is a
+leaf resource. This is eigenius#160, open.
+
+**The receiving end is ready and nothing arrives on it.** `trace_category` *does* have its
+`VerificationTrace` arm (`kernel/src/layer/witness_index.rs:184`, added under eigenius#200), so the emitter half was
+completed while the producer half was not. The two halves were fixed in opposite order.
+
+**The ontology asserts the missing path as fact.** `reasoning:VerifiedPropositionView`'s own
+description reads:
+
+> *"The witness emitter for `reflection:VerificationTrace` **looks up** the view by
+> `source_verified_resource` and **reads** `canonical_proposition` to build the `IsVerifiedAs`
+> witness (D49 §7)."*
+
+and the comment above it: *"Created automatically by the `lean_to_reasoning` comorphism"*. Both
+describe behaviour that does not exist.
+
+This is a different failure mode from a stale design document, and a worse one. A design document is
+dated by construction and read as history. An **ontology is chain-resident** — it is loaded, it is
+queryable, its descriptions are what `eigenius get-schema` returns to an agent, and it reads as
+current. Intent embedded there is indistinguishable from specification.
 
 ### 2.5 What §2 establishes
 
@@ -292,6 +334,10 @@ lifecycle.
 - Two of the four grades are granted by **hard-coded class IRIs** in a kernel match, not by any
   declared relation (§2.3, §2.4).
 - The soundness of `Verified` rests on a **four-file conjunction** that nothing records (§2.4).
+- `Verified` has **two intended producers and one working one**; the Lean route's middle step was
+  never built, and its consumer half was completed anyway (§2.4 route B).
+- An **ontology description asserts behaviour that does not exist** (§2.4 route B). Chain-resident
+  artifacts read as current in a way design documents do not.
 
 ---
 
