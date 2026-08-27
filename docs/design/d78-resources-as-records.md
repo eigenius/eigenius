@@ -1,6 +1,8 @@
 # D78 — Resources as records
 
-Status: draft. Written `2026-08-24` on `p2-residue`.
+**Status: IMPLEMENTED**, merged `2026-08-26` in [#229](https://github.com/eigenius/eigenius/pull/229).
+Written `2026-08-24`. Every phase's own status line below reads *complete*; §9's two deferrals were
+reviewed and closed out before the merge.
 
 Implements **Seam B** of `docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md`. D75 established
 *what* and *why*; this document is *how*. It inherits D75's decisions and does not reopen them:

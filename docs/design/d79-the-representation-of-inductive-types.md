@@ -1,13 +1,17 @@
 # D79 — The representation of inductive types
 
-**Status: design.** Completes the inductive-type work D76 began. Split out of
-[D77](d77-merge-as-a-pushout-of-environments.md) on `2026-08-25`, which had accumulated three
-separable projects; this is the one that is buildable now and is a prerequisite for the other two.
+**Status: IMPLEMENTED**, merged `2026-08-26` in [#229](https://github.com/eigenius/eigenius/pull/229).
+All seven phases landed; §7 is the build log, and records that three of the seven did not do what
+this plan said they would. Completes the inductive-type work D76 began, and is a prerequisite for
+[D77](d77-merge-as-a-pushout-of-environments.md) and [D80](d80-witness-and-institution-machinery.md),
+both of which remain design-only. Split out of D77 on `2026-08-25`, which had accumulated three
+separable projects.
 
 D76 made the layer chain the typing environment: the chain binds **names to declarations**, and
 `Env::lookup` returns one `InductiveDecl`. This document finishes the representation half of that
-change. Three defects, each found by a consumer that needed something the representation does not
-provide:
+change. **Seven defects**, each found by a consumer that needed something the representation does
+not provide — the first three were the split's motivation, and #4-#7 were found while building
+the fix for them:
 
 | # | defect | found by |
 |---|---|---|
@@ -415,7 +419,7 @@ chain-format or bootstrap change that would otherwise need a reseed of its own.
 
 ## 7. Build log
 
-Landed `2026-08-25`. Each phase's audit corrected something the plan asserted, which is the
+Landed `2026-08-25`--`2026-08-26`, merged in #229. Each phase's audit corrected something the plan asserted, which is the
 discipline D76's phases established and the reason they begin with one.
 
 | phase | outcome |

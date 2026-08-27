@@ -1,6 +1,18 @@
 # D75 — Fusing EigenTT with the typed knowledge graph
 
-Status: draft. Written `2026-08-24` on `p2-residue`.
+**Status: diagnosis stands; two of three follow-ons implemented.** Written `2026-08-24`.
+
+| follow-on | seam | state |
+|---|---|---|
+| [D76](d76-the-typing-environment.md) | A — the chain *is* `Γ_env` | **implemented**, merged in [#229](https://github.com/eigenius/eigenius/pull/229) |
+| [D78](d78-resources-as-records.md) | B — a resource *is* a record | **implemented**, merged in #229 |
+| [D77](d77-merge-as-a-pushout-of-environments.md) | merge as a pushout (§3.5) | **design only** |
+
+D77 was drafted and then split, because it had accumulated three separable projects:
+[D79](d79-the-representation-of-inductive-types.md) (implemented) and
+[D80](d80-witness-and-institution-machinery.md) (design only) now precede it. §3.4's
+environment-blind proposition identity — the witness defect — is D80's subject and is
+still open.
 
 Supersedes `docs/notes/ttr-as-the-class-model.md` (deleted; the investigation is preserved in the
 nine commits `fa03128..276fa5c`, which reached these findings in discovery order rather than causal

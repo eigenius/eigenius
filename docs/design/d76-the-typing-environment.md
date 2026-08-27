@@ -1,6 +1,6 @@
 # D76 — The typing environment
 
-**Status: implemented `2026-08-25`.** All phases complete — `A ▸ C ▸ B ▸ D ▸ E2 ▸ F`, plus B2.
+**Status: IMPLEMENTED** `2026-08-25`, merged `2026-08-26` in [#229](https://github.com/eigenius/eigenius/pull/229). All phases complete — `A ▸ C ▸ B ▸ D ▸ E2 ▸ F`, plus B2.
 Validated by two `--umls-all` reseeds at 9,439,633 resources / 0 errors, the WRN demo, and the parse
 gate under `--replay`.
 
