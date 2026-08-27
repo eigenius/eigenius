@@ -124,6 +124,14 @@ Declared by the procedure, not inferred from who invoked it.
 **Institution** — a logic with a **satisfaction relation the kernel cannot evaluate**. If the kernel
 can evaluate it — that is type checking — it is not an institution.
 
+**Satisfaction condition** — Goguen–Burstall's central axiom: `M' ⊨_Σ' σ(φ) ⟺ Mod(σ)(M') ⊨_Σ φ`.
+*Truth is invariant under change of notation.* An institution in the original sense is
+**model-theoretic** — signatures, sentences, models, ⊨ — with **no proofs, terms or checkers in the
+definition**. The ⊢ side is separate work (Fiadeiro–Sernadas π-institutions; Meseguer's *logical
+systems* = institution + entailment system + a soundness condition linking them). So *institution*
+and *proof system* here are two axes rather than a subset relation, which is why statistics is one
+and not the other.
+
 **Satisfaction relation (⊨)** — an institution's own criterion for when its sentences hold:
 `p < α` for statistics, `sc_S(φ) ≥ τ` for κ–τ, Lean's type theory for Lean. Having one is what makes
 a warrant-producer a logic; the encoding pipeline has none and is correctly not an institution.
@@ -334,6 +342,19 @@ does not say `P`.
 **The trusted base is therefore exactly:** the kernel's type checker, each proof checker we host
 (`nanoda_lib`), each comorphism, and the constant specification for attributions. Not the prover that
 found a proof, not an institution's verdict, not any class membership.
+
+**What admitting a new proof system requires**, stated in the institution literature's terms — these
+are the two things that could turn a false `P'` into an accepted `P`:
+
+1. **Soundness of its `⊢` with respect to its `⊨`** — if the checker accepts `t : P'`, then `P'`
+   holds in that logic's models. Meseguer's linking condition, assumed per hosted checker and
+   argued, not presumed.
+2. **Its comorphism satisfies the satisfaction condition** — translation preserves truth. This is
+   Goguen–Burstall's axiom, and it is the whole reason a `Verified` established elsewhere transfers
+   here at all.
+
+Hosting a checker is therefore not a packaging decision. It adds both obligations to the trusted
+base, and the argument for each belongs with the institution that brings them.
 
 ## 7. What this replaces
 
