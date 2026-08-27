@@ -294,12 +294,30 @@ stipulated:** those are the logics in which we hold something to check.
 A logic that brings a proof language we hold no checker for lands `Derived`. A proof we cannot check
 is not a proof we hold.
 
-**Statistics is not barred from producing judgements.** With its dataset committed as a term, the
-arithmetic facts it computes — `p(D, spec) < α` — are closed propositions the kernel can decide, and
-those are genuinely `Verified`. What stays `Derived` is the *scientific claim*, reached from the
-arithmetic fact across a declared inductive bridge. The same holds for κ–τ (§8). This is the general
-shape, not a concession: **an institution may verify the propositions it actually proves, and the
-step to the proposition anyone cares about is a premise someone owns.**
+**An institution's authority ends at its declared scope, and there are three levels, not two.**
+Statistics already implements this and the vocabulary should not blur it:
+
+| | what it is | how it is carried |
+|---|---|---|
+| **numerics** | `(statistic, p_value)` | audit fields on the result resource |
+| **the immediate statement** | the `canonical_proposition` — a **domain** claim at a declared epistemic scope, warranted when p crosses α | `IsDerivedAs`, gated by `check_epistemic_scope` |
+| **the translation** | what it means for, say, the efficacy of a compound | a further claim across a **declared bridge**, owned by someone else |
+
+`check_epistemic_scope` (`crates/eigenius-statistics/src/validate.rs:883`) reads the head predicate's
+scope marker against the replication structure and fails the gate on `EpistemicScopeViolation`; an
+unmarked predicate defaults to `PopulationLevel`, the more restrictive admissibility. **The
+institution already refuses to warrant past its design.**
+
+**`Derived` attaches to the immediate statement**, as `App(Declared(analysis plan), Observed(sample
+set))` — the plan's specification is §4's bridge, scope marker included. **The translation is not a
+row.** It is one more `App` out, with its own declared leaf, and `is_fully_verified` reports false
+because that leaf is `Declared`. Calling a bridged claim `Derived` would re-collapse it into the
+opaque atom §4 exists to eliminate.
+
+**And an institution may verify the propositions it actually proves.** With its data committed as
+terms the numerics become decidable closed propositions, genuinely `Verified` — for *those*
+propositions. That changes nothing above: the immediate statement is still `Derived` relative to the
+plan, and the translation still needs its bridge. The same holds for κ–τ (§8).
 
 ## 6. Witnesses
 
