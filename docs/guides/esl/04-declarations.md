@@ -170,7 +170,7 @@ note: "Folklore; built into the kernel's Prop universe per D46 §5."
 
 The declaration commits a Resource of class `eigentt:Axiom` with:
 
-- `eigentt:axiom_statement` — the type expression, D47-encoded as a chain-resident `core:EigenTTType` value via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs) (see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape);
+- `eigentt:axiom_statement` — the type expression, D47-encoded as a chain-resident `eigentt:TypeExpr` value via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs) (see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape);
 - `eigentt:axiom_justification` (optional) — the `note:` string.
 
 At env-build time the kernel's `build_axiom_env` walks every layer in the active chain, decodes each axiom's `axiom_statement` against the universe ladder, and registers the axiom's IRI as an opaque constant in the type-checking environment. From that point the axiom is citable from any program in the chain.
@@ -404,11 +404,30 @@ Indexed inductives in `Prop` also enable the [singleton-elimination rule](07-typ
 
 ### Wire shape
 
-Indices land on `core:indices` (array of `InductiveParam` resources, parallel to `type_params`), result sort on `core:result_sort` (string: `Prop` / `Set` / `Type:N`), and each typed ctor on `core:ctor_type` (the full Π-telescope D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs); see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape). Non-indexed declarations omit all three fields, preserving the pre-Layer-2 wire shape.
+Indices land on `core:indices` (array of `InductiveParam` resources, parallel to `type_params`), result sort on `core:result_sort` (a `core:Level` value — `{"ctor": "Zero"}` for `Prop`, `Succ(Zero)` for `Set`, and `Param`/`Max`/`IMax` for the polymorphic cases; it carried a *string* `Prop` / `Set` / `Type:N` until eigenius#188, a grammar that could not express a level variable), and each typed ctor on `core:ctor_type` (the full Π-telescope D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs); see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape). Non-indexed declarations omit all three fields, preserving the pre-Layer-2 wire shape.
 
-You don't author the `core:EigenTTType` value directly — the compiler produces it from the `forall (n : core:Nat) => ...` source you write — but understanding that it exists as a first-class chain value explains why indexed inductives can express dependencies in the first place: the constructor's type telescope is *data* the kernel reads back out of the layer at type-check time, not implicit elaboration.
+You don't author the `eigentt:TypeExpr` value directly — the compiler produces it from the `forall (n : core:Nat) => ...` source you write — but understanding that it exists as a first-class chain value explains why indexed inductives can express dependencies in the first place: the constructor's type telescope is *data* the kernel reads back out of the layer at type-check time, not implicit elaboration.
 
 Source: [`parse_data_index_telescope`](../../../kernel/src/esl/parser.rs), [`compile_data`](../../../kernel/src/esl/compile.rs), [`decode_indices` and `decode_result_sort`](../../../kernel/src/program/ground.rs).
+
+### An inductive cannot be redefined
+
+A later layer may **not** redeclare a `core:InductiveType` with a different body. The commit is
+refused with `InductiveRedefinition`, naming the IRI (eigenius#229, [D79 §2.3](../../design/d79-the-representation-of-inductive-types.md)).
+
+This is inductives only. Classes and properties stay redefinable, and redeclaring a class with a
+parent added is a load-bearing modelling idiom — it is how the WordNet↔UMLS lexicon alignment and
+`claim-kind-alignment.esl` work.
+
+The asymmetry is not arbitrary. For a class, "add a parent" is a *monotone* edit: nothing that was
+true stops being true. An inductive admits no monotone edit, because its constructors have no
+identity apart from it — redefining the type replaces the whole constructor set at once, and every
+committed term mentioning the type silently means something else afterwards.
+
+Re-loading an identical declaration is **not** a redefinition. The check compares canonical
+Eigon-CBOR, so re-seeding a bootstrap ontology — which shadows every inductive it declares with a
+byte-identical body — passes. Declare a new inductive under its own IRI when you need a different
+shape.
 
 ## 4.5a. Multi-class `data` declarations — marker classes (D52 §12 #8)
 
@@ -451,7 +470,7 @@ The emitted `core:InductiveType` resource's `core:is_a` array contains `core:Ind
 
 ### Compatibility with other `data` axes
 
-The extras list is orthogonal to the parametric / indexed / sized axes of [§4.5](#4-5-data-inductive-types) and composes with all of them:
+The extras list is orthogonal to the parametric / indexed axes of [§4.5](#4-5-data-inductive-types) and composes with both:
 
 ```esl
 data ex:WeightedTree(A : core:Set) : core:Nat -> Set, ex:Persistable, ex:Auditable {

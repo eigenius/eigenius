@@ -2,7 +2,7 @@
 
 *Status: design memo · **implemented** June 2026*
 
-*Companion documents: [D39 justification logic](d39-justification-logic.md), [D46 Prop universe + proof irrelevance](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D49 ChainWitness machinery](d49-chainwitness-machinery.md). Background: Artemov & Fitting, *Justification Logic* (2020), in `references/publications/`.*
+*Companion documents: [D39 justification logic](d39-justification-logic.md), [D46 Prop universe + proof irrelevance](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D49 ChainWitness machinery](d49-chainwitness-machinery.md). Background: Artemov & Fitting, *Justification Logic* (2019), in `references/publications/`.*
 
 *This memo specifies a small, foundational capability: letting a proven `ReasoningSentence` be cited as a **lemma** in a later sentence's justification, instead of re-inlining its sub-proof. It adds no logical power — inlining and lemma-citation are equivalent — but it is the prerequisite for layered proofs (lemmas → theorems) at any scale. It also fixes a concrete gap: the witness emitter does not currently admit a bare `ReasoningSentence`, so a sentence cannot cite another today. The memo's second half answers a deeper question raised in scoping — consistency checking is logic-dependent, so what does the institution's choice of justification logic actually give us?*
 

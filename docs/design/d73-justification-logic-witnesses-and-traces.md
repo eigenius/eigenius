@@ -2,7 +2,7 @@
 
 *Status: design memo · `2026-08-21`. **Supersedes [D39](d39-justification-logic.md).***
 
-*Reference: Artemov & Fitting, *Justification Logic*, 2020 (`references/publications/justification-logic-artemov-fitting-2020.txt`).
+*Reference: Artemov & Fitting, *Justification Logic*, 2019 (`references/publications/justification-logic-artemov-fitting-2020.txt`).
 Depends on D46 (Prop + proof irrelevance), D47 (the TypeExpr codec), D48 (indexed inductive families),
 [D49](d49-chainwitness-machinery.md) (witness machinery), [D6b](d6b-reasoning-trace-schema.md) (the epistemic cluster),
 [D68](../notes/d68-claim-kinds.md) (the two-axis claim), [D72](d72-declaration-provenance.md) (agent vs warrant).*

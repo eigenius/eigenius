@@ -111,7 +111,7 @@ Pattern-matching shapes that fit neither case are rejected with `cannot eliminat
 
 ### Wire shape for indexed declarations
 
-The compiler emits the constructor's full Π-telescope (parameters + indices + arguments + conclusion) as a chain-resident `core:EigenTTType` value on the constructor resource's `core:ctor_type` property; the kernel reads it back at type-check time via the [D47 decoder](../../design/d47-chain-mirrored-eigentt-type-fragment.md). This is why indexed inductives can express dependencies the surface grammar doesn't directly cover — the dependency is encoded in the type expression, which is data the kernel decodes from the layer rather than implicit elaboration. See [§4.5 "Indexed"](04-declarations.md#indexed-d48-indexed-families) for the ESL surface and the wire-shape pointer.
+The compiler emits the constructor's full Π-telescope (parameters + indices + arguments + conclusion) as a chain-resident `eigentt:TypeExpr` value on the constructor resource's `core:ctor_type` property (declared `core:inductive` since eigenius#229, so the validator type-checks it rather than treating it as opaque JSON); the kernel reads it back at type-check time via the [D47 decoder](../../design/d47-chain-mirrored-eigentt-type-fragment.md). This is why indexed inductives can express dependencies the surface grammar doesn't directly cover — the dependency is encoded in the type expression, which is data the kernel decodes from the layer rather than implicit elaboration. See [§4.5 "Indexed"](04-declarations.md#indexed-d48-indexed-families) for the ESL surface and the wire-shape pointer.
 
 ### Pattern unification
 
@@ -122,10 +122,22 @@ Constructor conclusions like `cons : forall (n : Nat) => A -> Vec(A, n) -> Vec(A
 Inductive types are introduced by `data` declarations ([§4.5](04-declarations.md)). Internally they're a kernel construct:
 
 ```rust
-Exp::Inductive(InductiveDecl)             // the type-former declaration
-Exp::InductiveType(Arc<InductiveDecl>, Vec<Exp>)  // applied to params
-Exp::InductiveCtor(Arc<InductiveDecl>, String, Vec<Exp>)  // constructor application
+Exp::Const(Iri, Vec<Level>)               // the type-former, by NAME
+Exp::InductiveCtor(Iri, Name, Vec<Exp>)   // constructor application
 ```
+
+**These carry an IRI, not a declaration** (eigenius#229, D76 Phase B). There used to be an
+`Exp::Inductive(InductiveDecl)` holding the declaration inline, and an `Exp::InductiveType`
+applying it to parameters; both are gone. A type-former is now a `Const` naming the inductive,
+applied to its parameters through the ordinary `App` spine — which is what the D47 wire has always
+carried — and the layer chain resolves the name to a declaration (`Env::lookup`). Inlining the
+declaration meant the codec had to *decode* a target inductive, and every constructor type of it,
+merely to build a reference to it.
+
+A constructor's identity is the pair `(inductive IRI, constructor name)`. Constructors have **no
+IRI of their own**: they are closed — a type's constructors are exhaustively given by its
+declaration — which is exactly what distinguishes them from resources, where anyone may add an
+instance in a later layer. See [D79 §2.2.1](../../design/d79-the-representation-of-inductive-types.md).
 
 An inductive type is defined by its constructors. `data Nat { zero, succ(Nat) }` introduces `Nat` along with two constructors (`zero` of type `Nat`, `succ` of type `Nat → Nat`). Recursive references are allowed — `succ` mentions `Nat` in its argument list.
 
@@ -182,19 +194,21 @@ These two are the only kernel `Val` constructs that depend on layer state. Every
 - **Π-types** — surface as `program ... : I -> O` ([§4.7](04-declarations.md)). Inhabited by lambdas ([§5.3](05-expressions.md)).
 - **Σ-types** — surface as `class` declarations ([§4.2](04-declarations.md)). Inhabited by `Construct` and `Pair` ([§5.6](05-expressions.md), [§5.12](05-expressions.md)).
 - **Inductive types** — surface as `data` declarations ([§4.5](04-declarations.md)). Inhabited by constructor application ([§5.2.1](05-expressions.md)). Consumed by `match` ([§5.5](05-expressions.md)).
-- **Sized types** — bounded binder syntax ([§4.5](04-declarations.md), [§4.6](04-declarations.md)). The TSO solver verifies size relationships during type-check.
+- **Indexed families** — `data` declarations with an index telescope ([§4.5](04-declarations.md)). The constructor's full Π-telescope is carried on-chain as `core:ctor_type` (§7.6), which is what lets an index depend on an earlier argument.
+
+Sized types are **not** a surface form: they were retired with codata in eigenius#218, and the size-constraint solver they needed was removed unwired in eigenius#139.
 
 ## 7.11. Further reading
 
 - Coquand, T., Kinoshita, Y., Nordström, B., & Takeyama, M. (2009). [**A simple type-theoretic language: EigenTT**](https://www.cambridge.org/core/books/abs/from-semantics-to-computer-science/simple-typetheoretic-language-minitt/21451A12E2E24A1F51C82421B066824A). In Y. Bertot, G. Huet, J.-J. Lévy, & G. Plotkin (Eds.), *From Semantics to Computer Science: Essays in Honour of Gilles Kahn* (pp. 139–164). Cambridge University Press. <https://doi.org/10.1017/CBO9780511770524.007>. The EigenTT chapter — the lineage we follow for the term/value split, NbE conversion, and bidirectional checking. Eigenius extends EigenTT substantially with the additions documented in D9, D11, D18, D19; the small calculus in the chapter remains the cleanest entry point to the conversion engine's shape.
 - [D9 — NbE unification and type extensions](../../design/d9-nbe-unification-and-type-extensions.md): capability modes, ground type resolution, and the EigenTT extensions the kernel ships.
 - [D18 — Ontology-as-types resolution](../../design/d18-ontology-as-types-resolution.md): the bridge mechanism described in chapter 6 with type-theoretic detail.
-- [D19 — Inductive and sized types](../../design/d19-inductive-types.md): the formal positivity check, sized recursion rules, and recursor derivation.
+- [D19 — Inductive and sized types](../../design/d19-inductive-types.md): the formal positivity check and recursor derivation. Its sized-recursion half is retired (eigenius#218).
 - [`kernel/src/nbe/term.rs`](../../../kernel/src/nbe/term.rs) and [`kernel/src/nbe/val.rs`](../../../kernel/src/nbe/val.rs): the AST shapes for the kernel's terms and values.
 - [nanoda_lib](https://github.com/ammkrn/nanoda_lib) — Chris Bailey's Lean 4 kernel implementation in Rust, which influenced the inductive-type design. The same library Eigenius integrates as the Lean institution checker (see [D28 §8.1](../../design/d28-lean-4-as-institution.md)).
 - [*Type Checking in Lean 4*](https://ammkrn.github.io/type_checking_in_lean4/) — the design notes for Lean's kernel, accompanying nanoda_lib. Useful background on universe checking, positivity, and recursor derivation.
 - Abel, A. (2010). [**MiniAgda: Integrating Sized and Dependent Types**](https://arxiv.org/abs/1012.4896). In *Workshop on Partiality and Recursion in Interactive Theorem Provers (PAR 2010)*, EPTCS 43, pp. 14–28. <https://doi.org/10.4204/EPTCS.43.2>. Was the foundational paper for the kernel's sized-types treatment. Sized types and codata were removed in eigenius#218; retained here as background for the technique.
-- [**MiniAgda**](https://github.com/andreasabel/MiniAgda) (Andreas Abel) — the prototype implementation accompanying the paper. The kernel's [`sized_rigid.rs`](../../../kernel/src/nbe/sized_rigid.rs) is a port of MiniAgda's `TreeShapedOrder.hs`. The companion Warshall meta-variable solver was ported and later removed (eigenius#139) — Eigenius sizes are written, not inferred. Available on [Hackage](https://hackage.haskell.org/package/MiniAgda).
+- [**MiniAgda**](https://github.com/andreasabel/MiniAgda) (Andreas Abel) — the prototype implementation accompanying the paper. The kernel once carried a port of MiniAgda's `TreeShapedOrder.hs` and of its Warshall meta-variable solver; both are gone (eigenius#139, eigenius#218), the solver having never acquired a caller. Retained here as the reference for the technique. Available on [Hackage](https://hackage.haskell.org/package/MiniAgda).
 - [**Agda — Sized Types**](https://agda.readthedocs.io/en/latest/language/sized-types.html) — the production-language documentation for the same machinery in Agda. Background for the technique in a production language. Eigenius does not implement sized types (eigenius#218).
 
 ---

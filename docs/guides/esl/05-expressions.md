@@ -39,7 +39,7 @@ succ(zero)
 cons(1, cons(2, nil))
 ```
 
-Bare-name function references that match a declared constructor compile to `program:CtorApply` with the constructor IRI in `function` and a positional `arguments` array. The kernel form is `Exp::InductiveCtor(decl, ctor_name, args)`.
+Bare-name function references that match a declared constructor compile to `program:CtorApply` with the constructor IRI in `function` and a positional `arguments` array. The kernel form is `Exp::InductiveCtor(iri, ctor_name, args)` — the *inductive's* IRI plus the constructor's name, which together are a constructor's identity (eigenius#229).
 
 **Type-check.** The constructor's declared signature gives the expected types for each arg.
 
@@ -293,7 +293,7 @@ This is the entry point for the platform's typed numerical surface. The full ref
 <a id="5-14a-type_expr-eigentt-type-expressions"></a>
 ## 5.14a. `type_expr(...)` — EigenTT type expressions as chain values (D47)
 
-The surface counterpart of `formula(...)` for the [D47 chain-mirrored EigenTT type fragment](../../design/d47-chain-mirrored-eigentt-type-fragment.md). A `type_expr(...)` block lets you embed an EigenTT type expression (a proposition in `Prop`, a function type, an inductive-ctor application, etc.) directly in any value position; the compiler parses it with the same `parse_type_expr` grammar `axiom` and `data` ctor types use, lowers it to a kernel `Exp`, and runs the D47 encoder to produce a chain-resident `core:EigenTTType` value:
+The surface counterpart of `formula(...)` for the [D47 chain-mirrored EigenTT type fragment](../../design/d47-chain-mirrored-eigentt-type-fragment.md). A `type_expr(...)` block lets you embed an EigenTT type expression (a proposition in `Prop`, a function type, an inductive-ctor application, etc.) directly in any value position; the compiler parses it with the same `parse_type_expr` grammar `axiom` and `data` ctor types use, lowers it to a kernel `Exp`, and runs the D47 encoder to produce a chain-resident `eigentt:TypeExpr` value:
 
 ```esl
 namespace screen     = "urn:eigenius:demo:screen";
@@ -330,7 +330,7 @@ The `type_expr(HasLowIC50(...))` expression compiles to a `Value::Json` carrying
 }
 ```
 
-…which the chain validator type-checks against `core:EigenTTType`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDerivedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
+…which the chain validator type-checks against `eigentt:TypeExpr`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDerivedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
 
 ### What grammar the inner expression accepts
 
@@ -382,7 +382,7 @@ What forces the pair: the DCG parser renders every definite description as `the(
 
 Authors *could* hand-write the tagged-dict JSON tree directly as a `Value::Json` literal, but in practice three-nested `App(ConstRef, LitString, …)` shapes get verbose quickly and the syntactic noise drowns out the proposition. `type_expr(...)` is to the D47 type fragment what `formula(...)` is to the D32 formula language: a Pratt-parsed inline sublanguage that compiles to the same wire shape the verifier consumes, with the syntactic shape an author actually reads.
 
-The two sublanguages target different chain types — `formula(...)` produces `formulas:FormulaTerm`, `type_expr(...)` produces `core:EigenTTType` — and they don't overlap: numerical institutions speak FormulaTerm, propositional / reasoning institutions speak EigenTTType. An ESL expression position can host either, depending on what the property's `class_types` constraint demands.
+The two sublanguages target different chain types — `formula(...)` produces `formulas:FormulaTerm`, `type_expr(...)` produces `eigentt:TypeExpr` — and they don't overlap: numerical institutions speak FormulaTerm, propositional / reasoning institutions speak `eigentt:TypeExpr`. An ESL expression position can host either, depending on what the property's `class_types` constraint demands.
 
 ### Compile target
 
