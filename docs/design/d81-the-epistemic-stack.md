@@ -296,15 +296,33 @@ lifecycle.
 The canonical verification story — a machine-checked proof — reaches the grade through a three-step
 path of which **only the first step exists**.
 
+**It is in the commit sequence.** `lean:qc_proof_check` declares **both** dispatch roles —
+`auto_on_load` and `on_demand` (`ontologies/lean/lean-institution.eigon.json`) — gated on
+`query_class = lean:LeanProofTerm`. So committing a proof term fires the checker through the same
+`dispatch_auto_on_load_for_layer` phase the reasoning institution uses, and a `Fails` verdict blocks
+the commit by the same mechanism (§2.4 route A step 2). Lean is not an on-demand-only query.
+
 | step | intended | actual |
 |---|---|---|
-| 1. Lean checks the proof term, returns a `Verdict` | `do_proof_check` (`crates/eigenius-lean/src/institution.rs:306`) | **exists** |
+| 1. Lean checks the proof term, returns a `Verdict` | `do_proof_check` (`crates/eigenius-lean/src/institution.rs:306`) | **exists**, and runs at commit |
 | 2. a `lean_to_reasoning` comorphism reifies a `reasoning:VerifiedPropositionView` | D49 §7 | **does not exist** — the identifier appears nowhere in the tree except one ontology comment |
 | 3. the witness emitter looks the view up by `source_verified_resource` and reads its `canonical_proposition` | D49 §7 | **does not exist** — `target_proposition_hash` (`kernel/src/layer/witness_index.rs:317`) has three slots: `canonical_proposition`, `reasoning:proposition`, and the `Asserts(iri)` default. The view is not among them |
 
 Nothing Lean-side stamps `reflection:VerifiedResource`, mints a `VerificationTrace`, or reifies a
 view — `grep` over `crates/eigenius-lean/` for all three returns nothing. A `Holds` verdict is a
 leaf resource. This is eigenius#160, open.
+
+**So the sharper statement is that the AutoOnLoad gate is used as a veto and not as a promoter.**
+Two institutions share the dispatch role and diverge on what a *pass* means:
+
+| | on `Fails` | on `Holds` |
+|---|---|---|
+| `reasoning:qc_validate_justification` | blocks the commit | **mints a `VerificationTrace`** (`crates/eigenius-reasoning/src/validate.rs:151`) |
+| `lean:qc_proof_check` | blocks the commit | commits the `Verdict` as provenance and **nothing else** |
+
+The asymmetry is not in the dispatch machinery, which is identical. It is that AutoOnLoad has no
+declared notion of a *post-condition on success* — what a passing gate is entitled to assert is
+decided by each handler's own code, and one of the two handlers decides nothing.
 
 **The receiving end is ready and nothing arrives on it.** `trace_category` *does* have its
 `VerificationTrace` arm (`kernel/src/layer/witness_index.rs:184`, added under eigenius#200), so the emitter half was
@@ -336,6 +354,9 @@ current. Intent embedded there is indistinguishable from specification.
 - The soundness of `Verified` rests on a **four-file conjunction** that nothing records (§2.4).
 - `Verified` has **two intended producers and one working one**; the Lean route's middle step was
   never built, and its consumer half was completed anyway (§2.4 route B).
+- **AutoOnLoad is a veto with no declared post-condition on success.** Two institutions share the
+  role and one promotes on `Holds` while the other does not; nothing in the mechanism says which is
+  correct (§2.4 route B).
 - An **ontology description asserts behaviour that does not exist** (§2.4 route B). Chain-resident
   artifacts read as current in a way design documents do not.
 
