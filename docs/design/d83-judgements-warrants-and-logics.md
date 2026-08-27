@@ -212,6 +212,41 @@ The `logic` parameter is what makes it general:
 
 A logic with no checker we hold cannot produce judgements here, whatever it produces elsewhere.
 
+### 1.1 The EigenTT case is already built
+
+The kernel's term language has an **annotation** constructor, `Ann(e, T)` — *"`e`, at type `T`"* —
+and its typing rule is exactly the rule proposed above:
+
+```
+check_infer(Ann(e, T))  =  infer T, require it to be a Sort;
+                           check e against T;          ← check mode, not infer
+                           return T
+```
+
+It exists because a Curry-style lambda has no synthesizable type: `λx. x` is not inferable bare but
+is inferable as `(λx. x : Prop → Prop)`. **Annotation is the bidirectional mode switch**, and it is
+runtime-erased — `eval(Ann(e, _)) = eval(e)` — so normal forms never contain it and it costs nothing
+semantically.
+
+**So for EigenTT, the fix is "require annotation", not "introduce a pairing".** The per-property
+exemptions §7 describes exist precisely because some values are stored as *bare* lambdas with their
+type in a neighbouring field; stored annotated, the existing inference path would have checked them
+with no new rule at all.
+
+**What annotation cannot do, and what `Judgement` is therefore for:**
+
+- **It cannot name a logic.** `Ann` is an EigenTT term, so it can express *"this EigenTT term at this
+  EigenTT type"* and nothing else. A Lean proof term checked by a Lean kernel is not an EigenTT term,
+  and the `logic` parameter is exactly the dimension annotation does not reach. §5's account of
+  external proof systems needs it.
+- **It cannot be cited.** An annotation is syntax inside a term and is erased on evaluation. §7 wants
+  a committed judgement to be a *citable object* — something a witness constructor can take as an
+  argument, and something that can be transported. That requires reification, which annotation is
+  designed to avoid.
+
+**`Ann` is therefore the EigenTT-internal case of `Judgement`, already implemented and already in
+check mode.** The design generalises it in one dimension rather than introducing a parallel notion.
+
 **One validation rule.** Every `Judgement`-ranged slot is decoded, its `type` checked as a type, and
 its `term` **checked against that type** — check mode, never infer. This replaces the
 proposition-slot special case, the separate definition-body rule, and every exemption carved out
@@ -475,13 +510,13 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
 
 ## 9. Open
 
-1. **`Judgement` versus `Ann`.** `Ann(term, typ)` already exists inside `Term` and has the same
-   shape. The difference is obligation, not structure — a `Judgement`-ranged slot must carry the
-   pair. Whether that warrants a distinct inductive, or whether the rule should simply require `Ann`
-   in those slots, is undecided.
-2. **Duplication.** A self-contained judgement stores its type, so a proof of a large proposition
-   stores that proposition twice. The alternative — naming a sibling slot — reintroduces the
-   cross-slot dependency §1 removes. Unresolved.
+1. ~~**`Judgement` versus `Ann`.**~~ **Resolved — see §1.1.** For the EigenTT lane the annotation
+   constructor already is the judgement, and the change is *"require annotation"* rather than
+   *"introduce a pairing"*. `Judgement` survives only for what annotation cannot express: the logic
+   parameter, and reification as a citable object.
+2. ~~**Duplication.**~~ **Not a new cost.** An annotated term already carries its type inline, so
+   whatever duplication a judgement introduces is the duplication annotation has always had, and it
+   is erased at runtime. This stops being an argument against the design.
 3. **Where the reproducibility declaration lives** (§4) — on the procedure resource, on the
    institution, or on the trace kind.
 4. **How provenance and warrant are carried** now that they are independent: two fields, or `is_a`
