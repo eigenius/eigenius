@@ -37,10 +37,18 @@ this document concrete rather than architectural taste — the system already st
 already stores things that are supposed to be evidence for them, and has to decide what that evidence
 licenses.
 
-**External logics participate as institutions** (§6), in the Goguen–Burstall sense [GB92]. One is
-built: a Lean 4 verification institution, where Lean proof terms are committed as resources and
-re-checked in-process by `nanoda_lib` [ND], a Lean kernel reimplementation. Others exist for
-statistics and for prose-to-proposition encoding.
+**External logics participate as institutions** (§6), in the Goguen–Burstall sense [GB92]. Two are
+built: a **Lean 4 verification institution**, where Lean proof terms are committed as resources and
+re-checked in-process by `nanoda_lib` [ND], a Lean kernel reimplementation; and a **statistics
+institution**, which runs a declared analysis plan against committed observations.
+
+**Not everything that produces claims is an institution.** A prose-to-proposition **encoding
+pipeline** turns documents into typed propositions, and was reassigned from the institution protocol
+to a *service operation* on independent grounds before this design was written. §6's criterion agrees:
+the pipeline has no satisfaction relation of its own, so it is a producer of claims rather than a
+logic, and §4 places its outputs — `Computed` for the deterministic parse, `Sampled` for the
+LLM-mediated steps within it. This document takes that downgrade as settled and explains it, rather
+than proposing it.
 
 **The system already implements justification logic** [AF19] as chain vocabulary: an inductive family
 `JustifiedBy(j, P)` whose constructors are the introduction rules, over an algebra of justification
