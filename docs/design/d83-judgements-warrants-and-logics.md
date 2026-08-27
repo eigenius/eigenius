@@ -453,9 +453,11 @@ established: `Declared` when the plan's author asserts it (the common case); `Ve
 *is* an EigenTT term, since determinism is then definitional; and resting on `Observed` runs when it
 comes from repeated executions agreeing, which is evidence about those runs and worth exactly that.
 
-**The regress terminates** at `Declared` and `Observed`, whose bridge is trust in an agent or
-instrument reliability rather than a further proposition — the same place §6's witness oracle bottoms
-out. One termination mechanism, not two.
+**The regress terminates** at `Declared` and `Observed`. Neither carries a bridge of its own: a
+declaration establishes that an agent asserted something, an observation that a recording happened,
+and any premise licensing more than that is **supplied by whoever wants the conclusion**, as a further
+`Declared` leaf. So the chain of premises bottoms out in attributions — the same place §6's witness
+oracle does. One termination mechanism, not two.
 
 ### 4.1a Sampling is substrate-independent
 
@@ -769,10 +771,13 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
    is *provenance of the observation*, not a second leaf, so a sampled outcome is a bare `Observed`
    ground — the same ground an instrument reading has. `Computed` and `Sampled` are therefore names
    for whether an application could be formed, and the grounds are `Verified`, `Observed`, `Declared`.
-   What remains genuinely open is whether **instrument reliability** should become an explicit
-   declared premise on an observation, parallel to a plan's `I → O` specification. It is the same
-   shape, but it changes how every observation is recorded, and nothing has been checked against
-   consumers that assume `Observed` is unconditioned.
+   An earlier draft left open whether *"instrument reliability"* should be a first-class premise on
+   an observation. **That question was malformed and is withdrawn.** The phrase was invented here as
+   a plausible bridge for the `Observed` row; it appears in neither PROV nor the chain vocabulary,
+   and it contradicts §4 — if `Sampled` and `Observed` are one ground they cannot have different
+   bridges. The general rule already covers the case: any premise licensing generalisation from an
+   observation is a `Declared` leaf with an owner, whether it concerns a calibration, a population,
+   or a plan's `I → O` specification. Instruments are not structurally special.
 6. ~~**Cross-claim circularity.**~~ **Resolved — see §4.3.** A well-foundedness condition rejects a
    premise whose support transitively includes it, checked one step for the case that arises, and
    vacuous on `Declared` premises where justification logic requires self-reference to stay legal.
