@@ -595,7 +595,7 @@ and the self-attesting `Derived` arm (§2.3) — both exist because the trace th
 witness through was never produced.
 
 **The witness index was to be materialised**: *"Use `OnceLock<BTreeMap<WitnessKey, ()>>` on the
-Layer"* (D49 §3, §6). Nothing is. The filename `witness_index.rs` is the residue, which is why
+Layer"* (D49 §3, §6). Nothing is. The filename `kernel/src/layer/witness_index.rs` is the residue, which is why
 §3.4 has to say "despite the name, no index is materialised".
 
 **WASM was the primary intended runtime**, not a speculative third value — D14 §12 specifies
