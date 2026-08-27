@@ -71,7 +71,7 @@ in three Rust lists (§5.2).
 
 ## 1. The concept inventory
 
-### 1.1 The four-way distinction is encoded seven times
+### 1.1 The four-way distinction is encoded nine times
 
 Every row below is a distinct artifact naming *declared / observed / derived / verified*. They are
 not synonyms — each occupies a different syntactic category, listed in the third column — but
@@ -86,6 +86,35 @@ nothing in the system states the mapping between them in one place.
 | 5 | `witness:Is{Declared,Observed,Derived,Verified}As` | **inductive predicate** — the proposition | `ontologies/reasoning/reasoning.esl` |
 | 6 | `JustifiedBy.{declared,observed,derived,verified}` | **constructor** — the certificate | same |
 | 7 | `Grade::{Declared,Observed,Derived,Verified}` | **crate enum** | `crates/eigenius-reasoning/src/grade.rs:69` |
+| 8 | `JustificationTerm.{Declared,Observed,Derived,Verified}Evidence` | **constructor** — the evidence term | `ontologies/reasoning/reasoning.esl` |
+| 9 | `Ground::{Declared,Observed,Derived,Verified}` | **crate enum**, mapping *from* row 8's ctor names | `crates/eigenius-reasoning/src/project.rs:71` |
+
+Rows 8 and 9 were missed by the first pass and found by asking what *other* epistemic categories
+exist. Row 8 matters: `JustifiedBy`'s grade-carrying constructors (row 6) each take a `witness:Is*As`
+(row 5), while `JustificationTerm`'s evidence constructors (row 8) are the *justification* side of
+the same four-way. Row 9 is a second dead-ish projection alongside row 7, reading row 8 by
+constructor **name**.
+
+### 1.1a Axes that are *not* repeats of the four
+
+Distinguished here because conflating them with §1.1 is how a redundancy count inflates.
+
+| vocabulary | axis it measures | relation to the four |
+|---|---|---|
+| **`Warrant::{Declared, Parsed}`** (`crates/eigenius-reasoning/src/grade.rs:83`) | **what warrants the assertion** | **finer than the grade** — both project to `Declared` via `Warrant::grade()`. `#[non_exhaustive]`, documented as *"the growth axis"* |
+| `enc:Claim` kinds — `Finding`, `Observation`, `Classification`, `Hypothesis`, `Suggestion`, `Assertion` | **discourse role** | orthogonal by design (§2.1) |
+| `institution:Verdict` — `Holds` / `Fails` / `Undecidable`, plus `VerdictReading`, `VerdictPredicate`, `ClaimVerdict` | **a gate decision** | not a grade; one tri-state in four representations |
+| `objective:WitnessKind` | how a milestone is *expected* to be witnessed | *"operational planning metadata with no reflection analog"* — a third sense of "witness" |
+| `objective:acceptance_grade` | the **target** grade of an open goal | reuses `reflection:EpistemicStatus` with `allows_only`; explicitly distinguished from `epistemic_status`, the **actual** grade |
+| `lexicon:grade` | the grade of a lexical entry | reuses the same individuals — *"not a parallel enum"* |
+| `enc:confidence` | pipeline confidence, 0..1 | *"Advisory; not a grade"* |
+| `enc:SelectionAuthority`, `BindingAuthority`, `GapDisposition`, `CutKind` | who chose, and what became of what could not be explained | the abductive record (§6) |
+
+**`Warrant` is the one that matters**, because it is the vocabulary §3.5 of D82 says is missing,
+already prototyped: two distinct *relations between a proposition and its evidence* — the source
+asserts it, versus the parser produced it from a span — collapsing to one grade because the grade
+cannot express the difference. It lives in one crate, in a Rust enum, marked as an axis expected to
+grow.
 
 Two observations, both mechanical:
 
