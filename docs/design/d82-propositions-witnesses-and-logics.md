@@ -55,9 +55,17 @@ of a proof-carrying type holds a term. Justification logic generalizes that posi
 checking is one. `witness:Is*As` are already `Prop`-valued inductives with **zero constructors**
 sitting in exactly that position — the design is present; only its ownership is wrong.
 
-**P3 — A logic owns its witnesses.** The rules by which a warrant is admitted belong to the logic
-that defines the warrant. The kernel's job is to hold the proposition and to check terms in the one
-language it owns.
+**P3 — The four categories are kernel-core; a logic owns *refinements* of them.** An earlier draft
+of this principle read *"a logic owns its witnesses"*, which would have let each institution mint its
+own stratification. The evidence does not support that, and §2a sets it out: **every extension the
+system has actually attempted is a refinement that projects onto the four**, and nothing anywhere
+asks for a fifth.
+
+So an institution declares a witness kind **together with the category it projects to**. The
+projection is declared, checkable, and is precisely the *"which relation"* §3.5 says is missing — a
+refinement **is** a named relation between a proposition and its evidence.
+
+The kernel keeps the four; it does not keep the list of ways to reach them.
 
 **P4 — The kernel owns exactly one witness kind.** Where the kernel can type-check a term against a
 proposition in EigenTT, that *is* verification, and needs no institution. Everything else is a
@@ -94,6 +102,37 @@ N implementors — is the kernel change this document needs. It is also the **on
 Abductive selection does not, unless one is supplied. Both produce chain-resident warrant records;
 only one is an institution.
 
+### 2a. Do the four need to expand?
+
+**No — on the evidence, and the refinement model is what the tree has been reaching for.**
+
+| pressure point | what it did |
+|---|---|
+| `Warrant::{Declared, Parsed}` | two *different* relations — the source asserts it; the parser produced it from a span — **both projecting to `Declared`** via `Warrant::grade()` |
+| `ExternalExecutionTrace` (eigenius#205) | a **fifth trace kind** added, mapped onto an **existing** grade. The refinement pattern already working, in a Rust `match` |
+| the literature-warrant climb (`Warrant`'s own doc) | a `reference:Citation` keeps the grade at *"Declared-but-attested"* — a qualified `Declared`, not a new one |
+| `objective:acceptance_grade` | reuses `reflection:EpistemicStatus` with `allows_only`, and says so: *"not a parallel enum"* |
+| `lexicon:grade` | same |
+| κ–τ (arXiv:2608.08192) | *"commit-worthy under Π at τ"* — a **qualified** warrant; and its suspension is a **non-assertion**, not a fifth grade |
+| the encoding pipeline's three propositions | a **subject** problem (§3.5), not a category problem — it needs *which relation*, not *which fifth grade* |
+
+Two negative checks:
+
+- **Nobody minted a fifth individual.** `grep epistemic:` over the whole ontology corpus returns
+  exactly four.
+- **No defeat, retraction or contestation status exists** — the usual pressure point for a fifth in
+  defeasible systems. The only `defeat`/`superseded` hits in the corpus are grammar prose and
+  schema.org boilerplate.
+
+D73 §1.2 already settled the matter from the other side, after the one attempt to make something
+else canonical was withdrawn: *"the four epistemic resource classes … `DeclaredResource requires
+declared_by` is a well-formedness rule about a resource and its trace, and **it stands unchanged**."*
+
+**The refinement model is safe precisely because it does not assume completeness.** If a fifth
+category is ever genuinely needed, the signal is a declared witness kind whose author cannot state a
+projection — a declaration that fails rather than a stratification that quietly forks. The
+architecture makes the need for expansion **detectable**, which is more than the current one does.
+
 ---
 
 ## 3. The target shape
@@ -103,7 +142,7 @@ only one is an institution.
 | tier | discharges a witness by | grade it can reach | examples |
 |---|---|---|---|
 | **kernel** | type-checking a term against the proposition | `Verified` | a `JustifiedBy` certificate; any EigenTT derivation |
-| **institution** (has ⊨) | evaluating its own satisfaction relation | its own, declared | statistics, Lean, κ–τ |
+| **institution** (has ⊨) | evaluating its own satisfaction relation | a **declared refinement** projecting onto one of the four | statistics, Lean, κ–τ |
 | **selection producer** (no ⊨) | recording a constrained choice and its authority | `Declared`, with an auditable record | the encoding pipeline |
 
 The middle tier is where the current protocol lives and the outer two are the ones it does not
@@ -254,11 +293,12 @@ S1 before S2 is the only hard ordering. S2 alone would already close #160.
    recompute-checkable, Lean's proof term is re-checkable, κ–τ's score is recomputable — but nothing
    in the protocol *requires* a witness to be either. D54 §4.3's principle
    (*"lemma-citability ⇔ proposition-bearing + kernel-warranted"*) suggests it must.
-3. **Does `Verified` stay a grade, or become "witnessed by the kernel"?** Under P4 they are the same
-   thing, which would make the fourth grade a derived notion rather than a primitive.
-3a. **If the four categories move to the reasoning institution (P5), what does the kernel call its
-   own witness kind?** It needs one — the term-checked position of P4 — and calling it `Verified`
-   re-imports the stratification P5 just exported.
+3. ~~**Does `Verified` stay a grade, or become "witnessed by the kernel"?**~~ **Resolved by P3/§2a.**
+   The four are kernel-core, so `Verified` stays a grade *and* the kernel's own term-checking is a
+   refinement projecting onto it. No conflict.
+3a. ~~**What does the kernel call its own witness kind?**~~ **Resolved with 3.** The kernel's
+   term-checked position is the refinement `Verified` is reached by when the kernel itself
+   discharges it — one refinement among the possible ones, and the only one the kernel supplies.
 4. **What happens to `epistemic_status` once relations are declared?** It is currently written by one
    site and read by none; either it becomes the declared vocabulary of §3.3a or it should be deleted.
 
