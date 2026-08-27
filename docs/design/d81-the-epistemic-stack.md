@@ -11,7 +11,7 @@ authority over what the system now is.
 | § | content | phase | state |
 |---|---|---|---|
 | 1 | the concept inventory | P0 | **done** |
-| 2 | four lifecycles | P1 | pending |
+| 2 | four lifecycles | P1 | **done** |
 | 3 | the boundary map | P2 | pending |
 | 4 | findings | P3 / P4 | pending |
 
@@ -162,6 +162,139 @@ and one trait, and the trait is used by one of them.
 
 ---
 
-## §§2–4
+## 2. Four lifecycles
+
+Each traced against an artifact that exists in the tree. The question is the same each time: from
+*something happened* to *a certificate can cite it*, what runs?
+
+### 2.0 Two carriers, computed from disjoint inputs
+
+Every lifecycle has **two independent carriers** of its grade, and nothing reconciles them.
+
+| carrier | how it is established | who reads it |
+|---|---|---|
+| **class membership** — `is_a reflection:*Resource` | asserted by the author, or inherited from a class that subclasses it | the validator's `requires` / `recommends` |
+| **witness admission** — a `WitnessKey` | computed by `layer_admits_witness` from traces and two hard-coded self-attesting classes | the type checker, when a `JustifiedBy.*` argument needs inhabiting |
+
+`layer_admits_witness` (`kernel/src/layer/witness_index.rs:66`) **never consults the epistemic
+classes.** Its self-attesting route matches on exactly two class IRIs —
+`reasoning:ReasoningSentence → Verified` and `reflection:InstitutionEmittedDerivation → Derived` —
+and its trace route matches on `trace_category`. `reflection:DeclaredResource` and its three
+siblings appear nowhere in `kernel/src/validation/` except test fixtures.
+
+So a resource may be `is_a VerifiedResource` and admit no witness, or admit a `Verified` witness
+while carrying no epistemic class at all. Both states validate.
+
+**The obligations the classes do impose are asymmetric**, and inverted with respect to how much
+evidence the grade implies:
+
+| class | `requires` | `recommends` |
+|---|---|---|
+| `DeclaredResource` | `declared_by` | `rationale`, `timestamp` |
+| `ObservedResource` | `source` | `source_irl`, `observed_at`, `timestamp` |
+| **`DerivedResource`** | **— nothing —** | `derivation` |
+| `VerifiedResource` *(⊂ Derived)* | `derivation`, `verification` | — |
+
+`DerivedResource` — the grade meaning *the kernel computed this* — is the only one of the four with
+no required property. That `derivation` is recommended rather than required is deliberate and
+documented at `kernel/src/validation/mod.rs:1518`: substrate-produced resources from `FIBER … INTO`
+and post-translation comorphism reify outputs "are derived by construction but may not have a
+kernel-generated `ProgramTrace` yet". The consequence stands regardless of the reason: nothing at
+commit distinguishes those from a resource that simply claims the grade.
+
+### 2.1 Declared — `demo/prose-to-formulas-v2/claims-intact.esl`
+
+```esl
+resource v2:claim_1 : encoding:EncodedClaim, encoding:Observation {
+    reflection:canonical_proposition = type_expr( … );
+    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
+}
+resource v2:trace_1 : reflection:DeclarationTrace {
+    reflection:resource = "urn:eigenius:demo:v2:claim_1";
+    …
+}
+```
+
+1. **Grade by class.** `enc:EncodedClaim : reflection:DeclaredResource`
+   (`ontologies/encoding/encoding.esl:366`) — inherited, not stated. `declared_by` is required and
+   present.
+2. **Two axes on purpose.** `encoding:Observation` here is a **discourse kind** (`enc:Observation :
+   enc:Claim`), not the epistemic `reflection:ObservedResource`. The ontology states the convention
+   at `ontologies/encoding/encoding.esl:377`: *"A landed claim carries BOTH axes as classes: `is_a = [enc:EncodedClaim,
+   enc:<Kind>]`"*. The word *Observation* therefore denotes two unrelated things one file apart.
+3. **Witness by trace.** `v2:trace_1` is a `DeclarationTrace` whose `reflection:resource` points at
+   the claim. `layer_admits_witness` takes the trace-attested route: `any_trace_targeting` finds it
+   (`reflection:resource` is `core:resource`-typed, hence in the triple index), `trace_category`
+   maps `DeclarationTrace → Declared`, and `emit_from_trace` builds the key from the *target's*
+   `canonical_proposition`.
+4. **Consumed by** `JustifiedBy.declared`, whose `witness:IsDeclaredAs(iri, P)` argument the checker
+   inhabits via `try_synthesize_chain_witness`.
+
+**Nothing requires step 1 and step 3 to agree.** The claim would validate without the trace, and the
+trace would grant its witness even if the claim carried no epistemic class.
+
+### 2.2 Observed — `experiments/publications/wrn-helicase/chain/08-phase3-invivo-mechanism.esl`
+
+```esl
+class wrn:XenograftTable : reflection:ObservedResource { … }
+```
+
+Same shape as Declared, one rung along: the grade arrives by subclassing, `source` is the required
+property, and admission is trace-attested through `ObservationTrace`.
+
+Both instance-level and class-level assertion are in use in the same file —
+`wrn:vivo_seed_control : bench:ToolArtifact, reflection:DeclaredResource` states its grade directly.
+Neither form is privileged.
+
+### 2.3 Derived — `reflection:InstitutionEmittedDerivation`, statistics
+
+The only lifecycle where the kernel both produces the resource and grants the witness.
+
+1. **Production.** `dispatch_auto_on_load_for_layer` (`kernel/src/commit/phases.rs:411`) fires the
+   institution's AutoOnLoad QueryClass during commit; statistics emits one derivation per ANOVA
+   effect, carrying `from_subject` (required) and `canonical_proposition` (recommended).
+2. **Witness, self-attesting.** `emit_from_institution_derivation`
+   (`kernel/src/layer/witness_index.rs:272`) reads `canonical_proposition` off the derivation and
+   keys `Derived` against the derivation's **own** IRI. No trace is consulted.
+3. **Silent on absence.** `canonical_proposition` is only *recommended*. A derivation without it
+   returns `None` — no witness, no error. The doc comment names two causes: "kernel merge dropped
+   it, or the institution didn't supply one".
+
+### 2.4 Verified — `reasoning:ReasoningSentence`
+
+1. **Witness, self-attesting.** `emit_from_reasoning_sentence`
+   (`kernel/src/layer/witness_index.rs:255`) grants `WitnessCategory::Verified` to **any**
+   `ReasoningSentence` whose `reasoning:proposition` hashes. It performs **no check that the
+   sentence's certificate validated.**
+2. **The guard is elsewhere.** `qc_validate_justification` is declared AutoOnLoad
+   (`ontologies/reasoning/reasoning.esl`), so it fires on every `ReasoningSentence` commit; a
+   `Fails` verdict becomes a `ValidationError { rule: InstitutionValidation }`
+   (`kernel/src/commit/phases.rs:460`) and blocks the commit. **Therefore any committed
+   `ReasoningSentence` has a validated certificate**, and step 1 may skip re-checking.
+
+**That invariant is load-bearing and is stated in no single place.** It is the conjunction of four
+facts in four files: the QueryClass's `dispatch_role`, the dispatch phase running it, `Fails`
+blocking the commit, and `emit_from_reasoning_sentence` relying on all three by omission. Nothing
+links them; nothing fails if a link is removed.
+
+One consequence is already known and belongs to a sibling document rather than here: merge ends at
+`store_layer` and never runs `dispatch_auto_on_load_for_layer` (D80 §3.3), so a `ReasoningSentence`
+materialised into a merge layer is not re-validated against the merged chain. It *was* validated —
+on its branch, against a different environment. That is D77's subject, not a defect of this
+lifecycle.
+
+### 2.5 What §2 establishes
+
+- The grade is carried twice, by mechanisms with **no common input and no reconciliation** (§2.0).
+- The obligation table is **inverted**: the grade implying the most machinery requires the least
+  (§2.0).
+- `Observation` denotes a discourse kind and an epistemic grade, one file apart (§2.1).
+- Two of the four grades are granted by **hard-coded class IRIs** in a kernel match, not by any
+  declared relation (§2.3, §2.4).
+- The soundness of `Verified` rests on a **four-file conjunction** that nothing records (§2.4).
+
+---
+
+## §§3–4
 
 Pending. See the plan.
