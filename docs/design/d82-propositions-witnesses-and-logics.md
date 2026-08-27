@@ -98,6 +98,38 @@ is generic in shape, but:
 Generalising it — recognition by **declared** witness type, categories owned by the declaring logic,
 N implementors — is the kernel change this document needs. It is also the **only** one.
 
+**P7 — A discharged witness is persisted.** In a system whose subject is propositions and their
+warrants, *the inhabitant of the proposition is the evidence* — the trace is only the raw material it
+was derived from. Storing the material and recomputing the conclusion on every read is what a
+database does; a proof system keeps the proof.
+
+**What was rejected was not this.** D66 slice 0 removed a materialised
+`OnceLock<BTreeMap<WitnessKey, ()>>` holding *every witness the layer could admit*, because it "cost
+memory proportional to the layer's trace count for the lifetime of the layer". That is an **eager
+index of all possible witnesses**. P7 persists the ones actually **discharged** — one per witness
+argument the checker filled — which is bounded by the number of certificates, not by the trace count.
+Different objects, different cost.
+
+**Persistence does not replace recomputation; it enables comparison.** This is what makes it worth
+doing rather than merely tidy:
+
+- today a witness is recomputed against the chain *as it now stands*, so the same key silently
+  yields the same answer in a chain where the names it depends on were rebound — D80 §2's
+  environment-blindness, undetectable because nothing recorded what was asserted;
+- with the discharge stored, the asserted witness and the recomputed one can be **compared**, and a
+  divergence is exactly the signal D77's rebound-set pass is trying to construct. Locally, per
+  certificate, without a chain walk.
+
+**And it makes the oracle auditable.** §2's P5 establishes that a witness is an *axiom the kernel
+asserts* — `Val::ChainWitness(key)`, an inhabitant of a zero-constructor type introduced by fiat. The
+system persists the trace, the verdict and the derivation, and keeps no record of the one step that
+is postulated rather than proved. That is backwards. A stored witness is the assertion on the chain
+with its stated reason, in the same form as everything else.
+
+**Cost accepted:** widening `WitnessKey` later (§7 Q1) becomes a migration rather than a no-op. Under
+the pre-production posture that is a reseed, and §5a.5's relation vocabulary should therefore land
+*before* P7 rather than after.
+
 **P6 — Not every warrant-producer is a logic.** An institution has a satisfaction relation.
 Abductive selection does not, unless one is supplied. Both produce chain-resident warrant records;
 only one is an institution.
@@ -352,6 +384,8 @@ other logics can reach it.
   κ–τ is the acceptance test.
 - **S4 — retire the kernel lists** (§3.3a) once S3 gives institutions somewhere to declare them.
 - **S5 — the selection-record protocol** (§3.4). Independent; can run any time after S1.
+- **S5a — persist discharged witnesses** (P7). After S1, because the relation belongs in the key
+  before anything is stored under it. Unlocks the drift comparison D77/D80 both need.
 - **S6 — split `reflection:Trace`** (§5a.2) and move the obligations onto refinements (§5a.3).
   Chain-vocabulary work, gated on S4 having somewhere to declare projections.
 
@@ -367,6 +401,8 @@ a declared form, not inventing a notion.
 
 1. **Does the witnessed relation belong in the key or beside it?** Widening `WitnessKey` re-forks
    every existing witness; a companion resource does not, but weakens the "witness is a term" story.
+   **P7 raises the stakes**: once discharges are persisted, this is a migration. Sequence the
+   relation vocabulary before persistence.
 2. **Can an institution's witness be trusted, or must the kernel re-check it?** Statistics is
    recompute-checkable, Lean's proof term is re-checkable, κ–τ's score is recomputable — but nothing
    in the protocol *requires* a witness to be either. D54 §4.3's principle
