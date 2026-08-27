@@ -13,7 +13,8 @@ authority over what the system now is.
 | 1 | the concept inventory | P0 | **done** |
 | 2 | four lifecycles | P1 | **done** |
 | 3 | the boundary map | P2 | **done** |
-| 4 | findings | P3 / P4 | pending |
+| 4 | provenance — why the shapes exist | P3 | **done** |
+| 5 | findings | P4 | pending |
 
 ---
 
@@ -505,6 +506,111 @@ been rebound.
 
 ---
 
-## §4
+## 4. Provenance
 
-Pending — P3 (provenance) then P4 (findings).
+**Everything in this section is quotation from the design corpus, not description of the system.**
+Per the method rule, a claim supported only by a design document is marked as one. §§1–3 stand
+without this section; it exists to answer *why* a shape is as it is, and — more usefully — to record
+which intentions were **abandoned**, since an abandoned intention usually marks something the plan
+had not anticipated.
+
+### 4.1 One encoding *was* canonical, and that was explicitly withdrawn
+
+D39 §8 made the justification term the canonical carrier and demoted the classes to a legacy path:
+the categories were to become *"structurally enforced projections from the `JustificationTerm`
+shape, rather than separate tags"*.
+
+**D73 §9 withdrew §8 in its entirety**, and replaced unification with deliberate separation:
+
+> *"One distinction to preserve: the four epistemic resource classes are **not** the category-of-a-term.
+> `DeclaredResource requires declared_by` is a well-formedness rule about a resource and its trace,
+> and it stands unchanged. What is withdrawn is the collapse of a justification term to a scalar."*
+> (D73 §1.2)
+
+The class-vs-`WitnessCategory` decoupling that §2.0 records as unreconciled is likewise a **recorded
+decision**, not an oversight — D54 §4.2 chose it because making `ReasoningSentence` a
+`VerifiedResource` would give it *"trace requirements it shouldn't have"*.
+
+**Rows 2 and 7 of §1.1 are unexplained anywhere in the corpus.** Neither the
+`reflection:epistemic:*` individuals nor `Grade`/`ClaimGrader` appears in any of the nine documents.
+
+### 4.2 The corpus specifies the opposite of §2.0's obligation table
+
+D6b §6.2 states `DerivedResource` **requires** `derivation`. The relaxation the code carries has no
+counterpart in the corpus, and D73 §3.2 treats the cases that motivate it as an **open defect rather
+than a design**: *"Each is a place where the chain plausibly knows something it cannot cite."*
+
+This does not make the code wrong — the implementation is the guiding artifact. It changes the
+character of the finding: the empty `requires` list is a **local relaxation that contradicts the
+spec**, not an evolved position.
+
+### 4.3 Promotion was specified — as a *kernel* responsibility, and never built
+
+§3.1.3 called the asymmetry "rejection is a contract, promotion is a convention". The corpus shows
+that division was deliberate, and that the missing half was assigned elsewhere:
+
+> *"If the Lean server accepts, **the kernel attaches the proof term as the resource's reasoning
+> trace and promotes the resource's epistemic status from derived → verified**."* (D14 §7.2)
+
+> *"On `Holds`, **the kernel emits**: 1. A `DerivedResource` … 2. A `ProgramTrace` resource (per D49
+> §6) pointing at the `DerivedResource`, so the witness index admits an `IsDerivedAs` entry."*
+> (D52 §6)
+
+The AutoOnLoad role owned rejection (D14 §9.1, D31 §6.3); the **kernel** was to own promotion. The
+kernel side was never built. The convention that fills the gap is each handler's own code.
+
+### 4.4 Abandoned intentions
+
+The most informative output of this pass. Each explains a seam §§1–3 found.
+
+**Uniformity was the design, and it is what was lost.** D49 §6 specified one emitter for all four
+families: *"In all four cases the witness emitter performs the same operation: locate the
+`canonical_proposition`-carrying chain resource, read the property, hash the encoded form, populate
+the witness index entry."* D49 §6 and D39 §4.2 explicitly intended **no** class-keyed arm for
+`ReasoningSentence` — its witness was to come from a `ProgramTrace` *"with no
+Reasoning-institution-specific dispatch in the witness emitter"*. That `ProgramTrace` was never
+produced (D54 §1), so the uniform emitter became three disjoint routes and two hard-coded class arms.
+
+**This explains §1.3.** The concept the ontology lacks — *trace kinds that ground a witness* — is the
+**residue of a uniformity that was supposed to make naming it unnecessary**. Nothing needed to say
+"these classes ground witnesses" while all of them did so identically through one property.
+
+**Statistics was designed with the kernel minting the trace** (D52 §6, §8, §9): a `Decidable`
+QueryClass whose `Holds` made the *kernel* emit a `DerivedResource` plus a `ProgramTrace`. The built
+system runs it AutoOnLoad, has the *institution* put derivations on `QueryOutcome.derivations`, and
+mints no `ProgramTrace`. **This is the origin of two seams at once** — the untyped channel (§3.1.1)
+and the self-attesting `Derived` arm (§2.3) — both exist because the trace the design routed the
+witness through was never produced.
+
+**The witness index was to be materialised**: *"Use `OnceLock<BTreeMap<WitnessKey, ()>>` on the
+Layer"* (D49 §3, §6). Nothing is. The filename `witness_index.rs` is the residue, which is why
+§3.4 has to say "despite the name, no index is materialised".
+
+**WASM was the primary intended runtime**, not a speculative third value — D14 §12 specifies
+institutions as WASM guest components against a WIT world. `runtimes:wasm` surviving with no
+implementation (§3.1.4) is the remains of the main plan, not an unfinished extra.
+
+**`QueryOutcome.derivations` post-dates the corpus.** D14 §8's trait returns a single `Resource`;
+D31 §6.3 enumerates one artifact per firing; D52 §10 records the multi-resource channel as *missing*
+— *"that fuller commit shape is the natural Phase 5.1 follow-on once the institution API supports
+multi-resource output cleanly"*. Nothing in the corpus discusses **typing** it. D54 §4.3 does state
+the principle the untyped channel now violates: *"lemma-citability ⇔ proposition-bearing +
+kernel-warranted"*, and *"Institution `Verdict`s are not lemmas."*
+
+**The only reconciliation ever proposed was withdrawn rather than replaced.** D39 §8 had
+`ValidateJustification` compute the epistemic category as part of admitting the term. D73 §9
+withdrew it; D73 §11.5 records it was never implemented. §2.0's "two carriers, no reconciliation" is
+the state left behind by that withdrawal.
+
+**`declared_by` was prose.** D6b §4.2's example carries `"declared_by": "Eigenius core team"`.
+D73 §3.1 records what changed it: on the WRN chain *"74 of them were the literal `\"esl-compiler\"`,
+so every `DeclaredEvidence` leaf bottomed out in a name for the compiler."* Rules 8 and 22 now force
+it to resolve to a `reflection:Agent`. **That tightening is what made the compiler a grade author**
+(§3.3): `stamp_declared` must synthesise `reflection:agent:unattributed` because its own stamp
+requires a resolvable agent.
+
+---
+
+## §5
+
+Pending — P4 findings, awaiting the adversarial pass.
