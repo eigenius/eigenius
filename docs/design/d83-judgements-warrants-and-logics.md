@@ -463,6 +463,42 @@ rebuildable from the relations, where a stamp is not**. If an index and the rela
 index is wrong by definition; if a stamp and the relations disagree, nothing says which is wrong —
 which is the current situation, and why grade-writing sites with no readers went unnoticed.
 
+**And recomputation is what creates §4.3's exposure.** Because a warrant is read at the current head
+rather than frozen at commit, adding a premise later can upgrade the evidence that was used to
+justify that very premise. The layer chain stratifies *citations* — a claim may only cite resources
+at or below its own layer — but it does not stratify *warrants*, because warrants are not stored.
+§4.3 is the condition that closes the gap.
+
+### 4.3 Well-foundedness: a premise may not rest on what it licenses
+
+**The exposure.** Suppose a claim `C` in layer 3 is computed under plan `f`, with `Reproducible(f)`
+not yet asserted, so `C` reads `Sampled`. In layer 5 someone asserts `Reproducible(f)`, citing `C`.
+`C` now re-reads as `Computed` — the premise exists — while `Reproducible(f)`'s own support contains
+`C`, whose warrant depends on `Reproducible(f)`. Nothing is established, and the layer order did not
+prevent it.
+
+**The condition:** *a premise's support may not transitively include the premise.* A justification
+that violates it is rejected at commit — a genuine well-formedness condition on justification terms,
+of the same kind as a positivity check on an inductive declaration.
+
+**It is cheaper than it sounds.** The general form needs the transitive expansion the support algebra
+does not have (§9.6), but the case that actually arises is one step: *does this premise's support
+contain a claim whose warrant depends on this premise?* Full closure is not required to catch a
+premise cited by the claims it licenses.
+
+**And it is vacuous exactly where justification logic requires self-reference to be legal.** A
+`Declared` premise has no support to inspect — its bridge is trust in an agent, not a further
+proposition — so the condition never bites on it. That is the right carve-out rather than a
+convenient one: Artemov's constant specifications may be **self-referential**, `c : A(c)`, and
+Kuznets showed self-referentiality is *unavoidable* for realising some S4 theorems in LP. Postulated
+self-reference is sound; **derived** circularity is not, and only the latter has support to inspect.
+
+**Mutual justification is not the escape hatch.** A mutual *inductive definition* is sound because a
+least fixed point makes the block denote something — an external construction. Mutual *justification*
+has no analogous construction: claims supporting each other establish nothing new. The kernel has no
+mutual inductive blocks in any case, but the analogy would fail even if it did, at exactly the point
+that makes mutual definition legitimate.
+
 ## 5. Institutions
 
 **An institution is a logic with a satisfaction relation the kernel cannot evaluate.** If the kernel
@@ -652,11 +688,11 @@ commitment/truth gap, which is what the pilot is *about*, so it should read as a
    row, including `IsComputedAs`. Either that witness attests the composite and its constructor takes
    the sub-warrants, or only `Declared`, `Observed` and `Verified` are grounds and the family shrinks
    from four to three. The second matches §4; it touches §6 and the certificate's constructor set.
-6. **Cross-claim circularity.** Nothing prevents a plan whose `Reproducible` claim is itself
-   established by a computation under that plan. It would appear as a cycle when a leaf is expanded
-   into the justification of the claim it names — but support is the normal form of **one** term and
-   does not chase leaves across claims, so such cycles are currently invisible. Detecting them needs
-   a transitive expansion the algebra does not have.
+6. ~~**Cross-claim circularity.**~~ **Resolved — see §4.3.** A well-foundedness condition rejects a
+   premise whose support transitively includes it, checked one step for the case that arises, and
+   vacuous on `Declared` premises where justification logic requires self-reference to stay legal.
+   What remains open is narrower: whether the one-step check is *sufficient*, or whether a
+   constructible case needs the full transitive expansion the support algebra lacks.
 
 ---
 
