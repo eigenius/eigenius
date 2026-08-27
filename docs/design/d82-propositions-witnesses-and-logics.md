@@ -578,6 +578,37 @@ for the defect D81 §5.2 found and could not characterise.
 
 ---
 
+### 5b.5 The implication, concretely: declared content launders into `Verified`
+
+The pieces above compose into a **live wrong answer**, reachable on the designed citation path:
+
+1. `DeclaredClaimGrader` writes a `reasoning:ReasoningSentence` whose own justification is
+   `DeclaredEvidence(declaring)` — someone asserted it (`grade.rs:260-270`).
+2. `emit_from_reasoning_sentence` mints `IsVerifiedAs(sentence_iri, P)` for **any** `ReasoningSentence`
+   with a hashable proposition (`witness_index.rs:262`). It never inspects that sentence's own
+   justification.
+3. A later sentence cites it with `JustifiedBy.verified` — `ChainRuleApplication`'s documented
+   lemma-citation path, *"the prior sentence is cited with `verified`"* (`grade.rs:542`).
+4. Its support is `{VerifiedEvidence(sentence_iri)}`, so **`is_fully_verified` returns `true`** for a
+   claim whose entire provenance is a declaration.
+
+Nothing in `project.rs` is at fault: it answers correctly about the leaves it is given, and the leaf
+is labelled `Verified` before it arrives. Every projection reads wrong in the **reassuring**
+direction — `is_fully_verified` says yes, and `leaves_of(term, Declared)` returns empty for a claim
+resting entirely on declarations.
+
+**Why this was not statable before §5b.** Under the old reading — `Verified` = *emitted by something
+we trust* — step 2 is defensible: a `ReasoningSentence` commits only if AutoOnLoad type-checked its
+certificate, so something *was* checked. What was checked is that the certificate is **well-formed**,
+which `JustifiedBy(DeclaredEvidence(x), P)` is. Once `Verified` means *the kernel holds a proof term
+for `P`*, step 2 is simply false, and the defect has a name (§5b.4: an inappropriate constant
+specification).
+
+**Priority.** S4a is the only item in §6 that closes an incorrect answer rather than tidying
+structure, and it needs no new vocabulary. It goes first.
+
+---
+
 ## 6. Sequencing
 
 **Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
@@ -586,6 +617,8 @@ architecturally tidy. D81 §5.6's own handoff — *"three dead artifacts to dele
 assertions to correct, three untested claims to pin, and one design question"* — is strand one, and
 is the part backed by measurement.
 
+- **S4a — key `Verified` to the checked certificate** (§5b.5). **First**: the only step that closes
+  a live wrong answer. Everything else below is structure.
 - **S0 — the deletions.** No design content; clears noise before anything moves.
 - **S1 — the witnessed relation** (§3.5). Everything else can be expressed once this exists; nothing
   should be built on a key that cannot say what it witnesses.
