@@ -1,6 +1,11 @@
 # D82 — Propositions, witnesses, and where logics live
 
-**Status: design.** No code. Rearchitecture of the epistemic machinery, taking
+**Status: superseded as a design by [D83](d83-judgements-warrants-and-logics.md); retained as the
+derivation record.** D83 states the target shape. This document is how it was reached — including
+several readings that were tried and withdrawn, each marked in place. Read it for *why* a decision
+went the way it did, not for what to build.
+
+**No code.** Rearchitecture of the epistemic machinery, taking
 [D81](d81-the-epistemic-stack.md) as its evidence base and the κ–τ pilot (arXiv:2608.08192) as its
 first external forcing case.
 
