@@ -470,6 +470,65 @@ So `WitnessKey` is not widened, and S5a's migration cost (§7 Q1) does not arise
 
 ---
 
+
+### 5b.4 Where the declarations are themselves wrong
+
+§5b.1's method — *find where Rust routes around the declared rule* — is half right. It found a real
+defect (S4a), but applied uniformly it **launders the ontology's mistakes into the design**. The
+declarations are evidence of intent, not authority; each one still has to survive the §5b
+definition. Three do not.
+
+**(i) `VerifiedResource subclass_of DerivedResource` is backwards.** `DerivedResource` is *"produced
+by a typed program from other resources"*; `VerifiedResource` is *"carries a machine-checked formal
+proof"*. A proof term is **checked, not produced** — a hand-written Lean proof was computed by no
+program. The subclass forces `VerifiedResource requires derivation`, i.e. a `ProgramTrace` pointer
+for something no program ran.
+
+The relation exists to make `IsVerifiedAs` coerce to `IsDerivedAs` at lookup (`witness_index.rs:1024`,
+D49 §4) — a **citation convenience encoded as a subsumption**. Under §5b the two answer different
+questions: `Derived` = what computed it; `Verified` = does the kernel hold a term that checks.
+Neither entails the other. Breaking the subclass costs the coercion, and the question that decides
+it is whether *verified ⇒ derived* is a real entailment or a shortcut. It is a shortcut: `Derived`
+requires a producing program and a proof term has none.
+
+**(ii) `reflection:epistemic_status` should be deleted, not wired up.** It carries `allows_only` over
+the four grade individuals, sits on `ProgramTrace`'s `recommends`, and is described as *"Epistemic
+status of the traced output"* — so **a trace declares which grade its output has**. That is exactly
+the self-nomination §5b rules out, one level down: an institution cannot nominate its own grade, and
+neither should its trace.
+
+So D81 §5.2's finding (*"the vocabulary exists, is chain-resident, and no Rust file reads it"*) has
+the **opposite** resolution from the one §5b.1 proposed. **The zero readers are correct; the
+declaration is the mistake.** The grade follows from the shape of the evidence — a checked proof
+term ⇒ `Verified`, a recorded kernel invocation ⇒ `Derived` — and needs no vocabulary, because a
+derived grade cannot be lied about.
+
+**S4 is therefore reversed**: delete `epistemic_status` and derive the grade from evidence, rather
+than replace `trace_category`'s match with a lookup that reintroduces the hole S4a closes.
+
+**(iii) The four grades answer three different questions.**
+
+| grade | `requires` | the question it answers |
+|---|---|---|
+| `DeclaredResource` | `declared_by` | **origin** — who asserted it |
+| `ObservedResource` | `source` | **origin** — where it came from |
+| `DerivedResource` | — | **process** — what computed it |
+| `VerifiedResource` | `derivation`, `verification` | **evidence** — does a checked term exist |
+
+Origin, process, evidence. One enum, three axes — which is what produced (i)'s bad subsumption and
+plausibly what D81 §1 was seeing when it found the four-way encoded nine times. §5b makes the split
+visible: institutions touch only the last two, and the first two are not institution outputs
+**because they are not derivations at all — they are attributions**.
+
+**The follow-through, not resolved here.** `JustifiedBy.{declared,observed,derived,verified}` treats
+the four as four of a kind. If two are attributions and two are proofs, they are not.
+`JustifiedBy.declared(w, P)` asserts `P` on the strength of someone having said so, which is not
+justification in Artemov's sense. Whether the J-family should carry attribution constructors at all
+is the question §2a's *"no evidence for a fifth category"* did not think to ask — it checked whether
+the four were **enough**, never whether they were **one kind**.
+
+---
+
 ## 6. Sequencing
 
 **Re-scoped by §5b.** The steps below were written before the `Verified`-means-proof-term decision;
@@ -485,9 +544,10 @@ is the part backed by measurement.
   makes the Lean gap (#160) a declaration error rather than an omission nobody notices.
 - ~~**S3 — institution-supplied witness synthesis.**~~ **Superseded by §5b.2.** An institution
   hands over a checkable proof term or it is `Derived`; there is no synthesis to supply.
-- **S4 — retire the kernel lists**, re-motivated: not "give institutions somewhere to declare
-  projections" but **read the vocabulary the ontology already declares** — `epistemic_status` in
-  place of `trace_category`'s match. Strand one; D81 §5.2 earned it.
+- **S4 — derive the grade from the evidence** (§5b.4(ii)). Reversed twice over: not "let
+  institutions declare projections" (S3, struck), and not "read `epistemic_status`" either — that
+  property lets a trace nominate its own grade and should be **deleted**. `trace_category`'s match
+  goes, replaced by the shape of the evidence, not by a lookup.
 - **S4a — key `Verified` to the checked certificate.** Replace
   `emit_from_reasoning_sentence`'s `is_a` test (`witness_index.rs:262`) with the `VerificationTrace`
   the ontology already requires. Closes D81 §5.2's standing finding and the §3.5 subject problem in
