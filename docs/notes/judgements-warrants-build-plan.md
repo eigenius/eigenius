@@ -198,36 +198,38 @@ asserting the commit is rejected.
 
 **Bootstrap edit → reseed.** Depends on P3 and P4.
 
-**This phase does not dissolve the reasoning institution.** An earlier draft said it did, importing a
-conclusion from D82 §5b.7 that rested on a criterion the paper rejects — *an institution is a logic
-with a satisfaction relation the kernel cannot evaluate*, under which "the validator is the kernel"
-was disqualifying. The paper's §6 holds instead that institutions and proof systems are not exclusive
-(Meseguer's logical systems unify them; proof-theoretic variants carry a functor of proofs; an
-entailment system without models is a valid instantiation), and that **the kernel is a degenerate
-institution rather than an entity outside the framework**. Nothing about the reasoning institution's
-standing is at issue.
+**The kernel owns what it must construct; the chain owns what the kernel only has to check.** That
+line places the witness types inside the kernel and leaves the certificate vocabulary outside it.
 
-What changes is ownership of specific vocabulary, and what the protocol says.
-
-- **`witness:Is*As` moves to kernel base vocabulary.** Not because of institution-hood, but because
-  the kernel *synthesizes* inhabitants of those types: `synthesize_chain_witness` recognises them, so
-  the kernel must know them. A type the kernel inhabits cannot be owned by a layer above it.
-- **`JustifiedBy` and `JustificationTerm` stay where they are**, as an ordinary chain ontology. They
-  are declared inductives; the kernel type-checks terms of any declared inductive and needs no
-  special knowledge of these.
-- **`project.rs`'s support algebra stays** as a query surface over retained terms. It is correct and
-  P4 changes only its ground enumeration.
-- **`ValidateJustification` stops being a dispatched AutoOnLoad query** — because P2 absorbed it into
-  uniform check-mode validation, not because anything dissolved. Checking a `JustifiedBy` certificate
-  is type checking, which the kernel does not delegate. D81 recorded that
-  `dispatch_auto_on_load_for_layer` has one call site and no test; write that test against whatever
-  the check becomes, once.
+- **`witness:Is*As` moves to kernel base vocabulary.** `synthesize_chain_witness` produces inhabitants
+  of those otherwise-empty types — by constant specification for attributions, and from a committed
+  judgement for `Verified` after P3. A type the kernel inhabits cannot be owned by a layer above it.
+  This also replaces `check_hooks.rs`'s recognition of witness positions by four hardcoded short
+  names, which admits any inductive anywhere carrying one of those names, with IRI resolution.
+- **`JustifiedBy` and `JustificationTerm` stay chain-declared.** The kernel verifies a constructor
+  application against its declared type; one argument's type is a witness type it recognises, and it
+  needs no knowledge that the constructor belongs to `JustifiedBy`. Chain-declared inductives exist
+  so the kernel can check terms of types it does not carry, and this is the case they were built for.
+  Keeping the algebra in a layer also keeps the system's position in the J / J4 / JT family an
+  ontology edit rather than a kernel change.
+- **`project.rs`'s support algebra stays** as a query surface over retained terms. P4 changes its
+  ground enumeration and nothing else.
+- **`ValidateJustification` stops being a dispatched AutoOnLoad query**, absorbed by P2's uniform
+  check-mode validation: checking a certificate is type checking, which the kernel does not delegate.
+  D81 recorded that `dispatch_auto_on_load_for_layer` has one call site and no test; write that test
+  against whatever the check becomes, once.
 - **State the protocol operationally.** The question is not whether a participating logic satisfies
   the definition of an institution, but whether the system can hold and re-check a witness for the
   claims it establishes. A logic supplies vocabulary, a decision procedure yielding a verdict,
   derivation resources, and optionally a judgement. It does not assign a warrant, define a witness
   kind, or establish `Verified`. Admitting a new hosted checker requires the two arguments the paper
   names: soundness of its `⊢` against its `⊨`, and satisfaction-preservation by its comorphism.
+
+**One assumption is load-bearing.** P6 is kernel enforcement and must inspect the support relation.
+The paper discharges it generically, over `core:mentions` reference edges, so the kernel detects
+cycles without distinguishing `App` from `Sum`. If that proves wrong — if the check requires the term
+algebra's semantics rather than generic reference edges — the kernel needs the algebra and the
+division above moves.
 
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's
