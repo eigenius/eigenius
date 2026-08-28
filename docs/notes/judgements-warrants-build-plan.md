@@ -221,9 +221,25 @@ is the documented one. The test must fail before P3 and pass after.
   derived. The relation carries no `requires` inheritance in practice — `DerivedResource` requires
   nothing — and nothing constrains a property to `DerivedResource` via `allows_only` or
   `class_types`, so the removal is free.
-- **Provenance becomes relations**, mapped to PROV: `wasAttributedTo`, `wasGeneratedBy`, `used`,
-  `hadPlan`, `hadPrimarySource`. The existing `declared_by` / `source` / `derivation` properties are
-  the starting points.
+- **Provenance becomes relations.** The starting points mostly exist: `reflection:declared_by` is
+  already resource-typed and ranged on `reflection:Agent`, which is `prov:wasAttributedTo` in all but
+  name, so the `Declared` constant specification can read it unchanged.
+
+  **`reflection:source` is the one real gap: it is a `string`.** The origin of an observation is
+  therefore not a traversable relation, so *which claims rest on this instrument* is unanswerable and
+  a warrant computed from relations has nothing to walk. **Retyping it to a resource reference is on
+  this phase's critical path**, independent of any PROV decision. Its consumers must be found first —
+  a string-valued property is read as text.
+
+- **The PROV mapping is interop, not correctness, and can land after this phase.** The minimum is
+  three classes (`Entity`, `Agent`, `Activity`) and two to five properties: `wasAttributedTo` for
+  `Declared`; `hadPrimarySource`, or `wasGeneratedBy` + `used` + `wasAssociatedWith`, for `Observed`;
+  and a time term. **Map rather than adopt**, following D57's schema.org precedent: PROV is OWL with
+  open-world semantics while these resources are typed with `requires` enforced at commit, so
+  adopting the IRIs means redeclaring them in this type system anyway. Note also that
+  `prov:hadPrimarySource` is a subproperty of `prov:wasDerivedFrom`, the relation §3.1 names as the
+  trap — harmless, since the warning concerns using it as warrant, but it is an entanglement rather
+  than a clean borrow.
 - **Warrant becomes a query** over the justification term. Nothing stores it. Index it if the cost
   requires; an index is a cache rebuildable from the relations, which a stamp is not.
 - **Resolve the `Warrant` / `Grade` name collision, which is a swap.**
