@@ -1,9 +1,15 @@
 # D82 — Propositions, witnesses, and where logics live
 
-**Status: superseded as a design by [D83](d83-judgements-warrants-and-logics.md); retained as the
-derivation record.** D83 states the target shape. This document is how it was reached — including
-several readings that were tried and withdrawn, each marked in place. Read it for *why* a decision
-went the way it did, not for what to build.
+**Status: superseded as a design by [*Judgements, Warrants, and Logics*](judgements-and-warrants.tex);
+retained as the derivation record.** That paper states the target shape. This document is how it was
+reached — including several readings that were tried and withdrawn, each marked in place. Read it for
+*why* a decision went the way it did, not for what to build.
+
+**Two conclusions here are superseded, not merely restated.** The paper rejects this document's
+institution criterion (an institution is *not* defined by having a satisfaction relation the kernel
+cannot evaluate; proof-theoretic institutions exist, and the kernel is a degenerate one), and refutes
+its constructive/classical conjecture (classicality is a property of a theory's axioms, which behave
+as typed constants during checking, so it does not determine which logics supply terms).
 
 **No code.** Rearchitecture of the epistemic machinery, taking
 [D81](d81-the-epistemic-stack.md) as its evidence base and the κ–τ pilot (arXiv:2608.08192) as its
@@ -281,8 +287,8 @@ change is a relocation of something that exists.
 
 ## 4. κ–τ as the forcing case
 
-> **Superseded by [D83 §8](d83-judgements-warrants-and-logics.md), which places κ–τ in the finished
-> framework.** Under the `Verified`-means-proof-term decision it is a `Derived` institution needing
+> **Superseded by [*Judgements, Warrants, and Logics*](judgements-and-warrants.tex) §7, which places
+> κ–τ in the finished framework.** Under the `Verified`-means-proof-term decision it is a `Derived` institution needing
 > no protocol change. This section stands as the analysis that established that; it no longer
 > motivates S3.
 

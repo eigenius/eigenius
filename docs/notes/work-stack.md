@@ -9,6 +9,16 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **ACTIVE: entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
+> (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
+> `docs/notes/judgements-warrants-build-plan.md` is the next task** — measurement only, no code.
+> The paper supersedes the D83 markdown draft (removed) and two of D82's conclusions: the
+> institution criterion and the constructive/classical conjecture. D82 remains the derivation record.
+>
+> This subsumes what entry 1 below scheduled as D80 (witness and institution machinery) and reaches
+> further: the build plan's P3 and P7 cover D80's W-phases, and D77's merge work is downstream of
+> both. Do not start D80 as scheduled below.
+
 > **ACTIVE: entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
 > two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.
 > **D76 and D78 are complete.** D77 was drafted as the third follow-on and turned out to carry three
