@@ -73,9 +73,20 @@ reading the provenance shape, per its computed-summary rule.
 
 ### Verdicts
 
-**A verdict keeps exactly one load-bearing role: the veto.** A `Fails` blocks a commit on the
-institution's authority, which is wrong-direction-safe — an incorrect `Fails` loses data, an
-incorrect `Holds` corrupts.
+**Verdicts stay stored, and that is not a change.** A verdict records that an institution was asked a
+question and gave an answer at a time, which is provenance, and §3 stores provenance. It is also
+already provenance-only in practice: the verdict is read **in flight** — `dispatch.rs:125` matches
+`VerdictReading::Fails` to decide whether to reject — and nothing reads the committed resource back.
+
+| verdict | stored | why |
+|---|---|---|
+| `Fails` | **no** | the commit is blocked, so no layer lands; the rejection reason returns to the caller. A fact cannot be recorded in a layer that was refused. |
+| `Holds` | yes | provenance of the institutional act |
+| `Undecidable` | yes | the verdict resource **is** the record of a suspension; without it, a below-threshold κ–τ result is invisible |
+
+**What the design removes is the licensing role, not the record.** A `Fails` keeps its one
+load-bearing effect — blocking a commit on the institution's authority, which is
+wrong-direction-safe, since an incorrect `Fails` loses data and an incorrect `Holds` corrupts.
 
 **A `Holds` grants nothing, and therefore needs no declared post-condition.** The warrant comes from
 what the institution *emitted* — a derivation carrying a composite justification term — not from the
