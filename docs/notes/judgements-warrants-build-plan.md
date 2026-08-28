@@ -53,10 +53,13 @@ Every later phase is sized by this one.
 2. **Confirm the grade classes have no structural readers.** Re-derive D81 §5.1 mechanically: for
    each of the 21 files, classify every non-test occurrence as writer, reader, or comment. A single
    genuine reader changes P5 from deletion to migration.
-3. **Inventory the persisted chain**, not just the tree: how many `DerivedEvidence` leaves,
+3. **Find every name the design reuses with a different meaning.** `Warrant` and `Grade` are
+   already known to be swapped (see P5). Sweep for others before P5 renames anything, since a
+   collision found mid-phase is a rename inside a rename.
+4. **Inventory the persisted chain**, not just the tree: how many `DerivedEvidence` leaves,
    `IsDerivedAs` witnesses and grade-class stamps exist on the current chain. Sizes the reseed and
    the P4 invalidation.
-4. **Establish the baseline.** Run the parse gate (`--release`, per `parse_sweep_must_be_release`)
+5. **Establish the baseline.** Run the parse gate (`--release`, per `parse_sweep_must_be_release`)
    and the WRN demo end to end on the current branch, and record the numbers. Nothing later may
    regress against this baseline, and a regression must be attributable to a phase.
 
@@ -168,6 +171,22 @@ is the documented one. The test must fail before P3 and pass after.
   the starting points.
 - **Warrant becomes a query** over the justification term. Nothing stores it. Index it if the cost
   requires; an index is a cache rebuildable from the relations, which a stamp is not.
+- **Resolve the `Warrant` / `Grade` name collision, which is a swap.**
+  `crates/eigenius-reasoning/src/grade.rs` declares `Grade {Declared, Observed, Derived, Verified}`
+  — the paper's **grounds** — and `Warrant {Declared, Parsed}`, documented as *"the axis along which
+  the grade climbs"* and projecting onto a `Grade`. The paper uses *warrant* for the axis whose
+  values are grounds, so the two words currently mean each other's referent.
+
+  **`Warrant`'s distinction is provenance, not warrant.** Both variants project to `Grade::Declared`;
+  what separates them is that a parse run produced one. The code already states this correctly on the
+  projection — *"the parser is a formulation instrument, not a warrant"* — so the insight is present
+  and only the name is wrong. Under this phase the distinction becomes `wasGeneratedBy(parse run)`
+  against its absence, with `wasAttributedTo(agent)` on both, and the enum has nothing left to carry.
+  `grade()` retires with `Grade`.
+
+  Its `#[non_exhaustive]` growth path — *"the `Observed`/`Verified` climbs are the next increments"* —
+  is superseded: those are grounds, not refinements of a ground.
+
 - Update the 21 Rust writers and 9 ontologies accordingly.
 
 **Exit:** no resource carries a stored epistemic grade; provenance and warrant are answerable as
