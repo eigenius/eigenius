@@ -331,6 +331,80 @@ implementation, to the trusted computing base.
 
 ---
 
+## Removal inventory
+
+Every declaration this plan deletes, verified present in the tree `2026-08-28`. Renames and
+reworks are listed separately below, because they are not deletions and must not be treated as such.
+
+### Rust — removed
+
+| declaration | file | phase |
+|---|---|---|
+| `enum Grade` (4 variants) | `crates/eigenius-reasoning/src/grade.rs:69` | P5 |
+| `enum Warrant` (2 variants) and `Warrant::grade()` | `grade.rs:83`, `grade.rs:99` | P5 |
+| `WitnessCategory::Derived` variant | `kernel/src/witness/mod.rs:47` | P4 |
+| `Ground::Derived` variant | `crates/eigenius-reasoning/src/project.rs:71` | P4 |
+| `PROPOSITION_SLOTS` | `kernel/src/ontology/well_known.rs:544` | P2 |
+| `DECLARED_RESOURCE`, `OBSERVED_RESOURCE`, `DERIVED_RESOURCE`, `VERIFIED_RESOURCE` | `well_known.rs:449-452` | P5 |
+| `emit_from_institution_derivation` | `kernel/src/layer/witness_index.rs:279` | P4 |
+| the coercion branch of `check_layer_with_coercion` | `witness_index.rs:444` | P4 |
+| `chain_witness_category_for_short_name` | `kernel/src/program/check_hooks.rs:93` | P7 |
+| Rule 21's two exemption branches | `kernel/src/validation/rules/eigentt_value.rs` | P2 |
+
+### Rust — reworked, not removed
+
+- `trace_category` (`witness_index.rs:186`) — five arms to two; P5 may retire it in favour of reading
+  the provenance shape.
+- `emit_from_reasoning_sentence` (`witness_index.rs:262`) — keyed to the checked judgement instead of
+  `is_a` membership. P3.
+- `verification_trace` (`crates/eigenius-reasoning/src/validate.rs:186`) — `proof_term` names a proof
+  of `P` rather than the sentence's own IRI. P3.
+- Rule 23 and Rule 24 — absorbed into P2's uniform rule rather than deleted outright; confirm no
+  behaviour is lost before removing either file.
+
+### Ontology — removed
+
+| declaration | file | phase |
+|---|---|---|
+| `reflection:DeclaredResource`, `ObservedResource`, `DerivedResource`, `VerifiedResource` | `reflection-ontology.json` | P5 |
+| `reflection:epistemic_status` | `reflection-ontology.json` | P5 |
+| `reflection:epistemic:{declared,observed,derived,verified}` — the four `allows_only` individuals | `reflection-ontology.json` | P5 |
+| `reflection:ExternalExecutionTrace` | `reflection-ontology.json` | P5 |
+| `witness:IsDerivedAs` | `ontologies/reasoning/reasoning.esl:60` | P4 |
+| `JustificationTerm.DerivedEvidence` constructor | `reasoning.esl:76` | P4 |
+| `JustifiedBy.derived` constructor | `reasoning.esl:122` | P4 |
+| `VerifiedResource subclass_of DerivedResource` | `reflection-ontology.json` | P5 |
+
+### Ontology — retyped
+
+**Ten classes currently subclass a grade class and must be retyped when the grade classes go.**
+This is the dependency P5 must handle first, and it spans six ontologies:
+
+| class | currently subclasses |
+|---|---|
+| `reference:Citation` | `DeclaredResource` |
+| `reasoning:ReasoningSentence` | `DerivedResource` |
+| `reasoning:VerifiedPropositionView` | `DerivedResource` |
+| `reasoning:EntailmentRequest` | `DerivedResource` |
+| `reasoning:ConsistencyRequest` | `DerivedResource` |
+| `stats:SampleSetResource` | `ObservedResource` |
+| `enc:EncodedClaim` | `DeclaredResource` |
+| `enc:ReasoningStructure` | `DerivedResource` |
+| `ingest:PinnedExternalFile` | `ObservedResource` |
+| `reflection:InstitutionEmittedDerivation` | `DerivedResource` |
+
+`reasoning:ReasoningSentence`'s subclassing carries a stated rationale — *"subclassing DerivedResource
+lets prior sentences be cited via DerivedEvidence; the inherited derivation requirement is satisfied
+by the certificate field"*. Both halves are void: `DerivedResource` requires nothing, so there is no
+inherited requirement, and `DerivedEvidence` is deleted in P4.
+
+### Renamed, not removed
+
+- `eigentt:TypeExpr` → `eigentt:Term` (P1) — 51 ontology sites, 21 Rust files. The 20 constructors
+  are unchanged.
+
+---
+
 ## Verification, every phase
 
 - `cargo test --workspace`; `cargo fmt --all -- --check`; `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`.
