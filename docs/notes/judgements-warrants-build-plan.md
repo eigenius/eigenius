@@ -182,15 +182,35 @@ class — is updated and runs.
 
 Reject at commit any justification whose premise's support transitively includes the premise. Extend
 `declaration_order.rs`'s existing topological pass rather than adding a second graph walk: it already
-detects cycles over the declaration dependency graph and already reasons about `core:mentions`, which
-projects term references into the triple index.
+detects cycles over the declaration dependency graph and already consumes `core:mentions`.
+
+**A justification term's premise citations do reach the index**, which is not obvious from the code
+and is now pinned by a test (`a_grounding_leafs_string_iri_becomes_a_mentions_triple`). The grounding
+leaves take the premise IRI as a `core:string` argument rather than a `ConstRef`, but
+`reasoning:justification` is declared `core:inductive`, the indexer walks any such property, and
+`json_mentions` matches any `urn:`-prefixed string at any depth. Only `InductiveType` objects are
+dropped, by the D79 seal.
+
+**The mentions graph is a superset of the premise graph, and P6 must filter.** A resource's
+`reasoning:proposition` and `reasoning:justification` are both `core:inductive`, so both contribute
+edges from the same subject: the proposition's references to classes sit in the same edge set as the
+justification's citations of premises. Cycle detection over raw `core:mentions` would report cycles
+that are not justification cycles. **The check restricts to edges originating in the
+justification-bearing slots** — which the index does not currently distinguish, since a
+`core:mentions` triple records subject and object and not the predicate the term came from.
+
+That leaves a decision for the phase: either carry the originating predicate on the projected triple,
+or filter by re-reading the justification slot of each candidate subject. The first widens the index
+and serves any future consumer that needs to know why a mention exists; the second keeps the index
+unchanged and costs a decode per candidate. Measure before choosing.
 
 The condition is vacuous on `Declared` premises, which have no support to inspect. That carve-out is
 required, not convenient: constant specifications may be self-referential, and self-referentiality is
 unavoidable for realising some S4 theorems in LP.
 
-**Exit:** a test constructing the two-layer retroactive-upgrade cycle from the paper's §5.3 and
-asserting the commit is rejected.
+**Exit:** a test constructing the two-layer retroactive-upgrade cycle from the paper and asserting the
+commit is rejected; and a test asserting that a claim whose proposition and premise reference the same
+class is **not** rejected.
 
 ---
 
@@ -226,10 +246,10 @@ line places the witness types inside the kernel and leaves the certificate vocab
   names: soundness of its `⊢` against its `⊨`, and satisfaction-preservation by its comorphism.
 
 **One assumption is load-bearing.** P6 is kernel enforcement and must inspect the support relation.
-The paper discharges it generically, over `core:mentions` reference edges, so the kernel detects
-cycles without distinguishing `App` from `Sum`. If that proves wrong — if the check requires the term
-algebra's semantics rather than generic reference edges — the kernel needs the algebra and the
-division above moves.
+It does so over `core:mentions` edges, so the kernel detects cycles without distinguishing `App` from
+`Sum` — confirmed for the citation case by P6's test. If a case arises that requires the term
+algebra's semantics rather than reference edges, the kernel needs the algebra and the division above
+moves.
 
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's

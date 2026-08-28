@@ -1579,6 +1579,24 @@ mod mentions_tests {
             .collect()
     }
 
+    /// **A justification term's premise citations are indexed.** The grounding
+    /// leaves take the premise IRI as a `core:string` argument rather than a
+    /// `ConstRef`, so whether they reach the index is not obvious; `json_mentions`
+    /// matches any `urn:`-prefixed string at any depth, so they do. This is what
+    /// lets a commit-time check reach a justification term's premises through the
+    /// triple index rather than by decoding the term.
+    #[test]
+    fn a_grounding_leafs_string_iri_becomes_a_mentions_triple() {
+        let m = mentions_of(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "DeclaredEvidence", "args": ["urn:eigenius:test:Topic"]},
+                {"ctor": "ObservedEvidence", "args": ["urn:eigenius:test:Topic"]}
+            ],
+        }));
+        assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
+    }
+
     /// The case that had no index answer at all.
     #[test]
     fn a_term_reference_becomes_a_mentions_triple() {
