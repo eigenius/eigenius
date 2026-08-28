@@ -18,6 +18,11 @@ any detour.
 > This subsumes what entry 1 below scheduled as D80 (witness and institution machinery) and reaches
 > further: the build plan's P3 and P7 cover D80's W-phases, and D77's merge work is downstream of
 > both. Do not start D80 as scheduled below.
+>
+> **Note on a superseded conclusion:** D82 §5b.7 argued the reasoning institution is not an
+> institution and should dissolve. The paper rejects the criterion that rested on — institutions and
+> proof systems are not exclusive, and the kernel is a *degenerate* institution. P7 relocates
+> vocabulary the kernel owns; it does not dissolve anything.
 
 > **ACTIVE: entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
 > two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.

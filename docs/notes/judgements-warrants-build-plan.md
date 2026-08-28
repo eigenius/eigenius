@@ -194,26 +194,44 @@ asserting the commit is rejected.
 
 ---
 
-## P7 — Dissolve the reasoning institution; state the operational boundary
+## P7 — Relocate what the kernel owns; state the boundary operationally
 
 **Bootstrap edit → reseed.** Depends on P3 and P4.
 
-- Move `witness:Is*As` from `ontologies/reasoning/` to kernel base vocabulary. They are the grounds
-  expressed as propositions about the chain, and an institution referencing base vocabulary is the
-  normal direction.
-- `JustifiedBy` checking is type checking and stays in the kernel. What remains institution-side is
-  the `JustificationTerm` algebra and its connectives.
-- `ValidateJustification` becomes a kernel commit-phase check rather than a dispatched AutoOnLoad
-  query. Note D81's finding that `dispatch_auto_on_load_for_layer` has one call site and no test;
-  write the test against whatever it becomes, once.
-- State the institution protocol operationally: a participating logic supplies vocabulary, a
-  decision procedure yielding a verdict, derivation resources, and optionally a judgement. It does
-  not assign a warrant, define a witness kind, or establish `Verified`. Admitting a new hosted
-  checker requires the two arguments the paper names — soundness of its `⊢` against its `⊨`, and
-  satisfaction-preservation by its comorphism.
+**This phase does not dissolve the reasoning institution.** An earlier draft said it did, importing a
+conclusion from D82 §5b.7 that rested on a criterion the paper rejects — *an institution is a logic
+with a satisfaction relation the kernel cannot evaluate*, under which "the validator is the kernel"
+was disqualifying. The paper's §6 holds instead that institutions and proof systems are not exclusive
+(Meseguer's logical systems unify them; proof-theoretic variants carry a functor of proofs; an
+entailment system without models is a valid instantiation), and that **the kernel is a degenerate
+institution rather than an entity outside the framework**. Nothing about the reasoning institution's
+standing is at issue.
 
-**Exit:** the reasoning institution declares no vocabulary the kernel owns; `Verified` is reachable
-only via a checked judgement.
+What changes is ownership of specific vocabulary, and what the protocol says.
+
+- **`witness:Is*As` moves to kernel base vocabulary.** Not because of institution-hood, but because
+  the kernel *synthesizes* inhabitants of those types: `synthesize_chain_witness` recognises them, so
+  the kernel must know them. A type the kernel inhabits cannot be owned by a layer above it.
+- **`JustifiedBy` and `JustificationTerm` stay where they are**, as an ordinary chain ontology. They
+  are declared inductives; the kernel type-checks terms of any declared inductive and needs no
+  special knowledge of these.
+- **`project.rs`'s support algebra stays** as a query surface over retained terms. It is correct and
+  P4 changes only its ground enumeration.
+- **`ValidateJustification` stops being a dispatched AutoOnLoad query** — because P2 absorbed it into
+  uniform check-mode validation, not because anything dissolved. Checking a `JustifiedBy` certificate
+  is type checking, which the kernel does not delegate. D81 recorded that
+  `dispatch_auto_on_load_for_layer` has one call site and no test; write that test against whatever
+  the check becomes, once.
+- **State the protocol operationally.** The question is not whether a participating logic satisfies
+  the definition of an institution, but whether the system can hold and re-check a witness for the
+  claims it establishes. A logic supplies vocabulary, a decision procedure yielding a verdict,
+  derivation resources, and optionally a judgement. It does not assign a warrant, define a witness
+  kind, or establish `Verified`. Admitting a new hosted checker requires the two arguments the paper
+  names: soundness of its `⊢` against its `⊨`, and satisfaction-preservation by its comorphism.
+
+**Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
+inhabits; and hosting a checker is documented as adding both obligations, and the checker's
+implementation, to the trusted computing base.
 
 ---
 
