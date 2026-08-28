@@ -39,6 +39,61 @@ Batch bootstrap edits within a phase; do not spread one edit across two.
 
 ---
 
+## Disposition: traces and verdicts
+
+The plan's phases move these; this section states where each lands, because neither is named in the
+paper and both are load-bearing today.
+
+### Traces
+
+**Only 5 of the 19 trace classes are in scope.** The other 14 — `ComponentTrace`, `PureTrace`,
+`MapTrace`, `ReduceTrace`, `CaseTrace`, `SeqTrace`, `LetTrace`, `ProjectTrace`, `ConstructTrace`,
+`FieldTrace`, `EmptyTrace`, `ComorphismTrace`, `ProductionTrace` and `Trace` itself — record the
+structure of a program run. They are provenance already and nothing here disputes that.
+
+The 5 that feed `trace_category` are the epistemic ones, and they are the ones that stop being a
+parallel grade vocabulary:
+
+| trace | requires | disposition | phase |
+|---|---|---|---|
+| `DeclarationTrace` | `resource`, `declared_by`, `timestamp` | becomes PROV attribution; still grounds `IsDeclaredAs` — the constant specification needs an input | P5 |
+| `ObservationTrace` | `resource`, `source`, `timestamp` | becomes PROV primary-source; still grounds `IsObservedAs` | P5 |
+| `ProgramTrace` | `resource`, `source`, `timestamp` | becomes a `prov:Activity` and **grounds nothing** — `IsDerivedAs` is deleted | P4 |
+| `VerificationTrace` | `resource`, `proof_system`, `proof_term`, `timestamp` | **stops being the licensor**; the judgement grounds `IsVerifiedAs`, and `proof_term` finally names a proof of `P` | P3 |
+| `ExternalExecutionTrace` | `resource`, `declared_by`, `source` | **dissolves**; what remains is an `Observed` recording with a plan in provenance | P5 |
+
+`ExternalExecutionTrace`'s dissolution is the one worth arguing. Its criterion is right — *no
+`f : I -> O`, so no specification, so nothing entailed* — but it tests for it by asking whether the
+system initiated the run. Under §4.1 the question is whether the plan carries an `I → O`
+specification, which is a property of the plan and not of who invoked it. The class encodes a proxy
+for a question the design asks directly.
+
+**`trace_category` shrinks from five entries to two**, and P5 may retire it entirely in favour of
+reading the provenance shape, per its computed-summary rule.
+
+### Verdicts
+
+**A verdict keeps exactly one load-bearing role: the veto.** A `Fails` blocks a commit on the
+institution's authority, which is wrong-direction-safe — an incorrect `Fails` loses data, an
+incorrect `Holds` corrupts.
+
+**A `Holds` grants nothing, and therefore needs no declared post-condition.** The warrant comes from
+what the institution *emitted* — a derivation carrying a composite justification term — not from the
+verdict. `Undecidable` commits the institution's resources without rejecting the subject, unchanged.
+
+**This retires a conclusion the derivation record treats as central.** D81 §5.6 identified *"whether
+AutoOnLoad should have a declared post-condition on success"* as its one design question, and
+D82 scheduled it as S2, calling it the root the other findings hang from. Under this design the
+question dissolves rather than being answered: a passing gate entitles nothing, so there is nothing
+for a post-condition to declare. What D81 actually found — that `Holds` had undefined consequences
+while `Fails` had defined ones — is fixed by removing the consequences rather than by declaring them.
+
+**`InstitutionEmittedDerivation` survives** as the institution's output resource. Its warrant comes
+from its justification term (composite after P4), not from its class, and
+`emit_from_institution_derivation` retires with `IsDerivedAs`.
+
+---
+
 ## P0 — Measure before building
 
 **No code.** Produces numbers that determine whether P2 and P5 are small changes or data migrations.
