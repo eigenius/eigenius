@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! D49 ChainWitness synthesis: kernel-side inhabitation of
-//! `JustifiedBy.*` predicate positions from the per-layer witness
+//! `justification:Certificate.*` predicate positions from the per-layer witness
 //! index. Split from `check.rs`.
 
 use super::{CheckCtx, CheckError};

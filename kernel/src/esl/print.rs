@@ -487,11 +487,11 @@ impl Printer<'_> {
 
             // A constructor is written `<ns>:<CtorName>`, where `<ns>` maps to a URI that
             // PREFIXES the parent inductive's IRI — see `Compiler::resolve_ctor_iri`. So
-            // `CtorApp["urn:eigenius:reasoning:JustifiedBy", "app"]` prints `reasoning:app`.
+            // `CtorApp["urn:eigenius:justification:Certificate", "app"]` prints `justification:app`.
             //
             // Qualified rather than bare on purpose: bare resolution is by short name across every
             // chain-resident inductive, and `App` alone is already ambiguous between
-            // `eigentt:TypeExpr:App` and `reasoning:JustificationTerm:App`.
+            // `eigentt:Term:App` and `justification:Term:App`.
             "CtorApp" => {
                 let decl = str_arg(0)?;
                 let name = str_arg(1)?;
@@ -682,23 +682,23 @@ fn escape(s: &str) -> String {
 }
 
 /// Print a term in the **inductive-value dialect** — the encoding a non-`type_expr` resource
-/// property carries, e.g. `reasoning:justification`.
+/// property carries, e.g. `justification:term`.
 ///
 /// This is NOT D47. Compare the two encodings of the same idea:
 ///
 /// ```text
 /// D47 (type position):    {"ctor":"App","args":[{"ctor":"CtorApp","args":[<decl>,"app"]}, …]}
-/// value dialect:          {"ctor":"DeclaredEvidence","args":["urn:eigenius:…"]}
+/// value dialect:          {"ctor":"Declared","args":["urn:eigenius:…"]}
 /// ```
 ///
 /// The value dialect names the constructor directly, applies it uncurried, and admits bare string
 /// leaves. It also **omits the decl IRI**, so the namespace to qualify with cannot be recovered
 /// from the term — the caller supplies it. The decompiler uses the holding property's own
 /// namespace, since a property and the inductive its values inhabit are declared in the same
-/// ontology (`reasoning:justification` holds a `reasoning:JustificationTerm`).
+/// ontology (`justification:term` holds a `justification:Term`).
 ///
-/// Qualification is not optional: bare `App` is ambiguous between `eigentt:TypeExpr:App` and
-/// `reasoning:JustificationTerm:App`, and the compiler rightly refuses it.
+/// Qualification is not optional: bare `App` is ambiguous between `eigentt:Term:App` and
+/// `justification:Term:App`, and the compiler rightly refuses it.
 pub fn print_value_term(
     term: &Value,
     ns: &mut Namespaces,
@@ -1066,7 +1066,7 @@ fn print_arg_type(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, 
     Ok(format!("{head}({})", rendered.join(", ")))
 }
 
-/// A kind or type reference — the `eigentt:TypeExpr` head that `Compiler::lower_kind` produced.
+/// A kind or type reference — the `eigentt:Term` head that `Compiler::lower_kind` produced.
 /// Inverts it: `Var` is a bare parameter name, `ConstRef` a qualified IRI, `Sort` a sort keyword.
 fn print_kind(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, PrintError> {
     let bad = |m: &str| PrintError {

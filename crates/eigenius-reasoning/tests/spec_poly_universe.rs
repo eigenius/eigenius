@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `JustifiedBy.spec_poly` at a `Set`-quantified rule (eigenius#136).
+//! `justification:Certificate.spec_poly` at a `Set`-quantified rule (eigenius#136).
 //!
 //! The fixture is the `spec_poly` site of `demo/prose-to-formulas-v2/inference.esl`
 //! reduced to a chain that builds in memory: a rule quantified over `Set` (the
@@ -91,7 +91,7 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     )
 }
 
-/// `(verdict ctor, diagnostic)` for the fixture's one `ReasoningSentence`.
+/// `(verdict ctor, diagnostic)` for the fixture's one `justification:Sentence`.
 fn verdict(reasoning_source: &str) -> (String, Option<String>) {
     let ctx = build_chain(
         reasoning_source,
@@ -123,7 +123,9 @@ fn verdict(reasoning_source: &str) -> (String, Option<String>) {
 /// `Set : Type 1` — legal by stratification — and the demo's certificate holds.
 #[test]
 fn spec_poly_holds_as_shipped() {
-    let (ctor, diagnostic) = verdict(include_str!("../../../ontologies/reasoning/reasoning.esl"));
+    let (ctor, diagnostic) = verdict(include_str!(
+        "../../../ontologies/justification/justification.esl"
+    ));
     assert_eq!(
         ctor,
         wk::VERDICT_HOLDS,
@@ -139,7 +141,7 @@ fn spec_poly_holds_as_shipped() {
 /// drift, and the assertion below fails loudly if the binder ever moves again.
 #[test]
 fn spec_poly_at_a_set_domain_is_rejected() {
-    let source = include_str!("../../../ontologies/reasoning/reasoning.esl")
+    let source = include_str!("../../../ontologies/justification/justification.esl")
         .replace("forall (T : Type 1,", "forall (T : Set,");
     assert!(
         source.contains("forall (T : Set,"),

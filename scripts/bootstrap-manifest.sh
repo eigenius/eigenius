@@ -44,7 +44,7 @@ SPECS=(
   "lean-expressions:ontologies/lean/lean-expressions.eigon.json"
   "lean-runtime-classes:ontologies/lean/lean-runtime-classes.eigon.json"
   "lean-institution:ontologies/lean/lean-institution.eigon.json"
-  "reasoning:ontologies/reasoning/reasoning.esl"
+  "reasoning:ontologies/justification/justification.esl"
   "statistics:ontologies/statistics/statistics.esl"
   "notebook:ontologies/notebook/notebook-ontology.json"
   "ingest:ontologies/ingest/ingest-ontology.json"

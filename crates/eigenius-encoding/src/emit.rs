@@ -149,7 +149,7 @@ pub struct ParsedSentence<'a> {
     /// landed claim carries its DISCOURSE KIND as a second `is_a` class, and a later sentence's
     /// proposition may USE that claim as a term (an anaphor resolved to it). A rebuilt cluster
     /// has no kind, so the claim no longer inhabits the lexicon class the kind aligns to, and
-    /// the artifact fails to load — `TypeExprIllTyped: … does not inhabit lexicon:Entity`,
+    /// the artifact fails to load — `TermIllTyped: … does not inhabit lexicon:Entity`,
     /// witnessed 2026-08-12. One claim, one resource.
     pub cluster: Option<(Resource, Resource)>,
 }

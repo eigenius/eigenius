@@ -27,7 +27,7 @@
 //! of the decision (D66 slice 0).
 //!
 //! **What is being decided here is whether to assert an axiom.** The `witness:Is*As` types have zero
-//! constructors (`ontologies/reasoning/reasoning.esl:52`), so no term inhabits them and this
+//! constructors (`ontologies/justification/justification.esl:52`), so no term inhabits them and this
 //! function is the only way one comes into existence — see `Val::ChainWitness` in `nbe/val.rs` for
 //! the full anatomy. Consequently **this module is inside the TCB**: everything above a witness is
 //! type-checked, the witness itself is postulated, and a wrong admission cannot be caught
@@ -44,12 +44,12 @@ use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
 use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 
-/// D54: the `reasoning:ReasoningSentence` class IRI and its `proposition`
+/// D54: the `justification:Sentence` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
 /// witness machinery is the one kernel site that is intrinsically
-/// reasoning-aware — it builds the witnesses `JustifiedBy` consumes.
-const REASONING_SENTENCE: &str = "urn:eigenius:reasoning:ReasoningSentence";
-const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
+/// reasoning-aware — it builds the witnesses `justification:Certificate` consumes.
+const REASONING_SENTENCE: &str = "urn:eigenius:justification:Sentence";
+const REASONING_PROPOSITION: &str = "urn:eigenius:justification:proposition";
 
 /// Does `layer` itself admit `key`?
 ///
@@ -61,7 +61,7 @@ const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
 ///
 /// Two routes, mirroring the two ways a witness arises (D49 §6):
 ///
-/// - **self-attesting** — the key's IRI *is* the resource. A committed `reasoning:ReasoningSentence`
+/// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Sentence`
 ///   is `Verified` on its own IRI (D54 lemma citation); a `reflection:InstitutionEmittedDerivation`
 ///   is `Derived` on its own IRI (D52). Reached by [`Layer::get_resource`], which is layer-local.
 /// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
@@ -156,7 +156,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 /// Could `resource` ever admit a `ChainWitness`?
 ///
 /// True for the seven classes [`layer_admits_witness`] can emit from: the five Trace classes, a
-/// `reflection:InstitutionEmittedDerivation`, and a `reasoning:ReasoningSentence`. Stamped over a
+/// `reflection:InstitutionEmittedDerivation`, and a `justification:Sentence`. Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
 /// caching an empty map.
@@ -254,9 +254,9 @@ where
     false
 }
 
-/// D54: read a `reasoning:ReasoningSentence`'s `proposition` and build a
+/// D54: read a `justification:Sentence`'s `proposition` and build a
 /// `Verified` `WitnessKey` keyed on the sentence's own IRI. The proposition
-/// is the D47-encoded `Value::Json` the consumer's `JustifiedBy.verified(iri, P)`
+/// is the D47-encoded `Value::Json` the consumer's `justification:Certificate.verified(iri, P)`
 /// term hashes to identically (same encoding path), so the key matches.
 /// Returns `None` when the sentence has no `@id` or no `proposition`.
 fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
@@ -317,7 +317,7 @@ fn emit_from_trace(
 /// Three slots can hold it, tried in order:
 ///
 /// 1. `reflection:canonical_proposition` — the general slot.
-/// 2. `reasoning:proposition` — where a `ReasoningSentence` keeps the same thing under a different
+/// 2. `justification:proposition` — where a `justification:Sentence` keeps the same thing under a different
 ///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
 ///    [`emit_from_reasoning_sentence`] reads slot 2, so without this arm a `VerificationTrace`
 ///    targeting a sentence would fall through to slot 3 and key the witness against
@@ -352,7 +352,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
 /// encodes via the D47 codec, and hashes.
 ///
 /// **Both ends of the witness machinery use the same construction.**
-/// When a future `JustifiedBy.declared(iri, Asserts(iri))` constructor
+/// When a future `justification:Certificate.declared(iri, Asserts(iri))` constructor
 /// is type-checked, the consumer side (D49 §5 / `synthesize_chain_witness`)
 /// receives the same `Exp` from the user's proof term, encodes it via
 /// the same `encode_type` path, and arrives at the same hash. The
@@ -387,7 +387,7 @@ pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Opti
 /// Public synthesis variant of [`default_asserts_proposition_hash`]
 /// that returns the full `Exp` rather than the hash. Used by the
 /// `synthesize_chain_witness` consumer site when the agent's
-/// `JustifiedBy.declared` constructor doesn't carry an explicit
+/// `justification:Certificate.declared` constructor doesn't carry an explicit
 /// proposition (i.e. the consumer wants the default to compare
 /// against). Same `Asserts(iri)` shape; same Exp; same hash.
 pub fn default_asserts_proposition(
@@ -461,16 +461,16 @@ fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
 /// **D49 §5 synthesis algorithm — Phase 6 foundation.** Look up a
 /// `ChainWitness` inhabitant for `(category, iri, proposition)` and, on
 /// hit, return a `Val::ChainWitness(key)` value the kernel's NbE checker
-/// can use as the synthesised witness argument to a `JustifiedBy.*`
+/// can use as the synthesised witness argument to a `justification:Certificate.*`
 /// constructor. On miss, surface the precise diagnostic D49 §5
 /// specifies — naming the missing predicate family, the IRI, and what
-/// the chain needs to admit for this `JustifiedBy.*` constructor to
+/// the chain needs to admit for this `justification:Certificate.*` constructor to
 /// become well-typed.
 ///
 /// This function is the kernel-side surface the D39 Reasoning
-/// institution's `JustifiedBy` constructor type-checker calls into. The
+/// institution's `justification:Certificate` constructor type-checker calls into. The
 /// integration site — where `check_infer` in `nbe/check.rs` recognises a
-/// `JustifiedBy.declared` / `.observed` / `.derived` / `.verified`
+/// `justification:Certificate.declared` / `.observed` / `.derived` / `.verified`
 /// constructor and dispatches here — lands during D39 implementation
 /// (per D51 gap 3); this function is the stable contract that integration
 /// can call against starting today.
@@ -504,7 +504,7 @@ pub fn synthesize_chain_witness(
              the resource at {} must be committed with reflection:canonical_proposition \
              matching the proposition (or the proposition must be Asserts(<iri>) — the \
              default; the Asserts default lands in Phase 5b once D39's core-ontology \
-             Asserts class is authored) before this JustifiedBy.{} constructor is well-typed",
+             Asserts class is authored) before this justification:Certificate.{} constructor is well-typed",
             category.label(),
             iri,
             iri,
@@ -543,7 +543,7 @@ mod tests {
         r
     }
 
-    /// A committed `reasoning:ReasoningSentence` — admitted as a `Verified` witness on its own
+    /// A committed `justification:Sentence` — admitted as a `Verified` witness on its own
     /// IRI (D54). The commit pipeline rejects `Fails` sentences, so any committed one Held.
     fn reasoning_sentence(sentence_iri: &str, prop: &Exp) -> Resource {
         let mut r = Resource::new(iri(sentence_iri));
@@ -782,7 +782,7 @@ mod tests {
         );
         assert!(
             is_witness_candidate(&reasoning_sentence("urn:eigenius:example:s", &prop)),
-            "ReasoningSentence must be a candidate (D54)"
+            "justification:Sentence must be a candidate (D54)"
         );
         // A target resource carrying a canonical_proposition is NOT itself a candidate — the
         // trace pointing at it is. Getting this backwards would stamp claim-only layers as
@@ -987,7 +987,7 @@ mod tests {
             "diagnostic should hint at canonical_proposition: {err}"
         );
         assert!(
-            err.contains("JustifiedBy.declared"),
+            err.contains("justification:Certificate.declared"),
             "diagnostic should name the consuming constructor: {err}"
         );
     }
@@ -1027,7 +1027,7 @@ mod tests {
         // coercion, even though the index doesn't carry the Derived key
         // directly.
         //
-        // A committed `reasoning:ReasoningSentence` is admitted as a `Verified` witness on its
+        // A committed `justification:Sentence` is admitted as a `Verified` witness on its
         // own IRI (D54 lemma citation), so the coercion can be exercised against the real
         // emission path — the predecessor injected a key through a test-only `OnceLock` setter
         // because it predated D54 emission.

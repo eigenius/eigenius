@@ -18,9 +18,9 @@
 //! resource into a typed `Val`" abstraction; every institution that
 //! exposes its data to the kernel's term language goes through it.
 //! The Reasoning institution's job in this file is to translate a
-//! `JustificationTerm` chain-resident value (D32 §3.7 tagged-dict
-//! shape on the `reasoning:justification` property) into a kernel
-//! `Val::InductiveVal` typed at `reasoning:JustificationTerm`.
+//! `justification:Term` chain-resident value (D32 §3.7 tagged-dict
+//! shape on the `justification:term` property) into a kernel
+//! `Val::InductiveVal` typed at `justification:Term`.
 //!
 //! Why this lives in the institution crate, not in the kernel:
 //!
@@ -32,7 +32,7 @@
 //!   institution is different because its "runtime" *is* the kernel's
 //!   NbE checker — there's no external worker to reify into, and the
 //!   validate handler needs a `Val` to construct
-//!   `JustifiedBy(justification, proposition)` for type-checking.
+//!   `justification:Certificate(justification, proposition)` for type-checking.
 //! - Routing the lift through `extract_typed` (rather than a free
 //!   function in the kernel) keeps the kernel surface scoped to
 //!   abstractions it has specs for. The "chain inductive value → Val"
@@ -63,8 +63,8 @@ use crate::institution::iris;
 /// `extract_typed` handler for `proc:extract_justification`.
 ///
 /// Reads the `justification` property off the supplied
-/// `ReasoningSentence` resource, lifts the chain-resident inductive
-/// value into a `Val::InductiveVal` typed at `JustificationTerm`.
+/// `justification:Sentence` resource, lifts the chain-resident inductive
+/// value into a `Val::InductiveVal` typed at `justification:Term`.
 pub fn extract_justification(
     sentence: &Resource,
     ctx: &ExecutionContext,
@@ -83,8 +83,8 @@ pub fn extract_justification(
 /// The same decode, stopped one step earlier: the SYNTACTIC `Exp::InductiveCtor` tree.
 ///
 /// [`extract_justification`] evaluates this into a `Val` because the validate handler needs a value
-/// to build `JustifiedBy(j, p)` from. The projections of D73 §1.2 want the opposite — they walk the
-/// constructor application itself, since a `JustificationTerm` IS its tree and evaluating it only
+/// to build `justification:Certificate(j, p)` from. The projections of D73 §1.2 want the opposite — they walk the
+/// constructor application itself, since a `justification:Term` IS its tree and evaluating it only
 /// obscures the shape (eigenius#204).
 pub fn justification_exp(
     sentence: &Resource,
@@ -94,7 +94,7 @@ pub fn justification_exp(
         .get(&Iri::parse(iris::PROP_JUSTIFICATION).expect("static IRI"))
         .ok_or_else(|| {
             InstitutionError::ComputationFailed(
-                "ReasoningSentence missing required `justification` property".to_string(),
+                "justification:Sentence missing required `justification` property".to_string(),
             )
         })?;
 
@@ -109,7 +109,7 @@ pub fn justification_exp(
         }
         Err(e) => {
             return Err(InstitutionError::ComputationFailed(format!(
-                "failed to resolve JustificationTerm inductive: {e}"
+                "failed to resolve justification:Term inductive: {e}"
             )));
         }
     };
@@ -157,7 +157,7 @@ pub fn justification_exp(
 ///   sibling declaration from; `resolve_inductive_type` hands back
 ///   ctor-internal inductive references as name-only stubs with empty
 ///   `ctors`, so decoding into one would have nothing to validate the
-///   inner ctor name against. `JustificationTerm` — the only inductive
+///   inner ctor name against. `justification:Term` — the only inductive
 ///   this decoder serves (see [`extract_justification`]) — is
 ///   homogeneous. See gh #74.
 /// - An argument declared at `core:json` or at a plain `core:Class`:
@@ -290,7 +290,7 @@ fn decode_json(
     // available-list diagnostic beats letting the type-checker crash
     // on a malformed `InductiveCtor`. The kernel validator's
     // `walk_inductive_value` (Rule 16's walk, reached for
-    // `reasoning:justification` through the `class_types` rule, since
+    // `justification:term` through the `class_types` rule, since
     // that property's `data_type` is `core:resource`) catches an
     // unknown ctor, a wrong arity and a mistyped argument at commit;
     // the handler is dispatched after commit and may run against a
@@ -526,8 +526,8 @@ mod tests {
         }
     }
 
-    /// The real `reasoning:JustificationTerm`, resolved from
-    /// `ontologies/reasoning/reasoning.esl` through the same chain the
+    /// The real `justification:Term`, resolved from
+    /// `ontologies/justification/justification.esl` through the same chain the
     /// institution stands up.
     fn justification_term() -> Arc<InductiveDecl> {
         let reflection_json =
@@ -543,8 +543,8 @@ mod tests {
         }
         let reflection = Arc::new(builder.build(LayerStorage::in_memory()));
 
-        let reasoning_source = include_str!("../../../ontologies/reasoning/reasoning.esl");
-        let mut builder = LayerBuilder::new("reasoning", Some(reflection));
+        let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
+        let mut builder = LayerBuilder::new("justification", Some(reflection));
         for r in esl::compile(reasoning_source).expect("reasoning.esl compiles") {
             builder.add_resource(r).expect("resource admitted");
         }
@@ -555,7 +555,7 @@ mod tests {
             &reasoning,
         ) {
             Ok(Val::InductiveType { decl, .. }) => decl,
-            other => panic!("JustificationTerm did not resolve to an inductive: {other:?}"),
+            other => panic!("justification:Term did not resolve to an inductive: {other:?}"),
         }
     }
 
@@ -598,21 +598,21 @@ data probe:Lits {
         let decl = justification_term();
         assert!(
             decl.params.is_empty() && decl.indices.is_empty(),
-            "JustificationTerm is monomorphic and non-indexed"
+            "justification:Term is monomorphic and non-indexed"
         );
 
         let declared_evidence = decl
             .ctors
             .iter()
-            .find(|c| c.name == "DeclaredEvidence")
-            .expect("DeclaredEvidence declared");
+            .find(|c| c.name == "Declared")
+            .expect("Declared declared");
         let args = ctor_arg_types(&decl, declared_evidence).expect("telescope walks");
         assert!(
             matches!(
                 args.as_slice(),
                 [Exp::EigonPrimitive(PrimitiveType::String)]
             ),
-            "DeclaredEvidence : core:string -> J, got {args:?}"
+            "Declared : core:string -> J, got {args:?}"
         );
 
         let spec_str_ctor = decl
@@ -691,11 +691,11 @@ data probe:Lits {
             json!({
                 "ctor": "App",
                 "args": [
-                    { "ctor": "DeclaredEvidence", "args": ["urn:eigenius:demo:a"] },
+                    { "ctor": "Declared", "args": ["urn:eigenius:demo:a"] },
                     {
                         "ctor": "SpecStr",
                         "args": [
-                            { "ctor": "ObservedEvidence", "args": ["urn:eigenius:demo:b"] },
+                            { "ctor": "Observed", "args": ["urn:eigenius:demo:b"] },
                             "urn:eigenius:demo:t"
                         ]
                     }
@@ -708,12 +708,12 @@ data probe:Lits {
             Exp::InductiveCtor(d, name, args) => {
                 assert_eq!(name, "App");
                 assert_eq!(d.as_str(), iris::JUSTIFICATION_TERM);
-                assert!(matches!(&args[0], Exp::InductiveCtor(_, n, _) if n == "DeclaredEvidence"));
+                assert!(matches!(&args[0], Exp::InductiveCtor(_, n, _) if n == "Declared"));
                 match &args[1] {
                     Exp::InductiveCtor(_, n, inner) => {
                         assert_eq!(n, "SpecStr");
                         assert!(
-                            matches!(&inner[0], Exp::InductiveCtor(_, n, _) if n == "ObservedEvidence")
+                            matches!(&inner[0], Exp::InductiveCtor(_, n, _) if n == "Observed")
                         );
                         assert_eq!(inner[1], Exp::LitString("urn:eigenius:demo:t".to_string()));
                     }
@@ -727,12 +727,12 @@ data probe:Lits {
     // ── A mistyped argument is rejected, naming both ──────────────
 
     /// The behaviour change this commit is about. The old decoder read
-    /// `42` as `Exp::LitInt(42)` and handed a `JustificationTerm`
-    /// whose `DeclaredEvidence` payload was an integer to the kernel.
+    /// `42` as `Exp::LitInt(42)` and handed a `justification:Term`
+    /// whose `Declared` payload was an integer to the kernel.
     #[test]
     fn integer_in_a_declared_string_slot_is_rejected_naming_both() {
         let decl = justification_term();
-        let err = decode(json!({ "ctor": "DeclaredEvidence", "args": [42] }), &decl)
+        let err = decode(json!({ "ctor": "Declared", "args": [42] }), &decl)
             .expect_err("an integer in a core:string slot must not decode");
         assert_eq!(
             err,
@@ -801,8 +801,8 @@ data probe:Lits {
 
         let err = decode(
             json!({
-                "ctor": "DeclaredEvidence",
-                "args": [{ "ctor": "DeclaredEvidence", "args": ["urn:x"] }]
+                "ctor": "Declared",
+                "args": [{ "ctor": "Declared", "args": ["urn:x"] }]
             }),
             &decl,
         )
@@ -817,7 +817,7 @@ data probe:Lits {
         );
 
         let err = decode(json!({ "ctor": "App", "args": ["urn:x", "urn:y"] }), &decl)
-            .expect_err("a string in a JustificationTerm slot must not decode");
+            .expect_err("a string in a justification:Term slot must not decode");
         assert_eq!(
             err,
             ChainDecodeError::ArgTypeMismatch {
@@ -847,14 +847,10 @@ data probe:Lits {
             }
         );
         assert_eq!(
-            decode(
-                json!({ "ctor": "DeclaredEvidence", "args": ["a", "b"] }),
-                &decl
-            )
-            .expect_err("too many"),
+            decode(json!({ "ctor": "Declared", "args": ["a", "b"] }), &decl).expect_err("too many"),
             ChainDecodeError::ArityMismatch {
                 path: "<root>".to_string(),
-                ctor_name: "DeclaredEvidence".to_string(),
+                ctor_name: "Declared".to_string(),
                 expected: 1,
                 got: 2,
             }

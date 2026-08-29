@@ -6,7 +6,7 @@
 //                           paper's reference list; DOI + PubMed ID both carried).
 //   - litclaim:*          — the imported claim a citation warrants, as a
 //                           proposition (so a node can later discharge it via
-//                           DeclaredEvidence).
+//                           Declared).
 //   - reference:Citation  — THIS paper's use of a Reference (a DeclaredResource):
 //                           reference:cites + the CiTO reference:citation_type +
 //                           the paper's local reference:reference_label. A
@@ -24,7 +24,7 @@
 // warrants as LOGICAL PREMISES (not just provenance) — the structure-function
 // rules consume WRNActivitiesSeparable [14] and the seed-control rule consumes
 // C911ControlIsValid [16], so concl_helicase_required / concl_exo_dispensable /
-// concl_vivo_ontarget each carry a DeclaredEvidence on the matching warrant and
+// concl_vivo_ontarget each carry a Declared on the matching warrant and
 // thread it through their certificate. Each warrant has a DeclarationTrace so
 // the kernel mints the IsDeclaredAs witness those certificates discharge.
 // (Remaining warrants — [1]/[10]/[11]/[17]/[20]/[36]/[40]/[43] and the
@@ -425,7 +425,7 @@ resource wrnlit:cite_ccle_gdsc : reference:Citation {
 
 // ════════════════════════════════════════════════════════════════════
 // DeclarationTraces — mint the IsDeclaredAs witness for each warrant, so a
-// chain node can discharge the imported claim via DeclaredEvidence.
+// chain node can discharge the imported claim via Declared.
 // ════════════════════════════════════════════════════════════════════
 
 resource wrnlit:lit_synthetic_lethality_trace : reflection:DeclarationTrace {

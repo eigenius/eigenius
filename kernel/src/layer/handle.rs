@@ -106,7 +106,7 @@ pub struct LayerHandle {
 
     /// **Witness-scan skip hint (D66 slice 0).** `false` iff this layer defines *no* resource that
     /// could ever admit a `ChainWitness` — no Trace, no `InstitutionEmittedDerivation`, no
-    /// `ReasoningSentence`. A `lookup_chain_witness` walk skips such a layer outright instead of
+    /// `justification:Sentence`. A `lookup_chain_witness` walk skips such a layer outright instead of
     /// probing it.
     ///
     /// Stamped by `store_layer` at write time from the layer's own immutable resources, exactly like

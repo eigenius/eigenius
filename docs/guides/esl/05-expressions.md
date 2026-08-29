@@ -395,10 +395,10 @@ The resulting value lands in the resource's property slot just like any other pr
 
 ### Where this appears in practice
 
-- `reflection:canonical_proposition` on every `DerivedResource` subclass (StatisticalAnalysisPlan, ReasoningSentence, custom institution-emitted derived resources) — the proposition the resource asserts.
+- `reflection:canonical_proposition` on every `DerivedResource` subclass (StatisticalAnalysisPlan, justification:Sentence, custom institution-emitted derived resources) — the proposition the resource asserts.
 - `eigentt:axiom_statement` on every `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) — surface-compiled via the same lowering path.
 - `stats:null_hypothesis` / `stats:alternative_hypothesis` on `StatisticalAnalysisPlan` — the null and alternative the verifier reports in the verdict's audit trail.
-- `reasoning:proposition` on `ReasoningSentence` — the proposition the certificate type-checks against.
+- `justification:proposition` on `justification:Sentence` — the proposition the certificate type-checks against.
 - `core:ctor_type` on the typed-ctor form of indexed inductives — emitted by the compiler from the `data` declaration, not authored as a literal.
 
 Source: [`parse_type_expr`](../../../kernel/src/esl/parser.rs), [`lower_type_expr_to_exp`](../../../kernel/src/esl/compile.rs), [`encode_type_expr_to_json`](../../../kernel/src/esl/compile.rs), [`eigentt_type_mirror::encode_type`](../../../kernel/src/program/eigentt_type_mirror.rs).

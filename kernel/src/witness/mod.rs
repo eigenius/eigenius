@@ -16,11 +16,11 @@
 //!
 //! Soundness boundary for the D39 Reasoning institution: the four
 //! `ChainWitness.IsXxAs : core:iri → Prop → Prop` predicate families are
-//! consumed by the `JustifiedBy` indexed inductive's grounding constructors
+//! consumed by the `justification:Certificate` indexed inductive's grounding constructors
 //! to project the chain's existing class-membership + Trace-emission facts
 //! into the type system. Witnesses are kernel-internal — ESL has no
 //! constructor for them; the kernel synthesises inhabitants at
-//! `JustifiedBy.declared` / `.observed` / `.derived` / `.verified`
+//! `justification:Certificate.declared` / `.observed` / `.derived` / `.verified`
 //! type-check time by looking up a per-`Layer` witness index that the
 //! Layer builds from its Trace resources.
 //!
@@ -84,7 +84,7 @@ impl WitnessCategory {
 /// `reflection:canonical_proposition` property; for `VerifiedResource`,
 /// derived from the reified `VerifiedPropositionView`). Keeping
 /// `prop_hash` in the key still matters: it surfaces "the
-/// `JustifiedBy.declared` constructor was instantiated with the wrong
+/// `justification:Certificate.declared` constructor was instantiated with the wrong
 /// proposition for this IRI" as a type error at type-check time, rather
 /// than silently admitting a witness for a mismatched proposition.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

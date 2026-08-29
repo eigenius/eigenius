@@ -91,7 +91,7 @@ activity was measured in. The parse does mention it: measured on `rule_1`, the a
 argument holds `umlscui:C0920269` (MSI cancer models) and the consequent holds only `v0`/`v1`.
 
 So the lift discards the experimental context, and a discarding step is an implication. Since
-**no `JustifiedBy` constructor produces `JustifiedBy(_, A -> B)`** (`ontologies/reasoning/reasoning.esl:26-31`;
+**no `JustifiedBy` constructor produces `JustifiedBy(_, A -> B)`** (`ontologies/justification/justification.esl:26-31`;
 the eight constructors are four groundings, `app`, `sum_l`, `sum_r`, `spec_poly`), that
 implication can only enter as a grounding — i.e. Declared.
 
@@ -696,8 +696,8 @@ cannot be deferred.)*
 | Shape rule is a Declared resource, one per (predicate, shape) | `crates/eigenius-reasoning/src/grade.rs:546`; key at `crates/eigenius-encoding/src/emit.rs:350` |
 | 62 sentences → 61 distinct sense-erased skeletons | `experiments/parsing/skeleton-abstraction.py` over `expected-readings.tsv` |
 | Skeletons erase every open-class sense | `kernel/src/dcg/skeleton.rs:53` (`erase_senses`, ≥4-digit token → `§`) |
-| Zero-ctor inductive is opaque | `ontologies/reasoning/reasoning.esl:52` |
-| No implication introduction | `ontologies/reasoning/reasoning.esl:26-31`, ctors at `:97-175` |
+| Zero-ctor inductive is opaque | `ontologies/justification/justification.esl:52` |
+| No implication introduction | `ontologies/justification/justification.esl:26-31`, ctors at `:97-175` |
 | `Decl::Def` never emitted from ESL | only `kernel/src/program/expr.rs:358` |
 | `Let` reserved for type-position δ-binding | `kernel/src/esl/lexer.rs:48-54` |
 | Lookup side normalizes | `kernel/src/program/check_hooks.rs:76` |

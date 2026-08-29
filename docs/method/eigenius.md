@@ -159,18 +159,18 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
   justification-logic institution
   ([D39](https://github.com/eigenius/eigenius/blob/main/docs/design/d39-justification-logic.md),
   guide [reasoning-institution/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/reasoning-institution)):
-  a `ReasoningSentence` carries `justification` + `certificate`; the certificate
-  type-checks against `JustifiedBy(justification, proposition)` via
-  `DerivedEvidence`/`DeclaredEvidence`/`VerifiedEvidence`/`App` and the
+  a `justification:Sentence` carries `justification` + `certificate`; the certificate
+  type-checks against `justification:Certificate(justification, proposition)` via
+  `DerivedEvidence`/`Declared`/`Verified`/`App` and the
   `derived()/declared()/verified()/app()` certificate constructors.
 - **Witness index** — [D49](https://github.com/eigenius/eigenius/blob/main/docs/design/d49-chainwitness-machinery.md):
   how `IsObservedAs`/`IsDeclaredAs`/`IsDerivedAs`/`IsVerifiedAs` witnesses are
   admitted per layer and consumed by certificates.
 - **Lemma citation** — [D54](https://github.com/eigenius/eigenius/blob/main/docs/design/d54-reasoning-lemma-citation.md):
-  a `Holds` `ReasoningSentence` is citable as a lemma (`verified(<iri>, P)`) →
+  a `Holds` `justification:Sentence` is citable as a lemma (`verified(<iri>, P)`) →
   layered proofs.
 - **The commit gate (fail-closed).** AutoOnLoad **rejects** a layer that adds a
-  `Fails` `ReasoningSentence`, so a later lemma citation of it can't be unsound —
+  `Fails` `justification:Sentence`, so a later lemma citation of it can't be unsound —
   this is what makes "you can't record an unwitnessed conclusion" structural.
 - **Anchors (third-party knowledge)** — the `reference` ontology
   (`ontologies/reference/reference.esl`): `reference:Reference` (a bibliographic

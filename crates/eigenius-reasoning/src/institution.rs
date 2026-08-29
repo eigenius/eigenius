@@ -14,7 +14,7 @@
 
 //! `ReasoningInstitution` — the D39 Justification Logic institution.
 //!
-//! Stateless: every `query` call resolves the JustifiedBy + JustificationTerm
+//! Stateless: every `query` call resolves the justification:Certificate + justification:Term
 //! inductives from the layer chain afresh. A future revision may cache
 //! per-Layer-id decl resolution; the `Arc<I>` blanket impl in
 //! [`eigenius_kernel::institution::runtime`] already permits state without
@@ -40,21 +40,21 @@ use crate::validate::do_validate_justification;
 /// same strings the chain ontology declared.
 ///
 /// Matches the resource declarations in
-/// [`ontologies/reasoning/reasoning.esl`](../../../ontologies/reasoning/reasoning.esl).
+/// [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl).
 pub mod iris {
     /// The institution itself.
     pub const INSTITUTION: &str = "urn:eigenius:reasoning:reasoning_institution";
 
-    /// AutoOnLoad procedure: type-check a ReasoningSentence's
-    /// certificate against `JustifiedBy(justification, proposition)`.
-    /// Load-bearing — every committed ReasoningSentence triggers it.
+    /// AutoOnLoad procedure: type-check a justification:Sentence's
+    /// certificate against `justification:Certificate(justification, proposition)`.
+    /// Load-bearing — every committed justification:Sentence triggers it.
     pub const PROC_VALIDATE_JUSTIFICATION: &str =
         "urn:eigenius:reasoning:proc:validate_justification";
 
-    /// ExportFormat procedure: lift a `ReasoningSentence`'s
-    /// `justification` property (a D32 §3.7-shaped JustificationTerm
+    /// ExportFormat procedure: lift a `justification:Sentence`'s
+    /// `justification` property (a D32 §3.7-shaped justification:Term
     /// chain value) into a typed `Val::InductiveVal`. Used by the
-    /// validate handler to construct `JustifiedBy(j, p)`; available
+    /// validate handler to construct `justification:Certificate(j, p)`; available
     /// as a standalone extract route so any future cross-institution
     /// consumer can lift a justification through the same path.
     pub const PROC_EXTRACT_JUSTIFICATION: &str =
@@ -63,7 +63,7 @@ pub mod iris {
     /// ExportFormat resource IRI referencing the procedure above.
     pub const EF_JUSTIFICATION: &str = "urn:eigenius:reasoning:ef_justification";
 
-    /// OnDemand procedure: search for a JustificationTerm over Γ that
+    /// OnDemand procedure: search for a justification:Term over Γ that
     /// witnesses a candidate Prop. v1 returns NotImplemented (Phase 7).
     pub const PROC_ENTAILMENT_QUERY: &str = "urn:eigenius:reasoning:proc:entailment_query";
 
@@ -71,34 +71,34 @@ pub mod iris {
     /// over a committed-sentence set. v1 returns NotImplemented (Phase 7).
     pub const PROC_CONSISTENCY_CHECK: &str = "urn:eigenius:reasoning:proc:consistency_check";
 
-    /// D73 §1.2 / eigenius#204 — project a retained JustificationTerm onto its support.
+    /// D73 §1.2 / eigenius#204 — project a retained justification:Term onto its support.
     pub const PROC_PROJECT_JUSTIFICATION: &str =
         "urn:eigenius:reasoning:proc:project_justification";
-    pub const JUSTIFICATION_PROJECTION: &str = "urn:eigenius:reasoning:JustificationProjection";
-    pub const PROP_SUBJECT_SENTENCE: &str = "urn:eigenius:reasoning:subject_sentence";
-    pub const PROP_COUNTERFACTUAL_IRI: &str = "urn:eigenius:reasoning:counterfactual_iri";
-    pub const PROP_SUPPORT_COUNT: &str = "urn:eigenius:reasoning:support_count";
-    pub const PROP_FULLY_VERIFIED: &str = "urn:eigenius:reasoning:fully_verified";
-    pub const PROP_DECLARED_GROUNDS: &str = "urn:eigenius:reasoning:declared_grounds";
-    pub const PROP_OBSERVED_GROUNDS: &str = "urn:eigenius:reasoning:observed_grounds";
-    pub const PROP_DERIVED_GROUNDS: &str = "urn:eigenius:reasoning:derived_grounds";
-    pub const PROP_VERIFIED_GROUNDS: &str = "urn:eigenius:reasoning:verified_grounds";
-    pub const PROP_SURVIVES_WITHOUT: &str = "urn:eigenius:reasoning:survives_without";
+    pub const JUSTIFICATION_PROJECTION: &str = "urn:eigenius:justification:Projection";
+    pub const PROP_SUBJECT_SENTENCE: &str = "urn:eigenius:justification:subject_sentence";
+    pub const PROP_COUNTERFACTUAL_IRI: &str = "urn:eigenius:justification:counterfactual_iri";
+    pub const PROP_SUPPORT_COUNT: &str = "urn:eigenius:justification:support_count";
+    pub const PROP_FULLY_VERIFIED: &str = "urn:eigenius:justification:fully_verified";
+    pub const PROP_DECLARED_GROUNDS: &str = "urn:eigenius:justification:declared_grounds";
+    pub const PROP_OBSERVED_GROUNDS: &str = "urn:eigenius:justification:observed_grounds";
+    pub const PROP_DERIVED_GROUNDS: &str = "urn:eigenius:justification:derived_grounds";
+    pub const PROP_VERIFIED_GROUNDS: &str = "urn:eigenius:justification:verified_grounds";
+    pub const PROP_SURVIVES_WITHOUT: &str = "urn:eigenius:justification:survives_without";
 
-    // Property IRIs on ReasoningSentence — used by the validate handler
+    // Property IRIs on justification:Sentence — used by the validate handler
     // to read the three fields.
-    pub const PROP_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
-    pub const PROP_JUSTIFICATION: &str = "urn:eigenius:reasoning:justification";
-    pub const PROP_CERTIFICATE: &str = "urn:eigenius:reasoning:certificate";
+    pub const PROP_PROPOSITION: &str = "urn:eigenius:justification:proposition";
+    pub const PROP_JUSTIFICATION: &str = "urn:eigenius:justification:term";
+    pub const PROP_CERTIFICATE: &str = "urn:eigenius:justification:certificate";
 
     // Inductive type IRIs the certificate type-check builds against.
-    pub const JUSTIFICATION_TERM: &str = "urn:eigenius:reasoning:JustificationTerm";
-    pub const JUSTIFIED_BY: &str = "urn:eigenius:reasoning:JustifiedBy";
+    pub const JUSTIFICATION_TERM: &str = "urn:eigenius:justification:Term";
+    pub const JUSTIFIED_BY: &str = "urn:eigenius:justification:Certificate";
 
     // EntailmentRequest / ConsistencyRequest property IRIs — used by
     // the OnDemand / Decidable handlers to read their inputs.
-    pub const PROP_CANDIDATE_PROPOSITION: &str = "urn:eigenius:reasoning:candidate_proposition";
-    pub const PROP_SENTENCE_SET: &str = "urn:eigenius:reasoning:sentence_set";
+    pub const PROP_CANDIDATE_PROPOSITION: &str = "urn:eigenius:justification:candidate_proposition";
+    pub const PROP_SENTENCE_SET: &str = "urn:eigenius:justification:sentence_set";
 }
 
 /// In-process Justification Logic institution.

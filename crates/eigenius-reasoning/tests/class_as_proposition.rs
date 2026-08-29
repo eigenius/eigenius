@@ -14,7 +14,7 @@
 
 //! A class is not a proposition (eigenius#191).
 //!
-//! `reasoning:JustifiedBy.declared` binds `P : Prop`, so its second argument
+//! `justification:Certificate.declared` binds `P : Prop`, so its second argument
 //! is checked against `Sort(0)`. Check mode carried
 //! `(Exp::EigonClass(_), Val::Sort(_)) => Ok(())`, admitting an `EigonClass`
 //! against every universe including `Prop`, while `check_infer` gives
@@ -58,8 +58,10 @@ fn build_chain() -> ExecutionContext {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
-    for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl"))
-        .expect("reasoning.esl compiles")
+    for r in esl::compile(include_str!(
+        "../../../ontologies/justification/justification.esl"
+    ))
+    .expect("reasoning.esl compiles")
     {
         reasoning_builder.add_resource(r).unwrap();
     }
@@ -92,7 +94,7 @@ fn build_chain() -> ExecutionContext {
     )
 }
 
-/// `(verdict ctor, diagnostic)` for one of the fixture's `ReasoningSentence`s.
+/// `(verdict ctor, diagnostic)` for one of the fixture's `justification:Sentence`s.
 fn verdict(local_name: &str) -> (String, Option<String>) {
     let ctx = build_chain();
     let sentence_iri =

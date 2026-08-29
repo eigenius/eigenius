@@ -10,7 +10,7 @@
 // citable artefact rather than something the statistics author folded
 // silently into the SAP.
 //
-// Five chain commits + one ReasoningSentence:
+// Five chain commits + one justification:Sentence:
 //
 // 1. Domain vocabulary — two predicates in `Prop`. `HasLowIC50` is
 //    marked `is_a stats:PopulationLevel` per D52 §7.4 so the statistics
@@ -59,7 +59,7 @@
 //      bridge across many compounds; lands as a follow-on. A matching
 //      `DeclarationTrace` admits the IsDeclaredAs witness.
 //
-// 6. A `ReasoningSentence` claiming `StrongInhibitor(EIG_0291)`. The
+// 6. A `justification:Sentence` claiming `StrongInhibitor(EIG_0291)`. The
 //    justification composes THREE evidences via nested `App`:
 //      App(rule,
 //          App(bridge,
@@ -71,23 +71,23 @@
 //    - The outer `App(rule, ...)` yields `StrongInhibitor(EIG_0291)`
 //      (the conclusion).
 //    The certificate is two nested `app(A, B, j1, j2, c1, c2)` calls
-//    composing JustifiedBy.declared (rule) + JustifiedBy.declared
-//    (bridge) + JustifiedBy.derived (verdict) via JustifiedBy.app.
+//    composing justification:Certificate.declared (rule) + justification:Certificate.declared
+//    (bridge) + justification:Certificate.derived (verdict) via justification:Certificate.app.
 //
 // On commit, ValidateJustification fires AutoOnLoad on the sentence
 // and the kernel type-checks the certificate against
-// `JustifiedBy(justification, proposition)`. The chain-witness index
+// `justification:Certificate(justification, proposition)`. The chain-witness index
 // supplies the three witnesses the grounding constructors consume
 // (`IsDerivedAs` on the verdict, `IsDeclaredAs` on the bridge, and
 // `IsDeclaredAs` on the literature rule).
 
-namespace core         = "urn:eigenius:core";
-namespace formats      = "urn:eigenius:core:formats";
-namespace reflection   = "urn:eigenius:reflection";
-namespace reasoning    = "urn:eigenius:reasoning";
-namespace stats        = "urn:eigenius:measurements";
-namespace eigentt      = "urn:eigenius:eigentt";
-namespace screen       = "urn:eigenius:demo:screen";
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace screen     = "urn:eigenius:demo:screen";
 
 // The per-effect `StatisticalAnalysisResult` IRI scheme is
 // `{plan_iri}:result:{effect_name}` (kernel-emitted; see
@@ -96,7 +96,8 @@ namespace screen       = "urn:eigenius:demo:screen";
 // `claim_eig0291_lowic50`, so `screen_result:main_effect` lands at
 // `urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect`.
 namespace screen_result = "urn:eigenius:demo:screen:claim_eig0291_lowic50:result";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Step 1: domain vocabulary ─────────────────────────────────────
 
@@ -249,7 +250,7 @@ resource screen:bridge_eig0291_lowic50_trace : reflection:DeclarationTrace {
     reflection:timestamp   = "2026-03-04T14:22:11Z";
 }
 
-// ─── Step 6: the ReasoningSentence ─────────────────────────────────
+// ─── Step 6: the justification:Sentence ─────────────────────────────────
 //
 // The agent's claim: "EIG_0291 is a strong CDK2 inhibitor."
 //
@@ -259,9 +260,9 @@ resource screen:bridge_eig0291_lowic50_trace : reflection:DeclarationTrace {
 // (StrongInhibitor).
 //
 //   App(
-//     DeclaredEvidence(rule_iri),         -- literature rule
+//     Declared(rule_iri),         -- literature rule
 //     App(
-//       DeclaredEvidence(bridge_iri),     -- statistical → domain
+//       Declared(bridge_iri),     -- statistical → domain
 //       DerivedEvidence(verdict_iri)      -- the per-effect result
 //     )
 //   )
@@ -270,17 +271,17 @@ resource screen:bridge_eig0291_lowic50_trace : reflection:DeclarationTrace {
 // composes the literature rule with the result of the inner `app`,
 // which itself composes the bridge with the per-effect verdict.
 
-resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+resource screen:concl_eig0291_strong : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+    justification:term = App(
+        Declared("urn:eigenius:demo:screen:rule_strong"),
         App(
-            DeclaredEvidence("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
+            Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
             DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect")
         )
     );
@@ -289,7 +290,7 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
     // inner app (which produces HasLowIC50(EIG_0291)).
     //   A  = HasLowIC50(EIG_0291)
     //   B  = StrongInhibitor(EIG_0291)
-    //   j1 = DeclaredEvidence(rule_iri)
+    //   j1 = Declared(rule_iri)
     //   j2 = App(bridge, verdict) — produced by the inner app
     //   c1 = declared(rule_iri, A -> B)
     //   c2 = inner app(...) — bridge applied to verdict
@@ -297,7 +298,7 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
     // Inner app: applies the bridge to the per-effect verdict.
     //   A'  = stats:lt(mean_of(s), 100.0)
     //   B'  = HasLowIC50(EIG_0291)
-    //   j1' = DeclaredEvidence(bridge_iri)
+    //   j1' = Declared(bridge_iri)
     //   j2' = DerivedEvidence(verdict_iri)
     //   c1' = declared(bridge_iri, A' -> B')
     //   c2' = derived(verdict_iri, A')
@@ -306,19 +307,19 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
     // `IsXxAs(iri, P)` slot the kernel's synthesize hook fills in
     // from the chain witness index. ESL admits eliding that slot —
     // the calls below stop after the (iri, P) pair.
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         app(
             // outer A
             screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
             // outer B
             screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
             // outer j1
-            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
-            // outer j2 — qualified `reasoning:App` because the bare
+            Declared("urn:eigenius:demo:screen:rule_strong"),
+            // outer j2 — qualified `justification:App` because the bare
             // `App` ctor name collides with `eigentt:TypeExpr.App`
             // and the type_expr parser resolves to TypeExpr otherwise.
-            reasoning:App(
-                DeclaredEvidence("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
+            justification:App(
+                Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
                 DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect")
             ),
             // outer c1: literature rule — witness slot elided
@@ -337,7 +338,7 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
                 // inner B'
                 screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
                 // inner j1'
-                DeclaredEvidence("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
+                Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
                 // inner j2'
                 DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect"),
                 // inner c1': bridge — witness slot elided

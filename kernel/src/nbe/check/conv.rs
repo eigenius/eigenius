@@ -929,7 +929,7 @@ mod index_conversion_tests {
     }
 
     /// A two-index family rejects a mismatch in the *second* index — the shape
-    /// of `reasoning:JustifiedBy : JustificationTerm -> Prop -> Type 0`, whose
+    /// of `justification:Certificate : justification:Term -> Prop -> Type 0`, whose
     /// index #1 is the proposition the certificate is about.
     #[test]
     fn a_mismatch_in_a_later_index_is_rejected() {

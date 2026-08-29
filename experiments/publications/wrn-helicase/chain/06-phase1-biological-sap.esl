@@ -26,13 +26,14 @@
 // file is loaded by the live demo (demo/wrn-helicase/run.sh) after that step —
 // not by the in-process recompute tests.
 
-namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace stats      = "urn:eigenius:measurements";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace bench      = "urn:eigenius:benchmark";
-namespace wrn        = "urn:eigenius:pub:wrn";
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace stats         = "urn:eigenius:measurements";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace bench         = "urn:eigenius:benchmark";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
 
 // The KM12 day-10 competition-assay table consumed by the lme4 biological-unit
 // RuntimeScript program (D56). Columns: viab_value (the Firefly:Renilla
@@ -47,13 +48,13 @@ class wrn:CompetitionTable : reflection:ObservedResource {
 // The biological-unit viability warrant: discharges the IsDerivedAs witness the
 // lme4 program commits (onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")).
 // Mirrors concl_vivo's shape (D54 certificate over a wrapped-R derived result).
-resource wrn:concl_viab_KM12_biological : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_viab_KM12_biological : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")
     );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result");
-    reasoning:certificate = type_expr(
+    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result");
+    justification:certificate = type_expr(
         derived("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result",
                 onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"))
     );

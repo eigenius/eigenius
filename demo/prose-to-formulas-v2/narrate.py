@@ -114,7 +114,7 @@ def main():
         if not r["@id"].endswith(suffix):
             continue
         p = r.get("urn:eigenius:reflection:canonical_proposition") or r.get(
-            "urn:eigenius:reasoning:proposition"
+            "urn:eigenius:justification:proposition"
         )
         if p:
             print("   ", render(p))

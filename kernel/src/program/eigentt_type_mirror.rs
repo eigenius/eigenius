@@ -15,7 +15,7 @@
 //! D47 — chain-mirrored EigenTT type fragment codec.
 //!
 //! Encodes closed EigenTT type expressions ([`Exp`]) as chain-resident
-//! values conforming to the `urn:eigenius:eigentt:TypeExpr` inductive
+//! values conforming to the `urn:eigenius:eigentt:Term` inductive
 //! type. Decoder is the inverse, resolving `ConstRef`s through the
 //! supplied chain layers.
 //!
@@ -62,7 +62,7 @@ impl std::fmt::Display for EncodeError {
 impl std::error::Error for EncodeError {}
 
 /// Encode an EigenTT type expression as a chain-resident
-/// `eigentt:TypeExpr` value.
+/// `eigentt:Term` value.
 ///
 /// The output is a [`Value::Json`] wrapping a `{"ctor": ..., "args": [...]}`
 /// tree shape (D32 §3.7). The validator at commit time walks the tree
@@ -370,7 +370,7 @@ fn binder_name(p: &Patt) -> String {
     }
 }
 
-/// Errors raised when a chain-resident `eigentt:TypeExpr` value cannot
+/// Errors raised when a chain-resident `eigentt:Term` value cannot
 /// be decoded back to an `Exp`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
@@ -417,23 +417,23 @@ pub enum DecodeError {
 impl std::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DecodeError::MalformedValue(s) => write!(f, "malformed eigentt:TypeExpr value: {s}"),
-            DecodeError::MissingCtor => write!(f, "eigentt:TypeExpr value missing `ctor` field"),
-            DecodeError::MissingArgs => write!(f, "eigentt:TypeExpr value missing `args` field"),
-            DecodeError::UnknownCtor(c) => write!(f, "unknown eigentt:TypeExpr ctor: `{c}`"),
+            DecodeError::MalformedValue(s) => write!(f, "malformed eigentt:Term value: {s}"),
+            DecodeError::MissingCtor => write!(f, "eigentt:Term value missing `ctor` field"),
+            DecodeError::MissingArgs => write!(f, "eigentt:Term value missing `args` field"),
+            DecodeError::UnknownCtor(c) => write!(f, "unknown eigentt:Term ctor: `{c}`"),
             DecodeError::WrongArgCount {
                 ctor,
                 expected,
                 actual,
             } => write!(
                 f,
-                "eigentt:TypeExpr ctor `{ctor}` expects {expected} arg(s), got {actual}"
+                "eigentt:Term ctor `{ctor}` expects {expected} arg(s), got {actual}"
             ),
             DecodeError::WrongArgShape {
                 ctor,
                 slot,
                 details,
-            } => write!(f, "eigentt:TypeExpr ctor `{ctor}` arg {slot}: {details}"),
+            } => write!(f, "eigentt:Term ctor `{ctor}` arg {slot}: {details}"),
             DecodeError::UnresolvedConstRef(iri) => {
                 write!(f, "ConstRef references unresolved IRI: {iri}")
             }
@@ -474,7 +474,7 @@ struct DecodeCtx<'a> {
     layer: &'a Layer,
 }
 
-/// Decode a chain-resident `eigentt:TypeExpr` value back to an
+/// Decode a chain-resident `eigentt:Term` value back to an
 /// EigenTT `Exp`.
 ///
 /// An `App` spine over a `ConstRef` decodes to the same spine over an

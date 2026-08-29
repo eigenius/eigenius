@@ -9,26 +9,27 @@
 // conformance witness; m4's conclusion cites the Declared cut accounting (04a).
 // The evidence (pins, rule, checks, cut_accounting) lives in 04a-evidence.esl.
 
-namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace obj        = "urn:eigenius:obj:d57";
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace obj           = "urn:eigenius:obj:d57";
+namespace justification = "urn:eigenius:justification";
 
 // ── m3: GeneratorProduces (modus ponens over Observed ∧ Observed ∧ Derived) ─
-resource obj:concl_generator : reasoning:ReasoningSentence {
-    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
-    reasoning:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
-    reasoning:justification = App(
+resource obj:concl_generator : justification:Sentence {
+    justification:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    justification:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
+    justification:term = App(
         App(
             App(
-                DeclaredEvidence("urn:eigenius:obj:d57:generator_rule"),
-                ObservedEvidence("urn:eigenius:obj:d57:gen_input")
+                Declared("urn:eigenius:obj:d57:generator_rule"),
+                Observed("urn:eigenius:obj:d57:gen_input")
             ),
-            ObservedEvidence("urn:eigenius:obj:d57:gen_output")
+            Observed("urn:eigenius:obj:d57:gen_output")
         ),
         DerivedEvidence("urn:eigenius:obj:d57:generate_result")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             RULE = "urn:eigenius:obj:d57:generator_rule",
             IN   = "urn:eigenius:obj:d57:gen_input",
@@ -39,29 +40,29 @@ resource obj:concl_generator : reasoning:ReasoningSentence {
             GC   = obj:GeneratorConforms("schema_org"),
             GP   = obj:GeneratorProduces("schema_org"),
             RULE_P = IAO -> OAO -> GC -> GP,
-            jIN  = ObservedEvidence(IN),
-            jOUT = ObservedEvidence(OUT),
+            jIN  = Observed(IN),
+            jOUT = Observed(OUT),
             jGC  = DerivedEvidence(RES),
             cIN  = observed(IN, IAO),
             cOUT = observed(OUT, OAO),
             cGC  = derived(RES, GC),
             c1 = app(IAO, OAO -> GC -> GP,
-                     DeclaredEvidence(RULE), jIN, declared(RULE, RULE_P), cIN),
+                     Declared(RULE), jIN, declared(RULE, RULE_P), cIN),
             c2 = app(OAO, GC -> GP,
-                     reasoning:App(DeclaredEvidence(RULE), jIN), jOUT, c1, cOUT)
+                     justification:App(Declared(RULE), jIN), jOUT, c1, cOUT)
         in
         app(GC, GP,
-            reasoning:App(reasoning:App(DeclaredEvidence(RULE), jIN), jOUT),
+            justification:App(justification:App(Declared(RULE), jIN), jOUT),
             jGC, c2, cGC)
     );
 }
 
 // ── m4: CutAccounted (Declared, mechanically-backed) ────────────────
-resource obj:concl_cut : reasoning:ReasoningSentence {
-    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
-    reasoning:proposition   = type_expr( obj:CutAccounted("schema_org") );
-    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:cut_accounting");
-    reasoning:certificate   = type_expr(
+resource obj:concl_cut : justification:Sentence {
+    justification:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    justification:proposition   = type_expr( obj:CutAccounted("schema_org") );
+    justification:term = Declared("urn:eigenius:obj:d57:cut_accounting");
+    justification:certificate   = type_expr(
         declared("urn:eigenius:obj:d57:cut_accounting", obj:CutAccounted("schema_org"))
     );
 }

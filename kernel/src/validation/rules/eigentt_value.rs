@@ -12,37 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rule 21 — the single commit-time validator for `eigentt:TypeExpr` values.
+//! Rule 21 — the single commit-time validator for `eigentt:Term` values.
 //!
-//! Any property whose declared range is `eigentt:TypeExpr` carries a
+//! Any property whose declared range is `eigentt:Term` carries a
 //! D47-encoded EigenTT tree (a proposition, a type, or a term). This rule is
 //! the *one* place that validates such values, end to end:
 //!
 //! 1. **decode** the tree via the D47 codec (`decode_type`) — catches malformed
 //!    trees, unresolved `ConstRef`s, and `CtorApp`s to unknown ctors →
-//!    [`ValidationRule::TypeExprMalformed`];
+//!    [`ValidationRule::TermMalformed`];
 //! 2. **type-check** the decoded `Exp` against the chain (`nbe::check_infer`) —
 //!    the Semantic Felicity Condition: a predicate applied to the wrong
 //!    argument type, an application of a non-function, etc. →
-//!    [`ValidationRule::TypeExprIllTyped`];
+//!    [`ValidationRule::TermIllTyped`];
 //! 3. **require `Prop`** of the slots that assert something —
 //!    [`wk::PROPOSITION_SLOTS`] — by keeping the type step 2 infers and
-//!    demanding `Sort(0)` → [`ValidationRule::TypeExprNotAProposition`].
+//!    demanding `Sort(0)` → [`ValidationRule::TermNotAProposition`].
 //!
 //! Step 3 is what separates a claim from an arbitrary term. `check_infer`
 //! already computes the type; discarding it let an integer literal commit as
 //! a resource's `reflection:canonical_proposition` — the slot the witness
 //! index projects into `IsDeclaredAs`/`IsDerivedAs` and the slot
-//! `JustifiedBy` certificates are checked against (eigenius#175).
+//! `justification:Certificate` certificates are checked against (eigenius#175).
 //!
 //! Steps 1–2 key off the declared **range** (`class_types ∋
-//! eigentt:TypeExpr`), not a property name. Step 3 cannot: that range covers
+//! eigentt:Term`), not a property name. Step 3 cannot: that range covers
 //! propositions, types, and terms alike, so the propositionhood obligation is
 //! carried per-property by [`wk::PROPOSITION_SLOTS`]. This rule
 //! **consolidates** what were
 //! three overlapping checks: the canonical-proposition decode check (old Rule
 //! 20), `check_inductive_value`'s bespoke `ConstRef`/`CtorApp` resolution walk
-//! for `eigentt:TypeExpr` (now skipped — see `inductive.rs`), and the
+//! for `eigentt:Term` (now skipped — see `inductive.rs`), and the
 //! type-check itself. One validator, one set of diagnostics, no duplicates.
 //!
 //! The layer is in hand, so cross-layer `ConstRef`s (axioms, classes,
@@ -56,14 +56,14 @@ use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::program::eigentt_type_mirror::decode_type;
 
-/// The `urn:` of the `eigentt:TypeExpr` inductive — the range marker that
+/// The `urn:` of the `eigentt:Term` inductive — the range marker that
 /// designates a property value as a D47-encoded EigenTT tree.
-const TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:TypeExpr";
+const TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:Term";
 
 impl Validator {
-    /// Rule 21 — decode + type-check every `eigentt:TypeExpr`-ranged value.
+    /// Rule 21 — decode + type-check every `eigentt:Term`-ranged value.
     /// See the module docs. No-op for properties whose range is not
-    /// `eigentt:TypeExpr`.
+    /// `eigentt:Term`.
     pub(in crate::validation) fn check_type_expr_well_typed(
         &self,
         prop_def: &Resource,
@@ -131,9 +131,9 @@ impl Validator {
                 return vec![ValidationError {
                     resource_id: res_id.clone(),
                     property: Some(prop_iri.clone()),
-                    rule: ValidationRule::TypeExprMalformed,
+                    rule: ValidationRule::TermMalformed,
                     message: format!(
-                        "eigentt:TypeExpr value failed to decode through the D47 codec: {e}"
+                        "eigentt:Term value failed to decode through the D47 codec: {e}"
                     ),
                 }];
             }
@@ -153,9 +153,9 @@ impl Validator {
                 return vec![ValidationError {
                     resource_id: res_id.clone(),
                     property: Some(prop_iri.clone()),
-                    rule: ValidationRule::TypeExprIllTyped,
+                    rule: ValidationRule::TermIllTyped,
                     message: format!(
-                        "eigentt:TypeExpr value decodes but does not type-check against the \
+                        "eigentt:Term value decodes but does not type-check against the \
                          chain: {reason}"
                     ),
                 }];
@@ -172,11 +172,11 @@ impl Validator {
             return vec![ValidationError {
                 resource_id: res_id.clone(),
                 property: Some(prop_iri.clone()),
-                rule: ValidationRule::TypeExprNotAProposition,
+                rule: ValidationRule::TermNotAProposition,
                 message: format!(
                     "{prop_iri} must hold a proposition — a term inhabiting Prop = Sort(0) — but \
                      this value inhabits {}. The slot is read as a proposition by the witness \
-                     index and by JustifiedBy certificate checking.",
+                     index and by justification:Certificate certificate checking.",
                     describe_inhabited(&inferred)
                 ),
             }];
@@ -220,8 +220,8 @@ mod tests {
         Iri::parse(s).unwrap()
     }
 
-    /// Bootstrap chain (has `eigentt:TypeExpr` + the core type-formers) plus a
-    /// property `test:tx : core:resource` ranged at `eigentt:TypeExpr`.
+    /// Bootstrap chain (has `eigentt:Term` + the core type-formers) plus a
+    /// property `test:tx : core:resource` ranged at `eigentt:Term`.
     fn chain_with_eigentt_prop() -> Arc<Layer> {
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
         let mut top = LayerBuilder::new("eigentt_value_test", Some(head));
@@ -237,9 +237,7 @@ mod tests {
         );
         prop.set(
             iri(wk::CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:eigentt:TypeExpr",
-            ))]),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
         );
         top.add_resource(prop).unwrap();
         Arc::new(top.build(LayerStorage::in_memory()))
@@ -262,9 +260,9 @@ mod tests {
             .filter(|e| {
                 matches!(
                     e.rule,
-                    ValidationRule::TypeExprMalformed
-                        | ValidationRule::TypeExprIllTyped
-                        | ValidationRule::TypeExprNotAProposition
+                    ValidationRule::TermMalformed
+                        | ValidationRule::TermIllTyped
+                        | ValidationRule::TermNotAProposition
                 )
             })
             .collect()
@@ -329,10 +327,7 @@ mod tests {
             1,
             "an integer literal is not a proposition; got {errs:?}"
         );
-        assert!(matches!(
-            errs[0].rule,
-            ValidationRule::TypeExprNotAProposition
-        ));
+        assert!(matches!(errs[0].rule, ValidationRule::TermNotAProposition));
         assert!(
             errs[0].message.contains("Prop = Sort(0)"),
             "diagnostic should name the obligation: {}",
@@ -342,16 +337,13 @@ mod tests {
 
     #[test]
     fn a_type_in_a_proposition_slot_rejected() {
-        // `Prop` itself is a perfectly good `eigentt:TypeExpr` — it passes in
+        // `Prop` itself is a perfectly good `eigentt:Term` — it passes in
         // the unconstrained `test:tx` slot above — but it inhabits `Set`, so
         // it asserts nothing.
         let encoded = encode_type(&Exp::sort(0)).unwrap();
         let errs = errors_for_claim(encoded);
         assert_eq!(errs.len(), 1, "`Prop` asserts nothing; got {errs:?}");
-        assert!(matches!(
-            errs[0].rule,
-            ValidationRule::TypeExprNotAProposition
-        ));
+        assert!(matches!(errs[0].rule, ValidationRule::TermNotAProposition));
         assert!(
             errs[0].message.contains("Set = Sort(1)"),
             "diagnostic should name what the value does inhabit: {}",
@@ -373,16 +365,13 @@ mod tests {
             1,
             "an unapplied predicate is not a proposition; got {errs:?}"
         );
-        assert!(matches!(
-            errs[0].rule,
-            ValidationRule::TypeExprNotAProposition
-        ));
+        assert!(matches!(errs[0].rule, ValidationRule::TermNotAProposition));
     }
 
     #[test]
     fn non_proposition_slots_still_admit_non_props() {
         // The obligation is per-slot, not per-range: `test:tx` is
-        // `eigentt:TypeExpr`-ranged but not a proposition slot, so a type and
+        // `eigentt:Term`-ranged but not a proposition slot, so a type and
         // a literal both belong there. Guards against step 3 being widened to
         // the whole range, which would reject every `eigentt:axiom_statement`
         // and `lexicon:cat` on the chain.
@@ -433,7 +422,7 @@ mod tests {
             1,
             "malformed eigentt value must be rejected exactly once; got {errs:?}"
         );
-        assert!(matches!(errs[0].rule, ValidationRule::TypeExprMalformed));
+        assert!(matches!(errs[0].rule, ValidationRule::TermMalformed));
         assert!(
             errs[0].message.contains("D47 codec"),
             "diagnostic should name the D47 codec: {}",
@@ -459,7 +448,7 @@ mod tests {
             1,
             "unresolved ConstRef must be rejected; got {errs:?}"
         );
-        assert!(matches!(errs[0].rule, ValidationRule::TypeExprMalformed));
+        assert!(matches!(errs[0].rule, ValidationRule::TermMalformed));
         assert!(
             errs[0].message.contains("urn:eigenius:nonexistent:Foo"),
             "diagnostic should name the offending IRI: {}",
@@ -489,7 +478,7 @@ mod tests {
         let errs = eigentt_errors(layer);
         assert!(
             errs.iter()
-                .any(|e| matches!(e.rule, ValidationRule::TypeExprIllTyped)),
+                .any(|e| matches!(e.rule, ValidationRule::TermIllTyped)),
             "ill-typed eigentt value (App of a class to a class) must be rejected by \
              check_infer; got {errs:?}"
         );

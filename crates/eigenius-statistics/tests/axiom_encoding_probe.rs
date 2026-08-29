@@ -33,7 +33,7 @@
 //!
 //! If both encoders agree on the JSON shape, the witness index keyed
 //! against the verdict's canonical_proposition will match the bridge's
-//! antecedent — and the reasoning institution's `JustifiedBy.derived`
+//! antecedent — and the reasoning institution's `justification:Certificate.derived`
 //! grounding ctor can synthesise the witness against the same hash.
 //!
 //! If they disagree, the bridge restructure cannot work without an ESL

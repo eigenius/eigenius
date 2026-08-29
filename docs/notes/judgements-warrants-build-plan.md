@@ -149,6 +149,130 @@ from its justification term (composite after P4), not from its class, and
 
 ---
 
+## Disposition: the sentence class
+
+**Added `2026-08-29`, after P1.** Names what `reasoning:ReasoningSentence` — `justification:Sentence`
+after P1.3 — becomes. It is a replacement, not a retirement, and it lands in **P2**.
+
+### What it is today
+
+`justification:Sentence : reflection:DerivedResource`, requiring `proposition`, `term` and
+`certificate`, recommending `subject_iri`, with `refutes` optional. **No Rust code constructs one** —
+every code reference is a consumer, confirmed mechanically (0 sites setting `is_a` to it).
+
+**Counts re-measured `2026-08-29`, post-P1, against `: justification:Sentence {` declarations**
+rather than name mentions, which the P1 prose rename inflated:
+
+| | resources | `proposition` | `term` | `certificate` | `subject_iri` | `refutes` |
+|---|---|---|---|---|---|---|
+| `experiments/` | 40 | | | | | |
+| `demo/` | 1 | | | | | |
+| `notebooks/` | 1 | | | | | |
+| **authored total** | **42** | 45 | 43 | 43 | 42 | **0** |
+| fixtures (`crates/*/tests`) | 6 | | | | | |
+
+**The authoring edit is 131 slot writes across 42 resources**, not the 91 an earlier draft of this
+section estimated. `refutes` has **no authored use at all** — its 2 occurrences are the ontology
+declaration and one doc mention, so the "belief revision" slot is carried forward on its design
+argument alone, not on use.
+
+### P2 subsumes three slots into one
+
+A sentence asserts that certificate `c` inhabits `Certificate(j, P)`. Once slots are
+`Judgement`-ranged that is one value — `holds(kernel, c, Certificate(j, P))` — with `P` and `j`
+appearing inside the type. Three slots checked by three paths become one slot checked by the
+uniform rule. P3 then adds a second, optional judgement, `holds(lean4, t, P)`: the proof term.
+**The two judgements must not be merged.** One says `j` grounds `P`; the other says `t` proves `P`.
+
+### Two slots are not subsumed, and a third constraint keeps the class
+
+- **`subject_iri`** (42 authored uses — one per sentence, so it is universal in practice) is
+  *aboutness*, not logic. Its own description calls it the
+  *"first-class EigenQL index … agents querying 'what have I concluded about X?' hit this
+  directly."* No judgement carries it.
+- **`refutes`** is belief revision — a structural marker for a supersession step, deferred to the
+  chain-merge work. **Zero authored uses** (see the table): it is retained on the design argument,
+  not on demand. If the chain-merge work does not arrive, this is the slot to drop.
+- **Something must keep a resource IRI.** `objective:satisfied_by` (10 occurrences) names the
+  sentence that discharged a Milestone; the competency-question answer slot and the
+  Tension/Hypothesis resolution slot do the same. A judgement value inside a property is not
+  addressable — only a resource is.
+
+So a step reading *"delete ReasoningSentence"* would be wrong. The class becomes a resource
+identity, one required judgement, one optional judgement, and two aboutness slots — three required
+inductive slots down to one.
+
+```
+class justification:Conclusion {
+    requires   justification:judgement;      // holds(kernel, c, Certificate(j, P))
+    recommends justification:proof,          // holds(logic, t, P) — P3, when one exists
+               justification:subject_iri;
+    // justification:refutes stays optional
+}
+```
+
+**The name is a decision, not a derivation.** *Sentence* came from D39's "reasoning sentence" and
+stops describing the thing once the three slots collapse. *Claim* is taken by `enc:EncodedClaim`.
+*Conclusion* distinguishes it from a parsed claim and says what it is.
+
+### The one open check, and its answer
+
+**Whether any consumer reads `proposition` or `certificate` separately rather than as a pair.**
+The collapse assumes they are only ever used together to build `Certificate(j, P)`.
+
+Measured `2026-08-29`. **Two readers take the proposition alone**, and neither blocks the collapse:
+
+| reader | reads | disposition |
+|---|---|---|
+| `witness_index.rs:264` `emit_from_reasoning_sentence` | `proposition` alone, to build the `Verified` `WitnessKey` | see below |
+| `entailment.rs:73` | `proposition` alone, scanning committed sentences | P7 deletes the file |
+
+`validate.rs:65-66` reads `proposition` and `certificate` as a pair, which is the assumed use.
+
+**The witness key survives the collapse, and the reason is that it never depended on the slot.**
+`hash_stored_proposition` (`witness_index.rs`) does **not** hash the stored JSON — it runs
+`decode_type` to an `Exp` first and hashes *that*, through `hash_proposition_exp`. The emit side is
+already a decode-then-hash path. After the collapse it decodes the judgement, takes its `type`,
+projects the second index argument of `Certificate(j, P)`, and hashes the same `Exp`. What is
+hashed is unchanged; only where the `Exp` is read from moves. The α/δ agreement that
+`emit_and_check_sides_agree_on_the_hash` pins is what keeps the emit and check sides equal, and it
+is stated over `Exp`, not over the stored value.
+
+**The new obligation is the projection step** — recognising `Certificate(j, P)` in the judgement's
+type and taking `P`. That is a structural walk on a decoded `Exp`. Pin it with a test that the
+projected hash equals the hash of the same proposition stored flat, or the two sides can drift
+silently and a `Verified` witness simply fails to be admitted.
+
+### Residue
+
+| residue | disposition |
+|---|---|
+| `proposition`, `term`, `certificate` properties | collapse into `judgement` — **P2**, where `Judgement`-ranged slots and the uniform rule arrive |
+| P3's proof-term slot | lands as the second, optional judgement, not a fourth slot |
+| `emit_from_reasoning_sentence` (`witness_index.rs:262`) | already rekeyed to the checked judgement by P3; reads the new slot |
+| `extract.rs`'s `extract_justification` | reads the justification slot today; must read the judgement. **Change the slot before P7 moves the file into the kernel**, so the move is a relocation and not a relocation plus a rewrite |
+| `subclass_of DerivedResource` | already on P5's retype list; unchanged by this |
+| `VerifiedPropositionView`, `EntailmentRequest`, `ConsistencyRequest` | reference sentences; P7 deletes all three with the institution |
+| `entailment.rs`'s scan over committed sentences | P7 deletes |
+| `objective:satisfied_by` (9 occurrences), the CQ answer slot, the Tension/Hypothesis resolution slot | retarget to the new class name only — they hold IRIs, so the shape is unchanged |
+| 42 authored resources / 131 slot writes | each sentence rewrites 3 slots to 1; batch with P2's reseed |
+| `docs/method/reasoning.md` | teaches authoring the 3-slot cluster. It is an executable skill, so **it must change before the ontology does** or agents keep writing the old shape |
+| `docs/guides/esl/09-institutions.md` §9.10.3, `composition/07` | teach the resource; rewrite with P2 |
+| D54 (sentence-as-lemma) | its subject is citing one of these; the capability survives, the shape changes |
+| ACP spec | references the certificate relation in `ACP-A-31`; already inside the 53 assertions in scope |
+
+### Sequencing
+
+**The collapse belongs in P2**, not P3 or P5 — that is where the `Judgement` inductive becomes real
+and the uniform rule replaces the three-step check. Doing it there means P3 adds one optional slot
+to a class that already has the right shape, rather than a fourth slot to a class about to lose
+three.
+
+Two ordering constraints: update `docs/method/reasoning.md` **first**, or agents keep authoring the
+deleted shape; and change `extract.rs`'s slot read **before** P7 moves the file into the kernel.
+
+---
+
 ## P0 — Measure before building
 
 **No code.** Produces numbers that determine whether P2 and P5 are small changes or data migrations.
@@ -277,6 +401,11 @@ with P7.
 ## P2 — Uniform check-mode validation
 
 **Depends on P1. Bootstrap edit → reseed.**
+
+**Read [*Disposition: the sentence class*](#disposition-the-sentence-class) with this phase.** The
+sentence's three required inductive slots collapse into one `Judgement`-ranged slot here, not in a
+later phase — it is the same edit as the rule change, and deferring it means P3 adds a fourth slot
+to a class about to lose three.
 
 Replace Rule 21's three-step shape (decode, `check_infer`, plus a `PROPOSITION_SLOTS` special case)
 with one rule over `Judgement`-ranged slots: decode both fields, check the type is a type, check the
@@ -791,7 +920,7 @@ reworks are listed separately below, because they are not deletions and must not
 | `reflection:EpistemicStatus` — the class the four inhabit | `reflection-ontology.json:123` | P5 |
 | `objective:acceptance_grade`, `objective:axiom_kind` | `objective-ontology.esl:163`, `:194` | P5 |
 | `reflection:ExternalExecutionTrace` | `reflection-ontology.json` | P5 |
-| `witness:IsDerivedAs` | `ontologies/reasoning/reasoning.esl:60` | P4 |
+| `witness:IsDerivedAs` | `ontologies/justification/justification.esl:60` | P4 |
 | `reasoning:reasoning_institution`, `ef_justification`, the four QueryClasses, `proc:*` | `reasoning.esl:323-393, 487` | P7 |
 | `JustificationTerm.DerivedEvidence` constructor | `reasoning.esl:76` | P4 |
 | `JustificationTerm.SpecStr` constructor | `reasoning.esl:90` | P4 |

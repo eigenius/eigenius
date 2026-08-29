@@ -4,9 +4,9 @@
 //
 //   forall c : core:string, HasLowIC50(c) -> StrongInhibitor(c)
 //
-// rather than specialised to a single compound. The ReasoningSentence
+// rather than specialised to a single compound. The justification:Sentence
 // applies the universal rule to EIG_0291 via the
-// `JustifiedBy.spec_poly` rule — kernel beta-reduces
+// `justification:Certificate.spec_poly` rule — kernel beta-reduces
 // `(forall c, P c)("urn:EIG_0291")` to `P("urn:EIG_0291")` at
 // type-check time. Same rule resource can be reused for any compound
 // without re-committing.
@@ -19,18 +19,19 @@
 //    `screen:HasLowIC50(c)` inside the body where `c` is a Pi
 //    binder lowers cleanly to `Exp::InductiveType(stub, [Var(c)])`.
 //    The body proposition references its binder.
-// 3. The new `JustificationTerm.SpecStr(j, t)` ctor in the
+// 3. The new `justification:Term.SpecStr(j, t)` ctor in the
 //    `justification` chain inductive value.
-// 4. The `JustifiedBy.spec_poly` rule in the certificate,
+// 4. The `justification:Certificate.spec_poly` rule in the certificate,
 //    producing the specialised type via kernel NbE beta-reduction
 //    of the rule's universal proposition at "urn:EIG_0291".
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace screen     = "urn:eigenius:demo:screen";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace screen        = "urn:eigenius:demo:screen";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Step 1: domain vocabulary (same as drug_screening.esl) ─────────
 
@@ -81,13 +82,13 @@ resource screen:m_eig0291_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-03-04T14:22:11Z";
 }
 
-// ─── Step 4: ReasoningSentence with universal-rule specialisation ──
+// ─── Step 4: justification:Sentence with universal-rule specialisation ──
 //
 // The justification chain value uses the new `SpecStr` JT ctor to
 // specialise the universal rule at "urn:EIG_0291":
 //
-//   App(SpecStr(DeclaredEvidence(rule_iri), "urn:EIG_0291"),
-//       ObservedEvidence(obs_iri))
+//   App(SpecStr(Declared(rule_iri), "urn:EIG_0291"),
+//       Observed(obs_iri))
 //
 // The certificate's `spec_poly` rule witnesses that the rule (with
 // its universal proposition) applied at "urn:EIG_0291" yields the
@@ -95,27 +96,27 @@ resource screen:m_eig0291_trace : reflection:ObservationTrace {
 // proposition — which `app` then composes with the observation to
 // conclude `StrongInhibitor("urn:EIG_0291")`.
 
-resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+resource screen:concl_eig0291_strong : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 
-    // Chain-shape JustificationTerm value.
-    reasoning:justification = App(
+    // Chain-shape justification:Term value.
+    justification:term = App(
         SpecStr(
-            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+            Declared("urn:eigenius:demo:screen:rule_strong"),
             "urn:eigenius:demo:screen:EIG_0291"
         ),
-        ObservedEvidence("urn:eigenius:demo:screen:m_eig0291")
+        Observed("urn:eigenius:demo:screen:m_eig0291")
     );
 
     // The certificate. The witness placeholders in the rule/obs
     // `declared` / `observed` ctors are kernel-synthesised (D49
     // Phase 9 hook); the user-supplied expression is ignored. We
     // pass `Prop` (a Sort literal) as a readable sentinel.
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         app(
             // A : Prop = HasLowIC50("urn:EIG_0291")
             screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
@@ -123,15 +124,15 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
             screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
             // j1 : JT — the specialised rule justification
             SpecStr(
-                DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+                Declared("urn:eigenius:demo:screen:rule_strong"),
                 "urn:eigenius:demo:screen:EIG_0291"
             ),
             // j2 : JT — the observation
-            ObservedEvidence("urn:eigenius:demo:screen:m_eig0291"),
-            // c1 : JustifiedBy(j1, A -> B)
-            //    = spec_poly(core:string, P, DeclaredEvidence(rule),
+            Observed("urn:eigenius:demo:screen:m_eig0291"),
+            // c1 : justification:Certificate(j1, A -> B)
+            //    = spec_poly(core:string, P, Declared(rule),
             //                "urn:EIG_0291", "urn:EIG_0291", rule_cert)
-            //   where rule_cert : JustifiedBy(DeclaredEvidence(rule),
+            //   where rule_cert : justification:Certificate(Declared(rule),
             //                                 forall x, P(x))
             spec_poly(
                 // T : the domain
@@ -146,12 +147,12 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
                 fun (x : core:string) =>
                     screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
                 // j : JT
-                DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+                Declared("urn:eigenius:demo:screen:rule_strong"),
                 // t : core:string
                 "urn:eigenius:demo:screen:EIG_0291",
                 // tag : audit label, same IRI as the instance
                 "urn:eigenius:demo:screen:EIG_0291",
-                // rule_cert : JustifiedBy(j, forall x, P(x))
+                // rule_cert : justification:Certificate(j, forall x, P(x))
                 declared(
                     "urn:eigenius:demo:screen:rule_strong",
                     forall (c : core:string) =>
@@ -159,7 +160,7 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
                     Prop
                 )
             ),
-            // c2 : JustifiedBy(j2, A)
+            // c2 : justification:Certificate(j2, A)
             observed(
                 "urn:eigenius:demo:screen:m_eig0291",
                 screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),

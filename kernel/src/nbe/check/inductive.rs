@@ -353,8 +353,8 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
 /// Before this returned a type, the `Exp::InductiveCtor` inference arm passed empty expected
 /// indices and answered `indices: []`, which made **every indexed inductive's constructor
 /// un-inferable** (`index arity mismatch (actual has N, expected has 0)`) and would have answered
-/// with the wrong type had it passed. That is not a corner case: `reasoning:JustifiedBy` is
-/// indexed, so no `reasoning:certificate` could pass validation Rule 21 at commit — including the
+/// with the wrong type had it passed. That is not a corner case: `justification:Certificate` is
+/// indexed, so no `justification:certificate` could pass validation Rule 21 at commit — including the
 /// WRN case study's own `chain/04-phase1-recompute-conclusions.esl` (found 2026-08-03).
 pub(super) fn check_inductive_ctor_args(
     ctx: &mut CheckCtx,

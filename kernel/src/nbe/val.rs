@@ -136,7 +136,7 @@ pub enum Val {
     /// asserts**, not a term anyone wrote.
     ///
     /// The types it inhabits (`witness:IsDeclaredAs` and its three
-    /// siblings, `ontologies/reasoning/reasoning.esl`) are `Prop`-valued
+    /// siblings, `ontologies/justification/justification.esl`) are `Prop`-valued
     /// inductives with **zero constructors**, so nothing in the term
     /// language can inhabit them. That emptiness is the enforcement
     /// mechanism, not an omission: it is what makes the kernel the only
@@ -146,14 +146,14 @@ pub enum Val {
     ///
     /// What the type *says* is a proposition about the **chain**, not
     /// about the world: `IsDeclaredAs(iri, P)` means "the chain contains
-    /// evidence that `iri` is declared as `P`". So a `JustifiedBy`
+    /// evidence that `iri` is declared as `P`". So a `justification:Certificate`
     /// certificate stacks three levels — `P` (about the world), the
     /// witness type (about the chain's relation to `P`), and
-    /// `JustifiedBy(j, P)` (Artemov's `t:F`), which cannot be formed
+    /// `justification:Certificate(j, P)` (Artemov's `t:F`), which cannot be formed
     /// without an inhabitant of the second. A witness therefore never
     /// asserts that `P` is true; it licenses forming the certificate.
     ///
-    /// The kernel synthesises one during `JustifiedBy.*` constructor
+    /// The kernel synthesises one during `justification:Certificate.*` constructor
     /// type-checking, via `CheckHooks::synthesize_chain_witness` →
     /// `layer::witness_index::layer_admits_witness`, which reads
     /// `DeclarationTrace` / `ObservationTrace` / `ProgramTrace`
@@ -174,7 +174,7 @@ pub enum Val {
     ///
     /// The witness has no eliminator and no readback into surface syntax
     /// — it exists only at value time, in the `Prop`-typed predicate
-    /// position of a `JustifiedBy` grounding constructor's argument list.
+    /// position of a `justification:Certificate` grounding constructor's argument list.
     ///
     /// Per D49 §8, definitional equality on `ChainWitness` values is
     /// key-based (two witnesses with the same key are equal); D46 proof

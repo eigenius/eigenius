@@ -2,7 +2,7 @@
 //
 // Builds core → reflection → reasoning → bench-core → harness → mol →
 // SAB-18 chain, runs ValidateJustification on the
-// `ImplementsDILIPredictor(solution)` ReasoningSentence (five Declared
+// `ImplementsDILIPredictor(solution)` justification:Sentence (five Declared
 // methodological conformances composed through an acceptance rule), asserts
 // Holds, then checks the decision↔code-block coverage. Move into the
 // harness crate when D51 gap 7 lands.
@@ -61,7 +61,7 @@ fn sab18_dili_rf_validates_to_holds_and_covers() {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     // reasoning
-    let reasoning_src = include_str!("../../../ontologies/reasoning/reasoning.esl");
+    let reasoning_src = include_str!("../../../ontologies/justification/justification.esl");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in esl::compile(reasoning_src).expect("reasoning.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();

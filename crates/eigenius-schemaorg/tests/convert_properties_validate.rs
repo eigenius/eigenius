@@ -85,8 +85,10 @@ fn convert_property_set_is_expressible() {
     );
     let reasoning = {
         let mut b = LayerBuilder::new("reasoning", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl"))
-            .expect("reasoning.esl compiles")
+        for r in esl::compile(include_str!(
+            "../../../ontologies/justification/justification.esl"
+        ))
+        .expect("reasoning.esl compiles")
         {
             b.add_resource(r).unwrap();
         }

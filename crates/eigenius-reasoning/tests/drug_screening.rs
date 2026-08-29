@@ -33,19 +33,19 @@
 //!    `ProgramTrace`. The claim's `canonical_proposition` is
 //!    `HasLowIC50(EIG_0291)` — the proposition `DerivedEvidence` exposes
 //!    to D39 reasoning.
-//! 5. A `ReasoningSentence` claiming `StrongInhibitor(EIG_0291)`,
-//!    justified by `App(DeclaredEvidence(rule), DerivedEvidence(claim))`,
-//!    with a `JustifiedBy.app` certificate composing
-//!    `JustifiedBy.declared` + `JustifiedBy.derived`.
+//! 5. A `justification:Sentence` claiming `StrongInhibitor(EIG_0291)`,
+//!    justified by `App(Declared(rule), DerivedEvidence(claim))`,
+//!    with a `justification:Certificate.app` certificate composing
+//!    `justification:Certificate.declared` + `justification:Certificate.derived`.
 //!
 //! This is the modernization of the original fixture, which committed
 //! the bench measurement as a plain `reflection:ObservedResource` whose
 //! `canonical_proposition` was a methodological assertion ("85.0 < 100
-//! ⇒ HasLowIC50 holds") and cited it via `ObservedEvidence`. The D52
+//! ⇒ HasLowIC50 holds") and cited it via `Observed`. The D52
 //! statistics institution turns that author-asserted bridge into a
 //! mechanical recomputation: the SampleSet carries the raw replicates,
 //! the StatisticalAnalysisPlan asserts the parameters, and the verifier
-//! computes the proposition. The ReasoningSentence then cites the
+//! computes the proposition. The justification:Sentence then cites the
 //! claim via `DerivedEvidence` and inherits its auditable provenance.
 //!
 //! This test compiles the fixture, builds the layer chain (core →
@@ -74,7 +74,7 @@ use eigenius_reasoning::ReasoningInstitution;
 /// → institution → reasoning → statistics) plus a user layer compiled
 /// from the drug-screening fixture. The fixture's `type_expr(...)`
 /// certificates reference reasoning-layer ctors (`app`, `declared`,
-/// `derived`, `App`, `DeclaredEvidence`, `DerivedEvidence`) and its
+/// `derived`, `App`, `Declared`, `DerivedEvidence`) and its
 /// resource bodies reference statistics-layer smart constructors
 /// (`stats:SingleSampleEstimate(...)`, `BiologicalReplication()`,
 /// `Absolute(...)`, etc.), so the fixture must be compiled with
@@ -108,7 +108,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    let reasoning_source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {
@@ -134,7 +134,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
 
     // The fixture compiles AGAINST the statistics layer so its
     // `type_expr(...)` bodies can reference reasoning-layer ctors
-    // (`app`, `declared`, `derived`, `App`, `DeclaredEvidence`,
+    // (`app`, `declared`, `derived`, `App`, `Declared`,
     // `DerivedEvidence`) AND statistics-layer smart constructors
     // (`SingleSampleEstimate`, `BiologicalReplication`, `Absolute`,
     // `TwoSided`, `WelchUnequal`, `Identity`) by their short names.
@@ -177,7 +177,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
 fn drug_screening_scenario_validates_to_holds() {
     let ctx = build_drug_screening_chain();
 
-    // Fetch the ReasoningSentence the fixture authored, by IRI.
+    // Fetch the justification:Sentence the fixture authored, by IRI.
     let sentence_iri =
         Iri::parse("urn:eigenius:demo:screen:concl_eig0291_strong").expect("sentence IRI");
     let sentence_arc = ctx

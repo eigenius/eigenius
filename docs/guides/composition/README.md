@@ -63,7 +63,7 @@ The chapters build on each other:
 7. **[Statistics + reasoning walkthrough](07-stats-and-reasoning-walkthrough.md)**
    — the second composition shape, traced end-to-end: raw IC50 readings
    → D52 `StatisticalAnalysisPlan` Holds → witness-index admission →
-   D39 `ReasoningSentence` certificate consumes the witness via
+   D39 `justification:Sentence` certificate consumes the witness via
    `DerivedEvidence` → `StrongInhibitor` conclusion. No comorphism
    between the institutions; the composition runs through the shared
    `eigentt:TypeExpr` proposition slot.

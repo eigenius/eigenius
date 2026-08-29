@@ -13,7 +13,7 @@
 // testable in isolation and the pipeline state is chain-committed and auditable.
 //
 // REUSE, DON'T MINT. Grades reuse reflection:EpistemicStatus; the encoded proposition
-// reuses reflection:canonical_proposition (eigentt:TypeExpr); warrants reuse
+// reuses reflection:canonical_proposition (eigentt:Term); warrants reuse
 // reflection:rationale; source works reuse reference:Reference; lexicon scope/entries
 // reuse lexicon:Lexicon / lexicon:LexicalEntry. New vocabulary here is only the
 // pipeline-state shapes that have no existing equivalent.
@@ -262,8 +262,8 @@ property enc:antecedent_resources : core:resource_array {
 }
 
 property enc:antecedent_term : core:inductive {
-    description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:TypeExpr of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
-    class_types eigentt:TypeExpr;
+    description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:Term of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
+    class_types eigentt:Term;
     domain enc:AnaphorBinding;
 }
 

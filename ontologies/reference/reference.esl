@@ -20,7 +20,7 @@
 //      `reference:Citation` is a `reflection:DeclaredResource`: a citation is an
 //      asserted act, and when it imports a claim (a *literature warrant*) the
 //      claim IS its `reflection:canonical_proposition`. Consuming nodes cite the
-//      warrant through the existing `reasoning:DeclaredEvidence` mechanism.
+//      warrant through the existing `justification:Declared` mechanism.
 //
 //   2. The reference IDENTITY + METADATA follows **CSL-JSON / Dublin Core**.
 //      `reference:Reference` is epistemically neutral (it asserts nothing; the
@@ -60,7 +60,7 @@
 //   }
 //   // (3) a node CITES the warrant via the existing reasoning mechanism —
 //   //     e.g. wrn:seed_control_rule's justification gains
-//   //     DeclaredEvidence("urn:eigenius:pub:wrn:lit_c911_design").
+//   //     Declared("urn:eigenius:pub:wrn:lit_c911_design").
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
@@ -166,11 +166,11 @@ resource reference:cites_as_authority : reference:CitationType {
 // a citation is an asserted act — so a *literature warrant* (a Citation that
 // imports a domain claim) simply carries that claim as its
 // reflection:canonical_proposition, and consuming nodes discharge it via
-// reasoning:DeclaredEvidence on the Citation's IRI. (reference:cites is the
+// justification:Declared on the Citation's IRI. (reference:cites is the
 // link to the cited work; declared_by records who asserted the Citation.)
 
 class reference:Citation : reflection:DeclaredResource {
-    description = "A citation — one citing entity's use of a reference:Reference. Carries the cited work (reference:cites), the CiTO citation function (reference:citation_type), and the citing document's own in-text label (reference:reference_label). As a DeclaredResource it may carry an imported claim in reflection:canonical_proposition (then it is a 'literature warrant' a node can discharge via DeclaredEvidence); a Citation without one is pure provenance. All citing-doc-local data lives here, not on the global Reference.";
+    description = "A citation — one citing entity's use of a reference:Reference. Carries the cited work (reference:cites), the CiTO citation function (reference:citation_type), and the citing document's own in-text label (reference:reference_label). As a DeclaredResource it may carry an imported claim in reflection:canonical_proposition (then it is a 'literature warrant' a node can discharge via Declared); a Citation without one is pure provenance. All citing-doc-local data lives here, not on the global Reference.";
     requires reference:cites;
     recommends reference:citation_type, reference:reference_label;
 }

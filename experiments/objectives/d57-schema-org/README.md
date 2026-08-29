@@ -21,7 +21,7 @@ Load in order:
 | # | File | What it adds |
 |---|---|---|
 | 1 | [chain/00-objective.esl](chain/00-objective.esl) | the obligation-graph propositions (thesis + milestones as `Prop` decls) + the two anchors (schema.org, Croissant) as `reference:Citation`s |
-| 2 | [chain/01-discipline.esl](chain/01-discipline.esl) | milestone **m1** — the mapping discipline, a Declared rule + the `ReasoningSentence` that discharges it (verdict: **Holds**) |
+| 2 | [chain/01-discipline.esl](chain/01-discipline.esl) | milestone **m1** — the mapping discipline, a Declared rule + the `justification:Sentence` that discharges it (verdict: **Holds**) |
 | 3 | `ontologies/objective/objective-ontology.esl` | the D58 `objective:` ontology (Objective / Milestone / Axiom) — a shared layer, not specific to this objective |
 | 4 | [chain/02-objective-typed.esl](chain/02-objective-typed.esl) | the **typed obligation graph**: `objective:Objective` + Milestones + Axioms, with acceptance grades (`reflection:epistemic:*`), `depends_on` edges, and `satisfied_by` links |
 

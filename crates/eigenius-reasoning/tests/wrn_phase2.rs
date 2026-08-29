@@ -70,7 +70,7 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
 }
 
 /// Build a layer from ESL, then replicate the live commit pipeline's AutoOnLoad
-/// gate: every `reasoning:ReasoningSentence` this layer adds MUST validate to
+/// gate: every `justification:Sentence` this layer adds MUST validate to
 /// `Holds`, else the live loader would reject the layer (so a downstream lemma
 /// citation of it would be unsound). Panics on a non-`Holds` sentence unless its
 /// IRI is in `pending` — the documented exceptions whose witnesses are produced
@@ -107,7 +107,7 @@ fn esl_against_pending(
         LayerStorage::in_memory(),
     );
     let inst = ReasoningInstitution::new();
-    let sentence_class = "urn:eigenius:reasoning:ReasoningSentence";
+    let sentence_class = "urn:eigenius:justification:Sentence";
     for r in &resources {
         if !r.is_a().iter().any(|c| c.as_str() == sentence_class) {
             continue;
@@ -221,8 +221,10 @@ fn wrn_phase2_validation_chain_validates() {
     };
     let reasoning = {
         let mut b = LayerBuilder::new("reasoning", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl"))
-            .expect("reasoning.esl compiles")
+        for r in esl::compile(include_str!(
+            "../../../ontologies/justification/justification.esl"
+        ))
+        .expect("reasoning.esl compiles")
         {
             b.add_resource(r).unwrap();
         }

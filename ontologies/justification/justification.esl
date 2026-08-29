@@ -5,25 +5,25 @@
 // - Four `ChainWitness.Is*As` predicates (D49 §6) — zero-ctor inductives
 //   in `Prop`. Kernel-internal opaque: ESL exposes no surface constructor
 //   for their inhabitants. The kernel synthesises `Val::ChainWitness`
-//   values at `JustifiedBy.*` type-check sites via the per-Layer witness
+//   values at `justification:Certificate.*` type-check sites via the per-Layer witness
 //   index (D49 §5, kernel/src/layer/witness_index.rs).
 //
-// - `JustificationTerm` (D39 §3) — seven-constructor closed inductive:
+// - `justification:Term` (D39 §3) — seven-constructor closed inductive:
 //   four categorical groundings (one per epistemic category), two
 //   composition operators (Artemov `App`/`Sum`), and universal
 //   specialization (`SpecStr`). No further evolution without a
 //   versioned change to the ADT.
 //
-// - `JustifiedBy : JustificationTerm -> Prop -> Type 0` (D39 §5) — the
+// - `justification:Certificate : justification:Term -> Prop -> Type 0` (D39 §5) — the
 //   indexed inductive predicate whose inhabitants are the certificates
-//   `ReasoningSentence` carries. Nine constructors: four grounding
+//   `justification:Sentence` carries. Nine constructors: four grounding
 //   constructors consume the matching `ChainWitness` witness; `app`
 //   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
 //   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
 //   a decomposable structure); `spec_poly` eliminates a universal
 //   quantifier at any domain.
 //
-// **No implication introduction.** No rule PRODUCES `JustifiedBy(_, A -> B)`:
+// **No implication introduction.** No rule PRODUCES `justification:Certificate(_, A -> B)`:
 // `app` yields `B`, `sum_*` yield `P`, `spec_*` yield `P(t)`. An implication
 // therefore enters only through a grounding — asserted as a resource, witnessed
 // by a trace. There is no deduction theorem, so a bridge between vocabularies
@@ -34,16 +34,17 @@
 // (`CHAIN_WITNESS_IS_*_AS`, etc.) — do not rename without updating
 // `kernel/src/ontology/well_known.rs` in lockstep.
 
-namespace core        = "urn:eigenius:core";
-namespace formats     = "urn:eigenius:core:formats";
-namespace eigentt     = "urn:eigenius:eigentt";
-namespace reflection  = "urn:eigenius:reflection";
-namespace institution = "urn:eigenius:institution";
-namespace reasoning   = "urn:eigenius:reasoning";
-namespace witness     = "urn:eigenius:reasoning:ChainWitness";
-namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
-namespace runtimes    = "urn:eigenius:institution:runtimes";
-namespace proc        = "urn:eigenius:reasoning:proc";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace reflection    = "urn:eigenius:reflection";
+namespace institution   = "urn:eigenius:institution";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace witness       = "urn:eigenius:witness";
+namespace dispatch      = "urn:eigenius:institution:dispatch_roles";
+namespace runtimes      = "urn:eigenius:institution:runtimes";
+namespace proc          = "urn:eigenius:reasoning:proc";
+namespace justification = "urn:eigenius:justification";
 
 // ── ChainWitness predicates ──────────────────────────────────────────
 //
@@ -63,36 +64,36 @@ data witness:IsDerivedAs : core:string -> Prop -> Prop {
 data witness:IsVerifiedAs : core:string -> Prop -> Prop {
 }
 
-// ── JustificationTerm ────────────────────────────────────────────────
+// ── justification:Term ────────────────────────────────────────────────
 //
 // The interlingua. Seven ctors total: four categorical groundings, two
 // composition operators (App, Sum), and universal specialization (SpecStr,
-// eliminated by `JustifiedBy.spec_poly`).
+// eliminated by `justification:Certificate.spec_poly`).
 // Adding a constructor is a versioned change.
 
-data reasoning:JustificationTerm {
-    DeclaredEvidence(core:string),
-    ObservedEvidence(core:string),
+data justification:Term {
+    Declared(core:string),
+    Observed(core:string),
     DerivedEvidence(core:string),
-    VerifiedEvidence(core:string),
-    App(reasoning:JustificationTerm, reasoning:JustificationTerm),
-    Sum(reasoning:JustificationTerm, reasoning:JustificationTerm),
+    Verified(core:string),
+    App(justification:Term, justification:Term),
+    Sum(justification:Term, justification:Term),
     // Universal specialization (D39 v2 extension). Pair a
     // universally-quantified justification term with an IRI naming the
-    // instantiation. The matching `JustifiedBy.spec_poly` rule turns
-    // `JustifiedBy(j, forall y : T, P(y))` into
-    // `JustifiedBy(SpecStr(j, tag), P(x))` for any domain `T`.
+    // instantiation. The matching `justification:Certificate.spec_poly` rule turns
+    // `justification:Certificate(j, forall y : T, P(y))` into
+    // `justification:Certificate(SpecStr(j, tag), P(x))` for any domain `T`.
     //
     // The second field is a `core:string` AUDIT TAG, not the instance:
     // the instance `x : T` is bound on the proof side, so the term
     // algebra stays first-order and needs no new constructor. The tag
     // names the instantiation for audit.
-    SpecStr(reasoning:JustificationTerm, core:string),
+    SpecStr(justification:Term, core:string),
 }
 
-// ── JustifiedBy ──────────────────────────────────────────────────────
+// ── justification:Certificate ──────────────────────────────────────────────────────
 //
-// Indexed inductive predicate `JustifiedBy : JustificationTerm -> Prop
+// Indexed inductive predicate `justification:Certificate : justification:Term -> Prop
 // -> Type 2`. Inhabits a Type (not `Prop`) so certificates are stored
 // and re-checkable — D39 §5 §last-paragraph.
 //
@@ -106,54 +107,54 @@ data reasoning:JustificationTerm {
 // found it reported this declaration and no other, across the whole workspace.
 //
 // This costs nothing at use sites: a certificate's TYPE moves up a universe, its VALUES do not
-// change, and nothing checks `JustifiedBy(j, p)` against a fixed sort.
+// change, and nothing checks `justification:Certificate(j, p)` against a fixed sort.
 
-data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 2 {
+data justification:Certificate : justification:Term -> Prop -> Type 2 {
     declared :
         forall (iri : core:string, P : Prop) =>
         witness:IsDeclaredAs(iri, P) ->
-        reasoning:JustifiedBy(reasoning:DeclaredEvidence(iri), P),
+        justification:Certificate(justification:Declared(iri), P),
 
     observed :
         forall (iri : core:string, P : Prop) =>
         witness:IsObservedAs(iri, P) ->
-        reasoning:JustifiedBy(reasoning:ObservedEvidence(iri), P),
+        justification:Certificate(justification:Observed(iri), P),
 
     derived :
         forall (iri : core:string, P : Prop) =>
         witness:IsDerivedAs(iri, P) ->
-        reasoning:JustifiedBy(reasoning:DerivedEvidence(iri), P),
+        justification:Certificate(justification:DerivedEvidence(iri), P),
 
     verified :
         forall (iri : core:string, P : Prop) =>
         witness:IsVerifiedAs(iri, P) ->
-        reasoning:JustifiedBy(reasoning:VerifiedEvidence(iri), P),
+        justification:Certificate(justification:Verified(iri), P),
 
     // Artemov Application: `j1 : (A -> B)` and `j2 : A` give
     // `App(j1, j2) : B`.
     app :
         forall (A : Prop, B : Prop,
-                j1 : reasoning:JustificationTerm,
-                j2 : reasoning:JustificationTerm) =>
-        reasoning:JustifiedBy(j1, A -> B) ->
-        reasoning:JustifiedBy(j2, A) ->
-        reasoning:JustifiedBy(reasoning:App(j1, j2), B),
+                j1 : justification:Term,
+                j2 : justification:Term) =>
+        justification:Certificate(j1, A -> B) ->
+        justification:Certificate(j2, A) ->
+        justification:Certificate(justification:App(j1, j2), B),
 
     // Artemov Sum (left): `j1 : P` gives `Sum(j1, j2) : P`.
     sum_l :
         forall (P : Prop,
-                j1 : reasoning:JustificationTerm,
-                j2 : reasoning:JustificationTerm) =>
-        reasoning:JustifiedBy(j1, P) ->
-        reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
+                j1 : justification:Term,
+                j2 : justification:Term) =>
+        justification:Certificate(j1, P) ->
+        justification:Certificate(justification:Sum(j1, j2), P),
 
     // Artemov Sum (right): `j2 : P` gives `Sum(j1, j2) : P`.
     sum_r :
         forall (P : Prop,
-                j1 : reasoning:JustificationTerm,
-                j2 : reasoning:JustificationTerm) =>
-        reasoning:JustifiedBy(j2, P) ->
-        reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
+                j1 : justification:Term,
+                j2 : justification:Term) =>
+        justification:Certificate(j2, P) ->
+        justification:Certificate(justification:Sum(j1, j2), P),
 
     // Universal specialization (D39 v2 extension) at ANY domain. Given a
     // witness for a universally-quantified proposition `forall y : T, P(y)`,
@@ -170,7 +171,7 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 2 {
     // over classes, which is the shape the DCG parser produces. Someone
     // reaching for the obvious-looking name got the wrong rule and found out
     // at commit. `SpecStr` the CONSTRUCTOR is unaffected and still shared;
-    // `JustificationTerm` stays at seven constructors.
+    // `justification:Term` stays at seven constructors.
     //
     // A parsed proposition's arguments are CLASSES (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`),
     // so a rule shaped
@@ -180,7 +181,7 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 2 {
     // commits fine — a Set-quantified implication is a `Prop` — but nothing could ELIMINATE the
     // quantifier, so one bridge was needed per sentence rather than one per parse shape.
     //
-    // The domain `T` and the instance `x : T` are bound on the PROOF side; the `JustificationTerm`
+    // The domain `T` and the instance `x : T` are bound on the PROOF side; the `justification:Term`
     // still carries only a `core:string` tag, so the term algebra stays first-order and needs no
     // new constructor — `SpecStr(j, tag)` serves, with the tag naming the instantiation for audit
     // rather than carrying it.
@@ -196,7 +197,7 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 2 {
     // Genuine universe polymorphism is the standing fix; see the follow-up issue.
     //
     // The ladder is not hypothetical, and this comment stated one half of it while the
-    // declaration stated the other: binding `T : Type 1` here is what forces `JustifiedBy`
+    // declaration stated the other: binding `T : Type 1` here is what forces `justification:Certificate`
     // itself to `Type 2` (see its header). `T : Type 1` is `Sort 2`, so this argument sits at
     // `Sort 3`, and a constructor argument may not exceed its inductive's universe. The
     // declaration said `Type 0` and nothing checked, until eigenius#188 ported nanoda's
@@ -204,59 +205,59 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 2 {
     spec_poly :
         forall (T : Type 1,
                 P : T -> Prop,
-                j : reasoning:JustificationTerm,
+                j : justification:Term,
                 x : T,
                 tag : core:string) =>
-        reasoning:JustifiedBy(j, forall (y : T) => P(y)) ->
-        reasoning:JustifiedBy(reasoning:SpecStr(j, tag), P(x)),
+        justification:Certificate(j, forall (y : T) => P(y)) ->
+        justification:Certificate(justification:SpecStr(j, tag), P(x)),
 }
 
-// ── ReasoningSentence (D39 §4.2) ─────────────────────────────────────
+// ── justification:Sentence (D39 §4.2) ─────────────────────────────────────
 //
-// The chain-resident pairing of a proposition with a JustificationTerm
-// and a JustifiedBy certificate. `subclass_of reflection:DerivedResource`
+// The chain-resident pairing of a proposition with a justification:Term
+// and a justification:Certificate certificate. `subclass_of reflection:DerivedResource`
 // makes a sentence first-class as evidence: a later sentence's
 // `DerivedEvidence(prior_iri)` lookup resolves to a real DerivedResource
 // and the `IsDerivedAs prior_iri P` witness is emitted at commit on the
 // same footing as for any other derived artifact.
 
-class reasoning:ReasoningSentence : reflection:DerivedResource {
-    description = "A chain-resident reasoning step: proposition + JustificationTerm + JustifiedBy certificate. The ValidateJustification AutoOnLoad gate type-checks the certificate against the proposition at commit (D39 §4.3). Subclassing DerivedResource lets prior sentences be cited via DerivedEvidence; the inherited derivation requirement is satisfied by the certificate field (the certificate IS the derivation).";
-    requires reasoning:proposition,
-             reasoning:justification,
-             reasoning:certificate;
-    recommends reasoning:subject_iri,
-               reasoning:refutes;
+class justification:Sentence : reflection:DerivedResource {
+    description = "A chain-resident reasoning step: proposition + justification:Term + justification:Certificate certificate. The ValidateJustification AutoOnLoad gate type-checks the certificate against the proposition at commit (D39 §4.3). Subclassing DerivedResource lets prior sentences be cited via DerivedEvidence; the inherited derivation requirement is satisfied by the certificate field (the certificate IS the derivation).";
+    requires justification:proposition,
+             justification:term,
+             justification:certificate;
+    recommends justification:subject_iri,
+               justification:refutes;
 }
 
-property reasoning:proposition : core:inductive {
+property justification:proposition : core:inductive {
     description = "The Prop-typed EigenTT proposition this sentence asserts, encoded via the D47 codec. Also serves as the sentence's reflection:canonical_proposition for D49 §6 witness emission, so downstream DerivedEvidence citations resolve to this proposition in the witness key.";
-    class_types eigentt:TypeExpr;
-    domain reasoning:ReasoningSentence;
+    class_types eigentt:Term;
+    domain justification:Sentence;
 }
 
-property reasoning:justification : core:inductive {
-    description = "The agent's JustificationTerm warrant for the proposition, encoded as a chain-mirrored inductive value over the six JustificationTerm constructors (D39 §3).";
-    class_types reasoning:JustificationTerm;
-    domain reasoning:ReasoningSentence;
+property justification:term : core:inductive {
+    description = "The agent's justification:Term warrant for the proposition, encoded as a chain-mirrored inductive value over the six justification:Term constructors (D39 §3).";
+    class_types justification:Term;
+    domain justification:Sentence;
 }
 
-property reasoning:certificate : core:inductive {
-    description = "The kernel-checkable JustifiedBy certificate, encoded via the D47 codec. ValidateJustification (D39 §4.3) type-checks it against `JustifiedBy justification proposition` at commit; Fails verdicts reject the sentence.";
-    class_types eigentt:TypeExpr;
-    domain reasoning:ReasoningSentence;
+property justification:certificate : core:inductive {
+    description = "The kernel-checkable justification:Certificate certificate, encoded via the D47 codec. ValidateJustification (D39 §4.3) type-checks it against `justification:Certificate justification proposition` at commit; Fails verdicts reject the sentence.";
+    class_types eigentt:Term;
+    domain justification:Sentence;
 }
 
-property reasoning:subject_iri : core:string {
+property justification:subject_iri : core:string {
     description = "The principal Resource this sentence is about. First-class EigenQL index for the Reasoning institution — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning (D39 §6.4), all alternative-consideration sentences and the final pick share the same subject_iri.";
     format = formats:iri;
-    domain reasoning:ReasoningSentence;
+    domain justification:Sentence;
 }
 
-property reasoning:refutes : core:string {
-    description = "IRI of a prior ReasoningSentence this sentence supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
+property justification:refutes : core:string {
+    description = "IRI of a prior justification:Sentence this sentence supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
     format = formats:iri;
-    domain reasoning:ReasoningSentence;
+    domain justification:Sentence;
 }
 
 // ── VerifiedPropositionView (D49 §7) ─────────────────────────────────
@@ -267,20 +268,20 @@ property reasoning:refutes : core:string {
 // from a chain resource uniformly with the other three witness families.
 // The user-authored Lean resource stays intact; this view is derived.
 //
-// Created automatically by the lean_to_reasoning comorphism (D49 §7);
+// Created automatically by the lean_to_justification comorphism (D49 §7);
 // not user-authored. Phase 8 wires the comorphism; this declaration
 // fixes the contract.
 
-class reasoning:VerifiedPropositionView : reflection:DerivedResource {
+class justification:VerifiedPropositionView : reflection:DerivedResource {
     description = "Comorphism-reified view of a Lean (or future Coq/Agda/Idris) VerifiedResource's proposition, expressed as an EigenTT Prop term. The witness emitter for reflection:VerificationTrace looks up the view by source_verified_resource and reads canonical_proposition to build the IsVerifiedAs witness (D49 §7). Required, not optional: a view without a canonical_proposition is malformed.";
-    requires reasoning:source_verified_resource,
+    requires justification:source_verified_resource,
              reflection:canonical_proposition;
 }
 
-property reasoning:source_verified_resource : core:string {
-    description = "IRI of the user-authored VerifiedResource (typically a lean:LeanProofTerm) whose proposition this view exposes in EigenTT form. The IsVerifiedAs witness key's iri slot uses this value (not the view's own IRI) so that JustifiedBy.verified constructors over the user-authored VerifiedResource resolve successfully.";
+property justification:source_verified_resource : core:string {
+    description = "IRI of the user-authored VerifiedResource (typically a lean:LeanProofTerm) whose proposition this view exposes in EigenTT form. The IsVerifiedAs witness key's iri slot uses this value (not the view's own IRI) so that justification:Certificate.verified constructors over the user-authored VerifiedResource resolve successfully.";
     format = formats:iri;
-    domain reasoning:VerifiedPropositionView;
+    domain justification:VerifiedPropositionView;
 }
 
 // ── Query request classes (D39 §4.3 inputs) ──────────────────────────
@@ -289,26 +290,26 @@ property reasoning:source_verified_resource : core:string {
 // than dispatching against existing ReasoningSentences. Each class
 // declares the shape its handler reads.
 
-class reasoning:EntailmentRequest : reflection:DerivedResource {
+class justification:EntailmentRequest : reflection:DerivedResource {
     description = "Input to qc_entailment_query (D39 §4.3 OnDemand): ask whether the chain warrants the named candidate proposition. v1 of the handler performs a lookup-based search — it walks the layer chain for committed ReasoningSentences and returns Holds if any sentence's proposition matches the candidate. Undecidable otherwise (absence of evidence is not proof of impossibility). Bounded-depth proof search is follow-on work.";
-    requires reasoning:candidate_proposition;
+    requires justification:candidate_proposition;
 }
 
-property reasoning:candidate_proposition : core:inductive {
-    description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as ReasoningSentence.proposition.";
-    class_types eigentt:TypeExpr;
-    domain reasoning:EntailmentRequest;
+property justification:candidate_proposition : core:inductive {
+    description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as justification:Sentence.proposition.";
+    class_types eigentt:Term;
+    domain justification:EntailmentRequest;
 }
 
-class reasoning:ConsistencyRequest : reflection:DerivedResource {
+class justification:ConsistencyRequest : reflection:DerivedResource {
     description = "Input to qc_consistency_check (D39 §4.3 Decidable): ask whether the named set of ReasoningSentences is internally consistent. v1 returns Undecidable for any non-trivial input — the propositional-fragment decision procedure is follow-on work. The handler exists so the QueryClass IRI is dispatch-bound; reserved input shape so a richer handler can be plugged in without surface churn.";
-    requires reasoning:sentence_set;
+    requires justification:sentence_set;
 }
 
-property reasoning:sentence_set : core:resource_array {
+property justification:sentence_set : core:resource_array {
     description = "The ReasoningSentences whose joint consistency is being queried. v1 of the handler does not inspect this beyond a non-empty check.";
-    class_types reasoning:ReasoningSentence;
-    domain reasoning:ConsistencyRequest;
+    class_types justification:Sentence;
+    domain justification:ConsistencyRequest;
 }
 
 // ── Reasoning institution (D39 §4.3 / D14) ───────────────────────────
@@ -324,22 +325,22 @@ resource reasoning:reasoning_institution : institution:Institution {
     institution:institution_iri = "urn:eigenius:reasoning:reasoning_institution";
     institution:institution_name = "Reasoning";
     institution:runtime = runtimes:in_process;
-    core:description = "Justification Logic institution (D39). Type-checks JustifiedBy certificates against (justification, proposition) pairs at ReasoningSentence commit time via the kernel's NbE checker; queries entailment and consistency on demand. The validator is the kernel — no external runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory implementation.";
+    core:description = "Justification Logic institution (D39). Type-checks justification:Certificate certificates against (justification, proposition) pairs at justification:Sentence commit time via the kernel's NbE checker; queries entailment and consistency on demand. The validator is the kernel — no external runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory implementation.";
 }
 
 // ── Query classes (D39 §4.3) ─────────────────────────────────────────
 //
 // Three dispatch roles, one per class:
 //
-// - ValidateJustification (AutoOnLoad): fires on every ReasoningSentence
+// - ValidateJustification (AutoOnLoad): fires on every justification:Sentence
 //   commit; decodes proposition + certificate, type-checks at Prop, then
-//   checks `certificate : JustifiedBy justification proposition`. Returns
+//   checks `certificate : justification:Certificate justification proposition`. Returns
 //   Verdict::Holds or Verdict::Fails (with subterm-pinned diagnostic).
 //   Fails verdicts reject the commit per D14 §6.
 //
 // - EntailmentQuery (OnDemand): given Γ + candidate proposition A,
-//   bounded-depth search for a JustificationTerm whose certificate
-//   type-checks against `JustifiedBy t A` over Γ.
+//   bounded-depth search for a justification:Term whose certificate
+//   type-checks against `justification:Certificate t A` over Γ.
 //
 // - ConsistencyCheck (Decidable): propositional-fragment consistency
 //   over a committed-sentence set; reports Undecidable for richer
@@ -351,7 +352,7 @@ resource reasoning:reasoning_institution : institution:Institution {
 // language via `extract_typed` through declared ExportFormats. The
 // one ExportFormat needed in v1 is for `justification` — a D32 §3.7
 // chain inductive value that the validate handler needs to lift into
-// a kernel `Val` to construct `JustifiedBy(j, p)` for type-checking.
+// a kernel `Val` to construct `justification:Certificate(j, p)` for type-checking.
 //
 // proposition + certificate don't need ExportFormats: they're D47-
 // encoded EigenTT terms and the kernel's `decode_type` is the right
@@ -360,16 +361,16 @@ resource reasoning:reasoning_institution : institution:Institution {
 
 resource reasoning:ef_justification : institution:ExportFormat {
     core:short_name = "ef_justification";
-    core:description = "Lifts a ReasoningSentence's `justification` property (a D32 §3.7-shaped JustificationTerm chain value) into a `Val::InductiveVal` typed at `reasoning:JustificationTerm`. Used by the ValidateJustification handler to construct the expected certificate type `JustifiedBy(j, p)`; available as a standalone extract route for any future cross-institution consumer.";
-    institution:from_class = reasoning:ReasoningSentence;
-    institution:payload_type = reasoning:JustificationTerm;
+    core:description = "Lifts a justification:Sentence's `justification` property (a D32 §3.7-shaped justification:Term chain value) into a `Val::InductiveVal` typed at `justification:Term`. Used by the ValidateJustification handler to construct the expected certificate type `justification:Certificate(j, p)`; available as a standalone extract route for any future cross-institution consumer.";
+    institution:from_class = justification:Sentence;
+    institution:payload_type = justification:Term;
     institution:institution_ref = reasoning:reasoning_institution;
     institution:procedure = proc:extract_justification;
 }
 
 resource reasoning:qc_validate_justification : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every ReasoningSentence commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `JustifiedBy justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
-    institution:query_class = reasoning:ReasoningSentence;
+    core:description = "AutoOnLoad gate on every justification:Sentence commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `justification:Certificate justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
+    institution:query_class = justification:Sentence;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
     institution:query_handler = proc:validate_justification;
@@ -377,8 +378,8 @@ resource reasoning:qc_validate_justification : institution:QueryClass {
 }
 
 resource reasoning:qc_entailment_query : institution:QueryClass {
-    core:description = "OnDemand: given a candidate Prop-typed proposition (carried on an EntailmentRequest), return whether the chain warrants it. v1 of the handler runs a lookup-based search across committed ReasoningSentences; bounded-depth proof search over JustificationTerm constructors is follow-on work. Holds when a matching sentence is found; Undecidable otherwise (absence of evidence is not proof of impossibility).";
-    institution:query_class = reasoning:EntailmentRequest;
+    core:description = "OnDemand: given a candidate Prop-typed proposition (carried on an EntailmentRequest), return whether the chain warrants it. v1 of the handler runs a lookup-based search across committed ReasoningSentences; bounded-depth proof search over justification:Term constructors is follow-on work. Holds when a matching sentence is found; Undecidable otherwise (absence of evidence is not proof of impossibility).";
+    institution:query_class = justification:EntailmentRequest;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:on_demand];
     institution:query_handler = proc:entailment_query;
@@ -387,7 +388,7 @@ resource reasoning:qc_entailment_query : institution:QueryClass {
 
 resource reasoning:qc_consistency_check : institution:QueryClass {
     core:description = "Decidable: return whether a set of committed ReasoningSentences (carried on a ConsistencyRequest) is internally consistent. v1 returns Verdict::Undecidable for any non-trivial input — the propositional-fragment decision procedure is genuinely research-level and is follow-on work. The QueryClass is declared so the dispatch IRI is bound and the input shape is reserved.";
-    institution:query_class = reasoning:ConsistencyRequest;
+    institution:query_class = justification:ConsistencyRequest;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:decidable];
     institution:query_handler = proc:consistency_check;
@@ -398,15 +399,15 @@ resource reasoning:qc_consistency_check : institution:QueryClass {
 // Justification projections (D73 §1.2, eigenius#204)
 // ════════════════════════════════════════════════════════════════════
 //
-// WHAT THE POLYNOMIAL IS FOR. D39 §8 specified collapsing a JustificationTerm to a scalar grade at
+// WHAT THE POLYNOMIAL IS FOR. D39 §8 specified collapsing a justification:Term to a scalar grade at
 // commit. It was never implemented and D73 withdrew it — but its replacement was never built
 // either, which left the term retained and nothing able to ask anything of it. These are the
 // questions §1.2 argues the retained term can answer and a stored scalar cannot:
 //
-//   is this fully verified?              every ground of SOME alternative is VerifiedEvidence
-//   what does it rest on unproved?       the DeclaredEvidence grounds
+//   is this fully verified?              every ground of SOME alternative is Verified
+//   what does it rest on unproved?       the Declared grounds
 //   which agents are we trusting?        declared_by of those grounds (expressible since D72)
-//   which measurements?                  the ObservedEvidence grounds
+//   which measurements?                  the Observed grounds
 //   would it survive losing X?           SOME alternative cites X nowhere
 //
 // The last one is the argument for the whole document. A scalar records what the grounds CAME TO,
@@ -418,76 +419,76 @@ resource reasoning:qc_consistency_check : institution:QueryClass {
 // counterfactual) rides an optional input.
 //
 // SUM IS DISJUNCTIVE, and getting that wrong is exactly what D39 §8's propagation rule did. A
-// conclusion resting on Sum(VerifiedEvidence(a), DeclaredEvidence(b)) IS fully verified — the `a`
+// conclusion resting on Sum(Verified(a), Declared(b)) IS fully verified — the `a`
 // branch carries it alone. Reading Sum conjunctively understates every conclusion with a fallback,
 // which is the shape a careful author writes.
 
-class reasoning:ProjectionRequest {
-    description = "Input to qc_project_justification (D73 §1.2): ask what a committed ReasoningSentence's JustificationTerm rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
-    requires reasoning:subject_sentence;
-    recommends reasoning:counterfactual_iri;
+class justification:ProjectionRequest {
+    description = "Input to qc_project_justification (D73 §1.2): ask what a committed justification:Sentence's justification:Term rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
+    requires justification:subject_sentence;
+    recommends justification:counterfactual_iri;
 }
 
-property reasoning:subject_sentence : core:resource {
-    description = "The ReasoningSentence whose JustificationTerm is being projected.";
-    class_types reasoning:ReasoningSentence;
+property justification:subject_sentence : core:resource {
+    description = "The justification:Sentence whose justification:Term is being projected.";
+    class_types justification:Sentence;
 }
 
-property reasoning:counterfactual_iri : core:string {
-    description = "An IRI to withdraw: would the conclusion still stand without it? Answered in reasoning:survives_without. A plain string, not a resource reference — the question is asked ABOUT a citation, and asking it of an IRI the chain no longer resolves is the point, so Rule 22's closed-world check must not apply.";
+property justification:counterfactual_iri : core:string {
+    description = "An IRI to withdraw: would the conclusion still stand without it? Answered in justification:survives_without. A plain string, not a resource reference — the question is asked ABOUT a citation, and asking it of an IRI the chain no longer resolves is the point, so Rule 22's closed-world check must not apply.";
     format = formats:iri;
 }
 
-class reasoning:JustificationProjection {
-    description = "The result of projecting a JustificationTerm: its support (the alternative minimal ground-sets, any one of which carries the conclusion) read along each axis D73 §1.2 names. A REPORT, never an assertion — it states what the term rests on, not that any of it is true, and carries no canonical_proposition for that reason.";
-    requires reasoning:subject_sentence, reasoning:support_count, reasoning:fully_verified;
-    recommends reasoning:declared_grounds, reasoning:observed_grounds, reasoning:derived_grounds,
-               reasoning:verified_grounds, reasoning:counterfactual_iri, reasoning:survives_without;
+class justification:Projection {
+    description = "The result of projecting a justification:Term: its support (the alternative minimal ground-sets, any one of which carries the conclusion) read along each axis D73 §1.2 names. A REPORT, never an assertion — it states what the term rests on, not that any of it is true, and carries no canonical_proposition for that reason.";
+    requires justification:subject_sentence, justification:support_count, justification:fully_verified;
+    recommends justification:declared_grounds, justification:observed_grounds, justification:derived_grounds,
+               justification:verified_grounds, justification:counterfactual_iri, justification:survives_without;
 }
 
-property reasoning:support_count : core:integer {
+property justification:support_count : core:integer {
     description = "How many alternative ground-sets the term admits. 1 means a single chain of dependencies with no fallback; >1 means Sum offered alternatives.";
-    domain reasoning:JustificationProjection;
+    domain justification:Projection;
 }
 
-property reasoning:fully_verified : core:boolean {
-    description = "Whether EVERY ground of SOME alternative is VerifiedEvidence. Existential over alternatives because Sum is disjunctive: one fully-verified branch verifies the conclusion even where another rests on a declaration.";
-    domain reasoning:JustificationProjection;
+property justification:fully_verified : core:boolean {
+    description = "Whether EVERY ground of SOME alternative is Verified. Existential over alternatives because Sum is disjunctive: one fully-verified branch verifies the conclusion even where another rests on a declaration.";
+    domain justification:Projection;
 }
 
-property reasoning:declared_grounds : core:value_array {
-    description = "The IRIs cited by DeclaredEvidence grounds — what the conclusion rests on that nobody proved. A UNION across alternatives, not an intersection: this is a question about exposure, and a ground appearing on any branch is one the conclusion may rest on. Pair with reflection:declared_by on each to get 'which agents are we trusting' (answerable only since D72 made declared_by a resolvable Agent).";
+property justification:declared_grounds : core:value_array {
+    description = "The IRIs cited by Declared grounds — what the conclusion rests on that nobody proved. A UNION across alternatives, not an intersection: this is a question about exposure, and a ground appearing on any branch is one the conclusion may rest on. Pair with reflection:declared_by on each to get 'which agents are we trusting' (answerable only since D72 made declared_by a resolvable Agent).";
     element_type = core:string;
-    domain reasoning:JustificationProjection;
+    domain justification:Projection;
 }
 
-property reasoning:observed_grounds : core:value_array {
-    description = "The IRIs cited by ObservedEvidence grounds — which measurements the conclusion rests on. Union across alternatives, as for declared_grounds.";
+property justification:observed_grounds : core:value_array {
+    description = "The IRIs cited by Observed grounds — which measurements the conclusion rests on. Union across alternatives, as for declared_grounds.";
     element_type = core:string;
-    domain reasoning:JustificationProjection;
+    domain justification:Projection;
 }
 
-property reasoning:derived_grounds : core:value_array {
+property justification:derived_grounds : core:value_array {
     description = "The IRIs cited by DerivedEvidence grounds — which program outputs the conclusion rests on. Union across alternatives.";
     element_type = core:string;
-    domain reasoning:JustificationProjection;
+    domain justification:Projection;
 }
 
-property reasoning:verified_grounds : core:value_array {
-    description = "The IRIs cited by VerifiedEvidence grounds — which checked proofs the conclusion rests on. Union across alternatives.";
+property justification:verified_grounds : core:value_array {
+    description = "The IRIs cited by Verified grounds — which checked proofs the conclusion rests on. Union across alternatives.";
     element_type = core:string;
-    domain reasoning:JustificationProjection;
+    domain justification:Projection;
 }
 
-property reasoning:survives_without : core:boolean {
-    description = "Whether SOME alternative cites reasoning:counterfactual_iri nowhere — would the conclusion still stand having lost it. Present only when the request named one. THE counterfactual D73 §1.2 argues the retained polynomial buys: a stored scalar grade cannot answer it, because it records what the grounds came to rather than what they were.";
-    domain reasoning:JustificationProjection;
+property justification:survives_without : core:boolean {
+    description = "Whether SOME alternative cites justification:counterfactual_iri nowhere — would the conclusion still stand having lost it. Present only when the request named one. THE counterfactual D73 §1.2 argues the retained polynomial buys: a stored scalar grade cannot answer it, because it records what the grounds came to rather than what they were.";
+    domain justification:Projection;
 }
 
 resource reasoning:qc_project_justification : institution:QueryClass {
-    core:description = "OnDemand: project a committed ReasoningSentence's JustificationTerm onto the axes of D73 §1.2 — is it fully verified, what does it rest on unproved, which measurements, and would it survive losing a named IRI. Returns a JustificationProjection, not a Verdict: this reports what the term rests on, it does not judge it.";
-    institution:query_class = reasoning:ProjectionRequest;
-    institution:result_class = reasoning:JustificationProjection;
+    core:description = "OnDemand: project a committed justification:Sentence's justification:Term onto the axes of D73 §1.2 — is it fully verified, what does it rest on unproved, which measurements, and would it survive losing a named IRI. Returns a justification:Projection, not a Verdict: this reports what the term rests on, it does not judge it.";
+    institution:query_class = justification:ProjectionRequest;
+    institution:result_class = justification:Projection;
     institution:dispatch_role = [dispatch:on_demand];
     institution:query_handler = proc:project_justification;
     institution:institution_ref = reasoning:reasoning_institution;

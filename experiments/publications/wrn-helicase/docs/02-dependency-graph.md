@@ -7,7 +7,7 @@ official site warrant palette ([website/src/styles/custom.css](../../../../websi
 - 🟦 **Observed** `#3A7CA5` — recorded from reality (datasets, `PinnedExternalFile`s, `SampleSet`s, the xenograft table).
 - 🟧 **Derived** `#D98C5F` — computed with an `IsDerivedAs` witness (statistics-institution results, wrapped-R results, linked-external `ToolArtifact`s).
 - 🟪 **Declared** `#8B5CB0` — asserted on authority (inference rules, statistical→domain bridges, impossibility witnesses, **literature warrants** = `reference:Citation`).
-- 🟩 **Verified** `#2E9D5D` — kernel-checked reasoning conclusions (`ReasoningSentence` that Holds); the bold-green apex is the final claim (itself a verified conclusion).
+- 🟩 **Verified** `#2E9D5D` — kernel-checked reasoning conclusions (`justification:Sentence` that Holds); the bold-green apex is the final claim (itself a verified conclusion).
 
 Edge style: **solid** = logical premise (composed into a certificate); **dotted**
 = method/source provenance (CiTO `uses_method_in` / `cites_as_source_document`)

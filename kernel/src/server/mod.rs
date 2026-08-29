@@ -607,7 +607,7 @@ impl EigeniusService {
     /// chain-resident smart-constructor macro (e.g.
     /// `stats:SingleSampleEstimate(...)`) or references ctors
     /// declared in a parent layer's inductive (e.g.
-    /// `reasoning:JustifiedBy.app` consumed from a `type_expr(...)`
+    /// `justification:Certificate.app` consumed from a `type_expr(...)`
     /// certificate body). When `branch` is None, falls back to
     /// `compile_with_institutions` (institution-aware, layer-blind).
     #[allow(clippy::result_large_err)]

@@ -195,7 +195,7 @@ pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
 /// introduction (D46 §10). Used by the D49 witness emitter as the
 /// default canonical proposition when a target resource carries no
 /// explicit `reflection:canonical_proposition`. The well-known IRI is
-/// pinned here so emission and the eventual `JustifiedBy.declared`
+/// pinned here so emission and the eventual `justification:Certificate.declared`
 /// consumer share one source of truth.
 pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
@@ -370,7 +370,7 @@ pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
 /// Kind of a size-binder arrow's bound variable. A name string — the size sort is `"Size"`.
 /// (`urn:eigenius:core:Size` is still ACCEPTED by the decoder's `:Size` suffix match, but it names
 /// no resource on any chain and nothing emits it; see eigenius#188. This property was not retyped
-/// to an `eigentt:TypeExpr` along with `core:param_kind` / `core:type_name`.)
+/// to an `eigentt:Term` along with `core:param_kind` / `core:type_name`.)
 pub const BINDER_KIND: &str = "urn:eigenius:core:binder_kind";
 /// Body of a size-binder arrow — embedded TypeExpr resource or
 /// string.
@@ -491,7 +491,7 @@ pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
 /// whose exported blob D49 §7's `Lean → Reasoning` comorphism reifies into a
-/// `reasoning:VerifiedPropositionView`, and the kernel, whose type-checked `JustifiedBy`
+/// `justification:VerifiedPropositionView`, and the kernel, whose type-checked `justification:Certificate`
 /// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
 
@@ -511,7 +511,7 @@ pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
 pub const PROOF_SYSTEM: &str = "urn:eigenius:reflection:proof_system";
 
 /// `reflection:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
-/// prover's blob, or the chain-resident IRI of the `ReasoningSentence` whose certificate checked.
+/// prover's blob, or the chain-resident IRI of the `justification:Sentence` whose certificate checked.
 pub const PROOF_TERM: &str = "urn:eigenius:reflection:proof_term";
 
 /// `reflection:timestamp` — when a Trace's event occurred. Required by every Trace class.
@@ -519,20 +519,20 @@ pub const TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
 
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
-/// `eigentt:TypeExpr` payload. Absent value defaults to `Asserts(iri)`
+/// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`
 /// at witness-emission time. Type-checked at `Prop` at commit by
 /// [`PROPOSITION_SLOTS`] / Rule 21.
 pub const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
 
-/// The `eigentt:TypeExpr`-ranged properties whose declared role is a
+/// The `eigentt:Term`-ranged properties whose declared role is a
 /// **proposition**: the value must inhabit `Prop` (`Sort(0)`), not merely
 /// type-check. Rule 21 (`validation/rules/eigentt_value.rs`) enforces it.
 ///
-/// `eigentt:TypeExpr` is the range of every D47-encoded EigenTT tree, and
+/// `eigentt:Term` is the range of every D47-encoded EigenTT tree, and
 /// most of those trees are legitimately *not* propositions —
 /// `eigentt:axiom_statement` and `eigentt:definition_type` hold types
 /// (`Sort(1)`/`Sort(2)`), `lexicon:cat` holds an inductive value,
-/// `lexicon:term` holds a λ-term, `reasoning:certificate` holds a proof
+/// `lexicon:term` holds a λ-term, `justification:certificate` holds a proof
 /// term whose *type* is a Prop. The range alone therefore cannot carry the
 /// obligation; membership here is what distinguishes a slot that asserts
 /// something from a slot that merely holds a term. Each entry's ontology
@@ -545,10 +545,10 @@ pub const PROPOSITION_SLOTS: &[&str] = &[
     // "The Prop-typed EigenTT proposition this resource canonically asserts."
     CANONICAL_PROPOSITION,
     // "The Prop-typed EigenTT proposition this sentence asserts."
-    "urn:eigenius:reasoning:proposition",
+    "urn:eigenius:justification:proposition",
     // "The Prop-typed EigenTT proposition the EntailmentRequest is asking
     //  the chain to warrant."
-    "urn:eigenius:reasoning:candidate_proposition",
+    "urn:eigenius:justification:candidate_proposition",
     // "The Prop-typed proposition this Milestone TARGETS or this Axiom admits."
     "urn:eigenius:objective:proposition",
     // "An Option's claim, as a Prop — never prose."
@@ -561,16 +561,16 @@ pub const PROPOSITION_SLOTS: &[&str] = &[
 //
 // The four kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
 // predicate types. ESL has no constructors for their inhabitants; the
-// kernel synthesises `Val::ChainWitness` values at `JustifiedBy.*`
+// kernel synthesises `Val::ChainWitness` values at `justification:Certificate.*`
 // constructor type-check time via the per-Layer witness-index lookup.
-// The IRIs are referenced from the `reasoning:JustifiedBy` indexed
+// The IRIs are referenced from the `justification:Certificate` indexed
 // inductive's constructor signatures (D39 §5) and from the witness-
 // synthesis hook in `kernel/src/nbe/check.rs` (D49 §5).
 
-pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs";
-pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsObservedAs";
-pub const CHAIN_WITNESS_IS_DERIVED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsDerivedAs";
-pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs";
+pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:witness:IsDeclaredAs";
+pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:witness:IsObservedAs";
+pub const CHAIN_WITNESS_IS_DERIVED_AS: &str = "urn:eigenius:witness:IsDerivedAs";
+pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:witness:IsVerifiedAs";
 
 /// Helper: map a class IRI for one of the four `ChainWitness.IsXxAs`
 /// predicate types to its `WitnessCategory`, or `None` if the IRI is

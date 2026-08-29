@@ -24,7 +24,7 @@
 //
 // With the model an explicit parameter, the quantifier is where it belongs — in the rule, visible,
 // and it is what the rule actually says. `inference.esl` eliminates it with
-// `JustifiedBy.spec_poly` at the model the sentences are about, which is the ordinary way to use a
+// `justification:Certificate.spec_poly` at the model the sentences are about, which is the ordinary way to use a
 // general claim on a particular case.
 //
 // ── AND WHY IT IS THE ONLY DECLARED THING HERE ────────────────────────────────────────────────
@@ -80,7 +80,7 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
     // premise of an `app` step.
     //
     // It must match, byte for byte after D47 encoding, the implication `inference.esl`'s
-    // `reasoning:declared(...)` sub-proof writes out — the witness key hashes the proposition, so a
+    // `justification:declared(...)` sub-proof writes out — the witness key hashes the proposition, so a
     // rule that says something even slightly different is a different rule. Note that the two
     // `onco2:` calls below are DEFINITIONS: decode unfolds them to the parsed sentences on both
     // sides, so the match is on the unfolded terms and holds by construction.
@@ -101,7 +101,7 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
 // The rule resource on its own mints nothing.
 //
 // That witness is exactly what `inference.esl` consumes. Its certificate contains
-// `reasoning:declared("…:lit_rule_exo_implies_helicase", ∀m. A -> B, ())`, and the `()` is a slot
+// `justification:declared("…:lit_rule_exo_implies_helicase", ∀m. A -> B, ())`, and the `()` is a slot
 // the kernel fills by looking up `(Declared, this IRI, hash of the proposition)` in the index.
 // `IsDeclaredAs` has zero constructors, so no author can supply an inhabitant — the lookup IS the
 // type-check. Delete this trace and the intact branch's inference stops committing.

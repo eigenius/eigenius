@@ -164,7 +164,7 @@ claim_eig0291_lowic50                      [StatisticalAnalysisPlan]
 Verdict("Fails", AlphaNotCrossed: computed p = 0.218..., threshold alpha = 0.05)
 ```
 
-The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) reads it to admit `IsDerivedAs(claim_iri, HasLowIC50(...))`; downstream [D39 reasoning sentences](../reasoning-institution/README.md) cite the claim via `DerivedEvidence` and consume the witness via `JustifiedBy.derived`.
+The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) reads it to admit `IsDerivedAs(claim_iri, HasLowIC50(...))`; downstream [D39 reasoning sentences](../reasoning-institution/README.md) cite the claim via `DerivedEvidence` and consume the witness via `justification:Certificate.derived`.
 
 Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_analysis_plan` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
 
@@ -264,9 +264,9 @@ raw IC50 readings (ObservedResource + ObservationTrace)
   → D52 validate_analysis_plan AutoOnLoad fires
   → Verdict::Holds; claim_eig0291_lowic50 is committed as DerivedResource
   → ProgramTrace pairs → witness index admits IsDerivedAs(claim_iri, HasLowIC50(...))
-  → D39 ReasoningSentence cites claim_iri via DerivedEvidence
+  → D39 justification:Sentence cites claim_iri via DerivedEvidence
   → D39 validate_justification AutoOnLoad fires
-  → certificate's JustifiedBy.derived consumes the IsDerivedAs witness
+  → certificate's justification:Certificate.derived consumes the IsDerivedAs witness
   → Verdict::Holds for the reasoning conclusion (e.g., StrongInhibitor(EIG_0291))
 ```
 

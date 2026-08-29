@@ -55,7 +55,7 @@ D14 §1.2 states what an institution is. Applied to the encoding engine:
 Every resource declaring `institution:Institution` today *decides* something: the five Julia solvers
 (Catalyst, DiffEq, Symbolics, JuMP, Intervals) solve, [Lean](../../ontologies/lean/lean-institution.eigon.json)
 checks proofs, [statistics](../../ontologies/statistics/statistics.esl) recomputes a test from raw
-replicates, [reasoning](../../ontologies/reasoning/reasoning.esl) validates a justification
+replicates, [reasoning](../../ontologies/justification/justification.esl) validates a justification
 certificate, runtime-substrate registers environments.
 
 Meanwhile five importers — UMLS, WordNet, NCBI-gene, obograph, schema-org — all do *external source →

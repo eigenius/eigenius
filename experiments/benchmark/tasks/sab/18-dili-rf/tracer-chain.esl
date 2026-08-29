@@ -8,7 +8,7 @@
 //   5 methodological decisions  (Declared, spec-warranted)
 //        │  composed through a declared acceptance rule
 //        ▼
-//   ImplementsDILIPredictor(solution)   (ReasoningSentence)
+//   ImplementsDILIPredictor(solution)   (justification:Sentence)
 //        │  binds                              ▲ overlay
 //        ▼                                      │
 //   bench:TaskOutput(python_source)  ◀── 5 bench:CodeBlocks (coverage)
@@ -19,14 +19,15 @@
 //
 // Validated by crates/eigenius-reasoning/tests/sab18_tracer.rs (Holds + coverage).
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace s18        = "urn:eigenius:bench:sab18";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace s18           = "urn:eigenius:bench:sab18";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Phase 1: per-task predicate vocabulary ────────────────────────
 
@@ -150,34 +151,34 @@ resource s18:impl_rule_trace : reflection:DeclarationTrace {
 
 // ─── Phase 4: the conclusion ───────────────────────────────────────
 
-resource s18:concl_solution_implements : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:bench:sab18:solution";
+resource s18:concl_solution_implements : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:bench:sab18:solution";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution")
     );
 
-    reasoning:justification = App(
+    justification:term = App(
         App(
             App(
                 App(
                     App(
                         SpecStr(
-                            DeclaredEvidence("urn:eigenius:bench:sab18:impl_rule"),
+                            Declared("urn:eigenius:bench:sab18:impl_rule"),
                             "urn:eigenius:bench:sab18:solution"
                         ),
-                        DeclaredEvidence("urn:eigenius:bench:sab18:conf_featurization")
+                        Declared("urn:eigenius:bench:sab18:conf_featurization")
                     ),
-                    DeclaredEvidence("urn:eigenius:bench:sab18:conf_label_mapping")
+                    Declared("urn:eigenius:bench:sab18:conf_label_mapping")
                 ),
-                DeclaredEvidence("urn:eigenius:bench:sab18:conf_configs")
+                Declared("urn:eigenius:bench:sab18:conf_configs")
             ),
-            DeclaredEvidence("urn:eigenius:bench:sab18:conf_model_selection")
+            Declared("urn:eigenius:bench:sab18:conf_model_selection")
         ),
-        DeclaredEvidence("urn:eigenius:bench:sab18:conf_output_format")
+        Declared("urn:eigenius:bench:sab18:conf_output_format")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             P    = "urn:eigenius:bench:sab18:solution",
             RULE = "urn:eigenius:bench:sab18:impl_rule",
@@ -202,11 +203,11 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
                 s18:ConformsOutputFormat(p) ->
                 s18:ImplementsDILIPredictor(p),
 
-            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), P),
-            j1 = reasoning:App(j0, DeclaredEvidence(D1)),
-            j2 = reasoning:App(j1, DeclaredEvidence(D2)),
-            j3 = reasoning:App(j2, DeclaredEvidence(D3)),
-            j4 = reasoning:App(j3, DeclaredEvidence(D4)),
+            j0 = justification:SpecStr(Declared(RULE), P),
+            j1 = justification:App(j0, Declared(D1)),
+            j2 = justification:App(j1, Declared(D2)),
+            j3 = justification:App(j2, Declared(D3)),
+            j4 = justification:App(j3, Declared(D4)),
 
             rule_cert = spec_poly(
                 // T : the domain
@@ -218,18 +219,18 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
                     s18:ConformsModelSelection(p) ->
                     s18:ConformsOutputFormat(p) ->
                     s18:ImplementsDILIPredictor(p),
-                DeclaredEvidence(RULE),
+                Declared(RULE),
                 P,
                 // tag : audit label, same IRI as the instance
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, DeclaredEvidence(D1), rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, DeclaredEvidence(D2), cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, j2, DeclaredEvidence(D3), cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, j3, DeclaredEvidence(D4), cert3, declared(D4, C4))
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
         in
-        app(C5, IMPL, j4, DeclaredEvidence(D5), cert4, declared(D5, C5))
+        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))
     );
 }
 

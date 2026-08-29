@@ -54,9 +54,9 @@ pub fn compile_with_institutions(
 
 /// Compile an ESL source string against a chain layer, seeding the
 /// compiler's ctor table with every chain-resident inductive's
-/// constructors. Required for D39 ReasoningSentence commits whose
+/// constructors. Required for D39 justification:Sentence commits whose
 /// `type_expr(...)` certificates reference chain-resident ctors like
-/// `app` / `declared` / `observed` from `reasoning:JustifiedBy` —
+/// `app` / `declared` / `observed` from `justification:Certificate` —
 /// the bare-name ctor disambiguator needs to see those entries to
 /// emit the right `Exp::InductiveCtor` instead of a plain reference.
 pub fn compile_against_layer(
@@ -77,7 +77,7 @@ pub fn compile_against_layer(
 /// the live institution index (D14 §9.5), AND cross-file references
 /// to ctors / macros declared in parent layers (like
 /// `stats:SingleSampleEstimate` smart constructors or
-/// `reasoning:JustifiedBy.app` ctors) need to resolve against the
+/// `justification:Certificate.app` ctors) need to resolve against the
 /// chain. Falls back to `compile_with_institutions` if no layer is
 /// available; `compile_against_layer` if no institution index is.
 ///

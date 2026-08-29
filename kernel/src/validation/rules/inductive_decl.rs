@@ -307,7 +307,7 @@ mod ctor_type_tests {
     //! garbage and still commit, which is why `layer::declaration_order` had to
     //! descend into `Value::Json` by hand to find inductive-to-inductive edges.
     //!
-    //! P2 declares it `core:inductive` + `class_types eigentt:TypeExpr`. These tests
+    //! P2 declares it `core:inductive` + `class_types eigentt:Term`. These tests
     //! pin the difference: a `ctor_type` naming an IRI that does not resolve is now
     //! refused, and a well-formed one still passes.
     //!

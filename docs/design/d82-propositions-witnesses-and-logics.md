@@ -389,7 +389,7 @@ today, and would become visibly so.
 ### 5a.4 `witness:Is*As` is kernel vocabulary, not the reasoning institution's
 
 Those four inductives *are* the four categories expressed as propositions. Under §2a they belong
-with the kernel's base vocabulary, not in `ontologies/reasoning/reasoning.esl` where they sit today.
+with the kernel's base vocabulary, not in `ontologies/justification/justification.esl` where they sit today.
 
 What stays with the reasoning institution is `JustifiedBy` and `JustificationTerm` — the certificate
 type and the J-family algebra (`app`, `sum_l`, `sum_r`, `spec_poly`, the evidence constructors). An
@@ -537,7 +537,7 @@ visible: institutions touch only the last two, and the first two are not institu
 justification in Artemov's sense."* Both halves are wrong, and the declaration says why.
 
 `JustifiedBy` has **no factivity rule**. Its seven constructors are the four groundings, `app`,
-`sum_l`/`sum_r` and `spec_poly` (`ontologies/reasoning/reasoning.esl:112-190`) — there is no
+`sum_l`/`sum_r` and `spec_poly` (`ontologies/justification/justification.esl:112-190`) — there is no
 `JustifiedBy(j, P) → P`, and no positive introspection. So the system implements **J**, the
 *non-factive* base of the justification-logic family, not **LP** (= JT4). A certificate never asserts
 its proposition; it records that `j` grounds a claim to it. And non-factive justification is squarely

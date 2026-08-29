@@ -1031,7 +1031,7 @@ fn resolve_inductive_declarations(
 
             let mut args = Vec::new();
             for arg_res in resource_array(&ctor_res, PROP_ARG_TYPES) {
-                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188), so the referenced
+                // `core:type_name` is an `eigentt:Term` (eigenius#188), so the referenced
                 // type is the value's HEAD. This read it as a string; the tests did not catch the
                 // break because their fixtures build the property by hand and still built strings.
                 let type_name =
@@ -2608,7 +2608,7 @@ fn sanitise_for_identifier(s: &str) -> String {
 mod tests {
     /// Test-only: `core:type_name` is written by fixtures here, and READ through
     /// `eigenius_kernel::program::ground::arg_type_head` (eigenius#188 retyped it to an
-    /// `eigentt:TypeExpr`, so there is no string to read directly any more).
+    /// `eigentt:Term`, so there is no string to read directly any more).
     const PROP_TYPE_NAME: &str = "urn:eigenius:core:type_name";
 
     use super::*;
@@ -4048,7 +4048,7 @@ end # module EigeniusMirror
             ))]),
         );
         succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
-        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
             Value::Json(serde_json::json!({

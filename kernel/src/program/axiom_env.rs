@@ -16,7 +16,7 @@
 //!
 //! Axioms are chain-resident `eigentt:Axiom` resources. Each carries an
 //! `axiom_statement` property whose value is an EigenTT type expression
-//! (encoded as `eigentt:TypeExpr` per D47). At environment-build time,
+//! (encoded as `eigentt:Term` per D47). At environment-build time,
 //! the kernel walks the chain, collects `eigentt:Axiom` resources, decodes
 //! each statement back to an [`Exp`], type-checks it inhabits some sort
 //! (i.e. is a well-formed type), and registers the IRI → type binding.

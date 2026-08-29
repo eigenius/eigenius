@@ -142,7 +142,7 @@ axiom ex:propext :
 
 The `axiom` keyword takes a name, a colon, and a type expression. The statement is **postulated** — the kernel admits an inhabitant of the type without requiring a proof term, treating the axiom's name as an opaque constant equal only to itself by symbol identity. Conversion never `delta`-reduces it. The chain validator type-checks the *statement* against the universe ladder at commit and rejects malformed propositions; the inhabitant is granted by fiat.
 
-Axioms are the chain-author surface for the kernel's "admit without proof" mechanism. Anything that lives here becomes a citable chain artifact downstream reasoning can name via `DeclaredEvidence`; anything that doesn't can't enter the trust base silently. (For a named term the kernel *unfolds* instead of postulating — definitional equality rather than fiat — see `def`, [§4.4c](#44c-def--transparent-definitions-d66).)
+Axioms are the chain-author surface for the kernel's "admit without proof" mechanism. Anything that lives here becomes a citable chain artifact downstream reasoning can name via `Declared`; anything that doesn't can't enter the trust base silently. (For a named term the kernel *unfolds* instead of postulating — definitional equality rather than fiat — see `def`, [§4.4c](#44c-def--transparent-definitions-d66).)
 
 ### Type-expression sub-grammar
 
@@ -182,7 +182,7 @@ Two axioms are admitted by the kernel itself in the initial environment — they
 - **`core:propext`** — propositional extensionality: `forall (P Q : Prop), (P <-> Q) -> Id(Prop, P, Q)`. Gives the chain a canonical-assertion identity (logically equivalent propositions are propositionally equal). Conservative over CIC.
 - **`core:Quot_sound`** — quotient soundness: `forall {α : Type} {r : α -> α -> Prop} {a b : α}, r a b -> Id(Quot r, Quot.mk r a, Quot.mk r b)`. Needed for evidence normalization, chain consolidation deduplication, and standard mathematical quotient constructions. The rest of `Quot` (`Quot.mk`, `Quot.lift`) is definitional; only `Quot.sound` is axiomatic.
 
-You can cite either from a `DeclaredEvidence(core:propext)` justification just as you would a user-declared axiom — the witness shape is the same.
+You can cite either from a `Declared(core:propext)` justification just as you would a user-declared axiom — the witness shape is the same.
 
 ### What's rejected at kernel level
 
@@ -194,7 +194,7 @@ The structural property the framework upholds: **every Prop-level belief in a ch
 
 ### Composing with D39 reasoning
 
-To cite an axiom from a [D39 reasoning sentence](09-institutions.md), pair the `axiom` declaration with a [D49](../../design/d49-chainwitness-machinery.md) `DeclarationTrace` pointing at the axiom resource — that admits the `IsDeclaredAs(axiom_iri, statement)` witness the certificate's `JustifiedBy.declared` constructor consumes:
+To cite an axiom from a [D39 reasoning sentence](09-institutions.md), pair the `axiom` declaration with a [D49](../../design/d49-chainwitness-machinery.md) `DeclarationTrace` pointing at the axiom resource — that admits the `IsDeclaredAs(axiom_iri, statement)` witness the certificate's `justification:Certificate.declared` constructor consumes:
 
 ```esl
 axiom ex:strong_inhibitor_implication :
@@ -209,7 +209,7 @@ resource ex:strong_inhibitor_implication_trace : reflection:DeclarationTrace {
 }
 ```
 
-A D39 reasoning sentence then references the axiom via `DeclaredEvidence("urn:eigenius:example:strong_inhibitor_implication")` in its `justification` and `declared(...)` in its certificate. See [§9.10](09-institutions.md) for the full reasoning surface.
+A D39 reasoning sentence then references the axiom via `Declared("urn:eigenius:example:strong_inhibitor_implication")` in its `justification` and `declared(...)` in its certificate. See [§9.10](09-institutions.md) for the full reasoning surface.
 
 ### Voiding semantics
 
@@ -377,7 +377,7 @@ There is no ambiguity with a qualified type: `ex:Tree` lexes as one `QualName` t
 
 ### Indexed — D48 indexed families
 
-Indexed inductives carry an **index telescope** between the parameters and the result sort. Each constructor's conclusion specifies *values* for the indices (not just the types), and pattern matching against an indexed scrutinee can refine the expected type per arm. This is the surface that lets us express length-indexed vectors, equality on a type, the [D39 `JustifiedBy(justification, proposition)`](../../design/d39-justification-logic.md) certificate, and any other family where the conclusion shape depends on the scrutinee.
+Indexed inductives carry an **index telescope** between the parameters and the result sort. Each constructor's conclusion specifies *values* for the indices (not just the types), and pattern matching against an indexed scrutinee can refine the expected type per arm. This is the surface that lets us express length-indexed vectors, equality on a type, the [D39 `justification:Certificate(justification, proposition)`](../../design/d39-justification-logic.md) certificate, and any other family where the conclusion shape depends on the scrutinee.
 
 ```esl
 data ex:Vec(A : core:Set) : core:Nat -> Set {

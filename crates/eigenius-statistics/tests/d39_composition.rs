@@ -23,9 +23,9 @@
 //!     `ic50_measurement.rs`) is visible to the D39 reasoning
 //!     validator when it processes a sentence using
 //!     `DerivedEvidence(claim_iri)`.
-//!  2. The reasoning sentence `App(SpecStr(DeclaredEvidence(rule),
+//!  2. The reasoning sentence `App(SpecStr(Declared(rule),
 //!     EIG_0291), DerivedEvidence(claim))` type-checks against
-//!     `JustifiedBy(_, StrongInhibitor(EIG_0291))`.
+//!     `justification:Certificate(_, StrongInhibitor(EIG_0291))`.
 //!
 //! This is the proof point that D52 §8 actually works end-to-end —
 //! the statistics institution produces a chain artifact that D39
@@ -72,9 +72,9 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    // Reasoning layer — provides JustifiedBy + JustificationTerm
+    // Reasoning layer — provides justification:Certificate + justification:Term
     // inductives the certificate type-checks against.
-    let reasoning_source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {
@@ -97,7 +97,7 @@ fn build_composition_chain() -> ExecutionContext {
     // IC50 fixture layer — provides the screening + confirmatory
     // SampleSets + claims + traces. The confirmatory StatisticalAnalysisPlan
     // is the IsDerivedAs witness target for the DerivedEvidence used
-    // by the composition fixture's ReasoningSentence.
+    // by the composition fixture's justification:Sentence.
     let ic50_source = include_str!("fixtures/ic50_measurement.esl");
     let ic50_resources =
         esl::compile_against_layer(ic50_source, &stats_layer).unwrap_or_else(|errs| {
@@ -116,7 +116,7 @@ fn build_composition_chain() -> ExecutionContext {
     let ic50_layer = Arc::new(ic50_builder.build(LayerStorage::in_memory()));
 
     // Composition fixture layer — adds the literature rule (universal)
-    // + its DeclarationTrace + the ReasoningSentence that derives
+    // + its DeclarationTrace + the justification:Sentence that derives
     // StrongInhibitor(EIG_0291) via App(SpecStr, DerivedEvidence).
     let composition_source = include_str!("fixtures/d39_composition.esl");
     let composition_resources = esl::compile_against_layer(composition_source, &ic50_layer)
@@ -176,7 +176,7 @@ fn statistics_verdict_composes_with_universal_rule_via_d39() {
     // its DeclarationTrace. SpecStr specializes the rule at
     // EIG_0291; App composes the specialized implication with the
     // derived evidence; the result type-checks against
-    // `JustifiedBy(_, StrongInhibitor(EIG_0291))`. Holds.
+    // `justification:Certificate(_, StrongInhibitor(EIG_0291))`. Holds.
     assert_eq!(
         ctor,
         wk::VERDICT_HOLDS,

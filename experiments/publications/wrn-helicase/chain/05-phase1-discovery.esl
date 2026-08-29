@@ -21,14 +21,15 @@
 //
 // Validated by crates/eigenius-statistics/tests/wrn_phase1_recompute.rs.
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace wrn        = "urn:eigenius:pub:wrn";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Observed: the public datasets (provenance per data/MANIFEST.md) ──
 
@@ -138,22 +139,22 @@ resource wrn:discovery_rule_trace : reflection:DeclarationTrace {
 
 // ─── C-WRN: WRN is selectively essential in MSI ──────────────────────
 
-resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_wrn_selective : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:SelectivelyEssential("WRN", "MSI")
     );
 
-    reasoning:justification = App(
+    justification:term = App(
         App(
-            SpecStr(DeclaredEvidence("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
-            DeclaredEvidence("urn:eigenius:pub:wrn:dd_achilles")
+            SpecStr(Declared("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
+            Declared("urn:eigenius:pub:wrn:dd_achilles")
         ),
-        DeclaredEvidence("urn:eigenius:pub:wrn:dd_drive")
+        Declared("urn:eigenius:pub:wrn:dd_drive")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             G    = "WRN",
             ACTX = "Achilles_MSI",
@@ -172,7 +173,7 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
                 onco:TopDifferentialDependency(g, DCTX) ->
                 onco:SelectivelyEssential(g, MSI),
 
-            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), G),
+            j0 = justification:SpecStr(Declared(RULE), G),
             rule_cert = spec_poly(
                 // T : the domain
                 core:string,
@@ -180,15 +181,15 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
                     onco:TopDifferentialDependency(g, ACTX) ->
                     onco:TopDifferentialDependency(g, DCTX) ->
                     onco:SelectivelyEssential(g, MSI),
-                DeclaredEvidence(RULE),
+                Declared(RULE),
                 G,
                 // tag : audit label, same IRI as the instance
                 G,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(TA, TD -> SE, j0, DeclaredEvidence(DDA), rule_cert, declared(DDA, TA))
+            cert1 = app(TA, TD -> SE, j0, Declared(DDA), rule_cert, declared(DDA, TA))
         in
-        app(TD, SE, reasoning:App(j0, DeclaredEvidence(DDA)), DeclaredEvidence(DDD), cert1, declared(DDD, TD))
+        app(TD, SE, justification:App(j0, Declared(DDA)), Declared(DDD), cert1, declared(DDD, TD))
     );
 }
 

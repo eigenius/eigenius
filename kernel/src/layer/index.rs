@@ -1536,9 +1536,7 @@ mod mentions_tests {
         );
         prop.set(
             iri(wk::CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:eigentt:TypeExpr",
-            ))]),
+            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
         );
         b.add_resource(prop).unwrap();
 
@@ -1590,8 +1588,8 @@ mod mentions_tests {
         let m = mentions_of(serde_json::json!({
             "ctor": "App",
             "args": [
-                {"ctor": "DeclaredEvidence", "args": ["urn:eigenius:test:Topic"]},
-                {"ctor": "ObservedEvidence", "args": ["urn:eigenius:test:Topic"]}
+                {"ctor": "Declared", "args": ["urn:eigenius:test:Topic"]},
+                {"ctor": "Observed", "args": ["urn:eigenius:test:Topic"]}
             ],
         }));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");

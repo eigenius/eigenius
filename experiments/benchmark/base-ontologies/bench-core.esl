@@ -12,7 +12,7 @@
 //     tool produced a typed output from typed inputs (D50 §9, §12). A
 //     ToolArtifact is a DerivedResource, so its `reflection:derivation`
 //     ProgramTrace yields an `IsDerivedAs` witness the D49 emitter admits
-//     — that is what lets a ReasoningSentence cite it via DerivedEvidence.
+//     — that is what lets a justification:Sentence cite it via DerivedEvidence.
 //
 //   - Measurement : a scalar value + unit + measured quantity. Reuses the
 //     value/unit shape proven in statistics.esl. Observed by default;

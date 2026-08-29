@@ -13,21 +13,21 @@
 // limitations under the License.
 
 //! End-to-end D39 v2 demo: a universally-quantified literature rule
-//! applied to a specific compound via `JustifiedBy.spec_poly`
+//! applied to a specific compound via `justification:Certificate.spec_poly`
 //! constructor.
 //!
 //! Closes the conceptual gap in the original `drug_screening.esl`
 //! fixture: the rule is now universal (`forall c, HasLowIC50(c) ->
 //! StrongInhibitor(c)`) rather than pre-specialised to EIG_0291.
 //! The certificate uses the `SpecStr` JT ctor + the `spec_poly`
-//! JustifiedBy ctor to apply the rule at "urn:EIG_0291"; the kernel's
+//! justification:Certificate ctor to apply the rule at "urn:EIG_0291"; the kernel's
 //! NbE beta-reduces `(forall c, P c)("urn:EIG_0291")` to
 //! `P("urn:EIG_0291")` so the result type matches the App composition.
 //!
 //! What this exercises:
 //! - The `lower_type_expr_to_exp` bound-variable-with-args fix:
 //!   `screen:HasLowIC50(c)` inside a forall body lowers cleanly.
-//! - `JustificationTerm.SpecStr` + `JustifiedBy.spec_poly`
+//! - `justification:Term.SpecStr` + `justification:Certificate.spec_poly`
 //!   constructors in `reasoning.esl`.
 //! - Kernel beta-reduction at the spec_poly result type during
 //!   certificate type-checking.
@@ -74,7 +74,7 @@ fn build_universal_rule_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    let reasoning_source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {

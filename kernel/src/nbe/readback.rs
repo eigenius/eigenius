@@ -216,14 +216,14 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         // proof-of-existence markers admitted by the per-Layer witness
         // index. They never appear in surface syntax, so readback into
         // an `Exp` is a programming error: they should only be produced
-        // by the type checker's synthesis hook at `JustifiedBy.*`
+        // by the type checker's synthesis hook at `justification:Certificate.*`
         // type-check time and consumed within the same type-check; they
         // do not survive normalisation into a readback-able form. This is
         // a genuine kernel-internal invariant (never input-dependent), so
         // it stays a hard panic even on the fallible path.
         Val::ChainWitness(key) => panic!(
             "readback_val: ChainWitness {:?} reached readback — witness values are \
-             kernel-internal and should be consumed at JustifiedBy.* type-check time, \
+             kernel-internal and should be consumed at justification:Certificate.* type-check time, \
              never readback into surface syntax",
             key
         ),

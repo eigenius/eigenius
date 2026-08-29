@@ -134,29 +134,29 @@ pub enum ValidationRule {
     ///
     /// Rule 23, `rules::inductive_decl.rs`. See eigenius#92, eigenius#188.
     InductiveDeclInadmissible,
-    /// An `eigentt:TypeExpr`-valued property carries a term that fails to
+    /// An `eigentt:Term`-valued property carries a term that fails to
     /// decode through the D47 codec — a malformed tree, an unresolved
     /// `ConstRef`, or a `CtorApp` to an unknown ctor. The single decode
     /// diagnostic for every eigentt slot (Rule 21, `eigentt_value.rs`);
     /// generalizes the former canonical-proposition-only check, so malformed
     /// propositions are rejected at commit and never silently absent the
     /// corresponding `ChainWitness`.
-    TypeExprMalformed,
-    /// An `eigentt:TypeExpr`-valued property decodes but does not type-check
+    TermMalformed,
+    /// An `eigentt:Term`-valued property decodes but does not type-check
     /// against the chain — the Semantic Felicity Condition (e.g. a predicate
     /// applied to the wrong argument type, an application of a non-function).
     /// Caught by `check_infer` (Rule 21).
-    TypeExprIllTyped,
+    TermIllTyped,
     /// A slot whose declared role is a **proposition**
     /// ([`well_known::PROPOSITION_SLOTS`](crate::ontology::well_known::PROPOSITION_SLOTS))
     /// holds a term that type-checks but does not inhabit `Prop` — a type
     /// (`Sort(1)` and up), an unapplied predicate, or a literal. Distinct
-    /// from [`ValidationRule::TypeExprIllTyped`]: the term is well-typed,
+    /// from [`ValidationRule::TermIllTyped`]: the term is well-typed,
     /// it is simply not an assertion. Every downstream consumer of these
-    /// slots — the witness index, `JustifiedBy` certificate checking —
+    /// slots — the witness index, `justification:Certificate` certificate checking —
     /// reads them as propositions by construction, so this is the gate
     /// that makes that construction true. See eigenius#175.
-    TypeExprNotAProposition,
+    TermNotAProposition,
     /// An `eigentt:Definition` is not well-formed (D66 slice 2). One of: its body does not decode;
     /// it is **recursive**, which would make decode's peel-and-substitute non-terminating; its body
     /// is **not in normal form**, breaking D9's rule that a definition's identity is the normal form
@@ -499,7 +499,7 @@ impl Validator {
                 // Phase 19d.0.d). No-op for non-FormulaTerm values.
                 errors.extend(self.check_formula_term_arity(prop_def, value, prop_iri, &res_id));
 
-                // Rule 21: eigentt:TypeExpr fields must decode AND type-check
+                // Rule 21: eigentt:Term fields must decode AND type-check
                 // against the chain — generalizes Rule 20's decode-only check
                 // to every type_expr slot; lands the deferred felicity check.
                 errors.extend(self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id));
@@ -1297,7 +1297,7 @@ fn is_option_of_class(value: &Value, class_iri: &str) -> bool {
     if !resource.is_instance_of(&inductive_arg_type) {
         return false;
     }
-    // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188), so the referenced IRI is the
+    // `core:type_name` is an `eigentt:Term` (eigenius#188), so the referenced IRI is the
     // value's HEAD, not the value itself.
     let Ok(name_str) = crate::program::ground::arg_type_head(resource) else {
         return false;
@@ -1354,7 +1354,7 @@ struct ComorphismFormatRef<'a> {
     expected_label: &'a str,
 }
 
-/// Does this encoded `eigentt:TypeExpr` tree contain a `ConstRef` to `target`? Used by Rule 24's
+/// Does this encoded `eigentt:Term` tree contain a `ConstRef` to `target`? Used by Rule 24's
 /// recursion check, on the encoded form because that is where a self-reference is visible as itself
 /// rather than as whatever decode turned it into.
 fn json_mentions_const_ref(v: &serde_json::Value, target: &str) -> bool {
@@ -1926,7 +1926,7 @@ mod tests {
     // trace metadata (program / started_at / completed_at / trace_tree
     // / output / metrics) lives in `recommends` — kernel-emitted
     // traces typically fill them; user-authored ProgramTraces wired
-    // alongside StatisticalAnalysisPlan / ReasoningSentence / etc. typically
+    // alongside StatisticalAnalysisPlan / justification:Sentence / etc. typically
     // don't need them.
 
     #[test]
@@ -2558,7 +2558,7 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
         );
-        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         r.set(
             iri(wk::TYPE_NAME),
             Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::OPTION]})),

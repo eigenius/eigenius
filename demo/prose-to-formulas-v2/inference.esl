@@ -36,13 +36,14 @@
 // any edit, so nothing would ever fail to commit.
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-namespace core        = "urn:eigenius:core";
-namespace inferred    = "urn:eigenius:demo:v2:inferred";
-namespace onco_typed  = "urn:eigenius:demo:onco-typed";
-namespace ontology    = "urn:eigenius:ontology";
-namespace reasoning   = "urn:eigenius:reasoning";
-namespace umlscui     = "urn:eigenius:umlscui";
-namespace wn          = "urn:eigenius:wn";
+namespace core          = "urn:eigenius:core";
+namespace inferred      = "urn:eigenius:demo:v2:inferred";
+namespace onco_typed    = "urn:eigenius:demo:onco-typed";
+namespace ontology      = "urn:eigenius:ontology";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace umlscui       = "urn:eigenius:umlscui";
+namespace wn            = "urn:eigenius:wn";
+namespace justification = "urn:eigenius:justification";
 
 // The vocabulary every proposition below is built from — all of it already on the chain, from two
 // different lexicons occupying the same argument slots:
@@ -58,27 +59,27 @@ namespace wn          = "urn:eigenius:wn";
 // whose kind is MSI — and that whole term is what the sentences are about. Writing it out is the
 // honest thing: the claim really is about that kind, not about a name.
 
-resource inferred:sentence : reasoning:ReasoningSentence {
+resource inferred:sentence : justification:Sentence {
     core:description = "«MSI cancer models required the helicase activity of WRN» — CONCLUDED by applying the pinned literature rule to sentence 1's parsed measurement. The document asserts this too; this justification does not depend on it doing so.";
 
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // ── The certificate ───────────────────────────────────────────────────────────────────────
     //
-    // `JustifiedBy.app` is Artemov application — from a warrant for an implication and a warrant
+    // `justification:Certificate.app` is Artemov application — from a warrant for an implication and a warrant
     // for its antecedent, a warrant for its consequent:
     //
-    //   app : forall (A : Prop, B : Prop, j1 : JustificationTerm, j2 : JustificationTerm) =>
-    //         JustifiedBy(j1, A -> B) ->        // j1 warrants the implication
-    //         JustifiedBy(j2, A) ->             // j2 warrants its antecedent
-    //         JustifiedBy(App(j1, j2), B)       // ... so App(j1, j2) warrants the consequent
+    //   app : forall (A : Prop, B : Prop, j1 : justification:Term, j2 : justification:Term) =>
+    //         justification:Certificate(j1, A -> B) ->        // j1 warrants the implication
+    //         justification:Certificate(j2, A) ->             // j2 warrants its antecedent
+    //         justification:Certificate(App(j1, j2), B)       // ... so App(j1, j2) warrants the consequent
     //
     // `alias` names the model term once instead of four times. It is compile-time substitution —
     // the stored proposition is identical to writing the term out at each site.
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias msi = (exists x0 : umlscui:C1516211 =>
                         ontology:compound_kind(x0, umlscui:C0920269)) in
-        reasoning:app(
+        justification:app(
             // A — the antecedent. Sentence 1's proposition. `HasActivity` is a DEFINITION, so this
             // unfolds to exactly the term `claim_1` carries; the witness below matches by
             // conversion, not by assertion.
@@ -90,8 +91,8 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             // j1 — the warrant for the implication: the literature rule SPECIALIZED to this model.
             // `SpecStr` records that a universal was instantiated; the tag names the instantiation
             // for audit rather than carrying the term.
-            reasoning:SpecStr(
-                reasoning:DeclaredEvidence(
+            justification:SpecStr(
+                justification:Declared(
                     "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
                 ),
                 "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
@@ -99,9 +100,9 @@ resource inferred:sentence : reasoning:ReasoningSentence {
 
             // j2 — the warrant for the antecedent: the landed claim's own witness, cited directly.
             // `claim_1` was committed under a `DeclarationTrace`, which mints `IsDeclaredAs`.
-            reasoning:DeclaredEvidence("urn:eigenius:demo:v2:claim_1"),
+            justification:Declared("urn:eigenius:demo:v2:claim_1"),
 
-            // Sub-proof 1 : JustifiedBy(SpecStr(...), A -> B).
+            // Sub-proof 1 : justification:Certificate(SpecStr(...), A -> B).
             //
             // The rule is `∀m. …`, so it cannot be applied to a particular model until the
             // quantifier is eliminated. `spec_poly` does that at any domain — here `Set`, since a
@@ -109,17 +110,17 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             // term being specialized, the instance x, the audit tag, and the proof of the
             // universal. The `declared(…)` proof's proposition must match the rule resource's
             // `canonical_proposition` exactly — the witness key hashes it.
-            reasoning:spec_poly(
+            justification:spec_poly(
                 Set,
                 (fun (m : Set) =>
                     onco_typed:HasActivity(m, umlscui:C0388246)
                       -> onco_typed:RequiresActivity(m, umlscui:C0388246)),
-                reasoning:DeclaredEvidence(
+                justification:Declared(
                     "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
                 ),
                 msi,
                 "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model",
-                reasoning:declared(
+                justification:declared(
                     "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
                     forall (m : Set) =>
                         onco_typed:HasActivity(m, umlscui:C0388246)
@@ -128,7 +129,7 @@ resource inferred:sentence : reasoning:ReasoningSentence {
                 )
             ),
 
-            // Sub-proof 2 : JustifiedBy(DeclaredEvidence(claim_1), A). THE LIVE DEPENDENCY.
+            // Sub-proof 2 : justification:Certificate(Declared(claim_1), A). THE LIVE DEPENDENCY.
             //
             // DECLARED, not Derived (D73 §6 / eigenius#201, superseding the 2026-08-10 settlement).
             // The parser established that sentence 1's text parses to this well-typed term — not
@@ -143,7 +144,7 @@ resource inferred:sentence : reasoning:ReasoningSentence {
             //
             // Sentence 2's own claim is untouched and still commits, so the document still says
             // the conclusion. Nothing compared the two texts; the dependency did the work.
-            reasoning:declared(
+            justification:declared(
                 "urn:eigenius:demo:v2:claim_1",
                 onco_typed:HasActivity(msi, umlscui:C0388246),
                 ()
@@ -154,19 +155,19 @@ resource inferred:sentence : reasoning:ReasoningSentence {
     // The justification TERM — the same shape as the certificate's `App(j1, j2)`, recorded on its
     // own so the warrant is readable (and indexable) without re-checking the proof. The gate
     // requires the certificate to be a proof about exactly this term.
-    reasoning:justification = reasoning:App(
-        reasoning:SpecStr(
-            reasoning:DeclaredEvidence(
+    justification:term = justification:App(
+        justification:SpecStr(
+            justification:Declared(
                 "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
             ),
             "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
         ),
-        reasoning:DeclaredEvidence("urn:eigenius:demo:v2:claim_1")
+        justification:Declared("urn:eigenius:demo:v2:claim_1")
     );
 
     // The proposition concluded: B from the `app` above. Sentence 2 of the paragraph asserts this
     // very same proposition directly — that is the point of the demo, not a redundancy.
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco_typed:RequiresActivity(
             (exists x0 : umlscui:C1516211 =>
                 ontology:compound_kind(x0, umlscui:C0920269)),

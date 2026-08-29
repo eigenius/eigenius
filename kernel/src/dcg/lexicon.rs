@@ -24,7 +24,7 @@
 //!    **It is not on the commit path.** Every call site is an importer binary, one CLI subcommand,
 //!    or a test; nothing under `kernel/src/{validation,layer,commit}` calls it, and in the importers
 //!    it sits behind an opt-in `--validate` flag that `scripts/reseed-lexicon-db.sh` does not pass.
-//!    A production lexicon load is gated by Rule 21 alone, which checks each `eigentt:TypeExpr` slot
+//!    A production lexicon load is gated by Rule 21 alone, which checks each `eigentt:Term` slot
 //!    in isolation and never relates `cat` to `sem_type`. Committing a lexicon does not run this.
 //! 2. **The index.** [`LexicalIndex`] is a `form → entries` map over a layer's committed
 //!    `lexicon:LexicalEntry` resources, resolving each through `entry_to_item` above. Lazy (a probe of

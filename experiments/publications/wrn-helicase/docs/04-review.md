@@ -67,7 +67,7 @@ recompute **plans** (emitters) → recompute **conclusions** (consumers) →
 wrapped-R warrants → reasoning phases (2/3/5) → a biological-SAP layer. Two
 institutions compose through the shared chain: the **statistics institution**
 writes `IsDerivedAs` witnesses; the **reasoning institution** reads them via the
-D49 ChainWitness index to discharge `JustifiedBy` certificates. Declared rules
+D49 ChainWitness index to discharge `justification:Certificate` certificates. Declared rules
 bridge statistical facts to domain conclusions, and the reasoning institution
 also discharges **imported published claims** (the literature warrants below) as
 Declared premises inside those certificates.
@@ -378,7 +378,7 @@ published technical-stratum 2.74e-19 — same data, honest unit of inference.
 
 ## A.3 Domain conclusions (reasoning institution)
 
-The 33 `ReasoningSentence`s, each with the proposition it asserts and the grade of
+The 33 `justification:Sentence`s, each with the proposition it asserts and the grade of
 its load-bearing warrant (R = recomputed, W = wrapped-R, D = declared,
 L = linked-external).
 
@@ -443,7 +443,7 @@ and the relations that turn them into `Prop`s:
 
 Certificate / witness term-formers (D49 ChainWitness + D54 justification):
 `derived(r, P)` and `declared(r, P)` (a chain witness inhabiting `P`),
-`DerivedEvidence(r)` / `DeclaredEvidence(r)` (citing a witness), and `app`
+`DerivedEvidence(r)` / `Declared(r)` (citing a witness), and `app`
 (application / →-elimination).
 
 ---
@@ -513,11 +513,11 @@ abbreviated) — what the notation above renders:
 
 ```
 proposition  = StrongBiomarker("MSI", "WRN_dependency")                 -- the goal SB
-justification = App(App(DeclaredEvidence(bridge_biomarker),             -- B
+justification = App(App(Declared(bridge_biomarker),             -- B
                         DerivedEvidence(biomarker_plan:result:ppv)),    -- r_ppv
                     DerivedEvidence(biomarker_plan:result:sensitivity)) -- r_sens
 certificate  = app( SENS, SB,                                           -- final →E
-                    App(DeclaredEvidence(B), DerivedEvidence(R_PPV)),   -- B r_ppv
+                    App(Declared(B), DerivedEvidence(R_PPV)),   -- B r_ppv
                     DerivedEvidence(R_SENS),                            -- r_sens
                     cert1,                                              -- proof of B r_ppv
                     derived(R_SENS, SENS) )                             -- r_sens : SENS leaf

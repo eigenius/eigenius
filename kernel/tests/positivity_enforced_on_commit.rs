@@ -176,7 +176,7 @@ fn parameter_kind_referring_to_a_later_parameter_is_rejected_at_commit() {
 ///
 /// Port of nanoda's `check_ctor` universe check (`src/inductive.rs:904`). An inductive at `Sort n`
 /// storing something from `Sort m` with `m > n` smuggles a large type into a small one, and
-/// Girard's paradox follows. This is the check that forced `reasoning:JustifiedBy` from `Type 0` to
+/// Girard's paradox follows. This is the check that forced `justification:Certificate` from `Type 0` to
 /// `Type 2` — it binds `T : Type 1` in `spec_poly`, and nothing enforced the constraint before.
 ///
 /// The probe that measured this before it rejected anything found exactly one violating

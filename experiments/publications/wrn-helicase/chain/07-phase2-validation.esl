@@ -24,15 +24,16 @@
 //
 // Validated by crates/eigenius-reasoning/tests/wrn_phase2.rs.
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace wrn        = "urn:eigenius:pub:wrn";
-namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace litclaim      = "urn:eigenius:pub:wrn:litclaim";
+namespace justification = "urn:eigenius:justification";
 
 // ════════════════════════════════════════════════════════════════════
 // Observed (linked-external): the wet-lab readouts
@@ -164,41 +165,41 @@ resource wrn:exo_rule_trace : reflection:DeclarationTrace {
 // the recorded concl_val/va_competition pair has been retired.
 
 // D-ONTARGET: the viability loss is attributable to WRN inactivation.
-resource wrn:concl_ontarget : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_ontarget : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:OnTarget("WRN", "MSI_viability")
     );
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:ontarget_rule"),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_rescue_wt_recomputed")
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:ontarget_rule"),
+        Verified("urn:eigenius:pub:wrn:concl_rescue_wt_recomputed")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             RULE  = "urn:eigenius:pub:wrn:ontarget_rule",
             CONCL = "urn:eigenius:pub:wrn:concl_rescue_wt_recomputed",
             RES   = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
             OT    = onco:OnTarget("WRN", "MSI_viability")
         in
-        app(RES, OT, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
+        app(RES, OT, Declared(RULE), Verified(CONCL),
             declared(RULE, RES -> OT), verified(CONCL, RES))
     );
 }
 
 // D-HELICASE (a): helicase activity is required.
-resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_helicase_required : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:RequiresActivity("WRN", "helicase")
     );
-    reasoning:justification = App(
+    justification:term = App(
         App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
-            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+            Declared("urn:eigenius:pub:wrn:helicase_rule"),
+            Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
         ),
-        DeclaredEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
+        Declared("urn:eigenius:pub:wrn:va_fail_k577m")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:helicase_rule",
             LIT  = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
@@ -207,30 +208,30 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
             FR   = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
             RA   = onco:RequiresActivity("WRN", "helicase"),
             RULE_P = SEP -> FR -> RA,
-            jSEP = DeclaredEvidence(LIT),
-            jFR  = DeclaredEvidence(ART),
-            cert1 = app(SEP, FR -> RA, DeclaredEvidence(RULE), jSEP,
+            jSEP = Declared(LIT),
+            jFR  = Declared(ART),
+            cert1 = app(SEP, FR -> RA, Declared(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(FR, RA, reasoning:App(DeclaredEvidence(RULE), jSEP), jFR,
+        app(FR, RA, justification:App(Declared(RULE), jSEP), jFR,
             cert1, declared(ART, FR))
     );
 }
 
 // D-HELICASE (b): exonuclease activity is dispensable.
-resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_exo_dispensable : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:DispensableActivity("WRN", "exonuclease")
     );
-    reasoning:justification = App(
+    justification:term = App(
         App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:exo_rule"),
-            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+            Declared("urn:eigenius:pub:wrn:exo_rule"),
+            Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
         ),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed")
+        Verified("urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             RULE  = "urn:eigenius:pub:wrn:exo_rule",
             LIT   = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
@@ -239,12 +240,12 @@ resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
             RES   = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
             DA    = onco:DispensableActivity("WRN", "exonuclease"),
             RULE_P = SEP -> RES -> DA,
-            jSEP  = DeclaredEvidence(LIT),
-            jRES  = VerifiedEvidence(CONCL),
-            cert1 = app(SEP, RES -> DA, DeclaredEvidence(RULE), jSEP,
+            jSEP  = Declared(LIT),
+            jRES  = Verified(CONCL),
+            cert1 = app(SEP, RES -> DA, Declared(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(RES, DA, reasoning:App(DeclaredEvidence(RULE), jSEP), jRES,
+        app(RES, DA, justification:App(Declared(RULE), jSEP), jRES,
             cert1, verified(CONCL, RES))
     );
 }

@@ -15,11 +15,11 @@
 //! D73 §1.2's projections, asked of the flagship chain's own conclusion (eigenius#204).
 //!
 //! `wrn:concl_wrn_selective` — *WRN is selectively essential in MSI* — is the WRN encoding's
-//! headline claim. Its `JustificationTerm`
+//! headline claim. Its `justification:Term`
 //! (`experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl:144`):
 //!
 //! ```text
-//! App(App(SpecStr(DeclaredEvidence(discovery_rule), "WRN"),
+//! App(App(SpecStr(Declared(discovery_rule), "WRN"),
 //!         DerivedEvidence(dd_achilles)),
 //!     DerivedEvidence(dd_drive))
 //! ```
@@ -42,8 +42,8 @@ const DRIVE: &str = "urn:eigenius:pub:wrn:dd_drive";
 fn decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
         uparams: Vec::new(),
-        iri: Iri::parse("urn:eigenius:reasoning:JustificationTerm").unwrap(),
-        name: "JustificationTerm".to_string(),
+        iri: Iri::parse("urn:eigenius:justification:Term").unwrap(),
+        name: "justification:Term".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
         sort: Exp::sort(1),
@@ -67,10 +67,7 @@ fn wrn_conclusion() -> Exp {
                 vec![
                     ctor(
                         "SpecStr",
-                        vec![
-                            leaf("DeclaredEvidence", RULE),
-                            Exp::LitString("WRN".to_string()),
-                        ],
+                        vec![leaf("Declared", RULE), Exp::LitString("WRN".to_string())],
                     ),
                     leaf("DerivedEvidence", ACHILLES),
                 ],
@@ -135,10 +132,7 @@ fn a_second_source_would_make_a_recompute_droppable() {
         vec![
             ctor(
                 "SpecStr",
-                vec![
-                    leaf("DeclaredEvidence", RULE),
-                    Exp::LitString("WRN".to_string()),
-                ],
+                vec![leaf("Declared", RULE), Exp::LitString("WRN".to_string())],
             ),
             ctor(
                 "Sum",

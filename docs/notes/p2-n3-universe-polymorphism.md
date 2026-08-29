@@ -31,7 +31,7 @@ Measured across `ontologies/`, `experiments/` and `demo/`:
 
 The two `Type 1` uses are the whole of the ladder above `Set`:
 
-- `ontologies/reasoning/reasoning.esl:186` — `spec_poly`'s domain binder, raised from `T : Set` by
+- `ontologies/justification/justification.esl:186` — `spec_poly`'s domain binder, raised from `T : Set` by
   #136/PR #187, which is what prompted #188.
 - `ontologies/lexicon/lexicon-ontology.esl:250` — `data lexicon:Cat : Type 1`.
 

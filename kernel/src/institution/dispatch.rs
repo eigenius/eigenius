@@ -676,7 +676,7 @@ mod tests {
     ///
     /// Rule 16 (`validation/rules/eigentt_value.rs`) does decode, `check_infer`
     /// and require `Sort(0)` — but it keys off the property's declared **range**
-    /// (`class_types ∋ eigentt:TypeExpr`) and runs at layer-validation time, not
+    /// (`class_types ∋ eigentt:Term`) and runs at layer-validation time, not
     /// at the boundary. So the coverage is incidental: it holds where the
     /// ontology happens to declare that range, and a declared property with any
     /// other range carries a proposition past every type-level check.

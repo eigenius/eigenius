@@ -146,7 +146,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 // args (D76 Phase B); the type checker resolves it through
                 // `Γ_env` at use time. This built a name-only stub declaration
                 // for the same purpose.
-                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188); the referenced type
+                // `core:type_name` is an `eigentt:Term` (eigenius#188); the referenced type
                 // is its head. Shares `arg_type_head` with `program::ground`'s two readers.
                 let type_name = crate::program::ground::arg_type_head(r)?;
                 let class_iri = Iri::parse(&type_name).map_err(|e| {

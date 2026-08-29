@@ -469,7 +469,7 @@ fn decode_indices(
                 ));
             }
         };
-        // An index kind is a `eigentt:TypeExpr`, decoded exactly like a parameter kind — the two
+        // An index kind is a `eigentt:Term`, decoded exactly like a parameter kind — the two
         // telescopes are the same shape and the ESL compiler emits them through the same code.
         //
         // This read used to be `Some(Value::String(s)) => s, _ => "urn:eigenius:core:Set"`, and the
@@ -478,7 +478,7 @@ fn decode_indices(
         // Every index kind that failed to be a string got it silently, and nothing noticed because
         // nothing type-checked the telescope. `check_type`'s `Exp::Inductive` arm now does
         // (`check_inductive_decl_telescopes`), and the first thing it reported was
-        // `reasoning:JustifiedBy.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
+        // `justification:Certificate.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
         let Some(kind_value) = pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) else {
             return Err(format!(
                 "inductive type '{class_iri}' index '{name}' missing `param_kind`"
@@ -624,7 +624,7 @@ fn decode_params(
 /// inductive named as a constructor argument decoded to an inductive reference
 /// while the *same* inductive named as an index kind decoded to
 /// `Exp::EigonClass`. That disagreement is eigenius#199 — it made
-/// `reasoning:JustifiedBy`'s index #0 (`JustificationTerm`) an `EigonClass` that
+/// `justification:Certificate`'s index #0 (`justification:Term`) an `EigonClass` that
 /// no inhabitant could check against, so the one relation carrying the platform's
 /// guarantee was the one whose type the surface language could not express.
 fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
@@ -808,7 +808,7 @@ fn decode_ctor_arg(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Deco
 /// The head reference an `InductiveArgType`'s `core:type_name` names, as the bare dispatch key the
 /// decoders key on: a parameter name, an IRI, or `"Size"` for the size sort.
 ///
-/// eigenius#188 / N4 retyped `core:type_name` from a string to an `eigentt:TypeExpr`. The HEAD is
+/// eigenius#188 / N4 retyped `core:type_name` from a string to an `eigentt:Term`. The HEAD is
 /// read out rather than the value decoded whole, because `core:type_args` is a SEPARATE property —
 /// an applied type is `type_name` + `type_args`, not one `App` spine — and because a
 /// self-reference must resolve to the in-construction declaration's stub rather than being looked
@@ -826,7 +826,7 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
         Value::Json(j) => j,
         other => {
             return Err(format!(
-                "InductiveArgType `type_name` must be an eigentt:TypeExpr value, got {other:?}"
+                "InductiveArgType `type_name` must be an eigentt:Term value, got {other:?}"
             ))
         }
     };
@@ -1439,7 +1439,7 @@ mod tests {
         // D39 §5 / D49 ChainWitness predicates need the kernel decoder
         // to recognise the Sort-literal kind strings the ESL compiler
         // emits for intermediate index positions ("Prop" / "Set" /
-        // "Type:N"). Without this mapping, JustifiedBy and similar
+        // "Type:N"). Without this mapping, justification:Certificate and similar
         // sort-indexed predicates can't round-trip through the codec.
         let layer = build_test_layer();
         assert!(
@@ -1467,7 +1467,7 @@ mod tests {
         // not: an index kind fell through to `EigonClass`, a param kind
         // all the way to `Sort(1)`. Since a value of that inductive
         // infers to `InductiveType`, the index form could never be
-        // satisfied — `reasoning:JustifiedBy`'s type was unwritable.
+        // satisfied — `justification:Certificate`'s type was unwritable.
         //
         // eigenius#188 / N4: index and parameter kinds are now decoded by ONE function, so the
         // two can no longer disagree by construction. The assertions below kept their pairing

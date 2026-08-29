@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! PROBE (eigenius#199): can `reasoning:JustifiedBy(j, P)` be written as a type in ESL?
+//! PROBE (eigenius#199): can `justification:Certificate(j, P)` be written as a type in ESL?
 
 use std::sync::Arc;
 
@@ -42,7 +42,11 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
     let refl = Arc::new(refl.build(LayerStorage::in_memory()));
 
     let mut rsn = LayerBuilder::new("reasoning", Some(refl));
-    for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl")).unwrap() {
+    for r in esl::compile(include_str!(
+        "../../../ontologies/justification/justification.esl"
+    ))
+    .unwrap()
+    {
         rsn.add_resource(r).unwrap();
     }
     Arc::new(rsn.build(LayerStorage::in_memory()))
@@ -52,25 +56,25 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
 fn justifiedby_can_be_written_as_a_type() {
     let base = chain();
     // The literal definition of done for eigenius#199: write
-    // `JustifiedBy(j, P)` as a TYPE at the ESL surface. An `axiom`
+    // `justification:Certificate(j, P)` as a TYPE at the ESL surface. An `axiom`
     // statement is the right slot — it holds a type, not a proposition,
     // so this exercises the index telescope without the `Prop`
     // obligation Rule 21 puts on `canonical_proposition`.
     //
-    // Index #0's declared kind is `reasoning:JustificationTerm`. Before
-    // the fix it decoded to `EigonClass(JustificationTerm)` while the
-    // supplied argument `DeclaredEvidence(...)` infers to
-    // `InductiveType(JustificationTerm, [])`, so this failed with
+    // Index #0's declared kind is `justification:Term`. Before
+    // the fix it decoded to `EigonClass(justification:Term)` while the
+    // supplied argument `Declared(...)` infers to
+    // `InductiveType(justification:Term, [])`, so this failed with
     // `InductiveType(…) ≠ EigonClass(…)`.
     let src = r#"
         namespace core       = "urn:eigenius:core";
-        namespace reasoning  = "urn:eigenius:reasoning";
+        namespace justification = "urn:eigenius:justification";
         namespace probe      = "urn:eigenius:probe";
 
         data probe:P : Prop { }
 
-        axiom probe:cert : reasoning:JustifiedBy(
-            reasoning:DeclaredEvidence("urn:eigenius:probe:src"),
+        axiom probe:cert : justification:Certificate(
+            justification:Declared("urn:eigenius:probe:src"),
             probe:P
         )
     "#;
@@ -80,7 +84,10 @@ fn justifiedby_can_be_written_as_a_type() {
     }
     let probe = Arc::new(b.build(LayerStorage::in_memory()));
     let errs = eigenius_kernel::validation::Validator::new(probe).validate();
-    assert!(errs.is_empty(), "JustifiedBy type rejected: {errs:#?}");
+    assert!(
+        errs.is_empty(),
+        "justification:Certificate type rejected: {errs:#?}"
+    );
 }
 
 #[test]
@@ -88,16 +95,16 @@ fn justifiedby_index_zero_rejects_a_non_justification_term() {
     // The other half of eigenius#199: making index #0 decode to
     // `InductiveType` must ENFORCE the index kind, not merely swap one
     // permissive form for another. A `core:string` where a
-    // `JustificationTerm` belongs has to be refused.
+    // `justification:Term` belongs has to be refused.
     let base = chain();
     let src = r#"
         namespace core      = "urn:eigenius:core";
-        namespace reasoning = "urn:eigenius:reasoning";
+        namespace justification = "urn:eigenius:justification";
         namespace probe     = "urn:eigenius:probe";
 
         data probe:P : Prop { }
 
-        axiom probe:bad : reasoning:JustifiedBy("not-a-justification-term", probe:P)
+        axiom probe:bad : justification:Certificate("not-a-justification-term", probe:P)
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
     for r in esl::compile_against_layer(src, &base).expect("probe ESL compiles") {
@@ -107,6 +114,6 @@ fn justifiedby_index_zero_rejects_a_non_justification_term() {
     let errs = eigenius_kernel::validation::Validator::new(probe).validate();
     assert!(
         !errs.is_empty(),
-        "a string in JustifiedBy's JustificationTerm index was accepted"
+        "a string in justification:Certificate's justification:Term index was accepted"
     );
 }

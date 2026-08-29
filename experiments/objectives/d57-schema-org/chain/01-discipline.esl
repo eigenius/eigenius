@@ -8,11 +8,12 @@
 // obj:concl_discipline's certificate discharges. This is the dogfood discipline:
 // evidence (the Declared rule) committed first, then the proposition that cites it.
 
-namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace obj        = "urn:eigenius:obj:d57";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace obj           = "urn:eigenius:obj:d57";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace justification = "urn:eigenius:justification";
 
 // The discipline, as a Declared rule. canonical_proposition = the milestone fact.
 resource obj:mapping_discipline : reflection:DeclaredResource {
@@ -31,11 +32,11 @@ resource obj:mapping_discipline_trace : reflection:DeclarationTrace {
 }
 
 // m1 discharged: the discipline is defined (Declared), witnessed by the rule above.
-resource obj:concl_discipline : reasoning:ReasoningSentence {
-    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
-    reasoning:proposition   = type_expr( obj:MappingDisciplineDefined("schema_org") );
-    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:mapping_discipline");
-    reasoning:certificate   = type_expr(
+resource obj:concl_discipline : justification:Sentence {
+    justification:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    justification:proposition   = type_expr( obj:MappingDisciplineDefined("schema_org") );
+    justification:term = Declared("urn:eigenius:obj:d57:mapping_discipline");
+    justification:certificate   = type_expr(
         declared("urn:eigenius:obj:d57:mapping_discipline",
                  obj:MappingDisciplineDefined("schema_org"))
     );

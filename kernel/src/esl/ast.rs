@@ -364,7 +364,7 @@ pub struct DataDecl {
     ///
     /// Indices use [`DataIndex`] rather than [`DataParam`] because
     /// index kinds can be Sort literals (e.g., D39 §5's
-    /// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as
+    /// `justification:Certificate : justification:Term → Prop → Type` has `Prop` as
     /// its second index kind). Type params have no such use case in
     /// v1 — they're always Set-kinded today.
     pub indices: Vec<DataIndex>,
@@ -403,7 +403,7 @@ pub struct DataParam {
 /// (eigenius#72 Layer 2). Differs from [`DataParam`] in that the kind
 /// can be a Sort literal (`Prop` / `Set` / `Type N`) as well as a
 /// qualified-name reference — D39 §5's
-/// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as its
+/// `justification:Certificate : justification:Term → Prop → Type` has `Prop` as its
 /// second index kind, which `DataParam`'s `QualifiedName`-only kind
 /// field can't express.
 #[derive(Debug)]

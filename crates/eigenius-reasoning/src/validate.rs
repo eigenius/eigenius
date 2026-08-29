@@ -16,17 +16,17 @@
 //!
 //! Algorithm:
 //!
-//! 1. Read `proposition` and `certificate` from the ReasoningSentence
+//! 1. Read `proposition` and `certificate` from the justification:Sentence
 //!    (D47-encoded EigenTT terms) — decoded via the kernel's D47 codec.
 //! 2. Lift the `justification` property into a typed `Val` via
 //!    `extract_typed(ef_justification, sentence, ctx)` — the kernel's
 //!    standard "chain resource → typed kernel value" surface, with
 //!    the lifting logic in [`crate::extract`].
-//! 3. Resolve the `JustifiedBy` inductive declaration from the layer.
+//! 3. Resolve the `justification:Certificate` inductive declaration from the layer.
 //! 4. Type-check the proposition at `Prop` (= `Sort(0)`) and eval it
 //!    to a `Val` to plug into the expected type's index slot.
 //! 5. Construct the expected certificate type
-//!    `Val::InductiveType { decl: JustifiedBy, params: [], indices:
+//!    `Val::InductiveType { decl: justification:Certificate, params: [], indices:
 //!    [justification_val, proposition_val] }` directly at the Val
 //!    layer — no Exp roundtrip needed.
 //! 6. Type-check the certificate against that `Val` via the kernel's
@@ -78,7 +78,7 @@ pub fn do_validate_justification(
     // Routes through the institution's own `extract_typed` so the
     // chain → Val translation rides on the kernel's standard surface rather
     // than a free kernel utility. The handler in `crate::extract`
-    // returns a `Val::InductiveVal` typed at `JustificationTerm`.
+    // returns a `Val::InductiveVal` typed at `justification:Term`.
     let ef_proc = Iri::parse(iris::PROC_EXTRACT_JUSTIFICATION).expect("static IRI");
     let justification_val = match inst.extract_typed(&ef_proc, sentence, ctx) {
         Ok(v) => v,
@@ -88,7 +88,7 @@ pub fn do_validate_justification(
         Err(e) => return Err(e),
     };
 
-    // ── Step 3: resolve JustifiedBy inductive declaration ────────────
+    // ── Step 3: resolve justification:Certificate inductive declaration ────────────
     let jb_iri = Iri::parse(iris::JUSTIFIED_BY).expect("static IRI");
     let jb_decl = match resolve_class_type(&jb_iri, ctx.head()) {
         Ok(Val::InductiveType { decl, .. }) => decl,
@@ -100,7 +100,7 @@ pub fn do_validate_justification(
         }
         Err(e) => {
             return Err(InstitutionError::ComputationFailed(format!(
-                "failed to resolve JustifiedBy inductive: {e}"
+                "failed to resolve justification:Certificate inductive: {e}"
             )));
         }
     };
@@ -127,10 +127,10 @@ pub fn do_validate_justification(
         }
     };
 
-    // ── Step 5: construct expected type `JustifiedBy(j, p)` as Val ───
+    // ── Step 5: construct expected type `justification:Certificate(j, p)` as Val ───
     //
-    // JustifiedBy has 0 params + 2 indices (per the D39 §5 declaration
-    // `JustifiedBy : JustificationTerm -> Prop -> Type 0`). Building
+    // justification:Certificate has 0 params + 2 indices (per the D39 §5 declaration
+    // `justification:Certificate : justification:Term -> Prop -> Type 0`). Building
     // the Val directly avoids an Exp roundtrip + eval — both index
     // sub-values are already in Val form (justification_val from
     // extract_typed, proposition_val from the eval above).
@@ -140,17 +140,17 @@ pub fn do_validate_justification(
         indices: vec![justification_val, proposition_val],
     };
 
-    // ── Step 6: type-check certificate against JustifiedBy(j, p) ─────
+    // ── Step 6: type-check certificate against justification:Certificate(j, p) ─────
     let mut cert_ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), ctx.head().clone());
     if let Err(e) = check(&mut cert_ctx, &certificate_exp, &expected_type_val) {
         return Ok(verdict_fails(format!(
-            "certificate does not type-check against `JustifiedBy(justification, proposition)`: {e}"
+            "certificate does not type-check against `justification:Certificate(justification, proposition)`: {e}"
         )));
     }
 
     // ── Step 7: the certificate checked — emit the VerificationTrace ─
     //
-    // eigenius#200. The kernel is a proof system, and a type-checked `JustifiedBy` certificate is a
+    // eigenius#200. The kernel is a proof system, and a type-checked `justification:Certificate` certificate is a
     // proof term in it, so a passing check is a verification event like any other and gets the same
     // chain-side audit artifact the other three grounding families get. Without this the Verified
     // family was the one place D39 §5's invariant failed — `emit_from_reasoning_sentence`
@@ -180,7 +180,7 @@ pub fn do_validate_justification(
 /// is already chain-resident.
 ///
 /// `derivation_trace` is deliberately absent. It is `recommends`, not `requires`, precisely for
-/// this case: a `ReasoningSentence` has no `ProgramTrace` to point at — D39 §4.2 satisfies its
+/// this case: a `justification:Sentence` has no `ProgramTrace` to point at — D39 §4.2 satisfies its
 /// inherited derivation requirement with the certificate field — and pointing the slot at itself to
 /// satisfy a schema would be a fiction.
 fn verification_trace(sentence_iri: &Iri) -> Resource {
@@ -211,7 +211,7 @@ fn verification_trace(sentence_iri: &Iri) -> Resource {
     r
 }
 
-/// Read a required property off the ReasoningSentence; fail with a
+/// Read a required property off the justification:Sentence; fail with a
 /// `ComputationFailed` error if missing. The validator at commit time
 /// (Rule 16 + the resource-class `requires` enforcement) should catch
 /// this before we reach the handler, but the defensive check keeps the
@@ -221,7 +221,7 @@ fn required_property(sentence: &Resource, prop_iri: &str) -> Result<Value, Insti
     let iri = Iri::parse(prop_iri).expect("static IRI");
     sentence.get(&iri).cloned().ok_or_else(|| {
         InstitutionError::ComputationFailed(format!(
-            "ReasoningSentence missing required `{prop_iri}` property"
+            "justification:Sentence missing required `{prop_iri}` property"
         ))
     })
 }

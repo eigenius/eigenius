@@ -395,7 +395,7 @@ resource lexicon:form_text_index : core:TextIndex {
 // filter, not the index's concern (D63 lexicon-augmentation §6a index c).
 property lexicon:cat : core:inductive {
     description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
-    class_types eigentt:TypeExpr;
+    class_types eigentt:Term;
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem : core:resource {
@@ -403,8 +403,8 @@ property lexicon:sem : core:resource {
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem_type : core:inductive {
-    description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:TypeExpr). The machine-readable felicity obligation: typeof(sem) = this.";
-    class_types eigentt:TypeExpr;
+    description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:Term). The machine-readable felicity obligation: typeof(sem) = this.";
+    class_types eigentt:Term;
     domain lexicon:LexicalEntry;
 }
 property lexicon:sense : core:string {
@@ -497,8 +497,8 @@ class lexicon:SemTerm {
     requires lexicon:term;
 }
 property lexicon:term : core:inductive {
-    description = "The EigenTT term, as a `type_expr` (eigentt:TypeExpr). For an unsynthesizable λ-term, author it annotated: `(fun … => … : T)`.";
-    class_types eigentt:TypeExpr;
+    description = "The EigenTT term, as a `type_expr` (eigentt:Term). For an unsynthesizable λ-term, author it annotated: `(fun … => … : T)`.";
+    class_types eigentt:Term;
     domain lexicon:SemTerm;
 }
 
@@ -512,8 +512,8 @@ property lexicon:gloss : core:string {
     domain lexicon:Sentence;
 }
 property lexicon:prop : core:inductive {
-    description = "The assembled proposition (eigentt:TypeExpr) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
-    class_types eigentt:TypeExpr;
+    description = "The assembled proposition (eigentt:Term) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
+    class_types eigentt:Term;
     domain lexicon:Sentence;
 }
 

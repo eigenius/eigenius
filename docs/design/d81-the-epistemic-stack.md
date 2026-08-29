@@ -30,7 +30,7 @@ that never touch each other.**
 |---|---|---|---|
 | `reflection:*Trace` (the 5 attestation classes) | **the evidence.** A chain record that an event happened, pointing at the resource it attests | authors (`DeclarationTrace` in ESL); the reasoning institution mints `VerificationTrace` on a passing gate | `trace_category` → witness admission |
 | `WitnessCategory` + `WitnessKey` | **the lookup key** — `(category, grounded IRI, proposition hash)`. Kernel-internal, **never persisted** | computed from traces, plus two hard-coded self-attesting classes | `layer_admits_witness` |
-| `witness:Is{Declared,Observed,Derived,Verified}As` | **the proposition.** `Prop`-valued inductives with **zero constructors** — unconstructible at the surface | declared in `ontologies/reasoning/reasoning.esl` | the declared type of `JustifiedBy`'s evidence argument |
+| `witness:Is{Declared,Observed,Derived,Verified}As` | **the proposition.** `Prop`-valued inductives with **zero constructors** — unconstructible at the surface | declared in `ontologies/justification/justification.esl` | the declared type of `JustifiedBy`'s evidence argument |
 | `JustifiedBy.{declared,observed,derived,verified}` | **the certificate.** The term an author writes and the kernel must check | authored ESL; built by `ClaimGrader` | the kernel type checker |
 
 This runs end to end: a trace grounds a key, the key inhabits the proposition, the proposition is the
@@ -83,10 +83,10 @@ nothing in the system states the mapping between them in one place.
 | 2 | `reflection:epistemic:{declared,observed,derived,verified}` | **individuals** of `reflection:EpistemicStatus`, held by the `reflection:epistemic_status` property | same; instances pinned by `kernel/src/bootstrap/mod.rs:1280` |
 | 3 | `reflection:{Declaration,Observation,Program,Verification,ExternalExecution}Trace` | **event kind** — what happened | same; **five** classes |
 | 4 | `WitnessCategory::{Declared,Observed,Derived,Verified}` | **kernel enum**, a `WitnessKey` component | `kernel/src/witness/mod.rs:47` |
-| 5 | `witness:Is{Declared,Observed,Derived,Verified}As` | **inductive predicate** — the proposition | `ontologies/reasoning/reasoning.esl` |
+| 5 | `witness:Is{Declared,Observed,Derived,Verified}As` | **inductive predicate** — the proposition | `ontologies/justification/justification.esl` |
 | 6 | `JustifiedBy.{declared,observed,derived,verified}` | **constructor** — the certificate | same |
 | 7 | `Grade::{Declared,Observed,Derived,Verified}` | **crate enum** | `crates/eigenius-reasoning/src/grade.rs:69` |
-| 8 | `JustificationTerm.{Declared,Observed,Derived,Verified}Evidence` | **constructor** — the evidence term | `ontologies/reasoning/reasoning.esl` |
+| 8 | `JustificationTerm.{Declared,Observed,Derived,Verified}Evidence` | **constructor** — the evidence term | `ontologies/justification/justification.esl` |
 | 9 | `Ground::{Declared,Observed,Derived,Verified}` | **crate enum**, mapping *from* row 8's ctor names | `crates/eigenius-reasoning/src/project.rs:71` |
 
 Rows 8 and 9 were missed by the first pass and found by asking what *other* epistemic categories
@@ -205,7 +205,7 @@ finds merge code.
 **Kernel — the checker seam:** `kernel/src/nbe/check/witness.rs::try_synthesize_chain_witness` →
 `EffectHooks::synthesize_chain_witness` → `kernel/src/program/check_hooks.rs:86` → the above.
 
-**Reasoning ontology — `ontologies/reasoning/reasoning.esl`**
+**Reasoning ontology — `ontologies/justification/justification.esl`**
 
 Inductives: `reasoning:JustificationTerm`, `reasoning:JustifiedBy`,
 `witness:Is{Declared,Observed,Derived,Verified}As`.
@@ -364,7 +364,7 @@ The only lifecycle where the kernel both produces the resource and grants the wi
    `ReasoningSentence` whose `reasoning:proposition` hashes. It performs **no check that the
    sentence's certificate validated.**
 2. **The guard is elsewhere.** `qc_validate_justification` is declared AutoOnLoad
-   (`ontologies/reasoning/reasoning.esl`), so it fires on every `ReasoningSentence` commit; a
+   (`ontologies/justification/justification.esl`), so it fires on every `ReasoningSentence` commit; a
    `Fails` verdict becomes a `ValidationError { rule: InstitutionValidation }`
    (`kernel/src/commit/phases.rs:460`) and blocks the commit. **Therefore any committed
    `ReasoningSentence` has a validated certificate**, and step 1 may skip re-checking.

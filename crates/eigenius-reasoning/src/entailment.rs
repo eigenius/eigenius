@@ -16,11 +16,11 @@
 //!
 //! Asks: "does the chain warrant this candidate proposition?" v1 of
 //! the handler is a *lookup-based* search — it walks the layer chain
-//! for committed `reasoning:ReasoningSentence` resources and returns
+//! for committed `justification:Sentence` resources and returns
 //! `Verdict::Holds` when it finds one whose proposition matches the
 //! query candidate (syntactic `Exp` equality after D47 decode).
 //!
-//! Bounded-depth proof search over `JustificationTerm` constructors —
+//! Bounded-depth proof search over `justification:Term` constructors —
 //! the spec's full algorithm — is follow-on work. v1's surface
 //! intentionally does the useful-but-trivial case ("have I already
 //! committed a sentence claiming this?"), and reports `Undecidable`
@@ -69,8 +69,7 @@ pub fn do_entailment_query(
     // top-of-chain wins for duplicate IRIs, which is the right
     // semantics here (most recently committed proposition is
     // authoritative).
-    let sentence_class =
-        Iri::parse("urn:eigenius:reasoning:ReasoningSentence").expect("static IRI");
+    let sentence_class = Iri::parse("urn:eigenius:justification:Sentence").expect("static IRI");
     let proposition_iri = Iri::parse(iris::PROP_PROPOSITION).expect("static IRI");
 
     for (iri, resource) in ctx.head().iter_all_resources() {
@@ -80,7 +79,7 @@ pub fn do_entailment_query(
         let prop_value = match resource.get(&proposition_iri) {
             Some(v) => v,
             // Sentence missing its proposition — Rule 16 + the
-            // ReasoningSentence requires-list should reject this at
+            // justification:Sentence requires-list should reject this at
             // commit, but skip defensively rather than fail the
             // whole query on one malformed row.
             None => continue,
@@ -106,7 +105,7 @@ pub fn do_entailment_query(
     // a fully-correct bounded-depth proof search might still find a
     // composite warrant. v1 doesn't attempt that.
     Ok(verdict_undecidable(
-        "no committed ReasoningSentence's proposition syntactically matches the candidate; \
+        "no committed justification:Sentence's proposition syntactically matches the candidate; \
          v1's lookup-based search does not attempt bounded-depth proof composition"
             .to_string(),
     ))

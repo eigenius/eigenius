@@ -260,7 +260,7 @@ Lai, Zhangsheng, Ng, Aik Beng, Wong, Liang Ze, See, Simon, and Lin, Shaowei (202
 
 [arXiv:2003.03785](https://arxiv.org/abs/2003.03785)
 
-> Reproduces RDF + SPARQL inside the Calculus of Inductive Constructions (Coq): graph triples become typed terms, and a query is reformulated AS A TYPE whose inhabitants are the answers, each carrying a proof witness ("queries as types, answers as proof-carrying witnesses"). The direct external precedent for Eigenius's "queries-as-types" stance (D30) and for the certificate/witness shape of D39's JustifiedBy (answers that carry their own justification). Explicitly a proof-of-concept, not a production system. Primary-read.
+> Reproduces RDF + SPARQL inside the Calculus of Inductive Constructions (Coq): graph triples become typed terms, and a query is reformulated AS A TYPE whose inhabitants are the answers, each carrying a proof witness ("queries as types, answers as proof-carrying witnesses"). The direct external precedent for Eigenius's "queries-as-types" stance (D30) and for the certificate/witness shape of D39's justification:Certificate (answers that carry their own justification). Explicitly a proof-of-concept, not a production system. Primary-read.
 
 ### `luo2012cnt`
 

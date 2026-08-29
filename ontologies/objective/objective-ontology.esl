@@ -5,25 +5,26 @@
 // DESIGN (D58 §5, grounded in the D57 dogfood harvest, not speculation):
 // the three planning nodes are STRUCTURAL, not epistemic. They reference
 // propositions and witnesses; the claims themselves stay in the existing
-// epistemic stack — the `Prop`, the reasoning:ReasoningSentence that discharges
+// epistemic stack — the `Prop`, the justification:Sentence that discharges
 // it, and the Observed/Declared/Citation witness. So `objective:` is a thin
 // planning layer over the reasoning stack, never a parallel epistemics.
 //
 // An Objective is a DAG: a thesis Milestone, intermediate Milestones (each a
 // proposition to derive, with acceptance criteria), and Axioms (pointers to
 // admitted premises). Completion is a QUERY — a Milestone is satisfied iff a
-// Holds reasoning:ReasoningSentence carries its proposition. Frame revision is
+// Holds justification:Sentence carries its proposition. Frame revision is
 // first-class (objective:supersedes): reframing is the normal case, and the
 // admissibility gates re-run on each version.
 //
-// Stacks above core + reasoning (it references reasoning:proposition's encoding).
+// Stacks above core + reasoning (it references justification:proposition's encoding).
 
-namespace core       = "urn:eigenius:core";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace reflection = "urn:eigenius:reflection";
-namespace epistemic  = "urn:eigenius:reflection:epistemic";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace objective  = "urn:eigenius:objective";
+namespace core          = "urn:eigenius:core";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace reflection    = "urn:eigenius:reflection";
+namespace epistemic     = "urn:eigenius:reflection:epistemic";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace objective     = "urn:eigenius:objective";
+namespace justification = "urn:eigenius:justification";
 
 // ── Classes ──────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ class objective:Objective {
 }
 
 class objective:Milestone {
-    description = "A proposition to establish, with acceptance criteria. Carries the Prop (objective:proposition — the same value the discharging reasoning:ReasoningSentence will carry), the acceptance grade + witness kind + falsifier, and the intended-warrant edges (objective:depends_on → other Milestones/Axioms). Completion is a query: the milestone is satisfied iff a Holds reasoning:ReasoningSentence carries its proposition (objective:satisfied_by records which). The thesis is just the root Milestone. The Checkable gate (D58 §3) is a TYPE CHECK, not a runtime query: proposition + acceptance_grade + witness_kind + falsifier are all required, so the structural validator rejects any milestone whose acceptance is undefined at commit — a non-checkable milestone cannot be recorded.";
+    description = "A proposition to establish, with acceptance criteria. Carries the Prop (objective:proposition — the same value the discharging justification:Sentence will carry), the acceptance grade + witness kind + falsifier, and the intended-warrant edges (objective:depends_on → other Milestones/Axioms). Completion is a query: the milestone is satisfied iff a Holds justification:Sentence carries its proposition (objective:satisfied_by records which). The thesis is just the root Milestone. The Checkable gate (D58 §3) is a TYPE CHECK, not a runtime query: proposition + acceptance_grade + witness_kind + falsifier are all required, so the structural validator rejects any milestone whose acceptance is undefined at commit — a non-checkable milestone cannot be recorded.";
     requires   objective:proposition, objective:acceptance_grade,
                objective:witness_kind, objective:falsifier;
     recommends objective:depends_on, objective:status,
@@ -156,8 +157,8 @@ property objective:status : core:string {
     description = "Well-posedness / progress status: open | blocked | admissible | satisfied. On the Objective (overall) and on each Milestone. Mutable progress state — a plain string, not part of the type contract.";
 }
 property objective:proposition : core:inductive {
-    description = "The Prop-typed proposition (eigentt:TypeExpr, encoded as for reasoning:proposition) this Milestone TARGETS or this Axiom admits. Distinct in role from reflection:canonical_proposition: this is the goal an OPEN milestone has not yet established; the discharging reasoning:ReasoningSentence ASSERTS it (carries it as canonical_proposition). On completion the two coincide — objective:satisfied_by links the milestone to that sentence.";
-    class_types eigentt:TypeExpr;
+    description = "The Prop-typed proposition (eigentt:Term, encoded as for justification:proposition) this Milestone TARGETS or this Axiom admits. Distinct in role from reflection:canonical_proposition: this is the goal an OPEN milestone has not yet established; the discharging justification:Sentence ASSERTS it (carries it as canonical_proposition). On completion the two coincide — objective:satisfied_by links the milestone to that sentence.";
+    class_types eigentt:Term;
 }
 property objective:acceptance_grade : core:resource {
     description = "The grade this Milestone must reach to count as done — the SAME reflection:EpistemicStatus the rest of the epistemic stack uses (not a parallel enum). allows_only enforces the grade vocabulary at commit — a value-level type check, part of Checkable. (Distinct property from reflection:epistemic_status: this is the TARGET grade of an open goal; epistemic_status is the ACTUAL grade of a produced resource.)";
@@ -187,7 +188,7 @@ property objective:frontier_gate : core:string {
     domain objective:Milestone;
 }
 property objective:satisfied_by : core:string {
-    description = "IRI of the Holds reasoning:ReasoningSentence that discharged this Milestone's proposition (filled on completion).";
+    description = "IRI of the Holds justification:Sentence that discharged this Milestone's proposition (filled on completion).";
     domain objective:Milestone;
 }
 property objective:axiom_kind : core:resource {
@@ -216,7 +217,7 @@ property objective:probes : core:resource {
     domain objective:CompetencyQuestion;
 }
 property objective:grounded_by : core:string {
-    description = "IRI of the witness / verdict / ReasoningSentence answering this CQ (filled when the falsifier returns its expected_answer). Empty => the CQ is OPEN.";
+    description = "IRI of the witness / verdict / justification:Sentence answering this CQ (filled when the falsifier returns its expected_answer). Empty => the CQ is OPEN.";
     domain objective:CompetencyQuestion;
 }
 property objective:discovery_target : core:resource_array {
@@ -235,8 +236,8 @@ property objective:selected : core:resource {
     domain objective:DecisionPoint;
 }
 property objective:option_claim : core:inductive {
-    description = "An Option's claim, as a Prop (eigentt:TypeExpr) — never prose.";
-    class_types eigentt:TypeExpr;
+    description = "An Option's claim, as a Prop (eigentt:Term) — never prose.";
+    class_types eigentt:Term;
     domain objective:Option;
 }
 property objective:warrant : core:resource_array {
@@ -244,7 +245,7 @@ property objective:warrant : core:resource_array {
     class_types objective:DesirableProperty, objective:CompetencyQuestion, objective:Axiom;
 }
 property objective:resolved_by : core:string {
-    description = "IRI of the ReasoningSentence/verdict (Hypothesis) or DecisionPoint (Tension) that resolved this node.";
+    description = "IRI of the justification:Sentence/verdict (Hypothesis) or DecisionPoint (Tension) that resolved this node.";
 }
 property objective:outcome : core:string {
     description = "held | refuted | open — a Hypothesis's decisive outcome (refuted is a recorded finding, not a failure).";

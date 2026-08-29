@@ -75,7 +75,7 @@ These are inputs, not conclusions. Each is a question the analysis must answer.
 | 1 | `reflection:{Declared,Observed,Derived,Verified}Resource` | `ontologies/reflection/` |
 | 2 | `reflection:{Declaration,Observation,Program,Verification,ExternalExecution}Trace` — **five** classes onto four grades | `kernel/src/layer/witness_index.rs:179` (`trace_category`) |
 | 3 | `WitnessCategory::{Declared,Observed,Derived,Verified}` | `kernel/src/witness/mod.rs` |
-| 4 | `witness:Is{Declared,Observed,Derived,Verified}As` | `ontologies/reasoning/reasoning.esl` |
+| 4 | `witness:Is{Declared,Observed,Derived,Verified}As` | `ontologies/justification/justification.esl` |
 | 5 | `JustifiedBy.{declared,observed,derived,verified}` | same |
 
 **To answer:** are these five projections of one concept, or do they differ somewhere? Specifically

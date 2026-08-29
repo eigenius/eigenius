@@ -11,7 +11,7 @@
 //   5 methodological decisions  (Declared, warranted by spec/convention)
 //        │  composed through a declared acceptance rule
 //        ▼
-//   ImplementsRequiredFilter(solution)   (ReasoningSentence)
+//   ImplementsRequiredFilter(solution)   (justification:Sentence)
 //        │  binds
 //        ▼
 //   bench:TaskOutput(python_source)      (the deliverable program)
@@ -23,14 +23,15 @@
 //
 // Validated by crates/eigenius-reasoning/tests/sab16_tracer.rs (Holds).
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace s16        = "urn:eigenius:bench:sab16";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace s16           = "urn:eigenius:bench:sab16";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Phase 1: per-task predicate vocabulary ────────────────────────
 // Conformance predicates over the solution IRI — one per methodological
@@ -163,34 +164,34 @@ resource s16:impl_rule_trace : reflection:DeclarationTrace {
 // "The solution implements the required filter", justified by applying the
 // acceptance rule (specialised at the solution) to the five conformances.
 
-resource s16:concl_solution_implements : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:bench:sab16:solution";
+resource s16:concl_solution_implements : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:bench:sab16:solution";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         s16:ImplementsRequiredFilter("urn:eigenius:bench:sab16:solution")
     );
 
-    reasoning:justification = App(
+    justification:term = App(
         App(
             App(
                 App(
                     App(
                         SpecStr(
-                            DeclaredEvidence("urn:eigenius:bench:sab16:impl_rule"),
+                            Declared("urn:eigenius:bench:sab16:impl_rule"),
                             "urn:eigenius:bench:sab16:solution"
                         ),
-                        DeclaredEvidence("urn:eigenius:bench:sab16:conf_featurization")
+                        Declared("urn:eigenius:bench:sab16:conf_featurization")
                     ),
-                    DeclaredEvidence("urn:eigenius:bench:sab16:conf_alert_catalogs")
+                    Declared("urn:eigenius:bench:sab16:conf_alert_catalogs")
                 ),
-                DeclaredEvidence("urn:eigenius:bench:sab16:conf_reduction")
+                Declared("urn:eigenius:bench:sab16:conf_reduction")
             ),
-            DeclaredEvidence("urn:eigenius:bench:sab16:conf_threshold")
+            Declared("urn:eigenius:bench:sab16:conf_threshold")
         ),
-        DeclaredEvidence("urn:eigenius:bench:sab16:conf_composition")
+        Declared("urn:eigenius:bench:sab16:conf_composition")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             P    = "urn:eigenius:bench:sab16:solution",
             RULE = "urn:eigenius:bench:sab16:impl_rule",
@@ -216,11 +217,11 @@ resource s16:concl_solution_implements : reasoning:ReasoningSentence {
                 s16:ImplementsRequiredFilter(p),
 
             // justification spine
-            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), P),
-            j1 = reasoning:App(j0, DeclaredEvidence(D1)),
-            j2 = reasoning:App(j1, DeclaredEvidence(D2)),
-            j3 = reasoning:App(j2, DeclaredEvidence(D3)),
-            j4 = reasoning:App(j3, DeclaredEvidence(D4)),
+            j0 = justification:SpecStr(Declared(RULE), P),
+            j1 = justification:App(j0, Declared(D1)),
+            j2 = justification:App(j1, Declared(D2)),
+            j3 = justification:App(j2, Declared(D3)),
+            j4 = justification:App(j3, Declared(D4)),
 
             // certificate spine — specialise the rule, then discharge the
             // five conformances one at a time via Artemov application.
@@ -234,18 +235,18 @@ resource s16:concl_solution_implements : reasoning:ReasoningSentence {
                     s16:ConformsThreshold(p) ->
                     s16:ConformsComposition(p) ->
                     s16:ImplementsRequiredFilter(p),
-                DeclaredEvidence(RULE),
+                Declared(RULE),
                 P,
                 // tag : audit label, same IRI as the instance
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, DeclaredEvidence(D1), rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, DeclaredEvidence(D2), cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, j2, DeclaredEvidence(D3), cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, j3, DeclaredEvidence(D4), cert3, declared(D4, C4))
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
         in
-        app(C5, IMPL, j4, DeclaredEvidence(D5), cert4, declared(D5, C5))
+        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))
     );
 }
 

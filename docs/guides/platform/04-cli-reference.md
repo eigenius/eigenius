@@ -52,12 +52,12 @@ Compile an ESL file to Eigon-JSON, write to stdout.
 eigenius compile demo/document.esl > demo/document.json
 ```
 
-Surface-language transformation — no validation, and nothing is committed. It does bootstrap a layer first, so that constructor short names resolve through the chain's ctor table (`collect_ctors_from_layer`): a file citing `reasoning:JustifiedBy`'s constructors compiles here rather than only inside a running server. Seeding the bootstrap layer only *adds* resolvable names, so it cannot make a previously-compiling file fail.
+Surface-language transformation — no validation, and nothing is committed. It does bootstrap a layer first, so that constructor short names resolve through the chain's ctor table (`collect_ctors_from_layer`): a file citing `justification:Certificate`'s constructors compiles here rather than only inside a running server. Seeding the bootstrap layer only *adds* resolvable names, so it cannot make a previously-compiling file fail.
 
 <a id="decompile-file---verify---pretty"></a>
 ### `decompile <FILE> [--verify] [--pretty]`
 
-Print an Eigon-JSON document back as ESL source — the inverse of `compile`. Every D47 term value (`reasoning:proposition`, `reasoning:certificate`, `eigentt:axiom_statement`, `reflection:canonical_proposition`, …) is rendered in the [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) sublanguage.
+Print an Eigon-JSON document back as ESL source — the inverse of `compile`. Every D47 term value (`justification:proposition`, `justification:certificate`, `eigentt:axiom_statement`, `reflection:canonical_proposition`, …) is rendered in the [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) sublanguage.
 
 ```bash
 eigenius decompile chain/sentence.json

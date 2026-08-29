@@ -35,15 +35,16 @@
 // (licensed by the synthetic-lethal directionality witness below) yields
 // stats:lt(mean_diff_of(s), 0) — MSI strictly more WRN-dependent.
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace stats      = "urn:eigenius:measurements";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace bench      = "urn:eigenius:benchmark";
-namespace wrn        = "urn:eigenius:pub:wrn";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace stats         = "urn:eigenius:measurements";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace bench         = "urn:eigenius:benchmark";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Directionality witness (D52 §7.1) ───────────────────────────────
 // Licenses the one-sided test: the synthetic-lethal hypothesis is
@@ -55,19 +56,19 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // ─── C-WRN (recomputed): SelectivelyEssential(WRN, MSI) ──────────────
 // Justified by the bridge applied to the institution-recomputed result.
 
-resource wrn:concl_wrn_selective_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_wrn_selective_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:SelectivelyEssential("WRN", "MSI")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_msi_selective"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_msi_selective"),
         DerivedEvidence("urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_msi_selective",
@@ -77,26 +78,26 @@ resource wrn:concl_wrn_selective_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, SE,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> SE),
             derived(RESULT, STAT)
         )
     );
 }
 
-resource wrn:concl_refine_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_refine_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_mutator_load"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_mutator_load"),
         DerivedEvidence("urn:eigenius:pub:wrn:wrn_corr_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_mutator_load",
@@ -106,7 +107,7 @@ resource wrn:concl_refine_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, DC,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> DC),
             derived(RESULT, STAT)
         )
@@ -117,19 +118,19 @@ resource wrn:concl_refine_recomputed : reasoning:ReasoningSentence {
 // mutator load than uncommon ones — the basis for the biomarker's lineage
 // restriction. Two-sample Wilcoxon (mean_diff_of, group A uncommon below
 // group B common), lifted through bridge_lineage_mutator.
-resource wrn:concl_lineage_mutator_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_lineage_mutator_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_lineage_mutator"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_lineage_mutator"),
         DerivedEvidence("urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:mutator_load_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_lineage_mutator",
@@ -139,7 +140,7 @@ resource wrn:concl_lineage_mutator_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, EM,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> EM),
             derived(RESULT, STAT)
         )
@@ -147,19 +148,19 @@ resource wrn:concl_lineage_mutator_recomputed : reasoning:ReasoningSentence {
 }
 
 // ─── C-LOC (recomputed, ED Fig 8d): WRN delocalized from the nucleolus in MSI.
-resource wrn:concl_coloc_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_coloc_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:ReducedNucleolarColocalization("WRN", "MSI")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_coloc"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_coloc"),
         DerivedEvidence("urn:eigenius:pub:wrn:coloc_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:coloc_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_coloc",
@@ -169,7 +170,7 @@ resource wrn:concl_coloc_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, RC,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> RC),
             derived(RESULT, STAT)
         )
@@ -177,19 +178,19 @@ resource wrn:concl_coloc_recomputed : reasoning:ReasoningSentence {
 }
 
 // ─── C-APOP-shRNA (recomputed, ED Fig 4d): apoptosis confirmed via shRNA.
-resource wrn:concl_apop_shrna_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_apop_shrna_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:CausesApoptosis("WRN", "MSI")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_apop_shrna"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_apop_shrna"),
         DerivedEvidence("urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_apop_shrna",
@@ -199,7 +200,7 @@ resource wrn:concl_apop_shrna_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, CA,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> CA),
             derived(RESULT, STAT)
         )
@@ -207,19 +208,19 @@ resource wrn:concl_apop_shrna_recomputed : reasoning:ReasoningSentence {
 }
 
 // ─── C-MMR-FN (recomputed, ED Fig 10a): MMR restoration restores repair.
-resource wrn:concl_hcr_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_hcr_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_hcr"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_hcr"),
         DerivedEvidence("urn:eigenius:pub:wrn:hcr_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:hcr_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_hcr",
@@ -229,26 +230,26 @@ resource wrn:concl_hcr_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, MR,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> MR),
             derived(RESULT, STAT)
         )
     );
 }
 
-resource wrn:concl_recq_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_recq_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:recq_uniqueness_rule"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:recq_uniqueness_rule"),
         DerivedEvidence("urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:wrn_recq_sampleset",
             RULE   = "urn:eigenius:pub:wrn:recq_uniqueness_rule",
@@ -258,29 +259,29 @@ resource wrn:concl_recq_recomputed : reasoning:ReasoningSentence {
         in
         app(
             STAT, OM,
-            DeclaredEvidence(RULE), DerivedEvidence(RESULT),
+            Declared(RULE), DerivedEvidence(RESULT),
             declared(RULE, STAT -> OM),
             derived(RESULT, STAT)
         )
     );
 }
 
-resource wrn:concl_biomarker_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_biomarker_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:StrongBiomarker("MSI", "WRN_dependency")
     );
 
-    reasoning:justification = App(
+    justification:term = App(
         App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:bridge_biomarker"),
+            Declared("urn:eigenius:pub:wrn:bridge_biomarker"),
             DerivedEvidence("urn:eigenius:pub:wrn:biomarker_plan:result:ppv")
         ),
         DerivedEvidence("urn:eigenius:pub:wrn:biomarker_plan:result:sensitivity")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS      = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
             BRIDGE  = "urn:eigenius:pub:wrn:bridge_biomarker",
@@ -290,25 +291,25 @@ resource wrn:concl_biomarker_recomputed : reasoning:ReasoningSentence {
             SENSP   = stats:ge(stats:sensitivity(SS), 0.9),
             SB      = onco:StrongBiomarker("MSI", "WRN_dependency"),
             bridge_cert = declared(BRIDGE, PPVP -> SENSP -> SB),
-            cert1 = app(PPVP, SENSP -> SB, DeclaredEvidence(BRIDGE), DerivedEvidence(R_PPV), bridge_cert, derived(R_PPV, PPVP))
+            cert1 = app(PPVP, SENSP -> SB, Declared(BRIDGE), DerivedEvidence(R_PPV), bridge_cert, derived(R_PPV, PPVP))
         in
-        app(SENSP, SB, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_PPV)), DerivedEvidence(R_SENS), cert1, derived(R_SENS, SENSP))
+        app(SENSP, SB, justification:App(Declared(BRIDGE), DerivedEvidence(R_PPV)), DerivedEvidence(R_SENS), cert1, derived(R_SENS, SENSP))
     );
 }
 
-resource wrn:concl_p53_modulates : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+resource wrn:concl_p53_modulates : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         onco:ModulatesDependence("TP53", "WRN")
     );
 
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_p53_modulates"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_p53_modulates"),
         DerivedEvidence("urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:p53_dep_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_p53_modulates",
@@ -318,26 +319,26 @@ resource wrn:concl_p53_modulates : reasoning:ReasoningSentence {
         in
         app(
             STAT, MD,
-            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> MD),
             derived(RESULT, STAT)
         )
     );
 }
 
-resource wrn:concl_val_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_val_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:SelectiveViabilityDependence("WRN", "MSI")
     );
-    reasoning:justification = App(
+    justification:term = App(
         App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:bridge_viability"),
+            Declared("urn:eigenius:pub:wrn:bridge_viability"),
             DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect")
         ),
         DerivedEvidence("urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
             R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
@@ -345,30 +346,30 @@ resource wrn:concl_val_recomputed : reasoning:ReasoningSentence {
             K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
             SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
-            cert1 = app(K, O -> SVD, DeclaredEvidence(BRIDGE), DerivedEvidence(R_KM12),
+            cert1 = app(K, O -> SVD, Declared(BRIDGE), DerivedEvidence(R_KM12),
                         declared(BRIDGE, K -> O -> SVD), derived(R_KM12, K))
         in
-        app(O, SVD, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_KM12)),
+        app(O, SVD, justification:App(Declared(BRIDGE), DerivedEvidence(R_KM12)),
             DerivedEvidence(R_OVK), cert1, derived(R_OVK, O))
     );
 }
 
-resource wrn:concl_cellcycle_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_cellcycle_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:CausesCellCycleArrest("WRN", "MSI")
     );
-    reasoning:justification = App(
+    justification:term = App(
         App(
             App(
-                DeclaredEvidence("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
                 DerivedEvidence("urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect")
             ),
             DerivedEvidence("urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect")
         ),
         DerivedEvidence("urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
             R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
@@ -379,32 +380,32 @@ resource wrn:concl_cellcycle_recomputed : reasoning:ReasoningSentence {
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
             CA = onco:CausesCellCycleArrest("WRN", "MSI"),
             RULE_P = K -> S -> O -> CA,
-            cert1 = app(K, S -> O -> CA, DeclaredEvidence(BRIDGE), DerivedEvidence(R_K),
+            cert1 = app(K, S -> O -> CA, Declared(BRIDGE), DerivedEvidence(R_K),
                         declared(BRIDGE, RULE_P), derived(R_K, K)),
-            cert2 = app(S, O -> CA, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)),
+            cert2 = app(S, O -> CA, justification:App(Declared(BRIDGE), DerivedEvidence(R_K)),
                         DerivedEvidence(R_S), cert1, derived(R_S, S))
         in
-        app(O, CA, reasoning:App(reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
+        app(O, CA, justification:App(justification:App(Declared(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
             DerivedEvidence(R_O), cert2, derived(R_O, O))
     );
 }
 
-resource wrn:concl_apoptosis_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_apoptosis_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:CausesApoptosis("WRN", "MSI")
     );
-    reasoning:justification = App(
+    justification:term = App(
         App(
             App(
-                DeclaredEvidence("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
                 DerivedEvidence("urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect")
             ),
             DerivedEvidence("urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect")
         ),
         DerivedEvidence("urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
             R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
@@ -415,32 +416,32 @@ resource wrn:concl_apoptosis_recomputed : reasoning:ReasoningSentence {
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
             CA = onco:CausesApoptosis("WRN", "MSI"),
             RULE_P = K -> S -> O -> CA,
-            cert1 = app(K, S -> O -> CA, DeclaredEvidence(BRIDGE), DerivedEvidence(R_K),
+            cert1 = app(K, S -> O -> CA, Declared(BRIDGE), DerivedEvidence(R_K),
                         declared(BRIDGE, RULE_P), derived(R_K, K)),
-            cert2 = app(S, O -> CA, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)),
+            cert2 = app(S, O -> CA, justification:App(Declared(BRIDGE), DerivedEvidence(R_K)),
                         DerivedEvidence(R_S), cert1, derived(R_S, S))
         in
-        app(O, CA, reasoning:App(reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
+        app(O, CA, justification:App(justification:App(Declared(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
             DerivedEvidence(R_O), cert2, derived(R_O, O))
     );
 }
 
-resource wrn:concl_mmr_restoration_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_mmr_restoration_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:RestorationPartiallyRescues("dMMR", "WRN")
     );
-    reasoning:justification = App(
+    justification:term = App(
         App(
             App(
-                DeclaredEvidence("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
                 DerivedEvidence("urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect")
             ),
             DerivedEvidence("urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect")
         ),
         DerivedEvidence("urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
             R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
@@ -451,25 +452,25 @@ resource wrn:concl_mmr_restoration_recomputed : reasoning:ReasoningSentence {
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
             RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
             RULE_P = K -> S -> O -> RP,
-            cert1 = app(K, S -> O -> RP, DeclaredEvidence(BRIDGE), DerivedEvidence(R_R),
+            cert1 = app(K, S -> O -> RP, Declared(BRIDGE), DerivedEvidence(R_R),
                         declared(BRIDGE, RULE_P), derived(R_R, K)),
-            cert2 = app(S, O -> RP, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_R)),
+            cert2 = app(S, O -> RP, justification:App(Declared(BRIDGE), DerivedEvidence(R_R)),
                         DerivedEvidence(R_1), cert1, derived(R_1, S))
         in
-        app(O, RP, reasoning:App(reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_R)), DerivedEvidence(R_1)),
+        app(O, RP, justification:App(justification:App(Declared(BRIDGE), DerivedEvidence(R_R)), DerivedEvidence(R_1)),
             DerivedEvidence(R_2), cert2, derived(R_2, O))
     );
 }
-resource wrn:concl_rescue_wt_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_rescue_wt_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
     );
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_rescue_wt"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_rescue_wt"),
         DerivedEvidence("urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
@@ -477,20 +478,20 @@ resource wrn:concl_rescue_wt_recomputed : reasoning:ReasoningSentence {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             RD     = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
         in
-        app(STAT, RD, DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+        app(STAT, RD, Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> RD), derived(RESULT, STAT))
     );
 }
-resource wrn:concl_rescue_e84a_recomputed : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_rescue_e84a_recomputed : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
     );
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
         DerivedEvidence("urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
@@ -498,7 +499,7 @@ resource wrn:concl_rescue_e84a_recomputed : reasoning:ReasoningSentence {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             RD     = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
         in
-        app(STAT, RD, DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+        app(STAT, RD, Declared(BRIDGE), DerivedEvidence(RESULT),
             declared(BRIDGE, STAT -> RD), derived(RESULT, STAT))
     );
 }

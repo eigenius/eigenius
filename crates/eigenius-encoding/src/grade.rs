@@ -53,7 +53,7 @@ const ENCODED_CLAIM_CLASS: &str = "urn:eigenius:encoding:EncodedClaim";
 /// until `2026-08-21`.
 const DECLARATION_TRACE_CLASS: &str = wk::DECLARATION_TRACE;
 
-/// The epistemic grade of a claim. A **structural projection** of the `JustificationTerm` constructor
+/// The epistemic grade of a claim. A **structural projection** of the `justification:Term` constructor
 /// (D39) — not a stored field. `Declared` is the honest floor a parsed proposition enters at; it climbs
 /// only on a real witness (observation / derivation / proof).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,9 +138,9 @@ pub struct GradedClaim {
     pub resources: Vec<Resource>,
     /// The resource carrying the proposition — the claim's chain identity, what downstream
     /// certificates and discourse candidates cite: the DECLARING resource (Declared cluster),
-    /// the `enc:EncodedClaim` (Derived cluster), the `ReasoningSentence` (inference clusters).
+    /// the `enc:EncodedClaim` (Derived cluster), the `justification:Sentence` (inference clusters).
     pub claim_iri: Iri,
-    /// The `ReasoningSentence` the D39 gate validates at commit, when the cluster carries one.
+    /// The `justification:Sentence` the D39 gate validates at commit, when the cluster carries one.
     /// `None` for the parsed cluster — its trust story is the agent named in `declared_by`, with
     /// no certificate to check.
     pub gate_sentence: Option<Iri>,
@@ -213,7 +213,7 @@ pub trait ClaimGrader {
 /// propositions that must not collapse into one witness — and `IsDerivedAs(claim, P)` collapsed
 /// them, because a certificate citing it read as "a program established P".
 ///
-/// There is still no `ReasoningSentence` and no certificate, so [`GradedClaim::gate_sentence`] is
+/// There is still no `justification:Sentence` and no certificate, so [`GradedClaim::gate_sentence`] is
 /// `None` and the D39 gate has nothing to check at commit. A certificate citing the claim still
 /// breaks the moment the prose changes and the parser produces a different `P` — the witness key
 /// hashes the proposition — which is the point and is unchanged by the grade.

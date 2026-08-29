@@ -753,7 +753,7 @@ impl<'a> Parser<'a> {
                 // same `parse_type_expr` used for `axiom` declarations
                 // and `data` ctor types; the compile-side hook D47-
                 // encodes the lowered Exp. Surface counterpart of
-                // `formula(...)` for D47, used by D39 ReasoningSentence
+                // `formula(...)` for D47, used by D39 justification:Sentence
                 // authors who'd otherwise hand-write the verbose
                 // `{"ctor":"App","args":[...]}` tagged-dict tree.
                 if bare.as_deref() == Some("type_expr") && self.peek_at(1) == &TokenKind::LParen {
@@ -1983,7 +1983,7 @@ impl<'a> Parser<'a> {
     ///   [`IndexKind::Named`].
     /// - A sort literal (`Prop` / `Set` / `Type N`) — needed for
     ///   indexed inductives that range over types as values, e.g.
-    ///   D39 §5's `JustifiedBy : JustificationTerm → Prop → Type`
+    ///   D39 §5's `justification:Certificate : justification:Term → Prop → Type`
     ///   and `ChainWitness.IsDeclaredAs : core:string → Prop → Prop`;
     ///   carries through as [`IndexKind::Sort`].
     ///
@@ -3799,7 +3799,7 @@ mod tests {
 
     #[test]
     fn data_indexed_accepts_sort_literals_in_intermediate_indices() {
-        // D39 §5 JustifiedBy / D49 ChainWitness predicates need Sort
+        // D39 §5 justification:Certificate / D49 ChainWitness predicates need Sort
         // literals (Prop, Set, Type N) as intermediate index kinds, not
         // just bare names or class IRIs.
         let file = parse_str(

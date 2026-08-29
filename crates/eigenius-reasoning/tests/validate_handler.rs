@@ -73,7 +73,7 @@ fn build_full_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    let reasoning_source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {
@@ -89,7 +89,7 @@ fn build_full_chain() -> ExecutionContext {
     )
 }
 
-/// Build a synthetic ReasoningSentence with the supplied property
+/// Build a synthetic justification:Sentence with the supplied property
 /// values. Tests pass the three required fields directly; the helper
 /// stamps the resource shape so the validate handler sees exactly
 /// what a committed sentence would carry.
@@ -102,7 +102,7 @@ fn synthetic_sentence(
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:reasoning:ReasoningSentence").unwrap(),
+            Iri::parse("urn:eigenius:justification:Sentence").unwrap(),
         )]),
     );
     if let Some(v) = proposition {
@@ -139,9 +139,7 @@ fn missing_proposition_surfaces_computation_failed() {
     let ctx = build_full_chain();
     let sentence = synthetic_sentence(
         None,
-        Some(Value::Json(
-            json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
-        )),
+        Some(Value::Json(json!({"ctor": "Declared", "args": ["urn:a"]}))),
         Some(Value::Json(
             json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
         )),
@@ -165,9 +163,7 @@ fn missing_certificate_surfaces_computation_failed() {
         Some(Value::Json(
             json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
         )),
-        Some(Value::Json(
-            json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
-        )),
+        Some(Value::Json(json!({"ctor": "Declared", "args": ["urn:a"]}))),
         None,
     );
     let err = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx).unwrap_err();
@@ -188,9 +184,7 @@ fn malformed_proposition_surfaces_verdict_fails() {
     let sentence = synthetic_sentence(
         // Wrong shape — D47 codec rejects an unknown ctor.
         Some(Value::Json(json!({"ctor": "NotARealCtor", "args": []}))),
-        Some(Value::Json(
-            json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
-        )),
+        Some(Value::Json(json!({"ctor": "Declared", "args": ["urn:a"]}))),
         Some(Value::Json(
             json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
         )),
@@ -213,7 +207,7 @@ fn malformed_justification_surfaces_verdict_fails() {
         Some(Value::Json(
             json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
         )),
-        // Unknown JustificationTerm ctor — chain inductive decoder
+        // Unknown justification:Term ctor — chain inductive decoder
         // catches it.
         Some(Value::Json(json!({"ctor": "NotAJTctor", "args": []}))),
         Some(Value::Json(
@@ -236,16 +230,14 @@ fn institution_dispatch_routes_to_validate_handler() {
     // …) routes to the same logic the direct
     // do_validate_justification entry point exercises. This is the
     // path the kernel's AutoOnLoad dispatch will take when the chain
-    // sees a ReasoningSentence commit.
+    // sees a justification:Sentence commit.
     let ctx = build_full_chain();
     let inst = ReasoningInstitution::new();
     let sentence = synthetic_sentence(
         // Wrong shape — same as the malformed_proposition test —
         // surfaces the Fails outcome via institution dispatch.
         Some(Value::Json(json!({"ctor": "NotARealCtor", "args": []}))),
-        Some(Value::Json(
-            json!({"ctor": "DeclaredEvidence", "args": ["urn:a"]}),
-        )),
+        Some(Value::Json(json!({"ctor": "Declared", "args": ["urn:a"]}))),
         Some(Value::Json(
             json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
         )),
@@ -279,7 +271,7 @@ fn entailment_request(candidate: Value) -> Resource {
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:reasoning:EntailmentRequest").unwrap(),
+            Iri::parse("urn:eigenius:justification:EntailmentRequest").unwrap(),
         )]),
     );
     r.set(
@@ -296,7 +288,7 @@ fn consistency_request(sentence_set: Value) -> Resource {
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:reasoning:ConsistencyRequest").unwrap(),
+            Iri::parse("urn:eigenius:justification:ConsistencyRequest").unwrap(),
         )]),
     );
     r.set(Iri::parse(iris::PROP_SENTENCE_SET).unwrap(), sentence_set);
@@ -345,7 +337,7 @@ fn entailment_query_missing_candidate_surfaces_computation_failed() {
     request.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:reasoning:EntailmentRequest").unwrap(),
+            Iri::parse("urn:eigenius:justification:EntailmentRequest").unwrap(),
         )]),
     );
     let proc_iri = Iri::parse(iris::PROC_ENTAILMENT_QUERY).unwrap();
@@ -402,7 +394,7 @@ fn consistency_check_missing_sentence_set_surfaces_computation_failed() {
     request.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:reasoning:ConsistencyRequest").unwrap(),
+            Iri::parse("urn:eigenius:justification:ConsistencyRequest").unwrap(),
         )]),
     );
     let proc_iri = Iri::parse(iris::PROC_CONSISTENCY_CHECK).unwrap();
@@ -484,7 +476,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     )
 }
 
-/// Build a `JustifiedBy.declared(iri, P, witness_placeholder)` D47
+/// Build a `justification:Certificate.declared(iri, P, witness_placeholder)` D47
 /// certificate where the witness slot is `UnitVal` — the kernel
 /// ignores the user's value and synthesizes the witness. `P` is
 /// supplied as a pre-encoded D47 sub-tree so callers can mismatch
@@ -500,7 +492,7 @@ fn justified_by_declared_certificate(
             {"ctor": "App", "args": [
                 {"ctor": "App", "args": [
                     {"ctor": "CtorApp", "args": [
-                        "urn:eigenius:reasoning:JustifiedBy",
+                        "urn:eigenius:justification:Certificate",
                         "declared",
                     ]},
                     {"ctor": "LitString", "args": [iri_str]},
@@ -616,7 +608,7 @@ fn end_to_end_validate_holds_with_explicit_canonical_proposition_after_iri_split
     });
     let proposition = Value::Json(asserts_subtree.clone());
     let justification = Value::Json(json!({
-        "ctor": "DeclaredEvidence",
+        "ctor": "Declared",
         "args": [target],
     }));
     let certificate = justified_by_declared_certificate(target, asserts_subtree);
@@ -639,7 +631,7 @@ fn end_to_end_validate_holds_when_certificate_matches_admitted_witness() {
     // The Phase 10 headline test: a complete justified-reasoning
     // commit lands as Verdict::Holds. Chain has a DeclarationTrace
     // emitting an admitted `IsDeclaredAs(target, Asserts(target))`
-    // witness; the certificate's `JustifiedBy.declared` ctor's third
+    // witness; the certificate's `justification:Certificate.declared` ctor's third
     // arg slot is filled in by the kernel's Phase 9 synthesis hook;
     // the type-check succeeds.
     let target = "urn:test:phase10:axiom";
@@ -655,7 +647,7 @@ fn end_to_end_validate_holds_when_certificate_matches_admitted_witness() {
 
     let proposition = Value::Json(asserts_subtree.clone());
     let justification = Value::Json(json!({
-        "ctor": "DeclaredEvidence",
+        "ctor": "Declared",
         "args": [target],
     }));
     let certificate = justified_by_declared_certificate(target, asserts_subtree);
@@ -696,11 +688,11 @@ fn end_to_end_validate_fails_when_proposition_mismatches_admitted_witness() {
     });
 
     let proposition = Value::Json(mismatched_subtree.clone());
-    // The justification still cites `target` (a valid DeclaredEvidence
+    // The justification still cites `target` (a valid Declared
     // grounding), but the proposition the certificate claims doesn't
     // match what the chain admits for that resource.
     let justification = Value::Json(json!({
-        "ctor": "DeclaredEvidence",
+        "ctor": "Declared",
         "args": [target],
     }));
     let certificate = justified_by_declared_certificate(target, mismatched_subtree);
@@ -740,7 +732,7 @@ fn end_to_end_validate_fails_when_target_iri_lacks_declaration_trace() {
 
     let proposition = Value::Json(asserts_subtree.clone());
     let justification = Value::Json(json!({
-        "ctor": "DeclaredEvidence",
+        "ctor": "Declared",
         "args": [target],
     }));
     let certificate = justified_by_declared_certificate(target, asserts_subtree);
@@ -758,7 +750,7 @@ fn end_to_end_validate_fails_when_target_iri_lacks_declaration_trace() {
 #[test]
 fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
     // Regression check on the arity-mismatch path: a certificate
-    // whose JustifiedBy.declared application is missing the witness
+    // whose justification:Certificate.declared application is missing the witness
     // arg slot (1 App-arg instead of 3) fails the kernel's
     // `check_inductive_ctor_args` arity assertion. Verdict is Fails
     // for a different reason than missing-witness — confirms the
@@ -774,16 +766,16 @@ fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
         ],
     }));
     let justification = Value::Json(json!({
-        "ctor": "DeclaredEvidence",
+        "ctor": "Declared",
         "args": ["urn:foo"],
     }));
-    // Certificate with only ONE App-arg — `JustifiedBy.declared`
+    // Certificate with only ONE App-arg — `justification:Certificate.declared`
     // expects three (iri, P, witness).
     let certificate = Value::Json(json!({
         "ctor": "App",
         "args": [
             {"ctor": "CtorApp", "args": [
-                "urn:eigenius:reasoning:JustifiedBy",
+                "urn:eigenius:justification:Certificate",
                 "declared",
             ]},
             {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
@@ -801,14 +793,14 @@ fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
 /// The sentence IRI used by the two `VerificationTrace` tests below.
 const TRACED_SENTENCE: &str = "urn:test:v200:sentence";
 
-/// A `ReasoningSentence` with a real IRI (unlike `synthetic_sentence`, which is embedded and so has
+/// A `justification:Sentence` with a real IRI (unlike `synthetic_sentence`, which is embedded and so has
 /// nothing to attest).
 fn iri_sentence(iri_str: &str, proposition: Value, justification: Value, cert: Value) -> Resource {
     let mut r = Resource::new(Iri::parse(iri_str).unwrap());
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:reasoning:ReasoningSentence").unwrap(),
+            Iri::parse("urn:eigenius:justification:Sentence").unwrap(),
         )]),
     );
     r.set(Iri::parse(iris::PROP_PROPOSITION).unwrap(), proposition);
@@ -831,7 +823,7 @@ fn passing_traced_sentence() -> (ExecutionContext, Resource, serde_json::Value) 
     let sentence = iri_sentence(
         TRACED_SENTENCE,
         Value::Json(asserts_subtree.clone()),
-        Value::Json(json!({"ctor": "DeclaredEvidence", "args": [target]})),
+        Value::Json(json!({"ctor": "Declared", "args": [target]})),
         justified_by_declared_certificate(target, asserts_subtree.clone()),
     );
     (ctx, sentence, asserts_subtree)
@@ -875,7 +867,7 @@ fn passing_validation_emits_a_kernel_verification_trace() {
     // The certificate lives on the sentence, so the sentence IS the proof term's location.
     assert_eq!(get(wk::PROOF_TERM).as_deref(), Some(TRACED_SENTENCE));
     assert!(get(wk::TIMESTAMP).is_some(), "trace carries a timestamp");
-    // `derivation_trace` is `recommends`, not `requires`: a ReasoningSentence has no ProgramTrace
+    // `derivation_trace` is `recommends`, not `requires`: a justification:Sentence has no ProgramTrace
     // to point at, and pointing the slot at itself would be a fiction.
     assert!(
         trace
@@ -888,11 +880,11 @@ fn passing_validation_emits_a_kernel_verification_trace() {
 #[test]
 fn the_minted_trace_keys_the_witness_on_the_sentences_own_proposition() {
     // The subtle half. `emit_from_trace` reads the TARGET's `reflection:canonical_proposition`,
-    // but a ReasoningSentence keeps its proposition under `reasoning:proposition`. Without the
-    // ReasoningSentence arm in `target_proposition_hash` the trace falls through to the D39 §4.1
+    // but a justification:Sentence keeps its proposition under `justification:proposition`. Without the
+    // justification:Sentence arm in `target_proposition_hash` the trace falls through to the D39 §4.1
     // default and keys the witness against `Asserts(sentence_iri)` — a different hash from the one
     // the sentence emits, and one no certificate legitimately cites. A chain could then discharge
-    // `JustifiedBy(VerifiedEvidence(s), Asserts(s))`: the sentence asserting itself.
+    // `justification:Certificate(Verified(s), Asserts(s))`: the sentence asserting itself.
     //
     // The trace is committed in a CHILD of the layer holding the sentence, so
     // `layer_admits_witness`'s self-attesting step (which is layer-LOCAL) cannot answer and the

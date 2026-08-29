@@ -18,14 +18,15 @@
 //
 // Validated by crates/eigenius-reasoning/tests/wrn_phase5.rs.
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace wrn        = "urn:eigenius:pub:wrn";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
 
 // The MMR-restoration causal-dissection experiment is now KERNEL-RECOMPUTED
 // (increment 10): `wrn:concl_mmr_restoration_recomputed` in the statistics
@@ -62,26 +63,26 @@ resource wrn:mmr_rule_trace : reflection:DeclarationTrace {
 // C-MMR: dMMR contributes to (but does not fully explain) WRN dependence.
 // Modus ponens over mmr_rule: the antecedent RestorationPartiallyRescues is
 // discharged by CITING the kernel-recomputed conclusion as a lemma (D54: a
-// Holds ReasoningSentence is admitted as a Verified witness keyed on its IRI),
+// Holds justification:Sentence is admitted as a Verified witness keyed on its IRI),
 // not by a linked-external ToolArtifact. The leaf proof (the three ED Fig 10c
 // crossed-ANOVA (stats:Crossed) contrasts) lives in wrn-phase1-recompute.
-resource wrn:concl_mmr : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_mmr : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:ContributesToDependence("dMMR", "WRN")
     );
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed")
+    justification:term = App(
+        Declared("urn:eigenius:pub:wrn:mmr_rule"),
+        Verified("urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed")
     );
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             RULE  = "urn:eigenius:pub:wrn:mmr_rule",
             CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
             RP    = onco:RestorationPartiallyRescues("dMMR", "WRN"),
             CD    = onco:ContributesToDependence("dMMR", "WRN")
         in
-        app(RP, CD, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
+        app(RP, CD, Declared(RULE), Verified(CONCL),
             declared(RULE, RP -> CD), verified(CONCL, RP))
     );
 }
@@ -93,7 +94,7 @@ resource wrn:concl_mmr : reasoning:ReasoningSentence {
 // the whole paper builds toward; C-MAIN reaches the thesis by modus ponens
 // (App) over the load-bearing findings (plan §7: C-VAL, C-VIVO, D-HELICASE,
 // C-MECH, C-MMR). Each antecedent is discharged by CITING its phase
-// conclusion as a lemma (D54 lemma citation: a Holds ReasoningSentence is
+// conclusion as a lemma (D54 lemma citation: a Holds justification:Sentence is
 // admitted as a Verified witness keyed on its IRI). A proven sentence is NOT
 // an evidence atom; it is the antecedent of this implication, discharged by
 // the lemma. (C-VAL is cited as concl_val_recomputed — the kernel-recomputed
@@ -120,37 +121,37 @@ resource wrn:synthesis_rule_trace : reflection:DeclarationTrace {
     reflection:timestamp   = "2026-06-13T04:30:00Z";
 }
 
-resource wrn:concl_main : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
+resource wrn:concl_main : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    justification:proposition = type_expr(
         onco:SyntheticLethal("WRN", "MSI")
     );
 
     // Modus ponens over the five findings — each antecedent discharged by
-    // CITING its phase conclusion as a lemma (D54: a Holds ReasoningSentence
+    // CITING its phase conclusion as a lemma (D54: a Holds justification:Sentence
     // is admitted as a Verified witness keyed on its IRI). The leaf proofs
     // live in the phase conclusions; C-MAIN references them by name.
-    reasoning:justification = App(
+    justification:term = App(
         App(
             App(
                 App(
                     App(
                         App(
-                            DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
-                            VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed")
+                            Declared("urn:eigenius:pub:wrn:synthesis_rule"),
+                            Verified("urn:eigenius:pub:wrn:concl_val_recomputed")
                         ),
-                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
+                        Verified("urn:eigenius:pub:wrn:concl_vivo")
                     ),
-                    VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required")
+                    Verified("urn:eigenius:pub:wrn:concl_helicase_required")
                 ),
-                VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech")
+                Verified("urn:eigenius:pub:wrn:concl_mech")
             ),
-            VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr")
+            Verified("urn:eigenius:pub:wrn:concl_mmr")
         ),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog")
+        Verified("urn:eigenius:pub:wrn:concl_paralog")
     );
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:synthesis_rule",
             SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
@@ -162,12 +163,12 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
             SL  = onco:SyntheticLethal("WRN", "MSI"),
             RULE_P = SVD -> IVD -> RA -> DL -> CD -> PAR -> SL,
             // antecedent justification terms — lemma citations of conclusions
-            jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed"),
-            jIVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo"),
-            jRA  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required"),
-            jDL  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech"),
-            jCD  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr"),
-            jPAR = VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog"),
+            jSVD = Verified("urn:eigenius:pub:wrn:concl_val_recomputed"),
+            jIVD = Verified("urn:eigenius:pub:wrn:concl_vivo"),
+            jRA  = Verified("urn:eigenius:pub:wrn:concl_helicase_required"),
+            jDL  = Verified("urn:eigenius:pub:wrn:concl_mech"),
+            jCD  = Verified("urn:eigenius:pub:wrn:concl_mmr"),
+            jPAR = Verified("urn:eigenius:pub:wrn:concl_paralog"),
             // antecedent certificates — one verified(conclusion, P) each
             cSVD = verified("urn:eigenius:pub:wrn:concl_val_recomputed", SVD),
             cIVD = verified("urn:eigenius:pub:wrn:concl_vivo", IVD),
@@ -177,18 +178,18 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
             cPAR = verified("urn:eigenius:pub:wrn:concl_paralog", PAR),
             // modus-ponens spine (unchanged — the "from A follows B" backbone)
             c1 = app(SVD, IVD -> RA -> DL -> CD -> PAR -> SL,
-                     DeclaredEvidence(RULE), jSVD, declared(RULE, RULE_P), cSVD),
+                     Declared(RULE), jSVD, declared(RULE, RULE_P), cSVD),
             c2 = app(IVD, RA -> DL -> CD -> PAR -> SL,
-                     reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD, c1, cIVD),
+                     justification:App(Declared(RULE), jSVD), jIVD, c1, cIVD),
             c3 = app(RA, DL -> CD -> PAR -> SL,
-                     reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA, c2, cRA),
+                     justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA, c2, cRA),
             c4 = app(DL, CD -> PAR -> SL,
-                     reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
+                     justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
             c5 = app(CD, PAR -> SL,
-                     reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
+                     justification:App(justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
         in
         app(PAR, SL,
-            reasoning:App(reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD),
+            justification:App(justification:App(justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL), jCD),
             jPAR, c5, cPAR)
     );
 }

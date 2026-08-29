@@ -25,7 +25,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 # D52 §8 end-to-end composition test: load the reasoning ontology +
-# institution alongside the statistics ones so a ReasoningSentence can
+# institution alongside the statistics ones so a justification:Sentence can
 # cite a MeasurementClaim's IsDerivedAs witness via DerivedEvidence,
 # proving the statistics → reasoning hand-off promised by §8.
 eigenius-reasoning = { path = "../eigenius-reasoning" }

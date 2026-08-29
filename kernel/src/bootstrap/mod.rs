@@ -146,7 +146,7 @@ fn load_layer(
 /// ESL-sourced variant of [`load_layer`]. Compiles the ESL source into
 /// chain resources via `esl::compile`, then runs the same
 /// build-and-validate pipeline. Used by Phase-8 bootstrap to ship
-/// `ontologies/reasoning/reasoning.esl` without committing a parallel
+/// `ontologies/justification/justification.esl` without committing a parallel
 /// `.json` to keep in sync — single source of truth.
 fn load_esl_layer(
     name: &str,
@@ -317,12 +317,12 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         format: OntologyFormat::Json,
     },
     // reasoning (D39 Phase 8) — the Justification Logic institution's chain
-    // artifacts (ChainWitness predicates, JustificationTerm, ReasoningSentence,
+    // artifacts (ChainWitness predicates, justification:Term, justification:Sentence,
     // the institution + QueryClasses + ExportFormat). ESL source = single source
     // of truth. Depends on core / eigentt / reflection / institution.
     BootstrapOntology {
-        name: "reasoning",
-        source: include_str!("../../../ontologies/reasoning/reasoning.esl"),
+        name: "justification",
+        source: include_str!("../../../ontologies/justification/justification.esl"),
         format: OntologyFormat::Esl,
     },
     // statistics (D52 Phase 5) — measurement-statistics ontology (claim schema,
@@ -1051,18 +1051,18 @@ class p:Cat { description = "a dog"; }"#;
     #[test]
     fn can_resolve_eigentt_type_expr() {
         // D47: the chain-mirrored EigenTT type fragment lives at
-        // urn:eigenius:eigentt:TypeExpr and is loaded just above the core
+        // urn:eigenius:eigentt:Term and is loaded just above the core
         // layer.
         let ctx = bootstrap().unwrap();
-        let iri = Iri::parse("urn:eigenius:eigentt:TypeExpr").unwrap();
+        let iri = Iri::parse("urn:eigenius:eigentt:Term").unwrap();
         let resolved = ctx
             .resolve(&iri)
-            .expect("should resolve eigentt:TypeExpr from the eigentt-type-fragment layer");
+            .expect("should resolve eigentt:Term from the eigentt-type-fragment layer");
         let is_a = resolved.is_a();
         let inductive_type_iri = Iri::parse("urn:eigenius:core:InductiveType").unwrap();
         assert!(
             is_a.iter().any(|i| i == &inductive_type_iri),
-            "eigentt:TypeExpr should be an InductiveType; is_a = {is_a:?}"
+            "eigentt:Term should be an InductiveType; is_a = {is_a:?}"
         );
     }
 
@@ -1326,23 +1326,23 @@ class p:Cat { description = "a dog"; }"#;
     fn bootstrap_includes_reasoning_layer_artifacts() {
         // D39 Phase 8 — confirm the reasoning layer's load_esl_layer
         // call produced the expected chain artifacts: the 4 ChainWitness
-        // predicates, the 2 indexed inductives (JustificationTerm +
-        // JustifiedBy), the 2 resource classes (ReasoningSentence +
+        // predicates, the 2 indexed inductives (justification:Term +
+        // justification:Certificate), the 2 resource classes (justification:Sentence +
         // VerifiedPropositionView), the 2 query-request classes
         // (EntailmentRequest + ConsistencyRequest), the institution
         // resource, the 3 QueryClasses, and the ExportFormat.
         let ctx = bootstrap().unwrap();
         for iri in [
-            "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
-            "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
-            "urn:eigenius:reasoning:ChainWitness:IsDerivedAs",
-            "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
-            "urn:eigenius:reasoning:JustificationTerm",
-            "urn:eigenius:reasoning:JustifiedBy",
-            "urn:eigenius:reasoning:ReasoningSentence",
-            "urn:eigenius:reasoning:VerifiedPropositionView",
-            "urn:eigenius:reasoning:EntailmentRequest",
-            "urn:eigenius:reasoning:ConsistencyRequest",
+            "urn:eigenius:witness:IsDeclaredAs",
+            "urn:eigenius:witness:IsObservedAs",
+            "urn:eigenius:witness:IsDerivedAs",
+            "urn:eigenius:witness:IsVerifiedAs",
+            "urn:eigenius:justification:Term",
+            "urn:eigenius:justification:Certificate",
+            "urn:eigenius:justification:Sentence",
+            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:EntailmentRequest",
+            "urn:eigenius:justification:ConsistencyRequest",
             "urn:eigenius:reasoning:reasoning_institution",
             "urn:eigenius:reasoning:qc_validate_justification",
             "urn:eigenius:reasoning:qc_entailment_query",
@@ -1507,7 +1507,7 @@ class p:Cat { description = "a dog"; }"#;
 
     /// Confirm that a kernel-emitted Verdict resource (the shape
     /// AutoOnLoad fires-and-emits at every StatisticalAnalysisPlan /
-    /// ReasoningSentence commit per D14 §5.6) validates cleanly. The
+    /// justification:Sentence commit per D14 §5.6) validates cleanly. The
     /// resource carries `core:ctor_name` to record which Verdict ctor
     /// (Holds / Fails / Undecidable) the institution returned — same
     /// property declared on InductiveCtor for declared-ctor names.

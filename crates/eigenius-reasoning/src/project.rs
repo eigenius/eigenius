@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Projections of a retained `JustificationTerm` — D73 §1.2, eigenius#204.
+//! Projections of a retained `justification:Term` — D73 §1.2, eigenius#204.
 //!
 //! **This is what justification logic buys over modal epistemic logic.** A stored scalar grade
 //! ("this claim is Derived") answers one question and forgets the reasons. The polynomial keeps
@@ -38,7 +38,7 @@
 //!
 //! **`Sum` being disjunctive is the thing to get right**, and it is exactly what D39 §8's
 //! propagation rule got wrong. A conclusion is fully verified if SOME spanning selection is, not if
-//! every leaf is: a claim resting on `Sum(VerifiedEvidence(a), DeclaredEvidence(b))` is verified,
+//! every leaf is: a claim resting on `Sum(Verified(a), Declared(b))` is verified,
 //! because the `a` branch alone carries it. Reading `Sum` conjunctively understates every
 //! conclusion that has a fallback, which is precisely the shape a careful author writes.
 //!
@@ -66,7 +66,7 @@ use crate::institution::iris;
 /// lie in the safe-looking direction.
 pub const MAX_SUPPORT_SETS: usize = 4096;
 
-/// The four grounding families, as they appear at a `JustificationTerm` leaf.
+/// The four grounding families, as they appear at a `justification:Term` leaf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ground {
     Declared,
@@ -78,10 +78,10 @@ pub enum Ground {
 impl Ground {
     fn from_ctor(name: &str) -> Option<Self> {
         match name {
-            "DeclaredEvidence" => Some(Ground::Declared),
-            "ObservedEvidence" => Some(Ground::Observed),
+            "Declared" => Some(Ground::Declared),
+            "Observed" => Some(Ground::Observed),
             "DerivedEvidence" => Some(Ground::Derived),
-            "VerifiedEvidence" => Some(Ground::Verified),
+            "Verified" => Some(Ground::Verified),
             _ => None,
         }
     }
@@ -89,10 +89,10 @@ impl Ground {
     /// The constructor name, for diagnostics and for rendering a projection back to the chain.
     pub fn ctor_name(self) -> &'static str {
         match self {
-            Ground::Declared => "DeclaredEvidence",
-            Ground::Observed => "ObservedEvidence",
+            Ground::Declared => "Declared",
+            Ground::Observed => "Observed",
             Ground::Derived => "DerivedEvidence",
-            Ground::Verified => "VerifiedEvidence",
+            Ground::Verified => "Verified",
         }
     }
 }
@@ -107,7 +107,7 @@ pub struct Leaf {
 /// Why a term could not be projected.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProjectError {
-    /// A constructor outside the seven `JustificationTerm` forms.
+    /// A constructor outside the seven `justification:Term` forms.
     UnknownCtor(String),
     /// A grounding constructor whose argument is not a string literal IRI.
     MalformedLeaf(String),
@@ -122,7 +122,7 @@ pub enum ProjectError {
 impl std::fmt::Display for ProjectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownCtor(c) => write!(f, "`{c}` is not a JustificationTerm constructor"),
+            Self::UnknownCtor(c) => write!(f, "`{c}` is not a justification:Term constructor"),
             Self::MalformedLeaf(c) => {
                 write!(f, "`{c}`'s argument is not a string literal IRI")
             }
@@ -216,7 +216,7 @@ fn two<'a>(ctor: &str, args: &'a [Exp]) -> Result<(&'a Exp, &'a Exp), ProjectErr
     }
 }
 
-/// Is every ground of SOME alternative `VerifiedEvidence`?
+/// Is every ground of SOME alternative `Verified`?
 ///
 /// The existential is the point: `Sum` is disjunctive, so one fully-verified branch verifies the
 /// conclusion even where another branch rests on a declaration.
@@ -262,10 +262,10 @@ pub fn cited_iris(term: &Exp) -> Result<BTreeSet<String>, ProjectError> {
 /// `proc:project_justification` — the OnDemand handler behind `qc_project_justification`.
 ///
 /// Reads the request's `subject_sentence`, resolves it on the chain, extracts its
-/// `JustificationTerm`, and reports every slice of the term's support at once. Computing the
+/// `justification:Term`, and reports every slice of the term's support at once. Computing the
 /// support is the whole cost; slicing it is free, so there is no projection-kind parameter.
 ///
-/// Returns a `reasoning:JustificationProjection`, not a `Verdict`. This REPORTS what a conclusion
+/// Returns a `justification:Projection`, not a `Verdict`. This REPORTS what a conclusion
 /// rests on; it does not judge it, and it carries no `canonical_proposition` because it asserts
 /// nothing.
 pub fn do_project_justification(
@@ -310,7 +310,7 @@ pub fn do_project_justification(
     )))
 }
 
-/// Build the `reasoning:JustificationProjection` result resource from a computed support.
+/// Build the `justification:Projection` result resource from a computed support.
 fn projection_resource(
     subject: &Iri,
     sets: &[BTreeSet<Leaf>],
@@ -390,8 +390,8 @@ mod tests {
     fn decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
             uparams: Vec::new(),
-            iri: Iri::parse("urn:eigenius:reasoning:JustificationTerm").unwrap(),
-            name: "JustificationTerm".to_string(),
+            iri: Iri::parse("urn:eigenius:justification:Term").unwrap(),
+            name: "justification:Term".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
             sort: Exp::sort(1),
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn a_grounding_leaf_is_its_own_support() {
-        let s = support(&leaf("ObservedEvidence", "urn:m1")).expect("projects");
+        let s = support(&leaf("Observed", "urn:m1")).expect("projects");
         assert_eq!(s.len(), 1);
         assert_eq!(
             s[0].iter().next().unwrap(),
@@ -436,10 +436,7 @@ mod tests {
     #[test]
     fn app_is_conjunctive_one_alternative_carrying_both_grounds() {
         // Applying `A -> B` to `A` needs both. One alternative, two leaves.
-        let t = app(
-            leaf("DeclaredEvidence", "urn:rule"),
-            leaf("ObservedEvidence", "urn:m1"),
-        );
+        let t = app(leaf("Declared", "urn:rule"), leaf("Observed", "urn:m1"));
         let s = support(&t).expect("projects");
         assert_eq!(s.len(), 1, "App yields one alternative");
         assert_eq!(s[0].len(), 2, "and it needs both grounds");
@@ -450,8 +447,8 @@ mod tests {
         // THE case D39 §8's propagation rule got wrong. `Sum` packages two independent grounds for
         // the SAME proposition; either carries it.
         let t = sum(
-            leaf("VerifiedEvidence", "urn:proof"),
-            leaf("DeclaredEvidence", "urn:assumed"),
+            leaf("Verified", "urn:proof"),
+            leaf("Declared", "urn:assumed"),
         );
         let s = support(&t).expect("projects");
         assert_eq!(s.len(), 2, "Sum yields two alternatives");
@@ -469,8 +466,8 @@ mod tests {
     fn a_declared_ground_under_app_blocks_full_verification() {
         // Contrast with the Sum case: under App there is no alternative to fall back to.
         let t = app(
-            leaf("VerifiedEvidence", "urn:proof"),
-            leaf("DeclaredEvidence", "urn:assumed"),
+            leaf("Verified", "urn:proof"),
+            leaf("Declared", "urn:assumed"),
         );
         assert!(!is_fully_verified(&t).expect("projects"));
     }
@@ -478,7 +475,7 @@ mod tests {
     #[test]
     fn specialization_passes_the_grounds_through() {
         // `SpecStr` instantiates the PROPOSITION; the grounds stay the quantified term's.
-        let inner = leaf("DeclaredEvidence", "urn:rule");
+        let inner = leaf("Declared", "urn:rule");
         assert_eq!(
             support(&spec(inner.clone(), "urn:instance")).expect("projects"),
             support(&inner).expect("projects"),
@@ -489,17 +486,17 @@ mod tests {
     #[test]
     fn the_counterfactual_distinguishes_a_fallback_from_a_dependency() {
         // The argument for retaining the polynomial. A stored scalar cannot answer either of these.
-        let m1 = || leaf("ObservedEvidence", "urn:instrument_x");
+        let m1 = || leaf("Observed", "urn:instrument_x");
 
         // Under Sum, instrument X has an alternative: losing it costs nothing.
-        let with_fallback = sum(m1(), leaf("ObservedEvidence", "urn:instrument_y"));
+        let with_fallback = sum(m1(), leaf("Observed", "urn:instrument_y"));
         assert!(
             survives_without(&with_fallback, "urn:instrument_x").expect("projects"),
             "the y branch carries the conclusion without x"
         );
 
         // Under App it does not: every alternative cites x.
-        let load_bearing = app(leaf("DeclaredEvidence", "urn:rule"), m1());
+        let load_bearing = app(leaf("Declared", "urn:rule"), m1());
         assert!(
             !survives_without(&load_bearing, "urn:instrument_x").expect("projects"),
             "no alternative avoids x"
@@ -510,11 +507,8 @@ mod tests {
     fn app_over_sum_distributes_into_both_alternatives() {
         // The multiplying case: `App(rule, Sum(a, b))` gives {rule,a} and {rule,b}.
         let t = app(
-            leaf("DeclaredEvidence", "urn:rule"),
-            sum(
-                leaf("ObservedEvidence", "urn:a"),
-                leaf("ObservedEvidence", "urn:b"),
-            ),
+            leaf("Declared", "urn:rule"),
+            sum(leaf("Observed", "urn:a"), leaf("Observed", "urn:b")),
         );
         let s = support(&t).expect("projects");
         assert_eq!(s.len(), 2);
@@ -529,11 +523,8 @@ mod tests {
     #[test]
     fn the_audit_projections_read_across_every_alternative() {
         let t = app(
-            leaf("DeclaredEvidence", "urn:agent_rule"),
-            sum(
-                leaf("ObservedEvidence", "urn:m1"),
-                leaf("DeclaredEvidence", "urn:assumed"),
-            ),
+            leaf("Declared", "urn:agent_rule"),
+            sum(leaf("Observed", "urn:m1"), leaf("Declared", "urn:assumed")),
         );
         let declared = leaves_of(&t, Ground::Declared).expect("projects");
         assert_eq!(
@@ -583,16 +574,13 @@ mod tests {
     fn support_refuses_rather_than_truncating() {
         // Nested Sums under Apps multiply. Every projection here reads as exhaustive, so a
         // truncated support set would make each of them lie in the safe-looking direction.
-        let mut t = sum(
-            leaf("ObservedEvidence", "urn:a0"),
-            leaf("ObservedEvidence", "urn:b0"),
-        );
+        let mut t = sum(leaf("Observed", "urn:a0"), leaf("Observed", "urn:b0"));
         for i in 1..14 {
             t = app(
                 t,
                 sum(
-                    leaf("ObservedEvidence", &format!("urn:a{i}")),
-                    leaf("ObservedEvidence", &format!("urn:b{i}")),
+                    leaf("Observed", &format!("urn:a{i}")),
+                    leaf("Observed", &format!("urn:b{i}")),
                 ),
             );
         }

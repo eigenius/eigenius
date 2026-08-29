@@ -1,6 +1,6 @@
 // A class used where a proposition is required (eigenius#191).
 //
-// `reasoning:JustifiedBy.declared` binds `P : Prop`, so its second argument is
+// `justification:Certificate.declared` binds `P : Prop`, so its second argument is
 // checked against `Sort(0)`. `screen:CellLine` is an `Exp::EigonClass`, which
 // inference puts in `Sort(1)`; check mode admitted it against every universe,
 // `Prop` included, so the certificate below type-checked and the sentence
@@ -9,11 +9,12 @@
 // `screen:IsInhibitory` is the control: a real `Prop`-sorted inductive in the
 // same slot, which must keep validating.
 
-namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace screen     = "urn:eigenius:demo:screen";
-namespace agent      = "urn:eigenius:reflection:agent";
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace reasoning     = "urn:eigenius:reasoning";
+namespace screen        = "urn:eigenius:demo:screen";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace justification = "urn:eigenius:justification";
 
 class screen:CellLine : core:Resource {
     description = "A cell line. A class — not a proposition.";
@@ -41,16 +42,16 @@ resource screen:rule_class_trace : reflection:DeclarationTrace {
     reflection:timestamp    = "2026-04-10T09:00:00Z";
 }
 
-resource screen:concl_class : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:demo:screen:CellLine";
+resource screen:concl_class : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:demo:screen:CellLine";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         screen:CellLine
     );
 
-    reasoning:justification = DeclaredEvidence("urn:eigenius:demo:screen:rule_class");
+    justification:term = Declared("urn:eigenius:demo:screen:rule_class");
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         declared(
             "urn:eigenius:demo:screen:rule_class",
             screen:CellLine,
@@ -78,16 +79,16 @@ resource screen:rule_prop_trace : reflection:DeclarationTrace {
     reflection:timestamp    = "2026-04-10T09:00:00Z";
 }
 
-resource screen:concl_prop : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
+resource screen:concl_prop : justification:Sentence {
+    justification:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
 
-    reasoning:proposition = type_expr(
+    justification:proposition = type_expr(
         screen:IsInhibitory
     );
 
-    reasoning:justification = DeclaredEvidence("urn:eigenius:demo:screen:rule_prop");
+    justification:term = Declared("urn:eigenius:demo:screen:rule_prop");
 
-    reasoning:certificate = type_expr(
+    justification:certificate = type_expr(
         declared(
             "urn:eigenius:demo:screen:rule_prop",
             screen:IsInhibitory,

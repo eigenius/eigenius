@@ -2,7 +2,7 @@
 //
 // Builds core → reflection → reasoning → bench-core → harness → mol →
 // SAB-16 chain, then runs the ValidateJustification handler on the
-// hand-authored `ImplementsRequiredFilter(solution)` ReasoningSentence and
+// hand-authored `ImplementsRequiredFilter(solution)` justification:Sentence and
 // asserts Holds. The chain justifies the program's construction via five
 // Declared methodological conformances composed through an acceptance rule
 // (the corrected, program-as-object-code model). Move into the harness
@@ -66,7 +66,7 @@ fn sab16_compound_filter_validates_to_holds() {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     // reasoning (compiled standalone, as drug_screening.rs does)
-    let reasoning_src = include_str!("../../../ontologies/reasoning/reasoning.esl");
+    let reasoning_src = include_str!("../../../ontologies/justification/justification.esl");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in esl::compile(reasoning_src).expect("reasoning.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();

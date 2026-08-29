@@ -41,8 +41,8 @@ const OPERATOR_IRI: &str = "urn:eigenius:formulas:Operator";
 
 /// EigenTTType InductiveType IRI (D47 §3). Pinned here so the
 /// `ConstRef` resolution check (D47 §5) can short-circuit when
-/// the inductive being walked isn't `eigentt:TypeExpr`.
-const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:TypeExpr";
+/// the inductive being walked isn't `eigentt:Term`.
+const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:Term";
 
 /// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
 /// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
@@ -164,7 +164,7 @@ impl Validator {
             }];
         }
 
-        // eigentt:TypeExpr values are validated end to end by Rule 21
+        // eigentt:Term values are validated end to end by Rule 21
         // (`check_type_expr_well_typed`, eigentt_value.rs): decode + NbE
         // type-check. Skip the generic inductive walk here so the two don't
         // produce duplicate diagnostics — Rule 21 is the single eigentt owner.
@@ -319,7 +319,7 @@ impl Validator {
         }
 
         for (i, (arg_value, arg_type_decl)) in args_array.iter().zip(arg_types.iter()).enumerate() {
-            // eigenius#188 / N4: `type_name` is an `eigentt:TypeExpr` value, so the type this
+            // eigenius#188 / N4: `type_name` is an `eigentt:Term` value, so the type this
             // dispatches on is the value's HEAD.
             let child_path = format!("{path}.args[{i}]");
             let type_name = match crate::program::ground::arg_type_head(arg_type_decl) {
@@ -697,7 +697,7 @@ mod tests {
                     Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
                 ),
                 (wk::ARG_NAME, Value::String("pred".into())),
-                // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+                // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
                 (
                     wk::TYPE_NAME,
                     Value::Json(serde_json::json!({
@@ -1692,7 +1692,7 @@ mod tests {
 
     /// Build a chain with the bootstrap layers (core + eigentt-type-fragment),
     /// plus a top layer carrying a property `eigentt_value : core:inductive`
-    /// typed at `eigentt:TypeExpr`. The top layer is also seeded with a
+    /// typed at `eigentt:Term`. The top layer is also seeded with a
     /// no-op auxiliary `Property` resource at `urn:eigenius:test:wrong_class`
     /// — used by the wrong-class test as a `ConstRef` target whose primary
     /// class isn't one of the type-former classes.
@@ -1700,7 +1700,7 @@ mod tests {
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
         let mut builder = LayerBuilder::new("test_eigentt_top", Some(head));
 
-        // Property `eigentt_value : core:inductive` typed at eigentt:TypeExpr.
+        // Property `eigentt_value : core:inductive` typed at eigentt:Term.
         let prop = make_resource(
             "urn:eigenius:test:eigentt_value",
             vec![
@@ -1712,9 +1712,7 @@ mod tests {
                 (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri(
-                        "urn:eigenius:eigentt:TypeExpr",
-                    ))]),
+                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
                 ),
             ],
         );
@@ -1741,11 +1739,11 @@ mod tests {
 
     #[test]
     fn eigentt_core_inductive_prop_is_validated_by_rule_21() {
-        // A `core:inductive` property ranged at `eigentt:TypeExpr` is carved
+        // A `core:inductive` property ranged at `eigentt:Term` is carved
         // out of `check_inductive_value` (Rule 16) and validated end-to-end by
         // Rule 21 (`check_type_expr_well_typed`, eigentt_value.rs). A bad value
         // (here an unresolved `ConstRef`) must therefore be rejected as
-        // `TypeExprMalformed` — proving the carve routes core:inductive eigentt
+        // `TermMalformed` — proving the carve routes core:inductive eigentt
         // values to the single eigentt owner, not the (removed) bespoke walk.
         //
         // Comprehensive eigentt-value coverage lives with the owners now: the
@@ -1769,7 +1767,7 @@ mod tests {
         let malformed: Vec<_> = Validator::new(layer)
             .validate()
             .into_iter()
-            .filter(|e| matches!(e.rule, ValidationRule::TypeExprMalformed))
+            .filter(|e| matches!(e.rule, ValidationRule::TermMalformed))
             .collect();
         assert_eq!(
             malformed.len(),

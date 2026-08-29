@@ -174,7 +174,7 @@ pub fn compile_file_with_institutions(
 /// walks of the layer the user file is being committed against.
 ///
 /// Without these seeds, cross-file references (e.g.
-/// `reasoning:JustifiedBy`'s ctors used in a sentence, or a
+/// `justification:Certificate`'s ctors used in a sentence, or a
 /// `stats:IID(...)` macro called in a fixture) resolve only against
 /// decls in the current file. With them, child files cite parent-
 /// layer ctors and macros without re-declaring.
@@ -262,7 +262,7 @@ pub fn compile_file_with_context(
 /// Both indices accumulate across the entire chain — no first-wins
 /// shadowing. When two chain-resident inductives in different
 /// namespaces declare a ctor with the same short name (e.g.
-/// `eigentt:TypeExpr.App` and `reasoning:JustificationTerm.App`),
+/// `eigentt:Term.App` and `justification:Term.App`),
 /// both land in `by_short_name[name]`. The ESL surface's bare-name
 /// lookup turns that into an "ambiguous — qualify as one of [...]"
 /// error rather than picking one silently.
@@ -402,12 +402,12 @@ struct Compiler {
     ///
     /// - `ctors_by_iri`: the canonical "is this IRI a constructor?" set.
     ///   IRI is the stable identifier (gh #75 extended to the ESL
-    ///   surface). Qualified references (`reasoning:App(...)`) resolve
+    ///   surface). Qualified references (`justification:App(...)`) resolve
     ///   the namespace prefix to an IRI and check membership here.
     /// - `ctors_by_short_name`: short name → list of qualifying ctor
     ///   IRIs, for bare-name lookup with ambiguity detection. Two
     ///   inductives that share a ctor short name (e.g.
-    ///   `eigentt:TypeExpr.App` and `reasoning:JustificationTerm.App`)
+    ///   `eigentt:Term.App` and `justification:Term.App`)
     ///   are both recorded; a bare `App(...)` reference becomes a hard
     ///   "ambiguous — qualify as one of [...]" error instead of
     ///   silently picking the chain-order-first one.
@@ -783,11 +783,11 @@ impl Compiler {
     ///
     /// IRI conventions:
     /// - Surface form (what the author writes): `<ns>:<CtorName>`,
-    ///   e.g. `reasoning:DeclaredEvidence`. This resolves to
+    ///   e.g. `justification:Declared`. This resolves to
     ///   `<ns_uri>:<CtorName>` via the standard namespace table.
     /// - Canonical chain IRI (what `ctors_by_iri` stores):
     ///   `<parent_inductive_iri>:<CtorName>`, e.g.
-    ///   `urn:eigenius:reasoning:JustificationTerm:DeclaredEvidence`.
+    ///   `urn:eigenius:justification:Term:Declared`.
     ///
     /// The two never match by string equality, so the resolution
     /// strategy is short-name-based with namespace filtering:
@@ -796,8 +796,8 @@ impl Compiler {
     ///   filter the candidate ctor IRIs to those whose parent IRI
     ///   starts with `ns_uri:`. If exactly one match, use it. The
     ///   namespace prefix is what disambiguates between
-    ///   `eigentt:App` (= `eigentt:TypeExpr:App`) and `reasoning:App`
-    ///   (= `reasoning:JustificationTerm:App`).
+    ///   `eigentt:App` (= `eigentt:Term:App`) and `justification:App`
+    ///   (= `justification:Term:App`).
     /// - **Bare** `Name` → look up the short name in
     ///   `ctors_by_short_name`. If exactly one ctor IRI matches, use
     ///   it. If two or more, error with an "ambiguous" message that
@@ -971,7 +971,7 @@ impl Compiler {
         ))
     }
 
-    /// Lower a `data` / `codata` parameter or index KIND to its `eigentt:TypeExpr` value.
+    /// Lower a `data` / `codata` parameter or index KIND to its `eigentt:Term` value.
     ///
     /// One function for all three telescope sites — `codata` params, `data` params, `data`
     /// indices. They were three copies of this match, and the copies had already drifted: the
@@ -1673,7 +1673,7 @@ impl Compiler {
                     // shape like `P(x)` where `P : T -> Prop` is a
                     // forall-bound function. Curry into `Exp::App` chain
                     // so EigenTT's NbE can beta-reduce at use time —
-                    // required by D39's `JustifiedBy.spec` constructor
+                    // required by D39's `justification:Certificate.spec` constructor
                     // whose result type writes `P(t)` for a forall-bound
                     // `P` and `t`.
                     let head = Exp::Var(name.name.clone());
@@ -1721,15 +1721,15 @@ impl Compiler {
                 // matches a declared ctor (in-file or chain-resident),
                 // emit `Exp::InductiveCtor` rather than
                 // `Exp::EigonClass` / `InductiveType`. Required for
-                // D39 §5 `JustifiedBy.declared : ... ->
-                // JustifiedBy(DeclaredEvidence iri) P` and any similar
+                // D39 §5 `justification:Certificate.declared : ... ->
+                // justification:Certificate(Declared iri) P` and any similar
                 // shape where a ctor of one inductive appears in
                 // another inductive's index/result-type position.
                 //
                 // `resolve_ctor_iri` walks `ctors_by_short_name` and
-                // filters by namespace prefix, so `reasoning:App(...)`
+                // filters by namespace prefix, so `justification:App(...)`
                 // unambiguously picks the `reasoning` namespace's
-                // `App` ctor even when `eigentt:TypeExpr:App` shares
+                // `App` ctor even when `eigentt:Term:App` shares
                 // the short name.
                 if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
                     return self.emit_ctor_app_from_ctor_iri(
@@ -2628,7 +2628,7 @@ impl Compiler {
             // type expression. Lowers via the same path as `axiom`
             // and `data` ctor types: ESL TypeExpr →
             // `lower_type_expr_to_exp` → `encode_type` → chain JSON.
-            // Used by D39 ReasoningSentence authors so propositions
+            // Used by D39 justification:Sentence authors so propositions
             // and certificates can be written in EigenTT surface
             // rather than the hand-built D47 tagged-dict tree.
             ast::Value::TypeExpr { typ, pos: _ } => {
@@ -2647,8 +2647,8 @@ impl Compiler {
             // ambiguity-aware diagnostic when needed), then fall
             // through to D52 §12 macro expansion only if it's not a
             // ctor. This is what makes
-            // `reasoning:App(...)` resolve to the
-            // `reasoning:JustificationTerm.App` ctor inside a value
+            // `justification:App(...)` resolve to the
+            // `justification:Term.App` ctor inside a value
             // slot — the disambiguator authors need when bare `App`
             // collides with another inductive's ctor short name.
             ast::Value::MacroCall { name, args, pos } => {
@@ -2749,7 +2749,7 @@ impl Compiler {
             )),
             // Same disambiguation as `compile_value`: try ctor
             // resolution first (qualified ctor refs reach this site
-            // when an outer ctor's arg is `reasoning:App(...)`),
+            // when an outer ctor's arg is `justification:App(...)`),
             // fall back to macro expansion otherwise.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
@@ -3753,7 +3753,7 @@ mod tests {
     /// it as writable as `data X : Set`, and lets the validator check it against the ctor schema
     /// instead of nothing checking the string at all.
     ///
-    /// The algebra lives in CORE rather than beside `eigentt:TypeExpr` because `core:Asserts`
+    /// The algebra lives in CORE rather than beside `eigentt:Term` because `core:Asserts`
     /// carries a `result_sort`, and a lower layer cannot reference a higher one.
     #[test]
     fn a_declaration_sort_may_be_polymorphic() {
@@ -3823,14 +3823,14 @@ mod tests {
     use crate::esl;
     use crate::ontology::eigon_json;
 
-    /// The `eigentt:TypeExpr` value a reference to `iri` encodes to. `core:type_name` and
+    /// The `eigentt:Term` value a reference to `iri` encodes to. `core:type_name` and
     /// `core:param_kind` carried a bare IRI STRING until eigenius#188 retyped both to
-    /// `eigentt:TypeExpr`; these two helpers keep the assertions readable.
+    /// `eigentt:Term`; these two helpers keep the assertions readable.
     fn const_ref_json(target: &str) -> Value {
         Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [target]}))
     }
 
-    /// The `eigentt:TypeExpr` value a reference to the type parameter `name` encodes to.
+    /// The `eigentt:Term` value a reference to the type parameter `name` encodes to.
     fn var_json(name: &str) -> Value {
         Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
     }
@@ -5351,7 +5351,7 @@ mod tests {
         // D39 §5 / D49 ChainWitness path: when an intermediate index is a sort literal
         // (Prop / Set / Type N), the compiler emits `Sort(level)`. This asserted the canonical
         // STRINGS "Prop" / "Set" / "Type:2" that `decode_param_kind_str` recognised; eigenius#188
-        // retyped `core:param_kind` to `eigentt:TypeExpr` so a level VARIABLE is expressible, and
+        // retyped `core:param_kind` to `eigentt:Term` so a level VARIABLE is expressible, and
         // the string grammar could not carry one.
         use crate::ontology::well_known as wk_local;
 
@@ -5499,10 +5499,10 @@ mod tests {
         // because at parse time it can't distinguish ctor from macro.
         // The compiler disambiguates by trying `resolve_ctor_iri`
         // first; only when no ctor matches does it fall through to
-        // macro expansion. Without that order, `reasoning:App(...)`
-        // in a `reasoning:justification = ...` slot errors with
+        // macro expansion. Without that order, `justification:App(...)`
+        // in a `justification:term = ...` slot errors with
         // "macro not declared" instead of resolving to the
-        // `reasoning:JustificationTerm.App` ctor.
+        // `justification:Term.App` ctor.
         let resources = esl::compile(
             r#"
             namespace core = "urn:eigenius:core";
@@ -6162,15 +6162,15 @@ mod tests {
         // D39 Phase 3 — the authored reasoning.esl source must compile
         // cleanly. Locks the structural contract: namespace declarations,
         // four `ChainWitness.Is*As` zero-ctor predicates, the
-        // `JustificationTerm` six-ctor inductive, and the `JustifiedBy`
+        // `justification:Term` six-ctor inductive, and the `justification:Certificate`
         // seven-ctor indexed inductive predicate. Any future edit to the
         // file or to the ESL surface that breaks this round-trip needs
         // to be deliberate.
-        let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+        let source = include_str!("../../../ontologies/justification/justification.esl");
         let resources = esl::compile(source).expect("reasoning.esl must compile");
 
-        // Expect: 4 ChainWitness predicates + 1 JustificationTerm
-        //         + 1 JustifiedBy = 6 inductive-type Resources.
+        // Expect: 4 ChainWitness predicates + 1 justification:Term
+        //         + 1 justification:Certificate = 6 inductive-type Resources.
         let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
         let ind_count = resources
             .iter()
@@ -6181,7 +6181,7 @@ mod tests {
             "expected at least 6 inductive Resources in reasoning.esl, found {ind_count}"
         );
 
-        // Phase 4 added two resource classes (ReasoningSentence +
+        // Phase 4 added two resource classes (justification:Sentence +
         // VerifiedPropositionView) + their property declarations.
         // Phase 7 added the two query-request classes
         // (EntailmentRequest + ConsistencyRequest). TaskOutput is
@@ -6191,10 +6191,10 @@ mod tests {
         // Reasoning institution ontology.
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
-            "urn:eigenius:reasoning:ReasoningSentence",
-            "urn:eigenius:reasoning:VerifiedPropositionView",
-            "urn:eigenius:reasoning:EntailmentRequest",
-            "urn:eigenius:reasoning:ConsistencyRequest",
+            "urn:eigenius:justification:Sentence",
+            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:EntailmentRequest",
+            "urn:eigenius:justification:ConsistencyRequest",
         ] {
             assert!(
                 resources
@@ -6265,11 +6265,11 @@ mod tests {
     fn reasoning_ontology_resolves_through_codec() {
         // End-to-end sanity check: reasoning.esl compiled on top of the
         // core ontology resolves cleanly through `resolve_class_type`.
-        // Exercises (a) the new Sort-typed-index path (JustifiedBy's
+        // Exercises (a) the new Sort-typed-index path (justification:Certificate's
         // `Prop` index), (b) the codec self-reference short-circuit
-        // (JustifiedBy's ctors reference JustifiedBy itself), and
-        // (c) cross-inductive references (JustifiedBy → ChainWitness +
-        // JustificationTerm). If any of these regress, the full Phase 6
+        // (justification:Certificate's ctors reference justification:Certificate itself), and
+        // (c) cross-inductive references (justification:Certificate → ChainWitness +
+        // justification:Term). If any of these regress, the full Phase 6
         // synthesis path breaks.
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
@@ -6284,7 +6284,7 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // Phase 4 — the resource classes (ReasoningSentence, TaskOutput,
+        // Phase 4 — the resource classes (justification:Sentence, TaskOutput,
         // VerifiedPropositionView) declare `subclass_of
         // reflection:DerivedResource`, so reflection-ontology has to be
         // in the layer chain before reasoning.esl loads.
@@ -6295,8 +6295,8 @@ mod tests {
         for r in reflection_resources {
             reflection_builder.add_resource(r).unwrap();
         }
-        // eigentt:TypeExpr is referenced from reasoning:proposition /
-        // reasoning:certificate via class_types; load the fragment too.
+        // eigentt:Term is referenced from justification:proposition /
+        // justification:certificate via class_types; load the fragment too.
         let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
         let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
         for r in eigentt_resources {
@@ -6305,9 +6305,9 @@ mod tests {
         let reflection =
             Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+        let source = include_str!("../../../ontologies/justification/justification.esl");
         let user_resources = esl::compile(source).expect("reasoning.esl must compile");
-        let mut user_builder = LayerBuilder::new("reasoning", Some(reflection));
+        let mut user_builder = LayerBuilder::new("justification", Some(reflection));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
@@ -6315,12 +6315,12 @@ mod tests {
 
         // The six inductive types — Phase 3.
         for iri_str in &[
-            "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
-            "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
-            "urn:eigenius:reasoning:ChainWitness:IsDerivedAs",
-            "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
-            "urn:eigenius:reasoning:JustificationTerm",
-            "urn:eigenius:reasoning:JustifiedBy",
+            "urn:eigenius:witness:IsDeclaredAs",
+            "urn:eigenius:witness:IsObservedAs",
+            "urn:eigenius:witness:IsDerivedAs",
+            "urn:eigenius:witness:IsVerifiedAs",
+            "urn:eigenius:justification:Term",
+            "urn:eigenius:justification:Certificate",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)
@@ -6335,8 +6335,8 @@ mod tests {
         // would mean a property declaration is malformed or references
         // an unresolved class.
         for iri_str in &[
-            "urn:eigenius:reasoning:ReasoningSentence",
-            "urn:eigenius:reasoning:VerifiedPropositionView",
+            "urn:eigenius:justification:Sentence",
+            "urn:eigenius:justification:VerifiedPropositionView",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)
@@ -6359,7 +6359,7 @@ mod tests {
                 requires eg:body;
             }
             property eg:body : core:resource {
-                class_types eigentt:TypeExpr;
+                class_types eigentt:Term;
             }
             namespace eigentt = "urn:eigenius:eigentt";
 

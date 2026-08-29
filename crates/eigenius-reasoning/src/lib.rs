@@ -16,7 +16,7 @@
 //!
 //! Implements D39's `ReasoningInstitution` over the foundational
 //! reasoning ontology declared in
-//! [`ontologies/reasoning/reasoning.esl`](../../ontologies/reasoning/reasoning.esl).
+//! [`ontologies/justification/justification.esl`](../../ontologies/justification/justification.esl).
 //! The kernel binary registers one of these at startup
 //! ([`startup::register`]) and the chain-scan registration pass wires
 //! it into the institution runtime whenever it sees the
@@ -24,10 +24,10 @@
 //!
 //! ## Phase 6 surface
 //!
-//! - `query(validate_justification, ReasoningSentence)` — **load-bearing**.
+//! - `query(validate_justification, justification:Sentence)` — **load-bearing**.
 //!   Decodes proposition + certificate via the D47 codec, decodes
 //!   justification via the chain inductive-value codec (D32 §3.7),
-//!   constructs `JustifiedBy justification proposition`, type-checks
+//!   constructs `justification:Certificate justification proposition`, type-checks
 //!   the certificate against it via the kernel's NbE checker. Returns
 //!   `Verdict::Holds | Fails { diagnostic }`.
 //! - `query(entailment_query, _)` — `NotImplemented`. Phase 7.
@@ -42,7 +42,7 @@
 //! ## Why this is structurally light
 //!
 //! No `chain_mirror.rs` (parallel to `eigenius-lean/src/chain_mirror.rs`)
-//! is needed because `JustificationTerm` and `JustifiedBy` are authored
+//! is needed because `justification:Term` and `justification:Certificate` are authored
 //! via the eigenius#72 Layer-2 ESL surface and consumed by existing
 //! kernel inductive machinery. No `checker.rs` is needed because there's
 //! no external term checker — the validator routes directly through
@@ -51,7 +51,7 @@
 //! `extract.rs` is required despite this, because the validate handler
 //! needs the `justification` property (a D32 §3.7-shaped chain
 //! inductive value) lifted into a kernel `Val` to construct
-//! `JustifiedBy(j, p)` for type-checking. The lift goes through
+//! `justification:Certificate(j, p)` for type-checking. The lift goes through
 //! `extract_typed` rather than a free helper so the abstraction stays
 //! aligned with the kernel's standard "lift chain resource → typed Val"
 //! shape — same surface every other institution uses.

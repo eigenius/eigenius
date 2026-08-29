@@ -15,7 +15,7 @@
 //! The D57 objective chain, kernel-type-checked end to end
 //! (`experiments/objectives/d57-schema-org/chain/`). Builds
 //! core → reflection → reasoning → reference → objective → 00…05 and replicates
-//! the live AutoOnLoad gate: every `reasoning:ReasoningSentence` each layer adds
+//! the live AutoOnLoad gate: every `justification:Sentence` each layer adds
 //! MUST validate to `Holds`, else the live loader would reject the layer and a
 //! downstream lemma citation of it would be unsound.
 //!
@@ -37,7 +37,7 @@ use eigenius_kernel::ontology::well_known as wk;
 use eigenius_reasoning::validate::do_validate_justification;
 use eigenius_reasoning::ReasoningInstitution;
 
-/// Build a layer from ESL against its parent, then assert every ReasoningSentence
+/// Build a layer from ESL against its parent, then assert every justification:Sentence
 /// it adds validates to `Holds` (the live AutoOnLoad gate).
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
@@ -62,7 +62,7 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
         LayerStorage::in_memory(),
     );
     let inst = ReasoningInstitution::new();
-    let sentence_class = "urn:eigenius:reasoning:ReasoningSentence";
+    let sentence_class = "urn:eigenius:justification:Sentence";
     for r in &resources {
         if !r.is_a().iter().any(|c| c.as_str() == sentence_class) {
             continue;
@@ -144,8 +144,10 @@ fn d57_objective_chain_validates() {
     );
     let reasoning = {
         let mut b = LayerBuilder::new("reasoning", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl"))
-            .expect("reasoning.esl compiles")
+        for r in esl::compile(include_str!(
+            "../../../ontologies/justification/justification.esl"
+        ))
+        .expect("reasoning.esl compiles")
         {
             b.add_resource(r).unwrap();
         }

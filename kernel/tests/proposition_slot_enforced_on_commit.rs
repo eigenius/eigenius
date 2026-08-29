@@ -155,8 +155,8 @@ fn integer_literal_claim_is_rejected_by_the_commit() {
     );
     let hit = errors
         .iter()
-        .find(|e| e.rule == ValidationRule::TypeExprNotAProposition)
-        .unwrap_or_else(|| panic!("no TypeExprNotAProposition among {errors:?}"));
+        .find(|e| e.rule == ValidationRule::TermNotAProposition)
+        .unwrap_or_else(|| panic!("no TermNotAProposition among {errors:?}"));
     assert_eq!(
         hit.resource_id.as_ref().map(Iri::as_str),
         Some(CLAIM),
@@ -182,8 +182,8 @@ fn a_type_in_the_proposition_slot_is_rejected_by_the_commit() {
     assert!(
         errors
             .iter()
-            .any(|e| e.rule == ValidationRule::TypeExprNotAProposition),
-        "no TypeExprNotAProposition among {errors:?}"
+            .any(|e| e.rule == ValidationRule::TermNotAProposition),
+        "no TermNotAProposition among {errors:?}"
     );
 }
 
@@ -218,8 +218,8 @@ fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
     assert!(
         errors
             .iter()
-            .any(|e| e.rule == ValidationRule::TypeExprNotAProposition
-                || e.rule == ValidationRule::TypeExprIllTyped),
+            .any(|e| e.rule == ValidationRule::TermNotAProposition
+                || e.rule == ValidationRule::TermIllTyped),
         "no propositionhood or typing diagnostic among {errors:?}"
     );
 }

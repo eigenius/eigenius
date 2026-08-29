@@ -1752,7 +1752,7 @@ fn cmd_compile(file: &str, json_output: bool) {
     });
 
     // Against a bootstrapped layer, not bare: constructor short names resolve through the chain's
-    // ctor table (`collect_ctors_from_layer`), so a file citing `reasoning:JustifiedBy`'s ctors
+    // ctor table (`collect_ctors_from_layer`), so a file citing `justification:Certificate`'s ctors
     // compiles here rather than only inside a running server. Seeding only ADDS resolvable names.
     let ctx = bootstrap::bootstrap().unwrap_or_else(|e| {
         eprintln!("Bootstrap failed: {e}");
@@ -1807,7 +1807,7 @@ fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
 
     if verify {
         // Against a bootstrapped layer: constructor short names resolve through the chain's ctor
-        // table, which is where `reasoning:JustifiedBy`'s constructors live.
+        // table, which is where `justification:Certificate`'s constructors live.
         let ctx = bootstrap::bootstrap().unwrap_or_else(|e| {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
