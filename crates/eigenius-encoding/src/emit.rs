@@ -53,6 +53,7 @@
 //! parser produces a different `P` — the witness key hashes the proposition — which is the whole
 //! point and is unaffected by the grade.
 
+use crate::ParsedClaimGrader;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
 use eigenius_kernel::dcg::{Candidate, ResolvedBinding, SelectionOutcome};
@@ -60,7 +61,6 @@ use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
-use eigenius_reasoning::ParsedClaimGrader;
 
 use crate::select::Pin;
 
@@ -686,7 +686,7 @@ mod tests {
                 source_path: "test.txt",
                 source_sha256: "deadbeef",
                 timestamp: "2026-08-11T00:00:00Z",
-                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+                declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: None,
             },
             glossary,
@@ -812,7 +812,7 @@ mod tests {
                 source_path: "test.txt",
                 source_sha256: "deadbeef",
                 timestamp: "2026-08-11T00:00:00Z",
-                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+                declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: Some("urn:eigenius:reference:lit:chan_2019"),
             },
             &[],

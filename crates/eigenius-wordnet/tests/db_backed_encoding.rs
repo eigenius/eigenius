@@ -3619,10 +3619,10 @@ fn resolve_document_discourse_close_out() {
     //                                unreferable — the deterministic floor)
     let kinds_path = std::env::var("EIGENIUS_KINDS").ok().map(PathBuf::from);
     let mut kinds_arm = "none";
-    let mut kinds_replay: Option<Arc<eigenius_reasoning::ReplayKindClassifier>> = None;
-    let inner_kinds: Box<dyn eigenius_reasoning::KindClassifier> = match &kinds_path {
+    let mut kinds_replay: Option<Arc<eigenius_encoding::ReplayKindClassifier>> = None;
+    let inner_kinds: Box<dyn eigenius_encoding::KindClassifier> = match &kinds_path {
         Some(p) if p.exists() => {
-            let r = eigenius_reasoning::ReplayKindClassifier::load(p).unwrap_or_else(|e| {
+            let r = eigenius_encoding::ReplayKindClassifier::load(p).unwrap_or_else(|e| {
                 panic!(
                     "EIGENIUS_KINDS={} exists but could not be read: {e}",
                     p.display()
@@ -3640,7 +3640,7 @@ fn resolve_document_discourse_close_out() {
         Some(p) => {
             #[cfg(feature = "use-llm")]
             {
-                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&page) else {
+                let Some(c) = eigenius_encoding::AnthropicKindClassifier::from_env(&page) else {
                     panic!(
                         "EIGENIUS_KINDS={} does not exist and ANTHROPIC_API_KEY is unset — \
                          cannot record a live kind draw",
@@ -3663,11 +3663,11 @@ fn resolve_document_discourse_close_out() {
         }
         None => {
             eprintln!("kind classifier: none (frame table only — unmarked claims land Assertion)");
-            Box::new(eigenius_reasoning::NoKindClassifier)
+            Box::new(eigenius_encoding::NoKindClassifier)
         }
     };
-    let kinds = eigenius_reasoning::RecordingKindClassifier::new(inner_kinds);
-    let lander = eigenius_reasoning::DerivedClaimLander::new("wrn-first-page", &kinds);
+    let kinds = eigenius_encoding::RecordingKindClassifier::new(inner_kinds);
+    let lander = eigenius_encoding::DerivedClaimLander::new("wrn-first-page", &kinds);
 
     // ── Reading-ranker arm — the COMPOSED configuration (plan §1.3 + §2.2: selection lives
     // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).

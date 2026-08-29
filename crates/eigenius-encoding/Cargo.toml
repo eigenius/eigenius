@@ -7,16 +7,23 @@ license.workspace = true
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
 eigenius-wordnet = { path = "../eigenius-wordnet" }
-eigenius-reasoning = { path = "../eigenius-reasoning" }
 eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
 serde_json.workspace = true
 clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
+serde.workspace = true
+# The live Anthropic kind classifier (claim_kind, use-llm only).
+schemars = { version = "0.8.12", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
+
+[dev-dependencies]
+# The D39 gate, for the acceptance test that commits a claim cluster and checks it validates.
+eigenius-reasoning = { path = "../eigenius-reasoning" }
 
 [features]
 # The contextual sense reranker. RECORD needs it; REPLAY does not (a recorded
 # `ranks.json` replays with no LLM at all), which is what the demo ships with.
-use-llm = ["eigenius-kernel/use-llm", "eigenius-reasoning/use-llm"]
+use-llm = ["eigenius-kernel/use-llm", "dep:schemars", "dep:tokio"]
 
 [[bin]]
 name = "prose-to-eigon"

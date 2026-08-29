@@ -20,9 +20,14 @@ substitution.
 | 3 | a trace admits a witness — `ProgramTrace → IsDerivedAs` is how a computation becomes citable | P4 deletes `IsDerivedAs` and `DerivedEvidence` |
 | 4 | an institution's `Verdict::Holds` promotes a resource's grade | the plan's disposition section removes the licensing role |
 | 5 | `eigentt:TypeExpr` names the type-level fragment | P1 renames it to `eigentt:Term` |
+| 6 | the justification calculus lives in `reasoning:` | P1.3 moves it to `justification:` |
+| 7 | the grounding leaves are named `*Evidence` | P1.3 renames them `Declared` / `Observed` / `Verified` |
+| 8 | the term algebra has seven constructors, `Sum` needs one branch | P4 leaves five, and `Sum` requires both |
 
-Claims 1–4 require rewriting; each is a sentence about what the system *means*. Claim 5 is
-`sed`-scale: **538 occurrences in 76 files** tree-wide, of which 36 files are under `docs/`.
+Claims 1–4 require rewriting; each is a sentence about what the system *means*. Claims 5–7 are
+`sed`-scale: **538 occurrences in 76 files** for `TypeExpr`, of which 36 are under `docs/`; **~650 in
+103 files** for the namespace, of which the guide chapters and every design document naming
+`reasoning:JustifiedBy` or `reasoning:ReasoningSentence` are part.
 
 **Corpus totals.** 111 of 242 files under `docs/` mention affected vocabulary: **56 of 90** design
 documents, **23 of 80** guide chapters, **27 of 65** notes, **2 of 2** spec files, **3 of 4** agent
@@ -87,6 +92,17 @@ narrative from the new mechanism, not a retraction.
 D74 (2), D75 (2), D79 (4), plus `notes/p2-n4-eigentt-representation-layer.md` (**33**, the largest
 single doc site).
 
+P1.3's constructor rename — `DeclaredEvidence` / `ObservedEvidence` / `VerifiedEvidence` to
+`Declared` / `Observed` / `Verified`, because the paper's taxonomy is of *grounds* and a declaration
+is explicitly not evidence for `P` — is **480 occurrences in 56 files**, and reaches the guide
+chapters that gloss each constructor's epistemic role one by one.
+
+P1.3's namespace move rides the same pass, but reaches further: every document naming
+`reasoning:JustifiedBy`, `reasoning:JustificationTerm` or `reasoning:ReasoningSentence` takes a
+substitution, which includes the three structural guide chapters of §3 and every §1.2 rewrite. Batch
+it with the rewrite rather than ahead of it — a document being rewritten should not be renamed
+twice.
+
 ### 1.5 Untouched
 
 The EigenQL guide (13 chapters), the formula guide (9 chapters), and the five Julia institution
@@ -134,10 +150,12 @@ against. The explainer (316 lines, 5 hits) follows the spec.
 
 23 of 80 chapters. Three are structural rewrites, not edits.
 
+**One of the three is a retirement, not a rewrite** — see the second row.
+
 | chapter | lines | affected | scope |
 |---|---|---|---|
-| [esl/09-institutions.md](../guides/esl/09-institutions.md) | 426 | 45 | **§9.10 is lines 256–426 — 171 lines, 40% of the chapter.** It teaches the seven `JustificationTerm` constructors with a per-constructor epistemic gloss, the four `JustifiedBy` grounding constructors, and the `Verified → Derived` coercion, each of which changes |
-| [platform/reasoning-institution/README.md](../guides/platform/reasoning-institution/README.md) | 282 | 44 | the whole document is the closed-audit-chain walkthrough: verdict → certificate → witnesses → traces → artifacts. Every hop but the first changes. Its table of "what admits a witness" is five rows of deleted vocabulary |
+| [esl/09-institutions.md](../guides/esl/09-institutions.md) | 426 | 45 | **§9.10 is lines 256–426 — 171 lines, 40% of the chapter.** It teaches seven `JustificationTerm` constructors where P4 leaves five, and glosses `Sum` as *"if either `j1` or `j2` justifies `P`"* where P4 requires both — each with a per-constructor epistemic gloss, alongside the four `JustifiedBy` grounding constructors and the `Verified → Derived` coercion, each of which changes. Its gloss on `DeclaredEvidence` — *"cite an `axiom` declaration or any other `DeclaredResource`"* — is the register the rewrite has to fix: a declaration is an attribution about the chain, not evidence for `P`, and the bridge to `P` is a separately declared premise |
+| [platform/reasoning-institution/README.md](../guides/platform/reasoning-institution/README.md) | 282 | 44 | **retire, do not rewrite — its subject stops existing.** P7 dissolves the reasoning institution: the paper names only Lean and statistics, and the validator was always the kernel. The document is the closed-audit-chain walkthrough (verdict → certificate → witnesses → traces → artifacts) and every hop but the first changes. What survives is a chapter on the justification calculus, which belongs beside the ESL guide, not under `platform/*-institution/` |
 | [composition/07-stats-and-reasoning-walkthrough.md](../guides/composition/07-stats-and-reasoning-walkthrough.md) | 313 | 36 | the eight-step end-to-end fixture walkthrough. Steps 3–5 are `DerivedResource` + `ProgramTrace` + `canonical_proposition` → `IsDerivedAs` → `App(DeclaredEvidence, DerivedEvidence)`. line 19's stated reason the composition works — *"both institutions honour the same chain artifact shape"* — names the shape that is deleted |
 
 Edits rather than rewrites: `esl/06` (11 — §6.4a witness predicates), `esl/11-appendix` (19, mostly
@@ -214,14 +232,47 @@ the Lean → Reasoning comorphism as partial and deferred; P3 changes what remai
 Surface: `crates/eigenius-lean` 5 files (1 source, 3 tests, 1 example generator), plus the
 `lean-verification` notebook and its fixture.
 
-### 6.3 Reasoning — P3 and P7
+### 6.3 Reasoning — dissolved at P7
 
 P3 rewrites `validate.rs`'s `verification_trace` and `emit_from_reasoning_sentence`; P4 removes a
-`Ground` variant from `project.rs`; P5 retires `grade.rs` entirely (607 lines, 46 matching lines — the
-largest single-file concentration in the tree); P7 absorbs `ValidateJustification` into uniform validation,
-which removes the institution's AutoOnLoad dispatch entirely.
+`Ground` variant from `project.rs`; P5 deletes the `Grade` and `Warrant` enums — **not** `grade.rs`
+entirely, as an earlier draft of both documents said. That file was the claim-grading pipeline
+(`ClaimGrader`, `ParsedClaimGrader`, `GradedClaim`, `ClaimSource`), of which the two enums are a
+small part, and it has since moved to `crates/eigenius-encoding` (see below).
 
-Surface: 8 source files, **15 test files**, 4 fixtures.
+**P7 removes the institution, not just its gate.** Absorbing `ValidateJustification` into uniform
+validation leaves nothing that constitutes one: the `ExportFormat`'s only caller is the retiring
+`validate.rs:83`; `consistency.rs` returns `Undecidable` for every non-empty input; `entailment.rs`
+is a real 113-line lookup with one test and no other caller; `qc_project_justification` has zero
+callers and its own ontology entry disclaims judgement — *"returns a JustificationProjection, not a
+Verdict."* The paper names two institutions, Lean and statistics, and no reasoning institution.
+
+**The crate was decomposed on `2026-08-29`, ahead of the phases.** It held three unrelated things.
+The encoding pipeline's claim machinery — `ClaimGrader`, `ParsedClaimGrader`, `DerivedClaimLander`,
+`UNATTRIBUTED_AGENT`, `ClaimSource`, `GradedClaim`, `Grade`, `Warrant` and the `KindClassifier`
+family — moved to `crates/eigenius-encoding`, whose `emit.rs`, `pipeline.rs` and `formalize.rs` were
+its only consumers; that crate no longer depends on `eigenius-reasoning` at build time. A third set
+was drift and was deleted: `DeclaredClaimGrader`, `ProseModusPonens`, `ChainRuleApplication` and
+`DocumentIngestion`/`InProcessIngestion`, plus 778 lines of tests — all reachable only from their own
+tests, and named by D67 §0 as a superseded pipeline construction. The crate is now **8 files, 2369
+lines**, all justification logic.
+
+What survives of that is `project.rs`'s algebra — and it leaves the crate too. P6.0 moves it to
+`kernel/src/justification/`, a sibling of `kernel/src/witness/`, because P6's well-foundedness check
+is unsound over `core:mentions` edges: reference edges cannot tell a conjunctive `App` from a
+disjunctive `Sum`, so a cycle through one branch of a `Sum` whose other branch is acyclic is rejected
+though the conclusion is well-founded. P3's and P4's exit gates are stated in that module's
+vocabulary and must keep running across the move. `crates/eigenius-reasoning` is left holding the
+extract path and the tests, and stops implementing `Institution`.
+
+`extract.rs` (1025 lines, the crate's largest file) goes with it: its own module doc sites it outside
+the kernel because *"the validate handler needs a `Val`"*, and that rationale inverts once the check
+moves in. With `project.rs` and `extract.rs` in the kernel and the rest deleted, **the crate is
+removed rather than renamed** — 1630 lines to the kernel, 739 deleted.
+
+Surface: 8 source files, **14 test files**, 4 fixtures — plus the seed assertions at
+`kernel/src/esl/compile.rs:6223-6244` and `bootstrap/mod.rs:1348-1350`, which pin the deleted IRIs
+and fail the reseed if they are not removed in the same edit.
 
 ### 6.4 Encoding, ingest, and the two generated ontologies
 
@@ -270,7 +321,7 @@ reasoning, 8 statistics, 6 kernel, 3 Lean, 5 elsewhere — against 56 source fil
 
 ## 8. What the build plan's inventory does not cover
 
-Seven findings. Each is a decision the plan has to make, not a document to edit.
+Eight findings. Each is a decision the plan has to make, not a document to edit.
 
 ### 8.1 `reflection:EpistemicStatus` has two consumers the removal inventory does not list
 
@@ -346,19 +397,52 @@ The one accommodation is the postfix `HOLDS` / `FAILS` / `UNDECIDABLE`, which re
 `Verdict`. D2 §3.8 records it as Verdict-specific in v1, with generalisation to any inductive named as
 a future revision.
 
-The escape hatch exists and is unused: `reasoning:qc_project_justification` is an OnDemand QueryClass
-reachable over `FIBER`, returning a `JustificationProjection` of integers, booleans, and IRI string
-arrays — the term flattened into EigenQL's value model. **No notebook, demo, experiment or guide
-invokes it.** Its `reasoning:derived_grounds` slot is itself a P4 casualty.
+The escape hatch exists and is unused: `qc_project_justification` is an OnDemand QueryClass reachable
+over `FIBER`, returning a `JustificationProjection` of integers, booleans, and IRI string arrays — the
+term flattened into EigenQL's value model. **No notebook, demo, experiment or guide invokes it**, and
+P7 deletes it along with the rest of the institution.
 
-**Why this lands on the plan rather than beside it.** `is_a` membership is an array of IRI strings, so
-filtering `MATCH "…:DerivedResource"(?r)` works today — the stored grade is the one epistemic fact
-EigenQL can filter on. P5 removes it and replaces it with something computed that EigenQL cannot
-compute. Either the plan states that warrant is a Rust-API answer and EigenQL loses grade filtering,
-or `qc_project_justification` (or a successor) becomes the supported route and P5 has a consumer to
-build against.
+**The fix is a separate line of work, not a phase of this plan.** The direction is a λProlog extension
+over EigenQL's Datalog foundation, tracked on its own. That is a better fit than adding structural
+inductive matching to the current engine, for a specific reason: λProlog's terms are simply-typed
+λ-terms and its unification is up to **αβη**, which is exactly the α problem the current engine cannot
+express — `Pi`, `Sig` and `Lam` carry binder *names*, so structural JSON equality is α-sensitive in
+both directions. It also subsumes the first-order case in the same mechanism: the justification
+algebra has no binders, so `support` / `leaves_of` / `survives_without` are ordinary Horn clauses and
+need no second facility.
 
-### 8.7 The agent skills write the deleted shape
+Two constraints that design will have to state, recorded here so this note's diagnosis is not read as
+a specification:
+
+- **δ and ι are not in αβη.** Proposition identity in the kernel is `decode → eval (β/δ/ι) → readback
+  → α-canonicalize → hash` (`kernel/src/layer/witness_index.rs:127`). Unification up to αβη covers α
+  and β; definitional unfolding (D66's δ-transparency, the reason `hash_stored_proposition` decodes
+  against the layer instead of hashing stored JSON) and ι are not covered, and need either unfolding
+  before unification or definitions expressed as clauses.
+- **Full higher-order unification is undecidable.** Practical systems restrict to the pattern
+  fragment, which is decidable with most-general unifiers. Which proposition queries are answerable
+  follows from where that line is drawn.
+
+**What this plan still has to decide.** `is_a` membership is an array of IRI strings, so filtering
+`MATCH "…:DerivedResource"(?r)` works today — the stored grade is the one epistemic fact EigenQL can
+filter on. P5 removes it, and its computed replacement is out of EigenQL's reach until the extension
+lands. P5 must therefore state plainly that warrant is a Rust-API answer in the interim, and say what
+happens to the queries that filter on a grade class today.
+
+### 8.7 `reflection:warranted_by` holds the word *warrant* and is in no phase
+
+`reflection:warranted_by` — *"the criterion, convention, source, or prior result that grounds this
+declaration"* (D72 §3.3) — is D72's warrant axis. Under the paper that is provenance, not warrant. It
+carries **no `class_types`**, so it is an untyped resource pointer: the same defect as
+`reflection:source`, one step removed.
+
+It is the most-used epistemic property outside the grade classes — **161 occurrences**, in every WRN
+chain file, the objective and benchmark experiment chains, `demo/prose-to-formulas-v2`, and eight
+test fixtures — and it appeared in no phase of the build plan until this analysis. It now sits in P5
+alongside `reflection:source`, with three options and a requirement that the name be resolved either
+way, because P1.3 declines `warrant:` as a namespace only while this property still holds the word.
+
+### 8.8 The agent skills write the deleted shape
 
 `docs/method/{reasoning,eigenius,grounding}.md` are executable methodology, not documentation. Until
 they are updated, any agent following the reasoning protocol authors `DeclaredResource` +
@@ -374,11 +458,12 @@ Documents follow their phase; nothing here needs to lead. Two exceptions.
 | when | what | why |
 |---|---|---|
 | **before P4** | the ACP spec's version decision (§8.5) | a conformance claim's meaning must not change silently while the phases run |
-| **before P4** | `docs/method/` skills (§8.7) | they author chains; a stale skill produces data the new tree rejects |
-| with P1 | the `TypeExpr` → `Term` rename across 36 doc files | one mechanical pass, batched with the code rename |
+| **before P4** | `docs/method/` skills (§8.8) | they author chains; a stale skill produces data the new tree rejects |
+| with P1 | the `TypeExpr` → `Term` rename across 36 doc files | one mechanical pass, batched with the code rename. P1.3's `reasoning:` → `justification:` move waits for each document's own phase, so nothing is renamed twice |
 | with P4 | D52, D56, D53, D51; the statistics institution and its 8 test files | the grounds vocabulary change |
 | with P5 | the narrative documents (§1.3), the objective ontology (§8.1), guides/README | the four-category framing |
-| with P7 | D49, D14/D10, D80, the three structural guide chapters, the website mirror | the kernel/chain boundary and the operational protocol |
+| with P6 | D49 §3–§6 (the machinery's location), and any doc siting the support algebra in the reasoning crate | P6.0 moves it to `kernel/src/justification/` |
+| with P7 | D49 §7, D14/D10, D80, the three structural guide chapters, the website mirror | the kernel/chain boundary and the operational protocol. The reasoning-institution chapter is retired here, not rewritten |
 | after P7 | D39, D73, D81, D82 status headers; the D70–D82 index gap | retirement is last, so each document is retired against a finished state |
 
 **The guides are the natural last gate.** `composition/07` and `platform/reasoning-institution/README.md`

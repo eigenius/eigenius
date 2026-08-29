@@ -1066,8 +1066,11 @@ dependencies = [
  "eigenius-reasoning",
  "eigenius-storage-rocksdb",
  "eigenius-wordnet",
+ "schemars",
+ "serde",
  "serde_json",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
@@ -1244,11 +1247,9 @@ name = "eigenius-reasoning"
 version = "0.1.0"
 dependencies = [
  "eigenius-kernel",
- "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -1350,8 +1351,8 @@ name = "eigenius-wordnet"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "eigenius-encoding",
  "eigenius-kernel",
- "eigenius-reasoning",
  "eigenius-storage-rocksdb",
  "serde_json",
 ]

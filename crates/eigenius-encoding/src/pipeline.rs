@@ -368,9 +368,9 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // INSIDE the discourse loop, which is what makes it available as an antecedent to a later
     // demonstrative. The kinds arm mirrors every other recorded stage (exists → replay, absent +
     // live → record); the recorder wraps whichever arm, so a run always leaves its draw.
-    let kind_classifier: Option<Box<dyn eigenius_reasoning::KindClassifier>> = match &args.kinds {
+    let kind_classifier: Option<Box<dyn crate::KindClassifier>> = match &args.kinds {
         Some(p) if p.exists() => {
-            let r = eigenius_reasoning::ReplayKindClassifier::load(p)
+            let r = crate::ReplayKindClassifier::load(p)
                 .map_err(|e| format!("read {}: {e}", p.display()))?;
             eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
             Some(Box::new(r))
@@ -378,7 +378,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         Some(p) => {
             #[cfg(feature = "use-llm")]
             {
-                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&doc) else {
+                let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
                     return Err(format!(
                         "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
                         p.display()
@@ -388,7 +388,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                     "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
                     p.display()
                 );
-                Some(Box::new(c) as Box<dyn eigenius_reasoning::KindClassifier>)
+                Some(Box::new(c) as Box<dyn crate::KindClassifier>)
             }
             #[cfg(not(feature = "use-llm"))]
             return Err(format!(
@@ -399,11 +399,11 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         }
         None => None,
     };
-    let kind_recorder = kind_classifier.map(eigenius_reasoning::RecordingKindClassifier::new);
+    let kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
     // ONE claim identity: the lander names claims exactly as the emitter will, so the
     // `enc:AnaphorBinding` this run records points at resources this run's artifact contains.
     let lander = kind_recorder.as_ref().map(|k| {
-        eigenius_reasoning::DerivedClaimLander::new(&doc_id, k)
+        crate::DerivedClaimLander::new(&doc_id, k)
             .with_emission_namespace(&args.ns)
             .with_source(&format!("{} (sha256 {sha})", args.source.display()))
     });
@@ -492,7 +492,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             // rather than hiding it behind the program that parsed it (eigenius#201 / D72).
             // Supplying a real `reflection:Agent` is D71's `land` story: the moment a
             // formulation becomes an assertion is the moment someone takes responsibility.
-            declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+            declared_by: crate::UNATTRIBUTED_AGENT,
             source_ref: args.source_ref.as_deref(),
         },
     })?;
