@@ -72,9 +72,10 @@
 //      (the domain claim)
 //    - The outer `justification:App(rule, ...)` yields `StrongInhibitor(EIG_0291)`
 //      (the conclusion).
-//    The certificate is two nested `app(A, B, j1, j2, c1, c2)` calls
-//    composing justification:Certificate.declared (rule) + justification:Certificate.declared
-//    (bridge) + justification:Certificate.derived (verdict) via justification:Certificate.app.
+//    The certificate is three nested `app(A, B, j1, j2, c1, c2)` calls
+//    composing justification:Certificate.declared (rule) + .declared
+//    (bridge) + .declared (plan) + .observed (sample set), all via
+//    justification:Certificate.app.
 //
 // On commit, ValidateJustification fires AutoOnLoad on the sentence
 // and the kernel type-checks the certificate against

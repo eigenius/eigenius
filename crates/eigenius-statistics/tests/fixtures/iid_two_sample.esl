@@ -10,8 +10,9 @@
 // a vehicle-only control arm and a drug-treated arm. Six biological
 // replicates per arm. Welch's t-test rejects H0 (mean_ctrl = mean_drug)
 // at α = 0.05 — the verdict is Holds, and the predicate
-// `DifferentMeanActivity` lands in the chain as a DerivedResource the
-// downstream D39 reasoning could cite via DerivedEvidence (parallel
+// `DifferentMeanActivity` lands in the chain as a DerivedResource recording
+// what the run produced; downstream D39 reasoning would ground on
+// `App(Declared(plan_yields_effect), Observed(sample_set))` (parallel
 // to the IC50 → StrongInhibitor composition in d39_composition.esl).
 
 namespace core       = "urn:eigenius:core";

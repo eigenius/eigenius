@@ -9,7 +9,7 @@
 //   - `claim_eig0291_confirmatory_holds` — the n=6 confirmatory read.
 //     One-sided p ≪ 0.05, verifier produces Holds. Exercises the
 //     Holds success path AND is what the D39 composition fixture
-//     cites via `DerivedEvidence(...)`.
+//     grounds against, via this file's plan-reproducibility declaration.
 //
 // Verdict-as-DerivedResource shape (post-step-1 / institution-surface
 // revision):
@@ -28,9 +28,10 @@
 //   - The `StatisticalAnalysisResult` derivation that carries the
 //     verifier-emitted `canonical_proposition` is pre-authored for
 //     the confirmatory SAP at IRI
-//     `{plan_iri}:result:main_effect`. Without it, downstream D39
-//     reasoning citing `DerivedEvidence(...)` couldn't admit a
-//     witness via the chain index. (Tests that DISPATCH the verifier
+//     `{plan_iri}:result:main_effect`. It grounds nothing on its own —
+//     see the plan-reproducibility declarations at the end of this
+//     file — but it is the record of what the statistic came to, and
+//     what the plan declaration is written against. (Tests that DISPATCH the verifier
 //     see the institution emit its own SAR in-test, separate from
 //     this pre-authored chain artefact.)
 //   - No ProgramTrace. The SAR's `is_a` membership in
