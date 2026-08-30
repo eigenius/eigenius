@@ -1335,7 +1335,6 @@ class p:Cat { description = "a dog"; }"#;
         for iri in [
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
-            "urn:eigenius:witness:IsDerivedAs",
             "urn:eigenius:witness:IsVerifiedAs",
             "urn:eigenius:justification:Term",
             "urn:eigenius:justification:Certificate",

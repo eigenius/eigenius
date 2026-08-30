@@ -193,7 +193,7 @@ resource s16:concl_solution_implements : justification:Conclusion {
                 s16:ImplementsRequiredFilter(p),
 
             // justification spine
-            j0 = justification:SpecStr(Declared(RULE), P),
+            j0 = Declared(RULE),
             j1 = justification:App(j0, Declared(D1)),
             j2 = justification:App(j1, Declared(D2)),
             j3 = justification:App(j2, Declared(D3)),
@@ -213,8 +213,6 @@ resource s16:concl_solution_implements : justification:Conclusion {
                     s16:ImplementsRequiredFilter(p),
                 Declared(RULE),
                 P,
-                // tag : audit label, same IRI as the instance
-                P,
                 declared(RULE, RULE_P)
             ),
             cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
@@ -230,10 +228,7 @@ resource s16:concl_solution_implements : justification:Conclusion {
                            justification:App(
                                justification:App(
                                    justification:App(
-                                       SpecStr(
-                                           Declared("urn:eigenius:bench:sab16:impl_rule"),
-                                           "urn:eigenius:bench:sab16:solution"
-                                       ),
+                                       Declared("urn:eigenius:bench:sab16:impl_rule"),
                                        Declared("urn:eigenius:bench:sab16:conf_featurization")
                                    ),
                                    Declared("urn:eigenius:bench:sab16:conf_alert_catalogs")

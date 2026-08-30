@@ -31,9 +31,9 @@
 //!   scope admissibility check, and returns a gate `Verdict::Holds`
 //!   (the SAP ran) plus one or more `StatisticalAnalysisResult`
 //!   `InstitutionEmittedDerivation`s carrying the derived
-//!   `canonical_proposition` + numerics per effect. The D49 §6 witness
-//!   emitter walks the result resources directly to admit the
-//!   IsDerivedAs witnesses. Gate Fails covers structural failures
+//!   `canonical_proposition` + numerics per effect. Those results record what
+//!   ran and ground nothing on their own; a downstream computed claim is
+//!   `App(Declared(plan), Observed(inputs))`. Gate Fails covers structural failures
 //!   (missing field, unwired dispatch, scope violation) — no result is
 //!   emitted in those cases.
 //! - `extract_typed`, `reify` — `NotImplemented` in Phase 1. Future

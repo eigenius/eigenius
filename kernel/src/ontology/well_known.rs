@@ -452,9 +452,12 @@ pub const OBSERVED_RESOURCE: &str = "urn:eigenius:reflection:ObservedResource";
 pub const VERIFIED_RESOURCE: &str = "urn:eigenius:reflection:VerifiedResource";
 /// `reflection:InstitutionEmittedDerivation` — marker subclass of
 /// `DerivedResource` for resources the kernel commits as side-effects of
-/// AutoOnLoad institution dispatches. The witness emitter walks these
-/// directly (no ProgramTrace required) to admit
-/// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6.
+/// AutoOnLoad institution dispatches. It records what the run produced and
+/// grounds nothing on its own: the witness emitter used to walk these directly
+/// (no ProgramTrace required) to admit
+/// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6, but a
+/// computed claim rests on the plan being DECLARED to denote a function of its
+/// input and on the input being OBSERVED, and no execution establishes either.
 pub const INSTITUTION_EMITTED_DERIVATION: &str =
     "urn:eigenius:reflection:InstitutionEmittedDerivation";
 /// `reflection:from_subject` — the analysis/claim IRI that triggered
@@ -484,9 +487,11 @@ pub const DECLARATION_TRACE: &str = "urn:eigenius:reflection:DeclarationTrace";
 /// Carries `reflection:resource` and `reflection:source`. Per D49 §6, a
 /// successful commit emits an `IsObservedAs` witness.
 pub const OBSERVATION_TRACE: &str = "urn:eigenius:reflection:ObservationTrace";
-/// Resource recording a complete program execution. The output resource's
-/// IRI is the witness `iri` key; per D49 §6 commit emits an `IsDerivedAs`
-/// witness.
+/// Resource recording a complete program execution. Pure provenance: it admits
+/// no witness, because the fact that a computation ran grounds nothing. What a
+/// computed claim rests on is `App(Declared(plan), Observed(inputs))`, whose two
+/// halves come from the plan's [`DECLARATION_TRACE`] and the input's
+/// [`OBSERVATION_TRACE`].
 pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
@@ -496,9 +501,10 @@ pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
 
 /// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
-/// (eigenius#205). Admits `IsDeclaredAs`, not `IsDerivedAs`: `Derived` holds a trace tied to a
-/// KERNEL-INITIATED activity, and a transcription has no `f : I -> O`, so no specification, so
-/// nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different claim.
+/// (eigenius#205). Admits `IsDeclaredAs`: a transcription has no `f : I -> O`, so no
+/// specification, so nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different
+/// claim, and the one trace kind that already refused to treat a run record as a ground of its own
+/// kind before the three-grounds change made that uniform.
 pub const EXTERNAL_EXECUTION_TRACE: &str = "urn:eigenius:reflection:ExternalExecutionTrace";
 
 /// `reflection:resource` — the target IRI a Trace points at. Common to
@@ -543,20 +549,24 @@ pub const IS_A_TYPE: &str = "urn:eigenius:eigentt:is_a_type";
 
 // --- D49 ChainWitness: predicate-type IRIs ---
 //
-// The four kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
+// The three kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
 // predicate types. ESL has no constructors for their inhabitants; the
 // kernel synthesises `Val::ChainWitness` values at `justification:Certificate.*`
 // constructor type-check time via the per-Layer witness-index lookup.
 // The IRIs are referenced from the `justification:Certificate` indexed
 // inductive's constructor signatures (D39 §5) and from the witness-
 // synthesis hook in `kernel/src/nbe/check.rs` (D49 §5).
+//
+// `IsDerivedAs` was a fourth until the three-grounds change. It could only ever
+// be consumed by `justification:Certificate.derived`, which is gone with the
+// `DerivedEvidence` term constructor, so no lookup can ask for it — removing the
+// constant is forced by the algebra, not a separate decision.
 
 pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:witness:IsDeclaredAs";
 pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:witness:IsObservedAs";
-pub const CHAIN_WITNESS_IS_DERIVED_AS: &str = "urn:eigenius:witness:IsDerivedAs";
 pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:witness:IsVerifiedAs";
 
-/// Helper: map a class IRI for one of the four `ChainWitness.IsXxAs`
+/// Helper: map a class IRI for one of the three `ChainWitness.IsXxAs`
 /// predicate types to its `WitnessCategory`, or `None` if the IRI is
 /// not a ChainWitness predicate.
 pub fn chain_witness_category_for_iri(iri: &str) -> Option<crate::witness::WitnessCategory> {
@@ -564,7 +574,6 @@ pub fn chain_witness_category_for_iri(iri: &str) -> Option<crate::witness::Witne
     match iri {
         CHAIN_WITNESS_IS_DECLARED_AS => Some(WitnessCategory::Declared),
         CHAIN_WITNESS_IS_OBSERVED_AS => Some(WitnessCategory::Observed),
-        CHAIN_WITNESS_IS_DERIVED_AS => Some(WitnessCategory::Derived),
         CHAIN_WITNESS_IS_VERIFIED_AS => Some(WitnessCategory::Verified),
         _ => None,
     }

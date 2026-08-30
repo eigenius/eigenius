@@ -35,19 +35,22 @@ use crate::ontology::{eigon_cbor, Iri, Value};
 use crate::program::eigentt_type_mirror::{encode_type, EncodeError};
 use sha2::{Digest, Sha256};
 
-/// Which of the four epistemic-category predicate families a witness
-/// belongs to. The four families are independent — the kernel does not
-/// silently coerce `IsObservedAs` to `IsDeclaredAs` even when the IRIs
-/// match — but `IsVerifiedAs` propagates to `IsDerivedAs` per the
-/// reflection ontology's `VerifiedResource subclass_of DerivedResource`
-/// relation. The coercion is implemented at lookup time
-/// (see `crate::layer::lookup_chain_witness`), not by populating both
-/// keys in the index.
+/// Which of the three epistemic-category predicate families a witness
+/// belongs to. The families are independent: the kernel does not silently
+/// coerce one to another even when the IRIs match.
+///
+/// A `Derived` variant stood beside these until the three-grounds change, and a
+/// hardcoded `IsVerifiedAs → IsDerivedAs` coercion in `lookup_chain_witness`
+/// let a Verified witness satisfy a `derived(…)` citation. That coercion
+/// implemented a lattice over the categories which the design rejects, and it
+/// was not driven by the ontology's `subclass_of` — it was a match arm. It went
+/// with the category: `Derived` could only be consumed by
+/// `justification:Certificate.derived`, and a computed claim now grounds as
+/// `App(Declared(plan), Observed(inputs))`, which needs no category of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WitnessCategory {
     Declared,
     Observed,
-    Derived,
     Verified,
 }
 
@@ -59,7 +62,6 @@ impl WitnessCategory {
         match self {
             WitnessCategory::Declared => "IsDeclaredAs",
             WitnessCategory::Observed => "IsObservedAs",
-            WitnessCategory::Derived => "IsDerivedAs",
             WitnessCategory::Verified => "IsVerifiedAs",
         }
     }
@@ -266,7 +268,6 @@ mod tests {
         for cat in [
             WitnessCategory::Declared,
             WitnessCategory::Observed,
-            WitnessCategory::Derived,
             WitnessCategory::Verified,
         ] {
             assert!(cat.label().starts_with("Is"));
@@ -314,8 +315,8 @@ mod tests {
     fn from_exp_and_from_encoded_agree() {
         let p = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::sort(0)));
         let encoded = encode_type(&p).unwrap();
-        let k_exp = WitnessKey::from_exp(WitnessCategory::Derived, ex_iri(), &p).unwrap();
-        let k_enc = WitnessKey::from_encoded(WitnessCategory::Derived, ex_iri(), &encoded);
+        let k_exp = WitnessKey::from_exp(WitnessCategory::Observed, ex_iri(), &p).unwrap();
+        let k_enc = WitnessKey::from_encoded(WitnessCategory::Observed, ex_iri(), &encoded);
         assert_eq!(k_exp, k_enc);
     }
 

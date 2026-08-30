@@ -30,7 +30,7 @@
 //! ```text
 //!   reference:Reference       the source work every unit hangs off (minted, or cited by IRI)
 //!   enc:ReasoningStructure    the artifact ROOT — the claims, the source, the bytes parsed
-//!   reflection:ProgramTrace ─▶ IsDerivedAs structure   ← the RUN, recorded once
+//!   reflection:ProgramTrace                            ← the RUN, recorded once (grounds nothing)
 //! ```
 //!
 //! The root exists so the artifact has a HANDLE: a service returns it, a notebook cell re-opens it,

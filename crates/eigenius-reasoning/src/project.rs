@@ -34,7 +34,10 @@
 //! | a grounding leaf `L` | `{{L}}` — one alternative, one leaf |
 //! | `App(a, b)` | `{ sa ∪ sb : sa ∈ support(a), sb ∈ support(b) }` — CONJUNCTIVE, both needed |
 //! | `Sum(a, b)` | `support(a) ∪ support(b)` — DISJUNCTIVE, either suffices |
-//! | `SpecStr(j, tag)` | `support(j)` — specialization changes the proposition, not the grounds |
+
+//! There is no specialization row. `spec_poly` used to build `SpecStr(j, tag)`, whose support was
+//! `support(j)` — specialization changes the proposition, not the grounds. Now that the rule leaves
+//! the term at `j`, that identity holds by there being nothing to project.
 //!
 //! **`Sum` being disjunctive is the thing to get right**, and it is exactly what D39 §8's
 //! propagation rule got wrong. A conclusion is fully verified if SOME spanning selection is, not if
@@ -66,12 +69,17 @@ use crate::institution::iris;
 /// lie in the safe-looking direction.
 pub const MAX_SUPPORT_SETS: usize = 4096;
 
-/// The four grounding families, as they appear at a `justification:Term` leaf.
+/// The three grounding families, as they appear at a `justification:Term` leaf.
+///
+/// A `Derived` variant read the `DerivedEvidence(iri)` constructor until the three-grounds change.
+/// A computed claim now grounds as `App(Declared(plan), Observed(inputs))`, so it projects to TWO
+/// leaves in different families rather than one opaque leaf naming a program output — which is the
+/// point: `leaves_of(term, Ground::Observed)` returns the sample set, and `survives_without` on
+/// that sample set answers false. Both answered wrongly before, in the reassuring direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ground {
     Declared,
     Observed,
-    Derived,
     Verified,
 }
 
@@ -80,7 +88,6 @@ impl Ground {
         match name {
             "Declared" => Some(Ground::Declared),
             "Observed" => Some(Ground::Observed),
-            "DerivedEvidence" => Some(Ground::Derived),
             "Verified" => Some(Ground::Verified),
             _ => None,
         }
@@ -91,7 +98,6 @@ impl Ground {
         match self {
             Ground::Declared => "Declared",
             Ground::Observed => "Observed",
-            Ground::Derived => "DerivedEvidence",
             Ground::Verified => "Verified",
         }
     }
@@ -107,7 +113,7 @@ pub struct Leaf {
 /// Why a term could not be projected.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProjectError {
-    /// A constructor outside the seven `justification:Term` forms.
+    /// A constructor outside the five `justification:Term` forms.
     UnknownCtor(String),
     /// A grounding constructor whose argument is not a string literal IRI.
     MalformedLeaf(String),
@@ -194,14 +200,6 @@ pub fn support(term: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
             sa.extend(sb);
             Ok(sa)
         }
-        // Specialization instantiates the PROPOSITION; the grounds are the quantified term's.
-        "SpecStr" => match args {
-            [j, _tag] => support(j),
-            other => Err(ProjectError::Arity {
-                ctor: ctor.to_string(),
-                got: other.len(),
-            }),
-        },
         other => Err(ProjectError::UnknownCtor(other.to_string())),
     }
 }
@@ -358,7 +356,6 @@ fn projection_resource(
     for (prop, g) in [
         (iris::PROP_DECLARED_GROUNDS, Ground::Declared),
         (iris::PROP_OBSERVED_GROUNDS, Ground::Observed),
-        (iris::PROP_DERIVED_GROUNDS, Ground::Derived),
         (iris::PROP_VERIFIED_GROUNDS, Ground::Verified),
     ] {
         let vals = grounds(g);
@@ -411,13 +408,6 @@ mod tests {
     }
     fn sum(a: Exp, b: Exp) -> Exp {
         Exp::InductiveCtor(decl().iri.clone(), "Sum".to_string(), vec![a, b])
-    }
-    fn spec(j: Exp, tag: &str) -> Exp {
-        Exp::InductiveCtor(
-            decl().iri.clone(),
-            "SpecStr".to_string(),
-            vec![j, Exp::LitString(tag.to_string())],
-        )
     }
 
     #[test]
@@ -473,13 +463,52 @@ mod tests {
     }
 
     #[test]
-    fn specialization_passes_the_grounds_through() {
-        // `SpecStr` instantiates the PROPOSITION; the grounds stay the quantified term's.
-        let inner = leaf("Declared", "urn:rule");
+    fn specialization_is_no_longer_a_term_at_all() {
+        // `spec_poly` used to build `SpecStr(j, tag)` and `support` passed the grounds through it,
+        // because instantiating a universal changes the PROPOSITION and not what it rests on. The
+        // rule now leaves the term at `j`, so that pass-through is the identity on nothing —
+        // and a term still carrying the old constructor is refused rather than silently projected.
         assert_eq!(
-            support(&spec(inner.clone(), "urn:instance")).expect("projects"),
-            support(&inner).expect("projects"),
-            "specialization changes what is concluded, not what it rests on"
+            support(&Exp::InductiveCtor(
+                decl().iri.clone(),
+                "SpecStr".to_string(),
+                vec![leaf("Declared", "urn:rule"), Exp::LitString("urn:x".into())],
+            )),
+            Err(ProjectError::UnknownCtor("SpecStr".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_computed_ground_projects_to_its_plan_and_its_input() {
+        // The three-grounds shape, and P4's exit criterion. A statistics-derived claim used to be
+        // one `DerivedEvidence(<program>:result)` leaf: `leaves_of(term, Observed)` returned
+        // NOTHING, and `survives_without(<dataset>)` returned TRUE — the conclusion "survived"
+        // losing the only data it was computed from, because the dataset appeared nowhere in the
+        // term. Both answers were wrong in the reassuring direction.
+        let t = app(
+            leaf(
+                "Declared",
+                "urn:eigenius:pub:wrn:wrn_dep_plan_yields_effect",
+            ),
+            leaf("Observed", "urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+        );
+        assert_eq!(
+            leaves_of(&t, Ground::Observed)
+                .expect("projects")
+                .iter()
+                .map(|l| l.iri.as_str())
+                .collect::<Vec<_>>(),
+            vec!["urn:eigenius:pub:wrn:wrn_dep_sampleset"],
+            "the sample set is a ground, so the projection names it"
+        );
+        assert!(
+            !survives_without(&t, "urn:eigenius:pub:wrn:wrn_dep_sampleset").expect("projects"),
+            "losing the data the claim was computed from must not leave it standing"
+        );
+        assert!(
+            !survives_without(&t, "urn:eigenius:pub:wrn:wrn_dep_plan_yields_effect")
+                .expect("projects"),
+            "nor does losing the declaration that the plan computes what it claims to"
         );
     }
 

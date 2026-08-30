@@ -60,12 +60,14 @@
 //      `DeclarationTrace` admits the IsDeclaredAs witness.
 //
 // 6. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`. The
-//    justification composes THREE evidences via nested `App`:
+//    justification composes FOUR evidences via nested `App`:
 //      justification:App(rule,
 //          justification:App(bridge,
-//              DerivedEvidence(verdict_iri)))
-//    - `DerivedEvidence(verdict_iri)` exposes
-//      `stats:lt(mean_of(s), 100.0)` (the statistical claim)
+//              justification:App(Declared(plan), Observed(sampleset))))
+//    - `App(Declared(plan), Observed(sampleset))` is the COMPUTED ground and
+//      exposes `stats:lt(mean_of(s), 100.0)` (the statistical claim). It was one
+//      `DerivedEvidence(verdict_iri)` leaf: the fact that a computation ran,
+//      standing in for both the method and the data it was run on.
 //    - The inner `justification:App(bridge, verdict)` yields `HasLowIC50(EIG_0291)`
 //      (the domain claim)
 //    - The outer `justification:App(rule, ...)` yields `StrongInhibitor(EIG_0291)`
@@ -216,11 +218,45 @@ resource screen_result:main_effect :
     );
 }
 
+// ─── Step 4b: the plan's reproducibility declaration ───────────────
+//
+// The SAR above records that a computation ran. That is provenance, and it
+// grounds nothing: a computed claim rests on the assertion that the PLAN denotes
+// a function of its input — which no execution establishes, since determinism is
+// a fact about the environment rather than something recoverable from having run
+// once — and on the INPUT, which the SampleSet's ObservationTrace already
+// attests. So the statistical claim is grounded by
+// `App(Declared(plan_yields_main_effect), Observed(sampleset))`, and this is the
+// declared half.
+
+resource screen:warrant_plan_reproducibility : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "The analysis plan pins its statistic, alpha, directionality, variance assumption and outlier rule over a recorded sample set. Those together are what make it a function of its input rather than of the occasion — the claim `Declared(plan)` carries, and the one no execution record could establish on its own.";
+    core:short_name = "warrant_plan_reproducibility";
+}
+
+resource screen:claim_eig0291_lowic50_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying claim_eig0291_lowic50 to the recorded sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset")
+        -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
+    );
+}
+
+resource screen:claim_eig0291_lowic50_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = screen:claim_eig0291_lowic50_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-04-10T09:00:00Z";
+}
+
 // ─── Step 5: statistical-to-domain bridge + its DeclarationTrace ────
 //
 // The bridge translates the verifier-derived statistical claim into
-// the domain-predicate language. Without it, `DerivedEvidence(verdict_iri)`
-// would expose an inherently-statistical proposition that the
+// the domain-predicate language. Without it, the computed ground would
+// expose an inherently-statistical proposition that the
 // literature rule's antecedent doesn't match — the chain would have
 // no path from one to the other. With the bridge committed, the
 // certificate's middle `app(...)` step lifts the statistical claim
@@ -263,13 +299,17 @@ resource screen:bridge_eig0291_lowic50_trace : reflection:DeclarationTrace {
 //     Declared(rule_iri),         -- literature rule
 //     justification:App(
 //       Declared(bridge_iri),     -- statistical → domain
-//       DerivedEvidence(verdict_iri)      -- the per-effect result
+//       justification:App(
+//         Declared(plan_iri),     -- the plan denotes a function of its input
+//         Observed(sampleset_iri) -- and this is the input
+//       )
 //     )
 //   )
 //
 // Certificate: nested `app(A, B, j1, j2, c1, c2)`. The outer `app`
 // composes the literature rule with the result of the inner `app`,
-// which itself composes the bridge with the per-effect verdict.
+// which itself composes the bridge with the computed statistic — itself
+// an `app` of the declared plan to the observed sample set.
 
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
@@ -288,7 +328,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    // and the type_expr parser resolves to TypeExpr otherwise.
                    justification:App(
                        Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
-                       DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect")
+                       justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
                    ),
                    // outer c1: literature rule — witness slot elided
                    declared(
@@ -307,8 +347,8 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
                        // inner j1'
                        Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
-                       // inner j2'
-                       DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect"),
+                       // inner j2' — the computed ground: the plan applied to the input
+                       justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset")),
                        // inner c1': bridge — witness slot elided
                        declared(
                            "urn:eigenius:demo:screen:bridge_eig0291_lowic50",
@@ -318,13 +358,24 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            )
                            -> screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
                        ),
-                       // inner c2': SAR — witness slot elided
-                       derived(
-                           "urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect",
-                           stats:lt(
-                               stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
-                               100.0
-                           )
+                       // inner c2': the computed statistic. Was `derived(SAR, STAT)`, one
+                       // leaf standing for both halves of what happened; now the
+                       // application of the declared plan to the observed input.
+                       app(
+                           // A' : the input is on record
+                           core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+                           // B' : what applying the plan to it yields
+                           stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0),
+                           // j1', j2'
+                           Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"),
+                           Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+                           // c1' : the plan denotes this function of this input
+                           declared(
+                               "urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect",
+                               core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset") -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
+                           ),
+                           // c2' : the input was measured
+                           observed("urn:eigenius:demo:screen:m_eig0291_sampleset", core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset"))
                        )
                    )
                ),
@@ -333,7 +384,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        Declared("urn:eigenius:demo:screen:rule_strong"),
                        justification:App(
                            Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
-                           DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect")
+                           justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
                        )
                    ),
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) )
@@ -345,19 +396,20 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
     //   A  = HasLowIC50(EIG_0291)
     //   B  = StrongInhibitor(EIG_0291)
     //   j1 = Declared(rule_iri)
-    //   j2 = justification:App(bridge, verdict) — produced by the inner app
+    //   j2 = justification:App(bridge, computed) — produced by the inner app
     //   c1 = declared(rule_iri, A -> B)
-    //   c2 = inner app(...) — bridge applied to verdict
+    //   c2 = inner app(...) — bridge applied to the computed statistic
     //
-    // Inner app: applies the bridge to the per-effect verdict.
+    // Inner app: applies the bridge to the computed statistic.
     //   A'  = stats:lt(mean_of(s), 100.0)
     //   B'  = HasLowIC50(EIG_0291)
     //   j1' = Declared(bridge_iri)
-    //   j2' = DerivedEvidence(verdict_iri)
+    //   j2' = justification:App(Declared(plan_iri), Observed(sampleset_iri))
     //   c1' = declared(bridge_iri, A' -> B')
-    //   c2' = derived(verdict_iri, A')
+    //   c2' = app(Asserts(s), A', Declared(plan), Observed(s),
+    //             declared(plan, Asserts(s) -> A'), observed(s, Asserts(s)))
     //
-    // The grounding ctors `declared`/`derived` each take a trailing
+    // The grounding ctors `declared`/`observed` each take a trailing
     // `IsXxAs(iri, P)` slot the kernel's synthesize hook fills in
     // from the chain witness index. ESL admits eliding that slot —
     // the calls below stop after the (iri, P) pair.

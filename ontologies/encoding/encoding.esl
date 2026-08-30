@@ -428,7 +428,8 @@ property enc:confidence : core:float {
 //
 //   1. THE PROCESS's output — this class. Applying the parse engine to bytes is a program run:
 //      a function of (engine, source_sha256) -> structure. That is Derived in the plain sense,
-//      witnessed by ONE reflection:ProgramTrace for the run.
+//      recorded by ONE reflection:ProgramTrace for the run. The trace is provenance and mints no
+//      witness — a run record grounds nothing, which is why the three grounds have no `Derived`.
 //   2. THE PROPOSITIONS — enc:EncodedClaim, one per claim, DECLARED by a named agent. The parser
 //      chooses the FORM; it does not assert the content.
 //
@@ -442,7 +443,8 @@ property enc:confidence : core:float {
 // The structure's own proposition needs no new vocabulary. Nothing CITES "the run happened" the way
 // a certificate cites a claim's warrant — it is provenance — so the D39 §4.1 default
 // `Asserts(structure_iri)` is adequate: the structure's identity already pins the engine, the bytes
-// and the claim set.
+// and the claim set. The three-grounds change made that reading the only one available: there is no
+// longer a constructor that could cite a run.
 
 class enc:ReasoningStructure : reflection:DerivedResource {
     description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing. DERIVED: this is the output of a program run over hashed input, and reflection:derivation points at the single ProgramTrace recording that run. The claims it assembles are Declared, by an agent — the parse fixes their form, not their content.";

@@ -15,7 +15,7 @@
 //! Institution-recompute smoke test — the ClassificationAnalysisPlan
 //! dispatch (D52 §2.2). Confirms the threshold classifier emits two
 //! StatisticalAnalysisResult derivations (`:result:ppv`, `:result:sensitivity`),
-//! each Holds with the metric value and an `IsDerivedAs`-admissible
+//! each Holds with the metric value and a declaration-ready
 //! `stats:ge(...)` canonical proposition.
 
 use std::sync::Arc;
@@ -145,7 +145,8 @@ fn classification_plan_emits_ppv_and_sensitivity_results() {
         assert!(
             r.get(&Iri::parse(iris::PROP_CANONICAL_PROPOSITION).unwrap())
                 .is_some(),
-            "{suffix} Holds → must carry a canonical proposition (for IsDerivedAs)"
+            "{suffix} Holds → must carry a canonical proposition (a plan declaration \
+             is written against it)"
         );
     }
 }

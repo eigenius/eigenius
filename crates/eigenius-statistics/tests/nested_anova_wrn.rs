@@ -138,7 +138,7 @@ fn nested_anova_reproduces_wrn_competition_assay() {
     );
     assert!(
         field(&km12, iris::PROP_CANONICAL_PROPOSITION).is_some(),
-        "KM12 Holds → must carry lt(mean_diff_of(s),0) for IsDerivedAs"
+        "KM12 Holds → must carry lt(mean_diff_of(s),0) for a plan declaration"
     );
     // p reported (one-sided) should be ~1.4e-19 (paper two-sided 2.7e-19).
     let p = field(&km12, iris::PROP_COMPUTED_P_VALUE)
@@ -165,6 +165,6 @@ fn nested_anova_reproduces_wrn_competition_assay() {
     );
     assert!(
         field(&es2, iris::PROP_CANONICAL_PROPOSITION).is_none(),
-        "ES2 Fails → no canonical proposition (no IsDerivedAs)"
+        "ES2 Fails → no canonical proposition, so nothing to declare against"
     );
 }

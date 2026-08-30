@@ -258,20 +258,18 @@ fn confirmatory_claim_recomputes_to_holds() {
 }
 
 #[test]
-fn sar_admits_is_derived_as_witness_via_institution_emitted_marker() {
-    // Post-step-1E: the IsDerivedAs witness is admitted off the
-    // `StatisticalAnalysisResult` derivation's
-    // `reflection:InstitutionEmittedDerivation` marker, NOT off a
-    // separate ProgramTrace. The witness emitter walks every
-    // `InstitutionEmittedDerivation` and indexes by
-    // `(resource_iri, canonical_proposition)`.
+fn a_statistical_analysis_result_grounds_nothing_on_its_own() {
+    // A `StatisticalAnalysisResult` used to admit an `IsDerivedAs` witness on its own IRI, off its
+    // `reflection:InstitutionEmittedDerivation` marker, so `DerivedEvidence(<plan>:result)` was a
+    // ground: the fact that a computation ran carried the claim.
     //
-    // The witness admission is independent of the institution's
-    // verdict outcome — the index is built from chain shapes
-    // (`is_a InstitutionEmittedDerivation` + `canonical_proposition`),
-    // not from runtime verifier outputs. The test below commits the
-    // pre-authored confirmatory SAR (via fixture load) and confirms
-    // the index sees the witness keyed on the SAR's IRI.
+    // It does not. A computed claim rests on the assertion that the plan denotes a function
+    // `I -> O` — which an accountable agent makes and which no execution establishes, since
+    // determinism is a fact about the environment and not something recoverable from a run
+    // record — and on the inputs it was applied to. So the ground is
+    // `App(Declared(plan), Observed(inputs))`, and the run record is provenance, not a third
+    // ground. The SAR is still emitted and still carries its `canonical_proposition`; what it no
+    // longer does is witness itself.
     use eigenius_kernel::layer::lookup_chain_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
@@ -283,25 +281,24 @@ fn sar_admits_is_derived_as_witness_via_institution_emitted_marker() {
         .resolve(&sar_iri)
         .unwrap_or_else(|| panic!("pre-authored SAR `{sar_iri}` should be on chain"));
 
-    // Read the SAR's canonical_proposition — the strictly-statistical
-    // claim the verifier emits for SingleSampleEstimate +
-    // OneSidedWitnessed + Absolute(T), pre-authored here to match
-    // what the institution would produce.
+    // The SAR still carries the proposition it computed — the record is intact.
     let canonical_prop = sar_arc
         .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
-        .expect("SAR must carry canonical_proposition for witness admission")
+        .expect("SAR must still carry canonical_proposition — it is the record of what ran")
         .clone();
 
-    // Build the lookup key the way D49 §6 builds it from the emitter
-    // side, using the same hash_proposition_value the index uses.
-    let expected_key =
-        WitnessKey::from_encoded(WitnessCategory::Derived, sar_iri.clone(), &canonical_prop);
-
-    assert!(
-        lookup_chain_witness(ctx.head().as_ref(), &expected_key),
-        "IsDerivedAs witness for {sar_iri} with the SAR's canonical_proposition \
-         must be in the chain witness index (the pre-authored SAR carries both \
-         `is_a InstitutionEmittedDerivation` and `canonical_proposition` — the \
-         two preconditions the D49 emitter requires)"
-    );
+    // No category admits a witness keyed on the SAR's own IRI.
+    for category in [
+        WitnessCategory::Declared,
+        WitnessCategory::Observed,
+        WitnessCategory::Verified,
+    ] {
+        let key = WitnessKey::from_encoded(category, sar_iri.clone(), &canonical_prop);
+        assert!(
+            !lookup_chain_witness(ctx.head().as_ref(), &key),
+            "a StatisticalAnalysisResult must admit no {} witness on its own IRI — \
+             it records that a computation ran, which grounds nothing",
+            category.label()
+        );
+    }
 }

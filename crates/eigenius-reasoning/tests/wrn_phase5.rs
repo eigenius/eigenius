@@ -35,8 +35,10 @@ use eigenius_kernel::ontology::well_known as wk;
 use eigenius_reasoning::validate::do_validate_justification;
 use eigenius_reasoning::ReasoningInstitution;
 
-/// Statistics-institution-recomputed conclusions (DerivedEvidence witnesses
-/// emitted out of band); validated in wrn_phase1_recompute.rs. See esl_against_pending.
+/// Statistics-institution-recomputed conclusions (their plan declarations and input
+/// observations are
+/// committed by the statistics layer's own AutoOnLoad, which this harness does not
+/// run); validated in wrn_phase1_recompute.rs. See esl_against_pending.
 const STATS_RECOMPUTED: &[&str] = &[
     "urn:eigenius:pub:wrn:concl_wrn_selective_recomputed",
     "urn:eigenius:pub:wrn:concl_refine_recomputed",
@@ -55,17 +57,6 @@ const STATS_RECOMPUTED: &[&str] = &[
     "urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed",
 ];
 
-/// Conclusions whose witnesses come from the R runtime; covered live by the demo.
-const R_RUNTIME: &[&str] = &[
-    "urn:eigenius:pub:wrn:concl_vivo",
-    "urn:eigenius:pub:wrn:concl_p53_activation",
-    "urn:eigenius:pub:wrn:concl_dsb_foci",
-    "urn:eigenius:pub:wrn:concl_dsb_gh2ax",
-    "urn:eigenius:pub:wrn:concl_dsb_gh2ax_foci",
-    "urn:eigenius:pub:wrn:concl_ddr_signaling",
-    "urn:eigenius:pub:wrn:concl_paralog",
-];
-
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     esl_against_pending(source, parent, name, &[])
 }
@@ -74,7 +65,7 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
 /// gate: every `justification:Conclusion` this layer adds MUST validate to
 /// `Holds`, else the live loader would reject it (and a downstream lemma citation
 /// would be unsound). Panics on a non-`Holds` sentence unless its IRI is in
-/// `pending` (witnesses produced out of band — R runtime / statistics institution).
+/// `pending` (witnesses committed out of band — the statistics institution's AutoOnLoad).
 fn esl_against_pending(
     source: &str,
     parent: &Arc<Layer>,
@@ -267,7 +258,10 @@ fn build_ctx() -> ExecutionContext {
         ),
         &provenance,
         "wrn-phase3",
-        R_RUNTIME,
+        // No pending allowance — see the same note in wrn_phase3.rs. A computed
+        // conclusion is `App(Declared(plan), Observed(input))` and both witnesses are
+        // chain-resident facts 08a commits, so nothing here needs a runtime.
+        &[],
     );
     let phase5 = esl_against(
         include_str!(

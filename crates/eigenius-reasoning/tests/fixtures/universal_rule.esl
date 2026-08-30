@@ -19,7 +19,7 @@
 //    `screen:HasLowIC50(c)` inside the body where `c` is a Pi
 //    binder lowers cleanly to `Exp::InductiveType(stub, [Var(c)])`.
 //    The body proposition references its binder.
-// 3. The new `justification:Term.SpecStr(j, t)` ctor in the
+// 3. The new `justification:Term.j` ctor in the
 //    `justification` chain inductive value.
 // 4. The `justification:Certificate.spec_poly` rule in the certificate,
 //    producing the specialised type via kernel NbE beta-reduction
@@ -88,7 +88,7 @@ resource screen:m_eig0291_trace : reflection:ObservationTrace {
 // The justification chain value uses the new `SpecStr` JT ctor to
 // specialise the universal rule at "urn:EIG_0291":
 //
-//   justification:App(SpecStr(Declared(rule_iri), "urn:EIG_0291"),
+//   justification:App(Declared(rule_iri),
 //       Observed(obs_iri))
 //
 // The certificate's `spec_poly` rule witnesses that the rule (with
@@ -108,15 +108,12 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    // B : Prop = StrongInhibitor("urn:EIG_0291")
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
                    // j1 : JT — the specialised rule justification
-                   SpecStr(
-                       Declared("urn:eigenius:demo:screen:rule_strong"),
-                       "urn:eigenius:demo:screen:EIG_0291"
-                   ),
+                   Declared("urn:eigenius:demo:screen:rule_strong"),
                    // j2 : JT — the observation
                    Observed("urn:eigenius:demo:screen:m_eig0291"),
                    // c1 : justification:Certificate(j1, A -> B)
                    //    = spec_poly(core:string, P, Declared(rule),
-                   //                "urn:EIG_0291", "urn:EIG_0291", rule_cert)
+                   //                "urn:EIG_0291", rule_cert)
                    //   where rule_cert : justification:Certificate(Declared(rule),
                    //                                 forall x, P(x))
                    spec_poly(
@@ -135,8 +132,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        Declared("urn:eigenius:demo:screen:rule_strong"),
                        // t : core:string
                        "urn:eigenius:demo:screen:EIG_0291",
-                       // tag : audit label, same IRI as the instance
-                       "urn:eigenius:demo:screen:EIG_0291",
                        // rule_cert : justification:Certificate(j, forall x, P(x))
                        declared(
                            "urn:eigenius:demo:screen:rule_strong",
@@ -154,10 +149,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                ),
                justification:Certificate(
                    justification:App(
-                       SpecStr(
-                           Declared("urn:eigenius:demo:screen:rule_strong"),
-                           "urn:eigenius:demo:screen:EIG_0291"
-                       ),
+                       Declared("urn:eigenius:demo:screen:rule_strong"),
                        Observed("urn:eigenius:demo:screen:m_eig0291")
                    ),
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) )

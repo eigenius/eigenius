@@ -31,10 +31,10 @@
 //!    universal-claim schema (alpha = 0.05, effect_size = Absolute(100,
 //!    "nM"), TwoSided, WelchUnequal, Identity exclusion) + a
 //!    `ProgramTrace`. The claim's `canonical_proposition` is
-//!    `HasLowIC50(EIG_0291)` — the proposition `DerivedEvidence` exposes
+//!    `HasLowIC50(EIG_0291)` — the proposition the computed ground exposes
 //!    to D39 reasoning.
 //! 5. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`,
-//!    justified by `App(Declared(rule), DerivedEvidence(claim))`,
+//!    justified by `App(Declared(rule), App(Declared(plan), Observed(s)))`,
 //!    with a `justification:Certificate.app` certificate composing
 //!    `justification:Certificate.declared` + `justification:Certificate.derived`.
 //!
@@ -46,13 +46,14 @@
 //! mechanical recomputation: the SampleSet carries the raw replicates,
 //! the StatisticalAnalysisPlan asserts the parameters, and the verifier
 //! computes the proposition. The justification:Conclusion then cites the
-//! claim via `DerivedEvidence` and inherits its auditable provenance.
+//! claim as `App(Declared(plan), Observed(sampleset))` and inherits its
+//! auditable provenance.
 //!
 //! This test compiles the fixture, builds the layer chain (core →
 //! reflection → reasoning → statistics → fixture), walks the D49
 //! witness index, runs the D39 ValidateJustification handler, and
 //! asserts `Verdict::Holds`. The statistics institution itself is not
-//! registered in the test runtime — D49 §6 admits `IsDerivedAs` from
+//! registered in the test runtime — D49 §6 admits `IsDeclaredAs` from
 //! the StatisticalAnalysisPlan's ProgramTrace + canonical_proposition pair,
 //! independent of whether AutoOnLoad has fired the verifier. The
 //! verifier's recomputation path is exercised separately in the
@@ -74,7 +75,7 @@ use eigenius_reasoning::ReasoningInstitution;
 /// → institution → reasoning → statistics) plus a user layer compiled
 /// from the drug-screening fixture. The fixture's `type_expr(...)`
 /// certificates reference reasoning-layer ctors (`app`, `declared`,
-/// `derived`, `App`, `Declared`, `DerivedEvidence`) and its
+/// `observed`, `App`, `Declared`, `Observed`) and its
 /// resource bodies reference statistics-layer smart constructors
 /// (`stats:SingleSampleEstimate(...)`, `BiologicalReplication()`,
 /// `Absolute(...)`, etc.), so the fixture must be compiled with
@@ -135,7 +136,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
     // The fixture compiles AGAINST the statistics layer so its
     // `type_expr(...)` bodies can reference reasoning-layer ctors
     // (`app`, `declared`, `derived`, `App`, `Declared`,
-    // `DerivedEvidence`) AND statistics-layer smart constructors
+    // `Observed`) AND statistics-layer smart constructors
     // (`SingleSampleEstimate`, `BiologicalReplication`, `Absolute`,
     // `TwoSided`, `WelchUnequal`, `Identity`) by their short names.
     // The ctor table seed walks the full chain unambiguously per
@@ -162,7 +163,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
     // admits `IsDeclaredAs(rule_iri, rule_prop)`; the SampleSet's
     // ObservationTrace admits `IsObservedAs(sampleset_iri, …)`; and
     // the StatisticalAnalysisPlan's ProgramTrace admits
-    // `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` — the witness
+    // `IsDeclaredAs(plan_iri, Asserts(s) -> lt(mean_of(s), 100.0))` — the witness
     // the certificate's `derived(...)` constructor consumes.
 
     ExecutionContext::new(

@@ -81,8 +81,11 @@ pub struct AutoOnLoadDispatch {
     /// validation — committed alongside the Verdict when it Holds,
     /// dropped when it Fails. Each derivation is marked
     /// `reflection:InstitutionEmittedDerivation` and carries a
-    /// `canonical_proposition` the chain attests; the witness emitter
-    /// walks these directly to admit `IsDerivedAs(derivation_iri, P)`.
+    /// `canonical_proposition` recording what the run produced. It grounds
+    /// nothing on its own: the witness emitter used to walk these to admit
+    /// `IsDerivedAs(derivation_iri, P)`, but a computed claim rests on the plan
+    /// being DECLARED to denote a function of its input and on the input being
+    /// OBSERVED, neither of which a run record establishes.
     /// Empty for institutions whose only job is the pass/fail gate.
     pub derivations: Vec<Resource>,
     /// Substrate-captured partial `RuntimeInvocation` (D26 §5.5).
@@ -425,9 +428,9 @@ fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
 ///   D28 / Julia institutions keep their per-invocation Verdict IRIs.
 /// - Otherwise (in-process institutions where the verdict is
 ///   a deterministic function of the subject), the Verdict IRI is
-///   `{subject_iri}:verdict` — a deterministic, 1:1 derivation that
-///   lets downstream `DerivedEvidence` consumers cite the Verdict
-///   directly without a UUID-indirection lookup. Re-runs against the
+///   `{subject_iri}:verdict` — a deterministic, 1:1 derivation, so the record
+///   of a given run is addressable without a UUID-indirection lookup.
+///   Re-runs against the
 ///   same claim produce the same Verdict IRI; the chain's append-only
 ///   discipline collapses idempotent re-emission to a no-op.
 pub fn derive_verdict_iri_for(runtime_invocation_iri: Option<&Iri>, subject_iri: &Iri) -> Iri {

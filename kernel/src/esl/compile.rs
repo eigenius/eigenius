@@ -6178,24 +6178,24 @@ mod tests {
     fn reasoning_ontology_esl_compiles() {
         // D39 Phase 3 — the authored reasoning.esl source must compile
         // cleanly. Locks the structural contract: namespace declarations,
-        // four `ChainWitness.Is*As` zero-ctor predicates, the
-        // `justification:Term` six-ctor inductive, and the `justification:Certificate`
+        // three `ChainWitness.Is*As` zero-ctor predicates, the
+        // `justification:Term` five-ctor inductive, and the `justification:Certificate`
         // seven-ctor indexed inductive predicate. Any future edit to the
         // file or to the ESL surface that breaks this round-trip needs
         // to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
         let resources = esl::compile(source).expect("reasoning.esl must compile");
 
-        // Expect: 4 ChainWitness predicates + 1 justification:Term
-        //         + 1 justification:Certificate = 6 inductive-type Resources.
+        // Expect: 3 ChainWitness predicates + 1 justification:Term
+        //         + 1 justification:Certificate = 5 inductive-type Resources.
         let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
         let ind_count = resources
             .iter()
             .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
             .count();
         assert!(
-            ind_count >= 6,
-            "expected at least 6 inductive Resources in reasoning.esl, found {ind_count}"
+            ind_count >= 5,
+            "expected at least 5 inductive Resources in reasoning.esl, found {ind_count}"
         );
 
         // Phase 4 added two resource classes (justification:Conclusion +
@@ -6261,12 +6261,11 @@ mod tests {
             "reasoning.esl missing the ef_justification ExportFormat resource"
         );
 
-        // Spot-check: the four witness IRIs are present.
+        // Spot-check: the three witness IRIs are present.
         use crate::ontology::well_known as wk_local;
         for expected in &[
             wk_local::CHAIN_WITNESS_IS_DECLARED_AS,
             wk_local::CHAIN_WITNESS_IS_OBSERVED_AS,
-            wk_local::CHAIN_WITNESS_IS_DERIVED_AS,
             wk_local::CHAIN_WITNESS_IS_VERIFIED_AS,
         ] {
             assert!(
@@ -6330,11 +6329,10 @@ mod tests {
         }
         let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // The six inductive types — Phase 3.
+        // The five inductive types — Phase 3.
         for iri_str in &[
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
-            "urn:eigenius:witness:IsDerivedAs",
             "urn:eigenius:witness:IsVerifiedAs",
             "urn:eigenius:justification:Term",
             "urn:eigenius:justification:Certificate",

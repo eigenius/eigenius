@@ -45,9 +45,12 @@
 //!    `{plan_iri}:result:{effect_name}`, whose `verdict_ctor` is Holds
 //!    when that effect's p crossed alpha and Fails (`AlphaNotCrossed`)
 //!    when it did not. Only a per-effect Holds carries a
-//!    `canonical_proposition`, so only a rejecting effect admits an
-//!    `IsDerivedAs` witness. Both outcomes carry the computed numerics
-//!    for audit.
+//!    `canonical_proposition`, so only a rejecting effect records what it
+//!    computed. The result grounds nothing on its own — a computed claim is
+//!    `App(Declared(plan), Observed(inputs))` — but the proposition is what a
+//!    downstream plan-reproducibility declaration is written against, so a
+//!    missing one still stops the composite from being expressible. Both
+//!    outcomes carry the computed numerics for audit.
 //!
 //! Every diagnostic on both paths is a free-form `String` in the one
 //! `institution:diagnostic` slot. `AlphaNotCrossed`,
@@ -844,11 +847,10 @@ pub fn do_validate_analysis_plan(
     // stats:lt, stats:False, ...). One source of truth: the alternative
     // hypothesis IS the canonical proposition, derivable deterministically
     // from (dispatch, effect_size, directionality). When the derivation
-    // shape isn't yet wired for a dispatch arm, this returns `None` —
-    // the verdict skips the canonical_proposition slot and the D49
-    // witness emitter won't admit `IsDerivedAs` against it, which is
-    // the correct fail-closed behaviour until those arms' derivations
-    // land.
+    // shape isn't yet wired for a dispatch arm, this returns `None` — the
+    // verdict skips the canonical_proposition slot and there is no recorded
+    // proposition for a plan declaration to be written against, which is the
+    // correct fail-closed behaviour until those arms' derivations land.
     let derived_proposition: Option<serde_json::Value> = match dispatch {
         DispatchPos::SingleSampleEstimate => derive_canonical_proposition_singlesample(
             &sample_set_iri_str,
@@ -1112,10 +1114,11 @@ fn recompute_method_comparison_claim(
 ///   - `{plan}:result:ppv`         carrying `stats:ge(stats:ppv(s), min_ppv)`
 ///   - `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)`
 ///
-/// Each result Holds iff its metric meets the author-declared minimum;
-/// the canonical proposition (and thus the D49 `IsDerivedAs`) attaches
-/// only on Holds. Downstream D39 reasoning composes both via a declared
-/// statistical→domain bridge into a domain biomarker conclusion.
+/// Each result Holds iff its metric meets the author-declared minimum; the
+/// canonical proposition attaches only on Holds. Downstream D39 reasoning
+/// grounds each as `App(Declared(plan_yields_metric), Observed(sample_set))` and
+/// composes both via a declared statistical→domain bridge into a domain
+/// biomarker conclusion.
 fn recompute_classification_quality_claim(
     claim: &Resource,
     bundle: &DecodedBundle,
@@ -2832,8 +2835,8 @@ fn check_epistemic_scope(
 // proposition per (dispatch, effect_size, directionality) triple.
 // Each value is a D47 chain-mirrored type-fragment JSON tree whose
 // hash the D49 witness index keys on; consumer-side reasoning
-// (D39 reasoning institution + ESL `DerivedEvidence`) reconstructs
-// the same Exp from a proof term, encodes via the same `encode_type`
+// (D39 reasoning institution, through the plan's reproducibility
+// declaration) reconstructs the same Exp from a proof term, encodes via the same `encode_type`
 // path, and arrives at the same hash. The hash equality is the
 // soundness guarantee tying chain-resident verdict to chain-resident
 // citation.
@@ -3190,9 +3193,8 @@ struct PerEffectResult {
 /// — the shape multi-effect dispatches (Factorial, SplitPlot,
 /// RepeatedMeasures, multi-factor RCBD) produce. The kernel commits
 /// each derivation independently at its own
-/// `{analysis_iri}:result:{effect_name}` IRI and the witness emitter
-/// admits one `IsDerivedAs` witness per derivation that carries a
-/// canonical_proposition (D52 §6 / D49 §6).
+/// `{analysis_iri}:result:{effect_name}` IRI. Each is the RECORD of one effect's
+/// computation and admits no witness of its own (D52 §6 / D49 §6).
 fn gate_holds_with_results(
     analysis_iri: Option<&Iri>,
     results: Vec<PerEffectResult>,

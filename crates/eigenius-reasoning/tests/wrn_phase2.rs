@@ -25,7 +25,7 @@
 //! - D-HELICASE `DispensableActivity(WRN, exonuclease)` (E84A rescues)
 //!
 //! Phase-2 statistics are linked-external (the authors' wet-lab assays,
-//! recorded as bench:ToolArtifacts with ProgramTrace → IsDerivedAs); the
+//! recorded as bench:ToolArtifacts whose ProgramTrace is provenance only); the
 //! Declared rules lift those readouts into the conclusions. No statistics
 //! institution is needed here — the warrants are Declared + linked-external.
 
@@ -42,7 +42,7 @@ use eigenius_reasoning::validate::do_validate_justification;
 use eigenius_reasoning::ReasoningInstitution;
 
 /// The kernel-recomputed (statistics-institution) conclusions: their
-/// `DerivedEvidence` witnesses are emitted by the statistics institution's
+/// plan declarations and input observations are committed by the statistics institution's
 /// AutoOnLoad, which this reasoning-only harness does not run, so they cannot
 /// validate in-process. They are validated for real in
 /// `eigenius-statistics/tests/wrn_phase1_recompute.rs`. Listed `pending` here so

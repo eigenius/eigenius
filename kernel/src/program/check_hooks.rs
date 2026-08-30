@@ -94,7 +94,6 @@ fn chain_witness_category_for_short_name(name: &str) -> Option<WitnessCategory> 
     match name {
         "IsDeclaredAs" => Some(WitnessCategory::Declared),
         "IsObservedAs" => Some(WitnessCategory::Observed),
-        "IsDerivedAs" => Some(WitnessCategory::Derived),
         "IsVerifiedAs" => Some(WitnessCategory::Verified),
         _ => None,
     }

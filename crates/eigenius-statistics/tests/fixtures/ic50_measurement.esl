@@ -182,3 +182,36 @@ resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredR
     core:short_name = "warrant_methodology_kinase_glo_emax_floor";
 }
 
+// ─── The plans' reproducibility declarations ───────────────────────
+//
+// A `StatisticalAnalysisResult` records that a computation ran. That is
+// provenance and it grounds nothing: a computed claim rests on the assertion
+// that the PLAN denotes a function of its input — which no execution
+// establishes, since determinism is a fact about the environment rather than
+// something recoverable from having run once — and on the INPUT, which each
+// SampleSet's ObservationTrace already attests. So a computed ground is
+// `App(Declared(plan_yields_effect), Observed(sampleset))`, and these are the
+// declared halves.
+
+resource screen:warrant_plan_reproducibility : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Each analysis plan below pins its statistic, alpha, directionality, variance assumption and outlier rule over a recorded sample set. Those together are what make a plan a function of its input rather than of the occasion — the claim `Declared(plan)` carries, and the one no execution record could establish on its own.";
+    core:short_name = "warrant_plan_reproducibility";
+}
+
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying claim_eig0291_confirmatory_holds to the confirmatory sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset")
+        -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"), 100.0)
+    );
+}
+
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = screen:claim_eig0291_confirmatory_holds_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = screen:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-04-10T09:00:00Z";
+}

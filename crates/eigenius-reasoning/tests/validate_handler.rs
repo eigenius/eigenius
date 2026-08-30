@@ -1126,7 +1126,8 @@ fn an_external_execution_trace_admits_declared_not_derived() {
         "an ExternalExecutionTrace must admit IsDeclaredAs — someone asserts the run happened"
     );
     assert!(
-        !layer_admits_witness(&layer, &key(WitnessCategory::Derived)),
-        "and must NOT admit IsDerivedAs — no kernel-initiated activity produced this"
+        !layer_admits_witness(&layer, &key(WitnessCategory::Observed)),
+        "and must NOT admit IsObservedAs — nobody measured anything; the assertion is that a \
+         program ran elsewhere"
     );
 }

@@ -62,17 +62,13 @@ resource poly:concl : justification:Conclusion {
                app(
                    poly:HasActivity(poly:Model),
                    poly:RequiresActivity(poly:Model),
-                   SpecStr(
-                       Declared("urn:eigenius:demo:poly:rule"),
-                       "urn:eigenius:demo:poly:rule#Model"
-                   ),
+                   Declared("urn:eigenius:demo:poly:rule"),
                    Observed("urn:eigenius:demo:poly:obs"),
                    spec_poly(
                        Set,
                        (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
                        Declared("urn:eigenius:demo:poly:rule"),
                        poly:Model,
-                       "urn:eigenius:demo:poly:rule#Model",
                        declared(
                            "urn:eigenius:demo:poly:rule",
                            forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m),
@@ -87,10 +83,7 @@ resource poly:concl : justification:Conclusion {
                ),
                justification:Certificate(
                    justification:App(
-                       SpecStr(
-                           Declared("urn:eigenius:demo:poly:rule"),
-                           "urn:eigenius:demo:poly:rule#Model"
-                       ),
+                       Declared("urn:eigenius:demo:poly:rule"),
                        Observed("urn:eigenius:demo:poly:obs")
                    ),
                    poly:RequiresActivity(poly:Model) ) )

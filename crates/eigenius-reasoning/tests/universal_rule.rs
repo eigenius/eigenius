@@ -19,7 +19,7 @@
 //! Closes the conceptual gap in the original `drug_screening.esl`
 //! fixture: the rule is now universal (`forall c, HasLowIC50(c) ->
 //! StrongInhibitor(c)`) rather than pre-specialised to EIG_0291.
-//! The certificate uses the `SpecStr` JT ctor + the `spec_poly`
+//! The certificate uses the `spec_poly`
 //! justification:Certificate ctor to apply the rule at "urn:EIG_0291"; the kernel's
 //! NbE beta-reduces `(forall c, P c)("urn:EIG_0291")` to
 //! `P("urn:EIG_0291")` so the result type matches the App composition.
@@ -27,8 +27,11 @@
 //! What this exercises:
 //! - The `lower_type_expr_to_exp` bound-variable-with-args fix:
 //!   `screen:HasLowIC50(c)` inside a forall body lowers cleanly.
-//! - `justification:Term.SpecStr` + `justification:Certificate.spec_poly`
-//!   constructors in `reasoning.esl`.
+//! - The `justification:Certificate.spec_poly` constructor in `justification.esl`.
+//!   It leaves the justification TERM unchanged — narrowing a universal to an
+//!   instance changes the proposition and introduces no ground — so there is no
+//!   matching term constructor. `SpecStr(j, tag)` was that constructor, and its
+//!   tag was the only unchecked argument in the algebra.
 //! - Kernel beta-reduction at the spec_poly result type during
 //!   certificate type-checking.
 //! - End-to-end `Verdict::Holds` from a chain author using the

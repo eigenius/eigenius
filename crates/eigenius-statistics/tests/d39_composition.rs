@@ -18,13 +18,14 @@
 //!   → statistics → ic50-fixture → d39-composition-fixture.
 //!
 //! Validates that:
-//!  1. The IC50 confirmatory StatisticalAnalysisPlan's IsDerivedAs witness
+//!  1. The IC50 confirmatory plan's reproducibility declaration and its input's
+//!     observation, the two witnesses
 //!     (admitted via its ProgramTrace, exercised in
 //!     `ic50_measurement.rs`) is visible to the D39 reasoning
 //!     validator when it processes a sentence using
-//!     `DerivedEvidence(claim_iri)`.
-//!  2. The reasoning sentence `App(SpecStr(Declared(rule),
-//!     EIG_0291), DerivedEvidence(claim))` type-checks against
+//!     `App(Declared(plan_iri), Observed(sample_set_iri))` consumes.
+//!  2. The reasoning sentence `App(Declared(rule),
+//!     App(Declared(plan), Observed(s)))` type-checks against
 //!     `justification:Certificate(_, StrongInhibitor(EIG_0291))`.
 //!
 //! This is the proof point that D52 §8 actually works end-to-end —
@@ -96,7 +97,8 @@ fn build_composition_chain() -> ExecutionContext {
 
     // IC50 fixture layer — provides the screening + confirmatory
     // SampleSets + claims + traces. The confirmatory StatisticalAnalysisPlan
-    // is the IsDerivedAs witness target for the DerivedEvidence used
+    // records what the run produced; the plan declaration written against that
+    // proposition is what the computed ground actually consumes, as used
     // by the composition fixture's justification:Conclusion.
     let ic50_source = include_str!("fixtures/ic50_measurement.esl");
     let ic50_resources =
@@ -117,7 +119,7 @@ fn build_composition_chain() -> ExecutionContext {
 
     // Composition fixture layer — adds the literature rule (universal)
     // + its DeclarationTrace + the justification:Conclusion that derives
-    // StrongInhibitor(EIG_0291) via App(SpecStr, DerivedEvidence).
+    // StrongInhibitor(EIG_0291) via App(Declared(rule), App(Declared(plan), Observed(s))).
     let composition_source = include_str!("fixtures/d39_composition.esl");
     let composition_resources = esl::compile_against_layer(composition_source, &ic50_layer)
         .unwrap_or_else(|errs| {
@@ -169,11 +171,11 @@ fn statistics_verdict_composes_with_universal_rule_via_d39() {
         .and_then(Value::as_str)
         .map(str::to_owned);
 
-    // The IsDerivedAs witness for the confirmatory claim is admitted
+    // The IsDeclaredAs witness for the confirmatory plan is admitted
     // by its ProgramTrace (see ic50_measurement.rs's
     // `claim_admits_is_derived_as_witness_via_program_trace` test).
     // The IsDeclaredAs witness for the universal rule is admitted by
-    // its DeclarationTrace. SpecStr specializes the rule at
+    // its DeclarationTrace. spec_poly specializes the rule at
     // EIG_0291; App composes the specialized implication with the
     // derived evidence; the result type-checks against
     // `justification:Certificate(_, StrongInhibitor(EIG_0291))`. Holds.

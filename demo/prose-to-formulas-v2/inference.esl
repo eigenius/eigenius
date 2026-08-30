@@ -91,28 +91,27 @@ resource inferred:sentence : justification:Conclusion {
                    // B — the consequent, and the claim this whole sentence concludes.
                    onco_typed:RequiresActivity(msi, umlscui:C0388246),
 
-                   // j1 — the warrant for the implication: the literature rule SPECIALIZED to this model.
-                   // `SpecStr` records that a universal was instantiated; the tag names the instantiation
-                   // for audit rather than carrying the term.
-                   justification:SpecStr(
-                       justification:Declared(
-                           "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
-                       ),
-                       "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
+                   // j1 — the warrant for the implication: the literature rule, specialized to this
+                   // model by `spec_poly` below. Specializing narrows the PROPOSITION and adds no
+                   // ground, so the term is the same `Declared` before and after.
+                   justification:Declared(
+                       "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
                    ),
 
                    // j2 — the warrant for the antecedent: the landed claim's own witness, cited directly.
                    // `claim_1` was committed under a `DeclarationTrace`, which mints `IsDeclaredAs`.
                    justification:Declared("urn:eigenius:demo:v2:claim_1"),
 
-                   // Sub-proof 1 : justification:Certificate(SpecStr(...), A -> B).
+                   // Sub-proof 1 : justification:Certificate(Declared(rule), A -> B).
                    //
                    // The rule is `∀m. …`, so it cannot be applied to a particular model until the
                    // quantifier is eliminated. `spec_poly` does that at any domain — here `Set`, since a
                    // model is a kind. Its arguments are: the domain T, the motive P, the justification
-                   // term being specialized, the instance x, the audit tag, and the proof of the
-                   // universal. The `declared(…)` proof's proposition must match the rule resource's
-                   // `canonical_proposition` exactly — the witness key hashes it.
+                   // term being specialized, the instance x, and the proof of the universal. The result
+                   // term is that same justification term — narrowing a universal introduces no ground —
+                   // so the certificate index stays `Declared(rule)`. The `declared(…)` proof's
+                   // proposition must match the rule resource's `canonical_proposition` exactly — the
+                   // witness key hashes it.
                    justification:spec_poly(
                        Set,
                        (fun (m : Set) =>
@@ -122,7 +121,6 @@ resource inferred:sentence : justification:Conclusion {
                            "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
                        ),
                        msi,
-                       "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model",
                        justification:declared(
                            "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
                            forall (m : Set) =>
@@ -155,11 +153,8 @@ resource inferred:sentence : justification:Conclusion {
                ),
                justification:Certificate(
                    justification:App(
-                       justification:SpecStr(
-                           justification:Declared(
-                               "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
-                           ),
-                           "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase#msi-cancer-model"
+                       justification:Declared(
+                           "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
                        ),
                        justification:Declared("urn:eigenius:demo:v2:claim_1")
                    ),

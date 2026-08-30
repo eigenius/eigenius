@@ -50,7 +50,8 @@ const REFLECTION_TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
 const ENCODED_CLAIM_CLASS: &str = "urn:eigenius:encoding:EncodedClaim";
 /// `urn:eigenius:reflection:DeclarationTrace` — the trace that mints `IsDeclaredAs`. Parsed claims
 /// land through this since eigenius#201 / D73 §6; it was a `ProgramTrace` minting `IsDerivedAs`
-/// until `2026-08-21`.
+/// until `2026-08-21`. A `ProgramTrace` now mints nothing at all, so the move anticipated by
+/// several months what the three grounds made general.
 const DECLARATION_TRACE_CLASS: &str = wk::DECLARATION_TRACE;
 
 /// The epistemic grade of a claim. A **structural projection** of the `justification:Term` constructor

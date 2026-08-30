@@ -20,7 +20,7 @@
 //! institution and confirms it (a) emits a `Holds` StatisticalAnalysisResult,
 //! (b) carries the verifier-derived two-sample canonical proposition
 //! (`¬(mean_diff_of(s) = 0)`) so the D49 witness emitter would admit
-//! `IsDerivedAs`, and (c) reproduces the paper's P = 4.2e-13 (the diagnostic
+//! a plan declaration can be written against, and (c) reproduces the paper's P = 4.2e-13 (the diagnostic
 //! note + computed p-value). This turns the recorded WRN dependency warrant
 //! into a kernel-recomputed one.
 
@@ -142,10 +142,11 @@ fn wilcoxon_recomputes_wrn_msi_vs_mss_to_holds() {
         "expected Holds; got {ctor}, diagnostic: {diagnostic:?}"
     );
     // (b) The result carries the verifier-derived two-sample proposition,
-    //     so D49 admits IsDerivedAs against it.
+    //     so a plan declaration can be written against it.
     assert!(
         has_canonical,
-        "Holds two-sample result must carry a canonical_proposition (for IsDerivedAs)"
+        "Holds two-sample result must carry a canonical_proposition (a plan \
+         declaration is written against it)"
     );
     // (c) Reproduces the paper's P = 4.2e-13 (§5.1 Class-C: log-scale).
     assert!(

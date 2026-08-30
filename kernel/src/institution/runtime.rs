@@ -69,8 +69,8 @@ pub struct QueryOutcome {
     /// pass/fail gate (e.g. Reasoning / Lean). Statistics emits one
     /// `StatisticalAnalysisResult` per ANOVA effect; each derivation is a
     /// `reflection:InstitutionEmittedDerivation` whose
-    /// `canonical_proposition` the chain ends up attesting (D49
-    /// §6 IsDerivedAs witness target). The kernel commits each
+    /// `canonical_proposition` recording what the run produced — a record, not
+    /// a ground (see `DispatchOutcome::derivations`). The kernel commits each
     /// derivation alongside the gate-Verdict when the gate Holds;
     /// derivations are dropped when the gate Fails.
     ///

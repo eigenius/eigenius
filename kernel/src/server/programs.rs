@@ -326,10 +326,9 @@ impl EigeniusService {
             // carries an `@id` and isn't already among `produced_resources`
             // (the comorphism-reify path pushes its output there; a plain
             // component application — e.g. `RunRuntimeScript` — does not).
-            // Without this the committed `ProgramTrace` points at a target
-            // that isn't chain-resident, so the D49 witness emitter can't
-            // read its `canonical_proposition` and no `IsDerivedAs` is
-            // minted — breaking the D56 wrapped-component derivation path.
+            // Without this the committed `ProgramTrace` points at a target that
+            // isn't chain-resident, so the run record names something the chain
+            // cannot resolve — breaking the D56 wrapped-component derivation path.
             if let Some(out_id) = output.id().cloned() {
                 let already = produced_resources.iter().any(|r| r.id() == Some(&out_id));
                 if !already {

@@ -426,7 +426,7 @@ pub(super) fn check_inductive_ctor_args(
 
                 // D49 Phase 6 hook — when the expected arg type is a
                 // ChainWitness predicate (`IsDeclaredAs` / `IsObservedAs`
-                // / `IsDerivedAs` / `IsVerifiedAs`), synthesize the
+                // / `IsVerifiedAs`), synthesize the
                 // witness from the layer's witness index rather than
                 // type-checking the user's arg. ChainWitness predicates
                 // have zero constructors — the user can't construct an

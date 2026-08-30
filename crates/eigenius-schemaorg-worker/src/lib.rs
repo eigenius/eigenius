@@ -22,8 +22,8 @@
 //! dispatch — kept in the lib (not the bin's serve loop) so it is unit-testable
 //! in-process without Docker. It returns the conversion-report `Resource` as
 //! Eigon-CBOR (`Response::DispatchOk.output`); the kernel stamps the
-//! invocation-declared `canonical_proposition` and applies the `ProgramTrace` /
-//! `IsDerivedAs` witness.
+//! invocation-declared `canonical_proposition` and applies the `ProgramTrace`
+//! recording the run.
 
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::eigon_json;

@@ -20,7 +20,7 @@
 //! **only the bare data** of the run — the generated ontology's `content_hash`
 //! plus the coverage accounting — encoded as Eigon-CBOR. It does **not** set the
 //! `canonical_proposition` (that is invocation-declared and kernel-stamped), nor
-//! the `ProgramTrace` / `IsDerivedAs` witness (kernel-applied). Keeping the
+//! the `ProgramTrace` recording the run (kernel-applied). Keeping the
 //! proposition off the tool is what lets the runtime stay language-agnostic: a
 //! `Prop` is a D47-encoded term a generic containerized tool has no business
 //! constructing.
@@ -91,10 +91,11 @@ pub fn build_report(
     // The worker is Eigenius-aware (links the kernel), so it sets its own
     // canonical_proposition — `obj:GeneratorConforms("schema_org")` — exactly as
     // the WRN R worker sets `r_eigon_set_proposition` (D55/D56). The committed
-    // ProgramTrace then mints `IsDerivedAs(<this resource>, GeneratorConforms)`,
-    // which the chain's `concl_generator` discharges via `derived(...)` (D60 §4.1
-    // tool-set path; the generic invocation-declared path is for non-Eigenius
-    // tools). The term shape is the D47 App-spine the reasoning institution reads:
+    // ProgramTrace records the run; it mints no witness, so a chain grounding a
+    // claim on this conversion writes `App(Declared(<the generator denotes this
+    // transform>), Observed(<the pinned schema.org input>))` (D60 §4.1 tool-set
+    // path; the generic invocation-declared path is for non-Eigenius tools).
+    // The term shape is the D47 App-spine the reasoning institution reads:
     // `App(ConstRef(pred), LitString(arg))`.
     r.set(
         iri(CANONICAL_PROPOSITION),
@@ -154,8 +155,8 @@ mod tests {
         );
 
         // The worker sets its own canonical_proposition — GeneratorConforms("schema_org")
-        // as the D47 App-spine — so the program-run's IsDerivedAs matches the chain's
-        // derived(...) certificate.
+        // as the D47 App-spine — so a chain declaration written against this
+        // proposition hashes to the same key.
         let Some(Value::Json(prop)) = back.get(&iri(CANONICAL_PROPOSITION)) else {
             panic!("report must carry canonical_proposition");
         };

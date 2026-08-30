@@ -18,7 +18,7 @@
 //! one-shot Job (`lifecycle:Job`): the substrate spawns it, provisions inputs by
 //! `content_hash`, and dispatches `DispatchMethod` over the UDS; the worker
 //! returns its result as Eigon-CBOR (`DispatchOk.output`). The kernel applies the
-//! `ProgramTrace` / `IsDerivedAs` witness on top. This is the same mechanism the R
+//! `ProgramTrace` recording the run on top. This is the same mechanism the R
 //! runtime uses, minus R's FFI mirror — the worker is plain Rust linking the
 //! kernel, so any pure transform (the schema.org generator is the first) plugs in
 //! as a worker binary.

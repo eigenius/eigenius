@@ -19,13 +19,20 @@
 //! (`experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl:144`):
 //!
 //! ```text
-//! App(App(SpecStr(Declared(discovery_rule), "WRN"),
-//!         DerivedEvidence(dd_achilles)),
-//!     DerivedEvidence(dd_drive))
+//! App(App(Declared(discovery_rule),
+//!         Declared(dd_achilles)),
+//!     Declared(dd_drive))
 //! ```
 //!
 //! All `App`, no `Sum`: one alternative, three grounds, no fallback anywhere. That shape is what
 //! makes the counterfactual answers below sharp — every ground is load-bearing.
+//!
+//! Two constructors left this term in the three-grounds change and neither altered its support.
+//! The rule's application at WRN was `SpecStr(Declared(rule), "WRN")`; `spec_poly` now leaves the
+//! term at `Declared(rule)`, because narrowing a universal to an instance changes the proposition
+//! and introduces no ground. The two recomputes were `DerivedEvidence` leaves; they are
+//! `Declared` because the chain declares each recompute's reproducibility, which is the claim they
+//! actually carry.
 
 use std::sync::Arc;
 
@@ -64,15 +71,9 @@ fn wrn_conclusion() -> Exp {
         vec![
             ctor(
                 "App",
-                vec![
-                    ctor(
-                        "SpecStr",
-                        vec![leaf("Declared", RULE), Exp::LitString("WRN".to_string())],
-                    ),
-                    leaf("DerivedEvidence", ACHILLES),
-                ],
+                vec![leaf("Declared", RULE), leaf("Declared", ACHILLES)],
             ),
-            leaf("DerivedEvidence", DRIVE),
+            leaf("Declared", DRIVE),
         ],
     )
 }
@@ -90,18 +91,24 @@ fn the_wrn_conclusion_rests_on_one_declaration_and_two_recomputes() {
         .into_iter()
         .map(|l| l.iri)
         .collect();
-    assert_eq!(declared, vec![RULE.to_string()]);
 
-    // "Which program outputs?" — both differential-dependency recomputes.
-    let derived: Vec<String> = leaves_of(&t, Ground::Derived)
-        .expect("projects")
-        .into_iter()
-        .map(|l| l.iri)
-        .collect();
-    assert_eq!(derived, vec![ACHILLES.to_string(), DRIVE.to_string()]);
+    // "What does this rest on that nobody proved?" is now the WHOLE question for this
+    // conclusion: the rule and both differential-dependency recomputes are declarations.
+    // `leaves_of` reads out of a `BTreeSet<Leaf>`, so the order is (ground, iri) — within one
+    // family, lexicographic by IRI rather than term order.
+    assert_eq!(
+        declared,
+        vec![ACHILLES.to_string(), DRIVE.to_string(), RULE.to_string()]
+    );
+    assert!(
+        leaves_of(&t, Ground::Observed)
+            .expect("projects")
+            .is_empty(),
+        "the discovery conclusion cites no measurement of its own"
+    );
 
     // Nothing on this conclusion is proved, so it is not fully verified — and saying so is the
-    // point: the flagship claim's strongest ground is a recompute, not a proof.
+    // point: the flagship claim's strongest ground is a declaration, not a proof.
     assert!(!is_fully_verified(&t).expect("projects"));
 
     assert_eq!(cited_iris(&t).expect("projects").len(), 3);
@@ -127,19 +134,20 @@ fn a_second_source_would_make_a_recompute_droppable() {
     // The same conclusion authored with a fallback — `Sum(dd_achilles, dd_drive)` instead of
     // needing both — answers the counterfactual differently. This is the distinction a stored
     // scalar grade erases: both shapes grade the same, and only the polynomial tells them apart.
+    //
+    // This builds the `Exp` directly and never commits it, which is what the `sum_l` strengthening
+    // makes worth saying out loud: `support` reads the TERM, so it reports two alternatives here
+    // regardless of whether either branch has a certificate. What changed is that committing this
+    // shape now requires certificates for BOTH branches, so the two alternatives `support` reports
+    // are two alternatives that were actually grounded. See
+    // `crates/eigenius-reasoning/tests/sum_requires_both_branches.rs`.
     let t = ctor(
         "App",
         vec![
-            ctor(
-                "SpecStr",
-                vec![leaf("Declared", RULE), Exp::LitString("WRN".to_string())],
-            ),
+            leaf("Declared", RULE),
             ctor(
                 "Sum",
-                vec![
-                    leaf("DerivedEvidence", ACHILLES),
-                    leaf("DerivedEvidence", DRIVE),
-                ],
+                vec![leaf("Declared", ACHILLES), leaf("Declared", DRIVE)],
             ),
         ],
     );

@@ -65,8 +65,10 @@ const CONCLUSION_PROOF: &str = "urn:eigenius:justification:proof";
 /// Two routes, mirroring the two ways a witness arises (D49 §6):
 ///
 /// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Conclusion`
-///   is `Verified` on its own IRI (D54 lemma citation); a `reflection:InstitutionEmittedDerivation`
-///   is `Derived` on its own IRI (D52). Reached by [`Layer::get_resource`], which is layer-local.
+///   whose judgement carries a proof is `Verified` on its own IRI. Reached by
+///   [`Layer::get_resource`], which is layer-local. A `reflection:InstitutionEmittedDerivation`
+///   used to be `Derived` on its own IRI (D52); it now attests nothing, because a program's
+///   output is not a ground — see `trace_category`.
 /// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
 ///   `reflection:resource`. Reached through the triple index, since that property is
 ///   `core:resource`-typed and therefore indexed.
@@ -87,13 +89,6 @@ pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
         let emitted = match key.category {
             WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) => {
                 emit_from_reasoning_sentence(layer, &resource)
-            }
-            WitnessCategory::Derived
-                if is_a
-                    .iter()
-                    .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION) =>
-            {
-                emit_from_institution_derivation(layer, &resource)
             }
             _ => None,
         };
@@ -190,12 +185,21 @@ fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
     match class_iri {
         wk::DECLARATION_TRACE => Some(WitnessCategory::Declared),
         wk::OBSERVATION_TRACE => Some(WitnessCategory::Observed),
-        wk::PROGRAM_TRACE => Some(WitnessCategory::Derived),
+        // A `ProgramTrace` grounds NOTHING. It records that a run happened —
+        // provenance — and a computed claim does not rest on the fact that a
+        // computation ran. It rests on the assertion that the plan denotes a
+        // function `I -> O`, which is Declared by an accountable agent and which
+        // no execution can establish, and on the inputs, which are Observed. The
+        // composite `App(Declared(plan), Observed(inputs))` is built from those
+        // two, so the run record is not a third ground.
+        wk::PROGRAM_TRACE => None,
         wk::VERIFICATION_TRACE => Some(WitnessCategory::Verified),
-        // An author recording that a program ran elsewhere (eigenius#205). DECLARED, not Derived:
-        // `Derived` is reserved for a trace tied to a kernel-initiated activity, and a
-        // transcription establishes only that someone asserts the run happened. `declared_by` is
-        // required on the class, so the assertion always has an agent behind it.
+        // An author recording that a program ran elsewhere (eigenius#205). A transcription
+        // establishes only that someone asserts the run happened, so it is DECLARED, and
+        // `declared_by` is required on the class, so the assertion always has an agent behind
+        // it. This arm was the one place the old four-category split had the right instinct:
+        // it already refused to call a run record a ground of its own kind. Now that
+        // `ProgramTrace` grounds nothing either, the two agree.
         wk::EXTERNAL_EXECUTION_TRACE => Some(WitnessCategory::Declared),
         _ => None,
     }
@@ -306,23 +310,6 @@ fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<Wi
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
-        prop_hash,
-    })
-}
-
-/// D52 institution-emitted derivation: read `canonical_proposition`
-/// directly off a kernel-emitted derivation resource and build a
-/// `WitnessKey` keyed against the derivation's own IRI. Returns `None`
-/// when the derivation has no `canonical_proposition` set (kernel
-/// merge dropped it, or the institution didn't supply one).
-fn emit_from_institution_derivation(layer: &Layer, derivation: &Resource) -> Option<WitnessKey> {
-    let derivation_iri = derivation.id().cloned()?;
-    let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
-    let encoded_prop = derivation.get(&prop_iri)?;
-    let prop_hash = hash_stored_proposition(layer, &derivation_iri, encoded_prop)?;
-    Some(WitnessKey {
-        category: WitnessCategory::Derived,
-        iri: derivation_iri,
         prop_hash,
     })
 }
@@ -473,37 +460,29 @@ fn resolve_target_iri(trace: &Resource) -> Option<Iri> {
 
 /// Walk the parent chain top-down, returning true on the first Layer
 /// whose witness index contains `key`. Implements the §5 synthesis
-/// algorithm's lookup step. The `IsVerifiedAs → IsDerivedAs` coercion
-/// (D49 §4) is handled at this layer: a `Derived`-category lookup also
-/// succeeds when a corresponding `Verified` entry exists at the same
-/// `(iri, prop_hash)`.
+/// algorithm's lookup step.
+///
+/// **No coercion between categories.** A `check_layer_with_coercion` helper sat
+/// here and let a `Derived`-category lookup succeed on a `Verified` entry at the
+/// same `(iri, prop_hash)`, on the authority of the reflection ontology's
+/// `VerifiedResource subclass_of DerivedResource`. It was the second laundering
+/// path: P3 narrowed what MINTS a Verified witness, and this is what SPENT one —
+/// a `derived(…)` citation satisfied by a proof-checked conclusion, so the
+/// distinction between "a program produced this" and "the kernel verified this"
+/// collapsed at the lookup. It also implemented a lattice over the categories
+/// that the design rejects, and it did so as a match arm rather than by reading
+/// `subclass_of`, so the ontology could not have disagreed with it. Gone with
+/// the `Derived` category itself.
 pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
-    if check_layer_with_coercion(layer, key) {
+    if layer_admits_witness(layer, key) {
         return true;
     }
     let mut cursor = layer.parent().cloned();
     while let Some(parent) = cursor {
-        if check_layer_with_coercion(&parent, key) {
+        if layer_admits_witness(&parent, key) {
             return true;
         }
         cursor = parent.parent().cloned();
-    }
-    false
-}
-
-fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
-    if layer_admits_witness(layer, key) {
-        return true;
-    }
-    if key.category == WitnessCategory::Derived {
-        let verified_key = WitnessKey {
-            category: WitnessCategory::Verified,
-            iri: key.iri.clone(),
-            prop_hash: key.prop_hash,
-        };
-        if layer_admits_witness(layer, &verified_key) {
-            return true;
-        }
     }
     false
 }
@@ -561,7 +540,6 @@ pub fn synthesize_chain_witness(
             match category {
                 WitnessCategory::Declared => "declared",
                 WitnessCategory::Observed => "observed",
-                WitnessCategory::Derived => "derived",
                 WitnessCategory::Verified => "verified",
             },
         ))
@@ -1226,21 +1204,20 @@ mod tests {
     }
 
     #[test]
-    fn verified_witness_coerces_to_derived_at_lookup() {
-        // D49 §4 coercion: VerifiedResource subclass_of DerivedResource
-        // means an `IsVerifiedAs iri P` witness in the index makes
-        // `IsDerivedAs iri P` lookups succeed via the lookup-time
-        // coercion, even though the index doesn't carry the Derived key
-        // directly.
+    fn witness_categories_do_not_coerce_into_one_another() {
+        // The categories are independent families. A `check_layer_with_coercion`
+        // helper used to make a `Derived`-category lookup succeed on a `Verified`
+        // entry at the same `(iri, prop_hash)`, justified by the reflection
+        // ontology's `VerifiedResource subclass_of DerivedResource`. That was the
+        // spend half of the laundering P3 closed the mint half of, and it is gone
+        // along with the `Derived` category. What remains to assert is that no
+        // OTHER pair coerces either — the property the removed helper's existence
+        // made easy to lose sight of.
         //
-        // A committed `justification:Conclusion` is admitted as a `Verified` witness on its
-        // own IRI (D54 lemma citation), so the coercion can be exercised against the real
-        // emission path — the predecessor injected a key through a test-only `OnceLock` setter
-        // because it predated D54 emission.
+        // A committed `justification:Conclusion` is admitted as a `Verified`
+        // witness on its own IRI, so this runs against the real emission path.
         let target = "urn:eigenius:example:proof";
         let prop = Exp::sort(0);
-        let verified_key =
-            WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
 
         // Parented on the bootstrap: a conclusion's judgement names
         // `eigentt:logic_kernel` and `justification:Certificate` by reference,
@@ -1252,24 +1229,21 @@ mod tests {
         b.add_resource(reasoning_sentence(target, &prop)).unwrap();
         let layer = b.build(LayerStorage::in_memory());
 
-        // Direct Verified lookup hits.
+        // The witness that IS admitted.
+        let verified_key =
+            WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
         assert!(lookup_chain_witness(&layer, &verified_key));
 
-        // Coerced Derived lookup at the same (iri, prop_hash) also hits.
-        let derived_key =
-            WitnessKey::from_exp(WitnessCategory::Derived, iri(target), &prop).unwrap();
-        assert!(
-            lookup_chain_witness(&layer, &derived_key),
-            "IsVerifiedAs should coerce to IsDerivedAs at lookup time per D49 §4"
-        );
-
-        // But a Declared lookup at the same prop does NOT coerce.
-        let declared_key =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
-        assert!(
-            !lookup_chain_witness(&layer, &declared_key),
-            "IsVerifiedAs must not coerce to IsDeclaredAs (no such subclass relation)"
-        );
+        // Neither remaining category is reachable from it at the same
+        // (iri, prop_hash).
+        for category in [WitnessCategory::Declared, WitnessCategory::Observed] {
+            let key = WitnessKey::from_exp(category, iri(target), &prop).unwrap();
+            assert!(
+                !lookup_chain_witness(&layer, &key),
+                "IsVerifiedAs must not coerce to {} — the families are independent",
+                category.label()
+            );
+        }
     }
 
     // ─── Environment-blindness of proposition identity (see

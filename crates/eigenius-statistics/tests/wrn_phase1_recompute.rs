@@ -17,7 +17,8 @@
 //!
 //! The **statistics** institution recomputes four `StatisticalAnalysisPlan`s
 //! from chain-resident data and emits `StatisticalAnalysisResult`s, each
-//! carrying a canonical proposition + an `IsDerivedAs` witness:
+//! carrying a canonical proposition, which the plan's reproducibility declaration
+//! is written against:
 //! 1. C-WRN — MSI-vs-MSS WRN dependency (Wilcoxon, 37 vs 91) → `lt(mean_diff_of(s), 0)`.
 //! 2. D-REFINE — WRN-dep ~ #MS-deletions (Spearman, 51 pairs) → `lt(spearman_rho(s), 0)`.
 //! 3. D-RECQ — WRN MSI-vs-MSS in the RecQ cohort (Wilcoxon, 32 vs 413) → `lt(mean_diff_of(s), 0)`.
@@ -25,7 +26,7 @@
 //!
 //! The **reasoning** institution then type-checks every conclusion, each
 //! certificate composing a declared statistical→domain bridge with
-//! `DerivedEvidence` on the matching result(s):
+//! `App(Declared(plan_yields_effect), Observed(sample_set))`:
 //! - `C-WRN` → `SelectivelyEssential(WRN, MSI)`
 //! - `D-REFINE` → `DependencyCorrelatesWithMutatorLoad(WRN, MSI)`
 //! - `D-RECQ` → `OnlyMSISelectiveInFamily(WRN, RecQ_helicases)` — WRN derived + declared uniqueness over the kernel-computed n.s. p-values of the other RecQ helicases (a null is not derivable, so the negatives are an explicit judgment)
@@ -75,7 +76,7 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
 /// Dispatch the statistics institution on `plan_iri`, assert every
 /// emitted derivation Holds, and finalize each (replicating the kernel's
 /// `finalize_emitted_derivation`, which the raw `query()` skips) so the D49
-/// witness emitter will admit its `IsDerivedAs` once committed. Returns
+/// proposition a plan declaration is written against. Returns
 /// all finalized result resources — one for single-effect plans, two for
 /// the classification plan (`:result:ppv` + `:result:sensitivity`).
 fn recompute_finalized(
@@ -313,7 +314,7 @@ fn wrn_warrants_kernel_recomputed() {
     );
 
     // ── Step 3: the reasoning institution type-checks every kernel-
-    //            recomputed conclusion against the IsDerivedAs-bearing
+    //            recomputed conclusion against the proposition-bearing
     //            results, plus the linked-external two-screen C-WRN ──
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_wrn_selective_recomputed");
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_refine_recomputed");

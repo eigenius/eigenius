@@ -1706,10 +1706,17 @@ resource wrn:warrant_viability_impairment_directionality : reflection:DeclaredRe
 // What the composite needs is the assertion that the plan DENOTES A FUNCTION of
 // its input. No run record establishes that: determinism is an empirical fact
 // about the environment, not a property recoverable from having executed once.
-// So it is DECLARED, by an accountable agent, and declared as a UNIVERSAL over
-// sample sets — the claim is about the method, not the answer. Instantiating it
-// at a specific set (`spec_poly`) is what yields the specific statistic, so
-// nobody has to assert the number in advance.
+// So it is DECLARED, by an accountable agent.
+//
+// **Pinned at the input, not universally quantified over sample sets.** These
+// were first written as `forall s. Asserts(s) -> STAT(s)`, which reads as a
+// claim about the method and is the shape a universal wants. It is also FALSE:
+// it says every recorded sample set has the stated statistic, which is a claim
+// about data nobody has seen, not about the plan. The true claim is narrower —
+// applying THIS plan to THIS recorded input yields THIS statistic — so each
+// declaration pins its sample set. Nobody asserts a number in advance either
+// way; what the pinning gives up is one declaration serving many inputs, which
+// no chain here needed.
 //
 // One declaration per (plan, EFFECT), not per plan: `IsDeclaredAs` carries one
 // proposition per IRI, and a plan emitting two effects — `biomarker_plan` does —
@@ -1729,7 +1736,7 @@ resource wrn:warrant_plan_reproducibility : reflection:DeclaredResource {
 resource wrn:wrn_dep_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying wrn_dep_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying wrn_dep_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)
     );
@@ -1744,7 +1751,7 @@ resource wrn:wrn_dep_plan_yields_main_effect_trace : reflection:DeclarationTrace
 resource wrn:mutator_load_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying mutator_load_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying mutator_load_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mutator_load_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)
     );
@@ -1759,7 +1766,7 @@ resource wrn:mutator_load_plan_yields_main_effect_trace : reflection:Declaration
 resource wrn:coloc_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying coloc_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying coloc_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:coloc_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)
     );
@@ -1774,7 +1781,7 @@ resource wrn:coloc_plan_yields_main_effect_trace : reflection:DeclarationTrace {
 resource wrn:apop_shrna_KM12_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying apop_shrna_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying apop_shrna_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)
     );
@@ -1789,7 +1796,7 @@ resource wrn:apop_shrna_KM12_plan_yields_main_effect_trace : reflection:Declarat
 resource wrn:hcr_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying hcr_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying hcr_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:hcr_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)
     );
@@ -1804,7 +1811,7 @@ resource wrn:hcr_plan_yields_main_effect_trace : reflection:DeclarationTrace {
 resource wrn:wrn_recq_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying wrn_recq_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying wrn_recq_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_recq_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)
     );
@@ -1819,7 +1826,7 @@ resource wrn:wrn_recq_plan_yields_main_effect_trace : reflection:DeclarationTrac
 resource wrn:biomarker_plan_yields_ppv : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying biomarker_plan to any recorded sample set yields its ppv. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying biomarker_plan to its recorded sample set yields that set's ppv. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)
     );
@@ -1834,7 +1841,7 @@ resource wrn:biomarker_plan_yields_ppv_trace : reflection:DeclarationTrace {
 resource wrn:biomarker_plan_yields_sensitivity : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying biomarker_plan to any recorded sample set yields its sensitivity. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying biomarker_plan to its recorded sample set yields that set's sensitivity. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)
     );
@@ -1849,7 +1856,7 @@ resource wrn:biomarker_plan_yields_sensitivity_trace : reflection:DeclarationTra
 resource wrn:p53_dep_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying p53_dep_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying p53_dep_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:p53_dep_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)
     );
@@ -1864,7 +1871,7 @@ resource wrn:p53_dep_plan_yields_main_effect_trace : reflection:DeclarationTrace
 resource wrn:viab_KM12_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying viab_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying viab_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
     );
@@ -1879,7 +1886,7 @@ resource wrn:viab_KM12_plan_yields_main_effect_trace : reflection:DeclarationTra
 resource wrn:viab_OVK18_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying viab_OVK18_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying viab_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)
     );
@@ -1894,7 +1901,7 @@ resource wrn:viab_OVK18_plan_yields_main_effect_trace : reflection:DeclarationTr
 resource wrn:cc_KM12_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying cc_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying cc_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
     );
@@ -1909,7 +1916,7 @@ resource wrn:cc_KM12_plan_yields_main_effect_trace : reflection:DeclarationTrace
 resource wrn:cc_SW48_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying cc_SW48_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying cc_SW48_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)
     );
@@ -1924,7 +1931,7 @@ resource wrn:cc_SW48_plan_yields_main_effect_trace : reflection:DeclarationTrace
 resource wrn:cc_OVK18_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying cc_OVK18_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying cc_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)
     );
@@ -1939,7 +1946,7 @@ resource wrn:cc_OVK18_plan_yields_main_effect_trace : reflection:DeclarationTrac
 resource wrn:apop_KM12_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying apop_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying apop_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
     );
@@ -1954,7 +1961,7 @@ resource wrn:apop_KM12_plan_yields_main_effect_trace : reflection:DeclarationTra
 resource wrn:apop_SW48_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying apop_SW48_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying apop_SW48_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)
     );
@@ -1969,7 +1976,7 @@ resource wrn:apop_SW48_plan_yields_main_effect_trace : reflection:DeclarationTra
 resource wrn:apop_OVK18_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying apop_OVK18_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying apop_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)
     );
@@ -1984,7 +1991,7 @@ resource wrn:apop_OVK18_plan_yields_main_effect_trace : reflection:DeclarationTr
 resource wrn:mmr_rescue_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying mmr_rescue_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying mmr_rescue_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
     );
@@ -1999,7 +2006,7 @@ resource wrn:mmr_rescue_plan_yields_main_effect_trace : reflection:DeclarationTr
 resource wrn:mmr_resens1_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying mmr_resens1_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying mmr_resens1_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)
     );
@@ -2014,7 +2021,7 @@ resource wrn:mmr_resens1_plan_yields_main_effect_trace : reflection:DeclarationT
 resource wrn:mmr_resens2_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying mmr_resens2_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying mmr_resens2_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)
     );
@@ -2029,7 +2036,7 @@ resource wrn:mmr_resens2_plan_yields_main_effect_trace : reflection:DeclarationT
 resource wrn:rescue_wt_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying rescue_wt_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying rescue_wt_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
     );
@@ -2044,7 +2051,7 @@ resource wrn:rescue_wt_plan_yields_main_effect_trace : reflection:DeclarationTra
 resource wrn:rescue_e84a_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying rescue_e84a_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying rescue_e84a_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
     );
@@ -2059,7 +2066,7 @@ resource wrn:rescue_e84a_plan_yields_main_effect_trace : reflection:DeclarationT
 resource wrn:wrn_corr_plan_yields_main_effect : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
     reflection:warranted_by = wrn:warrant_plan_reproducibility;
-    reflection:rationale    = "Applying wrn_corr_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:rationale    = "Applying wrn_corr_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
     reflection:canonical_proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_corr_sampleset") -> stats:lt(stats:spearman_rho("urn:eigenius:pub:wrn:wrn_corr_sampleset"), 0.0)
     );

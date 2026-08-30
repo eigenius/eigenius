@@ -15,10 +15,11 @@
 //! **D62 S6 — assembly**: turn a parsed sentence's `Prop` into a chain resource.
 //!
 //! The DCG engine (D63) produces a closed, felicity-gated `Prop` per sentence; the reasoning
-//! institution (D39) consumes chain-resident propositions carrying `IsDerivedAs` witnesses. This
+//! institution (D39) consumes chain-resident propositions carrying `IsDeclaredAs` witnesses. This
 //! crate is the join: parse → select one reading → D47-encode the term → emit Eigon-JSON that
-//! `eigenius load` puts on the chain as a `reflection:DerivedResource` under a
-//! `reflection:ProgramTrace`.
+//! `eigenius load` puts on the chain. The claims land Declared, under a
+//! `reflection:DeclarationTrace` — see [`grade`] for why the parser fixes their form and not their
+//! content.
 //!
 //! **Parsed claims land Declared** (D73 §6, superseding the Derived landing this crate was built
 //! against). The parser is a formulation instrument: it establishes that the text parses to this

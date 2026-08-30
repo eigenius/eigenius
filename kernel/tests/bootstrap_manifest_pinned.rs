@@ -31,6 +31,20 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED ON THE THREE-GROUNDS CHANGE (`2026-08-30`): `justification`, `statistics` and
+//! `reflection`. `justification` is the substantive one — `justification:Term` went from seven
+//! constructors to five (`DerivedEvidence` and `SpecStr` removed), `justification:Certificate`
+//! lost `derived`, `sum_l`/`sum_r` now take a derivation for EACH branch, `spec_poly` dropped its
+//! unchecked audit tag and leaves the term index at `j`, and `witness:IsDerivedAs` is gone. The
+//! other two are description strings only, which move a hash just as surely: `statistics` and
+//! `reflection` described the deleted mechanism in class descriptions, and `reflection:proof_term`
+//! carried the wrong account of what admits a Verified witness — a defect P3 stated in the
+//! ontology and deferred to here so it could ride one reseed instead of invalidating P2's
+//! mid-flight. The test named exactly the three files that were edited, which is the check that
+//! the edits were the intended ones. Editing `ontologies/encoding/encoding.esl` in the same pass
+//! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
+//! `description = "…"` is a resource property and hashes.
+//!
 //! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
 //! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
 //! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
@@ -80,7 +94,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 const EXPECTED: &str = "core:1892387054d3f4fb99048cf8fd9a8e7fab5285786ee6adc7aa7938dd36b6d385
 eigentt-type-fragment:262439f56bfaa793440679019de187b2c6fdc2604399bc1fbdd39a50df4df488
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
-reflection:cce649ac78dd982bd26135c81411c4646767e6314c799f4e290cf97cd2f76bf5
+reflection:b1b818176ce92e5f6cfd203da5df87ba14cc8e1495e2817fdbf51f798c3cc683
 obo:cb157be55245c9ac73385e0ac0c605f0cde8ecb9d1246b07226008cbf8cf4d76
 institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
 runtime:5ef02306d25bc1b52e517114c8b7f2280ca20ad1d70607255198b4d54d8b4bfc
@@ -88,8 +102,8 @@ formulas:2073d36b31311e89803a78f20dc28f376197d89eb75a384dbd429d2203455817
 lean-expressions:2b084735d270d8d1078e69e67de342b5d221f5f7a4939598582190f4c017d8f6
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:41c7dce62971e48bd5bdd08e97bac59e72f27fc38a7e36c4afdfcb3edc0e8d34
-justification:49aee1083e53c1c3581a45f8fa29f41c101e240683e04ed4435f95a01a50e82c
-statistics:c46a2a2881ffb120a5b82cb95eff9caff4cc296be67bbcdbb8196c4b7f889bd3
+justification:d06b3682f6b587e4449d05347ebda3a320f5d0ecdfe4592968e82ad5a9c370d2
+statistics:f95c0401edef61d987e493da8cf17cddfca06bf77db796ab828475e70122b5ce
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:6b3b1de79a7b69ffa60337824a82598b26fa2e99166a18f19bb27f1d07e72b0a
 reference:be3de75381099e9934cd500a356ed14de0b3818e00b3af36835af4e035c0e250

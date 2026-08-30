@@ -29,9 +29,10 @@
 //   carries the predicate the claim establishes when Holds. The
 //   institution's `validate_analysis_plan` query class recomputes
 //   the claim from raw replicates and admits the commit on Holds.
-//   Downstream D39 reasoning cites the claim's IRI via
-//   `DerivedEvidence`; the witness index (D49 §6) admits the
-//   IsDerivedAs witness against the canonical_proposition slot.
+//   Downstream D39 reasoning grounds the claim as
+//   `App(Declared(plan_yields_effect), Observed(sample_set))`: the plan's
+//   reproducibility declaration supplies the IsDeclaredAs witness and the
+//   SampleSet's ObservationTrace the IsObservedAs one (D49 §6).
 //
 // - Predicate scope-marker classes `PopulationLevel` /
 //   `MeasurementLevel` (D52 §7.4 / §12 #8): each domain predicate
@@ -815,9 +816,10 @@ property stats:observations_column : core:string {
 // canonical proposition mechanically from (effect_size, directionality,
 // dispatch's product position, parameter symbol set) at AutoOnLoad
 // firing time and emits it on the chain-committed Verdict resource at
-// `{claim_iri}:verdict`. Downstream `DerivedEvidence` consumers cite
-// the verdict IRI, not the claim IRI; the chain-witness index keys
-// `IsDerivedAs(verdict_iri, P)` accordingly.
+// `{claim_iri}:verdict`. The verdict is the RECORD of what the institution
+// computed; it grounds nothing on its own, because a computed claim rests on
+// the plan being declared to denote a function of its input and on the input
+// being observed — neither of which a run record establishes.
 //
 // The claim is not itself a DerivedResource. It is the *question* the
 // chain commits an author asked; the *answer* (with its derived
@@ -838,7 +840,7 @@ class stats:AnalysisPlan {
 }
 
 class stats:StatisticalAnalysisPlan : stats:AnalysisPlan {
-    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs the inherited SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
+    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs the inherited SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource recording what the run produced. It is not itself a ground: downstream D39 reasoning grounds a computed claim as App(Declared(plan_yields_effect), Observed(sample_set)), so the plan needs a reproducibility declaration and the sample set its ObservationTrace.";
     requires stats:alpha,
              stats:effect_size,
              stats:directionality,
@@ -1035,7 +1037,7 @@ class stats:ImpossibilityWitness {
 // factorial it's `:result:main_A`, `:result:interaction_AB`, etc.
 
 class stats:StatisticalAnalysisResult : reflection:InstitutionEmittedDerivation {
-    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). Downstream D39 reasoning cites this resource via DerivedEvidence; the D49 §6 witness emitter walks it directly to admit IsDerivedAs(result_iri, canonical_proposition).";
+    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). It is the record of a run, not a ground: a computed claim rests on the assertion that the PLAN denotes a function of its input — which no execution establishes, determinism being a fact about the environment rather than something recoverable from having run once — and on the INPUT. So downstream D39 reasoning grounds it as App(Declared(plan_yields_effect), Observed(sample_set)), and this resource admits no witness of its own.";
     requires stats:verdict_ctor,
              stats:computed_statistic,
              stats:computed_p_value;
@@ -1075,7 +1077,7 @@ resource stats:statistics_institution : institution:Institution {
     institution:institution_iri = "urn:eigenius:measurements:statistics_institution";
     institution:institution_name = "MeasurementStatistics";
     institution:runtime = runtimes:in_process;
-    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a StatisticalAnalysisPlan: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect StatisticalAnalysisResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the StatisticalAnalysisResults are what downstream D39 reasoning cites via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
+    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a StatisticalAnalysisPlan: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect StatisticalAnalysisResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the StatisticalAnalysisResults record what each run produced, and downstream D39 reasoning grounds a computed claim as App(Declared(plan_yields_effect), Observed(sample_set)) rather than by citing a result IRI. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
 }
 
 resource stats:qc_validate_analysis_plan : institution:QueryClass {

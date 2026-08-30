@@ -460,6 +460,58 @@ the parsing pipeline actually uses, or against `emit_from_reasoning_sentence` di
 
 **Depends on P3.** Invalidates authored artifacts; batch with P5's reseed if convenient.
 
+### Landed `2026-08-30`
+
+Three layers moved (`justification`, `statistics`, `reflection`); the pin in
+`kernel/tests/bootstrap_manifest_pinned.rs` is updated and carries the account. Workspace green.
+
+What the phase found that the plan did not predict, in the order it mattered:
+
+- **The out-of-band programs had no provenance at all.** All 12 program resources already declared
+  `input_type -> output_type` and their inputs were content-addressed, but **0 programs carried a
+  `DeclarationTrace` and 19 of 21 inputs carried no `ObservationTrace`**. `emit_from_trace` resolves
+  a trace's target on the chain, so both had to be committed before any citation could be rewritten.
+  New chain file `08a-program-provenance.esl`: 8 program claims, 8 input observations, one warrant.
+
+- **The plan declarations as first written were false.** They read
+  `forall s. Asserts(s) -> STAT(s)` — a claim about the method, and the shape a universal wants.
+  It asserts that *every* recorded sample set has the stated statistic, which is a claim about data
+  nobody has seen. Narrowed to pin the input. Side effect: `SpecStr` occurrences in the WRN chain
+  fell 45 → 3.
+
+- **`ProgramTrace` and `InstitutionEmittedDerivation` now emit NO witness.** The plan said to change
+  the two producers to emit a composite; what they actually had to do is stop. A run record grounds
+  nothing, and the removal is forced rather than chosen: `WitnessCategory::Derived` could only ever
+  be consumed by `Certificate.derived`, so once that constructor goes no lookup can ask for it.
+
+- **Seven tests stopped needing Docker.** `wrn_phase3`'s R-runtime `#[ignore]`s are gone and the
+  `R_RUNTIME` pending allowance is deleted from both `wrn_phase3.rs` and `wrn_phase5.rs`. Measured,
+  not assumed: emptying the allowance and running is what showed all seven now Hold. They needed a
+  runtime because `DerivedEvidence(<program>:result)` cited the program's OUTPUT resource, which
+  only R could commit; `App(Declared(plan), Observed(input))` cites two chain-resident facts, so
+  type-checking no longer requires having run the analysis. The demo still runs lme4 for real and
+  that is still what checks the numbers.
+
+- **The `Sum` strengthening cost zero, as predicted, and is now tested at commit.**
+  `crates/eigenius-reasoning/tests/sum_requires_both_branches.rs` — a `Sum` over two grounded
+  branches Holds; one whose fallback cites an ungroundable IRI is refused with a missing-`IsDeclaredAs`
+  diagnostic naming the branch.
+
+- **The notebook `notebooks/examples/stats-and-reasoning.json` was already broken**, independent of
+  this phase: it used `spec_str`, retired `2026-08-21` by eigenius#203. Nothing executes it, so
+  nothing noticed. Updated to `spec_poly` and the composite shape, plus the plan declaration cell it
+  now needs.
+
+- **`spec_poly` is 5-ary at all 8 call sites.** The audit tag is gone and the result index is `j`.
+  Two sites were missed on the first pass because the rewriter skipped calls NESTED inside one it had
+  already rewritten; a third-pass check by arity caught it. Comments containing a comma
+  (`// tag : audit label, same IRI as the instance`) also broke the argument splitter until it
+  learned to skip line comments.
+
+**Exit criteria, met.** `leaves_of(term, Observed)` returns the sample set and
+`survives_without(dataset)` returns false — `a_computed_ground_projects_to_its_plan_and_its_input`
+in `project.rs`. Both answered wrongly before, in the reassuring direction.
+
 ### Prerequisite found `2026-08-29` — the analysis plans are not declared
 
 **`App(Declared(plan), Observed(inputs))` needs BOTH witnesses to resolve, and the plan half does

@@ -1914,8 +1914,8 @@ impl<'a> Parser<'a> {
         // only by absurd elimination); in `Prop` they're the canonical
         // shape for opaque predicates whose inhabitants are admitted by
         // the kernel rather than constructed by users (D49 §6's
-        // `ChainWitness.IsDeclaredAs / IsObservedAs / IsDerivedAs /
-        // IsVerifiedAs` and D39 §4.1's `core:Asserts` are all of this
+        // `ChainWitness.IsDeclaredAs / IsObservedAs / IsVerifiedAs`
+        // and D39 §4.1's `core:Asserts` are all of this
         // shape). The parser does not police this — well-formedness is
         // a type-theory concern handled by the kernel checker, and
         // legitimate use cases would otherwise force users to either

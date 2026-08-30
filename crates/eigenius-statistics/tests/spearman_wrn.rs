@@ -18,7 +18,7 @@
 //! Recomputes the REAL WRN dependency ~ #MS-deletions correlation (51 MSI
 //! cell lines, the corrected n; finding F1) through the statistics
 //! institution and confirms it (a) emits a `Holds` result, (b) carries the
-//! verifier-derived `¬(spearman_rho(s) = 0)` proposition (IsDerivedAs-
+//! verifier-derived `¬(spearman_rho(s) = 0)` proposition (declaration-
 //! admissible), and (c) reproduces R's rho = -0.7412 (diagnostic) at a
 //! highly significant p. The kernel-recomputed form of `D-REFINE`.
 
@@ -142,7 +142,8 @@ fn spearman_recomputes_wrn_mutator_load_correlation_to_holds() {
     );
     assert!(
         has_canonical,
-        "Holds correlation result must carry a canonical_proposition (for IsDerivedAs)"
+        "Holds correlation result must carry a canonical_proposition (a plan \
+         declaration is written against it)"
     );
     assert!(
         p_value > 0.0 && p_value < 1e-6,

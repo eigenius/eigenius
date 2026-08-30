@@ -117,7 +117,7 @@ resource wrn:dd_drive_trace : reflection:ExternalExecutionTrace {
 // ─── Declared: the discovery rule ────────────────────────────────────
 // Independent CRISPR + RNAi replication of a top differential dependency
 // establishes selective essentiality. Universally quantified over genes;
-// SpecStr applies it at WRN in the certificate.
+// `spec_poly` applies it at WRN in the certificate.
 
 resource wrn:discovery_rule : reflection:DeclaredResource {
     reflection:declared_by  = wrn:authors;
@@ -161,7 +161,10 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 onco:TopDifferentialDependency(g, DCTX) ->
                 onco:SelectivelyEssential(g, MSI),
 
-            j0 = justification:SpecStr(Declared(RULE), G),
+            // Specialization leaves the TERM unchanged — `spec_poly` narrows the
+            // proposition from the universal to WRN, and narrowing introduces no
+            // ground. The rule is Declared before and after.
+            j0 = Declared(RULE),
             rule_cert = spec_poly(
                 // T : the domain
                 core:string,
@@ -170,8 +173,6 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                     onco:TopDifferentialDependency(g, DCTX) ->
                     onco:SelectivelyEssential(g, MSI),
                 Declared(RULE),
-                G,
-                // tag : audit label, same IRI as the instance
                 G,
                 declared(RULE, RULE_P)
             ),
@@ -182,7 +183,7 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                justification:Certificate(
                    justification:App(
                        justification:App(
-                           SpecStr(Declared("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
+                           Declared("urn:eigenius:pub:wrn:discovery_rule"),
                            Declared("urn:eigenius:pub:wrn:dd_achilles")
                        ),
                        Declared("urn:eigenius:pub:wrn:dd_drive")
