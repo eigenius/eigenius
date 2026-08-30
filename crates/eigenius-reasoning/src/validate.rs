@@ -162,21 +162,30 @@ pub fn do_validate_justification(
         )));
     }
 
-    // ── Step 7: the certificate checked — emit the VerificationTrace ─
+    // ── Step 7: a VerificationTrace, but only for an actual PROOF ────
     //
-    // eigenius#200. The kernel is a proof system, and a type-checked `justification:Certificate` certificate is a
-    // proof term in it, so a passing check is a verification event like any other and gets the same
-    // chain-side audit artifact the other three grounding families get. Without this the Verified
-    // family was the one place D39 §5's invariant failed — `emit_from_reasoning_sentence`
-    // synthesised a witness straight from the sentence, so every Verified witness on every chain
-    // was traceless.
+    // The certificate type-checking is not verification of the proposition.
+    // `Certificate(j, P)` says *j grounds a claim to P*; a checker confirming
+    // that says nothing about `P` itself. A `VerificationTrace` is declared as
+    // "a proof of a resource's proposition was checked by a proof system", so
+    // minting one off the certificate check asserted the thing the two-layer
+    // separation exists to deny — and it was the chain-side half of the same
+    // defect the witness emitter had.
     //
-    // The trace rides `outcome.derivations`, which the kernel commits alongside the Verdict only
-    // when the gate Holds — so a `Fails` mints nothing, which is the point.
-    let trace = match sentence.id() {
-        Some(sentence_iri) => vec![verification_trace(sentence_iri)],
-        // An embedded sentence has no IRI to attest; the gate still answers.
-        None => Vec::new(),
+    // eigenius#200 added this trace because Verified witnesses were otherwise
+    // traceless. That reason survives, and so does the trace — it now
+    // accompanies the judgement that actually establishes `P`,
+    // `justification:proof`, which is also what the witness emitter keys off.
+    // The two stay in step by construction.
+    //
+    // A conclusion with no proof mints nothing here. Its certificate check is
+    // still recorded — by the Verdict, which is provenance of the
+    // institutional act and is what that check actually produced.
+    let trace = match (sentence.id(), sentence.get(&proof_iri())) {
+        (Some(sentence_iri), Some(_)) => vec![verification_trace(sentence_iri)],
+        // No proof term, or an embedded sentence with no IRI to attest. The
+        // gate still answers; there is simply no verification to record.
+        _ => Vec::new(),
     };
     Ok(QueryOutcome {
         output: verdict_resource(wk::VERDICT_HOLDS, None),
@@ -197,6 +206,18 @@ pub fn do_validate_justification(
 /// this case: a `justification:Conclusion` has no `ProgramTrace` to point at — D39 §4.2 satisfies its
 /// inherited derivation requirement with the certificate field — and pointing the slot at itself to
 /// satisfy a schema would be a fiction.
+/// The conclusion's optional proof judgement.
+fn proof_iri() -> Iri {
+    Iri::parse("urn:eigenius:justification:proof").expect("static IRI")
+}
+
+/// The chain-side audit artifact for a checked PROOF.
+///
+/// `proof_term` names the conclusion carrying the proof judgement the kernel
+/// checked at `t : P`. It used to name the conclusion whose CERTIFICATE
+/// type-checked, which is a different and weaker fact — the property's own
+/// description still says so, and is corrected with the next bootstrap edit
+/// rather than mid-reseed.
 fn verification_trace(sentence_iri: &Iri) -> Resource {
     const KERNEL_PROOF_SYSTEM: &str = "urn:eigenius:kernel";
     let trace_iri = Iri::parse(&format!("{}:verification", sentence_iri.as_str()))

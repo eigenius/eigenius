@@ -50,6 +50,9 @@ use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 /// reasoning-aware — it builds the witnesses `justification:Certificate` consumes.
 const REASONING_SENTENCE: &str = "urn:eigenius:justification:Conclusion";
 const CONCLUSION_JUDGEMENT: &str = "urn:eigenius:justification:judgement";
+/// The conclusion's optional PROOF judgement — `holds(logic, t, P)`. This, and
+/// not the certificate judgement, is what establishes `Verified`.
+const CONCLUSION_PROOF: &str = "urn:eigenius:justification:proof";
 
 /// Does `layer` itself admit `key`?
 ///
@@ -254,39 +257,52 @@ where
     false
 }
 
-/// D54: project a `justification:Conclusion`'s proposition out of its checked
-/// judgement and build a `Verified` `WitnessKey` on the conclusion's own IRI.
+/// D54: admit a `justification:Conclusion` as a `Verified` witness — but ONLY
+/// on the strength of a proof term.
 ///
-/// The proposition is no longer a slot of its own. The judgement is
-/// `holds(kernel, c, Certificate(j, P))`, so `P` is the second index of the
-/// certificate type — which is what makes the pairing checkable rather than
-/// conventional, and what this has to walk to recover it.
+/// The conclusion carries up to two judgements, and they say different things:
 ///
-/// **The hash must match what a citing certificate produces.** A consumer's
-/// `justification:Certificate.verified(iri, P)` supplies `P` directly, and
-/// `hash_stored_proposition` hashes the DECODED `Exp` rather than the stored
-/// JSON, so both sides hash the same term — but only if this projection yields
-/// the same `Exp` the consumer wrote. A mismatch does not error: the lookup
-/// simply misses and no `Verified` witness is admitted.
+/// - `justification:judgement` is `holds(kernel, c, Certificate(j, P))` — *a
+///   checker verified the certificate c*. It does **not** say `P`. A
+///   certificate records the grounds a claim rests on; it is not factive.
+/// - `justification:proof` is `holds(logic, t, P)` — *a checker verified `t`
+///   against `P` itself*. That is factive, and it is what `Verified` means.
+///
+/// **Only the second admits a witness.** Minting `Verified` from the first was
+/// the substitution the two-layer separation exists to forbid: the witness is
+/// what a later `Certificate.verified(iri, P)` consumes, so a conclusion
+/// resting on nothing but `Declared("…")` laundered into a proof exactly one
+/// citation downstream, and `is_fully_verified` answered true for it.
+///
+/// A conclusion with no proof term therefore admits NO witness here. That is a
+/// deliberate tightening of D54 lemma citation: a lemma can be cited as
+/// `verified` only if it was proved, not merely justified.
+///
+/// The hash must match what a citing certificate produces. A consumer supplies
+/// `P` directly; `hash_proposition_exp` hashes the decoded `Exp`, so both sides
+/// hash the same term — see
+/// `a_projected_proposition_hashes_as_the_same_proposition_stored_flat`.
 fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
     let sentence_iri = sentence.id().cloned()?;
-    let judgement_iri = Iri::parse(CONCLUSION_JUDGEMENT).ok()?;
-    let stored = sentence.get(&judgement_iri)?;
-    let judgement = crate::program::eigentt_type_mirror::decode_judgement(stored, layer).ok()?;
-    let (_j, prop) = crate::program::eigentt_type_mirror::certificate_indices(&judgement.typ)?;
-    let prop_hash = match hash_proposition_exp(prop) {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::warn!(
-                { field::OPERATION } = operation::WITNESS_DECODE,
-                { field::ERROR_KIND } = "proposition_encode_failed",
-                { field::ERROR_MESSAGE } = %format!("{e:?}"),
-                resource_iri = %sentence_iri,
-                "a conclusion's projected proposition did not re-encode; no witness admitted"
-            );
-            return None;
-        }
-    };
+    let proof_iri = Iri::parse(CONCLUSION_PROOF).ok()?;
+    let stored = sentence.get(&proof_iri)?;
+    let proof = crate::program::eigentt_type_mirror::decode_judgement(stored, layer).ok()?;
+
+    // The proof's type IS the proposition — no certificate to unwrap. If it is
+    // a `Certificate(...)`, the slot holds a certificate judgement rather than
+    // a proof, and it establishes nothing about the proposition.
+    if crate::program::eigentt_type_mirror::certificate_indices(&proof.typ).is_some() {
+        tracing::warn!(
+            { field::OPERATION } = operation::WITNESS_DECODE,
+            { field::ERROR_KIND } = "proof_is_a_certificate",
+            resource_iri = %sentence_iri,
+            "justification:proof holds a certificate judgement, not a proof of the \
+             proposition; no Verified witness admitted"
+        );
+        return None;
+    }
+
+    let prop_hash = hash_proposition_exp(&proof.typ).ok()?;
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
@@ -577,34 +593,34 @@ mod tests {
         r
     }
 
-    /// A committed `justification:Conclusion` — admitted as a `Verified` witness on its own
-    /// IRI (D54). The commit pipeline rejects `Fails` sentences, so any committed one Held.
+    /// A committed `justification:Conclusion` carrying a PROOF — the only shape
+    /// admitted as a `Verified` witness on its own IRI (D54 lemma citation).
+    ///
+    /// It used to carry only the certificate judgement, and that was enough.
+    /// It is not any more, and the change is the point of P3: a certificate
+    /// records grounds, a proof establishes the proposition, and only the
+    /// second admits `Verified`. A fixture still built the old way would test
+    /// a shape the emitter no longer honours.
     fn reasoning_sentence(sentence_iri: &str, prop: &Exp) -> Resource {
         let mut r = Resource::new(iri(sentence_iri));
         r.set(
             iri(wk::IS_A),
             Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
         );
-        // The proposition rides inside the judgement's certificate type now,
-        // so the fixture has to build the shape the emitter projects from —
-        // which is the point: if the two ever disagree, the witness silently
-        // fails to appear rather than erroring, so the fixture must exercise
-        // the real path.
+        // `holds(kernel, t, P)` — the proof's TYPE is the proposition itself,
+        // with no certificate to unwrap. That is what makes it factive.
         let p = encode_type(prop).unwrap();
-        let j = crate::program::eigentt_type_mirror::encode_type(&Exp::InductiveCtor(
-            iri("urn:eigenius:justification:Term"),
-            "Declared".into(),
-            vec![Exp::LitString(sentence_iri.to_string())],
+        let t = crate::program::eigentt_type_mirror::encode_type(&Exp::LitString(
+            "urn:eigenius:test:proof-term".into(),
         ))
         .unwrap();
-        let typ = crate::program::eigentt_type_mirror::certificate_type(&j, &p).unwrap();
-        let judgement = crate::program::eigentt_type_mirror::encode_judgement(
+        let proof = crate::program::eigentt_type_mirror::encode_judgement(
             "urn:eigenius:eigentt:logic_kernel",
-            &j,
-            &typ,
+            &t,
+            &p,
         )
         .unwrap();
-        r.set(iri(CONCLUSION_JUDGEMENT), judgement);
+        r.set(iri(CONCLUSION_PROOF), proof);
         r
     }
 
@@ -851,6 +867,72 @@ mod tests {
 
     /// A layer stamped witness-free is skipped even when it does define a matching trace. This is
     /// the failure mode of the hint being wrong, pinned so the stamping side stays honest.
+    /// **P3's gate.** Written failing, then closed.
+    ///
+    /// A conclusion grounded only by a DECLARATION must not be admitted as a
+    /// `Verified` witness. It used to be: the emitter read the certificate
+    /// judgement, took the proposition out of `Certificate(j, P)`, and minted
+    /// `WitnessCategory::Verified` without ever looking at `j` — the binding
+    /// was literally `let (_j, prop) = …`.
+    ///
+    /// Why that is a soundness defect rather than a cosmetic one: the witness
+    /// it mints is what a LATER conclusion's `Certificate.verified(iri, P)`
+    /// consumes. So a claim resting on nothing but "an agent asserted it"
+    /// launders into `Verified` one citation downstream, and
+    /// `is_fully_verified` on the citing term answers true. That is the
+    /// substitution of grounds for a proof that the two-layer separation
+    /// exists to make inexpressible.
+    ///
+    /// `Judgement(kernel, c, Certificate(j, P))` says *a checker verified the
+    /// certificate c*. It does NOT say `P`. Only `Judgement(L, t, P)` — a
+    /// proof term checked against the proposition itself, which is what
+    /// `justification:proof` carries — establishes `Verified`.
+    ///
+    /// Closed by keying the `Verified` witness off `justification:proof` —
+    /// a proof of the proposition — rather than off the certificate judgement.
+    #[test]
+    fn a_declared_grounded_conclusion_is_not_admitted_as_verified() {
+        use crate::program::eigentt_type_mirror::{
+            certificate_type, encode_judgement, encode_type,
+        };
+
+        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let conclusion_iri = "urn:eigenius:test:p3:concl";
+        let prop = Exp::sort(0);
+
+        // The justification term is a bare DECLARATION — an agent asserted the
+        // premise. Nothing here is proved.
+        let j = encode_type(&Exp::InductiveCtor(
+            iri("urn:eigenius:justification:Term"),
+            "Declared".into(),
+            vec![Exp::LitString("urn:eigenius:test:p3:premise".into())],
+        ))
+        .unwrap();
+        let p = encode_type(&prop).unwrap();
+        let typ = certificate_type(&j, &p).unwrap();
+        let judgement = encode_judgement("urn:eigenius:eigentt:logic_kernel", &j, &typ).unwrap();
+
+        let mut r = Resource::new(iri(conclusion_iri));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
+        );
+        r.set(iri(CONCLUSION_JUDGEMENT), judgement);
+
+        let mut b = LayerBuilder::new("p3_gate", Some(head));
+        b.add_resource(r).unwrap();
+        let layer = b.build(LayerStorage::in_memory());
+
+        let verified =
+            WitnessKey::from_exp(WitnessCategory::Verified, iri(conclusion_iri), &prop).unwrap();
+        assert!(
+            !lookup_chain_witness(&layer, &verified),
+            "a conclusion whose only ground is Declared must NOT be admitted as Verified — \
+             the witness it mints is what a later `Certificate.verified(iri, P)` consumes, so \
+             admitting it launders a declaration into a proof one citation downstream"
+        );
+    }
+
     #[test]
     fn skip_hint_short_circuits_the_lookup() {
         let target = "urn:eigenius:example:thing";

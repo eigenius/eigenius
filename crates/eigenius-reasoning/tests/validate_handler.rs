@@ -888,12 +888,58 @@ fn passing_traced_sentence() -> (ExecutionContext, Resource, serde_json::Value) 
     (ctx, sentence, asserts_subtree)
 }
 
+/// Add a proof judgement `holds(kernel, t, P)` to a conclusion — the only
+/// thing that makes it Verified, and so the only thing that earns a
+/// `VerificationTrace`.
+fn with_proof(mut sentence: Resource, proposition: &serde_json::Value) -> Resource {
+    use eigenius_kernel::program::eigentt_type_mirror::encode_judgement;
+    let term = Value::Json(json!({"ctor": "LitString", "args": ["urn:test:proof-term"]}));
+    let proof = encode_judgement(
+        "urn:eigenius:eigentt:logic_kernel",
+        &term,
+        &Value::Json(proposition.clone()),
+    )
+    .expect("proof judgement encodes");
+    sentence.set(
+        Iri::parse("urn:eigenius:justification:proof").unwrap(),
+        proof,
+    );
+    sentence
+}
+
 #[test]
-fn passing_validation_emits_a_kernel_verification_trace() {
-    // D39 §5: the trace and the witness are two projections of one validator event. That held for
-    // Declared, Observed and Derived and not for Verified — nothing in the kernel ever created a
-    // `VerificationTrace`, so every Verified witness was traceless (eigenius#200).
+fn a_certificate_only_conclusion_emits_no_verification_trace() {
+    // The other direction, and the one that matters. A conclusion whose
+    // certificate type-checks has NOT had a proof of its proposition checked —
+    // `Certificate(j, P)` says `j` grounds `P`, not `P` — so no
+    // `VerificationTrace` is owed, and minting one would put a false claim on
+    // chain beside the false witness the emitter used to mint.
+    //
+    // The certificate check is still recorded: by the Verdict, which is
+    // provenance of the institutional act and is what that check produced.
     let (ctx, sentence, _) = passing_traced_sentence();
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_HOLDS);
+    assert!(
+        outcome.derivations.is_empty(),
+        "a certificate-only conclusion must mint no VerificationTrace; got {:?}",
+        outcome.derivations
+    );
+}
+
+#[test]
+fn a_proof_carrying_conclusion_emits_a_kernel_verification_trace() {
+    // D39 §5: the trace and the witness are two projections of one validator
+    // event, and they must stay in step. Both now key off the PROOF judgement,
+    // so a conclusion carrying one gets both.
+    //
+    // This used to fire on the certificate check alone. That made the trace
+    // claim more than the event supported — a `VerificationTrace` is declared
+    // as "a proof of a resource's proposition was checked", and checking
+    // `Certificate(j, P)` is not that.
+    let (ctx, sentence, prop) = passing_traced_sentence();
+    let sentence = with_proof(sentence, &prop);
     let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
         .expect("handler returns outcome");
     assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_HOLDS);
@@ -938,6 +984,7 @@ fn passing_validation_emits_a_kernel_verification_trace() {
 
 #[test]
 fn the_minted_trace_keys_the_witness_on_the_sentences_own_proposition() {
+    // Needs a proof for the same reason as the test above.
     // The subtle half. `emit_from_trace` reads the TARGET's `reflection:canonical_proposition`,
     // but a justification:Conclusion keeps its proposition under `justification:proposition`. Without the
     // justification:Conclusion arm in `target_proposition_hash` the trace falls through to the D39 §4.1
@@ -953,6 +1000,7 @@ fn the_minted_trace_keys_the_witness_on_the_sentences_own_proposition() {
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
     let (ctx, sentence, asserts_subtree) = passing_traced_sentence();
+    let sentence = with_proof(sentence, &asserts_subtree);
     let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
         .expect("handler returns outcome");
     let trace = outcome.derivations[0].clone();

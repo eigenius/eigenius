@@ -460,6 +460,83 @@ the parsing pipeline actually uses, or against `emit_from_reasoning_sentence` di
 
 **Depends on P3.** Invalidates authored artifacts; batch with P5's reseed if convenient.
 
+### Prerequisite found `2026-08-29` — the analysis plans are not declared
+
+**`App(Declared(plan), Observed(inputs))` needs BOTH witnesses to resolve, and the plan half does
+not exist.** Measured against the WRN chain:
+
+| resource | trace it carries | witness | composite half |
+|---|---|---|---|
+| `wrn_dep_sampleset` | `ObservationTrace` | `IsObservedAs` | `Observed(inputs)` ✅ |
+| `bridge_msi_selective` | `DeclarationTrace` | `IsDeclaredAs` | ✅ |
+| `wrn_dep_plan` | **`ProgramTrace`** | `IsDerivedAs` — deleted by this phase | `Declared(plan)` ❌ |
+
+**0 of 21 `stats:StatisticalAnalysisPlan` resources carry a `DeclarationTrace`.** Every one is
+traced only by the `ProgramTrace` of its run.
+
+**That is the right defect to find, and it is the design's central claim in miniature.** A
+`ProgramTrace` records *that a run happened* — provenance. What the composite needs is the
+assertion *that this plan denotes a function `I → O`*, which is a claim an accountable agent makes
+and which no execution can establish: determinism is an empirical fact about the environment, not a
+property recoverable from a run record. So the plans must be **declared**, and by someone.
+
+**P4's shape changes accordingly**: author 21 `DeclarationTrace`s (with agents and rationales)
+BEFORE the citation rewrite, or every rewritten `App(Declared(plan), …)` fails to resolve and the
+chains go from wrong to uncommittable. Sequence: declare the plans → rewrite the 32
+`DerivedEvidence` sites → rewrite the ~30 `Verified(…)` citations → delete the constructors.
+
+**This is also the first place the refactor asks for a judgement no one has recorded.** Twenty-one
+plans need an agent willing to assert reproducibility. That is not a mechanical edit, and pretending
+otherwise by minting stub declarations would reproduce exactly the pattern P5 deletes — a grade
+conferred by the importer that wrote the resource.
+
+### Scope grew after P3 — the citation spine
+
+**Added `2026-08-29`, from P3.** P3 closed its gate by minting `Verified` only from a proof
+judgement. That exposed a pattern the plan did not size: **D54 lemma citation is the laundering
+step, and it is how the project composes conclusions.**
+
+| file | `Verified(…)` citations |
+|---|---|
+| `wrn-helicase/chain/09-phase5-synthesis.esl` | **14** |
+| `wrn-helicase/chain/07-phase2-validation.esl` | 4 |
+| `wrn-helicase/chain/08-phase3-invivo-mechanism.esl` | 4 |
+| `d57-schema-org/chain/05-synthesis.esl` | 8 |
+
+Not one cited conclusion is proved. They rest on `Declared` and `DerivedEvidence`:
+`concl_val_recomputed` (Declared + DerivedEvidence), `concl_vivo` (DerivedEvidence),
+`concl_helicase_required` (Declared), `concl_mech` and `concl_mmr` (Declared + Verified).
+Citing them as `Verified(iri)` **is** the reduction of `Judgement(kernel, c, Certificate(j,P))` to
+`Judgement(kernel, t, P)` that the design names as inexpressible. It passed for months because the
+emitter minted `Verified` from `is_a` membership without inspecting what grounded the conclusion.
+
+**The repair belongs here, not in P3, for three reasons that are P4's to settle.**
+
+1. **P4 decides what a cited conclusion decomposes INTO.** Deleting `DerivedEvidence` takes the
+   grounds to three, so a computed conclusion becomes `App(Declared(plan), Observed(inputs))`.
+   `concl_vivo` rests on a `Derived` leaf today and on an application after P4 — the citation's
+   replacement differs before and after, and only the second is worth writing.
+2. **`08-phase3-invivo-mechanism.esl` composes with the `derived(…)` certificate constructor**,
+   which P4 removes. Rewriting its spine earlier guarantees rewriting it twice.
+3. **There is a second laundering path and P4 closes it.** `check_layer_with_coercion` lets a
+   `Verified` witness satisfy a `derived(…)` citation. P3 narrowed what MINTS a Verified witness;
+   P4 removes the coercion that SPENDS one. Repairing citations between the two aims at a moving
+   target.
+
+**The capability is not lost.** `Certificate.app` already composes certificates: a synthesis takes
+the cited conclusion's certificate as its antecedent instead of a fresh `Verified` leaf. What goes is
+citation *by IRI* for unproved conclusions — which is the point, since the IRI was standing in for a
+proof that does not exist.
+
+**Cost of the deferral, stated:** `d57_chain_validates` and the WRN demo stay red between P3 and P4.
+That is the honest state — those chains assert `Verified` for conclusions never proved — and making
+the tests green before the data is right would be the wrong order.
+
+**Also carried into P4 from P3:** `reflection:proof_term`'s description still reads *"for the kernel,
+the chain-resident IRI of the `justification:Conclusion` whose CERTIFICATE type-checked"* — the
+defect stated in the ontology. Correcting it changes the bootstrap manifest, so it rides P4's
+reseed rather than invalidating P2's mid-flight.
+
 | | current | after |
 |---|---|---|
 | `justification:Term` constructors | 7 | **5** — `DerivedEvidence` and `SpecStr` removed |
@@ -1009,6 +1086,39 @@ are sized in the companion scope note.
 - `cargo test --workspace`; `cargo fmt --all -- --check`; `RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets`.
 - The parse gate, **`--release`** — a debug build fakes grammar gaps through NbE stack overflow.
   Baseline from P0; grammar-gap 0 and the hit count must not regress.
+
+  **The tracked ranks are STALE against current importers, and that is a pre-existing condition
+  this refactor surfaced rather than caused.** Measured `2026-08-29` on the first post-P2 reseed:
+  a replay of `ranks/2026-07-29-demonstratives.json` reported **61 hits, 1 miss**, and the harness
+  voids its own run on that — *"each falls back to seed order, disabling sense elimination for that
+  sentence, so this is NOT a faithful replay and its per-unit numbers are not comparable."*
+  Downstream, `expected-hits` read 60 against the baseline's 62.
+
+  **Not attributable to P1-P3.** The whole of P1+P2 changes exactly one line under
+  `kernel/src/dcg/` — a doc comment renaming `eigentt:TypeExpr` to `eigentt:Term` in
+  `lexicon.rs`. The rank keys are sentence text, word surfaces and `wn:` / `umls:` sense IDs; the
+  refactor touches none of them.
+
+  **The cause is an axis the reseed script does not expose.** A rank key embeds the candidate
+  sense list, which the IMPORTERS produce. The ranks were recorded `2026-07-29` and their snapshot
+  built `2026-08-02`; `dcg/augment.rs` and `crates/eigenius-umls` changed `2026-08-20` (D71) and
+  `dcg/glossary.rs` changed `2026-08-26` (#229). Any reseed at HEAD reproduces the mismatch. The
+  baseline's own provenance note records this happening once before, when the D70 reseed changed
+  candidate sense lists and one key stopped matching.
+
+  **Matching baseline provenance therefore has one more axis than the flags cover.** UMLS scope,
+  drops, atom-overrides and countability are all selectable; the importer code that built the
+  lexicon is not. A faithful gate needs the ranks re-recorded whenever the importers move —
+  which is a live-LLM cost and a fresh draw, so it is a deliberate act rather than a step in a
+  phase.
+
+  **Coverage still gates, and it held**: `grammar-gap 0`, `missing-lexeme 0`, 62 units. That
+  criterion is the non-negotiable one and needs no rank replay to read.
+
+  **Decision (`2026-08-29`): P1-P3 are verified on COVERAGE ONLY.** The faithfulness number is
+  unreadable until the ranks are re-recorded, and re-recording is a live-LLM draw that buys nothing
+  for phases which provably do not touch the parse path. It becomes necessary the first time a
+  phase does.
 - The WRN demo end to end. Take the stack down first; staging removes the store directory under a
   live RocksDB otherwise.
 - After any bootstrap edit: reseed, and check the resource count against P0.
