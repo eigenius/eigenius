@@ -61,6 +61,17 @@ resource wrn:concl_wrn_selective_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:wrn_dep_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:wrn_dep_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:wrn_dep_sampleset", "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_msi_selective",
             RESULT = "urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect",
@@ -70,14 +81,14 @@ resource wrn:concl_wrn_selective_recomputed : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, SE,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), js,
                    declared(BRIDGE, STAT -> SE),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_msi_selective"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect")
+                       js
                    ),
                    onco:SelectivelyEssential("WRN", "MSI") ) )
     );
@@ -140,6 +151,17 @@ resource wrn:concl_lineage_mutator_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:mutator_load_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:mutator_load_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:mutator_load_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:mutator_load_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:mutator_load_sampleset", "urn:eigenius:pub:wrn:mutator_load_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:mutator_load_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:mutator_load_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:mutator_load_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_lineage_mutator",
             RESULT = "urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect",
@@ -149,14 +171,14 @@ resource wrn:concl_lineage_mutator_recomputed : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, EM,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), js,
                    declared(BRIDGE, STAT -> EM),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_lineage_mutator"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect")
+                       js
                    ),
                    onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon") ) )
     );
@@ -170,6 +192,17 @@ resource wrn:concl_coloc_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:coloc_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:coloc_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:coloc_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:coloc_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:coloc_sampleset", "urn:eigenius:pub:wrn:coloc_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:coloc_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:coloc_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:coloc_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_coloc",
             RESULT = "urn:eigenius:pub:wrn:coloc_plan:result:main_effect",
@@ -179,14 +212,14 @@ resource wrn:concl_coloc_recomputed : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, RC,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), js,
                    declared(BRIDGE, STAT -> RC),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_coloc"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:coloc_plan:result:main_effect")
+                       js
                    ),
                    onco:ReducedNucleolarColocalization("WRN", "MSI") ) )
     );
@@ -200,6 +233,17 @@ resource wrn:concl_apop_shrna_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset", "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_apop_shrna",
             RESULT = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect",
@@ -209,14 +253,14 @@ resource wrn:concl_apop_shrna_recomputed : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, CA,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), js,
                    declared(BRIDGE, STAT -> CA),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_apop_shrna"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect")
+                       js
                    ),
                    onco:CausesApoptosis("WRN", "MSI") ) )
     );
@@ -230,6 +274,17 @@ resource wrn:concl_hcr_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:hcr_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:hcr_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:hcr_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:hcr_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:hcr_sampleset", "urn:eigenius:pub:wrn:hcr_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:hcr_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:hcr_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:hcr_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_hcr",
             RESULT = "urn:eigenius:pub:wrn:hcr_plan:result:main_effect",
@@ -239,14 +294,14 @@ resource wrn:concl_hcr_recomputed : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, MR,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), js,
                    declared(BRIDGE, STAT -> MR),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_hcr"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:hcr_plan:result:main_effect")
+                       js
                    ),
                    onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5") ) )
     );
@@ -259,6 +314,17 @@ resource wrn:concl_recq_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:wrn_recq_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:wrn_recq_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:wrn_recq_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:wrn_recq_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:wrn_recq_sampleset", "urn:eigenius:pub:wrn:wrn_recq_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:wrn_recq_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:wrn_recq_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:wrn_recq_sampleset",
             RULE   = "urn:eigenius:pub:wrn:recq_uniqueness_rule",
             RESULT = "urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect",
@@ -268,14 +334,14 @@ resource wrn:concl_recq_recomputed : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, OM,
-                   Declared(RULE), DerivedEvidence(RESULT),
+                   Declared(RULE), js,
                    declared(RULE, STAT -> OM),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:recq_uniqueness_rule"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect")
+                       js
                    ),
                    onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases") ) )
     );
@@ -288,6 +354,28 @@ resource wrn:concl_biomarker_recomputed : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:biomarker_plan_yields_ppv",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            PLANP_0 = forall (s : core:string) => core:Asserts(s) -> stats:ge(stats:ppv(s), 0.7),
+            jp_0    = justification:SpecStr(Declared(CLAIM_0), "urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            js_0    = justification:App(jp_0, Observed("urn:eigenius:pub:wrn:wrn_dep_sampleset")),
+            cp_0    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:ge(stats:ppv(s), 0.7),
+                        Declared(CLAIM_0), "urn:eigenius:pub:wrn:wrn_dep_sampleset", "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+                        declared(CLAIM_0, PLANP_0)),
+            cs_0    = app(OBSP_0, stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7), jp_0, Observed("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+                        cp_0, observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:biomarker_plan_yields_sensitivity",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            PLANP_1 = forall (s : core:string) => core:Asserts(s) -> stats:ge(stats:sensitivity(s), 0.9),
+            jp_1    = justification:SpecStr(Declared(CLAIM_1), "urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            js_1    = justification:App(jp_1, Observed("urn:eigenius:pub:wrn:wrn_dep_sampleset")),
+            cp_1    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:ge(stats:sensitivity(s), 0.9),
+                        Declared(CLAIM_1), "urn:eigenius:pub:wrn:wrn_dep_sampleset", "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+                        declared(CLAIM_1, PLANP_1)),
+            cs_1    = app(OBSP_1, stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9), jp_1, Observed("urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+                        cp_1, observed("urn:eigenius:pub:wrn:wrn_dep_sampleset", OBSP_1)),
             SS      = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
             BRIDGE  = "urn:eigenius:pub:wrn:bridge_biomarker",
             R_PPV   = "urn:eigenius:pub:wrn:biomarker_plan:result:ppv",
@@ -296,17 +384,17 @@ resource wrn:concl_biomarker_recomputed : justification:Conclusion {
             SENSP   = stats:ge(stats:sensitivity(SS), 0.9),
             SB      = onco:StrongBiomarker("MSI", "WRN_dependency"),
             bridge_cert = declared(BRIDGE, PPVP -> SENSP -> SB),
-            cert1 = app(PPVP, SENSP -> SB, Declared(BRIDGE), DerivedEvidence(R_PPV), bridge_cert, derived(R_PPV, PPVP))
+            cert1 = app(PPVP, SENSP -> SB, Declared(BRIDGE), js_0, bridge_cert, cs_0)
         in
         holds( eigentt:logic_kernel,
-               app(SENSP, SB, justification:App(Declared(BRIDGE), DerivedEvidence(R_PPV)), DerivedEvidence(R_SENS), cert1, derived(R_SENS, SENSP)),
+               app(SENSP, SB, justification:App(Declared(BRIDGE), js_0), js_1, cert1, cs_1),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            Declared("urn:eigenius:pub:wrn:bridge_biomarker"),
-                           DerivedEvidence("urn:eigenius:pub:wrn:biomarker_plan:result:ppv")
+                           js_0
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:biomarker_plan:result:sensitivity")
+                       js_1
                    ),
                    onco:StrongBiomarker("MSI", "WRN_dependency") ) )
     );
@@ -319,6 +407,17 @@ resource wrn:concl_p53_modulates : justification:Conclusion {
 
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:p53_dep_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:p53_dep_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:p53_dep_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:p53_dep_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:p53_dep_sampleset", "urn:eigenius:pub:wrn:p53_dep_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:p53_dep_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:p53_dep_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:p53_dep_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_p53_modulates",
             RESULT = "urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect",
@@ -328,14 +427,14 @@ resource wrn:concl_p53_modulates : justification:Conclusion {
         holds( eigentt:logic_kernel,
                app(
                    STAT, MD,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), js,
                    declared(BRIDGE, STAT -> MD),
-                   derived(RESULT, STAT)
+                   cs
                ),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_p53_modulates"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect")
+                       js
                    ),
                    onco:ModulatesDependence("TP53", "WRN") ) )
     );
@@ -347,25 +446,47 @@ resource wrn:concl_val_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:viab_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+            PLANP_0 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_0    = justification:SpecStr(Declared(CLAIM_0), "urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+            js_0    = justification:App(jp_0, Observed("urn:eigenius:pub:wrn:viab_KM12_sampleset")),
+            cp_0    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_0), "urn:eigenius:pub:wrn:viab_KM12_sampleset", "urn:eigenius:pub:wrn:viab_KM12_sampleset",
+                        declared(CLAIM_0, PLANP_0)),
+            cs_0    = app(OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0), jp_0, Observed("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+                        cp_0, observed("urn:eigenius:pub:wrn:viab_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:viab_OVK18_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+            PLANP_1 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_1    = justification:SpecStr(Declared(CLAIM_1), "urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+            js_1    = justification:App(jp_1, Observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset")),
+            cp_1    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_1), "urn:eigenius:pub:wrn:viab_OVK18_sampleset", "urn:eigenius:pub:wrn:viab_OVK18_sampleset",
+                        declared(CLAIM_1, PLANP_1)),
+            cs_1    = app(OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0), jp_1, Observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+                        cp_1, observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset", OBSP_1)),
             BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
             R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
             R_OVK  = "urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect",
             K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
             SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
-            cert1 = app(K, O -> SVD, Declared(BRIDGE), DerivedEvidence(R_KM12),
-                        declared(BRIDGE, K -> O -> SVD), derived(R_KM12, K))
+            cert1 = app(K, O -> SVD, Declared(BRIDGE), js_0,
+                        declared(BRIDGE, K -> O -> SVD), cs_0)
         in
         holds( eigentt:logic_kernel,
-               app(O, SVD, justification:App(Declared(BRIDGE), DerivedEvidence(R_KM12)),
-               DerivedEvidence(R_OVK), cert1, derived(R_OVK, O)),
+               app(O, SVD, justification:App(Declared(BRIDGE), js_0),
+               js_1, cert1, cs_1),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            Declared("urn:eigenius:pub:wrn:bridge_viability"),
-                           DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect")
+                           js_0
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect")
+                       js_1
                    ),
                    onco:SelectiveViabilityDependence("WRN", "MSI") ) )
     );
@@ -375,6 +496,39 @@ resource wrn:concl_cellcycle_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            PLANP_0 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_0    = justification:SpecStr(Declared(CLAIM_0), "urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            js_0    = justification:App(jp_0, Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
+            cp_0    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_0), "urn:eigenius:pub:wrn:cc_KM12_sampleset", "urn:eigenius:pub:wrn:cc_KM12_sampleset",
+                        declared(CLAIM_0, PLANP_0)),
+            cs_0    = app(OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), jp_0, Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+                        cp_0, observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            PLANP_1 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_1    = justification:SpecStr(Declared(CLAIM_1), "urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            js_1    = justification:App(jp_1, Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
+            cp_1    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_1), "urn:eigenius:pub:wrn:cc_SW48_sampleset", "urn:eigenius:pub:wrn:cc_SW48_sampleset",
+                        declared(CLAIM_1, PLANP_1)),
+            cs_1    = app(OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), jp_1, Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+                        cp_1, observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            PLANP_2 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_2    = justification:SpecStr(Declared(CLAIM_2), "urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            js_2    = justification:App(jp_2, Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
+            cp_2    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_2), "urn:eigenius:pub:wrn:cc_OVK18_sampleset", "urn:eigenius:pub:wrn:cc_OVK18_sampleset",
+                        declared(CLAIM_2, PLANP_2)),
+            cs_2    = app(OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), jp_2, Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+                        cp_2, observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", OBSP_2)),
             BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
             R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
             R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
@@ -384,24 +538,24 @@ resource wrn:concl_cellcycle_recomputed : justification:Conclusion {
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
             CA = onco:CausesCellCycleArrest("WRN", "MSI"),
             RULE_P = K -> S -> O -> CA,
-            cert1 = app(K, S -> O -> CA, Declared(BRIDGE), DerivedEvidence(R_K),
-                        declared(BRIDGE, RULE_P), derived(R_K, K)),
-            cert2 = app(S, O -> CA, justification:App(Declared(BRIDGE), DerivedEvidence(R_K)),
-                        DerivedEvidence(R_S), cert1, derived(R_S, S))
+            cert1 = app(K, S -> O -> CA, Declared(BRIDGE), js_0,
+                        declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(S, O -> CA, justification:App(Declared(BRIDGE), js_0),
+                        js_1, cert1, cs_1)
         in
         holds( eigentt:logic_kernel,
-               app(O, CA, justification:App(justification:App(Declared(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
-               DerivedEvidence(R_O), cert2, derived(R_O, O)),
+               app(O, CA, justification:App(justification:App(Declared(BRIDGE), js_0), js_1),
+               js_2, cert2, cs_2),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            justification:App(
                                Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
-                               DerivedEvidence("urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect")
+                               js_0
                            ),
-                           DerivedEvidence("urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect")
+                           js_1
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect")
+                       js_2
                    ),
                    onco:CausesCellCycleArrest("WRN", "MSI") ) )
     );
@@ -411,6 +565,39 @@ resource wrn:concl_apoptosis_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            PLANP_0 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_0    = justification:SpecStr(Declared(CLAIM_0), "urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            js_0    = justification:App(jp_0, Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
+            cp_0    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_0), "urn:eigenius:pub:wrn:apop_KM12_sampleset", "urn:eigenius:pub:wrn:apop_KM12_sampleset",
+                        declared(CLAIM_0, PLANP_0)),
+            cs_0    = app(OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), jp_0, Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+                        cp_0, observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            PLANP_1 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_1    = justification:SpecStr(Declared(CLAIM_1), "urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            js_1    = justification:App(jp_1, Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
+            cp_1    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_1), "urn:eigenius:pub:wrn:apop_SW48_sampleset", "urn:eigenius:pub:wrn:apop_SW48_sampleset",
+                        declared(CLAIM_1, PLANP_1)),
+            cs_1    = app(OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), jp_1, Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+                        cp_1, observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            PLANP_2 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_2    = justification:SpecStr(Declared(CLAIM_2), "urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            js_2    = justification:App(jp_2, Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
+            cp_2    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_2), "urn:eigenius:pub:wrn:apop_OVK18_sampleset", "urn:eigenius:pub:wrn:apop_OVK18_sampleset",
+                        declared(CLAIM_2, PLANP_2)),
+            cs_2    = app(OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), jp_2, Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+                        cp_2, observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", OBSP_2)),
             BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
             R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
             R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
@@ -420,24 +607,24 @@ resource wrn:concl_apoptosis_recomputed : justification:Conclusion {
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
             CA = onco:CausesApoptosis("WRN", "MSI"),
             RULE_P = K -> S -> O -> CA,
-            cert1 = app(K, S -> O -> CA, Declared(BRIDGE), DerivedEvidence(R_K),
-                        declared(BRIDGE, RULE_P), derived(R_K, K)),
-            cert2 = app(S, O -> CA, justification:App(Declared(BRIDGE), DerivedEvidence(R_K)),
-                        DerivedEvidence(R_S), cert1, derived(R_S, S))
+            cert1 = app(K, S -> O -> CA, Declared(BRIDGE), js_0,
+                        declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(S, O -> CA, justification:App(Declared(BRIDGE), js_0),
+                        js_1, cert1, cs_1)
         in
         holds( eigentt:logic_kernel,
-               app(O, CA, justification:App(justification:App(Declared(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
-               DerivedEvidence(R_O), cert2, derived(R_O, O)),
+               app(O, CA, justification:App(justification:App(Declared(BRIDGE), js_0), js_1),
+               js_2, cert2, cs_2),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            justification:App(
                                Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
-                               DerivedEvidence("urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect")
+                               js_0
                            ),
-                           DerivedEvidence("urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect")
+                           js_1
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect")
+                       js_2
                    ),
                    onco:CausesApoptosis("WRN", "MSI") ) )
     );
@@ -447,6 +634,39 @@ resource wrn:concl_mmr_restoration_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         alias
+            CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            OBSP_0  = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            PLANP_0 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_0    = justification:SpecStr(Declared(CLAIM_0), "urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            js_0    = justification:App(jp_0, Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            cp_0    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_0), "urn:eigenius:pub:wrn:mmr_rescue_sampleset", "urn:eigenius:pub:wrn:mmr_rescue_sampleset",
+                        declared(CLAIM_0, PLANP_0)),
+            cs_0    = app(OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), jp_0, Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        cp_0, observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", OBSP_0)),
+            CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            OBSP_1  = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            PLANP_1 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_1    = justification:SpecStr(Declared(CLAIM_1), "urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            js_1    = justification:App(jp_1, Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            cp_1    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_1), "urn:eigenius:pub:wrn:mmr_resens1_sampleset", "urn:eigenius:pub:wrn:mmr_resens1_sampleset",
+                        declared(CLAIM_1, PLANP_1)),
+            cs_1    = app(OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), jp_1, Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        cp_1, observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", OBSP_1)),
+            CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            OBSP_2  = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            PLANP_2 = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp_2    = justification:SpecStr(Declared(CLAIM_2), "urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            js_2    = justification:App(jp_2, Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            cp_2    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM_2), "urn:eigenius:pub:wrn:mmr_resens2_sampleset", "urn:eigenius:pub:wrn:mmr_resens2_sampleset",
+                        declared(CLAIM_2, PLANP_2)),
+            cs_2    = app(OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), jp_2, Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        cp_2, observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", OBSP_2)),
             BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
             R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
             R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
@@ -456,24 +676,24 @@ resource wrn:concl_mmr_restoration_recomputed : justification:Conclusion {
             O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
             RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
             RULE_P = K -> S -> O -> RP,
-            cert1 = app(K, S -> O -> RP, Declared(BRIDGE), DerivedEvidence(R_R),
-                        declared(BRIDGE, RULE_P), derived(R_R, K)),
-            cert2 = app(S, O -> RP, justification:App(Declared(BRIDGE), DerivedEvidence(R_R)),
-                        DerivedEvidence(R_1), cert1, derived(R_1, S))
+            cert1 = app(K, S -> O -> RP, Declared(BRIDGE), js_0,
+                        declared(BRIDGE, RULE_P), cs_0),
+            cert2 = app(S, O -> RP, justification:App(Declared(BRIDGE), js_0),
+                        js_1, cert1, cs_1)
         in
         holds( eigentt:logic_kernel,
-               app(O, RP, justification:App(justification:App(Declared(BRIDGE), DerivedEvidence(R_R)), DerivedEvidence(R_1)),
-               DerivedEvidence(R_2), cert2, derived(R_2, O)),
+               app(O, RP, justification:App(justification:App(Declared(BRIDGE), js_0), js_1),
+               js_2, cert2, cs_2),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            justification:App(
                                Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
-                               DerivedEvidence("urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect")
+                               js_0
                            ),
-                           DerivedEvidence("urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect")
+                           js_1
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect")
+                       js_2
                    ),
                    onco:RestorationPartiallyRescues("dMMR", "WRN") ) )
     );
@@ -482,6 +702,17 @@ resource wrn:concl_rescue_wt_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:rescue_wt_sampleset", "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
             RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
@@ -489,12 +720,12 @@ resource wrn:concl_rescue_wt_recomputed : justification:Conclusion {
             RD     = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
         in
         holds( eigentt:logic_kernel,
-               app(STAT, RD, Declared(BRIDGE), DerivedEvidence(RESULT),
-               declared(BRIDGE, STAT -> RD), derived(RESULT, STAT)),
+               app(STAT, RD, Declared(BRIDGE), js,
+               declared(BRIDGE, STAT -> RD), cs),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_rescue_wt"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect")
+                       js
                    ),
                    onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ") ) )
     );
@@ -503,6 +734,17 @@ resource wrn:concl_rescue_e84a_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         alias
+            CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            OBSP  = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            PLANP = forall (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+            jp    = justification:SpecStr(Declared(CLAIM), "urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            js    = justification:App(jp, Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset")),
+            cp    = spec_poly(core:string,
+                        fun (s : core:string) => core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0),
+                        Declared(CLAIM), "urn:eigenius:pub:wrn:rescue_e84a_sampleset", "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+                        declared(CLAIM, PLANP)),
+            cs    = app(OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0), jp, Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+                        cp, observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", OBSP)),
             SS     = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
             RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
@@ -510,12 +752,12 @@ resource wrn:concl_rescue_e84a_recomputed : justification:Conclusion {
             RD     = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
         in
         holds( eigentt:logic_kernel,
-               app(STAT, RD, Declared(BRIDGE), DerivedEvidence(RESULT),
-               declared(BRIDGE, STAT -> RD), derived(RESULT, STAT)),
+               app(STAT, RD, Declared(BRIDGE), js,
+               declared(BRIDGE, STAT -> RD), cs),
                justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect")
+                       js
                    ),
                    onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ") ) )
     );

@@ -137,11 +137,17 @@ fn esl_against_pending(
         if ctor != wk::VERDICT_HOLDS {
             continue;
         }
-        // eigenius#200: a passing check is a verification event, so it mints the chain-side
-        // artifact that D39 §5 pairs with the witness. Asserted HERE because this loop is the only
-        // place the whole WRN chain's sentences are walked — 33 of them across phases 2, 3 and 5 —
-        // and because the loop's own shape is what left the gap: it reads `outcome.output` for the
-        // verdict and discarded `outcome.derivations`, which is where the trace rides.
+        // eigenius#200 minted a VerificationTrace on every passing check. P3
+        // narrowed that: checking a `Certificate(j, P)` establishes that `j`
+        // grounds `P`, not `P` — so it is not a verification of the
+        // proposition and owes no trace. A trace is minted only alongside a
+        // `justification:proof`, keyed off the same slot as the Verified
+        // witness so the two cannot drift.
+        //
+        // Every conclusion in the WRN chain rests on declarations and
+        // recomputations; none carries a proof term. So the correct count here
+        // is ZERO, and asserting it keeps the pairing honest — if a trace ever
+        // appears without a proof, the two halves have come apart again.
         let traces: Vec<_> = outcome
             .derivations
             .iter()
@@ -151,19 +157,10 @@ fn esl_against_pending(
                     .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
             })
             .collect();
-        assert_eq!(
-            traces.len(),
-            1,
-            "`{iri}` Held but minted {} VerificationTrace(s); expected exactly one",
+        assert!(
+            traces.is_empty(),
+            "`{iri}` carries no proof term, so it must mint no VerificationTrace; got {}",
             traces.len()
-        );
-        assert_eq!(
-            traces[0]
-                .get(&Iri::parse(wk::REFLECTION_RESOURCE).unwrap())
-                .and_then(|v| v.as_str().map(str::to_string))
-                .as_deref(),
-            Some(iri.as_str()),
-            "`{iri}`'s trace must attest the sentence itself"
         );
     }
     layer
