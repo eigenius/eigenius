@@ -47,6 +47,7 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace onco       = "urn:eigenius:benchmark:onco";
 namespace bench      = "urn:eigenius:benchmark";
 namespace wrn        = "urn:eigenius:pub:wrn";
+namespace agent      = "urn:eigenius:reflection:agent";
 
 // ─── Directionality witness (D52 §7.1) ───────────────────────────────
 // Licenses the one-sided test: the synthetic-lethal hypothesis is
@@ -211,11 +212,41 @@ resource wrn:wrn_corr_sampleset_trace : reflection:ObservationTrace {
 resource wrn:wrn_corr_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set = wrn:wrn_corr_sampleset;
 
+    // The reproducibility claim, as a universal over sample sets. Read: for any
+    // recorded sample set, applying THIS plan to it yields a negative Spearman
+    // rho. `spec_poly` instantiates it at the specific set; `app` then composes
+    // it with that set's observation.
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:spearman_rho(s), 0.0)
+    );
+
     stats:alpha               = 0.05;
     stats:effect_size         = Absolute(0.0, "spearman_rho");
     stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:mutator_load_directionality_witness");
     stats:variance_assumption = RankBased();
     stats:outlier_exclusion   = Identity();
+}
+
+// ── The reproducibility declaration (P4) ─────────────────────────────
+//
+// `App(Declared(plan), Observed(inputs))` needs BOTH witnesses. The plan half
+// did not exist: a plan carried only the ProgramTrace of its run, which mints
+// `IsDerivedAs` — the family this phase deletes.
+//
+// What the composite needs is the assertion that this plan DENOTES A FUNCTION
+// of its input, and no run record can establish that: determinism is an
+// empirical fact about the environment, not a property recoverable from having
+// executed once. So it is declared, by an accountable agent, as a UNIVERSAL
+// over sample sets — the claim is about the method, not about the answer.
+// Instantiating it at a specific sample set is what yields the specific
+// statistic, which is why this is a `forall` discharged by `spec_poly` rather
+// than a flat leaf asserting the number in advance.
+resource wrn:wrn_corr_plan_reproducible_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:wrn_corr_plan;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_wrn_recompute;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
 }
 
 resource wrn:wrn_corr_plan_trace : reflection:ProgramTrace {

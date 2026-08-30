@@ -88,30 +88,47 @@ resource wrn:concl_wrn_selective_recomputed : justification:Conclusion {
 resource wrn:concl_refine_recomputed : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
+    // P4 shape: the statistic is no longer a `DerivedEvidence` leaf citing the
+    // institution's result by IRI. It is the APPLICATION of a declared plan to
+    // an observed sample set — `App(Declared(plan), Observed(inputs))` — which
+    // is what a computed conclusion actually rests on. The plan's universal is
+    // instantiated at this sample set by `spec_poly`.
     justification:judgement = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
+            PLAN   = "urn:eigenius:pub:wrn:wrn_corr_plan",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_mutator_load",
-            RESULT = "urn:eigenius:pub:wrn:wrn_corr_plan:result:main_effect",
+
+            OBS    = core:Asserts(SS),
             STAT   = stats:lt(stats:spearman_rho(SS), 0.0),
-            DC     = onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI")
+            DC     = onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI"),
+
+            PLAN_P = forall (s : core:string) =>
+                        core:Asserts(s) -> stats:lt(stats:spearman_rho(s), 0.0),
+
+            j_plan = justification:SpecStr(Declared(PLAN), SS),
+            j_stat = justification:App(j_plan, Observed(SS)),
+
+            c_plan = spec_poly(
+                        core:string,
+                        fun (s : core:string) =>
+                            core:Asserts(s) -> stats:lt(stats:spearman_rho(s), 0.0),
+                        Declared(PLAN), SS, SS,
+                        declared(PLAN, PLAN_P)),
+            c_stat = app(OBS, STAT, j_plan, Observed(SS),
+                         c_plan, observed(SS, OBS))
         in
         holds( eigentt:logic_kernel,
                app(
                    STAT, DC,
-                   Declared(BRIDGE), DerivedEvidence(RESULT),
+                   Declared(BRIDGE), j_stat,
                    declared(BRIDGE, STAT -> DC),
-                   derived(RESULT, STAT)
+                   c_stat
                ),
                justification:Certificate(
-                   justification:App(
-                       Declared("urn:eigenius:pub:wrn:bridge_mutator_load"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:wrn_corr_plan:result:main_effect")
-                   ),
-                   onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI") ) )
+                   justification:App(Declared(BRIDGE), j_stat),
+                   DC ) )
     );
-
-
 }
 
 // ─── D-LINEAGE (recomputed, ED Fig 2b): common MSI lineages carry a higher
