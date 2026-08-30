@@ -103,6 +103,6 @@ resource dr:claim_dose_response_exists : stats:StatisticalAnalysisPlan {
 
 resource dr:claim_dose_response_exists_trace : prov:ProgramTrace {
     prov:resource  = dr:claim_dose_response_exists;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2026-04-15T09:30:00Z";
 }

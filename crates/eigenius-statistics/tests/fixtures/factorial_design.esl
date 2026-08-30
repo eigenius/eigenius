@@ -105,6 +105,6 @@ resource kx:claim_cell_means_differ : stats:StatisticalAnalysisPlan {
 
 resource kx:claim_cell_means_differ_trace : prov:ProgramTrace {
     prov:resource  = kx:claim_cell_means_differ;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2026-04-02T13:15:00Z";
 }

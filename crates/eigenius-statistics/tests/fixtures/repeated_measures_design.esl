@@ -108,6 +108,6 @@ resource pk:claim_drug_clears_over_time : stats:StatisticalAnalysisPlan {
 
 resource pk:claim_drug_clears_over_time_trace : prov:ProgramTrace {
     prov:resource  = pk:claim_drug_clears_over_time;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2026-05-15T08:00:00Z";
 }

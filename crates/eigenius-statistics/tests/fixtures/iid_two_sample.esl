@@ -81,6 +81,6 @@ resource assay:claim_drug_changes_activity : stats:StatisticalAnalysisPlan {
 
 resource assay:claim_drug_changes_activity_trace : prov:ProgramTrace {
     prov:resource  = assay:claim_drug_changes_activity;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2026-03-15T11:04:30Z";
 }

@@ -82,6 +82,6 @@ resource bp:claim_treatment_lowers_bp : stats:StatisticalAnalysisPlan {
 
 resource bp:claim_treatment_lowers_bp_trace : prov:ProgramTrace {
     prov:resource  = bp:claim_treatment_lowers_bp;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2026-03-20T09:00:00Z";
 }

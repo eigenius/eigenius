@@ -124,7 +124,7 @@ resource wrn:wrn_dep_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:wrn_dep_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:wrn_dep_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -223,7 +223,7 @@ resource wrn:wrn_corr_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:wrn_corr_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:wrn_corr_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -312,7 +312,7 @@ resource wrn:mutator_load_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:mutator_load_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:mutator_load_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -387,7 +387,7 @@ resource wrn:coloc_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:coloc_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:coloc_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -460,7 +460,7 @@ resource wrn:hcr_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:hcr_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:hcr_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -594,7 +594,7 @@ resource wrn:wrn_recq_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:wrn_recq_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:wrn_recq_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -642,7 +642,7 @@ resource wrn:biomarker_plan : stats:ClassificationAnalysisPlan {
 
 resource wrn:biomarker_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:biomarker_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -725,7 +725,7 @@ resource wrn:p53_dep_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:p53_dep_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:p53_dep_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -810,7 +810,7 @@ resource wrn:viab_KM12_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:viab_KM12_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:viab_KM12_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -854,7 +854,7 @@ resource wrn:viab_OVK18_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:viab_OVK18_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:viab_OVK18_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -932,7 +932,7 @@ resource wrn:cc_KM12_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:cc_KM12_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:cc_KM12_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -969,7 +969,7 @@ resource wrn:cc_SW48_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:cc_SW48_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:cc_SW48_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1006,7 +1006,7 @@ resource wrn:cc_OVK18_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:cc_OVK18_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:cc_OVK18_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1084,7 +1084,7 @@ resource wrn:apop_KM12_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:apop_KM12_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:apop_KM12_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1121,7 +1121,7 @@ resource wrn:apop_SW48_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:apop_SW48_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:apop_SW48_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1158,7 +1158,7 @@ resource wrn:apop_OVK18_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:apop_OVK18_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:apop_OVK18_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1227,7 +1227,7 @@ resource wrn:apop_shrna_KM12_plan : stats:StatisticalAnalysisPlan {
 
 resource wrn:apop_shrna_KM12_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:apop_shrna_KM12_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1316,7 +1316,7 @@ resource wrn:mmr_rescue_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:mmr_rescue_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:mmr_rescue_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1356,7 +1356,7 @@ resource wrn:mmr_resens1_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:mmr_resens1_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:mmr_resens1_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1396,7 +1396,7 @@ resource wrn:mmr_resens2_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:mmr_resens2_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:mmr_resens2_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1477,7 +1477,7 @@ resource wrn:rescue_wt_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:rescue_wt_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:rescue_wt_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -1512,7 +1512,7 @@ resource wrn:rescue_e84a_plan : stats:StatisticalAnalysisPlan {
 }
 resource wrn:rescue_e84a_plan_trace : prov:ProgramTrace {
     prov:resource  = wrn:rescue_e84a_plan;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 

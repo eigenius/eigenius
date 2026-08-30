@@ -112,6 +112,6 @@ resource tx:claim_effect_exists : stats:StatisticalAnalysisPlan {
 
 resource tx:claim_effect_exists_trace : prov:ProgramTrace {
     prov:resource  = tx:claim_effect_exists;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2026-05-03T08:45:00Z";
 }

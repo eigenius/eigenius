@@ -62,6 +62,6 @@ resource wrn:claim_wrn_dep_tracks_mutator_load : stats:StatisticalAnalysisPlan {
 
 resource wrn:claim_wrn_dep_tracks_mutator_load_trace : prov:ProgramTrace {
     prov:resource  = wrn:claim_wrn_dep_tracks_mutator_load;
-    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
