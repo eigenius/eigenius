@@ -1,0 +1,247 @@
+// ════════════════════════════════════════════════════════════════════
+// 08a — provenance for the out-of-band program runs
+// ════════════════════════════════════════════════════════════════════
+//
+// The mechanism and in-vivo arms are computed by wrapped-R programs whose
+// results the R runtime emits out of band. The chain used to cite those results
+// as `DerivedEvidence(<program>:result)` — a single opaque leaf standing in for
+// both halves of what actually happened.
+//
+// Under the three grounds there is no such leaf. A computed conclusion is
+// `App(Declared(plan), Observed(input))`: the plan is DECLARED to denote a
+// function of its input, and the input is OBSERVED. Both halves need a witness,
+// and a witness needs a trace whose target resolves on chain — so the programs'
+// inputs and the reproducibility claims are committed here, in an ancestor
+// layer of the conclusions that cite them.
+//
+// The programs already carried their `I -> O` signature as
+// `program:input_type` / `program:output_type`. What was missing was anyone
+// asserting it, and the kernel being able to check that they had.
+//
+// Each claim is bound to its SPECIFIC hash-pinned input, not universally
+// quantified: these inputs are content-addressed, so "this exact input yields
+// this result" is both the true statement and the whole of what
+// reproducibility means for immutable data.
+
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace agent         = "urn:eigenius:reflection:agent";
+namespace ingest        = "urn:eigenius:ingest";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace bench         = "urn:eigenius:benchmark";
+namespace wrn           = "urn:eigenius:pub:wrn";
+
+resource wrn:warrant_program_reproducibility : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Each wrapped-R program below pins its analysis script, its container image and its input by content hash, and declares its input and output types. Those together are what make the program a function of its input rather than of the occasion — the claim `Declared(program)` carries, and one no execution record could establish on its own.";
+    core:short_name = "warrant_program_reproducibility";
+}
+
+
+// ── vivo_lme4 ──────────────────────────────────────────────
+resource wrn:vivo_xenograft_table : ingest:PinnedExternalFile {
+    reflection:source = "wrn-paper Fig 2d KM12 shWRN1 xenograft tumor volumes (Dox-on";
+    core:short_name   = "vivo_xenograft_table";
+}
+resource wrn:vivo_xenograft_table_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:vivo_xenograft_table;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:vivo_lme4_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the vivo_lme4 program to its pinned input yields onco:InVivoDependence('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")
+    );
+}
+resource wrn:vivo_lme4_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:vivo_lme4_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── viab_KM12_bio_lme4 ──────────────────────────────────────────────
+resource wrn:viab_KM12_competition_table : ingest:PinnedExternalFile {
+    reflection:source = "wrn-paper ED Fig 3b KM12 day-10 competition-assay relative r";
+    core:short_name   = "viab_KM12_competition_table";
+}
+resource wrn:viab_KM12_competition_table_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:viab_KM12_competition_table;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:viab_KM12_bio_lme4_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the viab_KM12_bio_lme4 program to its pinned input yields onco:ViabilityDependenceAtBiologicalUnit('WRN', 'KM12').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table") -> onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")
+    );
+}
+resource wrn:viab_KM12_bio_lme4_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:viab_KM12_bio_lme4_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── if_ed5 ──────────────────────────────────────────────
+resource wrn:input_8d26fbb8aafb610a : ingest:PinnedExternalFile {
+    reflection:source = "Derived from wrn_sourcedata_EDFig5_MOESM8.xlsx (panels 5b/5d";
+    core:short_name   = "8d26fbb8aafb610a4952c6281b4088b41bb1ffc6";
+}
+resource wrn:input_8d26fbb8aafb610a_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:input_8d26fbb8aafb610a;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:if_ed5_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the if_ed5 program to its pinned input yields onco:RaisesP53DamageMarkers('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a") -> onco:RaisesP53DamageMarkers("WRN", "MSI")
+    );
+}
+resource wrn:if_ed5_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:if_ed5_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── paralog_ctrl ──────────────────────────────────────────────
+resource wrn:input_14e82c398188b9f6 : ingest:PinnedExternalFile {
+    reflection:source = "DepMap 18Q4 curated omics bundle (figshare 7712756.v1); the ";
+    core:short_name   = "14e82c398188b9f61ad2255301726551884354e9";
+}
+resource wrn:input_14e82c398188b9f6_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:input_14e82c398188b9f6;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:paralog_ctrl_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the paralog_ctrl program to its pinned input yields onco:NotExplainedByParalogLoss('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6") -> onco:NotExplainedByParalogLoss("WRN", "MSI")
+    );
+}
+resource wrn:paralog_ctrl_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:paralog_ctrl_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── foci_dsb ──────────────────────────────────────────────
+resource wrn:input_1ba6dc6f78b10cee : ingest:PinnedExternalFile {
+    reflection:source = "Derived from wrn_sourcedata_EDFig6_MOESM9.xlsx (panels 6f/6h";
+    core:short_name   = "1ba6dc6f78b10cee9ebc25287cc35170fffc11c3";
+}
+resource wrn:input_1ba6dc6f78b10cee_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:input_1ba6dc6f78b10cee;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:foci_dsb_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the foci_dsb program to its pinned input yields onco:CausesDSBs('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee") -> onco:CausesDSBs("WRN", "MSI")
+    );
+}
+resource wrn:foci_dsb_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:foci_dsb_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── gh2ax ──────────────────────────────────────────────
+resource wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95 : ingest:PinnedExternalFile {
+    reflection:source = "Derived from wrn_sourcedata_EDFig6_MOESM9.xlsx (panel 6c) vi";
+    core:short_name   = "d8da9e9535f0f863e8ca541c63982804fa1e0fb9";
+}
+resource wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:gh2ax_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the gh2ax program to its pinned input yields onco:CausesDSBs('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")
+    );
+}
+resource wrn:gh2ax_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:gh2ax_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── gh2ax_foci ──────────────────────────────────────────────
+resource wrn:input_70abbad2f5319ae1 : ingest:PinnedExternalFile {
+    reflection:source = "Derived from wrn_sourcedata_EDFig6_MOESM9.xlsx (panels 6a/6d";
+    core:short_name   = "70abbad2f5319ae18ed840cd36bb3b75805ecd5c";
+}
+resource wrn:input_70abbad2f5319ae1_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:input_70abbad2f5319ae1;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:gh2ax_foci_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the gh2ax_foci program to its pinned input yields onco:CausesDSBs('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1") -> onco:CausesDSBs("WRN", "MSI")
+    );
+}
+resource wrn:gh2ax_foci_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:gh2ax_foci_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+// ── patm ──────────────────────────────────────────────
+resource wrn:input_9a718df80087dece : ingest:PinnedExternalFile {
+    reflection:source = "Derived from wrn_sourcedata_EDFig7_MOESM10.xlsx (panels 7b/7";
+    core:short_name   = "9a718df80087dece5ca9c36af2cb647f06913e1a";
+}
+resource wrn:input_9a718df80087dece_obs : reflection:ObservationTrace {
+    reflection:resource  = wrn:input_9a718df80087dece;
+    reflection:source    = "content-addressed extraction slice; see programs/*/**-input.json";
+    reflection:timestamp = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:patm_yields_result : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:rationale    = "Applying the patm program to its pinned input yields onco:ActivatesDSBResponse('WRN', 'MSI').";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece") -> onco:ActivatesDSBResponse("WRN", "MSI")
+    );
+}
+resource wrn:patm_yields_result_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:patm_yields_result;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_program_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}

@@ -455,7 +455,7 @@ resource wrn:concl_main : justification:Conclusion {
                        ),
                        c_val_recomput_0_js_1
                    ),
-            jIVD = DerivedEvidence("urn:eigenius:pub:wrn:vivo_lme4:result"),
+            jIVD = justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table")),
             jRA  = justification:App(
                        justification:App(
                            Declared("urn:eigenius:pub:wrn:helicase_rule"),
@@ -504,12 +504,13 @@ resource wrn:concl_main : justification:Conclusion {
                        c_mmr_4_c_mmr_restorat_1_js_2
                    )
                    ),
-            jPAR = DerivedEvidence("urn:eigenius:pub:wrn:paralog_ctrl:result"),
+            jPAR = justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6")),
             // antecedent certificates — one verified(conclusion, P) each
             cSVD = app(c_val_recomput_0_O, c_val_recomput_0_SVD, justification:App(Declared(c_val_recomput_0_BRIDGE), c_val_recomput_0_js_0),
                c_val_recomput_0_js_1, c_val_recomput_0_cert1, c_val_recomput_0_cs_1),
-            cIVD = derived("urn:eigenius:pub:wrn:vivo_lme4:result",
-               onco:InVivoDependence("WRN", "MSI")),
+            cIVD = app(core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"), onco:InVivoDependence("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"),
+                       declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:vivo_xenograft_table", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"))),
             cRA  = app(c_helicase_req_2_FR, c_helicase_req_2_RA, justification:App(Declared(c_helicase_req_2_RULE), c_helicase_req_2_jSEP), c_helicase_req_2_jFR,
                c_helicase_req_2_cert1, declared(c_helicase_req_2_ART, c_helicase_req_2_FR)),
             cDL  = app(c_mech_3_AA, c_mech_3_DL, justification:App(justification:App(Declared(c_mech_3_RULE), c_mech_3_jDSB), c_mech_3_jCA),
@@ -527,8 +528,9 @@ resource wrn:concl_main : justification:Conclusion {
                    ),
                declared(c_mmr_4_RULE, c_mmr_4_RP -> c_mmr_4_CD), app(c_mmr_4_c_mmr_restorat_0_O, c_mmr_4_c_mmr_restorat_0_RP, justification:App(justification:App(Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0), c_mmr_4_c_mmr_restorat_0_js_1),
                c_mmr_4_c_mmr_restorat_0_js_2, c_mmr_4_c_mmr_restorat_0_cert2, c_mmr_4_c_mmr_restorat_0_cs_2)),
-            cPAR = derived("urn:eigenius:pub:wrn:paralog_ctrl:result",
-               onco:NotExplainedByParalogLoss("WRN", "MSI")),
+            cPAR = app(core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6"),
+                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6", core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6"))),
             // modus-ponens spine (unchanged — the "from A follows B" backbone)
             c1 = app(SVD, IVD -> RA -> DL -> CD -> PAR -> SL,
                      Declared(RULE), jSVD, declared(RULE, RULE_P), cSVD),
@@ -561,7 +563,7 @@ resource wrn:concl_main : justification:Conclusion {
                        c_val_recomput_0_js_1
                    )
                                        ),
-                                       DerivedEvidence("urn:eigenius:pub:wrn:vivo_lme4:result")
+                                       justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"))
                                    ),
                                    justification:App(
                        justification:App(
@@ -614,7 +616,7 @@ resource wrn:concl_main : justification:Conclusion {
                    )
                    )
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:paralog_ctrl:result")
+                       justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6"))
                    ),
                    onco:SyntheticLethal("WRN", "MSI") ) )
     );

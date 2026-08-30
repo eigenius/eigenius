@@ -53,10 +53,11 @@ resource wrn:concl_viab_KM12_biological : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result",
-               onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
+               app(core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"), onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"), Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table"),
+                       declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table") -> onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
+                       observed("urn:eigenius:pub:wrn:viab_KM12_competition_table", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table")),
                    onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12") ) )
     );
 }

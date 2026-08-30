@@ -103,10 +103,11 @@ resource wrn:concl_vivo : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:vivo_lme4:result",
-               onco:InVivoDependence("WRN", "MSI")),
+               app(core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"), onco:InVivoDependence("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"),
+                       declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:vivo_xenograft_table", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:vivo_lme4:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table")),
                    onco:InVivoDependence("WRN", "MSI") ) )
     );
 }
@@ -184,20 +185,22 @@ resource wrn:concl_p53_activation : justification:Conclusion {
             AP   = onco:ActivatesP53Response("WRN", "MSI"),
             RULE_P = PS15 -> RM -> AP,
             jPS15 = Declared(LIT),
-            jRM   = DerivedEvidence(RES),
+            jRM   = justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a")),
             cert1 = app(PS15, RM -> AP, Declared(RULE), jPS15,
                         declared(RULE, RULE_P), declared(LIT, PS15))
         in
         holds( eigentt:logic_kernel,
                app(RM, AP, justification:App(Declared(RULE), jPS15), jRM,
-               cert1, derived(RES, RM)),
+               cert1, app(core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a"), onco:RaisesP53DamageMarkers("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a"),
+                       declared("urn:eigenius:pub:wrn:if_ed5_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a") -> onco:RaisesP53DamageMarkers("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a", core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a")))),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            Declared("urn:eigenius:pub:wrn:p53_activation_rule"),
                            Declared("urn:eigenius:pub:wrn:lit:lit_ps15_readout")
                        ),
-                       DerivedEvidence("urn:eigenius:pub:wrn:if_ed5:result")
+                       justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a"))
                    ),
                    onco:ActivatesP53Response("WRN", "MSI") ) )
     );
@@ -218,10 +221,11 @@ resource wrn:concl_paralog : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:paralog_ctrl:result",
-               onco:NotExplainedByParalogLoss("WRN", "MSI")),
+               app(core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6"),
+                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6", core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:paralog_ctrl:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6")),
                    onco:NotExplainedByParalogLoss("WRN", "MSI") ) )
     );
 }
@@ -310,10 +314,11 @@ resource wrn:concl_dsb_foci : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:foci_dsb:result",
-               onco:CausesDSBs("WRN", "MSI")),
+               app(core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee"),
+                       declared("urn:eigenius:pub:wrn:foci_dsb_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee", core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:foci_dsb:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee")),
                    onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
@@ -332,10 +337,11 @@ resource wrn:concl_dsb_gh2ax : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:gh2ax:result",
-               onco:CausesDSBs("WRN", "MSI")),
+               app(core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"),
+                       declared("urn:eigenius:pub:wrn:gh2ax_yields_result", core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95", core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:gh2ax:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95")),
                    onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
@@ -343,10 +349,11 @@ resource wrn:concl_dsb_gh2ax_foci : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:gh2ax_foci:result",
-               onco:CausesDSBs("WRN", "MSI")),
+               app(core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:pub:wrn:input_70abbad2f5319ae1"),
+                       declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:input_70abbad2f5319ae1", core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:gh2ax_foci:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:pub:wrn:input_70abbad2f5319ae1")),
                    onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
@@ -364,21 +371,29 @@ resource wrn:concl_ddr_signaling : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:pub:wrn:patm:result",
-               onco:ActivatesDSBResponse("WRN", "MSI")),
+               app(core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece"), onco:ActivatesDSBResponse("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:pub:wrn:input_9a718df80087dece"),
+                       declared("urn:eigenius:pub:wrn:patm_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece") -> onco:ActivatesDSBResponse("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:input_9a718df80087dece", core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece"))),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:pub:wrn:patm:result"),
+                   justification:App(Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:pub:wrn:input_9a718df80087dece")),
                    onco:ActivatesDSBResponse("WRN", "MSI") ) )
     );
 }
 
-// Modus ponens over the 3-antecedent mech_rule: the first leg (DSBs) is
-// discharged by the linked-external DSB-marker ToolArtifact (DerivedEvidence);
-// the two downstream legs (cell-cycle arrest, apoptosis) are discharged by
-// CITING the kernel-recomputed conclusions as lemmas (D54: a Holds
-// justification:Conclusion is admitted as a Verified witness keyed on its IRI). The
-// arrest/apoptosis leaf proofs live in wrn-phase1-recompute (ED Fig 4b/4c
-// nested ANOVAs); C-MECH references them by name.
+// Modus ponens over the 3-antecedent mech_rule. The first leg (DSBs) is
+// discharged by `Declared(wrn:mech_dsb)`, the linked-external DSB-marker
+// ToolArtifact. The two downstream legs (cell-cycle arrest, apoptosis) carry
+// INLINED COPIES of the phase-1 recompute proofs — the `c_cellcycle_re_0_*` and
+// `c_apoptosis_re_1_*` alias blocks below, each an `App(Declared(plan),
+// Observed(sampleset))` per cell line (ED Fig 4b/4c nested ANOVAs).
+//
+// They are copies rather than citations because the inductive-value encoding has
+// no subtree reference: a `Value` can hold `ResourceRef(Iri)` for a resource, but
+// an inductive value is `Json` — inline only. D54's lemma citation was
+// `Verified(iri)` standing in for a reference it could not express, which is
+// exactly the laundering P3 closed. `support()` returns a `BTreeSet<Leaf>`, so
+// the inlined tree and a referencing DAG yield the same support set; the cost is
+// duplication, not a different answer. P6 adds the reference node and dedupes.
 resource wrn:concl_mech : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(

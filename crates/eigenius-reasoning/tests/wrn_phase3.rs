@@ -267,11 +267,22 @@ fn build_phase3_ctx() -> (ExecutionContext, ReasoningInstitution) {
         &phase1,
         "wrn-phase2",
     );
+    // 08a commits the out-of-band programs' inputs (as observations) and their
+    // reproducibility claims (as declarations). It must precede 08, whose
+    // conclusions cite both: `emit_from_trace` resolves a trace's target on the
+    // chain, so the targets have to be in an ancestor layer.
+    let provenance = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/chain/08a-program-provenance.esl"
+        ),
+        &phase2,
+        "wrn-08a",
+    );
     let phase3 = esl_against_pending(
         include_str!(
             "../../../experiments/publications/wrn-helicase/chain/08-phase3-invivo-mechanism.esl"
         ),
-        &phase2,
+        &provenance,
         "wrn-phase3",
         R_RUNTIME,
     );
