@@ -139,22 +139,10 @@ resource wrn:discovery_rule_trace : reflection:DeclarationTrace {
 
 // ─── C-WRN: WRN is selectively essential in MSI ──────────────────────
 
-resource wrn:concl_wrn_selective : justification:Sentence {
+resource wrn:concl_wrn_selective : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    justification:proposition = type_expr(
-        onco:SelectivelyEssential("WRN", "MSI")
-    );
-
-    justification:term = App(
-        App(
-            SpecStr(Declared("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
-            Declared("urn:eigenius:pub:wrn:dd_achilles")
-        ),
-        Declared("urn:eigenius:pub:wrn:dd_drive")
-    );
-
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             G    = "WRN",
             ACTX = "Achilles_MSI",
@@ -189,8 +177,20 @@ resource wrn:concl_wrn_selective : justification:Sentence {
             ),
             cert1 = app(TA, TD -> SE, j0, Declared(DDA), rule_cert, declared(DDA, TA))
         in
-        app(TD, SE, justification:App(j0, Declared(DDA)), Declared(DDD), cert1, declared(DDD, TD))
+        holds( eigentt:logic_kernel,
+               app(TD, SE, justification:App(j0, Declared(DDA)), Declared(DDD), cert1, declared(DDD, TD)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           SpecStr(Declared("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
+                           Declared("urn:eigenius:pub:wrn:dd_achilles")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:dd_drive")
+                   ),
+                   onco:SelectivelyEssential("WRN", "MSI") ) )
     );
+
+
 }
 
 // ─── D-REFINE / D-RECQ / D-BIOM: kernel-recomputed in the statistics

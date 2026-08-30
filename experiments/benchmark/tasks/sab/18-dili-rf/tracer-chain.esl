@@ -8,7 +8,7 @@
 //   5 methodological decisions  (Declared, spec-warranted)
 //        │  composed through a declared acceptance rule
 //        ▼
-//   ImplementsDILIPredictor(solution)   (justification:Sentence)
+//   ImplementsDILIPredictor(solution)   (justification:Conclusion)
 //        │  binds                              ▲ overlay
 //        ▼                                      │
 //   bench:TaskOutput(python_source)  ◀── 5 bench:CodeBlocks (coverage)
@@ -151,34 +151,10 @@ resource s18:impl_rule_trace : reflection:DeclarationTrace {
 
 // ─── Phase 4: the conclusion ───────────────────────────────────────
 
-resource s18:concl_solution_implements : justification:Sentence {
+resource s18:concl_solution_implements : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:bench:sab18:solution";
 
-    justification:proposition = type_expr(
-        s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution")
-    );
-
-    justification:term = App(
-        App(
-            App(
-                App(
-                    App(
-                        SpecStr(
-                            Declared("urn:eigenius:bench:sab18:impl_rule"),
-                            "urn:eigenius:bench:sab18:solution"
-                        ),
-                        Declared("urn:eigenius:bench:sab18:conf_featurization")
-                    ),
-                    Declared("urn:eigenius:bench:sab18:conf_label_mapping")
-                ),
-                Declared("urn:eigenius:bench:sab18:conf_configs")
-            ),
-            Declared("urn:eigenius:bench:sab18:conf_model_selection")
-        ),
-        Declared("urn:eigenius:bench:sab18:conf_output_format")
-    );
-
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             P    = "urn:eigenius:bench:sab18:solution",
             RULE = "urn:eigenius:bench:sab18:impl_rule",
@@ -230,8 +206,32 @@ resource s18:concl_solution_implements : justification:Sentence {
             cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
             cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
         in
-        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))
+        holds( eigentt:logic_kernel,
+               app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               justification:App(
+                                   justification:App(
+                                       SpecStr(
+                                           Declared("urn:eigenius:bench:sab18:impl_rule"),
+                                           "urn:eigenius:bench:sab18:solution"
+                                       ),
+                                       Declared("urn:eigenius:bench:sab18:conf_featurization")
+                                   ),
+                                   Declared("urn:eigenius:bench:sab18:conf_label_mapping")
+                               ),
+                               Declared("urn:eigenius:bench:sab18:conf_configs")
+                           ),
+                           Declared("urn:eigenius:bench:sab18:conf_model_selection")
+                       ),
+                       Declared("urn:eigenius:bench:sab18:conf_output_format")
+                   ),
+                   s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution") ) )
     );
+
+
 }
 
 // ─── Phase 5: the deliverable ──────────────────────────────────────

@@ -1035,6 +1035,129 @@ fn wrong_shape(ctor: &'static str, slot: usize, details: &str) -> DecodeError {
     }
 }
 
+/// Build a `justification:Certificate(j, P)` TYPE from encoded indices.
+///
+/// The inverse of [`certificate_indices`]. An indexed inductive applied to its
+/// indices encodes as nested `App`s over a `ConstRef` head.
+pub fn certificate_type(j: &Value, p: &Value) -> Result<Value, EncodeError> {
+    let head = ctor(
+        "ConstRef",
+        vec![json!("urn:eigenius:justification:Certificate")],
+    );
+    let one = ctor("App", vec![head, value_json(j)?]);
+    Ok(Value::Json(ctor("App", vec![one, value_json(p)?])))
+}
+
+/// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
+/// `eigentt:Logic` individual and two encoded terms.
+///
+/// The inverse of [`decode_judgement`]. A constructor application encodes as
+/// `App`s folded over a `CtorApp` base, which is the D47 shape for any
+/// chain-declared inductive.
+pub fn encode_judgement(logic_iri: &str, term: &Value, typ: &Value) -> Result<Value, EncodeError> {
+    let base = ctor(
+        "CtorApp",
+        vec![json!("urn:eigenius:eigentt:Judgement"), json!("holds")],
+    );
+    let l = ctor("App", vec![base, ctor("ConstRef", vec![json!(logic_iri)])]);
+    let t = ctor("App", vec![l, value_json(term)?]);
+    Ok(Value::Json(ctor("App", vec![t, value_json(typ)?])))
+}
+
+/// Unwrap a `Value::Json` payload, which is what every encoded term is.
+fn value_json(v: &Value) -> Result<serde_json::Value, EncodeError> {
+    match v {
+        Value::Json(j) => Ok(j.clone()),
+        other => Err(EncodeError::NotATypeLevelExp(format!(
+            "expected an encoded term, got {other:?}"
+        ))),
+    }
+}
+
+/// The three fields of a committed `eigentt:Judgement` value: the logic whose
+/// checker ran, the term it checked, and the type it checked against.
+#[derive(Debug, Clone)]
+pub struct Judgement {
+    /// IRI of the `eigentt:Logic` individual naming the checker.
+    pub logic: Iri,
+    /// The checked term.
+    pub term: Exp,
+    /// The type it was checked against.
+    pub typ: Exp,
+}
+
+/// Decode a stored `eigentt:Judgement` value into its three fields.
+///
+/// A judgement is `holds(logic, term, type)` — an ordinary constructor
+/// application, so it decodes through [`decode_type`] like any other term and
+/// this only names the parts.
+pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, DecodeError> {
+    let exp = decode_type(value, layer)?;
+    match &exp {
+        Exp::InductiveCtor(_, name, args) if name.as_str() == "holds" && args.len() == 3 => {
+            let logic = match &args[0] {
+                // An `eigentt:Logic` inhabitant is a RESOURCE, so a reference
+                // to one decodes to `EigonResource` carrying the whole record —
+                // not to a `Const`. That is a consequence of Logic being a
+                // class with individuals rather than an inductive with nullary
+                // constructors, and it is the shape this has to read.
+                Exp::EigonResource(r) => match r.id() {
+                    Some(iri) => iri.clone(),
+                    None => {
+                        return Err(DecodeError::MalformedValue(
+                            "a judgement's logic names an embedded resource with no @id"
+                                .to_string(),
+                        ))
+                    }
+                },
+                Exp::Const(iri, _) | Exp::EigonClass(iri) => iri.clone(),
+                Exp::InductiveCtor(iri, _, _) => iri.clone(),
+                other => {
+                    return Err(DecodeError::MalformedValue(format!(
+                        "a judgement's logic must name an eigentt:Logic individual, got {other:?}"
+                    )))
+                }
+            };
+            Ok(Judgement {
+                logic,
+                term: args[1].clone(),
+                typ: args[2].clone(),
+            })
+        }
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a judgement `holds(logic, term, type)`, got {other:?}"
+        ))),
+    }
+}
+
+/// Project the two indices out of a `justification:Certificate(j, P)` type.
+///
+/// A certificate type is the indexed inductive applied to its two indices, so
+/// it reaches here as `App(App(Const(Certificate), j), P)` — the shape D76
+/// Phase B leaves for a type former applied to arguments.
+///
+/// This is what lets a conclusion's proposition be recovered from its
+/// judgement rather than stored in a second slot. The emit and check sides
+/// must agree on the result: the witness index hashes `P` projected out here,
+/// while a citing certificate's `verified(iri, P)` supplies `P` directly, and
+/// a mismatch does not error — it silently fails to admit the witness.
+pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
+    let (inner, p) = match typ {
+        Exp::App(f, a) => (f.as_ref(), a.as_ref()),
+        _ => return None,
+    };
+    let (head, j) = match inner {
+        Exp::App(f, a) => (f.as_ref(), a.as_ref()),
+        _ => return None,
+    };
+    let names_certificate = matches!(
+        head,
+        Exp::Const(iri, _) | Exp::EigonClass(iri) | Exp::EigonAxiom(iri)
+            if iri.as_str() == "urn:eigenius:justification:Certificate"
+    );
+    names_certificate.then_some((j, p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

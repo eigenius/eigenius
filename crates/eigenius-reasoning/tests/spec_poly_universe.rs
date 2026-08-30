@@ -91,7 +91,7 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     )
 }
 
-/// `(verdict ctor, diagnostic)` for the fixture's one `justification:Sentence`.
+/// `(verdict ctor, diagnostic)` for the fixture's one `justification:Conclusion`.
 fn verdict(reasoning_source: &str) -> (String, Option<String>) {
     let ctx = build_chain(
         reasoning_source,

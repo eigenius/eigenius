@@ -11,7 +11,7 @@
 //   5 methodological decisions  (Declared, warranted by spec/convention)
 //        │  composed through a declared acceptance rule
 //        ▼
-//   ImplementsRequiredFilter(solution)   (justification:Sentence)
+//   ImplementsRequiredFilter(solution)   (justification:Conclusion)
 //        │  binds
 //        ▼
 //   bench:TaskOutput(python_source)      (the deliverable program)
@@ -164,34 +164,10 @@ resource s16:impl_rule_trace : reflection:DeclarationTrace {
 // "The solution implements the required filter", justified by applying the
 // acceptance rule (specialised at the solution) to the five conformances.
 
-resource s16:concl_solution_implements : justification:Sentence {
+resource s16:concl_solution_implements : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:bench:sab16:solution";
 
-    justification:proposition = type_expr(
-        s16:ImplementsRequiredFilter("urn:eigenius:bench:sab16:solution")
-    );
-
-    justification:term = App(
-        App(
-            App(
-                App(
-                    App(
-                        SpecStr(
-                            Declared("urn:eigenius:bench:sab16:impl_rule"),
-                            "urn:eigenius:bench:sab16:solution"
-                        ),
-                        Declared("urn:eigenius:bench:sab16:conf_featurization")
-                    ),
-                    Declared("urn:eigenius:bench:sab16:conf_alert_catalogs")
-                ),
-                Declared("urn:eigenius:bench:sab16:conf_reduction")
-            ),
-            Declared("urn:eigenius:bench:sab16:conf_threshold")
-        ),
-        Declared("urn:eigenius:bench:sab16:conf_composition")
-    );
-
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             P    = "urn:eigenius:bench:sab16:solution",
             RULE = "urn:eigenius:bench:sab16:impl_rule",
@@ -246,8 +222,32 @@ resource s16:concl_solution_implements : justification:Sentence {
             cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
             cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
         in
-        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))
+        holds( eigentt:logic_kernel,
+               app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               justification:App(
+                                   justification:App(
+                                       SpecStr(
+                                           Declared("urn:eigenius:bench:sab16:impl_rule"),
+                                           "urn:eigenius:bench:sab16:solution"
+                                       ),
+                                       Declared("urn:eigenius:bench:sab16:conf_featurization")
+                                   ),
+                                   Declared("urn:eigenius:bench:sab16:conf_alert_catalogs")
+                               ),
+                               Declared("urn:eigenius:bench:sab16:conf_reduction")
+                           ),
+                           Declared("urn:eigenius:bench:sab16:conf_threshold")
+                       ),
+                       Declared("urn:eigenius:bench:sab16:conf_composition")
+                   ),
+                   s16:ImplementsRequiredFilter("urn:eigenius:bench:sab16:solution") ) )
     );
+
+
 }
 
 // ─── Phase 5: the deliverable ──────────────────────────────────────

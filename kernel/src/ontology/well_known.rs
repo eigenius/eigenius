@@ -353,7 +353,7 @@ pub const BINDER_NAME: &str = "urn:eigenius:core:binder_name";
 /// the rigid size variable or `Inf` the binder is strictly below.
 pub const BINDER_BOUND: &str = "urn:eigenius:core:binder_bound";
 
-// --- TypeExpr resource shapes for codata observation types (Phase 11b step 15h.3) ---
+// --- Term resource shapes for codata observation types (Phase 11b step 15h.3) ---
 
 /// is_a marker for a non-dependent arrow `A -> B` in a codata
 /// observation type.
@@ -362,7 +362,7 @@ pub const TYPE_ARROW: &str = "urn:eigenius:core:TypeArrow";
 /// `{j : Kind} -> body` in a codata observation type.
 pub const TYPE_BINDER_ARROW: &str = "urn:eigenius:core:TypeBinderArrow";
 
-/// Domain of a `TypeArrow` — embedded TypeExpr resource (or string).
+/// Domain of a `TypeArrow` — embedded Term resource (or string).
 pub const ARROW_DOMAIN: &str = "urn:eigenius:core:arrow_domain";
 /// Codomain of a `TypeArrow`.
 pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
@@ -372,7 +372,7 @@ pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
 /// no resource on any chain and nothing emits it; see eigenius#188. This property was not retyped
 /// to an `eigentt:Term` along with `core:param_kind` / `core:type_name`.)
 pub const BINDER_KIND: &str = "urn:eigenius:core:binder_kind";
-/// Body of a size-binder arrow — embedded TypeExpr resource or
+/// Body of a size-binder arrow — embedded Term resource or
 /// string.
 pub const BINDER_BODY: &str = "urn:eigenius:core:binder_body";
 
@@ -511,7 +511,7 @@ pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
 pub const PROOF_SYSTEM: &str = "urn:eigenius:reflection:proof_system";
 
 /// `reflection:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
-/// prover's blob, or the chain-resident IRI of the `justification:Sentence` whose certificate checked.
+/// prover's blob, or the chain-resident IRI of the `justification:Conclusion` whose certificate checked.
 pub const PROOF_TERM: &str = "urn:eigenius:reflection:proof_term";
 
 /// `reflection:timestamp` — when a Trace's event occurred. Required by every Trace class.
@@ -521,41 +521,25 @@ pub const TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
 /// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`
 /// at witness-emission time. Type-checked at `Prop` at commit by
-/// [`PROPOSITION_SLOTS`] / Rule 21.
+/// its `eigentt:expected_type` (`Prop`) and Rule 21.
 pub const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
 
-/// The `eigentt:Term`-ranged properties whose declared role is a
-/// **proposition**: the value must inhabit `Prop` (`Sort(0)`), not merely
-/// type-check. Rule 21 (`validation/rules/eigentt_value.rs`) enforces it.
+/// `eigentt:expected_type` — the type a property's term-valued instances must
+/// check against. Rule 21 forms `Ann(value, expected_type)` and runs the
+/// kernel's existing inference path, whose `Ann` rule *is* the check.
 ///
-/// `eigentt:Term` is the range of every D47-encoded EigenTT tree, and
-/// most of those trees are legitimately *not* propositions —
-/// `eigentt:axiom_statement` and `eigentt:definition_type` hold types
-/// (`Sort(1)`/`Sort(2)`), `lexicon:cat` holds an inductive value,
-/// `lexicon:term` holds a λ-term, `justification:certificate` holds a proof
-/// term whose *type* is a Prop. The range alone therefore cannot carry the
-/// obligation; membership here is what distinguishes a slot that asserts
-/// something from a slot that merely holds a term. Each entry's ontology
-/// declaration already states the obligation in its `core:description`;
-/// this list is where the kernel acts on it (eigenius#175).
-///
-/// Adding a slot is a tightening: every value already committed to it must
-/// infer `Sort(0)` or the chain stops resolving.
-pub const PROPOSITION_SLOTS: &[&str] = &[
-    // "The Prop-typed EigenTT proposition this resource canonically asserts."
-    CANONICAL_PROPOSITION,
-    // "The Prop-typed EigenTT proposition this sentence asserts."
-    "urn:eigenius:justification:proposition",
-    // "The Prop-typed EigenTT proposition the EntailmentRequest is asking
-    //  the chain to warrant."
-    "urn:eigenius:justification:candidate_proposition",
-    // "The Prop-typed proposition this Milestone TARGETS or this Axiom admits."
-    "urn:eigenius:objective:proposition",
-    // "An Option's claim, as a Prop — never prose."
-    "urn:eigenius:objective:option_claim",
-    // "The assembled proposition — kernel-checked to inhabit Prop."
-    "urn:eigenius:lexicon:prop",
-];
+/// This replaced `PROPOSITION_SLOTS`, a hardcoded list of the slots required to
+/// hold a proposition. That list could say nothing but "must be a Prop", so
+/// every other obligation — a category value being a category — went unstated,
+/// and the rule's `check_infer`-then-discard fallback let a value of the wrong
+/// type commit as long as it had *some* type.
+pub const EXPECTED_TYPE: &str = "urn:eigenius:eigentt:expected_type";
+
+/// `eigentt:is_a_type` — when true, the property's values must themselves be
+/// types (`check_type`, the first step of the same `Ann` rule). Separate from
+/// [`EXPECTED_TYPE`] because the inhabited sorts vary within a single slot and
+/// that property holds one term.
+pub const IS_A_TYPE: &str = "urn:eigenius:eigentt:is_a_type";
 
 // --- D49 ChainWitness: predicate-type IRIs ---
 //

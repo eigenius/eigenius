@@ -34,6 +34,7 @@ namespace onco          = "urn:eigenius:benchmark:onco";
 namespace bench         = "urn:eigenius:benchmark";
 namespace wrn           = "urn:eigenius:pub:wrn";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 // The KM12 day-10 competition-assay table consumed by the lme4 biological-unit
 // RuntimeScript program (D56). Columns: viab_value (the Firefly:Renilla
@@ -48,15 +49,15 @@ class wrn:CompetitionTable : reflection:ObservedResource {
 // The biological-unit viability warrant: discharges the IsDerivedAs witness the
 // lme4 program commits (onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")).
 // Mirrors concl_vivo's shape (D54 certificate over a wrapped-R derived result).
-resource wrn:concl_viab_KM12_biological : justification:Sentence {
+resource wrn:concl_viab_KM12_biological : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result",
-                onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result",
+               onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result"),
+                   onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12") ) )
     );
 }
 

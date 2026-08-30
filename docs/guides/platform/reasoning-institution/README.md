@@ -2,7 +2,7 @@
 
 Slow-walk worked example of the platform's first reasoning institution: D39 Justification Logic. Walks the closed audit chain end-to-end against a concrete drug-screening scenario — from the chain-committed `Verdict::Holds` back through the `justification:Certificate` certificate, the chain witnesses that admitted the grounding constructors, the trace resources that admitted the witnesses, and the raw chain artifacts those traces point at.
 
-Read this if you want to know what a `justification:Sentence` commit actually does, how the `App(Declared, DerivedEvidence)` composition picks up groundings from anywhere on the chain, or how a D52 statistics verdict becomes a citable evidence node in a D39 proof.
+Read this if you want to know what a `justification:Conclusion` commit actually does, how the `App(Declared, DerivedEvidence)` composition picks up groundings from anywhere on the chain, or how a D52 statistics verdict becomes a citable evidence node in a D39 proof.
 
 Surface reference: [**ESL §9.10 — D39 reasoning institution**](../../esl/09-institutions.md#9-10-the-reasoning-institution-d39-justification-logic). Design spec: [**D39 Justification Logic**](../../../design/d39-justification-logic.md). Companion design: [**D49 chain-witness machinery**](../../../design/d49-chainwitness-machinery.md). Implementation: [`crates/eigenius-reasoning/`](../../../../crates/eigenius-reasoning/). Ontology: [`ontologies/justification/justification.esl`](../../../../ontologies/justification/justification.esl).
 
@@ -31,18 +31,18 @@ Reasoning leaves a typed audit trail. The institution itself emits only the verd
 | `reflection:DerivedResource` + `ProgramTrace` | Any derived artifact committed together with a program trace pointing at it. The trace admits `IsDerivedAs(iri, canonical_proposition)` on the target. |
 | `reflection:InstitutionEmittedDerivation` | Institution output the kernel stamped on dispatch — a [D52 `StatisticalAnalysisResult`](../statistics-institution/README.md) is the canonical case. **Self-attesting**: it admits `IsDerivedAs(iri, canonical_proposition)` on its own IRI, reading the property off itself, with no companion trace. Note that this is the *result*, not the `StatisticalAnalysisPlan`: the plan carries no propositional content of its own. |
 
-**No trace class admits `IsVerifiedAs`.** `trace_category` (`kernel/src/layer/witness_index.rs`) has exactly three arms — `DeclarationTrace → Declared`, `ObservationTrace → Observed`, `ProgramTrace → Derived` — and no `VerificationTrace` arm. `reflection:VerifiedResource` is `subclass_of DerivedResource`, so a `VerifiedResource` paired with a `ProgramTrace` admits `IsDerivedAs` like any other derived artifact; nothing promotes that to `IsVerifiedAs`. A [Lean institution](../lean-institution/README.md) proof therefore admits no witness at all at this revision: D49 §7 routes it through a comorphism-reified `VerifiedPropositionView`, and that comorphism is not built. The only `IsVerifiedAs` the kernel admits today is a committed `justification:Sentence` self-attesting (below). The one coercion runs in the opposite direction to the sentence in the table this note replaced: a `Derived` lookup *also* tries the matching `Verified` key, so a `Verified` entry satisfies a `derived(...)` citation — never the reverse.
+**No trace class admits `IsVerifiedAs`.** `trace_category` (`kernel/src/layer/witness_index.rs`) has exactly three arms — `DeclarationTrace → Declared`, `ObservationTrace → Observed`, `ProgramTrace → Derived` — and no `VerificationTrace` arm. `reflection:VerifiedResource` is `subclass_of DerivedResource`, so a `VerifiedResource` paired with a `ProgramTrace` admits `IsDerivedAs` like any other derived artifact; nothing promotes that to `IsVerifiedAs`. A [Lean institution](../lean-institution/README.md) proof therefore admits no witness at all at this revision: D49 §7 routes it through a comorphism-reified `VerifiedPropositionView`, and that comorphism is not built. The only `IsVerifiedAs` the kernel admits today is a committed `justification:Conclusion` self-attesting (below). The one coercion runs in the opposite direction to the sentence in the table this note replaced: a `Derived` lookup *also* tries the matching `Verified` key, so a `Verified` entry satisfies a `derived(...)` citation — never the reverse.
 
 The reasoning institution then emits two more shapes:
 
 | Resource | Role |
 |---|---|
-| `justification:Sentence` | The chain-resident reasoning step: proposition + justification + certificate. AutoOnLoad fires `ValidateJustification` on commit; type-checks the certificate against `justification:Certificate(justification, proposition)`. |
+| `justification:Conclusion` | The chain-resident reasoning step: proposition + justification + certificate. AutoOnLoad fires `ValidateJustification` on commit; type-checks the certificate against `justification:Certificate(justification, proposition)`. |
 | `Verdict` (`ctor_name: "Holds" / "Fails"`) | The institution's outcome. Committed alongside a `RuntimeInvocation` provenance record. Failed verdicts reject the commit. |
 
-`justification:Sentence` is declared `subclass_of reflection:DerivedResource`, but it carries **neither** a `ProgramTrace` **nor** a `reflection:canonical_proposition`. Its `requires` list is `proposition`, `justification`, `certificate`, on the class's own reasoning that the certificate *is* the derivation. [D54 §1](../../../design/d54-reasoning-lemma-citation.md) opens on precisely that: because a bare sentence had neither of the two shapes witness admission recognised, citing a prior conclusion used to fail with `no admitted IsDerivedAs witness`.
+`justification:Conclusion` is declared `subclass_of reflection:DerivedResource`, but it carries **neither** a `ProgramTrace` **nor** a `reflection:canonical_proposition`. Its `requires` list is `proposition`, `justification`, `certificate`, on the class's own reasoning that the certificate *is* the derivation. [D54 §1](../../../design/d54-reasoning-lemma-citation.md) opens on precisely that: because a bare sentence had neither of the two shapes witness admission recognised, citing a prior conclusion used to fail with `no admitted IsDerivedAs witness`.
 
-What closed it is a third recognition route rather than a stamped trace. `layer_admits_witness` matches a resource whose `is_a` includes `justification:Sentence` and emits a **`Verified`** witness keyed on the sentence's own IRI, hashing the sentence's own `justification:proposition` (`emit_from_reasoning_sentence`). A later `verified(prior_iri, P)` citation matches it directly; a `derived(prior_iri, P)` citation matches through the `Verified → Derived` coercion. Soundness sits at the commit boundary, not in the emitter: `autoonload_dispatch` rejects a `Fails` verdict, so every committed sentence passed its gate (D54 §3).
+What closed it is a third recognition route rather than a stamped trace. `layer_admits_witness` matches a resource whose `is_a` includes `justification:Conclusion` and emits a **`Verified`** witness keyed on the sentence's own IRI, hashing the sentence's own `justification:proposition` (`emit_from_reasoning_sentence`). A later `verified(prior_iri, P)` citation matches it directly; a `derived(prior_iri, P)` citation matches through the `Verified → Derived` coercion. Soundness sits at the commit boundary, not in the emitter: `autoonload_dispatch` rejects a `Fails` verdict, so every committed sentence passed its gate (D54 §3).
 
 ## D49 witness admission — how the kernel admits grounding witnesses
 
@@ -62,8 +62,8 @@ pub struct WitnessKey {
 
 `layer_admits_witness(&Layer, &WitnessKey) -> bool` ([`kernel/src/layer/witness_index.rs`](../../../../kernel/src/layer/witness_index.rs)) answers in three steps and builds nothing:
 
-1. **Skip.** `LayerHandle::has_witness_candidates` is stamped at write time over the layer's resources. A layer holding no Trace, no `InstitutionEmittedDerivation` and no `justification:Sentence` answers `false` with no probe at all — a lexicon layer stops here.
-2. **Self-attesting.** `Layer::get_resource` on the key's IRI, which is layer-local. If that resource is a `justification:Sentence` and the key's category is `Verified`, or an `InstitutionEmittedDerivation` and the category is `Derived`, build the key it would emit and compare it to the key asked for.
+1. **Skip.** `LayerHandle::has_witness_candidates` is stamped at write time over the layer's resources. A layer holding no Trace, no `InstitutionEmittedDerivation` and no `justification:Conclusion` answers `false` with no probe at all — a lexicon layer stops here.
+2. **Self-attesting.** `Layer::get_resource` on the key's IRI, which is layer-local. If that resource is a `justification:Conclusion` and the key's category is `Verified`, or an `InstitutionEmittedDerivation` and the category is `Derived`, build the key it would emit and compare it to the key asked for.
 3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `reflection:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `reflection:canonical_proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
 
 An earlier implementation did materialize an index: `build_witness_index` walked the layer at construction and cached a `BTreeMap<WitnessKey, ()>` in a `OnceLock` on the `Layer`, and lookup was a membership test. **D66 slice 0 removed all of it.** The map cost memory proportional to the layer's trace count for the layer's whole lifetime and reduced every miss to a bare `false` carrying no reason; direct lookup is O(1) in memory and holds the specific resource at the point of the decision. There is no `Layer::chain_witness_index` method and nothing is cached.
@@ -97,7 +97,7 @@ Witnesses are derived state, recomputed at every lookup. Voiding a layer removes
 
 ## The four-step `ValidateJustification` check
 
-[D39 §4.3](../../../design/d39-justification-logic.md) specifies what the institution verifies for every `justification:Sentence` that commits. AutoOnLoad fires it; the kernel rejects the commit if any step fails.
+[D39 §4.3](../../../design/d39-justification-logic.md) specifies what the institution verifies for every `justification:Conclusion` that commits. AutoOnLoad fires it; the kernel rejects the commit if any step fails.
 
 1. **Property decoding.** Read `justification:proposition`, `justification:term` and `justification:certificate` from the sentence resource. The proposition and certificate are D47-encoded type-expression values, decoded to a kernel `Exp` by `decode_type`; the justification is lifted into a `Val::InductiveVal` typed at `justification:Term` through the institution's own `extract_typed` route (`extract_justification`), so the chain-to-`Val` translation rides the standard institution surface. A property that is present but does not decode yields `Verdict::Fails` carrying `malformed proposition: ...` or `malformed certificate: ...`. A property that is *absent* does not reach a verdict at all: `required_property` returns an `InstitutionError::ComputationFailed`, on the reasoning that the class's `requires` enforcement has already rejected such a sentence at commit.
 
@@ -105,7 +105,7 @@ Witnesses are derived state, recomputed at every lookup. Voiding a layer removes
 
 3. **Certificate type-checking.** Resolve the `justification:Certificate` inductive from the layer and build the expected type directly at the `Val` layer: `Val::InductiveType { decl: justification:Certificate, params: [], indices: [justification_val, proposition_val] }`, no `Exp` round-trip. Run the kernel's NbE `check` against it. The check walks the certificate's constructor tree and, at every grounding constructor, synthesizes the implicit `ChainWitness` argument by the lookup above. **Every** failure of this step — a witness that no layer admits, a certificate constructor that does not match the justification's shape, an indexed-family elaboration the pattern unifier rejects — arrives as one string inside `certificate does not type-check against \`justification:Certificate(justification, proposition)\`: ...`. The kernel's type error is what distinguishes them.
 
-4. **Verdict emission.** On success the institution emits a `Verdict` resource with `ctor_name = "Holds"`. The gate stamps nothing on the sentence itself; a later sentence can nonetheless cite it via `DerivedEvidence(sentence_iri)` or `Verified(sentence_iri)`, because a committed `justification:Sentence` self-attests a `Verified` witness at its own IRI and the `Verified → Derived` coercion covers the `derived` form.
+4. **Verdict emission.** On success the institution emits a `Verdict` resource with `ctor_name = "Holds"`. The gate stamps nothing on the sentence itself; a later sentence can nonetheless cite it via `DerivedEvidence(sentence_iri)` or `Verified(sentence_iri)`, because a committed `justification:Conclusion` self-attests a `Verified` witness at its own IRI and the `Verified → Derived` coercion covers the `derived` form.
 
 All four must pass for `Verdict::Holds`. Any failure produces `Verdict::Fails` carrying a single `urn:eigenius:institution:diagnostic` **string**, and the commit is rejected.
 
@@ -144,7 +144,7 @@ claim_eig0291_lowic50:result:main_effect        [StatisticalAnalysisResult +
   │
   ↑ App(Declared(rule),
   │     App(Declared(bridge), DerivedEvidence(result)))
-concl_eig0291_strong                            [justification:Sentence]
+concl_eig0291_strong                            [justification:Conclusion]
   ↑ ValidateJustification AutoOnLoad
 Verdict("Holds")                                [the verdict]
 ```
@@ -200,7 +200,7 @@ The high-level shape, modeled on the drug-screening fixture:
 3. **Author the reasoning sentence.** Three required slots — proposition, justification, certificate — all D47-encoded via [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions):
 
    ```esl
-   resource screen:concl_eig0291_strong : justification:Sentence {
+   resource screen:concl_eig0291_strong : justification:Conclusion {
        justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
        justification:proposition = type_expr(
@@ -261,13 +261,13 @@ A failed gate gives you one string on the `Verdict`, under `urn:eigenius:institu
 - **The same prefix, with the kernel's own type error after it** — the certificate's shape does not match the justification's. Every mismatch of constructor, index or type arrives through this one path, so read the kernel's error: `justification:Certificate.observed` consumes `IsObservedAs`, which only an `ObservationTrace` admits, and using it to ground a `Declared(iri)` term is a category mismatch. Match the certificate constructor name to the justification's grounding-ctor name — `declared` for `Declared`, `derived` for `DerivedEvidence`, and so on.
 - **`proposition does not type-check at Prop: …`** — the `proposition` slot's `type_expr(...)` body lowered to a `Set`/`Type(n)`-typed expression instead of `Prop`. Common cause: the predicate's `data` declaration was written with `: Set`, or with no result-sort clause, instead of `: … -> Prop`. Re-declare the predicate with a `Prop` result sort.
 - **`malformed proposition: …` / `malformed certificate: …`** — the D47 decode failed. Check that `proposition` and `certificate` are `type_expr(...)` values rather than raw JSON.
-- **`justification:Sentence missing required … property`, arriving as an institution error rather than a verdict** — a required slot is absent. The class's `requires` enforcement should have rejected this at commit; reaching the handler means the institution was dispatched against a resource that did not come through the commit path.
+- **`justification:Conclusion missing required … property`, arriving as an institution error rather than a verdict** — a required slot is absent. The class's `requires` enforcement should have rejected this at commit; reaching the handler means the institution was dispatched against a resource that did not come through the commit path.
 - **The gate is slow to reject** — admission keeps no cached index, so a *miss* walks to the root of the chain, and on a layer still in flight (which is the case during `autoonload_dispatch`) the trace-attested route iterates the layer rather than using the triple index. A measured case on `demo/prose-to-formulas` took 0.75 s to commit and 127 s to reject the same certificate shape.
 - **Sentence type-checks in one chain resolution but fails in another** — voiding semantics. Admission is recomputed against the resolution's layers at every lookup; voiding a layer removes its traces from every resolution that excludes it. Confirm the resolution includes every layer holding a grounding artifact the certificate cites.
 
 ## Cross-references
 
-- [**ESL §9.10 — D39 reasoning institution surface**](../../esl/09-institutions.md#9-10-the-reasoning-institution-d39-justification-logic) — surface syntax reference: the seven `justification:Term` constructors, the nine `justification:Certificate` certificate constructors, the `justification:Sentence` resource shape, and the worked example this sub-guide expands on.
+- [**ESL §9.10 — D39 reasoning institution surface**](../../esl/09-institutions.md#9-10-the-reasoning-institution-d39-justification-logic) — surface syntax reference: the seven `justification:Term` constructors, the nine `justification:Certificate` certificate constructors, the `justification:Conclusion` resource shape, and the worked example this sub-guide expands on.
 - [**ESL §6.4a — Witness predicates**](../../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) — the kernel-side view of the four `ChainWitness.Is*As` families.
 - [**ESL §7.1 — Universes**](../../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) — `Prop`, proof irrelevance, and why distinct evidence chains for the same proposition produce judgmentally-equal certificates.
 - [**Statistics institution tutorial**](../statistics-institution/README.md) — the D52 institution whose verdicts are the canonical `DerivedEvidence` targets for D39 reasoning sentences.

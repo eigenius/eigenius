@@ -14,6 +14,7 @@ namespace reasoning     = "urn:eigenius:reasoning";
 namespace obj           = "urn:eigenius:obj:d57";
 namespace agent         = "urn:eigenius:reflection:agent";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 // The discipline, as a Declared rule. canonical_proposition = the milestone fact.
 resource obj:mapping_discipline : reflection:DeclaredResource {
@@ -32,13 +33,15 @@ resource obj:mapping_discipline_trace : reflection:DeclarationTrace {
 }
 
 // m1 discharged: the discipline is defined (Declared), witnessed by the rule above.
-resource obj:concl_discipline : justification:Sentence {
+resource obj:concl_discipline : justification:Conclusion {
     justification:subject_iri   = "urn:eigenius:obj:d57:schema_org";
-    justification:proposition   = type_expr( obj:MappingDisciplineDefined("schema_org") );
-    justification:term = Declared("urn:eigenius:obj:d57:mapping_discipline");
-    justification:certificate   = type_expr(
-        declared("urn:eigenius:obj:d57:mapping_discipline",
-                 obj:MappingDisciplineDefined("schema_org"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               declared("urn:eigenius:obj:d57:mapping_discipline",
+               obj:MappingDisciplineDefined("schema_org")),
+               justification:Certificate(
+                   Declared("urn:eigenius:obj:d57:mapping_discipline"),
+                   obj:MappingDisciplineDefined("schema_org") ) )
     );
 }
 

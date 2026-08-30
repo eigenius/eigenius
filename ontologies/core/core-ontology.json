@@ -612,6 +612,23 @@
     ]
   },
   {
+    "@id": "urn:eigenius:eigentt:expected_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "expected_type",
+    "urn:eigenius:core:description": "The type this property's `eigentt:Term`-encoded values must check against. When present, the validator treats the stored value as an ANNOTATED term \u2014 it forms `Ann(value, expected_type)` and runs the kernel's existing inference path, whose `Ann` rule is: infer the annotation while requiring a sort, check the value against it in CHECK mode, return it. That is the whole rule, and it is the kernel's own, so no new typing rule is introduced. When absent, the value must be self-describing \u2014 it already carries its own annotation, or is a rigid reference to a declared axiom, definition or constructor \u2014 and inference alone suffices. This replaced a hardcoded list of the slots required to hold a proposition, which could say nothing but `Prop` and so left every other obligation \u2014 a category value being a category, an antecedent being an entity \u2014 unstated and unchecked. Declared in CORE rather than beside the eigentt fragment because core properties carry it and a lower layer cannot reference a higher one; the IRI keeps its `eigentt:` prefix because a namespace is a naming convention, not a layer assertion.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:is_a_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "is_a_type",
+    "urn:eigenius:core:description": "When true, this property's values must themselves be TYPES: the validator runs `check_type`, which is the first step of the same `Ann` rule `eigentt:expected_type` uses, applied to the value instead of to an annotation. A separate declaration rather than a value of `expected_type` because the sorts vary WITHIN a single slot and `expected_type` holds one term: a `lexicon:sem_type` is `Set` (which inhabits `Sort(2)`) for 2,062,659 entries and a semantic-type class (which inhabits `Sort(1)`) for 281,599 more, and an `eigentt:axiom_statement` is `Entity -> Prop` (inhabiting `Sort(1)`) for the WordNet senses and `Set -> Entity` (inhabiting `Sort(2)`) for `ontology:kind_of`. No single type is inhabited by both, and a level PARAMETER does not close the gap \u2014 `Sort(l)` is a rigid free level here, not a metavariable, so `Sort(1)` does not check against it. Mutually exclusive with `expected_type`: a slot states one or the other, or neither.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Property"]
+  },
+  {
     "@id": "urn:eigenius:eigentt:Term",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Term",
@@ -904,7 +921,8 @@
     "urn:eigenius:core:description": "The encoded type expression (eigentt) of a constructor — the full arrow type a constructor inhabits. A D47-encoded `eigentt:Term`, so `core:inductive` rather than `core:json`: until D79 §2.1 this was declared `core:json`, which is 'not validated by the ontology', so no rule checked it and the mutual-inductive walker in `layer::declaration_order` had to descend into it by hand.",
     "urn:eigenius:core:short_name": "ctor_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
-    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"]
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:eigentt:is_a_type": true
   },
   {
     "@id": "urn:eigenius:core:macro_decl_json",

@@ -33,7 +33,7 @@
 //!    `ProgramTrace`. The claim's `canonical_proposition` is
 //!    `HasLowIC50(EIG_0291)` — the proposition `DerivedEvidence` exposes
 //!    to D39 reasoning.
-//! 5. A `justification:Sentence` claiming `StrongInhibitor(EIG_0291)`,
+//! 5. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`,
 //!    justified by `App(Declared(rule), DerivedEvidence(claim))`,
 //!    with a `justification:Certificate.app` certificate composing
 //!    `justification:Certificate.declared` + `justification:Certificate.derived`.
@@ -45,7 +45,7 @@
 //! statistics institution turns that author-asserted bridge into a
 //! mechanical recomputation: the SampleSet carries the raw replicates,
 //! the StatisticalAnalysisPlan asserts the parameters, and the verifier
-//! computes the proposition. The justification:Sentence then cites the
+//! computes the proposition. The justification:Conclusion then cites the
 //! claim via `DerivedEvidence` and inherits its auditable provenance.
 //!
 //! This test compiles the fixture, builds the layer chain (core →
@@ -177,7 +177,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
 fn drug_screening_scenario_validates_to_holds() {
     let ctx = build_drug_screening_chain();
 
-    // Fetch the justification:Sentence the fixture authored, by IRI.
+    // Fetch the justification:Conclusion the fixture authored, by IRI.
     let sentence_iri =
         Iri::parse("urn:eigenius:demo:screen:concl_eig0291_strong").expect("sentence IRI");
     let sentence_arc = ctx

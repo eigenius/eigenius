@@ -16,7 +16,7 @@
 //!
 //! Asks: "does the chain warrant this candidate proposition?" v1 of
 //! the handler is a *lookup-based* search — it walks the layer chain
-//! for committed `justification:Sentence` resources and returns
+//! for committed `justification:Conclusion` resources and returns
 //! `Verdict::Holds` when it finds one whose proposition matches the
 //! query candidate (syntactic `Exp` equality after D47 decode).
 //!
@@ -36,7 +36,9 @@ use eigenius_kernel::institution::runtime::QueryOutcome;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::well_known as wk;
-use eigenius_kernel::program::eigentt_type_mirror::decode_type;
+use eigenius_kernel::program::eigentt_type_mirror::{
+    certificate_indices, decode_judgement, decode_type,
+};
 
 use crate::institution::iris;
 use crate::validate::{verdict_resource, verdict_undecidable};
@@ -69,25 +71,28 @@ pub fn do_entailment_query(
     // top-of-chain wins for duplicate IRIs, which is the right
     // semantics here (most recently committed proposition is
     // authoritative).
-    let sentence_class = Iri::parse("urn:eigenius:justification:Sentence").expect("static IRI");
-    let proposition_iri = Iri::parse(iris::PROP_PROPOSITION).expect("static IRI");
+    let sentence_class = Iri::parse("urn:eigenius:justification:Conclusion").expect("static IRI");
+    let judgement_iri = Iri::parse(iris::PROP_JUDGEMENT).expect("static IRI");
 
     for (iri, resource) in ctx.head().iter_all_resources() {
         if !resource.is_instance_of(&sentence_class) {
             continue;
         }
-        let prop_value = match resource.get(&proposition_iri) {
-            Some(v) => v,
-            // Sentence missing its proposition — Rule 16 + the
-            // justification:Sentence requires-list should reject this at
-            // commit, but skip defensively rather than fail the
-            // whole query on one malformed row.
-            None => continue,
+        // The proposition is projected out of the conclusion's judgement —
+        // it has no slot of its own. A conclusion missing or malforming it
+        // should have been rejected at commit by the requires-list and the
+        // uniform check-mode rule; skip defensively rather than fail the whole
+        // query on one bad row.
+        let Some(stored) = resource.get(&judgement_iri) else {
+            continue;
         };
-        let prop_exp = match decode_type(prop_value, ctx.head()) {
-            Ok(e) => e,
-            Err(_) => continue, // malformed proposition — skip
+        let Ok(judgement) = decode_judgement(stored, ctx.head()) else {
+            continue;
         };
+        let Some((_, prop)) = certificate_indices(&judgement.typ) else {
+            continue;
+        };
+        let prop_exp = prop.clone();
         if prop_exp == candidate_exp {
             // Holds — citation goes in the diagnostic so a caller can
             // recover the witnessing sentence's IRI without parsing
@@ -105,7 +110,7 @@ pub fn do_entailment_query(
     // a fully-correct bounded-depth proof search might still find a
     // composite warrant. v1 doesn't attempt that.
     Ok(verdict_undecidable(
-        "no committed justification:Sentence's proposition syntactically matches the candidate; \
+        "no committed justification:Conclusion's proposition syntactically matches the candidate; \
          v1's lookup-based search does not attempt bounded-depth proof composition"
             .to_string(),
     ))

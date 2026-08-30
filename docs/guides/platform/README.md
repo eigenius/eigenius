@@ -97,7 +97,7 @@ Passing-Bablok, §7.4 epistemic-scope guard). See
 
 The platform's justification-logic institution. In-process; type-checks
 `justification:Certificate(justification, proposition)` certificates against
-justification:Sentence resources at commit. Grounding constructors consume
+justification:Conclusion resources at commit. Grounding constructors consume
 chain witnesses admitted by the D49 witness index, composing chain
 artifacts (axioms, observations, statistics verdicts, formal proofs)
 into auditable reasoning chains. See

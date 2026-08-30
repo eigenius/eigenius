@@ -44,12 +44,12 @@ use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
 use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 
-/// D54: the `justification:Sentence` class IRI and its `proposition`
+/// D54: the `justification:Conclusion` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
 /// witness machinery is the one kernel site that is intrinsically
 /// reasoning-aware — it builds the witnesses `justification:Certificate` consumes.
-const REASONING_SENTENCE: &str = "urn:eigenius:justification:Sentence";
-const REASONING_PROPOSITION: &str = "urn:eigenius:justification:proposition";
+const REASONING_SENTENCE: &str = "urn:eigenius:justification:Conclusion";
+const CONCLUSION_JUDGEMENT: &str = "urn:eigenius:justification:judgement";
 
 /// Does `layer` itself admit `key`?
 ///
@@ -61,7 +61,7 @@ const REASONING_PROPOSITION: &str = "urn:eigenius:justification:proposition";
 ///
 /// Two routes, mirroring the two ways a witness arises (D49 §6):
 ///
-/// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Sentence`
+/// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Conclusion`
 ///   is `Verified` on its own IRI (D54 lemma citation); a `reflection:InstitutionEmittedDerivation`
 ///   is `Derived` on its own IRI (D52). Reached by [`Layer::get_resource`], which is layer-local.
 /// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
@@ -156,7 +156,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 /// Could `resource` ever admit a `ChainWitness`?
 ///
 /// True for the seven classes [`layer_admits_witness`] can emit from: the five Trace classes, a
-/// `reflection:InstitutionEmittedDerivation`, and a `justification:Sentence`. Stamped over a
+/// `reflection:InstitutionEmittedDerivation`, and a `justification:Conclusion`. Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
 /// caching an empty map.
@@ -254,16 +254,39 @@ where
     false
 }
 
-/// D54: read a `justification:Sentence`'s `proposition` and build a
-/// `Verified` `WitnessKey` keyed on the sentence's own IRI. The proposition
-/// is the D47-encoded `Value::Json` the consumer's `justification:Certificate.verified(iri, P)`
-/// term hashes to identically (same encoding path), so the key matches.
-/// Returns `None` when the sentence has no `@id` or no `proposition`.
+/// D54: project a `justification:Conclusion`'s proposition out of its checked
+/// judgement and build a `Verified` `WitnessKey` on the conclusion's own IRI.
+///
+/// The proposition is no longer a slot of its own. The judgement is
+/// `holds(kernel, c, Certificate(j, P))`, so `P` is the second index of the
+/// certificate type — which is what makes the pairing checkable rather than
+/// conventional, and what this has to walk to recover it.
+///
+/// **The hash must match what a citing certificate produces.** A consumer's
+/// `justification:Certificate.verified(iri, P)` supplies `P` directly, and
+/// `hash_stored_proposition` hashes the DECODED `Exp` rather than the stored
+/// JSON, so both sides hash the same term — but only if this projection yields
+/// the same `Exp` the consumer wrote. A mismatch does not error: the lookup
+/// simply misses and no `Verified` witness is admitted.
 fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
     let sentence_iri = sentence.id().cloned()?;
-    let prop_iri = Iri::parse(REASONING_PROPOSITION).ok()?;
-    let encoded_prop = sentence.get(&prop_iri)?;
-    let prop_hash = hash_stored_proposition(layer, &sentence_iri, encoded_prop)?;
+    let judgement_iri = Iri::parse(CONCLUSION_JUDGEMENT).ok()?;
+    let stored = sentence.get(&judgement_iri)?;
+    let judgement = crate::program::eigentt_type_mirror::decode_judgement(stored, layer).ok()?;
+    let (_j, prop) = crate::program::eigentt_type_mirror::certificate_indices(&judgement.typ)?;
+    let prop_hash = match hash_proposition_exp(prop) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!(
+                { field::OPERATION } = operation::WITNESS_DECODE,
+                { field::ERROR_KIND } = "proposition_encode_failed",
+                { field::ERROR_MESSAGE } = %format!("{e:?}"),
+                resource_iri = %sentence_iri,
+                "a conclusion's projected proposition did not re-encode; no witness admitted"
+            );
+            return None;
+        }
+    };
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
@@ -317,7 +340,7 @@ fn emit_from_trace(
 /// Three slots can hold it, tried in order:
 ///
 /// 1. `reflection:canonical_proposition` — the general slot.
-/// 2. `justification:proposition` — where a `justification:Sentence` keeps the same thing under a different
+/// 2. `justification:proposition` — where a `justification:Conclusion` keeps the same thing under a different
 ///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
 ///    [`emit_from_reasoning_sentence`] reads slot 2, so without this arm a `VerificationTrace`
 ///    targeting a sentence would fall through to slot 3 and key the witness against
@@ -331,16 +354,27 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
     {
         return hash_stored_proposition(layer, target_iri, encoded);
     }
+    // A conclusion carries its proposition inside its judgement rather than in
+    // a slot, so it is projected out — and it MUST be, for the reason slot 2
+    // exists at all: without it a trace targeting a conclusion falls through to
+    // `Asserts(iri)`, a different hash from the one the conclusion itself
+    // emits, and no certificate cites that.
     if target
         .is_a()
         .iter()
         .any(|c| c.as_str() == REASONING_SENTENCE)
     {
-        if let Some(encoded) = Iri::parse(REASONING_PROPOSITION)
+        if let Some(stored) = Iri::parse(CONCLUSION_JUDGEMENT)
             .ok()
             .and_then(|i| target.get(&i))
         {
-            return hash_stored_proposition(layer, target_iri, encoded);
+            if let Ok(j) = crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
+                if let Some((_, prop)) =
+                    crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
+                {
+                    return hash_proposition_exp(prop).ok();
+                }
+            }
         }
     }
     default_asserts_proposition_hash(layer, target_iri)
@@ -543,7 +577,7 @@ mod tests {
         r
     }
 
-    /// A committed `justification:Sentence` — admitted as a `Verified` witness on its own
+    /// A committed `justification:Conclusion` — admitted as a `Verified` witness on its own
     /// IRI (D54). The commit pipeline rejects `Fails` sentences, so any committed one Held.
     fn reasoning_sentence(sentence_iri: &str, prop: &Exp) -> Resource {
         let mut r = Resource::new(iri(sentence_iri));
@@ -551,7 +585,26 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
         );
-        r.set(iri(REASONING_PROPOSITION), encode_type(prop).unwrap());
+        // The proposition rides inside the judgement's certificate type now,
+        // so the fixture has to build the shape the emitter projects from —
+        // which is the point: if the two ever disagree, the witness silently
+        // fails to appear rather than erroring, so the fixture must exercise
+        // the real path.
+        let p = encode_type(prop).unwrap();
+        let j = crate::program::eigentt_type_mirror::encode_type(&Exp::InductiveCtor(
+            iri("urn:eigenius:justification:Term"),
+            "Declared".into(),
+            vec![Exp::LitString(sentence_iri.to_string())],
+        ))
+        .unwrap();
+        let typ = crate::program::eigentt_type_mirror::certificate_type(&j, &p).unwrap();
+        let judgement = crate::program::eigentt_type_mirror::encode_judgement(
+            "urn:eigenius:eigentt:logic_kernel",
+            &j,
+            &typ,
+        )
+        .unwrap();
+        r.set(iri(CONCLUSION_JUDGEMENT), judgement);
         r
     }
 
@@ -782,7 +835,7 @@ mod tests {
         );
         assert!(
             is_witness_candidate(&reasoning_sentence("urn:eigenius:example:s", &prop)),
-            "justification:Sentence must be a candidate (D54)"
+            "justification:Conclusion must be a candidate (D54)"
         );
         // A target resource carrying a canonical_proposition is NOT itself a candidate — the
         // trace pointing at it is. Getting this backwards would stamp claim-only layers as
@@ -836,6 +889,77 @@ mod tests {
     ///
     /// That reasoning is exactly what D66 says to verify rather than assume, so this asserts the
     /// agreement directly instead of arguing for it.
+    /// The projection out of a judgement must hash IDENTICALLY to the same
+    /// proposition stored flat.
+    ///
+    /// This is the one failure the collapse can produce silently. A citing
+    /// certificate's `verified(iri, P)` supplies `P` directly, while the emit
+    /// side now recovers `P` by walking `holds(kernel, c, Certificate(j, P))`.
+    /// If those two ever disagree — a stray annotation, a different binder
+    /// name, an encoding that does not round-trip — nothing errors: the
+    /// witness-index lookup simply misses, no `IsVerifiedAs` is admitted, and
+    /// a conclusion that should Hold reports an unsatisfied citation with no
+    /// indication that the proposition was the problem.
+    ///
+    /// Asserting hash equality is what turns that into a test failure.
+    #[test]
+    fn a_projected_proposition_hashes_as_the_same_proposition_stored_flat() {
+        use crate::program::eigentt_type_mirror::{
+            certificate_indices, certificate_type, decode_judgement, encode_judgement, encode_type,
+        };
+
+        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let layer = LayerBuilder::new("projection", Some(head)).build(LayerStorage::in_memory());
+
+        // Shapes with structure worth losing: binders, arrows, a literal.
+        let cases: Vec<(&str, Exp)> = vec![
+            ("bare sort", Exp::sort(0)),
+            (
+                "arrow",
+                Exp::Arrow(Box::new(Exp::sort(0)), Box::new(Exp::sort(0))),
+            ),
+            (
+                "pi with a named binder",
+                Exp::Pi(
+                    Patt::Var("x".into()),
+                    Box::new(Exp::sort(1)),
+                    Box::new(Exp::sort(0)),
+                ),
+            ),
+        ];
+
+        for (label, prop) in cases {
+            // The check side: the proposition as a certificate would supply it.
+            let flat = hash_proposition_exp(&prop).expect("flat proposition hashes");
+
+            // The emit side: the same proposition, reached through a judgement.
+            let p = encode_type(&prop).unwrap();
+            let j = encode_type(&Exp::InductiveCtor(
+                iri("urn:eigenius:justification:Term"),
+                "Declared".into(),
+                vec![Exp::LitString("urn:eigenius:test:premise".into())],
+            ))
+            .unwrap();
+            let typ = certificate_type(&j, &p).expect("certificate type encodes");
+            let stored = encode_judgement("urn:eigenius:eigentt:logic_kernel", &j, &typ)
+                .expect("judgement encodes");
+
+            let judgement = decode_judgement(&stored, &layer)
+                .unwrap_or_else(|e| panic!("{label}: judgement must decode: {e}"));
+            let (_, projected) = certificate_indices(&judgement.typ)
+                .unwrap_or_else(|| panic!("{label}: judgement type must be a Certificate"));
+            let via_judgement =
+                hash_proposition_exp(projected).expect("projected proposition hashes");
+
+            assert_eq!(
+                flat, via_judgement,
+                "{label}: a proposition projected out of a judgement must hash as the same \
+                 proposition stored flat, or the emit and check sides drift and the witness \
+                 silently fails to be admitted"
+            );
+        }
+    }
+
     #[test]
     fn emit_and_check_sides_agree_on_the_hash() {
         use crate::nbe::env::Rho;
@@ -1027,7 +1151,7 @@ mod tests {
         // coercion, even though the index doesn't carry the Derived key
         // directly.
         //
-        // A committed `justification:Sentence` is admitted as a `Verified` witness on its
+        // A committed `justification:Conclusion` is admitted as a `Verified` witness on its
         // own IRI (D54 lemma citation), so the coercion can be exercised against the real
         // emission path — the predecessor injected a key through a test-only `OnceLock` setter
         // because it predated D54 emission.
@@ -1036,7 +1160,13 @@ mod tests {
         let verified_key =
             WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
 
-        let mut b = LayerBuilder::new("test", None);
+        // Parented on the bootstrap: a conclusion's judgement names
+        // `eigentt:logic_kernel` and `justification:Certificate` by reference,
+        // and the emitter resolves both through the chain. A parent-less layer
+        // could carry the old flat proposition (a bare `Sort`, resolving
+        // nothing) but cannot carry a judgement.
+        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut b = LayerBuilder::new("test", Some(head));
         b.add_resource(reasoning_sentence(target, &prop)).unwrap();
         let layer = b.build(LayerStorage::in_memory());
 

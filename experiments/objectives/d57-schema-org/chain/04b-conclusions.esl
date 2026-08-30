@@ -14,22 +14,12 @@ namespace reflection    = "urn:eigenius:reflection";
 namespace reasoning     = "urn:eigenius:reasoning";
 namespace obj           = "urn:eigenius:obj:d57";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 // ── m3: GeneratorProduces (modus ponens over Observed ∧ Observed ∧ Derived) ─
-resource obj:concl_generator : justification:Sentence {
+resource obj:concl_generator : justification:Conclusion {
     justification:subject_iri   = "urn:eigenius:obj:d57:schema_org";
-    justification:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
-    justification:term = App(
-        App(
-            App(
-                Declared("urn:eigenius:obj:d57:generator_rule"),
-                Observed("urn:eigenius:obj:d57:gen_input")
-            ),
-            Observed("urn:eigenius:obj:d57:gen_output")
-        ),
-        DerivedEvidence("urn:eigenius:obj:d57:generate_result")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE = "urn:eigenius:obj:d57:generator_rule",
             IN   = "urn:eigenius:obj:d57:gen_input",
@@ -51,18 +41,33 @@ resource obj:concl_generator : justification:Sentence {
             c2 = app(OAO, GC -> GP,
                      justification:App(Declared(RULE), jIN), jOUT, c1, cOUT)
         in
-        app(GC, GP,
-            justification:App(justification:App(Declared(RULE), jIN), jOUT),
-            jGC, c2, cGC)
+        holds( eigentt:logic_kernel,
+               app(GC, GP,
+               justification:App(justification:App(Declared(RULE), jIN), jOUT),
+               jGC, c2, cGC),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:obj:d57:generator_rule"),
+                               Observed("urn:eigenius:obj:d57:gen_input")
+                           ),
+                           Observed("urn:eigenius:obj:d57:gen_output")
+                       ),
+                       DerivedEvidence("urn:eigenius:obj:d57:generate_result")
+                   ),
+                   obj:GeneratorProduces("schema_org") ) )
     );
 }
 
 // ── m4: CutAccounted (Declared, mechanically-backed) ────────────────
-resource obj:concl_cut : justification:Sentence {
+resource obj:concl_cut : justification:Conclusion {
     justification:subject_iri   = "urn:eigenius:obj:d57:schema_org";
-    justification:proposition   = type_expr( obj:CutAccounted("schema_org") );
-    justification:term = Declared("urn:eigenius:obj:d57:cut_accounting");
-    justification:certificate   = type_expr(
-        declared("urn:eigenius:obj:d57:cut_accounting", obj:CutAccounted("schema_org"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               declared("urn:eigenius:obj:d57:cut_accounting", obj:CutAccounted("schema_org")),
+               justification:Certificate(
+                   Declared("urn:eigenius:obj:d57:cut_accounting"),
+                   obj:CutAccounted("schema_org") ) )
     );
 }

@@ -53,6 +53,7 @@ namespace stats         = "urn:eigenius:measurements";
 namespace screen        = "urn:eigenius:demo:screen";
 namespace agent         = "urn:eigenius:reflection:agent";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 // ─── Domain vocabulary ─────────────────────────────────────────────
 //
@@ -151,7 +152,7 @@ resource screen:rule_strong_trace : reflection:DeclarationTrace {
     reflection:timestamp   = "2026-04-10T09:00:00Z";
 }
 
-// ─── justification:Sentence: derive StrongInhibitor(EIG_0291) ───────────
+// ─── justification:Conclusion: derive StrongInhibitor(EIG_0291) ───────────
 //
 // Five-step composition (four `App`s + two nested `SpecStr`s):
 //
@@ -172,34 +173,10 @@ resource screen:rule_strong_trace : reflection:DeclarationTrace {
 //        v
 //   StrongInhibitor(EIG_0291)
 
-resource screen:concl_eig0291_strong : justification:Sentence {
+resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    justification:proposition = type_expr(
-        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
-    );
-
-    justification:term = App(
-        SpecStr(
-            Declared("urn:eigenius:demo:screen:rule_strong"),
-            "urn:eigenius:demo:screen:EIG_0291"
-        ),
-        justification:App(
-            justification:App(
-                SpecStr(
-                    SpecStr(
-                        Declared("urn:eigenius:demo:screen:bridge_lowic50"),
-                        "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
-                    ),
-                    "urn:eigenius:demo:screen:EIG_0291"
-                ),
-                Declared("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
-            ),
-            DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
-        )
-    );
-
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             EIG    = "urn:eigenius:demo:screen:EIG_0291",
             SS     = "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
@@ -232,70 +209,94 @@ resource screen:concl_eig0291_strong : justification:Sentence {
             bridge_app  = justification:App(bridge_full, sf_j),
             full_app    = justification:App(bridge_app, derived_j)
         in
-        app(
-            // outer A, B
-            HAS_LOW, STRONG,
-            // outer j1, j2
-            rule_j, full_app,
-            // outer c1 : specialise the literature rule at EIG_0291.
-            spec_poly(
-                // T : the domain
-                core:string,
-                fun (x : core:string) =>
-                    screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
-                Declared(RULE),
-                EIG,
-                // tag : audit label, same IRI as the instance
-                EIG,
-                declared(RULE, RULE_P)
-            ),
-            // outer c2 : middle app composes the partially-applied bridge
-            // (after sample_for) with the per-effect verdict.
-            app(
-                STAT, HAS_LOW,
-                bridge_app, derived_j,
-                // middle c1' : inner app composes the fully-specialised
-                // bridge with the sample_for witness.
-                app(
-                    S_FOR, STAT -> HAS_LOW,
-                    bridge_full, sf_j,
-                    // inner c1'' : nested spec_poly — specialise the
-                    // bridge at s, then at c.
-                    spec_poly(
-                        // T : the domain
-                        core:string,
-                        fun (c : core:string) =>
-                            screen:sample_for(SS, c)
-                            -> stats:lt(stats:mean_of(SS), 100.0)
-                            -> screen:HasLowIC50(c),
-                        bridge_s,
-                        EIG,
-                        // tag : audit label, same IRI as the instance
-                        EIG,
-                        spec_poly(
-                            // T : the domain
-                            core:string,
-                            fun (s : core:string) =>
-                                forall (c : core:string) =>
-                                    screen:sample_for(s, c)
-                                    -> stats:lt(stats:mean_of(s), 100.0)
-                                    -> screen:HasLowIC50(c),
-                            Declared(BRIDGE),
-                            SS,
-                            // tag : audit label, same IRI as the instance
-                            SS,
-                            declared(BRIDGE, BRIDGE_P)
-                        )
-                    ),
-                    // inner c2'' : the sample_for witness
-                    declared(SFW, S_FOR)
-                ),
-                // middle c2' : the verifier-emitted statistical result
-                derived(SAR, STAT
-                )
-            )
-        )
+        holds( eigentt:logic_kernel,
+               app(
+                   // outer A, B
+                   HAS_LOW, STRONG,
+                   // outer j1, j2
+                   rule_j, full_app,
+                   // outer c1 : specialise the literature rule at EIG_0291.
+                   spec_poly(
+                       // T : the domain
+                       core:string,
+                       fun (x : core:string) =>
+                           screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
+                       Declared(RULE),
+                       EIG,
+                       // tag : audit label, same IRI as the instance
+                       EIG,
+                       declared(RULE, RULE_P)
+                   ),
+                   // outer c2 : middle app composes the partially-applied bridge
+                   // (after sample_for) with the per-effect verdict.
+                   app(
+                       STAT, HAS_LOW,
+                       bridge_app, derived_j,
+                       // middle c1' : inner app composes the fully-specialised
+                       // bridge with the sample_for witness.
+                       app(
+                           S_FOR, STAT -> HAS_LOW,
+                           bridge_full, sf_j,
+                           // inner c1'' : nested spec_poly — specialise the
+                           // bridge at s, then at c.
+                           spec_poly(
+                               // T : the domain
+                               core:string,
+                               fun (c : core:string) =>
+                                   screen:sample_for(SS, c)
+                                   -> stats:lt(stats:mean_of(SS), 100.0)
+                                   -> screen:HasLowIC50(c),
+                               bridge_s,
+                               EIG,
+                               // tag : audit label, same IRI as the instance
+                               EIG,
+                               spec_poly(
+                                   // T : the domain
+                                   core:string,
+                                   fun (s : core:string) =>
+                                       forall (c : core:string) =>
+                                           screen:sample_for(s, c)
+                                           -> stats:lt(stats:mean_of(s), 100.0)
+                                           -> screen:HasLowIC50(c),
+                                   Declared(BRIDGE),
+                                   SS,
+                                   // tag : audit label, same IRI as the instance
+                                   SS,
+                                   declared(BRIDGE, BRIDGE_P)
+                               )
+                           ),
+                           // inner c2'' : the sample_for witness
+                           declared(SFW, S_FOR)
+                       ),
+                       // middle c2' : the verifier-emitted statistical result
+                       derived(SAR, STAT
+                       )
+                   )
+               ),
+               justification:Certificate(
+                   justification:App(
+                       SpecStr(
+                           Declared("urn:eigenius:demo:screen:rule_strong"),
+                           "urn:eigenius:demo:screen:EIG_0291"
+                       ),
+                       justification:App(
+                           justification:App(
+                               SpecStr(
+                                   SpecStr(
+                                       Declared("urn:eigenius:demo:screen:bridge_lowic50"),
+                                       "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
+                                   ),
+                                   "urn:eigenius:demo:screen:EIG_0291"
+                               ),
+                               Declared("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
+                           ),
+                           DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
+                       )
+                   ),
+                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) )
     );
+
+
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────

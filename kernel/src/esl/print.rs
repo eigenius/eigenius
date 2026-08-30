@@ -1073,7 +1073,7 @@ fn print_kind(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, Prin
         message: m.to_string(),
         path: path.to_string(),
     };
-    let o = v.as_object().ok_or_else(|| bad("kind is not a TypeExpr"))?;
+    let o = v.as_object().ok_or_else(|| bad("kind is not a Term"))?;
     let ctor = o
         .get("ctor")
         .and_then(Value::as_str)

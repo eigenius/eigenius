@@ -94,7 +94,7 @@ fn build_chain() -> ExecutionContext {
     )
 }
 
-/// `(verdict ctor, diagnostic)` for one of the fixture's `justification:Sentence`s.
+/// `(verdict ctor, diagnostic)` for one of the fixture's `justification:Conclusion`s.
 fn verdict(local_name: &str) -> (String, Option<String>) {
     let ctx = build_chain();
     let sentence_iri =

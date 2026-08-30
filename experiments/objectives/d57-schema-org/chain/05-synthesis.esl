@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════════════════
 //
 // The capstone. Each antecedent is discharged by CITING its milestone
-// conclusion as a lemma (D54: a Holds justification:Sentence is admitted as a Verified
+// conclusion as a lemma (D54: a Holds justification:Conclusion is admitted as a Verified
 // witness keyed on its IRI). Loaded as a layer AFTER 01/03/04 so concl_discipline
 // (m1), concl_probe (m2), concl_generator (m3), concl_cut (m4) already Hold.
 // Modus-ponens spine copied from wrn-helicase/chain/09 (concl_main).
@@ -14,6 +14,7 @@ namespace reasoning     = "urn:eigenius:reasoning";
 namespace obj           = "urn:eigenius:obj:d57";
 namespace agent         = "urn:eigenius:reflection:agent";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 resource obj:synthesis_rule : reflection:DeclaredResource {
     reflection:declared_by  = agent:eigenius_core_team;
@@ -37,23 +38,9 @@ resource obj:synthesis_rule_trace : reflection:DeclarationTrace {
     reflection:warranted_by = obj:warrant_d57_synthesis;
     reflection:timestamp   = "2026-06-20T00:00:00Z";
 }
-resource obj:concl_main : justification:Sentence {
+resource obj:concl_main : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:obj:d57:schema_org";
-    justification:proposition = type_expr( obj:SchemaOrgMapped("schema_org") );
-    justification:term = App(
-        App(
-            App(
-                App(
-                    Declared("urn:eigenius:obj:d57:synthesis_rule"),
-                    Verified("urn:eigenius:obj:d57:concl_discipline")
-                ),
-                Verified("urn:eigenius:obj:d57:concl_probe")
-            ),
-            Verified("urn:eigenius:obj:d57:concl_generator")
-        ),
-        Verified("urn:eigenius:obj:d57:concl_cut")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE = "urn:eigenius:obj:d57:synthesis_rule",
             MDD = obj:MappingDisciplineDefined("schema_org"),
@@ -77,9 +64,25 @@ resource obj:concl_main : justification:Sentence {
             c3 = app(GP, CA -> SOM,
                      justification:App(justification:App(Declared(RULE), jMDD), jPV), jGP, c2, cGP)
         in
-        app(CA, SOM,
-            justification:App(justification:App(justification:App(Declared(RULE), jMDD), jPV), jGP),
-            jCA, c3, cCA)
+        holds( eigentt:logic_kernel,
+               app(CA, SOM,
+               justification:App(justification:App(justification:App(Declared(RULE), jMDD), jPV), jGP),
+               jCA, c3, cCA),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               justification:App(
+                                   Declared("urn:eigenius:obj:d57:synthesis_rule"),
+                                   Verified("urn:eigenius:obj:d57:concl_discipline")
+                               ),
+                               Verified("urn:eigenius:obj:d57:concl_probe")
+                           ),
+                           Verified("urn:eigenius:obj:d57:concl_generator")
+                       ),
+                       Verified("urn:eigenius:obj:d57:concl_cut")
+                   ),
+                   obj:SchemaOrgMapped("schema_org") ) )
     );
 }
 

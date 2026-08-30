@@ -317,7 +317,7 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         format: OntologyFormat::Json,
     },
     // reasoning (D39 Phase 8) — the Justification Logic institution's chain
-    // artifacts (ChainWitness predicates, justification:Term, justification:Sentence,
+    // artifacts (ChainWitness predicates, justification:Term, justification:Conclusion,
     // the institution + QueryClasses + ExportFormat). ESL source = single source
     // of truth. Depends on core / eigentt / reflection / institution.
     BootstrapOntology {
@@ -1327,7 +1327,7 @@ class p:Cat { description = "a dog"; }"#;
         // D39 Phase 8 — confirm the reasoning layer's load_esl_layer
         // call produced the expected chain artifacts: the 4 ChainWitness
         // predicates, the 2 indexed inductives (justification:Term +
-        // justification:Certificate), the 2 resource classes (justification:Sentence +
+        // justification:Certificate), the 2 resource classes (justification:Conclusion +
         // VerifiedPropositionView), the 2 query-request classes
         // (EntailmentRequest + ConsistencyRequest), the institution
         // resource, the 3 QueryClasses, and the ExportFormat.
@@ -1339,7 +1339,7 @@ class p:Cat { description = "a dog"; }"#;
             "urn:eigenius:witness:IsVerifiedAs",
             "urn:eigenius:justification:Term",
             "urn:eigenius:justification:Certificate",
-            "urn:eigenius:justification:Sentence",
+            "urn:eigenius:justification:Conclusion",
             "urn:eigenius:justification:VerifiedPropositionView",
             "urn:eigenius:justification:EntailmentRequest",
             "urn:eigenius:justification:ConsistencyRequest",
@@ -1507,7 +1507,7 @@ class p:Cat { description = "a dog"; }"#;
 
     /// Confirm that a kernel-emitted Verdict resource (the shape
     /// AutoOnLoad fires-and-emits at every StatisticalAnalysisPlan /
-    /// justification:Sentence commit per D14 §5.6) validates cleanly. The
+    /// justification:Conclusion commit per D14 §5.6) validates cleanly. The
     /// resource carries `core:ctor_name` to record which Verdict ctor
     /// (Holds / Fails / Undecidable) the institution returned — same
     /// property declared on InductiveCtor for declared-ctor names.

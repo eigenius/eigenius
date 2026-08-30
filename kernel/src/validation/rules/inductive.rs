@@ -1714,6 +1714,12 @@ mod tests {
                     wk::CLASS_TYPES,
                     Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
                 ),
+                (
+                    // A TYPE slot, so the decode failure this test is about is
+                    // what surfaces rather than a type mismatch.
+                    wk::IS_A_TYPE,
+                    Value::Boolean(true),
+                ),
             ],
         );
 

@@ -89,7 +89,7 @@ fn build_full_chain() -> ExecutionContext {
     )
 }
 
-/// Build a synthetic justification:Sentence with the supplied property
+/// Build a synthetic justification:Conclusion with the supplied property
 /// values. Tests pass the three required fields directly; the helper
 /// stamps the resource shape so the validate handler sees exactly
 /// what a committed sentence would carry.
@@ -102,17 +102,20 @@ fn synthetic_sentence(
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:Sentence").unwrap(),
+            Iri::parse("urn:eigenius:justification:Conclusion").unwrap(),
         )]),
     );
-    if let Some(v) = proposition {
-        r.set(Iri::parse(iris::PROP_PROPOSITION).unwrap(), v);
-    }
-    if let Some(v) = justification {
-        r.set(Iri::parse(iris::PROP_JUSTIFICATION).unwrap(), v);
-    }
-    if let Some(v) = certificate {
-        r.set(Iri::parse(iris::PROP_CERTIFICATE).unwrap(), v);
+    // The three parts are now one slot, so "a part is missing" becomes "the
+    // judgement is missing": with the parts collapsed into the certificate
+    // type there is no way to supply two of three. The error paths these
+    // callers exercise are unchanged in kind — the handler still reports a
+    // conclusion it cannot read — but there is now one way to be unreadable
+    // instead of three.
+    if let (Some(p), Some(j), Some(c)) = (proposition, justification, certificate) {
+        r.set(
+            Iri::parse(iris::PROP_JUDGEMENT).unwrap(),
+            judgement(p, j, c),
+        );
     }
     r
 }
@@ -148,7 +151,7 @@ fn missing_proposition_surfaces_computation_failed() {
     match err {
         InstitutionError::ComputationFailed(msg) => {
             assert!(
-                msg.contains("proposition"),
+                msg.contains("judgement"),
                 "expected proposition error, got: {msg}"
             );
         }
@@ -170,7 +173,7 @@ fn missing_certificate_surfaces_computation_failed() {
     match err {
         InstitutionError::ComputationFailed(msg) => {
             assert!(
-                msg.contains("certificate"),
+                msg.contains("judgement"),
                 "expected certificate error, got: {msg}"
             );
         }
@@ -194,21 +197,31 @@ fn malformed_proposition_surfaces_verdict_fails() {
     assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_FAILS);
     let diag = verdict_diagnostic(&outcome.output).expect("Fails carries diagnostic");
     assert!(
-        diag.contains("proposition"),
-        "diagnostic should mention proposition, got: {diag}"
+        diag.contains("judgement") || diag.contains("proposition"),
+        "diagnostic should name the judgement the proposition now lives in, got: {diag}"
     );
 }
 
 #[test]
 fn malformed_justification_surfaces_verdict_fails() {
     let ctx = build_full_chain();
+    // `Asserts("urn:a")` — a term that actually INHABITS Prop.
+    //
+    // This used to be `Sort(Zero)`, commented "Valid Prop term". It is not: it
+    // is `Prop` itself, a type. The old handler never noticed, because the
+    // proposition was a slot of its own that nothing checked for
+    // propositionhood. Inside a judgement it is the second index of
+    // `Certificate(j, P)`, so `P : Prop` is checked — and the fixture's own
+    // defect surfaced ahead of the one the test is about.
     let sentence = synthetic_sentence(
-        // Valid Prop term.
-        Some(Value::Json(
-            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
-        )),
-        // Unknown justification:Term ctor — chain inductive decoder
-        // catches it.
+        Some(Value::Json(json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+                {"ctor": "LitString", "args": ["urn:a"]},
+            ],
+        }))),
+        // Unknown justification:Term ctor.
         Some(Value::Json(json!({"ctor": "NotAJTctor", "args": []}))),
         Some(Value::Json(
             json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
@@ -219,8 +232,8 @@ fn malformed_justification_surfaces_verdict_fails() {
     assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_FAILS);
     let diag = verdict_diagnostic(&outcome.output).expect("Fails carries diagnostic");
     assert!(
-        diag.contains("justification"),
-        "diagnostic should mention justification, got: {diag}"
+        diag.contains("judgement") || diag.contains("justification"),
+        "diagnostic should name the judgement the justification term now lives in, got: {diag}"
     );
 }
 
@@ -230,7 +243,7 @@ fn institution_dispatch_routes_to_validate_handler() {
     // …) routes to the same logic the direct
     // do_validate_justification entry point exercises. This is the
     // path the kernel's AutoOnLoad dispatch will take when the chain
-    // sees a justification:Sentence commit.
+    // sees a justification:Conclusion commit.
     let ctx = build_full_chain();
     let inst = ReasoningInstitution::new();
     let sentence = synthetic_sentence(
@@ -793,19 +806,65 @@ fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
 /// The sentence IRI used by the two `VerificationTrace` tests below.
 const TRACED_SENTENCE: &str = "urn:test:v200:sentence";
 
-/// A `justification:Sentence` with a real IRI (unlike `synthetic_sentence`, which is embedded and so has
+/// Assemble the one judgement a conclusion now carries from the three parts
+/// that used to be separate slots: `holds(kernel, cert, Certificate(j, P))`.
+fn judgement(proposition: Value, justification: Value, cert: Value) -> Value {
+    use eigenius_kernel::program::eigentt_type_mirror::{certificate_type, encode_judgement};
+    let typ =
+        certificate_type(&d47(&justification), &proposition).expect("certificate type encodes");
+    encode_judgement("urn:eigenius:eigentt:logic_kernel", &cert, &typ).expect("judgement encodes")
+}
+
+/// Re-encode a plain D32 §3.7 tagged-dict `justification:Term` into the D47
+/// form a term embedded in a judgement must carry.
+///
+/// This conversion is the encoding boundary the collapse moved. A justification
+/// term used to sit in a slot of its own as a plain `{"ctor", "args"}` dict; it
+/// now rides inside the judgement, which is an `eigentt:Term`-ranged value, so
+/// the D47 codec reads it and a foreign inductive's constructor is named by
+/// `CtorApp` with arguments folded through `App`. Callers below still write the
+/// plain shape because it is what an author reads.
+fn d47(v: &Value) -> Value {
+    const JT: &str = "urn:eigenius:justification:Term";
+    let Value::Json(j) = v else { return v.clone() };
+    let (Some(name), args) = (
+        j.get("ctor").and_then(serde_json::Value::as_str),
+        j.get("args")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    ) else {
+        return v.clone();
+    };
+    let mut acc = json!({"ctor": "CtorApp", "args": [JT, name]});
+    for a in args {
+        let arg = match &a {
+            serde_json::Value::String(s) => json!({"ctor": "LitString", "args": [s]}),
+            serde_json::Value::Object(_) => match d47(&Value::Json(a.clone())) {
+                Value::Json(x) => x,
+                _ => a.clone(),
+            },
+            other => other.clone(),
+        };
+        acc = json!({"ctor": "App", "args": [acc, arg]});
+    }
+    Value::Json(acc)
+}
+
+/// A `justification:Conclusion` with a real IRI (unlike `synthetic_sentence`, which is embedded and so has
 /// nothing to attest).
 fn iri_sentence(iri_str: &str, proposition: Value, justification: Value, cert: Value) -> Resource {
     let mut r = Resource::new(Iri::parse(iri_str).unwrap());
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:Sentence").unwrap(),
+            Iri::parse("urn:eigenius:justification:Conclusion").unwrap(),
         )]),
     );
-    r.set(Iri::parse(iris::PROP_PROPOSITION).unwrap(), proposition);
-    r.set(Iri::parse(iris::PROP_JUSTIFICATION).unwrap(), justification);
-    r.set(Iri::parse(iris::PROP_CERTIFICATE).unwrap(), cert);
+    r.set(
+        Iri::parse(iris::PROP_JUDGEMENT).unwrap(),
+        judgement(proposition, justification, cert),
+    );
     r
 }
 
@@ -867,7 +926,7 @@ fn passing_validation_emits_a_kernel_verification_trace() {
     // The certificate lives on the sentence, so the sentence IS the proof term's location.
     assert_eq!(get(wk::PROOF_TERM).as_deref(), Some(TRACED_SENTENCE));
     assert!(get(wk::TIMESTAMP).is_some(), "trace carries a timestamp");
-    // `derivation_trace` is `recommends`, not `requires`: a justification:Sentence has no ProgramTrace
+    // `derivation_trace` is `recommends`, not `requires`: a justification:Conclusion has no ProgramTrace
     // to point at, and pointing the slot at itself would be a fiction.
     assert!(
         trace
@@ -880,8 +939,8 @@ fn passing_validation_emits_a_kernel_verification_trace() {
 #[test]
 fn the_minted_trace_keys_the_witness_on_the_sentences_own_proposition() {
     // The subtle half. `emit_from_trace` reads the TARGET's `reflection:canonical_proposition`,
-    // but a justification:Sentence keeps its proposition under `justification:proposition`. Without the
-    // justification:Sentence arm in `target_proposition_hash` the trace falls through to the D39 §4.1
+    // but a justification:Conclusion keeps its proposition under `justification:proposition`. Without the
+    // justification:Conclusion arm in `target_proposition_hash` the trace falls through to the D39 §4.1
     // default and keys the witness against `Asserts(sentence_iri)` — a different hash from the one
     // the sentence emits, and one no certificate legitimately cites. A chain could then discharge
     // `justification:Certificate(Verified(s), Asserts(s))`: the sentence asserting itself.

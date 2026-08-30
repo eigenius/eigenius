@@ -16,7 +16,7 @@
 //
 // - `justification:Certificate : justification:Term -> Prop -> Type 0` (D39 §5) — the
 //   indexed inductive predicate whose inhabitants are the certificates
-//   `justification:Sentence` carries. Nine constructors: four grounding
+//   `justification:Conclusion` carries. Nine constructors: four grounding
 //   constructors consume the matching `ChainWitness` witness; `app`
 //   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
 //   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
@@ -212,7 +212,7 @@ data justification:Certificate : justification:Term -> Prop -> Type 2 {
         justification:Certificate(justification:SpecStr(j, tag), P(x)),
 }
 
-// ── justification:Sentence (D39 §4.2) ─────────────────────────────────────
+// ── justification:Conclusion (D39 §4.2) ─────────────────────────────────────
 //
 // The chain-resident pairing of a proposition with a justification:Term
 // and a justification:Certificate certificate. `subclass_of reflection:DerivedResource`
@@ -221,43 +221,36 @@ data justification:Certificate : justification:Term -> Prop -> Type 2 {
 // and the `IsDerivedAs prior_iri P` witness is emitted at commit on the
 // same footing as for any other derived artifact.
 
-class justification:Sentence : reflection:DerivedResource {
-    description = "A chain-resident reasoning step: proposition + justification:Term + justification:Certificate certificate. The ValidateJustification AutoOnLoad gate type-checks the certificate against the proposition at commit (D39 §4.3). Subclassing DerivedResource lets prior sentences be cited via DerivedEvidence; the inherited derivation requirement is satisfied by the certificate field (the certificate IS the derivation).";
-    requires justification:proposition,
-             justification:term,
-             justification:certificate;
-    recommends justification:subject_iri,
+class justification:Conclusion : reflection:DerivedResource {
+    description = "A chain-resident reasoning step: the thing a justification concludes. Carries ONE required judgement — `holds(kernel, c, Certificate(j, P))`, read as `the kernel verified that certificate c grounds a claim to P`. It does NOT assert P: a certificate records grounds, and no rule turns Certificate(j,P) into P. Replaces the three required slots this class used to carry (proposition + term + certificate), which were checked by three separate paths with nothing requiring them to be about the same claim — a certificate for one proposition could sit beside a different proposition and both checked clean. Folding them into the judgement's type is what makes the pairing the thing that gets checked. Named Conclusion rather than Sentence because `sentence` described the three-slot record; `Claim` is taken by enc:EncodedClaim.";
+    requires justification:judgement;
+    recommends justification:proof,
+               justification:subject_iri,
                justification:refutes;
 }
 
-property justification:proposition : core:inductive {
-    description = "The Prop-typed EigenTT proposition this sentence asserts, encoded via the D47 codec. Also serves as the sentence's reflection:canonical_proposition for D49 §6 witness emission, so downstream DerivedEvidence citations resolve to this proposition in the witness key.";
-    class_types eigentt:Term;
-    domain justification:Sentence;
+property justification:judgement : core:inductive {
+    description = "The checked judgement this conclusion rests on: `holds(kernel, c, Certificate(j, P))`. The proposition P and the justification term j both appear inside the TYPE, so checking the judgement checks that the certificate inhabits the certificate type for that proposition — one obligation, discharged by the uniform check-mode rule. Also the source of the conclusion's canonical proposition for witness emission: P is projected out of the judgement's type rather than read from a separate slot.";
+    class_types eigentt:Judgement;
+    domain justification:Conclusion;
 }
 
-property justification:term : core:inductive {
-    description = "The agent's justification:Term warrant for the proposition, encoded as a chain-mirrored inductive value over the six justification:Term constructors (D39 §3).";
-    class_types justification:Term;
-    domain justification:Sentence;
-}
-
-property justification:certificate : core:inductive {
-    description = "The kernel-checkable justification:Certificate certificate, encoded via the D47 codec. ValidateJustification (D39 §4.3) type-checks it against `justification:Certificate justification proposition` at commit; Fails verdicts reject the sentence.";
-    class_types eigentt:Term;
-    domain justification:Sentence;
+property justification:proof : core:inductive {
+    description = "An optional SECOND judgement: `holds(logic, t, P)`, a proof of the conclusion's proposition in a logic the system hosts a checker for. Distinct from `justification:judgement` and never merged with it — that one says `j grounds P`, this one says `t proves P`, and conflating them is the substitution the two-layer separation exists to make inexpressible. Present only where a proof term exists; its absence is the normal case and carries no penalty.";
+    class_types eigentt:Judgement;
+    domain justification:Conclusion;
 }
 
 property justification:subject_iri : core:string {
-    description = "The principal Resource this sentence is about. First-class EigenQL index for the Reasoning institution — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning (D39 §6.4), all alternative-consideration sentences and the final pick share the same subject_iri.";
+    description = "The principal Resource this conclusion is about. Aboutness, not logic: no judgement carries it. First-class EigenQL index — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning (D39 §6.4), all alternative-consideration conclusions and the final pick share the same subject_iri.";
     format = formats:iri;
-    domain justification:Sentence;
+    domain justification:Conclusion;
 }
 
 property justification:refutes : core:string {
-    description = "IRI of a prior justification:Sentence this sentence supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
+    description = "IRI of a prior justification:Conclusion this one supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
     format = formats:iri;
-    domain justification:Sentence;
+    domain justification:Conclusion;
 }
 
 // ── VerifiedPropositionView (D49 §7) ─────────────────────────────────
@@ -296,8 +289,9 @@ class justification:EntailmentRequest : reflection:DerivedResource {
 }
 
 property justification:candidate_proposition : core:inductive {
-    description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as justification:Sentence.proposition.";
+    description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as justification:Conclusion.proposition.";
     class_types eigentt:Term;
+    expected_type Prop;
     domain justification:EntailmentRequest;
 }
 
@@ -308,7 +302,7 @@ class justification:ConsistencyRequest : reflection:DerivedResource {
 
 property justification:sentence_set : core:resource_array {
     description = "The ReasoningSentences whose joint consistency is being queried. v1 of the handler does not inspect this beyond a non-empty check.";
-    class_types justification:Sentence;
+    class_types justification:Conclusion;
     domain justification:ConsistencyRequest;
 }
 
@@ -325,14 +319,14 @@ resource reasoning:reasoning_institution : institution:Institution {
     institution:institution_iri = "urn:eigenius:reasoning:reasoning_institution";
     institution:institution_name = "Reasoning";
     institution:runtime = runtimes:in_process;
-    core:description = "Justification Logic institution (D39). Type-checks justification:Certificate certificates against (justification, proposition) pairs at justification:Sentence commit time via the kernel's NbE checker; queries entailment and consistency on demand. The validator is the kernel — no external runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory implementation.";
+    core:description = "Justification Logic institution (D39). Type-checks justification:Certificate certificates against (justification, proposition) pairs at justification:Conclusion commit time via the kernel's NbE checker; queries entailment and consistency on demand. The validator is the kernel — no external runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory implementation.";
 }
 
 // ── Query classes (D39 §4.3) ─────────────────────────────────────────
 //
 // Three dispatch roles, one per class:
 //
-// - ValidateJustification (AutoOnLoad): fires on every justification:Sentence
+// - ValidateJustification (AutoOnLoad): fires on every justification:Conclusion
 //   commit; decodes proposition + certificate, type-checks at Prop, then
 //   checks `certificate : justification:Certificate justification proposition`. Returns
 //   Verdict::Holds or Verdict::Fails (with subterm-pinned diagnostic).
@@ -361,16 +355,16 @@ resource reasoning:reasoning_institution : institution:Institution {
 
 resource reasoning:ef_justification : institution:ExportFormat {
     core:short_name = "ef_justification";
-    core:description = "Lifts a justification:Sentence's `justification` property (a D32 §3.7-shaped justification:Term chain value) into a `Val::InductiveVal` typed at `justification:Term`. Used by the ValidateJustification handler to construct the expected certificate type `justification:Certificate(j, p)`; available as a standalone extract route for any future cross-institution consumer.";
-    institution:from_class = justification:Sentence;
+    core:description = "Lifts a justification:Conclusion's `justification` property (a D32 §3.7-shaped justification:Term chain value) into a `Val::InductiveVal` typed at `justification:Term`. Used by the ValidateJustification handler to construct the expected certificate type `justification:Certificate(j, p)`; available as a standalone extract route for any future cross-institution consumer.";
+    institution:from_class = justification:Conclusion;
     institution:payload_type = justification:Term;
     institution:institution_ref = reasoning:reasoning_institution;
     institution:procedure = proc:extract_justification;
 }
 
 resource reasoning:qc_validate_justification : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every justification:Sentence commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `justification:Certificate justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
-    institution:query_class = justification:Sentence;
+    core:description = "AutoOnLoad gate on every justification:Conclusion commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `justification:Certificate justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
+    institution:query_class = justification:Conclusion;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
     institution:query_handler = proc:validate_justification;
@@ -424,14 +418,14 @@ resource reasoning:qc_consistency_check : institution:QueryClass {
 // which is the shape a careful author writes.
 
 class justification:ProjectionRequest {
-    description = "Input to qc_project_justification (D73 §1.2): ask what a committed justification:Sentence's justification:Term rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
+    description = "Input to qc_project_justification (D73 §1.2): ask what a committed justification:Conclusion's justification:Term rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
     requires justification:subject_sentence;
     recommends justification:counterfactual_iri;
 }
 
 property justification:subject_sentence : core:resource {
-    description = "The justification:Sentence whose justification:Term is being projected.";
-    class_types justification:Sentence;
+    description = "The justification:Conclusion whose justification:Term is being projected.";
+    class_types justification:Conclusion;
 }
 
 property justification:counterfactual_iri : core:string {
@@ -486,7 +480,7 @@ property justification:survives_without : core:boolean {
 }
 
 resource reasoning:qc_project_justification : institution:QueryClass {
-    core:description = "OnDemand: project a committed justification:Sentence's justification:Term onto the axes of D73 §1.2 — is it fully verified, what does it rest on unproved, which measurements, and would it survive losing a named IRI. Returns a justification:Projection, not a Verdict: this reports what the term rests on, it does not judge it.";
+    core:description = "OnDemand: project a committed justification:Conclusion's justification:Term onto the axes of D73 §1.2 — is it fully verified, what does it rest on unproved, which measurements, and would it survive losing a named IRI. Returns a justification:Projection, not a Verdict: this reports what the term rests on, it does not judge it.";
     institution:query_class = justification:ProjectionRequest;
     institution:result_class = justification:Projection;
     institution:dispatch_role = [dispatch:on_demand];

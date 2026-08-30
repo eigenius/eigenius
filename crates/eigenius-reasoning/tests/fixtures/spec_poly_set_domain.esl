@@ -10,6 +10,7 @@ namespace reasoning     = "urn:eigenius:reasoning";
 namespace poly          = "urn:eigenius:demo:poly";
 namespace agent         = "urn:eigenius:reflection:agent";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 class poly:Model : core:Resource {
     description = "A cancer model — the Set-level term the rule is specialised at.";
@@ -53,49 +54,49 @@ resource poly:obs_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-08-18T00:00:00Z";
 }
 
-resource poly:concl : justification:Sentence {
+resource poly:concl : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:poly:Model";
 
-    justification:proposition = type_expr(
-        poly:RequiresActivity(poly:Model)
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               app(
+                   poly:HasActivity(poly:Model),
+                   poly:RequiresActivity(poly:Model),
+                   SpecStr(
+                       Declared("urn:eigenius:demo:poly:rule"),
+                       "urn:eigenius:demo:poly:rule#Model"
+                   ),
+                   Observed("urn:eigenius:demo:poly:obs"),
+                   spec_poly(
+                       Set,
+                       (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
+                       Declared("urn:eigenius:demo:poly:rule"),
+                       poly:Model,
+                       "urn:eigenius:demo:poly:rule#Model",
+                       declared(
+                           "urn:eigenius:demo:poly:rule",
+                           forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m),
+                           ()
+                       )
+                   ),
+                   observed(
+                       "urn:eigenius:demo:poly:obs",
+                       poly:HasActivity(poly:Model),
+                       ()
+                   )
+               ),
+               justification:Certificate(
+                   justification:App(
+                       SpecStr(
+                           Declared("urn:eigenius:demo:poly:rule"),
+                           "urn:eigenius:demo:poly:rule#Model"
+                       ),
+                       Observed("urn:eigenius:demo:poly:obs")
+                   ),
+                   poly:RequiresActivity(poly:Model) ) )
     );
 
-    justification:term = App(
-        SpecStr(
-            Declared("urn:eigenius:demo:poly:rule"),
-            "urn:eigenius:demo:poly:rule#Model"
-        ),
-        Observed("urn:eigenius:demo:poly:obs")
-    );
 
-    justification:certificate = type_expr(
-        app(
-            poly:HasActivity(poly:Model),
-            poly:RequiresActivity(poly:Model),
-            SpecStr(
-                Declared("urn:eigenius:demo:poly:rule"),
-                "urn:eigenius:demo:poly:rule#Model"
-            ),
-            Observed("urn:eigenius:demo:poly:obs"),
-            spec_poly(
-                Set,
-                (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
-                Declared("urn:eigenius:demo:poly:rule"),
-                poly:Model,
-                "urn:eigenius:demo:poly:rule#Model",
-                declared(
-                    "urn:eigenius:demo:poly:rule",
-                    forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m),
-                    ()
-                )
-            ),
-            observed(
-                "urn:eigenius:demo:poly:obs",
-                poly:HasActivity(poly:Model),
-                ()
-            )
-        )
-    );
 }
 
 // Warrant target, post-D72: `warranted_by` is resource-typed, so Rule 22 needs it to resolve.

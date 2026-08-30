@@ -98,31 +98,21 @@ resource wrn:seed_control_rule_trace : reflection:DeclarationTrace {
     reflection:timestamp   = "2026-06-13T03:30:00Z";
 }
 
-resource wrn:concl_vivo : justification:Sentence {
+resource wrn:concl_vivo : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:InVivoDependence("WRN", "MSI")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:vivo_lme4:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:vivo_lme4:result",
-                onco:InVivoDependence("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:vivo_lme4:result",
+               onco:InVivoDependence("WRN", "MSI")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:vivo_lme4:result"),
+                   onco:InVivoDependence("WRN", "MSI") ) )
     );
 }
 
-resource wrn:concl_vivo_ontarget : justification:Sentence {
+resource wrn:concl_vivo_ontarget : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:OnTarget("WRN", "xenograft_growth")
-    );
-    justification:term = App(
-        App(
-            Declared("urn:eigenius:pub:wrn:seed_control_rule"),
-            Declared("urn:eigenius:pub:wrn:lit:lit_c911_design")
-        ),
-        Declared("urn:eigenius:pub:wrn:vivo_seed_control")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:seed_control_rule",
             LIT  = "urn:eigenius:pub:wrn:lit:lit_c911_design",
@@ -136,8 +126,18 @@ resource wrn:concl_vivo_ontarget : justification:Sentence {
             cert1 = app(C911, SC -> OT, Declared(RULE), jC911,
                         declared(RULE, RULE_P), declared(LIT, C911))
         in
-        app(SC, OT, justification:App(Declared(RULE), jC911), jSC,
-            cert1, declared(ART, SC))
+        holds( eigentt:logic_kernel,
+               app(SC, OT, justification:App(Declared(RULE), jC911), jSC,
+               cert1, declared(ART, SC)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:seed_control_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_c911_design")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:vivo_seed_control")
+                   ),
+                   onco:OnTarget("WRN", "xenograft_growth") ) )
     );
 }
 
@@ -171,19 +171,9 @@ resource wrn:p53_activation_rule_trace : reflection:DeclarationTrace {
     reflection:timestamp   = "2026-06-17T00:00:00Z";
 }
 
-resource wrn:concl_p53_activation : justification:Sentence {
+resource wrn:concl_p53_activation : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:ActivatesP53Response("WRN", "MSI")
-    );
-    justification:term = App(
-        App(
-            Declared("urn:eigenius:pub:wrn:p53_activation_rule"),
-            Declared("urn:eigenius:pub:wrn:lit:lit_ps15_readout")
-        ),
-        DerivedEvidence("urn:eigenius:pub:wrn:if_ed5:result")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:p53_activation_rule",
             LIT  = "urn:eigenius:pub:wrn:lit:lit_ps15_readout",
@@ -197,8 +187,18 @@ resource wrn:concl_p53_activation : justification:Sentence {
             cert1 = app(PS15, RM -> AP, Declared(RULE), jPS15,
                         declared(RULE, RULE_P), declared(LIT, PS15))
         in
-        app(RM, AP, justification:App(Declared(RULE), jPS15), jRM,
-            cert1, derived(RES, RM))
+        holds( eigentt:logic_kernel,
+               app(RM, AP, justification:App(Declared(RULE), jPS15), jRM,
+               cert1, derived(RES, RM)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:p53_activation_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_ps15_readout")
+                       ),
+                       DerivedEvidence("urn:eigenius:pub:wrn:if_ed5:result")
+                   ),
+                   onco:ActivatesP53Response("WRN", "MSI") ) )
     );
 }
 
@@ -213,15 +213,15 @@ resource wrn:concl_p53_activation : justification:Sentence {
 // set when the MSI coefficient stays significant + same-signed controlling for
 // every paralogue's loss (baseline β = −0.667 p = 4.4e-60; controlled β stays
 // ≈ −0.67..−0.70, worst p ≈ 1e-58). ED Fig 9a.
-resource wrn:concl_paralog : justification:Sentence {
+resource wrn:concl_paralog : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:NotExplainedByParalogLoss("WRN", "MSI")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:paralog_ctrl:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:paralog_ctrl:result",
-                onco:NotExplainedByParalogLoss("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:paralog_ctrl:result",
+               onco:NotExplainedByParalogLoss("WRN", "MSI")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:paralog_ctrl:result"),
+                   onco:NotExplainedByParalogLoss("WRN", "MSI") ) )
     );
 }
 
@@ -279,15 +279,15 @@ resource wrn:mech_rule_trace : reflection:DeclarationTrace {
     reflection:timestamp   = "2026-06-13T03:30:00Z";
 }
 
-resource wrn:concl_dsb : justification:Sentence {
+resource wrn:concl_dsb : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:CausesDSBs("WRN", "MSI")
-    );
-    justification:term = Declared("urn:eigenius:pub:wrn:mech_dsb");
-    justification:certificate = type_expr(
-        declared("urn:eigenius:pub:wrn:mech_dsb",
-                onco:CausesDSBs("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               declared("urn:eigenius:pub:wrn:mech_dsb",
+               onco:CausesDSBs("WRN", "MSI")),
+               justification:Certificate(
+                   Declared("urn:eigenius:pub:wrn:mech_dsb"),
+                   onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
 
@@ -305,15 +305,15 @@ resource wrn:concl_dsb : justification:Sentence {
 // intensity + foci → concl_dsb_gh2ax / concl_dsb_gh2ax_foci; pATM(S1981) foci →
 // concl_ddr_signaling); only the Chk2(T68) western (ED 7e, no numeric data)
 // remains linked in mech_dsb. This reproduces the 53BP1 leg from per-cell data.
-resource wrn:concl_dsb_foci : justification:Sentence {
+resource wrn:concl_dsb_foci : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:CausesDSBs("WRN", "MSI")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:foci_dsb:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:foci_dsb:result",
-                onco:CausesDSBs("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:foci_dsb:result",
+               onco:CausesDSBs("WRN", "MSI")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:foci_dsb:result"),
+                   onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
 
@@ -327,26 +327,26 @@ resource wrn:concl_dsb_foci : justification:Sentence {
 // (programs/mechanism/gh2ax-foci-program.json), with saturated pan-nuclear cells
 // counted at a ceiling (the MSI-enriched high-damage cells; interaction +7.3,
 // foci ×3.4 MSI vs ×1.0 MSS). Two independent recomputed γH2AX legs of CausesDSBs.
-resource wrn:concl_dsb_gh2ax : justification:Sentence {
+resource wrn:concl_dsb_gh2ax : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:CausesDSBs("WRN", "MSI")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:gh2ax:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:gh2ax:result",
-                onco:CausesDSBs("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:gh2ax:result",
+               onco:CausesDSBs("WRN", "MSI")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:gh2ax:result"),
+                   onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
-resource wrn:concl_dsb_gh2ax_foci : justification:Sentence {
+resource wrn:concl_dsb_gh2ax_foci : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:CausesDSBs("WRN", "MSI")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:gh2ax_foci:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:gh2ax_foci:result",
-                onco:CausesDSBs("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:gh2ax_foci:result",
+               onco:CausesDSBs("WRN", "MSI")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:gh2ax_foci:result"),
+                   onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
 
@@ -359,15 +359,15 @@ resource wrn:concl_dsb_gh2ax_foci : justification:Sentence {
 // activation rests on). Commits the new onco:ActivatesDSBResponse, previously
 // absent from the chain. (Chk2(T68), ED 7e, is a western blot with no per-cell
 // numeric data and stays linked in mech_dsb.)
-resource wrn:concl_ddr_signaling : justification:Sentence {
+resource wrn:concl_ddr_signaling : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:ActivatesDSBResponse("WRN", "MSI")
-    );
-    justification:term = DerivedEvidence("urn:eigenius:pub:wrn:patm:result");
-    justification:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:patm:result",
-                onco:ActivatesDSBResponse("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:pub:wrn:patm:result",
+               onco:ActivatesDSBResponse("WRN", "MSI")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:pub:wrn:patm:result"),
+                   onco:ActivatesDSBResponse("WRN", "MSI") ) )
     );
 }
 
@@ -375,25 +375,12 @@ resource wrn:concl_ddr_signaling : justification:Sentence {
 // discharged by the linked-external DSB-marker ToolArtifact (DerivedEvidence);
 // the two downstream legs (cell-cycle arrest, apoptosis) are discharged by
 // CITING the kernel-recomputed conclusions as lemmas (D54: a Holds
-// justification:Sentence is admitted as a Verified witness keyed on its IRI). The
+// justification:Conclusion is admitted as a Verified witness keyed on its IRI). The
 // arrest/apoptosis leaf proofs live in wrn-phase1-recompute (ED Fig 4b/4c
 // nested ANOVAs); C-MECH references them by name.
-resource wrn:concl_mech : justification:Sentence {
+resource wrn:concl_mech : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:DSBDrivenLethality("WRN", "MSI")
-    );
-    justification:term = App(
-        App(
-            App(
-                Declared("urn:eigenius:pub:wrn:mech_rule"),
-                Declared("urn:eigenius:pub:wrn:mech_dsb")
-            ),
-            Verified("urn:eigenius:pub:wrn:concl_cellcycle_recomputed")
-        ),
-        Verified("urn:eigenius:pub:wrn:concl_apoptosis_recomputed")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:mech_rule",
             ART  = "urn:eigenius:pub:wrn:mech_dsb",
@@ -412,8 +399,21 @@ resource wrn:concl_mech : justification:Sentence {
             cert2 = app(CA, AA -> DL, justification:App(Declared(RULE), jDSB),
                         jCA, cert1, verified(CC, CA))
         in
-        app(AA, DL, justification:App(justification:App(Declared(RULE), jDSB), jCA),
-            jAA, cert2, verified(AP, AA))
+        holds( eigentt:logic_kernel,
+               app(AA, DL, justification:App(justification:App(Declared(RULE), jDSB), jCA),
+               jAA, cert2, verified(AP, AA)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:mech_rule"),
+                               Declared("urn:eigenius:pub:wrn:mech_dsb")
+                           ),
+                           Verified("urn:eigenius:pub:wrn:concl_cellcycle_recomputed")
+                       ),
+                       Verified("urn:eigenius:pub:wrn:concl_apoptosis_recomputed")
+                   ),
+                   onco:DSBDrivenLethality("WRN", "MSI") ) )
     );
 }
 
@@ -439,15 +439,15 @@ resource wrn:fish_readout_trace : reflection:ExternalExecutionTrace {
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:concl_not_telomere : justification:Sentence {
+resource wrn:concl_not_telomere : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:NotViaTelomereDefect("WRN", "MSI")
-    );
-    justification:term = Declared("urn:eigenius:pub:wrn:fish_readout");
-    justification:certificate = type_expr(
-        declared("urn:eigenius:pub:wrn:fish_readout",
-                onco:NotViaTelomereDefect("WRN", "MSI"))
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               declared("urn:eigenius:pub:wrn:fish_readout",
+               onco:NotViaTelomereDefect("WRN", "MSI")),
+               justification:Certificate(
+                   Declared("urn:eigenius:pub:wrn:fish_readout"),
+                   onco:NotViaTelomereDefect("WRN", "MSI") ) )
     );
 }
 

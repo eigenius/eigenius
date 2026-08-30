@@ -94,7 +94,7 @@ model and applied to the measurement's claim, and the result is:
 > Once because it **follows** from sentence 1 plus a published rule.
 >
 > One proposition, two entirely different warrants: sentence 2's own parse witness, and a
-> `justification:Sentence` whose certificate applies the rule. (Nothing on chain records that they
+> `justification:Conclusion` whose certificate applies the rule. (Nothing on chain records that they
 > coincide.)
 
 **The derived route is not the better-warranted one**, and it is worth being exact about that:
@@ -173,7 +173,7 @@ A false proposition, on its own, commits fine. `qc_consistency_check` returns Un
 non-trivial input ([`reasoning.esl`](../../ontologies/justification/justification.esl)), so nothing checks a
 standalone claim against anything. What rejects is the **certificate**.
 
-### The three properties on a justification:Sentence
+### The three properties on a justification:Conclusion
 
 | property | what it holds | encoding |
 |---|---|---|
@@ -188,7 +188,7 @@ type-check.
 ### What the gate does
 
 [`do_validate_justification`](../../crates/eigenius-reasoning/src/validate.rs) runs at commit, via the
-`AutoOnLoad` hook on every `justification:Sentence`:
+`AutoOnLoad` hook on every `justification:Conclusion`:
 
 1. **Decode** `proposition` and `certificate` through the D47 codec against the current chain — where
    `ConstRef`s (`umlscui:C…`, `wn:…`) re-resolve to real classes and axioms.

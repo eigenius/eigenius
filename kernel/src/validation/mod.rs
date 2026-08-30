@@ -148,7 +148,7 @@ pub enum ValidationRule {
     /// Caught by `check_infer` (Rule 21).
     TermIllTyped,
     /// A slot whose declared role is a **proposition**
-    /// ([`well_known::PROPOSITION_SLOTS`](crate::ontology::well_known::PROPOSITION_SLOTS))
+    /// (its `eigentt:obligation` names `inhabits(Prop)`)
     /// holds a term that type-checks but does not inhabit `Prop` — a type
     /// (`Sort(1)` and up), an unapplied predicate, or a literal. Distinct
     /// from [`ValidationRule::TermIllTyped`]: the term is well-typed,
@@ -502,7 +502,9 @@ impl Validator {
                 // Rule 21: eigentt:Term fields must decode AND type-check
                 // against the chain — generalizes Rule 20's decode-only check
                 // to every type_expr slot; lands the deferred felicity check.
-                errors.extend(self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id));
+                errors.extend(
+                    self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id, resource),
+                );
             }
             // Rule 12 (open world): unknown properties are allowed
         }
@@ -1926,7 +1928,7 @@ mod tests {
     // trace metadata (program / started_at / completed_at / trace_tree
     // / output / metrics) lives in `recommends` — kernel-emitted
     // traces typically fill them; user-authored ProgramTraces wired
-    // alongside StatisticalAnalysisPlan / justification:Sentence / etc. typically
+    // alongside StatisticalAnalysisPlan / justification:Conclusion / etc. typically
     // don't need them.
 
     #[test]

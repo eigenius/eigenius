@@ -125,7 +125,7 @@ resource objcite:developers_distribution : reference:Citation {
 // 2. THE OBLIGATION GRAPH (reasoning skill phase 0, D58-lightweight)
 //
 // Thesis + milestones as goal-post propositions. Each only becomes a Holds
-// justification:Sentence once its evidence path is discharged (phases 3-5). The
+// justification:Conclusion once its evidence path is discharged (phases 3-5). The
 // acceptance grade + intended-warrant edges live in these comments — which is
 // precisely the D58 gap (HARVEST-1).
 // ════════════════════════════════════════════════════════════════════

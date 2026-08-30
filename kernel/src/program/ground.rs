@@ -641,7 +641,7 @@ fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
 /// checked and was not. The string could not carry a level variable either, so `data Vec (A : Sort u)`
 /// was inexpressible.
 ///
-/// The kind is a type expression and now says so. Every case the string encoded is a `TypeExpr`
+/// The kind is a type expression and now says so. Every case the string encoded is a `Term`
 /// constructor, and `decode_type` already dispatches all of them — including the `ConstRef`
 /// resolution that distinguishes a primitive from an inductive from a class.
 fn decode_param_kind(value: &Value, class_iri: &Iri, layer: &Layer) -> Result<Exp, String> {

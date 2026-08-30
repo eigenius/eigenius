@@ -37,7 +37,7 @@ eigenius-lean = { path = "../crates/eigenius-lean" }
 # own NbE checker — no external runtime — so the verification TCB is
 # bounded by the kernel's type-theory implementation. Linked in
 # alongside Lean so AutoOnLoad ValidateJustification on every
-# justification:Sentence commit dispatches as a direct function call.
+# justification:Conclusion commit dispatches as a direct function call.
 eigenius-reasoning = { path = "../crates/eigenius-reasoning" }
 eigenius-encoding = { path = "../crates/eigenius-encoding" }
 # D52: the measurement-statistics institution's validator runs
@@ -47,7 +47,7 @@ eigenius-encoding = { path = "../crates/eigenius-encoding" }
 # commit recomputes the claim and emits Holds/Fails as a direct
 # function call. Composes with Reasoning via the D49 chain-witness
 # index: the emitted DerivedResource's canonical_proposition becomes
-# the IsDerivedAs witness any downstream justification:Sentence's
+# the IsDerivedAs witness any downstream justification:Conclusion's
 # DerivedEvidence ctor consumes.
 eigenius-statistics = { path = "../crates/eigenius-statistics" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }

@@ -165,41 +165,31 @@ resource wrn:exo_rule_trace : reflection:DeclarationTrace {
 // the recorded concl_val/va_competition pair has been retired.
 
 // D-ONTARGET: the viability loss is attributable to WRN inactivation.
-resource wrn:concl_ontarget : justification:Sentence {
+resource wrn:concl_ontarget : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:OnTarget("WRN", "MSI_viability")
-    );
-    justification:term = App(
-        Declared("urn:eigenius:pub:wrn:ontarget_rule"),
-        Verified("urn:eigenius:pub:wrn:concl_rescue_wt_recomputed")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE  = "urn:eigenius:pub:wrn:ontarget_rule",
             CONCL = "urn:eigenius:pub:wrn:concl_rescue_wt_recomputed",
             RES   = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
             OT    = onco:OnTarget("WRN", "MSI_viability")
         in
-        app(RES, OT, Declared(RULE), Verified(CONCL),
-            declared(RULE, RES -> OT), verified(CONCL, RES))
+        holds( eigentt:logic_kernel,
+               app(RES, OT, Declared(RULE), Verified(CONCL),
+               declared(RULE, RES -> OT), verified(CONCL, RES)),
+               justification:Certificate(
+                   justification:App(
+                       Declared("urn:eigenius:pub:wrn:ontarget_rule"),
+                       Verified("urn:eigenius:pub:wrn:concl_rescue_wt_recomputed")
+                   ),
+                   onco:OnTarget("WRN", "MSI_viability") ) )
     );
 }
 
 // D-HELICASE (a): helicase activity is required.
-resource wrn:concl_helicase_required : justification:Sentence {
+resource wrn:concl_helicase_required : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:RequiresActivity("WRN", "helicase")
-    );
-    justification:term = App(
-        App(
-            Declared("urn:eigenius:pub:wrn:helicase_rule"),
-            Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
-        ),
-        Declared("urn:eigenius:pub:wrn:va_fail_k577m")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:helicase_rule",
             LIT  = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
@@ -213,25 +203,25 @@ resource wrn:concl_helicase_required : justification:Sentence {
             cert1 = app(SEP, FR -> RA, Declared(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(FR, RA, justification:App(Declared(RULE), jSEP), jFR,
-            cert1, declared(ART, FR))
+        holds( eigentt:logic_kernel,
+               app(FR, RA, justification:App(Declared(RULE), jSEP), jFR,
+               cert1, declared(ART, FR)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:helicase_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:va_fail_k577m")
+                   ),
+                   onco:RequiresActivity("WRN", "helicase") ) )
     );
 }
 
 // D-HELICASE (b): exonuclease activity is dispensable.
-resource wrn:concl_exo_dispensable : justification:Sentence {
+resource wrn:concl_exo_dispensable : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:proposition = type_expr(
-        onco:DispensableActivity("WRN", "exonuclease")
-    );
-    justification:term = App(
-        App(
-            Declared("urn:eigenius:pub:wrn:exo_rule"),
-            Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
-        ),
-        Verified("urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed")
-    );
-    justification:certificate = type_expr(
+    justification:judgement = type_expr(
         alias
             RULE  = "urn:eigenius:pub:wrn:exo_rule",
             LIT   = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
@@ -245,8 +235,18 @@ resource wrn:concl_exo_dispensable : justification:Sentence {
             cert1 = app(SEP, RES -> DA, Declared(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(RES, DA, justification:App(Declared(RULE), jSEP), jRES,
-            cert1, verified(CONCL, RES))
+        holds( eigentt:logic_kernel,
+               app(RES, DA, justification:App(Declared(RULE), jSEP), jRES,
+               cert1, verified(CONCL, RES)),
+               justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:exo_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       Verified("urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed")
+                   ),
+                   onco:DispensableActivity("WRN", "exonuclease") ) )
     );
 }
 

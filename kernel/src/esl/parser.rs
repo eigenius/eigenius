@@ -508,6 +508,21 @@ impl<'a> Parser<'a> {
                 self.expect_semicolon()?;
                 Ok(PropertyItem::ClassTypes(names))
             }
+            // `expected_type <term>;` — a bare keyword, like every other
+            // property item; the block's grammar is a fixed set of items, not
+            // arbitrary namespaced fields.
+            "expected_type" => {
+                self.advance();
+                let typ = self.parse_type_expr()?;
+                self.expect_semicolon()?;
+                Ok(PropertyItem::ExpectedType(typ))
+            }
+            // `is_a_type;` — no value; the presence of the item is the claim.
+            "is_a_type" => {
+                self.advance();
+                self.expect_semicolon()?;
+                Ok(PropertyItem::IsAType)
+            }
             "element_type" => {
                 self.advance();
                 self.expect(&TokenKind::Eq)?;
@@ -753,7 +768,7 @@ impl<'a> Parser<'a> {
                 // same `parse_type_expr` used for `axiom` declarations
                 // and `data` ctor types; the compile-side hook D47-
                 // encodes the lowered Exp. Surface counterpart of
-                // `formula(...)` for D47, used by D39 justification:Sentence
+                // `formula(...)` for D47, used by D39 justification:Conclusion
                 // authors who'd otherwise hand-write the verbose
                 // `{"ctor":"App","args":[...]}` tagged-dict tree.
                 if bare.as_deref() == Some("type_expr") && self.peek_at(1) == &TokenKind::LParen {
@@ -762,7 +777,7 @@ impl<'a> Parser<'a> {
                     self.expect(&TokenKind::LParen)?;
                     let typ = self.parse_type_expr()?;
                     self.expect(&TokenKind::RParen)?;
-                    return Ok(Value::TypeExpr { typ, pos });
+                    return Ok(Value::Term { typ, pos });
                 }
                 let qn = self.parse_qualified_name()?;
                 // Bare `Ident` followed by `(` is an inductive-ctor
@@ -1069,13 +1084,13 @@ impl<'a> Parser<'a> {
     ///
     /// Grammar (right-associative arrow, tight-binding ref):
     /// ```text
-    /// TypeExpr ::= Atom '->' TypeExpr        -- arrow
+    /// Term ::= Atom '->' Term        -- arrow
     ///            | BinderArrow               -- `{j < i} -> …`
     ///            | Atom
-    /// Atom     ::= QualifiedName [ '(' TypeExpr (',' TypeExpr)* ')' ]
-    /// BinderArrow ::= '{' ident (':' QualifiedName)? ('<' QualifiedName)? '}' '->' TypeExpr
+    /// Atom     ::= QualifiedName [ '(' Term (',' Term)* ')' ]
+    /// BinderArrow ::= '{' ident (':' QualifiedName)? ('<' QualifiedName)? '}' '->' Term
     /// ```
-    fn parse_type_expr(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_type_expr(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
 
         // D37 §3.5 — `pi x_1 : T_1, …, x_N : T_N => U`. The value-
@@ -1127,7 +1142,7 @@ impl<'a> Parser<'a> {
             if self.at(&TokenKind::Arrow) {
                 self.advance();
                 let codomain = self.parse_type_expr()?;
-                return Ok(TypeExpr::Arrow {
+                return Ok(Term::Arrow {
                     domain: Box::new(sort),
                     codomain: Box::new(codomain),
                     pos,
@@ -1176,7 +1191,7 @@ impl<'a> Parser<'a> {
             self.expect(&TokenKind::RBrace)?;
             self.expect(&TokenKind::Arrow)?;
             let body = self.parse_type_expr()?;
-            return Ok(TypeExpr::BinderArrow {
+            return Ok(Term::BinderArrow {
                 name,
                 kind,
                 bound,
@@ -1190,7 +1205,7 @@ impl<'a> Parser<'a> {
         if self.at(&TokenKind::Arrow) {
             self.advance();
             let codomain = self.parse_type_expr()?;
-            Ok(TypeExpr::Arrow {
+            Ok(Term::Arrow {
                 domain: Box::new(atom),
                 codomain: Box::new(codomain),
                 pos,
@@ -1200,21 +1215,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// eigenius#72 — parse a sort literal as a `TypeExpr::Sort`.
+    /// eigenius#72 — parse a sort literal as a `Term::Sort`.
     /// `Prop` / `Set` are nullary; `Type` requires a following
     /// integer level.
-    fn parse_sort_literal(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_sort_literal(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
         if self.at(&TokenKind::Prop) {
             self.advance();
-            return Ok(TypeExpr::Sort {
+            return Ok(Term::Sort {
                 kind: crate::esl::ast::SortKind::Prop,
                 pos,
             });
         }
         if self.at(&TokenKind::SetKw) {
             self.advance();
-            return Ok(TypeExpr::Sort {
+            return Ok(Term::Sort {
                 kind: crate::esl::ast::SortKind::Set,
                 pos,
             });
@@ -1222,7 +1237,7 @@ impl<'a> Parser<'a> {
         if self.at(&TokenKind::TypeKw) {
             self.advance();
             let level = self.parse_level_expr("Type")?;
-            return Ok(TypeExpr::Sort {
+            return Ok(Term::Sort {
                 kind: crate::esl::ast::SortKind::Type(level),
                 pos,
             });
@@ -1232,7 +1247,7 @@ impl<'a> Parser<'a> {
         if self.at(&TokenKind::SortKw) {
             self.advance();
             let level = self.parse_level_expr("Sort")?;
-            return Ok(TypeExpr::Sort {
+            return Ok(Term::Sort {
                 kind: crate::esl::ast::SortKind::Sort(level),
                 pos,
             });
@@ -1312,7 +1327,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_type_atom(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
         // Parenthesized (grouped) type — lets a function type appear as an arrow
         // domain, e.g. `(A -> Prop) -> Prop` (higher-order types, as in
@@ -1324,7 +1339,7 @@ impl<'a> Parser<'a> {
             // parenthesis pair is not a parse error.
             if self.at(&TokenKind::RParen) {
                 self.advance();
-                return Ok(TypeExpr::Unit { pos });
+                return Ok(Term::Unit { pos });
             }
             let inner = self.parse_type_expr()?;
             // `(e : T)` — a type annotation (the bidirectional mode switch),
@@ -1334,7 +1349,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let typ = self.parse_type_expr()?;
                 self.expect(&TokenKind::RParen)?;
-                return Ok(TypeExpr::Ann {
+                return Ok(Term::Ann {
                     expr: Box::new(inner),
                     typ: Box::new(typ),
                     pos,
@@ -1353,19 +1368,19 @@ impl<'a> Parser<'a> {
         match self.peek().clone() {
             TokenKind::StringLit(s) => {
                 self.advance();
-                return Ok(TypeExpr::LitString { value: s, pos });
+                return Ok(Term::LitString { value: s, pos });
             }
             TokenKind::IntLit(n) => {
                 self.advance();
-                return Ok(TypeExpr::LitInt { value: n, pos });
+                return Ok(Term::LitInt { value: n, pos });
             }
             TokenKind::FloatLit(f) => {
                 self.advance();
-                return Ok(TypeExpr::LitFloat { value: f, pos });
+                return Ok(Term::LitFloat { value: f, pos });
             }
             TokenKind::BoolLit(b) => {
                 self.advance();
-                return Ok(TypeExpr::LitBool { value: b, pos });
+                return Ok(Term::LitBool { value: b, pos });
             }
             _ => {}
         }
@@ -1392,7 +1407,7 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        Ok(TypeExpr::Ref { name, args, pos })
+        Ok(Term::Ref { name, args, pos })
     }
 
     /// D37 §3.5 — `pi x_1 : T_1, …, x_N : T_N => U`. Value-typed
@@ -1403,10 +1418,10 @@ impl<'a> Parser<'a> {
     /// comma-separated; the compiler folds N binders into N nested
     /// single-parameter `Exp::Pi` nodes, with U as the innermost
     /// return type.
-    fn parse_pi_type(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_pi_type(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
         // Either `pi` (D37 §3.5) or `forall` (eigenius#72 alias) opens
-        // the binder list. Both lower to the same `TypeExpr::Pi`.
+        // the binder list. Both lower to the same `Term::Pi`.
         if self.at(&TokenKind::Pi) || self.at(&TokenKind::Forall) {
             self.advance();
         } else {
@@ -1418,17 +1433,17 @@ impl<'a> Parser<'a> {
         let params = self.parse_typed_param_list()?;
         self.expect(&TokenKind::FatArrow)?;
         let codomain = self.parse_type_expr()?;
-        Ok(TypeExpr::Pi {
+        Ok(Term::Pi {
             params,
             codomain: Box::new(codomain),
             pos,
         })
     }
 
-    /// `exists x_1 : T_1, ..., x_N : T_N => B` — nested `TypeExpr::Sigma`.
+    /// `exists x_1 : T_1, ..., x_N : T_N => B` — nested `Term::Sigma`.
     ///
     /// Mirrors [`Self::parse_pi_type`] exactly, `=>` closing the binder list included.
-    fn parse_sigma_type(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_sigma_type(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Exists)?;
         let params = self.parse_typed_param_list()?;
@@ -1438,7 +1453,7 @@ impl<'a> Parser<'a> {
         // ESL has no postfix form yet; leave the door open.)
         self.expect(&TokenKind::FatArrow)?;
         let body = self.parse_type_expr()?;
-        Ok(TypeExpr::Sigma {
+        Ok(Term::Sigma {
             params,
             body: Box::new(body),
             pos,
@@ -1454,7 +1469,7 @@ impl<'a> Parser<'a> {
     /// in body
     /// ```
     ///
-    /// Each binding's value is a full `TypeExpr` (an IRI literal, a
+    /// Each binding's value is a full `Term` (an IRI literal, a
     /// proposition, a sub-justification term, anything). The compiler
     /// substitutes the bindings into the body at lowering time —
     /// purely surface sugar; the kernel's NbE never sees the `Alias`
@@ -1469,7 +1484,7 @@ impl<'a> Parser<'a> {
     /// have separate keywords intentionally — `alias` is pure
     /// compile-time substitution, `let` is a real definitional
     /// binding the type theory sees.
-    fn parse_alias_in_type_expr(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_alias_in_type_expr(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Alias)?;
         let mut bindings = Vec::new();
@@ -1491,7 +1506,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::In)?;
         let body = self.parse_type_expr()?;
-        Ok(TypeExpr::Alias {
+        Ok(Term::Alias {
             bindings,
             body: Box::new(body),
             pos,
@@ -1501,13 +1516,13 @@ impl<'a> Parser<'a> {
     /// eigenius#72 Layer 3 — `fun (i_1 : T_1, …, i_n : T_n) => body`
     /// lambda in type position. Mirrors `parse_pi_type` exactly except
     /// for the keyword and the resulting AST variant.
-    fn parse_fun_lambda(&mut self) -> Result<TypeExpr, EslError> {
+    fn parse_fun_lambda(&mut self) -> Result<Term, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Fun)?;
         let params = self.parse_typed_param_list()?;
         self.expect(&TokenKind::FatArrow)?;
         let body = self.parse_type_expr()?;
-        Ok(TypeExpr::Lambda {
+        Ok(Term::Lambda {
             params,
             body: Box::new(body),
             pos,
@@ -1933,8 +1948,8 @@ impl<'a> Parser<'a> {
             // (`parse_data_index_telescope`). A param kind is terminated by `,`
             // or `)`, so no trailing arrow is consumed here.
             let kind = match self.parse_type_expr()? {
-                TypeExpr::Ref { name, args, .. } if args.is_empty() => IndexKind::Named(name),
-                TypeExpr::Sort { kind, .. } => IndexKind::Sort(kind),
+                Term::Ref { name, args, .. } if args.is_empty() => IndexKind::Named(name),
+                Term::Sort { kind, .. } => IndexKind::Sort(kind),
                 other => {
                     return Err(EslError::parser(
                         Some(other.pos().clone()),
@@ -2000,14 +2015,14 @@ impl<'a> Parser<'a> {
         let mut current = te;
         loop {
             match current {
-                TypeExpr::Arrow {
+                Term::Arrow {
                     domain, codomain, ..
                 } => {
                     let (kind, dom_pos) = match *domain {
-                        TypeExpr::Ref { name, args, pos } if args.is_empty() => {
+                        Term::Ref { name, args, pos } if args.is_empty() => {
                             (IndexKind::Named(name), pos)
                         }
-                        TypeExpr::Sort { kind, pos } => (IndexKind::Sort(kind), pos),
+                        Term::Sort { kind, pos } => (IndexKind::Sort(kind), pos),
                         other => {
                             return Err(EslError::parser(
                                 Some(other.pos().clone()),
@@ -2026,7 +2041,7 @@ impl<'a> Parser<'a> {
                     });
                     current = *codomain;
                 }
-                TypeExpr::Sort { kind, .. } => {
+                Term::Sort { kind, .. } => {
                     return Ok((indices, Some(kind)));
                 }
                 other => {
@@ -3896,8 +3911,8 @@ mod tests {
         match &prog.body {
             Expr::Match { returning, .. } => {
                 assert!(
-                    matches!(returning, Some(TypeExpr::Lambda { .. })),
-                    "expected TypeExpr::Lambda motive, got {returning:?}"
+                    matches!(returning, Some(Term::Lambda { .. })),
+                    "expected Term::Lambda motive, got {returning:?}"
                 );
             }
             other => panic!("expected Match, got {other:?}"),
@@ -3907,7 +3922,7 @@ mod tests {
     #[test]
     fn match_returning_with_bare_ref_motive_parses_as_typeexpr_ref() {
         // The pre-Layer-3 form `returning T` is still accepted; it
-        // now parses as `TypeExpr::Ref` instead of the old
+        // now parses as `Term::Ref` instead of the old
         // `QualifiedName`.
         let file = parse_str(
             r#"
@@ -3933,11 +3948,11 @@ mod tests {
         };
         match &prog.body {
             Expr::Match { returning, .. } => match returning {
-                Some(TypeExpr::Ref { name, args, .. }) => {
+                Some(Term::Ref { name, args, .. }) => {
                     assert_eq!(name.name, "Nat");
                     assert!(args.is_empty());
                 }
-                other => panic!("expected TypeExpr::Ref, got {other:?}"),
+                other => panic!("expected Term::Ref, got {other:?}"),
             },
             other => panic!("expected Match, got {other:?}"),
         }
@@ -4091,7 +4106,7 @@ mod tests {
             Declaration::Program(p) => match &p.body {
                 Expr::Lambda {
                     param,
-                    param_type: Some(TypeExpr::Ref { name, .. }),
+                    param_type: Some(Term::Ref { name, .. }),
                     ..
                 } => {
                     assert_eq!(param, "x");
@@ -4149,7 +4164,7 @@ mod tests {
     #[test]
     fn parses_pi_type_expression() {
         // `pi a : ex:A, b : ex:A => ex:A` as a codata observation
-        // type. Codata observation types accept full `TypeExpr`s
+        // type. Codata observation types accept full `Term`s
         // (unlike `program` whose input/output slots are
         // `QualifiedName` — a separate piece of work to extend),
         // which is the natural existing surface for testing the new
@@ -4168,7 +4183,7 @@ mod tests {
             other => panic!("expected axiom, got {other:?}"),
         };
         match &axiom.statement {
-            TypeExpr::Pi {
+            Term::Pi {
                 params, codomain, ..
             } => {
                 assert_eq!(params.len(), 2);
@@ -4176,7 +4191,7 @@ mod tests {
                 assert_eq!(params[1].name, "b");
                 assert!(matches!(
                     codomain.as_ref(),
-                    TypeExpr::Ref { name, .. } if name.name == "A"
+                    Term::Ref { name, .. } if name.name == "A"
                 ));
             }
             other => panic!("expected Pi, got {other:?}"),

@@ -97,7 +97,7 @@ fn build_composition_chain() -> ExecutionContext {
     // IC50 fixture layer — provides the screening + confirmatory
     // SampleSets + claims + traces. The confirmatory StatisticalAnalysisPlan
     // is the IsDerivedAs witness target for the DerivedEvidence used
-    // by the composition fixture's justification:Sentence.
+    // by the composition fixture's justification:Conclusion.
     let ic50_source = include_str!("fixtures/ic50_measurement.esl");
     let ic50_resources =
         esl::compile_against_layer(ic50_source, &stats_layer).unwrap_or_else(|errs| {
@@ -116,7 +116,7 @@ fn build_composition_chain() -> ExecutionContext {
     let ic50_layer = Arc::new(ic50_builder.build(LayerStorage::in_memory()));
 
     // Composition fixture layer — adds the literature rule (universal)
-    // + its DeclarationTrace + the justification:Sentence that derives
+    // + its DeclarationTrace + the justification:Conclusion that derives
     // StrongInhibitor(EIG_0291) via App(SpecStr, DerivedEvidence).
     let composition_source = include_str!("fixtures/d39_composition.esl");
     let composition_resources = esl::compile_against_layer(composition_source, &ic50_layer)

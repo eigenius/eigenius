@@ -2,7 +2,7 @@
 //
 // Builds core → reflection → reasoning → bench-core → harness → mol →
 // SAB-16 chain, then runs the ValidateJustification handler on the
-// hand-authored `ImplementsRequiredFilter(solution)` justification:Sentence and
+// hand-authored `ImplementsRequiredFilter(solution)` justification:Conclusion and
 // asserts Holds. The chain justifies the program's construction via five
 // Declared methodological conformances composed through an acceptance rule
 // (the corrected, program-as-object-code model). Move into the harness

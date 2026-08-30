@@ -14,6 +14,7 @@
     "urn:eigenius:core:description": "The EigenTT type the axiom inhabits — typically a Prop. Encoded as a chain-mirrored EigenTT type expression per D47 (eigentt:Term).",
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:eigentt:is_a_type": true,
     "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
   },
   {
@@ -39,6 +40,7 @@
     "urn:eigenius:core:description": "The declared type of the definition, e.g. `Set -> Set -> Set -> Prop`. Arity and parameter types are read from here rather than duplicated, so a stored arity can never contradict the type. D47-encoded (eigentt:Term).",
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:eigentt:is_a_type": true,
     "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
   },
   {
@@ -60,21 +62,22 @@
   },
   {
     "@id": "urn:eigenius:eigentt:Logic",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "Logic",
-    "urn:eigenius:core:description": "A logic the system can CHECK a judgement in. Closed deliberately, unlike reflection:proof_system: that property records which verifier ran and is illustrative, whereas an inhabitant here asserts the system hosts a checker for the logic's proof language. Adding one admits that checker to the trusted computing base and requires the two arguments the design names \u2014 soundness of the external turnstile against its satisfaction relation, and satisfaction-preservation by its comorphism \u2014 so it is a bootstrap edit by design. `kernel` is the native type checker, where the type IS the proposition and no comorphism is needed; `lean4` is the hosted Lean 4 kernel, which needs one. A logic with no hosted checker produces no judgements and cannot reach Verified.",
-    "urn:eigenius:core:ctors": [
-      {
-        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
-        "urn:eigenius:core:ctor_name": "kernel",
-        "urn:eigenius:core:arg_types": []
-      },
-      {
-        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
-        "urn:eigenius:core:ctor_name": "lean4",
-        "urn:eigenius:core:arg_types": []
-      }
-    ]
+    "urn:eigenius:core:description": "A logic whose proof language the system HOSTS A CHECKER for. An inhabitant is a resource, not a bare tag, because admitting a logic is a governance act that carries evidence: which checker implementation, which comorphism, and the two arguments the design requires \u2014 soundness of the external turnstile against its satisfaction relation, and satisfaction-preservation by the comorphism. A nullary constructor could carry none of that. Adding a logic is therefore declaring a resource, which is also why this is a class rather than an inductive: the admissible set is the set of declared individuals, extended by a layer rather than by editing a type. Distinct from `reflection:proof_system`, which records which verifier ran and is deliberately an open string \u2014 recording a verifier must not be a bootstrap edit, whereas admitting one to the trusted computing base must be. A logic with no hosted checker is not an inhabitant: it produces no judgement and cannot reach Verified.",
+    "urn:eigenius:core:recommends": ["urn:eigenius:core:description"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:logic_kernel",
+    "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Logic"],
+    "urn:eigenius:core:short_name": "logic_kernel",
+    "urn:eigenius:core:description": "The kernel's own type checker. The degenerate and privileged case: the type IS the proposition, so no comorphism is needed and the satisfaction-preservation obligation is vacuous. Under inhabitation semantics the assertion that the checker accepts `t : P` and the assertion that `P` holds are the same statement, so soundness is discharged by construction rather than argued."
+  },
+  {
+    "@id": "urn:eigenius:eigentt:logic_lean4",
+    "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Logic"],
+    "urn:eigenius:core:short_name": "logic_lean4",
+    "urn:eigenius:core:description": "Lean 4, re-checked in process by the `nanoda_lib` kernel reimplementation. Because that checker is statically linked into the host kernel, admitting this logic puts the whole of `nanoda_lib` inside the trusted computing base. Needs a comorphism relating the native Lean proposition to the graph proposition, and the primary risk it carries is not that the Lean kernel accepts falsehoods but that the translated proposition fails to denote the target one."
   },
   {
     "@id": "urn:eigenius:eigentt:Judgement",

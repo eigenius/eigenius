@@ -25,7 +25,7 @@ repo's own WRN work:
   prior knowledge that fixes the ground.
 
 The kernel makes each one a *hard stop* instead of a thing noticed five turns
-later: a `justification:Sentence` only commits if its certificate type-checks against an
+later: a `justification:Conclusion` only commits if its judgement type-checks against an
 **admitted witness**; a `Fails` verdict blocks the layer (AutoOnLoad gate). You
 cannot record "X holds" without the thing that makes X hold.
 
@@ -48,7 +48,7 @@ kernel enforces. Never let a claim float ungraded.
 | **Observed** | recorded from reality | `reflection:ObservedResource` + provenance (a pinned source / content hash) + an `ObservationTrace` | `IsObservedAs` |
 | **Declared** | asserted on authority/design | `reflection:DeclaredResource` + `reflection:rationale` + a `DeclarationTrace` | `IsDeclaredAs` |
 | **Derived** | computed | a `DerivedResource` a program/institution emits, carrying `canonical_proposition`, under a `ProgramTrace` | `IsDerivedAs` |
-| **Verified** | kernel-checked reasoning | a `justification:Sentence` whose certificate type-checks → `Holds` | `IsVerifiedAs` |
+| **Verified** | kernel-checked reasoning | a `justification:Conclusion` whose judgement type-checks → `Holds` | `IsVerifiedAs` |
 
 Each of the first three witnesses is emitted by the per-layer witness index **from a
 trace resource** (`ObservationTrace` / `DeclarationTrace` / `ProgramTrace`) whose
@@ -188,7 +188,7 @@ derived, or declared with a rationale. Distinguish anchors (cited prior knowledg
 from your own claims — never let an assumption pass as established fact.
 
 ### 2. Plan — express the plan as a typed warrant graph
-Author the intended `justification:Sentence`s (the dependency graph), even as stubs, so
+Author the intended `justification:Conclusion`s (the dependency graph), even as stubs, so
 the plan lives on chain. Then any later deviation is a **structural diff** (plan
 declares warrant W; chain lacks a resource discharging it), not a silent prose
 change. Name what evidence kind will discharge each (Observed/Derived/Declared).
@@ -210,13 +210,27 @@ cites it. Three shapes:
   through the D60 generic `oci` tool runtime — `eigenius env build --language oci` +
   `eigenius run` — the WRN wrapped-program pattern, no new institution. Then:
 ```esl
-resource obj:concl_x : justification:Sentence {
-    justification:subject_iri   = "urn:eigenius:obj:<slug>:subject";
-    justification:proposition   = type_expr( obj:Result("x") );
-    justification:term = DerivedEvidence("urn:eigenius:obj:<slug>:x:result");
-    justification:certificate   = type_expr( derived("urn:eigenius:obj:<slug>:x:result", obj:Result("x")) );
+resource obj:concl_x : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:obj:<slug>:subject";
+    justification:judgement   = type_expr(
+        holds( eigentt:logic_kernel,
+               derived("urn:eigenius:obj:<slug>:x:result", obj:Result("x")),
+               justification:Certificate(
+                   DerivedEvidence("urn:eigenius:obj:<slug>:x:result"),
+                   obj:Result("x") ) )
+    );
 }
 ```
+**One slot, not three.** The proposition and the justification term are no longer
+separate fields — they appear inside the judgement's TYPE, where the kernel checks
+that the certificate actually inhabits `Certificate(j, P)`. Previously `proposition`,
+`term` and `certificate` were three fields checked by three paths, with nothing
+requiring them to be about the same claim; a certificate for one proposition sat
+happily beside a different `proposition`. Now the pairing is what gets checked.
+
+The judgement reads: *the kernel verified that this certificate grounds this
+proposition*. It does **not** say the proposition is true — that is the point of the
+separation, and no rule turns one into the other.
 - **Declared** rule/judgment — `DeclaredResource` + rationale + `DeclarationTrace`
   (the anchor shape, minus the citation), carrying the rule as
   `canonical_proposition`.
@@ -235,7 +249,7 @@ with a rationale (the `recompute-findings.md` discipline, generalized).
 
 ### 5. Compose — lemma-cite sub-results up to the thesis
 Once sub-conclusions Hold, the capstone cites them as lemmas (D54): a Holds
-`justification:Sentence` is admitted as a Verified witness keyed on its IRI, so
+`justification:Conclusion` is admitted as a Verified witness keyed on its IRI, so
 `verified("...:concl_sub", obj:SubProp("x"))` discharges an antecedent. The
 thesis Holds **only if every antecedent does** — the gate composes the warrant for
 you. For the multi-antecedent modus-ponens spine, copy the worked pattern in
@@ -245,7 +259,7 @@ you. For the multi-antecedent modus-ponens spine, copy the worked pattern in
 ### 6. Audit — query the chain for integrity
 Before declaring done, query: does every conclusion resolve to a witness? Is every
 anchor a real, cited source? Are there dangling claims (no consumer) or ungraded
-assertions? `eigenius_query` over `justification:Sentence` / `Verdict` makes this
+assertions? `eigenius_query` over `justification:Conclusion` / `Verdict` makes this
 mechanical.
 
 ## Disciplines (the rules, each against a failure mode)

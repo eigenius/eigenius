@@ -134,7 +134,7 @@ fn var_value(name: &str) -> Value {
     Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
 }
 
-/// A bare (unqualified) kind name as a `TypeExpr` value.
+/// A bare (unqualified) kind name as a `Term` value.
 ///
 /// `Size` is the one bare name that is not a parameter reference — it is the size sort, which
 /// `decode_param_kind_str` has always special-cased. Everything else unqualified is a reference
@@ -467,9 +467,9 @@ fn resolve_apply_function(
 /// structurally cloned with recursion into compound shapes (`Array`,
 /// `Block`, `CtorApp`, `MacroCall`).
 ///
-/// Substitution does *not* descend into `TypeExpr` — parameter
+/// Substitution does *not* descend into `Term` — parameter
 /// references inside `type_expr(...)` bodies are not supported in
-/// v1 because the TypeExpr AST has its own name-resolution scope
+/// v1 because the Term AST has its own name-resolution scope
 /// (bound vs free type-level variables) that would require parallel
 /// substitution machinery. Add if a real use case arrives.
 fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> ast::Value {
@@ -508,16 +508,16 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
     }
 }
 
-/// Expand all `TypeExpr::Alias` forms by substituting each binding's
+/// Expand all `Term::Alias` forms by substituting each binding's
 /// value into the body at the names it introduces. The result is an
-/// alias-free `TypeExpr` ready for the standard compile passes
+/// alias-free `Term` ready for the standard compile passes
 /// (`lower_type_expr_to_exp` / `encode_type_expr_to_json` /
 /// `compile_type_expr`).
 ///
 /// Substitution rules:
 ///
 /// - `Ref { namespace: None, name, args: [] }` → if `name` is bound
-///   in `env`, replace with the bound `TypeExpr`. Otherwise leave
+///   in `env`, replace with the bound `Term`. Otherwise leave
 ///   alone. The empty-args check is intentional: name-with-args is
 ///   either a chain-resident ctor call (`screen:HasLowIC50(c)`) or a
 ///   forall-bound variable application (`P(x)`), neither of which an
@@ -532,36 +532,36 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
 ///   then added to env for subsequent bindings + the body.
 /// - All other variants (`Sort`, `LitString`, `LitInt`, `LitFloat`,
 ///   `LitBool`, `Arrow`) recurse into their children unchanged.
-fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) -> ast::TypeExpr {
+fn expand_aliases(typ: &ast::Term, env: &BTreeMap<String, ast::Term>) -> ast::Term {
     match typ {
-        ast::TypeExpr::Unit { .. } => typ.clone(),
-        ast::TypeExpr::Ref { name, args, pos } => {
+        ast::Term::Unit { .. } => typ.clone(),
+        ast::Term::Ref { name, args, pos } => {
             if name.namespace.is_none() && args.is_empty() {
                 if let Some(bound) = env.get(&name.name) {
                     return bound.clone();
                 }
             }
-            ast::TypeExpr::Ref {
+            ast::Term::Ref {
                 name: name.clone(),
                 args: args.iter().map(|a| expand_aliases(a, env)).collect(),
                 pos: pos.clone(),
             }
         }
-        ast::TypeExpr::Arrow {
+        ast::Term::Arrow {
             domain,
             codomain,
             pos,
-        } => ast::TypeExpr::Arrow {
+        } => ast::Term::Arrow {
             domain: Box::new(expand_aliases(domain, env)),
             codomain: Box::new(expand_aliases(codomain, env)),
             pos: pos.clone(),
         },
-        ast::TypeExpr::Ann { expr, typ, pos } => ast::TypeExpr::Ann {
+        ast::Term::Ann { expr, typ, pos } => ast::Term::Ann {
             expr: Box::new(expand_aliases(expr, env)),
             typ: Box::new(expand_aliases(typ, env)),
             pos: pos.clone(),
         },
-        ast::TypeExpr::BinderArrow {
+        ast::Term::BinderArrow {
             name,
             kind,
             bound,
@@ -570,7 +570,7 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
         } => {
             let mut inner = env.clone();
             inner.remove(name);
-            ast::TypeExpr::BinderArrow {
+            ast::Term::BinderArrow {
                 name: name.clone(),
                 kind: kind.clone(),
                 bound: bound.clone(),
@@ -578,7 +578,7 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
                 pos: pos.clone(),
             }
         }
-        ast::TypeExpr::Pi {
+        ast::Term::Pi {
             params,
             codomain,
             pos,
@@ -596,13 +596,13 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
                     }
                 })
                 .collect();
-            ast::TypeExpr::Pi {
+            ast::Term::Pi {
                 params: new_params,
                 codomain: Box::new(expand_aliases(codomain, &inner)),
                 pos: pos.clone(),
             }
         }
-        ast::TypeExpr::Sigma { params, body, pos } => {
+        ast::Term::Sigma { params, body, pos } => {
             let mut inner = env.clone();
             let new_params: Vec<_> = params
                 .iter()
@@ -616,13 +616,13 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
                     }
                 })
                 .collect();
-            ast::TypeExpr::Sigma {
+            ast::Term::Sigma {
                 params: new_params,
                 body: Box::new(expand_aliases(body, &inner)),
                 pos: pos.clone(),
             }
         }
-        ast::TypeExpr::Lambda { params, body, pos } => {
+        ast::Term::Lambda { params, body, pos } => {
             let mut inner = env.clone();
             let new_params: Vec<_> = params
                 .iter()
@@ -636,13 +636,13 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
                     }
                 })
                 .collect();
-            ast::TypeExpr::Lambda {
+            ast::Term::Lambda {
                 params: new_params,
                 body: Box::new(expand_aliases(body, &inner)),
                 pos: pos.clone(),
             }
         }
-        ast::TypeExpr::Alias {
+        ast::Term::Alias {
             bindings,
             body,
             pos: _,
@@ -654,11 +654,11 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
             }
             expand_aliases(body, &inner)
         }
-        ast::TypeExpr::Sort { .. }
-        | ast::TypeExpr::LitString { .. }
-        | ast::TypeExpr::LitInt { .. }
-        | ast::TypeExpr::LitFloat { .. }
-        | ast::TypeExpr::LitBool { .. } => typ.clone(),
+        ast::Term::Sort { .. }
+        | ast::Term::LitString { .. }
+        | ast::Term::LitInt { .. }
+        | ast::Term::LitFloat { .. }
+        | ast::Term::LitBool { .. } => typ.clone(),
     }
 }
 
@@ -941,7 +941,7 @@ impl Compiler {
         pos: &crate::esl::error::Position,
         ctor_name: &str,
         ctor_iri_str: &str,
-        args: &[ast::TypeExpr],
+        args: &[ast::Term],
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Exp, EslError> {
         // The ctor IRI shape is `parent_iri:ctor_name` — strip the
@@ -1196,7 +1196,7 @@ impl Compiler {
         let param_types = [class_value.clone(), class_value.clone(), option_arg.clone()];
 
         // Build the Pi-term: `pi a : C, b : C, opt : Option<C> => C`.
-        // Nested TypeBinderArrow resources, same shape `TypeExpr::Pi`
+        // Nested TypeBinderArrow resources, same shape `Term::Pi`
         // would have produced.
         let mut pi_acc: Value = class_value.clone();
         for (name, kind_value) in params.iter().zip(param_types.iter()).rev() {
@@ -1249,24 +1249,24 @@ impl Compiler {
 
     fn compile_type_expr(
         &self,
-        typ: &ast::TypeExpr,
+        typ: &ast::Term,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Value, EslError> {
         use crate::ontology::well_known as wk;
         // `alias` sugar — expand bindings into the body and recurse.
         // The expanded body is alias-free, so the recursion terminates.
-        if let ast::TypeExpr::Alias { .. } = typ {
+        if let ast::Term::Alias { .. } = typ {
             let expanded = expand_aliases(typ, &BTreeMap::new());
             return self.compile_type_expr(&expanded, scope);
         }
         match typ {
-            ast::TypeExpr::Unit { pos } => Err(EslError::compiler(
+            ast::Term::Unit { pos } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "the unit value `()` is a TERM, not a type — it is only meaningful inside \
                  `type_expr(...)`"
                     .to_string(),
             )),
-            ast::TypeExpr::Ref { name, args, .. } => {
+            ast::Term::Ref { name, args, .. } => {
                 let resolved = if name.namespace.is_none() {
                     let n = name.name.as_str();
                     if scope.contains(n) || n == "Inf" || n == "Size" {
@@ -1294,7 +1294,7 @@ impl Compiler {
                     Ok(Value::Embedded(Box::new(ar)))
                 }
             }
-            ast::TypeExpr::Arrow {
+            ast::Term::Arrow {
                 domain, codomain, ..
             } => {
                 let mut ar = Resource::new_embedded();
@@ -1313,13 +1313,13 @@ impl Compiler {
             // type-declaration position (codata observation type / inductive ctor
             // arg type). Annotations belong in `type_expr(...)` term slots, which
             // compile via `encode_type_expr_to_json`, not here.
-            ast::TypeExpr::Ann { pos, .. } => Err(EslError::compiler(
+            ast::Term::Ann { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "a type annotation `(e : T)` is not valid in a type-declaration \
                  position; it belongs in a term `type_expr(...)`"
                     .to_string(),
             )),
-            ast::TypeExpr::BinderArrow {
+            ast::Term::BinderArrow {
                 name,
                 kind,
                 bound,
@@ -1371,18 +1371,18 @@ impl Compiler {
             // produces `Exp::Pi` from a non-size-kind `TypeBinderArrow`,
             // so D37 Pi-types decode through the same path.
             //
-            // Parameter types can be arbitrary `TypeExpr`s (including
+            // Parameter types can be arbitrary `Term`s (including
             // parametric types like `Option<A>` whose lowering
             // produces an embedded `InductiveArgType`). The kind
             // slot accepts both string and embedded forms — the
             // decoder dispatches on the value's shape.
-            ast::TypeExpr::Sigma { pos, .. } => Err(EslError::compiler(
+            ast::Term::Sigma { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "`exists` (Sigma) is only available inside `type_expr(...)`, which lowers to the \
                  D47 ctor encoding; the resource-shaped type language has no binder for it"
                     .to_string(),
             )),
-            ast::TypeExpr::Pi {
+            ast::Term::Pi {
                 params, codomain, ..
             } => {
                 // Compile parameter types left-to-right so dependent
@@ -1417,7 +1417,7 @@ impl Compiler {
             // The proper Exp-side lowering for `axiom` statements lives
             // in `lower_type_expr_to_exp` (Layer 1) and reads the AST
             // directly, bypassing this chain-Value path.
-            ast::TypeExpr::Sort { kind, .. } => {
+            ast::Term::Sort { kind, .. } => {
                 let s = match kind {
                     ast::SortKind::Prop => "Prop".to_string(),
                     ast::SortKind::Set => "Set".to_string(),
@@ -1426,7 +1426,7 @@ impl Compiler {
                 };
                 Ok(Value::String(s))
             }
-            ast::TypeExpr::Lambda { pos, .. } => Err(EslError::compiler(
+            ast::Term::Lambda { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "`fun (…) => …` is only allowed inside `match … returning <motive>` \
                  motives, axiom statements, and other Exp-encoded contexts — not in \
@@ -1436,10 +1436,10 @@ impl Compiler {
                  branch is not exercised."
                     .to_string(),
             )),
-            ast::TypeExpr::LitString { pos, .. }
-            | ast::TypeExpr::LitInt { pos, .. }
-            | ast::TypeExpr::LitFloat { pos, .. }
-            | ast::TypeExpr::LitBool { pos, .. } => Err(EslError::compiler(
+            ast::Term::LitString { pos, .. }
+            | ast::Term::LitInt { pos, .. }
+            | ast::Term::LitFloat { pos, .. }
+            | ast::Term::LitBool { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "literal values are not allowed in chain-value type-expression slots \
                  (codata observation types, etc.); they only appear in Exp-encoded \
@@ -1448,7 +1448,7 @@ impl Compiler {
                     .to_string(),
             )),
             // Eliminated by the early-return at the top of this fn.
-            ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
+            ast::Term::Alias { .. } => unreachable!("alias expanded above"),
         }
     }
 
@@ -1457,7 +1457,7 @@ impl Compiler {
     /// Lower an `axiom Name : <type-expr>` declaration to a chain
     /// `core:Axiom` Resource whose `axiom_statement` is the encoded
     /// EigenTT type expression. Goes through the D47 codec
-    /// (`encode_type`) after lowering the ESL TypeExpr to a kernel
+    /// (`encode_type`) after lowering the ESL Term to a kernel
     /// `Exp` via [`Self::lower_type_expr_to_exp`].
     /// D52 §12 cross-file macros — emit a `core:Macro` chain resource
     /// carrying the macro's serialized `MacroDecl` AST. The resource's
@@ -1592,7 +1592,7 @@ impl Compiler {
         Ok(vec![r])
     }
 
-    /// eigenius#72 — lower an ESL `TypeExpr` to a kernel `Exp`.
+    /// eigenius#72 — lower an ESL `Term` to a kernel `Exp`.
     ///
     /// Used by Layer 1's `axiom` declaration (statement encoding) and
     /// Layer 2's indexed `data` ctor result types. Recognises:
@@ -1612,17 +1612,17 @@ impl Compiler {
     ///   `Exp::SizedPi` handling but are rare in axiom statements.
     fn lower_type_expr_to_exp(
         &self,
-        typ: &ast::TypeExpr,
+        typ: &ast::Term,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Exp, EslError> {
         // `alias` sugar — expand bindings into the body and recurse.
-        if let ast::TypeExpr::Alias { .. } = typ {
+        if let ast::Term::Alias { .. } = typ {
             let expanded = expand_aliases(typ, &BTreeMap::new());
             return self.lower_type_expr_to_exp(&expanded, scope);
         }
         match typ {
-            ast::TypeExpr::Unit { .. } => Ok(Exp::Unit),
-            ast::TypeExpr::Sigma { params, body, .. } => {
+            ast::Term::Unit { .. } => Ok(Exp::Unit),
+            ast::Term::Sigma { params, body, .. } => {
                 // Nested `Exp::Sig`, rightmost binder innermost — the mirror of `Pi` below.
                 let mut working = scope.clone();
                 let mut doms = Vec::with_capacity(params.len());
@@ -1643,7 +1643,7 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Sort { kind, pos } => Ok(Exp::Sort(sort_kind_level(
+            ast::Term::Sort { kind, pos } => Ok(Exp::Sort(sort_kind_level(
                 kind,
                 &self.declared_universes,
                 pos,
@@ -1651,7 +1651,7 @@ impl Compiler {
             // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_json`. Both paths
             // are live: `axiom X : T` lowers through here, `type_expr(...)` in a resource
             // property through the JSON encoder.
-            ast::TypeExpr::Ref { name, args, .. }
+            ast::Term::Ref { name, args, .. }
                 if args.len() == 1
                     && matches!(
                         self.resolve(name).as_deref(),
@@ -1665,7 +1665,7 @@ impl Compiler {
                     Exp::Snd(Box::new(inner))
                 })
             }
-            ast::TypeExpr::Ref { name, args, .. } => {
+            ast::Term::Ref { name, args, .. } => {
                 let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
                 if is_bound {
                     // Bound variable: lowers to `Exp::Var`. If args are
@@ -1755,7 +1755,7 @@ impl Compiler {
                     Ok(Exp::const_applied(iri_val.clone(), Vec::new(), arg_exps?))
                 }
             }
-            ast::TypeExpr::Arrow {
+            ast::Term::Arrow {
                 domain, codomain, ..
             } => {
                 let dom = self.lower_type_expr_to_exp(domain, scope)?;
@@ -1763,12 +1763,12 @@ impl Compiler {
                 Ok(Exp::arrow(dom, body))
             }
             // `(e : T)` — bidirectional annotation → `Exp::Ann`.
-            ast::TypeExpr::Ann { expr, typ, .. } => {
+            ast::Term::Ann { expr, typ, .. } => {
                 let e = self.lower_type_expr_to_exp(expr, scope)?;
                 let t = self.lower_type_expr_to_exp(typ, scope)?;
                 Ok(Exp::Ann(Box::new(e), Box::new(t)))
             }
-            ast::TypeExpr::Pi {
+            ast::Term::Pi {
                 params, codomain, ..
             } => {
                 // Dependent telescope: thread each binder into scope
@@ -1791,7 +1791,7 @@ impl Compiler {
                 }
                 Ok(body)
             }
-            ast::TypeExpr::BinderArrow {
+            ast::Term::BinderArrow {
                 name,
                 kind,
                 bound: _,
@@ -1833,7 +1833,7 @@ impl Compiler {
             // which the kernel already knows). The ESL surface
             // requires the annotation for readability and to thread
             // the binder into scope during further lowering.
-            ast::TypeExpr::Lambda { params, body, .. } => {
+            ast::Term::Lambda { params, body, .. } => {
                 let mut working: std::collections::HashSet<String> =
                     scope.iter().map(|s| s.to_string()).collect();
                 for p in params {
@@ -1851,16 +1851,16 @@ impl Compiler {
             // `Exp::Lit*` constructors. Used as arguments to value-
             // indexed inductives (e.g. `Asserts("urn:foo")`,
             // `Vec(3, A)`, etc.) inside `type_expr(...)`.
-            ast::TypeExpr::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
-            ast::TypeExpr::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
-            ast::TypeExpr::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
-            ast::TypeExpr::LitBool { value, .. } => Ok(Exp::LitBool(*value)),
+            ast::Term::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
+            ast::Term::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
+            ast::Term::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
+            ast::Term::LitBool { value, .. } => Ok(Exp::LitBool(*value)),
             // Eliminated by the early-return at the top of this fn.
-            ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
+            ast::Term::Alias { .. } => unreachable!("alias expanded above"),
         }
     }
 
-    /// Encode an ESL `TypeExpr` directly to the D47 chain-JSON shape,
+    /// Encode an ESL `Term` directly to the D47 chain-JSON shape,
     /// preserving `fun (x : T) => body` binder-type annotations.
     ///
     /// `lower_type_expr_to_exp` + `encode_type` would otherwise reject
@@ -1881,21 +1881,21 @@ impl Compiler {
     /// to `lower_type_expr_to_exp` + `encode_type`.
     fn encode_type_expr_to_json(
         &self,
-        typ: &ast::TypeExpr,
+        typ: &ast::Term,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<serde_json::Value, EslError> {
         use crate::program::eigentt_type_mirror::encode_type;
         use serde_json::json;
         // `alias` sugar — expand bindings into the body and recurse.
-        if let ast::TypeExpr::Alias { .. } = typ {
+        if let ast::Term::Alias { .. } = typ {
             let expanded = expand_aliases(typ, &BTreeMap::new());
             return self.encode_type_expr_to_json(&expanded, scope);
         }
 
-        // Wrap a leaf TypeExpr: lower to Exp, encode via the D47
+        // Wrap a leaf Term: lower to Exp, encode via the D47
         // encoder, unwrap to raw JSON. Safe for any subtree whose
         // lowered Exp contains no `Lam`.
-        let encode_leaf = |this: &Self, t: &ast::TypeExpr| -> Result<serde_json::Value, EslError> {
+        let encode_leaf = |this: &Self, t: &ast::Term| -> Result<serde_json::Value, EslError> {
             let exp = this.lower_type_expr_to_exp(t, scope)?;
             let v = encode_type(&exp).map_err(|e| {
                 EslError::compiler(
@@ -1913,8 +1913,8 @@ impl Compiler {
         };
 
         match typ {
-            ast::TypeExpr::Unit { .. } => Ok(serde_json::json!({"ctor": "UnitVal", "args": []})),
-            ast::TypeExpr::Lambda { params, body, .. } => {
+            ast::Term::Unit { .. } => Ok(serde_json::json!({"ctor": "UnitVal", "args": []})),
+            ast::Term::Lambda { params, body, .. } => {
                 // Mirror the lowering's scope-threading so later params
                 // can mention earlier binders. Each dom is encoded
                 // against the scope where prior binders are visible.
@@ -1940,7 +1940,7 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Sigma { params, body, .. } => {
+            ast::Term::Sigma { params, body, .. } => {
                 let mut working: std::collections::HashSet<String> =
                     scope.iter().map(|s| s.to_string()).collect();
                 let mut binder_doms: Vec<(String, serde_json::Value)> =
@@ -1962,7 +1962,7 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Pi {
+            ast::Term::Pi {
                 params, codomain, ..
             } => {
                 let mut working: std::collections::HashSet<String> =
@@ -1987,7 +1987,7 @@ impl Compiler {
                 }
                 Ok(acc)
             }
-            ast::TypeExpr::Arrow {
+            ast::Term::Arrow {
                 domain, codomain, ..
             } => {
                 let dom_json = self.encode_type_expr_to_json(domain, scope)?;
@@ -2000,7 +2000,7 @@ impl Compiler {
             // `(e : T)` — bidirectional annotation. Recurse into both children so
             // a `fun` lambda inside `e` keeps its binder annotations (the whole
             // reason `sem` can carry a λ-term that `check_infer` then accepts).
-            ast::TypeExpr::Ann { expr, typ, .. } => {
+            ast::Term::Ann { expr, typ, .. } => {
                 let e_json = self.encode_type_expr_to_json(expr, scope)?;
                 let t_json = self.encode_type_expr_to_json(typ, scope)?;
                 Ok(json!({
@@ -2008,7 +2008,7 @@ impl Compiler {
                     "args": [e_json, t_json],
                 }))
             }
-            ast::TypeExpr::BinderArrow {
+            ast::Term::BinderArrow {
                 name,
                 kind,
                 bound: _,
@@ -2036,9 +2036,9 @@ impl Compiler {
             // Sigma ELIMINATION. `eigentt:fst(p)` / `eigentt:snd(p)` are surface spellings of
             // the `Fst`/`Snd` term nodes, not axioms — an axiom would be opaque and never
             // reduce, so `fst(pair)` would not compute. Written as pseudo-application because
-            // `TypeExpr` has no postfix form at all; a `.1` / `.fst` postfix could be added
+            // `Term` has no postfix form at all; a `.1` / `.fst` postfix could be added
             // later and would desugar to these same nodes, leaving encoded terms identical.
-            ast::TypeExpr::Ref { name, args, .. }
+            ast::Term::Ref { name, args, .. }
                 if args.len() == 1
                     && matches!(
                         self.resolve(name).as_deref(),
@@ -2054,7 +2054,7 @@ impl Compiler {
                 let inner = self.encode_type_expr_to_json(&args[0], scope)?;
                 Ok(json!({ "ctor": ctor, "args": [inner] }))
             }
-            ast::TypeExpr::Ref { name, args, .. } => {
+            ast::Term::Ref { name, args, .. } => {
                 // Mirror `lower_type_expr_to_exp`'s Ref resolution: bound
                 // variable check first, then bare-name ctor lookup, then
                 // namespace resolution, then post-resolve ctor lookup,
@@ -2115,13 +2115,13 @@ impl Compiler {
                 Ok(acc)
             }
             // Leaves with no Lambda-exposure: lower + encode.
-            ast::TypeExpr::Sort { .. }
-            | ast::TypeExpr::LitString { .. }
-            | ast::TypeExpr::LitInt { .. }
-            | ast::TypeExpr::LitFloat { .. }
-            | ast::TypeExpr::LitBool { .. } => encode_leaf(self, typ),
+            ast::Term::Sort { .. }
+            | ast::Term::LitString { .. }
+            | ast::Term::LitInt { .. }
+            | ast::Term::LitFloat { .. }
+            | ast::Term::LitBool { .. } => encode_leaf(self, typ),
             // Eliminated by the early-return at the top of this fn.
-            ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
+            ast::Term::Alias { .. } => unreachable!("alias expanded above"),
         }
     }
 
@@ -2294,7 +2294,7 @@ impl Compiler {
                     ast::CtorDecl::Typed { typ, pos, .. } => {
                         // eigenius#72 Layer 2 — the typed form supplies
                         // the full Π-telescope (including conclusion
-                        // indices) as a single TypeExpr. Lower it to
+                        // indices) as a single Term. Lower it to
                         // `Exp` and stash the D47-encoded payload under
                         // `core:ctor_type`; the kernel decoder uses it
                         // directly without going through arg_types.
@@ -2545,6 +2545,23 @@ impl Compiler {
                     let et = self.resolve(t)?;
                     r.set(iri("urn:eigenius:core:element_type"), Value::String(et));
                 }
+                // `expected_type` holds a TERM, so it goes through the D47
+                // codec exactly as any other `eigentt:Term`-ranged value does.
+                ast::PropertyItem::ExpectedType(typ) => {
+                    let scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                    let exp = self.lower_type_expr_to_exp(typ, &scope)?;
+                    let encoded =
+                        crate::program::eigentt_type_mirror::encode_type(&exp).map_err(|e| {
+                            EslError::compiler(
+                                Some(prop.pos.clone()),
+                                format!("expected_type encoding failed: {e}"),
+                            )
+                        })?;
+                    r.set(iri("urn:eigenius:eigentt:expected_type"), encoded);
+                }
+                ast::PropertyItem::IsAType => {
+                    r.set(iri("urn:eigenius:eigentt:is_a_type"), Value::Boolean(true));
+                }
             }
         }
 
@@ -2624,14 +2641,14 @@ impl Compiler {
             // full ctor schema and reports a clean structural error
             // if the name + arg shapes don't match.
             ast::Value::CtorApp { .. } => Ok(Value::Json(self.ctor_value_to_json(value)?)),
-            // `type_expr(<TypeExpr>)` — inline D47-encoded EigenTT
+            // `type_expr(<Term>)` — inline D47-encoded EigenTT
             // type expression. Lowers via the same path as `axiom`
-            // and `data` ctor types: ESL TypeExpr →
+            // and `data` ctor types: ESL Term →
             // `lower_type_expr_to_exp` → `encode_type` → chain JSON.
-            // Used by D39 justification:Sentence authors so propositions
+            // Used by D39 justification:Conclusion authors so propositions
             // and certificates can be written in EigenTT surface
             // rather than the hand-built D47 tagged-dict tree.
-            ast::Value::TypeExpr { typ, pos: _ } => {
+            ast::Value::Term { typ, pos: _ } => {
                 // Walk the AST directly so `fun (x : T) => body`
                 // lambdas retain their binder type annotations through
                 // the D47 codec. The generic `encode_type` rejects bare
@@ -2741,7 +2758,7 @@ impl Compiler {
                 obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
                 Ok(serde_json::Value::Object(obj))
             }
-            ast::Value::TypeExpr { .. } => Err(EslError::compiler(
+            ast::Value::Term { .. } => Err(EslError::compiler(
                 None,
                 "`type_expr(...)` cannot appear as an argument inside a chain inductive ctor — \
                  D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
@@ -3325,7 +3342,7 @@ impl Compiler {
                 // infers the motive from context.
                 //
                 // Two on-chain motive encodings (eigenius#72 Layer 3):
-                // - A bare `TypeExpr::Ref` (qualified name, no args) is
+                // - A bare `Term::Ref` (qualified name, no args) is
                 //   emitted as an IRI string under
                 //   `program:result_type` — the pre-Layer-3 wire shape;
                 //   kernel decoder wraps it as the constant motive
@@ -3337,14 +3354,14 @@ impl Compiler {
                 //   payload. Kernel decoder uses it directly.
                 if let Some(te) = returning {
                     match te {
-                        ast::TypeExpr::Ref { name, args, .. } if args.is_empty() => {
+                        ast::Term::Ref { name, args, .. } if args.is_empty() => {
                             let result_iri = self.resolve(name)?;
                             r.set(
                                 iri("urn:eigenius:program:result_type"),
                                 Value::String(result_iri),
                             );
                         }
-                        ast::TypeExpr::Lambda { params, body, pos } => {
+                        ast::Term::Lambda { params, body, pos } => {
                             // Encode the Lambda's binder-type annotations
                             // explicitly via `encode_lam_chain` — the
                             // generic `encode_type` rejects bare
@@ -6067,7 +6084,7 @@ mod tests {
             "axiom must be classed as eigentt:Axiom; got is_a = {:?}",
             is_a.iter().map(|i| i.as_str()).collect::<Vec<_>>()
         );
-        // The axiom_statement value is the encoded TypeExpr.
+        // The axiom_statement value is the encoded Term.
         let stmt = ax
             .get(&iri("urn:eigenius:eigentt:axiom_statement"))
             .expect("axiom_statement property must be set");
@@ -6181,7 +6198,7 @@ mod tests {
             "expected at least 6 inductive Resources in reasoning.esl, found {ind_count}"
         );
 
-        // Phase 4 added two resource classes (justification:Sentence +
+        // Phase 4 added two resource classes (justification:Conclusion +
         // VerifiedPropositionView) + their property declarations.
         // Phase 7 added the two query-request classes
         // (EntailmentRequest + ConsistencyRequest). TaskOutput is
@@ -6191,7 +6208,7 @@ mod tests {
         // Reasoning institution ontology.
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
-            "urn:eigenius:justification:Sentence",
+            "urn:eigenius:justification:Conclusion",
             "urn:eigenius:justification:VerifiedPropositionView",
             "urn:eigenius:justification:EntailmentRequest",
             "urn:eigenius:justification:ConsistencyRequest",
@@ -6284,7 +6301,7 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // Phase 4 — the resource classes (justification:Sentence, TaskOutput,
+        // Phase 4 — the resource classes (justification:Conclusion, TaskOutput,
         // VerifiedPropositionView) declare `subclass_of
         // reflection:DerivedResource`, so reflection-ontology has to be
         // in the layer chain before reasoning.esl loads.
@@ -6335,7 +6352,7 @@ mod tests {
         // would mean a property declaration is malformed or references
         // an unresolved class.
         for iri_str in &[
-            "urn:eigenius:justification:Sentence",
+            "urn:eigenius:justification:Conclusion",
             "urn:eigenius:justification:VerifiedPropositionView",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();

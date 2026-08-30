@@ -16,7 +16,7 @@
 //!
 //! Algorithm:
 //!
-//! 1. Read `proposition` and `certificate` from the justification:Sentence
+//! 1. Read `proposition` and `certificate` from the justification:Conclusion
 //!    (D47-encoded EigenTT terms) — decoded via the kernel's D47 codec.
 //! 2. Lift the `justification` property into a typed `Val` via
 //!    `extract_typed(ef_justification, sentence, ctx)` — the kernel's
@@ -45,7 +45,7 @@ use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
-use eigenius_kernel::program::eigentt_type_mirror::decode_type;
+use eigenius_kernel::program::eigentt_type_mirror::{certificate_indices, decode_judgement};
 use eigenius_kernel::program::ground::resolve_class_type;
 use eigenius_kernel::server::helpers::{millis_to_iso8601, now_millis};
 
@@ -61,16 +61,30 @@ pub fn do_validate_justification(
     sentence: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
-    // ── Step 1: decode proposition + certificate via D47 codec ───────
-    let proposition_value = required_property(sentence, iris::PROP_PROPOSITION)?;
-    let certificate_value = required_property(sentence, iris::PROP_CERTIFICATE)?;
-    let proposition_exp = match decode_type(&proposition_value, ctx.head()) {
-        Ok(e) => e,
-        Err(e) => return Ok(verdict_fails(format!("malformed proposition: {e:?}"))),
+    // ── Step 1: project proposition + certificate out of the judgement ──
+    //
+    // Both used to be slots of their own, and nothing required them to be
+    // about the same claim. They are now the certificate term and the second
+    // index of its type inside `holds(kernel, c, Certificate(j, P))`, so the
+    // pairing this handler used to check by hand is checked at commit by the
+    // uniform check-mode rule. What remains here is the institutional verdict,
+    // which is provenance; the check itself is no longer this handler's to own
+    // and the handler retires with the institution.
+    let judgement_value = required_property(sentence, iris::PROP_JUDGEMENT)?;
+    let judgement = match decode_judgement(&judgement_value, ctx.head()) {
+        Ok(j) => j,
+        Err(e) => return Ok(verdict_fails(format!("malformed judgement: {e:?}"))),
     };
-    let certificate_exp = match decode_type(&certificate_value, ctx.head()) {
-        Ok(e) => e,
-        Err(e) => return Ok(verdict_fails(format!("malformed certificate: {e:?}"))),
+    let certificate_exp = judgement.term.clone();
+    let proposition_exp = match certificate_indices(&judgement.typ) {
+        Some((_, p)) => p.clone(),
+        None => {
+            return Ok(verdict_fails(
+                "a conclusion's judgement must be checked against \
+                 justification:Certificate(j, P)"
+                    .to_string(),
+            ))
+        }
     };
 
     // ── Step 2: lift justification via extract_typed ─────────────────
@@ -180,7 +194,7 @@ pub fn do_validate_justification(
 /// is already chain-resident.
 ///
 /// `derivation_trace` is deliberately absent. It is `recommends`, not `requires`, precisely for
-/// this case: a `justification:Sentence` has no `ProgramTrace` to point at — D39 §4.2 satisfies its
+/// this case: a `justification:Conclusion` has no `ProgramTrace` to point at — D39 §4.2 satisfies its
 /// inherited derivation requirement with the certificate field — and pointing the slot at itself to
 /// satisfy a schema would be a fiction.
 fn verification_trace(sentence_iri: &Iri) -> Resource {
@@ -211,7 +225,7 @@ fn verification_trace(sentence_iri: &Iri) -> Resource {
     r
 }
 
-/// Read a required property off the justification:Sentence; fail with a
+/// Read a required property off the justification:Conclusion; fail with a
 /// `ComputationFailed` error if missing. The validator at commit time
 /// (Rule 16 + the resource-class `requires` enforcement) should catch
 /// this before we reach the handler, but the defensive check keeps the
@@ -221,7 +235,7 @@ fn required_property(sentence: &Resource, prop_iri: &str) -> Result<Value, Insti
     let iri = Iri::parse(prop_iri).expect("static IRI");
     sentence.get(&iri).cloned().ok_or_else(|| {
         InstitutionError::ComputationFailed(format!(
-            "justification:Sentence missing required `{prop_iri}` property"
+            "justification:Conclusion missing required `{prop_iri}` property"
         ))
     })
 }

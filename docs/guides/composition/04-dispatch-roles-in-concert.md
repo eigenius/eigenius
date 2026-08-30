@@ -89,7 +89,7 @@ reasoning stack is the **statistics → reasoning** pipeline:
    the layer's witness index admits an `IsDerivedAs(claim_iri,
    canonical_proposition)` entry.
 2. **D39 fires next.** If the same commit also includes a
-   `justification:Sentence` whose certificate cites the just-committed
+   `justification:Conclusion` whose certificate cites the just-committed
    claim via `DerivedEvidence(claim_iri)`, the reasoning institution's
    `validate_justification` AutoOnLoad gate fires. The kernel's NbE checker
    walks the certificate's `justification:Certificate.derived` constructor, consults the

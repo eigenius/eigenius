@@ -378,7 +378,7 @@ published technical-stratum 2.74e-19 — same data, honest unit of inference.
 
 ## A.3 Domain conclusions (reasoning institution)
 
-The 33 `justification:Sentence`s, each with the proposition it asserts and the grade of
+The 33 `justification:Conclusion`s, each with the proposition it asserts and the grade of
 its load-bearing warrant (R = recomputed, W = wrapped-R, D = declared,
 L = linked-external).
 

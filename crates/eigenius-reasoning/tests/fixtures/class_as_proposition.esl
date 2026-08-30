@@ -15,6 +15,7 @@ namespace reasoning     = "urn:eigenius:reasoning";
 namespace screen        = "urn:eigenius:demo:screen";
 namespace agent         = "urn:eigenius:reflection:agent";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 class screen:CellLine : core:Resource {
     description = "A cell line. A class — not a proposition.";
@@ -42,22 +43,22 @@ resource screen:rule_class_trace : reflection:DeclarationTrace {
     reflection:timestamp    = "2026-04-10T09:00:00Z";
 }
 
-resource screen:concl_class : justification:Sentence {
+resource screen:concl_class : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:CellLine";
 
-    justification:proposition = type_expr(
-        screen:CellLine
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               declared(
+                   "urn:eigenius:demo:screen:rule_class",
+                   screen:CellLine,
+                   Prop
+               ),
+               justification:Certificate(
+                   Declared("urn:eigenius:demo:screen:rule_class"),
+                   screen:CellLine ) )
     );
 
-    justification:term = Declared("urn:eigenius:demo:screen:rule_class");
 
-    justification:certificate = type_expr(
-        declared(
-            "urn:eigenius:demo:screen:rule_class",
-            screen:CellLine,
-            Prop
-        )
-    );
 }
 
 // ── The control: a genuine Prop in the same slot ─────────────────────
@@ -79,22 +80,22 @@ resource screen:rule_prop_trace : reflection:DeclarationTrace {
     reflection:timestamp    = "2026-04-10T09:00:00Z";
 }
 
-resource screen:concl_prop : justification:Sentence {
+resource screen:concl_prop : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
 
-    justification:proposition = type_expr(
-        screen:IsInhibitory
+    justification:judgement = type_expr(
+        holds( eigentt:logic_kernel,
+               declared(
+                   "urn:eigenius:demo:screen:rule_prop",
+                   screen:IsInhibitory,
+                   Prop
+               ),
+               justification:Certificate(
+                   Declared("urn:eigenius:demo:screen:rule_prop"),
+                   screen:IsInhibitory ) )
     );
 
-    justification:term = Declared("urn:eigenius:demo:screen:rule_prop");
 
-    justification:certificate = type_expr(
-        declared(
-            "urn:eigenius:demo:screen:rule_prop",
-            screen:IsInhibitory,
-            Prop
-        )
-    );
 }
 
 resource screen:warrant_illustrative : reflection:DeclaredResource {

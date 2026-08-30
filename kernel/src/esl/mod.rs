@@ -54,7 +54,7 @@ pub fn compile_with_institutions(
 
 /// Compile an ESL source string against a chain layer, seeding the
 /// compiler's ctor table with every chain-resident inductive's
-/// constructors. Required for D39 justification:Sentence commits whose
+/// constructors. Required for D39 justification:Conclusion commits whose
 /// `type_expr(...)` certificates reference chain-resident ctors like
 /// `app` / `declared` / `observed` from `justification:Certificate` —
 /// the bare-name ctor disambiguator needs to see those entries to

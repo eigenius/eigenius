@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rule 21 step 3 (`wk::PROPOSITION_SLOTS`) fires **through a real commit**.
+//! `reflection:canonical_proposition`'s propositionhood fires **through a real
+//! commit**.
 //!
 //! Issue #175. `enc:EncodedClaim` is the artifact of record for the encoding
 //! pipeline: an LLM proposes a formalization, the kernel accepts or rejects
@@ -22,11 +23,17 @@
 //! an integer literal decoded, inferred `core:integer`, and committed as the
 //! proposition a claim asserts.
 //!
+//! The obligation is now carried by the property itself
+//! (`eigentt:expected_type Prop`) rather than by a hardcoded list of slots in
+//! the kernel, so this file tests the shipped declaration. Its companion,
+//! `declared_obligations_enforced.rs`, covers the four slots the list could
+//! never express because it could only ever say "must be a Prop".
+//!
 //! The unit tests in `validation/rules/eigentt_value.rs` drive the validator
 //! directly. This file goes through `commit_layer_default` against a real
 //! bootstrapped chain, because the commit gate is the whole of the guarantee:
 //! nothing downstream re-reads the prose, and no other check inspects the
-//! sort of a decoded `TypeExpr`.
+//! sort of a decoded term.
 
 use eigenius_kernel::lattice::{commit_layer_default, CommitError};
 use eigenius_kernel::layer::LayerStorage;

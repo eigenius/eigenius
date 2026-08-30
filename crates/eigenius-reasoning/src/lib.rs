@@ -24,7 +24,7 @@
 //!
 //! ## Phase 6 surface
 //!
-//! - `query(validate_justification, justification:Sentence)` — **load-bearing**.
+//! - `query(validate_justification, justification:Conclusion)` — **load-bearing**.
 //!   Decodes proposition + certificate via the D47 codec, decodes
 //!   justification via the chain inductive-value codec (D32 §3.7),
 //!   constructs `justification:Certificate justification proposition`, type-checks

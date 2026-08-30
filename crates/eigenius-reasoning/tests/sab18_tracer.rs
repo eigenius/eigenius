@@ -2,7 +2,7 @@
 //
 // Builds core → reflection → reasoning → bench-core → harness → mol →
 // SAB-18 chain, runs ValidateJustification on the
-// `ImplementsDILIPredictor(solution)` justification:Sentence (five Declared
+// `ImplementsDILIPredictor(solution)` justification:Conclusion (five Declared
 // methodological conformances composed through an acceptance rule), asserts
 // Holds, then checks the decision↔code-block coverage. Move into the
 // harness crate when D51 gap 7 lands.

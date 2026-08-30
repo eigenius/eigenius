@@ -53,7 +53,7 @@ property bench:payload : core:string {
 }
 
 property bench:reasoning_chain : core:value_array {
-    description = "IRIs of the justification:Sentences this output rests on, in commit order. Auditors trace from the deliverable to its warrants. (Commit-time validation that each IRI resolves to a justification:Sentence on chain is a follow-on validator rule, D50 §5b.)";
+    description = "IRIs of the justification:Conclusions this output rests on, in commit order. Auditors trace from the deliverable to its warrants. (Commit-time validation that each IRI resolves to a justification:Conclusion on chain is a follow-on validator rule, D50 §5b.)";
     element_type = core:string;
     domain bench:TaskOutput;
 }

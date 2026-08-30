@@ -794,7 +794,7 @@
   {
     "@id": "urn:eigenius:reflection:proof_term",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Sentence whose certificate type-checked. Both are IRIs; only the former is a blob.",
+    "urn:eigenius:core:description": "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Conclusion whose certificate type-checked. Both are IRIs; only the former is a blob.",
     "urn:eigenius:core:short_name": "proof_term",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
@@ -803,7 +803,7 @@
   {
     "@id": "urn:eigenius:reflection:derivation_trace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The ProgramTrace being verified. RECOMMENDED, not required (eigenius#200): a kernel-verified justification:Sentence has no ProgramTrace to point at -- D39 \u00a74.2 satisfies its inherited derivation requirement with the certificate field, the certificate being the derivation. Requiring this field would force that case to point it at itself, a fiction to satisfy a schema.",
+    "urn:eigenius:core:description": "The ProgramTrace being verified. RECOMMENDED, not required (eigenius#200): a kernel-verified justification:Conclusion has no ProgramTrace to point at -- D39 \u00a74.2 satisfies its inherited derivation requirement with the certificate field, the certificate being the derivation. Requiring this field would force that case to point it at itself, a fiction to satisfy a schema.",
     "urn:eigenius:core:short_name": "derivation_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"],
@@ -816,6 +816,7 @@
     "urn:eigenius:core:short_name": "canonical_proposition",
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:eigentt:expected_type": {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
     "urn:eigenius:core:domain": [
       "urn:eigenius:reflection:DeclaredResource",
       "urn:eigenius:reflection:ObservedResource",

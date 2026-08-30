@@ -264,7 +264,7 @@ raw IC50 readings (ObservedResource + ObservationTrace)
   → D52 validate_analysis_plan AutoOnLoad fires
   → Verdict::Holds; claim_eig0291_lowic50 is committed as DerivedResource
   → ProgramTrace pairs → witness index admits IsDerivedAs(claim_iri, HasLowIC50(...))
-  → D39 justification:Sentence cites claim_iri via DerivedEvidence
+  → D39 justification:Conclusion cites claim_iri via DerivedEvidence
   → D39 validate_justification AutoOnLoad fires
   → certificate's justification:Certificate.derived consumes the IsDerivedAs witness
   → Verdict::Holds for the reasoning conclusion (e.g., StrongInhibitor(EIG_0291))

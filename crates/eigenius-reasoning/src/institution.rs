@@ -45,13 +45,13 @@ pub mod iris {
     /// The institution itself.
     pub const INSTITUTION: &str = "urn:eigenius:reasoning:reasoning_institution";
 
-    /// AutoOnLoad procedure: type-check a justification:Sentence's
+    /// AutoOnLoad procedure: type-check a justification:Conclusion's
     /// certificate against `justification:Certificate(justification, proposition)`.
-    /// Load-bearing — every committed justification:Sentence triggers it.
+    /// Load-bearing — every committed justification:Conclusion triggers it.
     pub const PROC_VALIDATE_JUSTIFICATION: &str =
         "urn:eigenius:reasoning:proc:validate_justification";
 
-    /// ExportFormat procedure: lift a `justification:Sentence`'s
+    /// ExportFormat procedure: lift a `justification:Conclusion`'s
     /// `justification` property (a D32 §3.7-shaped justification:Term
     /// chain value) into a typed `Val::InductiveVal`. Used by the
     /// validate handler to construct `justification:Certificate(j, p)`; available
@@ -85,11 +85,12 @@ pub mod iris {
     pub const PROP_VERIFIED_GROUNDS: &str = "urn:eigenius:justification:verified_grounds";
     pub const PROP_SURVIVES_WITHOUT: &str = "urn:eigenius:justification:survives_without";
 
-    // Property IRIs on justification:Sentence — used by the validate handler
+    // Property IRIs on justification:Conclusion — used by the validate handler
     // to read the three fields.
-    pub const PROP_PROPOSITION: &str = "urn:eigenius:justification:proposition";
-    pub const PROP_JUSTIFICATION: &str = "urn:eigenius:justification:term";
-    pub const PROP_CERTIFICATE: &str = "urn:eigenius:justification:certificate";
+    /// The conclusion's single required judgement. The proposition and the
+    /// justification term are projected out of its type rather than read from
+    /// slots of their own.
+    pub const PROP_JUDGEMENT: &str = "urn:eigenius:justification:judgement";
 
     // Inductive type IRIs the certificate type-check builds against.
     pub const JUSTIFICATION_TERM: &str = "urn:eigenius:justification:Term";

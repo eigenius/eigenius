@@ -774,7 +774,24 @@ line places the witness types inside the kernel and leaves the certificate vocab
   gains is a reading; what the chain keeps is the vocabulary. The two are separable precisely because
   the reading is total on any term built from the constructors it recognises and errs (`ProjectError`)
   on anything else, rather than silently mis-reading it.
-- **`extract.rs` moves to the kernel with the check it serves.** Its own module doc explains why it
+- **`extract.rs` no longer needs to move — P2 deleted the reason.** *Updated `2026-08-29`,
+  after the sentence collapse landed.* The bullet below is the original plan and is retained
+  because its reasoning is still the record of why the move was scheduled; what changed is its
+  premise. The lift it turns on — *"nothing else performs that lift"* — **is now performed by
+  nothing at all.**
+
+  A `justification:Term` used to sit in its own slot as a plain D32 §3.7 tagged dict, a shape no
+  codec read, so the file carried a bespoke decoder for it: `chain_value_to_exp` plus its error
+  type, argument walker and diagnostics. After the collapse the term rides inside the judgement,
+  which is an `eigentt:Term`-ranged value, so the D47 codec decodes it and `justification_exp`
+  projects an `Exp` straight out. **One encoding where there were two.**
+
+  Measured: `extract.rs` went from **1035 lines to 147**, with 888 removed as dead — 330 lines of
+  decoder and ~550 of tests that existed only to exercise it. The two public functions survive.
+  P7's disposition for this file is therefore a deletion with its two functions rehomed, not a
+  1025-line relocation, and the crate's 2369-line total resolves accordingly.
+
+- **[superseded] `extract.rs` moves to the kernel with the check it serves.** Its own module doc explains why it
   sits outside today: *"the Reasoning institution is different because its 'runtime' is the kernel's
   NbE checker — there's no external worker to reify into, and the validate handler needs a `Val`."*
   That rationale inverts here. Once `ValidateJustification` is absorbed into P2's uniform validation,

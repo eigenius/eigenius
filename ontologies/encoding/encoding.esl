@@ -264,6 +264,7 @@ property enc:antecedent_resources : core:resource_array {
 property enc:antecedent_term : core:inductive {
     description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:Term of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
     class_types eigentt:Term;
+    expected_type lexicon:Entity;
     domain enc:AnaphorBinding;
 }
 

@@ -396,6 +396,7 @@ resource lexicon:form_text_index : core:TextIndex {
 property lexicon:cat : core:inductive {
     description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
     class_types eigentt:Term;
+    expected_type lexicon:Cat;
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem : core:resource {
@@ -405,6 +406,7 @@ property lexicon:sem : core:resource {
 property lexicon:sem_type : core:inductive {
     description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:Term). The machine-readable felicity obligation: typeof(sem) = this.";
     class_types eigentt:Term;
+    is_a_type;
     domain lexicon:LexicalEntry;
 }
 property lexicon:sense : core:string {
@@ -514,6 +516,7 @@ property lexicon:gloss : core:string {
 property lexicon:prop : core:inductive {
     description = "The assembled proposition (eigentt:Term) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
     class_types eigentt:Term;
+    expected_type Prop;
     domain lexicon:Sentence;
 }
 
