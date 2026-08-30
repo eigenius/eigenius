@@ -57,6 +57,21 @@ namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource screen:act_kinase_glo_plate_2026_03_04_a1 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    core:short_name = "act_kinase_glo_plate_2026_03_04_a1";
+}
+resource screen:act_kinase_glo_plate_2026_03_11_confirmatory : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
+    core:short_name = "act_kinase_glo_plate_2026_03_11_confirmatory";
+}
+
+
 // ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
 
 data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
@@ -73,7 +88,7 @@ resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
 // ─── SampleSet: 3 IC50 replicate readings of EIG_0291 (screening) ──
 
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_04_a1;
     prov:observed_at = "2026-03-04T14:22:11Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
@@ -84,7 +99,7 @@ resource screen:m_eig0291_sampleset : stats:SampleSetResource {
 
 resource screen:m_eig0291_trace : prov:ObservationTrace {
     prov:resource  = screen:m_eig0291_sampleset;
-    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:was_generated_by    = screen:act_kinase_glo_plate_2026_03_04_a1;
     prov:timestamp = "2026-03-04T14:22:11Z";
 }
 
@@ -117,7 +132,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
 // the hypothesis; the n=6 confirmatory run supports it.
 
 resource screen:m_eig0291_confirmatory_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_11_confirmatory;
     prov:observed_at = "2026-03-11T10:18:42Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
@@ -128,7 +143,7 @@ resource screen:m_eig0291_confirmatory_sampleset : stats:SampleSetResource {
 
 resource screen:m_eig0291_confirmatory_trace : prov:ObservationTrace {
     prov:resource  = screen:m_eig0291_confirmatory_sampleset;
-    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
+    prov:was_generated_by    = screen:act_kinase_glo_plate_2026_03_11_confirmatory;
     prov:timestamp = "2026-03-11T10:18:42Z";
 }
 

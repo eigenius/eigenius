@@ -13,8 +13,23 @@ namespace stats      = "urn:eigenius:measurements";
 namespace demo       = "urn:eigenius:demo:classify";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource demo:act_synthetic_two_group_classification_smoke : prov:Activity {
+    core:description = "synthetic two-group classification smoke";
+    core:short_name = "act_synthetic_two_group_classification_smoke";
+}
+resource demo:act_synthetic : prov:Activity {
+    core:description = "synthetic";
+    core:short_name = "act_synthetic";
+}
+
+
 resource demo:set : stats:SampleSetResource {
-    prov:was_generated_by      = "synthetic two-group classification smoke";
+    prov:was_generated_by      = demo:act_synthetic_two_group_classification_smoke;
     prov:observed_at = "2019-01-01T00:00:00Z";
 
     stats:sample_set_value = stats:IID(
@@ -26,7 +41,7 @@ resource demo:set : stats:SampleSetResource {
 
 resource demo:set_trace : prov:ObservationTrace {
     prov:resource  = demo:set;
-    prov:was_generated_by    = "synthetic";
+    prov:was_generated_by    = demo:act_synthetic;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 

@@ -30,6 +30,17 @@ namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource s18:act_sab18_condition_c_loop : prov:Activity {
+    core:description = "agent:sab18-condition-c-loop";
+    core:short_name = "act_sab18_condition_c_loop";
+}
+
+
 // ─── Phase 1: per-task predicate vocabulary ────────────────────────
 
 data s18:ConformsFeaturization : core:string -> Prop {
@@ -321,7 +332,7 @@ for name, (pos, neg) in CONFIGS.items():
 
 resource s18:solution_trace : prov:ProgramTrace {
     prov:resource  = s18:solution;
-    prov:was_generated_by    = "agent:sab18-condition-c-loop";
+    prov:was_generated_by    = s18:act_sab18_condition_c_loop;
     prov:timestamp = "2026-06-12T11:05:00Z";
 }
 

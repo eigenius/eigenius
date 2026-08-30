@@ -29,6 +29,17 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace kx         = "urn:eigenius:demo:kx";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource kx:act_kinase_glo_plate_2026_04_02_factorial : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-04-02-factorial";
+    core:short_name = "act_kinase_glo_plate_2026_04_02_factorial";
+}
+
+
 // ─── Domain predicate ──────────────────────────────────────────────
 
 data kx:CellMeansDifferAcrossFactors : core:string -> Prop, stats:PopulationLevel {
@@ -47,7 +58,7 @@ data kx:CellMeansDifferAcrossFactors : core:string -> Prop, stats:PopulationLeve
 // is uniformly typed).
 
 resource kx:cross_factorial_2026_04_02 : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-04-02-factorial";
+    prov:was_generated_by      = kx:act_kinase_glo_plate_2026_04_02_factorial;
     prov:observed_at = "2026-04-02T13:15:00Z";
 
     stats:sample_set_value = stats:Factorial(
@@ -77,7 +88,7 @@ resource kx:cross_factorial_2026_04_02 : stats:SampleSetResource {
 
 resource kx:cross_factorial_trace : prov:ObservationTrace {
     prov:resource  = kx:cross_factorial_2026_04_02;
-    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-04-02-factorial";
+    prov:was_generated_by    = kx:act_kinase_glo_plate_2026_04_02_factorial;
     prov:timestamp = "2026-04-02T13:15:00Z";
 }
 

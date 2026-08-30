@@ -20,6 +20,17 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace bp         = "urn:eigenius:demo:bp";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource bp:act_bp_study_2026_03_20 : prov:Activity {
+    core:description = "clinical-trial-record:bp-study-2026-03-20";
+    core:short_name = "act_bp_study_2026_03_20";
+}
+
+
 // ─── Domain predicate ──────────────────────────────────────────────
 
 // PopulationLevel scope marker via the multi-class data header.
@@ -35,7 +46,7 @@ data bp:TreatmentChangesBP : core:string -> Prop, stats:PopulationLevel {
 // df = 4, p ≈ 0.002. Clear Holds at α = 0.05.
 
 resource bp:trial_2026_03_20 : stats:SampleSetResource {
-    prov:was_generated_by      = "clinical-trial-record:bp-study-2026-03-20";
+    prov:was_generated_by      = bp:act_bp_study_2026_03_20;
     prov:observed_at = "2026-03-20T09:00:00Z";
 
     stats:sample_set_value = stats:Paired(
@@ -53,7 +64,7 @@ resource bp:trial_2026_03_20 : stats:SampleSetResource {
 
 resource bp:trial_trace : prov:ObservationTrace {
     prov:resource  = bp:trial_2026_03_20;
-    prov:was_generated_by    = "clinical-trial-record:bp-study-2026-03-20";
+    prov:was_generated_by    = bp:act_bp_study_2026_03_20;
     prov:timestamp = "2026-03-20T09:00:00Z";
 }
 

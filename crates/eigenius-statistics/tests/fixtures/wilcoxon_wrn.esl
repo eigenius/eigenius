@@ -19,8 +19,23 @@ namespace stats      = "urn:eigenius:measurements";
 namespace wrn        = "urn:eigenius:demo:wrndep";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource wrn:act_a_18q4_avg_wrn_dependency_common_msi_lineages_supp_table : prov:Activity {
+    core:description = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
+    core:short_name = "act_a_18q4_avg_wrn_dependency_common_msi_lineages_supp_table";
+}
+resource wrn:act_a_18q4_supp_table_1 : prov:Activity {
+    core:description = "depmap:18Q4 (Supp Table 1)";
+    core:short_name = "act_a_18q4_supp_table_1";
+}
+
+
 resource wrn:wrn_dep_msi_vs_mss : stats:SampleSetResource {
-    prov:was_generated_by      = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
+    prov:was_generated_by      = wrn:act_a_18q4_avg_wrn_dependency_common_msi_lineages_supp_table;
     prov:observed_at = "2019-01-01T00:00:00Z";
 
     stats:sample_set_value = stats:IID(
@@ -47,7 +62,7 @@ resource wrn:wrn_dep_msi_vs_mss : stats:SampleSetResource {
 
 resource wrn:wrn_dep_trace : prov:ObservationTrace {
     prov:resource  = wrn:wrn_dep_msi_vs_mss;
-    prov:was_generated_by    = "depmap:18Q4 (Supp Table 1)";
+    prov:was_generated_by    = wrn:act_a_18q4_supp_table_1;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 

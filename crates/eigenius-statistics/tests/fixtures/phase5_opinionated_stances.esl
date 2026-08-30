@@ -22,6 +22,33 @@ namespace methods    = "urn:eigenius:demo:methods";
 namespace assay      = "urn:eigenius:demo:assay";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource decay:act_radioactive_decay_axiom : prov:Activity {
+    core:description = "physics-textbook:radioactive-decay-axiom";
+    core:short_name = "act_radioactive_decay_axiom";
+}
+resource decay:act_lab_2026_04_01 : prov:Activity {
+    core:description = "decay-assay:lab-2026-04-01";
+    core:short_name = "act_lab_2026_04_01";
+}
+resource assay:act_noisy_2026_04_02 : prov:Activity {
+    core:description = "assay-plate:noisy-2026-04-02";
+    core:short_name = "act_noisy_2026_04_02";
+}
+resource methods:act_a_2026_04_03 : prov:Activity {
+    core:description = "concordance-study:2026-04-03";
+    core:short_name = "act_a_2026_04_03";
+}
+resource methods:act_disagreeing_2026_04_04 : prov:Activity {
+    core:description = "concordance-study:disagreeing-2026-04-04";
+    core:short_name = "act_disagreeing_2026_04_04";
+}
+
+
 // ── §7.1 fixtures ───────────────────────────────────────────────────
 
 // PopulationLevel-marker predicate for the half-life claim. The
@@ -36,7 +63,7 @@ data decay:HasShortHalfLife : core:string -> Prop, stats:PopulationLevel {
 // The marker class membership is what the institution checks; the
 // resource's content is opaque to the verifier (audit only).
 resource decay:half_life_positivity_witness : stats:ImpossibilityWitness {
-    prov:was_generated_by      = "physics-textbook:radioactive-decay-axiom";
+    prov:was_generated_by      = decay:act_radioactive_decay_axiom;
     prov:observed_at = "2026-01-01T00:00:00Z";
 }
 
@@ -44,7 +71,7 @@ resource decay:half_life_positivity_witness : stats:ImpossibilityWitness {
 // clustered around 8 minutes (claim asserts < 12 min one-sidedly,
 // witnessed by the half_life_positivity_witness).
 resource decay:half_life_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "decay-assay:lab-2026-04-01";
+    prov:was_generated_by      = decay:act_lab_2026_04_01;
     prov:observed_at = "2026-04-01T10:00:00Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
@@ -55,7 +82,7 @@ resource decay:half_life_sampleset : stats:SampleSetResource {
 
 resource decay:half_life_sampleset_trace : prov:ObservationTrace {
     prov:resource  = decay:half_life_sampleset;
-    prov:was_generated_by    = "decay-assay:lab-2026-04-01";
+    prov:was_generated_by    = decay:act_lab_2026_04_01;
     prov:timestamp = "2026-04-01T10:00:00Z";
 }
 
@@ -121,7 +148,7 @@ data assay:HasLowReadout : core:string -> Prop, stats:PopulationLevel {
 // tight cluster around 50 (clearly < threshold), the without-exclusion
 // raw mean is inflated by the outliers (closer to the threshold).
 resource assay:noisy_readout_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "assay-plate:noisy-2026-04-02";
+    prov:was_generated_by      = assay:act_noisy_2026_04_02;
     prov:observed_at = "2026-04-02T11:00:00Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
@@ -133,7 +160,7 @@ resource assay:noisy_readout_sampleset : stats:SampleSetResource {
 
 resource assay:noisy_readout_sampleset_trace : prov:ObservationTrace {
     prov:resource  = assay:noisy_readout_sampleset;
-    prov:was_generated_by    = "assay-plate:noisy-2026-04-02";
+    prov:was_generated_by    = assay:act_noisy_2026_04_02;
     prov:timestamp = "2026-04-02T11:00:00Z";
 }
 
@@ -167,7 +194,7 @@ data methods:MethodsAgree : core:string -> Prop, stats:PopulationLevel {
 // systematic bias) — the PB regression should find slope ≈ 1.0 and
 // intercept ≈ 0.0 with CIs containing 1.0 and 0.0 respectively.
 resource methods:concordance_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "concordance-study:2026-04-03";
+    prov:was_generated_by      = methods:act_a_2026_04_03;
     prov:observed_at = "2026-04-03T12:00:00Z";
 
     // Paired layout: [method_a_0, method_b_0, method_a_1, method_b_1, ...]
@@ -181,7 +208,7 @@ resource methods:concordance_sampleset : stats:SampleSetResource {
 
 resource methods:concordance_sampleset_trace : prov:ObservationTrace {
     prov:resource  = methods:concordance_sampleset;
-    prov:was_generated_by    = "concordance-study:2026-04-03";
+    prov:was_generated_by    = methods:act_a_2026_04_03;
     prov:timestamp = "2026-04-03T12:00:00Z";
 }
 
@@ -209,7 +236,7 @@ resource methods:claim_methods_agree_trace : prov:ProgramTrace {
 // proportional bias — the PB regression's slope CI should exclude
 // 1.0 and the verifier should report MethodComparisonDisagreement.
 resource methods:disagreement_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "concordance-study:disagreeing-2026-04-04";
+    prov:was_generated_by      = methods:act_disagreeing_2026_04_04;
     prov:observed_at = "2026-04-04T13:00:00Z";
 
     stats:sample_set_value = stats:Paired(
@@ -222,7 +249,7 @@ resource methods:disagreement_sampleset : stats:SampleSetResource {
 
 resource methods:disagreement_sampleset_trace : prov:ObservationTrace {
     prov:resource  = methods:disagreement_sampleset;
-    prov:was_generated_by    = "concordance-study:disagreeing-2026-04-04";
+    prov:was_generated_by    = methods:act_disagreeing_2026_04_04;
     prov:timestamp = "2026-04-04T13:00:00Z";
 }
 

@@ -13,6 +13,17 @@ namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource poly:act_illustrative : prov:Activity {
+    core:description = "instrument-log:illustrative";
+    core:short_name = "act_illustrative";
+}
+
+
 class poly:Model : core:Resource {
     description = "A cancer model — the Set-level term the rule is specialised at.";
 }
@@ -41,7 +52,7 @@ resource poly:rule_trace : prov:DeclarationTrace {
 }
 
 resource poly:obs : justification:Claim {
-    prov:was_generated_by      = "instrument-log:illustrative";
+    prov:was_generated_by      = poly:act_illustrative;
     prov:observed_at = "2026-08-18T00:00:00Z";
 
     reflection:canonical_proposition = type_expr(
@@ -51,7 +62,7 @@ resource poly:obs : justification:Claim {
 
 resource poly:obs_trace : prov:ObservationTrace {
     prov:resource  = poly:obs;
-    prov:was_generated_by    = "instrument-log:illustrative";
+    prov:was_generated_by    = poly:act_illustrative;
     prov:timestamp = "2026-08-18T00:00:00Z";
 }
 

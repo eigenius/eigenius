@@ -34,6 +34,17 @@ namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource s16:act_sab16_condition_c_loop : prov:Activity {
+    core:description = "agent:sab16-condition-c-loop";
+    core:short_name = "act_sab16_condition_c_loop";
+}
+
+
 // ─── Phase 1: per-task predicate vocabulary ────────────────────────
 // Conformance predicates over the solution IRI — one per methodological
 // axis — plus the top-level implementation claim. Plain Props.
@@ -335,7 +346,7 @@ resource s16:block_filter : bench:CodeBlock {
 
 resource s16:solution_trace : prov:ProgramTrace {
     prov:resource  = s16:solution;
-    prov:was_generated_by    = "agent:sab16-condition-c-loop";
+    prov:was_generated_by    = s16:act_sab16_condition_c_loop;
     prov:timestamp = "2026-06-12T10:05:00Z";
 }
 

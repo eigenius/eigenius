@@ -89,7 +89,8 @@
   {
     "@id": "urn:eigenius:runtime:RuntimeInvocation",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "The provenance closure for one execution. The invocation is reproducible — same output bytes — iff (script, environment, inputs, random_seed) resolve to the same content-hashed values on a re-run, against a host with matching numerical_metadata. The image digest pin makes 'same environment' objective. See D26 §5.5.",
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:prov:Activity"],
+    "urn:eigenius:core:description": "The provenance closure for one execution, and a prov:Activity — it was already one in all but name, requiring inputs (prov:used), output (what it generated), and started_at / completed_at (prov:startedAtTime / endedAtTime). Subclassing says so rather than leaving a second, parallel notion of the same thing beside the general one: a query for what produced a resource reaches a wrapped-R run and a lab plate through the same relation. The invocation is reproducible — same output bytes — iff (script, environment, inputs, random_seed) resolve to the same content-hashed values on a re-run, against a host with matching numerical_metadata. The image digest pin makes 'same environment' objective. See D26 §5.5.",
     "urn:eigenius:core:short_name": "RuntimeInvocation",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",

@@ -46,6 +46,17 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace tx         = "urn:eigenius:demo:tx";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource tx:act_incubator_runs_2026_05_03_splitplot : prov:Activity {
+    core:description = "instrument-log:incubator-runs-2026-05-03-splitplot";
+    core:short_name = "act_incubator_runs_2026_05_03_splitplot";
+}
+
+
 // ─── Domain predicate ──────────────────────────────────────────────
 
 data tx:TemperatureOrDrugEffectExists : core:string -> Prop, stats:PopulationLevel {
@@ -57,7 +68,7 @@ data tx:TemperatureOrDrugEffectExists : core:string -> Prop, stats:PopulationLev
 // rows — 4 floats per row, 12 rows total = 48 floats.
 
 resource tx:incubator_split_2026_05_03 : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:incubator-runs-2026-05-03-splitplot";
+    prov:was_generated_by      = tx:act_incubator_runs_2026_05_03_splitplot;
     prov:observed_at = "2026-05-03T08:45:00Z";
 
     stats:sample_set_value = stats:SplitPlot(
@@ -90,7 +101,7 @@ resource tx:incubator_split_2026_05_03 : stats:SampleSetResource {
 
 resource tx:incubator_split_trace : prov:ObservationTrace {
     prov:resource  = tx:incubator_split_2026_05_03;
-    prov:was_generated_by    = "instrument-log:incubator-runs-2026-05-03-splitplot";
+    prov:was_generated_by    = tx:act_incubator_runs_2026_05_03_splitplot;
     prov:timestamp = "2026-05-03T08:45:00Z";
 }
 

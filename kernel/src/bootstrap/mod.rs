@@ -1605,13 +1605,19 @@ class p:Cat { description = "a dog"; }"#;
         let index = Arc::new(crate::institution::registry::InstitutionIndex::default());
 
         let sample_set_cell = r#"
+namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
-namespace prov = "urn:eigenius:prov";
+namespace prov       = "urn:eigenius:prov";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
 
+resource screen:act_kinase_glo_plate_2026_03_11 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-11";
+    core:short_name = "act_kinase_glo_plate_2026_03_11";
+}
+
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-11";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_11;
     prov:observed_at = "2026-03-11T10:18:42Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(

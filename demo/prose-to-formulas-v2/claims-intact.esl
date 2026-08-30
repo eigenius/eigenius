@@ -11,6 +11,17 @@ namespace v2 = "urn:eigenius:demo:v2";
 namespace wn = "urn:eigenius:wn";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource v2:act_dcg_parse_paragraph : prov:Activity {
+    core:description = "eigenius-encoding prose-to-eigon: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (source sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c)";
+    core:short_name = "act_dcg_parse_paragraph";
+}
+
+
 resource v2:source : reference:Reference {
     core:description = "The source this encoding was derived from: demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c). Minted document-locally — the file carries no DOI or PMID; pass an existing reference:Reference IRI to cite a bibliographic record instead.";
 }
@@ -164,7 +175,7 @@ resource v2:binding_3_0 : encoding:AnaphorBinding {
 
 resource v2:run_trace : prov:ProgramTrace {
     prov:resource = "urn:eigenius:demo:v2:structure";
-    prov:was_generated_by = "eigenius-encoding prose-to-eigon: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (source sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c)";
+    prov:was_generated_by = v2:act_dcg_parse_paragraph;
     prov:timestamp = "2026-08-03T00:00:00Z";
 }
 

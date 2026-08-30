@@ -23,6 +23,17 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace assay      = "urn:eigenius:demo:assay";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource assay:act_kinase_glo_plate_2026_03_15_iid : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-15-IID";
+    core:short_name = "act_kinase_glo_plate_2026_03_15_iid";
+}
+
+
 // ─── Domain predicate ──────────────────────────────────────────────
 
 // Multi-class data decl marks the predicate as PopulationLevel
@@ -34,7 +45,7 @@ data assay:DifferentMeanActivity : core:string -> Prop, stats:PopulationLevel {
 // ─── SampleSet: 6 control + 6 drug-treated kinase activity readings ─
 
 resource assay:kinase_run_2026_03_15 : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-15-IID";
+    prov:was_generated_by      = assay:act_kinase_glo_plate_2026_03_15_iid;
     prov:observed_at = "2026-03-15T11:04:30Z";
 
     // Group A = vehicle control (cluster around 100 a.u.), Group B =
@@ -49,7 +60,7 @@ resource assay:kinase_run_2026_03_15 : stats:SampleSetResource {
 
 resource assay:kinase_run_trace : prov:ObservationTrace {
     prov:resource  = assay:kinase_run_2026_03_15;
-    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-15-IID";
+    prov:was_generated_by    = assay:act_kinase_glo_plate_2026_03_15_iid;
     prov:timestamp = "2026-03-15T11:04:30Z";
 }
 

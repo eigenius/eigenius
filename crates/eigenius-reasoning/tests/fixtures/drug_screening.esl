@@ -103,6 +103,17 @@ namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource screen:act_kinase_glo_plate_2026_03_04_a1 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    core:short_name = "act_kinase_glo_plate_2026_03_04_a1";
+}
+
+
 // ─── Step 1: domain vocabulary ─────────────────────────────────────
 
 data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
@@ -138,7 +149,7 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 // ─── Step 3: SampleSetResource carrying the raw replicate readings ──
 
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_04_a1;
     prov:observed_at = "2026-03-04T14:22:11Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
@@ -149,7 +160,7 @@ resource screen:m_eig0291_sampleset : stats:SampleSetResource {
 
 resource screen:m_eig0291_sampleset_trace : prov:ObservationTrace {
     prov:resource  = screen:m_eig0291_sampleset;
-    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:was_generated_by    = screen:act_kinase_glo_plate_2026_03_04_a1;
     prov:timestamp = "2026-03-04T14:22:11Z";
 }
 

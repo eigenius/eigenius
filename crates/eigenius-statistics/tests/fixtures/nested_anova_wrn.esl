@@ -10,6 +10,25 @@ namespace demo       = "urn:eigenius:demo:nested";
 namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
 
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource demo:act_wrn_paper_ed_fig_3b_km12_day_10_relative_ratio : prov:Activity {
+    core:description = "wrn-paper ED Fig 3b KM12 day-10 relative ratio";
+    core:short_name = "act_wrn_paper_ed_fig_3b_km12_day_10_relative_ratio";
+}
+resource demo:act_wrn_paper_ed_fig_3b : prov:Activity {
+    core:description = "wrn-paper ED Fig 3b";
+    core:short_name = "act_wrn_paper_ed_fig_3b";
+}
+resource demo:act_wrn_paper_ed_fig_3b_es2_day_10_relative_ratio : prov:Activity {
+    core:description = "wrn-paper ED Fig 3b ES2 day-10 relative ratio";
+    core:short_name = "act_wrn_paper_ed_fig_3b_es2_day_10_relative_ratio";
+}
+
+
 resource demo:viability_witness : stats:ImpossibilityWitness {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = demo:warrant_wrn_paper_viability_impairment_directionality;
@@ -19,7 +38,7 @@ resource demo:viability_witness : stats:ImpossibilityWitness {
 // KM12 (MSI) — competition assay day-10 relative ratio.
 // group A = sgWRN guides (flat, by guide), group B = sgCh2 negative controls.
 resource demo:set_KM12 : stats:SampleSetResource {
-    prov:was_generated_by      = "wrn-paper ED Fig 3b KM12 day-10 relative ratio";
+    prov:was_generated_by      = demo:act_wrn_paper_ed_fig_3b_km12_day_10_relative_ratio;
     prov:observed_at = "2019-01-01T00:00:00Z";
     stats:sample_set_value = stats:Nested(
         [
@@ -38,7 +57,7 @@ resource demo:set_KM12 : stats:SampleSetResource {
 }
 resource demo:set_KM12_trace : prov:ObservationTrace {
     prov:resource  = demo:set_KM12;
-    prov:was_generated_by    = "wrn-paper ED Fig 3b";
+    prov:was_generated_by    = demo:act_wrn_paper_ed_fig_3b;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource demo:plan_KM12 : stats:StatisticalAnalysisPlan {
@@ -58,7 +77,7 @@ resource demo:plan_KM12_trace : prov:ProgramTrace {
 // ES2 (MSS) — competition assay day-10 relative ratio.
 // group A = sgWRN guides (flat, by guide), group B = sgCh2 negative controls.
 resource demo:set_ES2 : stats:SampleSetResource {
-    prov:was_generated_by      = "wrn-paper ED Fig 3b ES2 day-10 relative ratio";
+    prov:was_generated_by      = demo:act_wrn_paper_ed_fig_3b_es2_day_10_relative_ratio;
     prov:observed_at = "2019-01-01T00:00:00Z";
     stats:sample_set_value = stats:Nested(
         [
@@ -77,7 +96,7 @@ resource demo:set_ES2 : stats:SampleSetResource {
 }
 resource demo:set_ES2_trace : prov:ObservationTrace {
     prov:resource  = demo:set_ES2;
-    prov:was_generated_by    = "wrn-paper ED Fig 3b";
+    prov:was_generated_by    = demo:act_wrn_paper_ed_fig_3b;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource demo:plan_ES2 : stats:StatisticalAnalysisPlan {
