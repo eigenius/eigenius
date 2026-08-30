@@ -36,11 +36,11 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::nbe::term::{Exp, InductiveDecl};
-use eigenius_kernel::ontology::iri::Iri;
-use eigenius_reasoning::project::{
+use eigenius_kernel::justification::{
     cited_iris, is_fully_verified, leaves_of, support, survives_without, Ground,
 };
+use eigenius_kernel::nbe::term::{Exp, InductiveDecl};
+use eigenius_kernel::ontology::iri::Iri;
 
 const RULE: &str = "urn:eigenius:pub:wrn:discovery_rule";
 const ACHILLES: &str = "urn:eigenius:pub:wrn:dd_achilles";
