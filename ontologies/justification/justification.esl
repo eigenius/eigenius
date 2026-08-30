@@ -494,6 +494,37 @@ resource reasoning:qc_consistency_check : institution:QueryClass {
 // branch carries it alone. Reading Sum conjunctively understates every conclusion with a fallback,
 // which is the shape a careful author writes.
 
+// ── How warrant is asked, and what cannot ask it ─────────────────────
+//
+// Warrant is COMPUTED from a justification term. Nothing stores it: the grade
+// classes and `epistemic_status` that used to are deleted, because a stored
+// grade conflated the two axes and let the thing being graded nominate its own
+// grade.
+//
+// **EigenQL cannot express the replacement, and saying so is part of the
+// change.** A justification term lands as `Value::Json` — `Value` has no
+// inductive variant (`kernel/src/ontology/resource.rs`) — and `values_equal`
+// (`kernel/src/query/functions.rs`) has no `Json` arm, so two terms never
+// compare equal and a pattern can never bind one. Patterns admit scalars and
+// arrays; no built-in decodes a term. The one epistemic fact EigenQL could
+// filter on was the stored grade, precisely because `is_a` is an array of IRI
+// strings — and that is the fact this design removes.
+//
+// So warrant is a **Rust-API answer** in the interim: `support`, `leaves_of`,
+// `is_fully_verified`, `survives_without` in
+// `crates/eigenius-reasoning/src/project.rs`, reached through a
+// `justification:ProjectionRequest` whose result is a `justification:Projection`
+// below. "Warrant becomes a query" must not be read as "an EigenQL query"; it is
+// not one, and pretending otherwise would send a reader to a language that
+// cannot answer. The real fix is the λProlog extension over EigenQL's Datalog
+// foundation, tracked separately.
+//
+// PROVENANCE, by contrast, IS an EigenQL query now, and that is the point of
+// making it relational: `prov:was_attributed_to`, `prov:was_generated_by`,
+// `prov:used` and `prov:had_primary_source` are all resource-typed, so `which
+// claims rest on this instrument` is a join. It was a free-text string, and no
+// query could ask it at all.
+
 class justification:ProjectionRequest {
     description = "Input to qc_project_justification (D73 §1.2): ask what a committed justification:Conclusion's justification:Term rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
     requires justification:subject_sentence;

@@ -677,6 +677,72 @@ today it commits and `survives_without` reports the real ground as droppable.
 
 **The largest phase. Bootstrap edit → reseed.** Depends on P4 for the grounds vocabulary.
 
+### Landed `2026-08-30` (reseed still owed)
+
+**Provenance became its own namespace and its own layer**, `ontologies/prov/prov.esl`, mapped
+onto W3C PROV-O rather than adopting its IRIs. That was not in the plan; the plan had the
+vocabulary staying in `reflection`. The reason to move it: `reflection` held two unrelated families
+under one word — `reflection:Trace` with `LetTrace` / `MapTrace` / `CaseTrace` records how a PROGRAM
+EVALUATED, while the parentless `DeclarationTrace` / `ObservationTrace` / `ProductionTrace` /
+`VerificationTrace` record HOW A RESOURCE CAME TO EXIST. `prov` sits ABOVE `reflection` and the
+direction is forced: `prov:ProgramTrace` reaches down through `prov:trace_tree` and
+`reflection:output`, and nothing reaches back.
+
+**`prov:Activity` was the axis's missing middle.** 153 sites named the event that produced an
+observation in a free-text string, so the origin was not a node and *which claims rest on this
+instrument* had no answer. 50 distinct WRN strings collapsed to 25 activities on one reading: the
+activity is the measurement occasion, and the rest of each string described the slice taken from it,
+which belongs on the entity. `runtime:RuntimeInvocation` now subclasses `prov:Activity` — it was
+already one, requiring inputs, an output, and start/end times.
+
+**Renamed where the old name was wrong**, not merely re-namespaced: `declared_by` →
+`prov:was_attributed_to` (2,461), `source` → `prov:was_generated_by` (192, retyped from string),
+`warranted_by` → `prov:had_primary_source` (206, retyped). `objective:warrant` →
+`objective:rests_on` with it, which the plan required be settled together.
+
+**The 144 resources using a grade class AS their class split by the design's own mechanical test** —
+does the resource carry a proposition: 83 → `justification:Claim` (which REQUIRES
+`canonical_proposition`), 58 → `prov:Source`. `Claim` is ground-neutral: two of them are instrument
+readings, and `Certificate.declared` and `.observed` both cite this kind, so which ground applies is
+which trace the resource carries. Making the ground a KIND OF RESOURCE is exactly what the grade
+classes did wrong.
+
+**`lexicon:grade` is the thesis at maximum cardinality**, as P0 predicted: 2,641,713 stamps on the
+converted chain, every one `epistemic:declared`. A lexical entry carries no proposition, so it has no
+warrant to grade — and the single value it ever took says so, because nothing ever climbed.
+
+#### What a textual rename does not reach
+
+Four classes of site, each found by a failing test rather than by grep, and now recorded because the
+next namespace move will hit all four again: IRIs built by interpolation (`format!("{REFL}:rationale")`);
+non-canonical aliases (`namespace ref = "urn:eigenius:reflection"`); files using the new prefix
+without declaring it, in `.esl` AND in ESL embedded in Rust string literals; and hand-built layer
+chains in tests. Use `cargo test --no-fail-fast` so all of them report in one pass.
+
+#### The gap that hid most of this
+
+**`esl::compile_against_layer` compiles and does not validate, and `LayerBuilder::build` does not
+either** — so the authored chains were checked for their conclusions' certificates and never for
+structural validity. `00-wrn-vocabulary.esl`'s own header records the same gap costing two months in
+2026-06. All four WRN harnesses now assert `Validator::validate()`, and it immediately found six
+things: `prov` / `reference` / `ingest` missing from the test chains; **`eigentt:Judgement` slots
+validated by nobody** (Rule 21 selected only on `eigentt:Term`, so judgements fell to Rule 16's D32
+walk while being D47-encoded — every judgement on every chain reported "ctor `App` not declared");
+`ExternalExecutionTrace` dissolving into `DeclarationTrace` rather than ProgramTrace; eigenius#205's
+linkability question answered by requiring the ACTIVITY instead of a ProductionTrace; **08a's eight
+`PinnedExternalFile`s being hash-less stand-ins whose IRIs were truncated prefixes of files that
+already existed content-addressed**; and `wrn_phase1_recompute` never loading `02-literature.esl`.
+
+**The notebook was already broken and nothing ran it** — `spec_str`, retired 2026-08-21.
+`kernel/tests/stats_notebook_cells_compile.rs` now compiles its cells cumulatively.
+
+**Exit criteria met**, except the reseed: no resource carries a stored epistemic grade; provenance is
+relational and queryable in EigenQL; warrant is a Rust-API answer and `justification.esl` now says so
+plainly rather than leaving "warrant becomes a query" to be read as an EigenQL query; the notebook is
+updated and compiles.
+
+**Still owed:** the reseed (P4's and P5's, batched), the ACP spec, and `docs/method/`.
+
 - **Delete the grade classes** `{Declared,Observed,Derived,Verified}Resource` and
   `reflection:epistemic_status`. The latter lets a trace nominate the grade of its own output, which
   is the self-nomination the design forbids; its zero readers are correct and the declaration is the
