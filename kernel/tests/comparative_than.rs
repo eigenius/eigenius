@@ -61,7 +61,6 @@ resource lexicon:dependent_rel : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dependent_rel_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependent.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // `dependent` — the POSITIVE relational predication the importer emits for a governed adjective
@@ -83,7 +82,6 @@ resource lexicon:dependent_pos_rel : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dependent_pos_rel_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:dependent.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // `dependent` — the PLAIN gradable reading the importer also emits (1-place degree, no governed
@@ -102,7 +100,6 @@ resource lexicon:dependent_plain : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dependent_plain_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependent.a.02";
-    lexicon:grade    = epistemic:declared;
 }
 
 // Entities + their proper-noun / bare-plural NP entries.
@@ -111,28 +108,28 @@ resource lexicon:wrn_sem : lexicon:SemTerm { lexicon:term = type_expr( lexicon:w
 resource lexicon:wrn_np : lexicon:LexicalEntry {
     lexicon:form = "WRN"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
     lexicon:sem = lexicon:wrn_sem; lexicon:sem_type = type_expr( lexicon:Entity );
-    lexicon:sense = "wrn"; lexicon:grade = epistemic:declared;
+    lexicon:sense = "wrn";
 }
 axiom lexicon:msi : lexicon:Entity
 resource lexicon:msi_sem : lexicon:SemTerm { lexicon:term = type_expr( lexicon:msi ); }
 resource lexicon:msi_np : lexicon:LexicalEntry {
     lexicon:form = "MSI"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
     lexicon:sem = lexicon:msi_sem; lexicon:sem_type = type_expr( lexicon:Entity );
-    lexicon:sense = "msi"; lexicon:grade = epistemic:declared;
+    lexicon:sense = "msi";
 }
 axiom lexicon:the_lines : lexicon:Entity
 resource lexicon:the_lines_sem : lexicon:SemTerm { lexicon:term = type_expr( lexicon:the_lines ); }
 resource lexicon:lines_np : lexicon:LexicalEntry {
     lexicon:form = "lines"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
     lexicon:sem = lexicon:the_lines_sem; lexicon:sem_type = type_expr( lexicon:Entity );
-    lexicon:sense = "lines"; lexicon:grade = epistemic:declared;
+    lexicon:sense = "lines";
 }
 axiom lexicon:counterparts : lexicon:Entity
 resource lexicon:counterparts_sem : lexicon:SemTerm { lexicon:term = type_expr( lexicon:counterparts ); }
 resource lexicon:counterparts_np : lexicon:LexicalEntry {
     lexicon:form = "counterparts"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
     lexicon:sem = lexicon:counterparts_sem; lexicon:sem_type = type_expr( lexicon:Entity );
-    lexicon:sense = "counterparts"; lexicon:grade = epistemic:declared;
+    lexicon:sense = "counterparts";
 }
 "#;
 

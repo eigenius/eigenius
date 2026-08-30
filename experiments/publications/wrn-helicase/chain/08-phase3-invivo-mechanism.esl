@@ -33,6 +33,7 @@ namespace wrn           = "urn:eigenius:pub:wrn";
 namespace litclaim      = "urn:eigenius:pub:wrn:litclaim";
 namespace justification = "urn:eigenius:justification";
 namespace stats         = "urn:eigenius:measurements";
+namespace prov       = "urn:eigenius:prov";
 
 // ════════════════════════════════════════════════════════════════════
 // C-VIVO — in vivo + patient-derived validation
@@ -61,29 +62,29 @@ class wrn:XenograftTable : reflection:ObservedResource {
 
 // Linked-external: the C911 seed-matched control is inert in vivo.
 resource wrn:vivo_seed_control : bench:ToolArtifact, reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+    prov:was_attributed_to = wrn:authors;
     bench:tool            = "C911 seed-control xenograft (shWRN1 vs shWRN1-C911)";
     bench:produced_from   = ["wrn-paper:Fig-2d"];
     bench:tool_parameters = "shWRN1-C911 (nt 9-11 of shWRN1 mutated to complement, preserving the off-target 'seed') does NOT impair KM12 xenograft growth, whereas on-target shWRN1 does. The seed-matched control is inert. LINKED-EXTERNAL.";
-    reflection:derivation = wrn:vivo_seed_control_trace;
+    prov:derivation = wrn:vivo_seed_control_trace;
     reflection:canonical_proposition = type_expr(
         onco:SeedControlInert("WRN", "xenograft_growth")
     );
 }
 resource wrn:vivo_seed_control_trace : reflection:ExternalExecutionTrace {
-    reflection:declared_by = wrn:authors;
-    reflection:resource  = wrn:vivo_seed_control;
-    reflection:source    = "wrn-paper:Fig-2d C911 seed control (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:vivo_seed_control;
+    prov:was_generated_by    = "wrn-paper:Fig-2d C911 seed control (linked-external)";
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // Declared: the seed-control inference. An shRNA's off-target activity is
 // driven by its 'seed'; a seed-matched but on-target-disrupted control
 // (C911) that is inert isolates the on-target effect.
 resource wrn:seed_control_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_c911_seed_control_logic;
-    reflection:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence, and a C911 seed-preserving control isolates on-target from seed off-target effects (Buehler 2012 [16], a litclaim premise): shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. Given that control's validity, if the seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_c911_seed_control_logic;
+    prov:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence, and a C911 seed-preserving control isolates on-target from seed off-target effects (Buehler 2012 [16], a litclaim premise): shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. Given that control's validity, if the seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
     reflection:canonical_proposition = type_expr(
         litclaim:C911ControlIsValid("shRNA")
         ->
@@ -92,11 +93,11 @@ resource wrn:seed_control_rule : reflection:DeclaredResource {
         onco:OnTarget("WRN", "xenograft_growth")
     );
 }
-resource wrn:seed_control_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:seed_control_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_c911_seed_control_logic;
-    reflection:timestamp   = "2026-06-13T03:30:00Z";
+resource wrn:seed_control_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:seed_control_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_c911_seed_control_logic;
+    prov:timestamp   = "2026-06-13T03:30:00Z";
 }
 
 resource wrn:concl_vivo : justification:Conclusion {
@@ -155,9 +156,9 @@ resource wrn:concl_vivo_ontarget : justification:Conclusion {
 // with the measured fact; concl_p53_activation discharges it (the if_ed5 witness
 // is minted by the R run; lit_ps15_readout by its DeclarationTrace).
 resource wrn:p53_activation_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_p53_activation_readout;
-    reflection:rationale   = "Phospho-p53(Ser15) is an ATR/ATM DNA-damage-response target that marks p53 activation (Loughery 2014, the lit_ps15_readout premise). Given that, if WRN depletion raises p-p53(S15) (and the p53 target p21) in MSI cells, WRN depletion activates the p53 response in MSI.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_activation_readout;
+    prov:rationale   = "Phospho-p53(Ser15) is an ATR/ATM DNA-damage-response target that marks p53 activation (Loughery 2014, the lit_ps15_readout premise). Given that, if WRN depletion raises p-p53(S15) (and the p53 target p21) in MSI cells, WRN depletion activates the p53 response in MSI.";
     reflection:canonical_proposition = type_expr(
         litclaim:pS15MarksP53Activation("p53")
         ->
@@ -166,11 +167,11 @@ resource wrn:p53_activation_rule : reflection:DeclaredResource {
         onco:ActivatesP53Response("WRN", "MSI")
     );
 }
-resource wrn:p53_activation_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:p53_activation_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_p53_activation_readout;
-    reflection:timestamp   = "2026-06-17T00:00:00Z";
+resource wrn:p53_activation_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:p53_activation_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_activation_readout;
+    prov:timestamp   = "2026-06-17T00:00:00Z";
 }
 
 resource wrn:concl_p53_activation : justification:Conclusion {
@@ -243,20 +244,20 @@ resource wrn:concl_paralog : justification:Conclusion {
 // the shRNA in-vitro/in-vivo γH2AX confirmation (Fig 2e / ED 7e, CRISPR-artifact
 // control). No source-data sheet exists for either.
 resource wrn:mech_dsb : bench:ToolArtifact, reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+    prov:was_attributed_to = wrn:authors;
     bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
     bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
     bench:tool_parameters = "WRN silencing substantially increased γH2AX and 53BP1 foci (DSB markers) in MSI but not MSS cells; corroborated by increased phospho-ATM(S1981) foci and Chk2(T68) phosphorylation; confirmed with shRNA in vitro and in vivo (not a CRISPR/Cas9 artifact). LINKED-EXTERNAL.";
-    reflection:derivation = wrn:mech_dsb_trace;
+    prov:derivation = wrn:mech_dsb_trace;
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
     );
 }
 resource wrn:mech_dsb_trace : reflection:ExternalExecutionTrace {
-    reflection:declared_by = wrn:authors;
-    reflection:resource  = wrn:mech_dsb;
-    reflection:source    = "wrn-paper:Fig-4 / ED-Fig-6,7 DSB-marker IF (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:mech_dsb;
+    prov:was_generated_by    = "wrn-paper:Fig-4 / ED-Fig-6,7 DSB-marker IF (linked-external)";
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // Declared: the DSB-driven-lethality mechanism. DSBs activate the DNA-damage
@@ -264,9 +265,9 @@ resource wrn:mech_dsb_trace : reflection:ExternalExecutionTrace {
 // death; p53-S15 & p21 IF) and are directly toxic — independent of p53 status
 // (explaining why p53-impaired MSI cells are also sensitive).
 resource wrn:mech_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_dsb_ddr_mechanism;
-    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The DSB lesion is now reproduced-external in both markers (γH2AX intensity + foci via concl_dsb_gh2ax/concl_dsb_gh2ax_foci; 53BP1 foci via concl_dsb_foci), and the upstream DDR signaling that bridges DSBs to p53 is reproduced via pATM(S1981) (concl_ddr_signaling, onco:ActivatesDSBResponse) — so the lethality claim rests on recomputed DSB + DDR-signaling readouts PLUS the two kernel-recomputed DDR endpoints; only the Chk2(T68) western remains linked.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_dsb_ddr_mechanism;
+    prov:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The DSB lesion is now reproduced-external in both markers (γH2AX intensity + foci via concl_dsb_gh2ax/concl_dsb_gh2ax_foci; 53BP1 foci via concl_dsb_foci), and the upstream DDR signaling that bridges DSBs to p53 is reproduced via pATM(S1981) (concl_ddr_signaling, onco:ActivatesDSBResponse) — so the lethality claim rests on recomputed DSB + DDR-signaling readouts PLUS the two kernel-recomputed DDR endpoints; only the Chk2(T68) western remains linked.";
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
         ->
@@ -277,11 +278,11 @@ resource wrn:mech_rule : reflection:DeclaredResource {
         onco:DSBDrivenLethality("WRN", "MSI")
     );
 }
-resource wrn:mech_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:mech_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_dsb_ddr_mechanism;
-    reflection:timestamp   = "2026-06-13T03:30:00Z";
+resource wrn:mech_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:mech_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_dsb_ddr_mechanism;
+    prov:timestamp   = "2026-06-13T03:30:00Z";
 }
 
 resource wrn:concl_dsb : justification:Conclusion {
@@ -589,20 +590,20 @@ resource wrn:concl_mech : justification:Conclusion {
 // telomeric end-to-end fusions or signal loss — ruling out a telomere defect
 // as the basis of the synthetic lethality.
 resource wrn:fish_readout : bench:ToolArtifact, reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+    prov:was_attributed_to = wrn:authors;
     bench:tool            = "telomere PNA-FISH of metaphase spreads (± shWRN1)";
     bench:produced_from   = ["wrn-paper:Fig-4d", "wrn-paper:Fig-4e", "wrn-paper:ED-Fig-8a"];
     bench:tool_parameters = "WRN silencing induced DSB/fragmentation throughout chromosomes in MSI but not MSS cells, with NO specific telomeric defects (no increased end-to-end fusions, no telomeric signal loss). The synthetic lethality is not via a telomere defect — an explicitly tested-and-rejected hypothesis. LINKED-EXTERNAL.";
-    reflection:derivation = wrn:fish_readout_trace;
+    prov:derivation = wrn:fish_readout_trace;
     reflection:canonical_proposition = type_expr(
         onco:NotViaTelomereDefect("WRN", "MSI")
     );
 }
 resource wrn:fish_readout_trace : reflection:ExternalExecutionTrace {
-    reflection:declared_by = wrn:authors;
-    reflection:resource  = wrn:fish_readout;
-    reflection:source    = "wrn-paper:Fig-4d,e / ED-Fig-8a telomere-FISH (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:fish_readout;
+    prov:was_generated_by    = "wrn-paper:Fig-4d,e / ED-Fig-8a telomere-FISH (linked-external)";
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:concl_not_telomere : justification:Conclusion {
@@ -620,19 +621,19 @@ resource wrn:concl_not_telomere : justification:Conclusion {
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
 resource wrn:warrant_c911_seed_control_logic : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:c911-seed-control-logic`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_c911_seed_control_logic";
 }
 
 resource wrn:warrant_dsb_ddr_mechanism : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:dsb-ddr-mechanism`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_dsb_ddr_mechanism";
 }
 
 resource wrn:warrant_p53_activation_readout : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:p53-activation-readout`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_p53_activation_readout";
 }

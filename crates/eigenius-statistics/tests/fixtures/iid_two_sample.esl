@@ -21,6 +21,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace assay      = "urn:eigenius:demo:assay";
+namespace prov       = "urn:eigenius:prov";
 
 // ─── Domain predicate ──────────────────────────────────────────────
 
@@ -33,8 +34,8 @@ data assay:DifferentMeanActivity : core:string -> Prop, stats:PopulationLevel {
 // ─── SampleSet: 6 control + 6 drug-treated kinase activity readings ─
 
 resource assay:kinase_run_2026_03_15 : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-15-IID";
-    reflection:observed_at = "2026-03-15T11:04:30Z";
+    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-15-IID";
+    prov:observed_at = "2026-03-15T11:04:30Z";
 
     // Group A = vehicle control (cluster around 100 a.u.), Group B =
     // drug-treated (cluster around 60 a.u.) — clear separation,
@@ -46,10 +47,10 @@ resource assay:kinase_run_2026_03_15 : stats:SampleSetResource {
     );
 }
 
-resource assay:kinase_run_trace : reflection:ObservationTrace {
-    reflection:resource  = assay:kinase_run_2026_03_15;
-    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-15-IID";
-    reflection:timestamp = "2026-03-15T11:04:30Z";
+resource assay:kinase_run_trace : prov:ObservationTrace {
+    prov:resource  = assay:kinase_run_2026_03_15;
+    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-15-IID";
+    prov:timestamp = "2026-03-15T11:04:30Z";
 }
 
 // ─── The IID StatisticalAnalysisPlan ──────────────────────────────────────
@@ -78,8 +79,8 @@ resource assay:claim_drug_changes_activity : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource assay:claim_drug_changes_activity_trace : reflection:ProgramTrace {
-    reflection:resource  = assay:claim_drug_changes_activity;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-03-15T11:04:30Z";
+resource assay:claim_drug_changes_activity_trace : prov:ProgramTrace {
+    prov:resource  = assay:claim_drug_changes_activity;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-03-15T11:04:30Z";
 }

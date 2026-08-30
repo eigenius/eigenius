@@ -544,7 +544,7 @@ D = declared, L = linked-external.
 
 The chain's proposition graph follows the paper's argument arc — hypothesis →
 computational discovery → wet-lab validation → in vivo → mechanism → thesis. Each
-conclusion's `reflection:declared_by` already names the paper criterion in the
+conclusion's `prov:was_attributed_to` already names the paper criterion in the
 left column; this table grounds it in the Nature figure + narrative claim.
 
 ### Hypothesis

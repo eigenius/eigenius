@@ -18,13 +18,13 @@
 //! institution (D39) consumes chain-resident propositions carrying `IsDeclaredAs` witnesses. This
 //! crate is the join: parse → select one reading → D47-encode the term → emit Eigon-JSON that
 //! `eigenius load` puts on the chain. The claims land Declared, under a
-//! `reflection:DeclarationTrace` — see [`grade`] for why the parser fixes their form and not their
+//! `prov:DeclarationTrace` — see [`grade`] for why the parser fixes their form and not their
 //! content.
 //!
 //! **Parsed claims land Declared** (D73 §6, superseding the Derived landing this crate was built
 //! against). The parser is a formulation instrument: it establishes that the text parses to this
 //! well-typed term, not that the term is faithful to what the author wrote, nor that what the
-//! author wrote is true. The agent named in `reflection:declared_by` takes responsibility for the
+//! author wrote is true. The agent named in `prov:was_attributed_to` takes responsibility for the
 //! proposition; the RUN is recorded once on the `enc:ReasoningStructure`'s `ProgramTrace`. An
 //! *edit to the prose* is still visible to the commit gate — the witness key hashes the
 //! proposition, so a certificate citing the claim stops resolving the moment the parser derives a
@@ -59,8 +59,7 @@ pub use emit::{
     SentenceSelection,
 };
 pub use grade::{
-    ClaimGrader, ClaimSource, Grade, GradeError, GradedClaim, ParsedClaimGrader, Warrant,
-    UNATTRIBUTED_AGENT,
+    ClaimGrader, ClaimSource, GradeError, GradedClaim, ParsedClaimGrader, UNATTRIBUTED_AGENT,
 };
 pub use land::DerivedClaimLander;
 pub use select::{load_pins, Pin};

@@ -20,6 +20,7 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace decay      = "urn:eigenius:demo:decay";
 namespace methods    = "urn:eigenius:demo:methods";
 namespace assay      = "urn:eigenius:demo:assay";
+namespace prov       = "urn:eigenius:prov";
 
 // ── §7.1 fixtures ───────────────────────────────────────────────────
 
@@ -35,16 +36,16 @@ data decay:HasShortHalfLife : core:string -> Prop, stats:PopulationLevel {
 // The marker class membership is what the institution checks; the
 // resource's content is opaque to the verifier (audit only).
 resource decay:half_life_positivity_witness : stats:ImpossibilityWitness {
-    reflection:source      = "physics-textbook:radioactive-decay-axiom";
-    reflection:observed_at = "2026-01-01T00:00:00Z";
+    prov:was_generated_by      = "physics-textbook:radioactive-decay-axiom";
+    prov:observed_at = "2026-01-01T00:00:00Z";
 }
 
 // Half-life readings from a small in-vitro decay assay — 6 replicates
 // clustered around 8 minutes (claim asserts < 12 min one-sidedly,
 // witnessed by the half_life_positivity_witness).
 resource decay:half_life_sampleset : stats:SampleSetResource {
-    reflection:source      = "decay-assay:lab-2026-04-01";
-    reflection:observed_at = "2026-04-01T10:00:00Z";
+    prov:was_generated_by      = "decay-assay:lab-2026-04-01";
+    prov:observed_at = "2026-04-01T10:00:00Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [7.5, 8.2, 7.8, 8.5, 8.0, 8.1],
@@ -52,10 +53,10 @@ resource decay:half_life_sampleset : stats:SampleSetResource {
     );
 }
 
-resource decay:half_life_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = decay:half_life_sampleset;
-    reflection:source    = "decay-assay:lab-2026-04-01";
-    reflection:timestamp = "2026-04-01T10:00:00Z";
+resource decay:half_life_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = decay:half_life_sampleset;
+    prov:was_generated_by    = "decay-assay:lab-2026-04-01";
+    prov:timestamp = "2026-04-01T10:00:00Z";
 }
 
 // The OneSidedWitnessed claim — should Holds with halved p-value
@@ -78,10 +79,10 @@ resource decay:claim_short_half_life_onesided : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource decay:claim_short_half_life_onesided_trace : reflection:ProgramTrace {
-    reflection:resource  = decay:claim_short_half_life_onesided;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-04-01T10:00:00Z";
+resource decay:claim_short_half_life_onesided_trace : prov:ProgramTrace {
+    prov:resource  = decay:claim_short_half_life_onesided;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-04-01T10:00:00Z";
 }
 
 // Sibling claim with a witness that does NOT exist on chain — the
@@ -103,10 +104,10 @@ resource decay:claim_short_half_life_bad_witness : stats:StatisticalAnalysisPlan
     stats:outlier_exclusion = Identity();
 }
 
-resource decay:claim_short_half_life_bad_witness_trace : reflection:ProgramTrace {
-    reflection:resource  = decay:claim_short_half_life_bad_witness;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-04-01T10:00:00Z";
+resource decay:claim_short_half_life_bad_witness_trace : prov:ProgramTrace {
+    prov:resource  = decay:claim_short_half_life_bad_witness;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-04-01T10:00:00Z";
 }
 
 // ── §7.2 fixtures ───────────────────────────────────────────────────
@@ -120,8 +121,8 @@ data assay:HasLowReadout : core:string -> Prop, stats:PopulationLevel {
 // tight cluster around 50 (clearly < threshold), the without-exclusion
 // raw mean is inflated by the outliers (closer to the threshold).
 resource assay:noisy_readout_sampleset : stats:SampleSetResource {
-    reflection:source      = "assay-plate:noisy-2026-04-02";
-    reflection:observed_at = "2026-04-02T11:00:00Z";
+    prov:was_generated_by      = "assay-plate:noisy-2026-04-02";
+    prov:observed_at = "2026-04-02T11:00:00Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [48.0, 50.0, 49.5, 51.0, 50.5, 49.0, 50.0, 51.5, 49.0, 50.5,
@@ -130,10 +131,10 @@ resource assay:noisy_readout_sampleset : stats:SampleSetResource {
     );
 }
 
-resource assay:noisy_readout_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = assay:noisy_readout_sampleset;
-    reflection:source    = "assay-plate:noisy-2026-04-02";
-    reflection:timestamp = "2026-04-02T11:00:00Z";
+resource assay:noisy_readout_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = assay:noisy_readout_sampleset;
+    prov:was_generated_by    = "assay-plate:noisy-2026-04-02";
+    prov:timestamp = "2026-04-02T11:00:00Z";
 }
 
 resource assay:claim_low_readout_esd : stats:StatisticalAnalysisPlan {
@@ -150,10 +151,10 @@ resource assay:claim_low_readout_esd : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = ESD(3, 0.05);
 }
 
-resource assay:claim_low_readout_esd_trace : reflection:ProgramTrace {
-    reflection:resource  = assay:claim_low_readout_esd;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-04-02T11:00:00Z";
+resource assay:claim_low_readout_esd_trace : prov:ProgramTrace {
+    prov:resource  = assay:claim_low_readout_esd;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-04-02T11:00:00Z";
 }
 
 // ── §7.3 fixtures ───────────────────────────────────────────────────
@@ -166,8 +167,8 @@ data methods:MethodsAgree : core:string -> Prop, stats:PopulationLevel {
 // systematic bias) — the PB regression should find slope ≈ 1.0 and
 // intercept ≈ 0.0 with CIs containing 1.0 and 0.0 respectively.
 resource methods:concordance_sampleset : stats:SampleSetResource {
-    reflection:source      = "concordance-study:2026-04-03";
-    reflection:observed_at = "2026-04-03T12:00:00Z";
+    prov:was_generated_by      = "concordance-study:2026-04-03";
+    prov:observed_at = "2026-04-03T12:00:00Z";
 
     // Paired layout: [method_a_0, method_b_0, method_a_1, method_b_1, ...]
     stats:sample_set_value = stats:Paired(
@@ -178,10 +179,10 @@ resource methods:concordance_sampleset : stats:SampleSetResource {
     );
 }
 
-resource methods:concordance_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = methods:concordance_sampleset;
-    reflection:source    = "concordance-study:2026-04-03";
-    reflection:timestamp = "2026-04-03T12:00:00Z";
+resource methods:concordance_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = methods:concordance_sampleset;
+    prov:was_generated_by    = "concordance-study:2026-04-03";
+    prov:timestamp = "2026-04-03T12:00:00Z";
 }
 
 resource methods:claim_methods_agree : stats:MethodComparisonAnalysisPlan {
@@ -198,18 +199,18 @@ resource methods:claim_methods_agree : stats:MethodComparisonAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource methods:claim_methods_agree_trace : reflection:ProgramTrace {
-    reflection:resource  = methods:claim_methods_agree;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-04-03T12:00:00Z";
+resource methods:claim_methods_agree_trace : prov:ProgramTrace {
+    prov:resource  = methods:claim_methods_agree;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-04-03T12:00:00Z";
 }
 
 // Sibling MethodComparison claim where Method B has a clear 1.5×
 // proportional bias — the PB regression's slope CI should exclude
 // 1.0 and the verifier should report MethodComparisonDisagreement.
 resource methods:disagreement_sampleset : stats:SampleSetResource {
-    reflection:source      = "concordance-study:disagreeing-2026-04-04";
-    reflection:observed_at = "2026-04-04T13:00:00Z";
+    prov:was_generated_by      = "concordance-study:disagreeing-2026-04-04";
+    prov:observed_at = "2026-04-04T13:00:00Z";
 
     stats:sample_set_value = stats:Paired(
         [10.0, 15.0,  20.0, 30.0,  30.0, 45.0,  40.0, 60.0,
@@ -219,10 +220,10 @@ resource methods:disagreement_sampleset : stats:SampleSetResource {
     );
 }
 
-resource methods:disagreement_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = methods:disagreement_sampleset;
-    reflection:source    = "concordance-study:disagreeing-2026-04-04";
-    reflection:timestamp = "2026-04-04T13:00:00Z";
+resource methods:disagreement_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = methods:disagreement_sampleset;
+    prov:was_generated_by    = "concordance-study:disagreeing-2026-04-04";
+    prov:timestamp = "2026-04-04T13:00:00Z";
 }
 
 resource methods:claim_methods_disagree : stats:MethodComparisonAnalysisPlan {
@@ -239,8 +240,8 @@ resource methods:claim_methods_disagree : stats:MethodComparisonAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource methods:claim_methods_disagree_trace : reflection:ProgramTrace {
-    reflection:resource  = methods:claim_methods_disagree;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-04-04T13:00:00Z";
+resource methods:claim_methods_disagree_trace : prov:ProgramTrace {
+    prov:resource  = methods:claim_methods_disagree;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-04-04T13:00:00Z";
 }

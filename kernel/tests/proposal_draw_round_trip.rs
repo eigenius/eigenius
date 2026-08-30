@@ -73,10 +73,11 @@ fn encoding_chain() -> Arc<Layer> {
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],
     );
+    let prov = esl_layer("prov", include_str!("../../ontologies/prov/prov.esl"), refl);
     let logic = esl_layer(
         "logic",
         include_str!("../../ontologies/logic/logic.esl"),
-        refl,
+        prov,
     );
     let lexicon = esl_layer(
         "lexicon-schema",

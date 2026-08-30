@@ -59,7 +59,7 @@ fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// core → reflection(+eigentt, institution, ingest) → logic → lexicon-schema → reference —
+/// core → reflection(+eigentt, institution, ingest) → prov → logic → lexicon-schema → reference —
 /// the chain `ontologies/encoding/encoding.esl`'s header documents it loads after.
 fn parent_chain() -> Arc<Layer> {
     let core = json_layer(
@@ -77,10 +77,13 @@ fn parent_chain() -> Arc<Layer> {
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],
     );
+    // `prov` sits above reflection and below everything that names an agent, a
+    // trace or an attribution — which is most of the stack.
+    let prov = esl_layer("prov", include_str!("../../ontologies/prov/prov.esl"), refl);
     let logic = esl_layer(
         "logic",
         include_str!("../../ontologies/logic/logic.esl"),
-        refl,
+        prov,
     );
     let lexicon = esl_layer(
         "lexicon-schema",

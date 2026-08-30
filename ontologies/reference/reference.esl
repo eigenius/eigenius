@@ -54,7 +54,7 @@
 //       reference:cites                  = lit:buehler_2012;
 //       reference:citation_type          = reference:uses_method_in;
 //       reference:reference_label        = "16";   // the WRN paper's own [16]
-//       reflection:rationale             = "A C911 (seed-preserving, target-
+//       prov:rationale             = "A C911 (seed-preserving, target-
 //           disrupted) control isolates on-target from shRNA seed off-target.";
 //       reflection:canonical_proposition = type_expr( onco:SeedControlIsValid("C911") );
 //   }
@@ -66,6 +66,7 @@ namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
 namespace reference  = "urn:eigenius:reference";
+namespace prov       = "urn:eigenius:prov";
 
 // ── The bibliographic WORK (CSL-JSON / Dublin Core aligned) ──────────────
 //
@@ -169,14 +170,14 @@ resource reference:cites_as_authority : reference:CitationType {
 // justification:Declared on the Citation's IRI. (reference:cites is the
 // link to the cited work; declared_by records who asserted the Citation.)
 
-class reference:Citation : reflection:DeclaredResource {
+class reference:Citation {
     description = "A citation — one citing entity's use of a reference:Reference. Carries the cited work (reference:cites), the CiTO citation function (reference:citation_type), and the citing document's own in-text label (reference:reference_label). As a DeclaredResource it may carry an imported claim in reflection:canonical_proposition (then it is a 'literature warrant' a node can discharge via Declared); a Citation without one is pure provenance. All citing-doc-local data lives here, not on the global Reference.";
     requires reference:cites;
     recommends reference:citation_type, reference:reference_label;
 }
 
 property reference:cites : core:resource {
-    description = "The published Reference this Citation uses — the authoritative link to the cited work. Distinct from reflection:declared_by, which records who asserted this Citation, not what it cites.";
+    description = "The published Reference this Citation uses — the authoritative link to the cited work. Distinct from prov:was_attributed_to, which records who asserted this Citation, not what it cites.";
     class_types reference:Reference;
     domain reference:Citation;
 }

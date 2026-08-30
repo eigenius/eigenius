@@ -361,10 +361,6 @@ pub fn abbreviation_resources(
         p("urn:eigenius:lexicon:sense"),
         Value::String(format!("doc:{key}")),
     );
-    e.set(
-        p("urn:eigenius:lexicon:grade"),
-        Value::ResourceRef(p("urn:eigenius:reflection:epistemic:declared")),
-    );
 
     Some(vec![e])
 }

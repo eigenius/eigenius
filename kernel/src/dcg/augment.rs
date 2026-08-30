@@ -414,10 +414,6 @@ fn predicate_alias_resources(head: &Arc<Layer>, surface: &str, concept: &Iri) ->
             p("urn:eigenius:lexicon:sense"),
             Value::String(format!("doc:{key}")),
         );
-        e.set(
-            p("urn:eigenius:lexicon:grade"),
-            Value::ResourceRef(p("urn:eigenius:reflection:epistemic:declared")),
-        );
         return Some(e);
     }
     None

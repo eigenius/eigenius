@@ -198,7 +198,7 @@ echo "   the two demos). The choice is on the chain as an enc:DecisionPoint with
 python3 - "$HERE/claims-intact.esl" <<'PY'
 import re, sys, textwrap
 s = open(sys.argv[1]).read()
-m = re.search(r'resource \w+:decision_3 .*?reflection:rationale = "(.*?)";', s, re.S)
+m = re.search(r'resource \w+:decision_3 .*?prov:rationale = "(.*?)";', s, re.S)
 if m:
     # ESL string escapes only: \" and \n. (`unicode_escape` would mangle UTF-8 — it decodes
     # byte-wise, so an em dash comes back as mojibake.)
@@ -219,7 +219,7 @@ if not m:
 for line in m.group(1).strip().splitlines():
     line = line.strip().replace('\\"', '"')
     if line.startswith(("encoding:antecedent", "encoding:bound_by", "encoding:confidence",
-                        "reflection:rationale")):
+                        "prov:rationale")):
         print(textwrap.fill(line, 92, initial_indent="     ", subsequent_indent="       "))
 PY
 echo

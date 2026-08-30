@@ -28,8 +28,8 @@
 
 namespace core       = "urn:eigenius:core";
 namespace eigentt    = "urn:eigenius:eigentt";
-namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace objective  = "urn:eigenius:objective";
+namespace reference  = "urn:eigenius:reference";
 namespace obj        = "urn:eigenius:obj:d57:convert";
 
 // ── Content vocabulary: the converter's properties as typed Props ──────
@@ -134,10 +134,28 @@ resource obj:hyp_invariants_universal : objective:Hypothesis {
 // check (cq_no_domain) is NECESSARY, not SUFFICIENT; the warrant is the
 // cited conformance fact. D57 #9, the running example.
 // ════════════════════════════════════════════════════════════════════
+// The citation `objective:witness` names. It was the string
+// "urn:eigenius:obj:d57:cite:datamodel_conformance", which resolved to nothing —
+// a dangling reference the string typing hid. Resource-typing the property is
+// what surfaced it, which is the argument for the retype in one example.
+resource obj:ref_schema_org_datamodel : reference:Reference {
+    core:description = "schema.org's own data-model documentation, which states that domainIncludes / rangeIncludes are advisory rather than constraining.";
+    core:short_name  = "ref_schema_org_datamodel";
+}
+
+resource obj:cite_datamodel_conformance : reference:Citation {
+    reference:cites  = obj:ref_schema_org_datamodel;
+    core:description = "Cited for the open-world reading of schema.org's domain declarations.";
+    core:short_name  = "cite_datamodel_conformance";
+}
+
 resource obj:ax_domain_advisory : objective:Axiom {
     objective:proposition = type_expr( obj:PreservesOpenWorld("schema_org") );
-    objective:axiom_kind  = epistemic:declared;
-    objective:witness     = "urn:eigenius:obj:d57:cite:datamodel_conformance";
+    // `objective:axiom_kind = epistemic:declared` stood here. Which ground an
+    // Axiom rests on is which provenance trace it carries, so recording it again
+    // as a value let the two disagree with nothing checking that they did not.
+    // The witness is resource-typed now; it names the citation directly.
+    objective:witness     = obj:cite_datamodel_conformance;
 }
 resource obj:dp_open_world : objective:DesirableProperty {
     objective:proposition = type_expr( obj:PreservesOpenWorld("schema_org") );
@@ -164,7 +182,7 @@ resource obj:dec_domain_mapping : objective:DecisionPoint {
     objective:proposition = type_expr( obj:MapDomainToRecommends("schema_org") );
     objective:options     = [obj:opt_domain, obj:opt_recommends];
     objective:selected    = obj:opt_recommends;
-    objective:warrant     = [obj:dp_open_world, obj:cq_no_domain, obj:ax_domain_advisory];
+    objective:rests_on    = [obj:dp_open_world, obj:cq_no_domain, obj:ax_domain_advisory];
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -211,7 +229,10 @@ resource obj:cut_tier3 : objective:CutItem {
 // ════════════════════════════════════════════════════════════════════
 resource obj:m_convert_faithful : objective:Milestone {
     objective:proposition      = type_expr( obj:OutputValidates("schema_org") );
-    objective:acceptance_grade = epistemic:verified;
+    // `objective:acceptance_grade = epistemic:verified` stood here — a target
+    // point on a lattice that no longer exists. What it meant is a question about
+    // the discharging conclusion's justification term, which objective:satisfied_by
+    // names and `is_fully_verified` answers.
     objective:witness_kind     = objective:wk_query;
     objective:falsifier        = "any Tier-1 competency-question falsifier returns a non-expected result";
     objective:discovery_target = [obj:cq_validates, obj:cq_no_domain, obj:cq_enum_closed,

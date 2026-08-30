@@ -35,7 +35,6 @@ use eigenius_wordnet::wndb::Pos;
 // individuals.
 const DOMAIN: &str = r#"
 namespace core      = "urn:eigenius:core";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace lexicon   = "urn:eigenius:lexicon";
 
 class lexicon:Entity { description = "top of the demo entity hierarchy"; }
@@ -53,7 +52,6 @@ resource lexicon:e_affect : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affect;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:form     = "BRCA1";
@@ -61,7 +59,6 @@ resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:brca1";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_hela : lexicon:LexicalEntry {
     lexicon:form     = "HeLa";
@@ -69,7 +66,6 @@ resource lexicon:e_hela : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:CellLine );
     lexicon:sense    = "urn:eigenius:lexicon:hela";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 

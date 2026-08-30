@@ -128,11 +128,12 @@ fn esl_canonical_proposition(
     let bridge_source = r#"
 namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
+namespace prov = "urn:eigenius:prov";
 namespace stats      = "urn:eigenius:measurements";
 namespace probe      = "urn:eigenius:probe";
 
 resource probe:bridge_proposition : reflection:DeclaredResource {
-    reflection:declared_by = "probe:axiom-encoding";
+    prov:was_attributed_to = "probe:axiom-encoding";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(

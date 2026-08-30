@@ -83,8 +83,13 @@ fn convert_property_set_is_expressible() {
             include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ],
     );
+    let prov = esl_layer(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+        "prov",
+    );
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(reflection));
+        let mut b = LayerBuilder::new("reasoning", Some(prov));
         for r in esl::compile(include_str!(
             "../../../ontologies/justification/justification.esl"
         ))

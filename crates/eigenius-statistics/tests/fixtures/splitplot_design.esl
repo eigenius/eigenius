@@ -44,6 +44,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace tx         = "urn:eigenius:demo:tx";
+namespace prov       = "urn:eigenius:prov";
 
 // ─── Domain predicate ──────────────────────────────────────────────
 
@@ -56,8 +57,8 @@ data tx:TemperatureOrDrugEffectExists : core:string -> Prop, stats:PopulationLev
 // rows — 4 floats per row, 12 rows total = 48 floats.
 
 resource tx:incubator_split_2026_05_03 : stats:SampleSetResource {
-    reflection:source      = "instrument-log:incubator-runs-2026-05-03-splitplot";
-    reflection:observed_at = "2026-05-03T08:45:00Z";
+    prov:was_generated_by      = "instrument-log:incubator-runs-2026-05-03-splitplot";
+    prov:observed_at = "2026-05-03T08:45:00Z";
 
     stats:sample_set_value = stats:SplitPlot(
         2,    // a = whole-plot factor levels (temperatures)
@@ -87,10 +88,10 @@ resource tx:incubator_split_2026_05_03 : stats:SampleSetResource {
     );
 }
 
-resource tx:incubator_split_trace : reflection:ObservationTrace {
-    reflection:resource  = tx:incubator_split_2026_05_03;
-    reflection:source    = "instrument-log:incubator-runs-2026-05-03-splitplot";
-    reflection:timestamp = "2026-05-03T08:45:00Z";
+resource tx:incubator_split_trace : prov:ObservationTrace {
+    prov:resource  = tx:incubator_split_2026_05_03;
+    prov:was_generated_by    = "instrument-log:incubator-runs-2026-05-03-splitplot";
+    prov:timestamp = "2026-05-03T08:45:00Z";
 }
 
 // ─── The split-plot StatisticalAnalysisPlan ──────────────────────────────
@@ -109,8 +110,8 @@ resource tx:claim_effect_exists : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource tx:claim_effect_exists_trace : reflection:ProgramTrace {
-    reflection:resource  = tx:claim_effect_exists;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-05-03T08:45:00Z";
+resource tx:claim_effect_exists_trace : prov:ProgramTrace {
+    prov:resource  = tx:claim_effect_exists;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-05-03T08:45:00Z";
 }

@@ -46,7 +46,7 @@
 //! curator-asserted scientific knowledge — declared, not derived.
 //! Every Resource the converter emits is tagged
 //! `is_a: [..., urn:eigenius:reflection:DeclaredResource]` and
-//! carries `urn:eigenius:reflection:declared_by` pointing at the
+//! carries `urn:eigenius:prov:was_attributed_to` pointing at the
 //! source graph IRI (or a CLI-supplied override). This satisfies
 //! the DeclaredResource `requires` slot and makes provenance-aware
 //! EigenQL queries (filter by `declared_by`, exclude derived
@@ -140,7 +140,7 @@ const STRING_DATA_TYPE: &str = "urn:eigenius:core:string";
 const RESOURCE_DATA_TYPE: &str = "urn:eigenius:core:resource";
 
 const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
-const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
+const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 
 /// Declared-by attribution for converter-synthesised Property
 /// declarations. Distinct from the source-graph attribution used
@@ -148,8 +148,8 @@ const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 /// auditors can tell "this Property was inferred by the importer"
 /// apart from "this Property was declared by the source curators."
 const CONVERTER_DECLARED_BY: &str = "urn:obo:converter:eigenius-obograph";
-const ORGANIZATION: &str = "urn:eigenius:reflection:Organization";
-const UNATTRIBUTED: &str = "urn:eigenius:reflection:agent:unattributed";
+const ORGANIZATION: &str = "urn:eigenius:prov:Organization";
+const UNATTRIBUTED: &str = "urn:eigenius:prov:agent:unattributed";
 
 /// HTTP IRI rewriting prefixes — paired (input, output).
 const OBO_HTTP_PREFIX: &str = "http://purl.obolibrary.org/obo/";
@@ -368,7 +368,7 @@ fn declarer_ref(value: &str) -> Value {
     }
 }
 
-/// One `reflection:Organization` per distinct `declared_by` value seen in this run.
+/// One `prov:Organization` per distinct `declared_by` value seen in this run.
 ///
 /// MODELLING NOTE, stated rather than hidden: an OBO `declared_by` is usually the
 /// source graph's IRI (`http://purl.obolibrary.org/obo/go.owl`), which names the

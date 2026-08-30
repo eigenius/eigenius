@@ -30,9 +30,10 @@ namespace formats       = "urn:eigenius:core:formats";
 namespace reflection    = "urn:eigenius:reflection";
 namespace reasoning     = "urn:eigenius:reasoning";
 namespace screen        = "urn:eigenius:demo:screen";
-namespace agent         = "urn:eigenius:reflection:agent";
+namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
 
 // ─── Step 1: domain vocabulary (same as drug_screening.esl) ─────────
 
@@ -49,9 +50,9 @@ data screen:StrongInhibitor : core:string -> Prop {
 // StrongInhibitor(c)` — a Pi over `core:string` with a Prop body.
 
 resource screen:rule_strong : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_literature_smith_et_al_2024_3_2;
-    reflection:rationale   = "Universal: any compound with HasLowIC50 is a StrongInhibitor at that target.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
+    prov:rationale   = "Universal: any compound with HasLowIC50 is a StrongInhibitor at that target.";
 
     reflection:canonical_proposition = type_expr(
         forall (c : core:string) =>
@@ -59,28 +60,28 @@ resource screen:rule_strong : reflection:DeclaredResource {
     );
 }
 
-resource screen:rule_strong_trace : reflection:DeclarationTrace {
-    reflection:resource    = screen:rule_strong;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_literature_smith_et_al_2024_3_2;
-    reflection:timestamp   = "2026-04-10T09:00:00Z";
+resource screen:rule_strong_trace : prov:DeclarationTrace {
+    prov:resource    = screen:rule_strong;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
+    prov:timestamp   = "2026-04-10T09:00:00Z";
 }
 
 // ─── Step 3: bench observation + trace (unchanged in shape) ────────
 
 resource screen:m_eig0291 : reflection:ObservedResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-    reflection:observed_at = "2026-03-04T14:22:11Z";
+    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:observed_at = "2026-03-04T14:22:11Z";
 
     reflection:canonical_proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
 }
 
-resource screen:m_eig0291_trace : reflection:ObservationTrace {
-    reflection:resource  = screen:m_eig0291;
-    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-    reflection:timestamp = "2026-03-04T14:22:11Z";
+resource screen:m_eig0291_trace : prov:ObservationTrace {
+    prov:resource  = screen:m_eig0291;
+    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:timestamp = "2026-03-04T14:22:11Z";
 }
 
 // ─── Step 4: justification:Conclusion with universal-rule specialisation ──
@@ -166,7 +167,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
 resource screen:warrant_literature_smith_et_al_2024_3_2 : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `literature:smith_et_al_2024_3.2`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_literature_smith_et_al_2024_3_2";
 }

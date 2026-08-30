@@ -194,7 +194,7 @@ pub fn do_validate_justification(
     })
 }
 
-/// The `reflection:VerificationTrace` a passing `ValidateJustification` mints.
+/// The `prov:VerificationTrace` a passing `ValidateJustification` mints.
 ///
 /// `proof_system` is the kernel itself, which is what distinguishes this from a Lean / Coq / Agda
 /// trace — the two are the same kind of artifact by different verifiers, so they are one class and

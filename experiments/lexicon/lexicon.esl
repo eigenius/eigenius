@@ -97,7 +97,6 @@ resource lexicon:e_cell_line : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:CellLine;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:cell_line.n.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (1c) a MASS noun — `cat_n(Instability, mass)`. Used BARE as an argument ("instability affects
@@ -109,7 +108,6 @@ resource lexicon:e_instability : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Instability;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:instability.n.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (1b) a second common noun — the modifier of an N-N kind compound (D63 §8.13 6-mod):
@@ -120,7 +118,6 @@ resource lexicon:e_gene : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Gene;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:gene.n.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (2) named entity → a WITNESS, referenced by IRI.
@@ -131,7 +128,6 @@ resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:brca1";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (2b) a second named entity (a CellLine) — the subject NP for the parser's
@@ -142,7 +138,6 @@ resource lexicon:e_hela : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:CellLine );
     lexicon:sense    = "urn:eigenius:lexicon:hela";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (3) transitive verb → a PREDICATE (EigonAxiom), category `(S\NP)/NP`,
@@ -153,7 +148,6 @@ resource lexicon:e_depends_on : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:depends_on;
     lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:depend.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (4) adjective → a PREDICATE (EigonAxiom), **predicative** form, the adjectival
@@ -169,7 +163,6 @@ resource lexicon:e_primary : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:is_primary;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:primary.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (4b) a GRADABLE adjective — degree semantics (D63 §8.12 Slice 6-cmp). Unlike the
@@ -201,7 +194,6 @@ resource lexicon:e_large : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:large_pos_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:large.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 // comparative "larger": (S[adj]\NP)/cat_pp_than, λy.λx. gt(deg_large(x), deg_large(y)).
 resource lexicon:e_larger : lexicon:LexicalEntry {
@@ -210,7 +202,6 @@ resource lexicon:e_larger : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:larger_cmp_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:large.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 // ATTRIBUTIVE / elided-`than` comparative "larger": a BARE predicative `S[adj]\NP` whose comparison
 // STANDARD is an anaphoric hole (`lexicon:anaphor`), not the positive's absolute `std_large`. This is
@@ -232,7 +223,6 @@ resource lexicon:e_larger_attrib : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:larger_attrib_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:large.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // ── PHRASAL comparative (D63 §8.12, d63-comparative-phrasal.md) — the comparative QUANTIFIER over a
@@ -252,7 +242,6 @@ resource lexicon:e_dependence : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:deg_dependent;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependence.n.01";
-    lexicon:grade    = epistemic:declared;
 }
 // The comparative OPERATORS (`greater`/`less`/`more`/`fewer` + the `card` functor) are CLOSED-CLASS →
 // they live in the bootstrap (`ontologies/lexicon/closed-class.esl`, moved in B1). This demo lexicon keeps
@@ -269,7 +258,6 @@ resource lexicon:e_dependent_adj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:deg_dependent;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependent.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 // A second named gene, so the comparative subject/ground/standard can be three distinct entities.
 resource lexicon:msh2 : lexicon:Gene {
@@ -281,7 +269,6 @@ resource lexicon:e_msh2 : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:msh2;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:msh2";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (5) a GENERAL transitive verb typed at the supertype. ⟦cat⟧ = Entity → Entity
@@ -295,7 +282,6 @@ resource lexicon:e_affects : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (5b) the PLURAL-finite form of the general verb — same surface as the base ("affect")
@@ -309,7 +295,6 @@ resource lexicon:e_affect_pl : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (5c) a CLAUSE-TAKING (report) verb — category `(S\NP)/CP`, an opaque attitude axiom
@@ -324,7 +309,6 @@ resource lexicon:e_shows : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:shows;
     lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:show.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_show_pl : lexicon:LexicalEntry {
     lexicon:form     = "show";
@@ -332,7 +316,6 @@ resource lexicon:e_show_pl : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:shows;
     lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:show.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (6) a COLLECTIVE verb — category `S\Group(Entity)`: it takes a coordinated NP
@@ -346,7 +329,6 @@ resource lexicon:e_form_complex : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:forms_complex;
     lexicon:sem_type = type_expr( core:List(lexicon:Entity) -> Prop );
     lexicon:sense    = "wn:form.v.04";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (7) the BASE form of the general verb (`Fin = bse`) — the form an auxiliary
@@ -360,7 +342,6 @@ resource lexicon:e_affect_bse : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (7b/7c) the PARTICIPLE forms of the general verb — `Fin = ger` (present participle,
@@ -375,7 +356,6 @@ resource lexicon:e_affect_ger : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_affect_pss : lexicon:LexicalEntry {
     lexicon:form     = "affected";
@@ -383,7 +363,6 @@ resource lexicon:e_affect_pss : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 // (8b) the finite SIMPLE PAST form ("affected") — `Fin = fin` (a finite declarative root) with a
 //      `num_any` subject (English past tense has no number agreement: "HeLa/genes affected …").
@@ -396,7 +375,6 @@ resource lexicon:e_affect_fin_past : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (8) an INTRANSITIVE verb — category `S\NP` (no object), `Entity → Prop`. Its present
@@ -409,7 +387,6 @@ resource lexicon:e_arises : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:arises;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:arise.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_arising : lexicon:LexicalEntry {
     lexicon:form     = "arising";
@@ -417,7 +394,6 @@ resource lexicon:e_arising : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:arises;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:arise.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // (9) a LIGHT-VERB / MULTIWORD verb (D62 §2 #7) — "give rise to" is a 3-token transitive verb
@@ -433,7 +409,6 @@ resource lexicon:e_gives_rise_to : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:give_rise_to;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:give_rise_to.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_give_rise_to : lexicon:LexicalEntry {
     lexicon:form     = "give rise to";
@@ -441,7 +416,6 @@ resource lexicon:e_give_rise_to : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:give_rise_to;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:give_rise_to.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_gave_rise_to : lexicon:LexicalEntry {
     lexicon:form     = "gave rise to";
@@ -449,7 +423,6 @@ resource lexicon:e_gave_rise_to : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:give_rise_to;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:give_rise_to.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 
 // ── A stored composed sentence (Expressible; the felicity FILTER itself is

@@ -39,7 +39,14 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
             refl.add_resource(r).unwrap();
         }
     }
-    let refl = Arc::new(refl.build(LayerStorage::in_memory()));
+    let refl_layer = Arc::new(refl.build(LayerStorage::in_memory()));
+
+    // `prov` — the provenance axis, above reflection.
+    let mut prov = LayerBuilder::new("prov", Some(refl_layer));
+    for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+        prov.add_resource(r).unwrap();
+    }
+    let refl = Arc::new(prov.build(LayerStorage::in_memory()));
 
     let mut rsn = LayerBuilder::new("reasoning", Some(refl));
     for r in esl::compile(include_str!(

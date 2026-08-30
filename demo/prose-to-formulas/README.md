@@ -84,7 +84,7 @@ and one rule **pinned from the literature**, not from this document:
 ```
 
 The parser turns each sentence into a closed, felicity-gated `Prop`, committed as an
-`enc:EncodedClaim` under a `reflection:DeclarationTrace` that mints `IsDeclaredAs claim_i P_i`. There is
+`enc:EncodedClaim` under a `prov:DeclarationTrace` that mints `IsDeclaredAs claim_i P_i`. There is
 no lift step: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon, so
 each parsed proposition already **is** a domain formula. Then the pinned rule is specialized at the
 model and applied to the measurement's claim, and the result is:
@@ -238,7 +238,7 @@ WitnessKey { category: Derived, iri: claim_iri, prop_hash: sha256(encode(P)) }
 
 `lookup_chain_witness` walks the layer and every ancestor
 ([`witness_index.rs`](../../kernel/src/layer/witness_index.rs)). The key is minted on the other side
-by the parser's `reflection:DeclarationTrace`: a trace whose `reflection:resource` points at the
+by the parser's `prov:DeclarationTrace`: a trace whose `prov:resource` points at the
 claim emits `IsDeclaredAs claim_iri P`, where `P` is the claim's own `canonical_proposition`.
 
 Declared, not Derived, since eigenius#201 (D73 §6). The parser establishes that the text parses to

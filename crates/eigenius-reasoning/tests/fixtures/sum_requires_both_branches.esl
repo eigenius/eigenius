@@ -18,9 +18,10 @@
 namespace core          = "urn:eigenius:core";
 namespace reflection    = "urn:eigenius:reflection";
 namespace screen        = "urn:eigenius:demo:screen";
-namespace agent         = "urn:eigenius:reflection:agent";
+namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
 
 data screen:StrongInhibitor : core:string -> Prop {
 }
@@ -31,41 +32,41 @@ data screen:StrongInhibitor : core:string -> Prop {
 // the conclusion, so losing one costs nothing.
 
 resource screen:warrant_two_source_agreement : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Two independent reviews reach the same designation for EIG_0291. Either supports it alone, which is what makes the pair a Sum rather than an App.";
     core:short_name = "warrant_two_source_agreement";
 }
 
 resource screen:review_a : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_two_source_agreement;
-    reflection:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
     reflection:canonical_proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 }
 
-resource screen:review_a_trace : reflection:DeclarationTrace {
-    reflection:resource     = screen:review_a;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_two_source_agreement;
-    reflection:timestamp    = "2026-04-10T09:00:00Z";
+resource screen:review_a_trace : prov:DeclarationTrace {
+    prov:resource     = screen:review_a;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
 }
 
 resource screen:review_b : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_two_source_agreement;
-    reflection:rationale    = "Second independent review reaches the same designation.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:rationale    = "Second independent review reaches the same designation.";
     reflection:canonical_proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 }
 
-resource screen:review_b_trace : reflection:DeclarationTrace {
-    reflection:resource     = screen:review_b;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_two_source_agreement;
-    reflection:timestamp    = "2026-04-11T09:00:00Z";
+resource screen:review_b_trace : prov:DeclarationTrace {
+    prov:resource     = screen:review_b;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:timestamp    = "2026-04-11T09:00:00Z";
 }
 
 // ─── The conclusion that SHOULD commit: both branches ground ───────

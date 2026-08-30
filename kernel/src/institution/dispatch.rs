@@ -332,10 +332,7 @@ pub fn build_verdict_resource(
     let mut r = Resource::new(verdict_iri);
     r.set(
         Iri::parse(wk::IS_A).expect("static IRI"),
-        Value::Array(vec![
-            Value::String(wk::VERDICT.to_string()),
-            Value::String(wk::DERIVED_RESOURCE.to_string()),
-        ]),
+        Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
     );
     r.set(
         Iri::parse(wk::CTOR_NAME).expect("static IRI"),
@@ -457,10 +454,9 @@ pub fn build_runtime_invocation_resource(
     let mut r = Resource::new(invocation_iri.clone());
     r.set(
         Iri::parse(wk::IS_A).expect("static IRI"),
-        Value::Array(vec![
-            Value::String("urn:eigenius:runtime:RuntimeInvocation".to_string()),
-            Value::String(wk::DERIVED_RESOURCE.to_string()),
-        ]),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:runtime:RuntimeInvocation".to_string(),
+        )]),
     );
     // Carry forward every property the substrate captured (language,
     // image_digest, started_at, completed_at, numerical_metadata,
@@ -540,9 +536,6 @@ pub fn finalize_emitted_derivation(
             _ => false,
         })
     };
-    if !has_class(&classes, wk::DERIVED_RESOURCE) {
-        classes.push(Value::String(wk::DERIVED_RESOURCE.to_string()));
-    }
     if !has_class(&classes, wk::INSTITUTION_EMITTED_DERIVATION) {
         classes.push(Value::String(
             wk::INSTITUTION_EMITTED_DERIVATION.to_string(),

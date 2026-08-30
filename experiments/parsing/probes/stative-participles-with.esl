@@ -19,7 +19,6 @@ resource wn:e_v00085626_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00085626_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:anoint.v.00085626";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -30,7 +29,6 @@ resource wn:e_v00085626_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00085626_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:inunct.v.00085626";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -41,7 +39,6 @@ resource wn:e_v00085626_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00085626_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:oil.v.00085626";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -52,7 +49,6 @@ resource wn:e_v00085626_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00085626_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:anele.v.00085626";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -63,7 +59,6 @@ resource wn:e_v00085626_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00085626_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:embrocate.v.00085626";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -76,7 +71,6 @@ resource wn:e_v00086320_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00086320_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:inject.v.00086320";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -87,7 +81,6 @@ resource wn:e_v00086320_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00086320_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:shoot.v.00086320";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -100,7 +93,6 @@ resource wn:e_v00089750_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00089750_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:infect.v.00089750";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -113,7 +105,6 @@ resource wn:e_v00162688_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00162688_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:replace.v.00162688";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -126,7 +117,6 @@ resource wn:e_v00171127_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00171127_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:modify.v.00171127";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -137,7 +127,6 @@ resource wn:e_v00171127_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00171127_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:qualify.v.00171127";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -150,7 +139,6 @@ resource wn:e_v00181875_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00181875_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:clutter.v.00181875";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -161,7 +149,6 @@ resource wn:e_v00181875_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00181875_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:clutter_up.v.00181875";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -174,7 +161,6 @@ resource wn:e_v00189511_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00189511_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:feed.v.00189511";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -185,7 +171,6 @@ resource wn:e_v00189511_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00189511_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:feed_in.v.00189511";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -198,7 +183,6 @@ resource wn:e_v00262703_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00262703_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:patch.v.00262703";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -209,7 +193,6 @@ resource wn:e_v00262703_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00262703_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:patch_up.v.00262703";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -222,7 +205,6 @@ resource wn:e_v00320681_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00320681_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:farce.v.00320681";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -233,7 +215,6 @@ resource wn:e_v00320681_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00320681_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:stuff.v.00320681";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -246,7 +227,6 @@ resource wn:e_v00321148_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00321148_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:stuff.v.00321148";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -259,7 +239,6 @@ resource wn:e_v00321486_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00321486_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pad.v.00321486";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -270,7 +249,6 @@ resource wn:e_v00321486_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00321486_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bolster.v.00321486";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -283,7 +261,6 @@ resource wn:e_v00452512_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00452512_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fill.v.00452512";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -294,7 +271,6 @@ resource wn:e_v00452512_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00452512_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fill_up.v.00452512";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -305,7 +281,6 @@ resource wn:e_v00452512_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00452512_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:make_full.v.00452512";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -318,7 +293,6 @@ resource wn:e_v00453554_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00453554_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:overfill.v.00453554";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -331,7 +305,6 @@ resource wn:e_v00453803_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00453803_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:replenish.v.00453803";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -342,7 +315,6 @@ resource wn:e_v00453803_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00453803_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:refill.v.00453803";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -353,7 +325,6 @@ resource wn:e_v00453803_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00453803_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fill_again.v.00453803";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -366,7 +337,6 @@ resource wn:e_v00485435_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00485435_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:cap_off.v.00485435";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -379,7 +349,6 @@ resource wn:e_v00498163_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00498163_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:imbrue.v.00498163";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -390,7 +359,6 @@ resource wn:e_v00498163_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00498163_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:drench.v.00498163";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -403,7 +371,6 @@ resource wn:e_v00656916_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00656916_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bracket.v.00656916";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -416,7 +383,6 @@ resource wn:e_v00691944_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00691944_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:identify.v.00691944";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -429,7 +395,6 @@ resource wn:e_v00713167_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:associate.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -440,7 +405,6 @@ resource wn:e_v00713167_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:tie_in.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -451,7 +415,6 @@ resource wn:e_v00713167_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:relate.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -462,7 +425,6 @@ resource wn:e_v00713167_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:link.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -473,7 +435,6 @@ resource wn:e_v00713167_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:colligate.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -484,7 +445,6 @@ resource wn:e_v00713167_rel_5_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:link_up.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -495,7 +455,6 @@ resource wn:e_v00713167_rel_6_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:connect.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -508,7 +467,6 @@ resource wn:e_v00714531_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00714531_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:identify.v.00714531";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -521,7 +479,6 @@ resource wn:e_v00714718_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00714718_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:free-associate.v.00714718";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -534,7 +491,6 @@ resource wn:e_v00718907_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00718907_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:greet.v.00718907";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -547,7 +503,6 @@ resource wn:e_v00727143_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00727143_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:credit.v.00727143";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -560,7 +515,6 @@ resource wn:e_v00748084_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00748084_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:stick.v.00748084";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -571,7 +525,6 @@ resource wn:e_v00748084_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00748084_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:sting.v.00748084";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -584,7 +537,6 @@ resource wn:e_v00750532_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00750532_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:charge.v.00750532";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -595,7 +547,6 @@ resource wn:e_v00750532_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00750532_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:saddle.v.00750532";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -606,7 +557,6 @@ resource wn:e_v00750532_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00750532_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:burden.v.00750532";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -619,7 +569,6 @@ resource wn:e_v00750842_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00750842_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:overburden.v.00750842";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -632,7 +581,6 @@ resource wn:e_v00751131_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00751131_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:overwhelm.v.00751131";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -643,7 +591,6 @@ resource wn:e_v00751131_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00751131_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:deluge.v.00751131";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -654,7 +601,6 @@ resource wn:e_v00751131_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00751131_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:flood_out.v.00751131";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -667,7 +613,6 @@ resource wn:e_v00842538_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00842538_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:blame.v.00842538";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -678,7 +623,6 @@ resource wn:e_v00842538_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00842538_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fault.v.00842538";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -691,7 +635,6 @@ resource wn:e_v00843468_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00843468_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:charge.v.00843468";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -702,7 +645,6 @@ resource wn:e_v00843468_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00843468_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:accuse.v.00843468";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -715,7 +657,6 @@ resource wn:e_v00844161_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00844161_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:tax.v.00844161";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -728,7 +669,6 @@ resource wn:e_v00869931_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00869931_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:charge.v.00869931";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -739,7 +679,6 @@ resource wn:e_v00869931_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00869931_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:lodge.v.00869931";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -750,7 +689,6 @@ resource wn:e_v00869931_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00869931_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:file.v.00869931";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -763,7 +701,6 @@ resource wn:e_v00871405_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00871405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:threaten.v.00871405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -776,7 +713,6 @@ resource wn:e_v00874175_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00874175_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:familiarize.v.00874175";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -787,7 +723,6 @@ resource wn:e_v00874175_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00874175_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:familiarise.v.00874175";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -798,7 +733,6 @@ resource wn:e_v00874175_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00874175_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:acquaint.v.00874175";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -811,7 +745,6 @@ resource wn:e_v00874714_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00874714_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:verse.v.00874714";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -824,7 +757,6 @@ resource wn:e_v00874867_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00874867_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:reacquaint.v.00874867";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -837,7 +769,6 @@ resource wn:e_v00956405_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:embroider.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -848,7 +779,6 @@ resource wn:e_v00956405_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pad.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -859,7 +789,6 @@ resource wn:e_v00956405_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:lard.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -870,7 +799,6 @@ resource wn:e_v00956405_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:embellish.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -881,7 +809,6 @@ resource wn:e_v00956405_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:aggrandize.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -892,7 +819,6 @@ resource wn:e_v00956405_rel_5_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:aggrandise.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -903,7 +829,6 @@ resource wn:e_v00956405_rel_6_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:blow_up.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -914,7 +839,6 @@ resource wn:e_v00956405_rel_7_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:dramatize.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -925,7 +849,6 @@ resource wn:e_v00956405_rel_8_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00956405_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:dramatise.v.00956405";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -938,7 +861,6 @@ resource wn:e_v01066433_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01066433_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:confront.v.01066433";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -949,7 +871,6 @@ resource wn:e_v01066433_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01066433_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:face.v.01066433";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -960,7 +881,6 @@ resource wn:e_v01066433_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01066433_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:present.v.01066433";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -973,7 +893,6 @@ resource wn:e_v01121320_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01121320_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pepper.v.01121320";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -984,7 +903,6 @@ resource wn:e_v01121320_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01121320_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pelt.v.01121320";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -997,7 +915,6 @@ resource wn:e_v01176232_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01176232_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:regale.v.01176232";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1008,7 +925,6 @@ resource wn:e_v01176232_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01176232_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:treat.v.01176232";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1021,7 +937,6 @@ resource wn:e_v01182709_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01182709_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:provide.v.01182709";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1032,7 +947,6 @@ resource wn:e_v01182709_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01182709_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:supply.v.01182709";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1043,7 +957,6 @@ resource wn:e_v01182709_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01182709_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:ply.v.01182709";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1054,7 +967,6 @@ resource wn:e_v01182709_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01182709_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:cater.v.01182709";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1067,7 +979,6 @@ resource wn:e_v01184453_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01184453_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:accommodate.v.01184453";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1080,7 +991,6 @@ resource wn:e_v01195201_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01195201_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:inject.v.01195201";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1093,7 +1003,6 @@ resource wn:e_v01203369_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01203369_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fix_up.v.01203369";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1106,7 +1015,6 @@ resource wn:e_v01233194_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01233194_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:dab.v.01233194";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1117,7 +1025,6 @@ resource wn:e_v01233194_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01233194_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:swab.v.01233194";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1128,7 +1035,6 @@ resource wn:e_v01233194_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01233194_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:swob.v.01233194";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1141,7 +1047,6 @@ resource wn:e_v01374020_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374020_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:spatter.v.01374020";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1152,7 +1057,6 @@ resource wn:e_v01374020_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374020_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:splatter.v.01374020";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1163,7 +1067,6 @@ resource wn:e_v01374020_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374020_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:plash.v.01374020";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1174,7 +1077,6 @@ resource wn:e_v01374020_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374020_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:splash.v.01374020";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1185,7 +1087,6 @@ resource wn:e_v01374020_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374020_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:splosh.v.01374020";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1196,7 +1097,6 @@ resource wn:e_v01374020_rel_5_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374020_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:swash.v.01374020";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1209,7 +1109,6 @@ resource wn:e_v01374767_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:sprinkle.v.01374767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1220,7 +1119,6 @@ resource wn:e_v01374767_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:splash.v.01374767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1231,7 +1129,6 @@ resource wn:e_v01374767_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01374767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:splosh.v.01374767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1244,7 +1141,6 @@ resource wn:e_v01375120_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01375120_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:salt.v.01375120";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1257,7 +1153,6 @@ resource wn:e_v01400044_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01400044_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:hit.v.01400044";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1270,7 +1165,6 @@ resource wn:e_v01401371_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01401371_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:conk.v.01401371";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1283,7 +1177,6 @@ resource wn:e_v01401955_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01401955_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:crack.v.01401955";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1296,7 +1189,6 @@ resource wn:e_v01438681_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01438681_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:serve.v.01438681";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1307,7 +1199,6 @@ resource wn:e_v01438681_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01438681_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:process.v.01438681";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1318,7 +1209,6 @@ resource wn:e_v01438681_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01438681_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:swear_out.v.01438681";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1331,7 +1221,6 @@ resource wn:e_v01482449_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01482449_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pack.v.01482449";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1344,7 +1233,6 @@ resource wn:e_v01484982_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01484982_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:lubricate.v.01484982";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1355,7 +1243,6 @@ resource wn:e_v01484982_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01484982_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:lube.v.01484982";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1368,7 +1255,6 @@ resource wn:e_v01487311_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01487311_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:burden.v.01487311";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1379,7 +1265,6 @@ resource wn:e_v01487311_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01487311_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:burthen.v.01487311";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1390,7 +1275,6 @@ resource wn:e_v01487311_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01487311_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:weight.v.01487311";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1401,7 +1285,6 @@ resource wn:e_v01487311_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01487311_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:weight_down.v.01487311";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1414,7 +1297,6 @@ resource wn:e_v01488956_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01488956_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:charge.v.01488956";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1427,7 +1309,6 @@ resource wn:e_v01489989_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01489989_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:load.v.01489989";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1438,7 +1319,6 @@ resource wn:e_v01489989_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01489989_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:lade.v.01489989";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1449,7 +1329,6 @@ resource wn:e_v01489989_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01489989_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:laden.v.01489989";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1460,7 +1339,6 @@ resource wn:e_v01489989_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01489989_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:load_up.v.01489989";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1473,7 +1351,6 @@ resource wn:e_v01490690_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01490690_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:reload.v.01490690";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1486,7 +1363,6 @@ resource wn:e_v01503952_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01503952_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:stack.v.01503952";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1499,7 +1375,6 @@ resource wn:e_v01507914_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01507914_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pelt.v.01507914";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1510,7 +1385,6 @@ resource wn:e_v01507914_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01507914_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bombard.v.01507914";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1523,7 +1397,6 @@ resource wn:e_v01524298_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524298_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:jam.v.01524298";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1534,7 +1407,6 @@ resource wn:e_v01524298_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524298_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:jampack.v.01524298";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1545,7 +1417,6 @@ resource wn:e_v01524298_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524298_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:ram.v.01524298";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1556,7 +1427,6 @@ resource wn:e_v01524298_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524298_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:chock_up.v.01524298";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1567,7 +1437,6 @@ resource wn:e_v01524298_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524298_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:cram.v.01524298";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1578,7 +1447,6 @@ resource wn:e_v01524298_rel_5_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524298_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:wad.v.01524298";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1591,7 +1459,6 @@ resource wn:e_v01524523_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524523_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:deluge.v.01524523";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1602,7 +1469,6 @@ resource wn:e_v01524523_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524523_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:flood.v.01524523";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1613,7 +1479,6 @@ resource wn:e_v01524523_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524523_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:inundate.v.01524523";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1624,7 +1489,6 @@ resource wn:e_v01524523_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524523_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:swamp.v.01524523";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1637,7 +1501,6 @@ resource wn:e_v01524871_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01524871_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:stuff.v.01524871";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1650,7 +1513,6 @@ resource wn:e_v01526956_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01526956_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pad.v.01526956";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1661,7 +1523,6 @@ resource wn:e_v01526956_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01526956_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fill_out.v.01526956";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1674,7 +1535,6 @@ resource wn:e_v01585523_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01585523_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:inject.v.01585523";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1685,7 +1545,6 @@ resource wn:e_v01585523_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01585523_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:shoot.v.01585523";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1698,7 +1557,6 @@ resource wn:e_v01588297_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01588297_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:rope_in.v.01588297";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1709,7 +1567,6 @@ resource wn:e_v01588297_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01588297_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:rope_off.v.01588297";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1720,7 +1577,6 @@ resource wn:e_v01588297_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01588297_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:cordon_off.v.01588297";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1733,7 +1589,6 @@ resource wn:e_v01588493_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01588493_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:tag.v.01588493";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1744,7 +1599,6 @@ resource wn:e_v01588493_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01588493_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:label.v.01588493";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1755,7 +1609,6 @@ resource wn:e_v01588493_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01588493_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:mark.v.01588493";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1768,7 +1621,6 @@ resource wn:e_v01590171_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01590171_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:patch.v.01590171";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1779,7 +1631,6 @@ resource wn:e_v01590171_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01590171_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:piece.v.01590171";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1792,7 +1643,6 @@ resource wn:e_v01612487_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01612487_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:drape.v.01612487";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1805,7 +1655,6 @@ resource wn:e_v01612660_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01612660_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:dust.v.01612660";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1818,7 +1667,6 @@ resource wn:e_v01612964_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01612964_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:plaster.v.01612964";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1829,7 +1677,6 @@ resource wn:e_v01612964_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01612964_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:beplaster.v.01612964";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1842,7 +1689,6 @@ resource wn:e_v01679980_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01679980_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:deck.v.01679980";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1853,7 +1699,6 @@ resource wn:e_v01679980_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01679980_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bedight.v.01679980";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1864,7 +1709,6 @@ resource wn:e_v01679980_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v01679980_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:bedeck.v.01679980";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1877,7 +1721,6 @@ resource wn:e_v02148788_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02148788_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:show.v.02148788";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1888,7 +1731,6 @@ resource wn:e_v02148788_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02148788_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:demo.v.02148788";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1899,7 +1741,6 @@ resource wn:e_v02148788_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02148788_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:exhibit.v.02148788";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1910,7 +1751,6 @@ resource wn:e_v02148788_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02148788_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:present.v.02148788";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1921,7 +1761,6 @@ resource wn:e_v02148788_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02148788_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:demonstrate.v.02148788";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1934,7 +1773,6 @@ resource wn:e_v02201268_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02201268_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:endow.v.02201268";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1945,7 +1783,6 @@ resource wn:e_v02201268_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02201268_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:dower.v.02201268";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1958,7 +1795,6 @@ resource wn:e_v02201521_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02201521_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:benefice.v.02201521";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1971,7 +1807,6 @@ resource wn:e_v02251743_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02251743_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pay.v.02251743";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1984,7 +1819,6 @@ resource wn:e_v02257767_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02257767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:substitute.v.02257767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -1995,7 +1829,6 @@ resource wn:e_v02257767_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02257767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:replace.v.02257767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2006,7 +1839,6 @@ resource wn:e_v02257767_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02257767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:interchange.v.02257767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2017,7 +1849,6 @@ resource wn:e_v02257767_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02257767_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:exchange.v.02257767";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2030,7 +1861,6 @@ resource wn:e_v02262752_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02262752_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:present.v.02262752";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2041,7 +1871,6 @@ resource wn:e_v02262752_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02262752_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:submit.v.02262752";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2054,7 +1883,6 @@ resource wn:e_v02263788_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02263788_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:heap.v.02263788";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2067,7 +1895,6 @@ resource wn:e_v02264752_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02264752_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:credit.v.02264752";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2080,7 +1907,6 @@ resource wn:e_v02265560_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02265560_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:debit.v.02265560";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2093,7 +1919,6 @@ resource wn:e_v02327200_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02327200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:supply.v.02327200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2104,7 +1929,6 @@ resource wn:e_v02327200_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02327200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:provide.v.02327200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2115,7 +1939,6 @@ resource wn:e_v02327200_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02327200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:render.v.02327200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2126,7 +1949,6 @@ resource wn:e_v02327200_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02327200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:furnish.v.02327200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2139,7 +1961,6 @@ resource wn:e_v02339413_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02339413_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:equip.v.02339413";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2150,7 +1971,6 @@ resource wn:e_v02339413_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02339413_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fit.v.02339413";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2161,7 +1981,6 @@ resource wn:e_v02339413_rel_1_1 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02339413_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fit.v.02339413";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2172,7 +1991,6 @@ resource wn:e_v02339413_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02339413_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fit_out.v.02339413";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2183,7 +2001,6 @@ resource wn:e_v02339413_rel_2_1 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02339413_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:fit_out.v.02339413";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2194,7 +2011,6 @@ resource wn:e_v02339413_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02339413_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:outfit.v.02339413";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2207,7 +2023,6 @@ resource wn:e_v02341200_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02341200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:kit_out.v.02341200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2218,7 +2033,6 @@ resource wn:e_v02341200_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02341200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:kit_up.v.02341200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2229,7 +2043,6 @@ resource wn:e_v02341200_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02341200_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:kit.v.02341200";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2242,7 +2055,6 @@ resource wn:e_v02341370_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02341370_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:appoint.v.02341370";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2255,7 +2067,6 @@ resource wn:e_v02341592_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02341592_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:refit.v.02341592";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2268,7 +2079,6 @@ resource wn:e_v02342132_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02342132_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:supplement.v.02342132";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2281,7 +2091,6 @@ resource wn:e_v02344381_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02344381_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:reward.v.02344381";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2292,7 +2101,6 @@ resource wn:e_v02344381_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02344381_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:repay.v.02344381";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2303,7 +2111,6 @@ resource wn:e_v02344381_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02344381_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:pay_back.v.02344381";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2316,7 +2123,6 @@ resource wn:e_v02356704_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02356704_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:flood.v.02356704";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2327,7 +2133,6 @@ resource wn:e_v02356704_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02356704_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:oversupply.v.02356704";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2338,7 +2143,6 @@ resource wn:e_v02356704_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02356704_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:glut.v.02356704";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2351,7 +2155,6 @@ resource wn:e_v02361329_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02361329_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:retrofit.v.02361329";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2364,7 +2167,6 @@ resource wn:e_v02363371_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02363371_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:enfeoff.v.02363371";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2377,7 +2179,6 @@ resource wn:e_v02386675_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02386675_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:invest.v.02386675";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2388,7 +2189,6 @@ resource wn:e_v02386675_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02386675_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:clothe.v.02386675";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2399,7 +2199,6 @@ resource wn:e_v02386675_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02386675_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:adorn.v.02386675";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2412,7 +2211,6 @@ resource wn:e_v02392600_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02392600_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:task.v.02392600";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2425,7 +2223,6 @@ resource wn:e_v02473981_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02473981_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:empower.v.02473981";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2436,7 +2233,6 @@ resource wn:e_v02473981_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02473981_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:authorise.v.02473981";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2447,7 +2243,6 @@ resource wn:e_v02473981_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02473981_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:authorize.v.02473981";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2460,7 +2255,6 @@ resource wn:e_v02474239_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02474239_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:endow.v.02474239";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2471,7 +2265,6 @@ resource wn:e_v02474239_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02474239_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:indue.v.02474239";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2482,7 +2275,6 @@ resource wn:e_v02474239_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02474239_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:gift.v.02474239";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2493,7 +2285,6 @@ resource wn:e_v02474239_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02474239_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:empower.v.02474239";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2504,7 +2295,6 @@ resource wn:e_v02474239_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02474239_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:invest.v.02474239";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2515,7 +2305,6 @@ resource wn:e_v02474239_rel_5_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02474239_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:endue.v.02474239";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2528,7 +2317,6 @@ resource wn:e_v02540670_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02540670_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:serve.v.02540670";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2539,7 +2327,6 @@ resource wn:e_v02540670_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02540670_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:attend_to.v.02540670";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2550,7 +2337,6 @@ resource wn:e_v02540670_rel_2_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02540670_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:wait_on.v.02540670";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2561,7 +2347,6 @@ resource wn:e_v02540670_rel_3_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02540670_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:attend.v.02540670";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2572,7 +2357,6 @@ resource wn:e_v02540670_rel_4_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02540670_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:assist.v.02540670";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2585,7 +2369,6 @@ resource wn:e_v02631163_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02631163_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:unite.v.02631163";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2596,7 +2379,6 @@ resource wn:e_v02631163_rel_1_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02631163_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:combine.v.02631163";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 
@@ -2609,7 +2391,6 @@ resource wn:e_v02718309_rel_0_0 : lexicon:LexicalEntry {
     lexicon:sem        = wn:v02718309_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:share.v.02718309";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }
 

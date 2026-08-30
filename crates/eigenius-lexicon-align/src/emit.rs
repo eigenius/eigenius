@@ -52,7 +52,6 @@ pub struct Rewrite {
     /// Everything else, passed through verbatim.
     pub form: String,
     pub sense: String,
-    pub grade: String,
     pub in_lexicon: String,
     pub sem_type: String,
 }
@@ -97,7 +96,6 @@ pub fn render(r: &Rewrite) -> String {
          \x20   lexicon:sem        = wn:n{off};\n\
          \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
          \x20   lexicon:sense      = \"{sense}\";\n\
-         \x20   lexicon:grade      = {grade};\n\
          \x20   lexicon:in_lexicon = {in_lexicon};\n\
          }}\n\n",
         form = esc(&r.form),
@@ -105,7 +103,6 @@ pub fn render(r: &Rewrite) -> String {
         num = r.num,
         sem_type = r.sem_type,
         sense = esc(&r.sense),
-        grade = r.grade,
         in_lexicon = r.in_lexicon,
     )
 }
@@ -142,7 +139,6 @@ mod tests {
             wn_offset: "00024720".into(),
             form: "State".into(),
             sense: "umls:C1442792".into(),
-            grade: "epistemic:declared".into(),
             in_lexicon: "lexicon:umls".into(),
             sem_type: "Set".into(),
         };
@@ -172,7 +168,6 @@ mod tests {
             wn_offset: "00024720".into(),
             form: "State".into(),
             sense: "umls:C1442792".into(),
-            grade: "epistemic:declared".into(),
             in_lexicon: "lexicon:umls".into(),
             sem_type: "Set".into(),
         };

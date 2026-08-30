@@ -46,13 +46,13 @@ kernel enforces. Never let a claim float ungraded.
 | Grade | Means | What it requires on chain | Witness |
 |---|---|---|---|
 | **Observed** | recorded from reality | `reflection:ObservedResource` + provenance (a pinned source / content hash) + an `ObservationTrace` | `IsObservedAs` |
-| **Declared** | asserted on authority/design | `reflection:DeclaredResource` + `reflection:rationale` + a `DeclarationTrace` | `IsDeclaredAs` |
+| **Declared** | asserted on authority/design | `reflection:DeclaredResource` + `prov:rationale` + a `DeclarationTrace` | `IsDeclaredAs` |
 | **Derived** | computed | a `DerivedResource` a program/institution emits, carrying `canonical_proposition`, under a `ProgramTrace` | `IsDerivedAs` |
 | **Verified** | kernel-checked reasoning | a `justification:Conclusion` whose judgement type-checks → `Holds` | `IsVerifiedAs` |
 
 Each of the first three witnesses is emitted by the per-layer witness index **from a
 trace resource** (`ObservationTrace` / `DeclarationTrace` / `ProgramTrace`) whose
-`reflection:resource` points at the target and whose target carries
+`prov:resource` points at the target and whose target carries
 `reflection:canonical_proposition` — so `observed(iri, P)` / `declared(iri, P)` /
 `derived(iri, P)` only resolve when that trace exists in an **ancestor layer** of the
 citing sentence (load emitters before consumers — the
@@ -178,9 +178,9 @@ resource lit:cite_smith : reference:Citation {
     reflection:canonical_proposition = type_expr( obj:KnownFact("x") );
     core:description = "what this work establishes that we build on";
 }
-resource lit:cite_smith_trace : reflection:DeclarationTrace {
-    reflection:resource = lit:cite_smith; reflection:declared_by = "lit:smith-2020";
-    reflection:timestamp = "<iso>";
+resource lit:cite_smith_trace : prov:DeclarationTrace {
+    prov:resource = lit:cite_smith; prov:was_attributed_to = "lit:smith-2020";
+    prov:timestamp = "<iso>";
 }
 ```
 An anchor is a *premise you are allowed to build on*. Everything else must be
@@ -199,7 +199,7 @@ cites it. Three shapes:
 
 - **Observed** — commit an `ObservedResource` (a pinned source, a content-hashed
   `ingest:PinnedExternalFile`) **plus an `ObservationTrace`** pointing at it
-  (`reflection:resource = <iri>`); the trace is what makes the witness index emit
+  (`prov:resource = <iri>`); the trace is what makes the witness index emit
   `IsObservedAs`, so `observed(iri, P)` resolves. Without the trace the resource
   loads but cannot be cited.
 - **Derived** — run a program / institution (see `eigenius` skill: `run`,

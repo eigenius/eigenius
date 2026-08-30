@@ -66,7 +66,14 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
             refl.add_resource(r).unwrap();
         }
     }
-    let refl = Arc::new(refl.build(LayerStorage::in_memory()));
+    let refl_layer = Arc::new(refl.build(LayerStorage::in_memory()));
+
+    // `prov` — the provenance axis, above reflection.
+    let mut prov = LayerBuilder::new("prov", Some(refl_layer));
+    for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+        prov.add_resource(r).unwrap();
+    }
+    let refl = Arc::new(prov.build(LayerStorage::in_memory()));
 
     let mut vocab = LayerBuilder::new("parse-vocabulary", Some(refl));
     for src in [
@@ -789,10 +796,20 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
     let mut claim = Resource::new(iri("urn:eigenius:demo:esl:claim"));
     claim.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+    );
+    // `core:Class` requires these two; the resource previously carried
+    // `reflection:DeclaredResource`, which required only an attribution.
+    claim.set(
+        iri("urn:eigenius:core:description"),
+        Value::String("A claim whose proposition uses an ESL-authored definition.".into()),
     );
     claim.set(
-        iri("urn:eigenius:reflection:declared_by"),
+        iri("urn:eigenius:core:short_name"),
+        Value::String("claim".into()),
+    );
+    claim.set(
+        iri("urn:eigenius:prov:was_attributed_to"),
         Value::String("test".into()),
     );
     claim.set(
@@ -835,10 +852,10 @@ fn definition_body_cannot_escape_checking_by_riding_on_another_class() {
     let mut smuggler = Resource::new(iri("urn:eigenius:demo:esl:smuggler"));
     smuggler.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
     );
     smuggler.set(
-        iri("urn:eigenius:reflection:declared_by"),
+        iri("urn:eigenius:prov:was_attributed_to"),
         Value::String("test".into()),
     );
     // A body that Rule 24 would reject (ill-typed), on a resource Rule 24 will never look at.
@@ -896,9 +913,10 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace logic    = "urn:eigenius:logic";
         namespace eigentt  = "urn:eigenius:eigentt";
         namespace reflection = "urn:eigenius:reflection";
+        namespace prov = "urn:eigenius:prov";
         namespace p = "urn:eigenius:demo:parse";
         resource p:claim : reflection:DeclaredResource {{
-            reflection:declared_by = "test";
+            prov:was_attributed_to = "test";
             reflection:canonical_proposition = type_expr(
                 {verb_axiom}(
                     eigentt:fst(ontology:the(
@@ -917,6 +935,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace logic    = "urn:eigenius:logic";
         namespace eigentt  = "urn:eigenius:eigentt";
         namespace reflection = "urn:eigenius:reflection";
+        namespace prov = "urn:eigenius:prov";
         namespace onco = "urn:eigenius:demo:onco";
         namespace d = "urn:eigenius:demo:def";
 
@@ -928,7 +947,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
                 ontology:kind_of(m));
 
         resource d:claim : reflection:DeclaredResource {{
-            reflection:declared_by = "test";
+            prov:was_attributed_to = "test";
             reflection:canonical_proposition = type_expr(
                 onco:{def_name}({MSI}, umlscui:C0388246)
             );

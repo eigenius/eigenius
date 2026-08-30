@@ -21,6 +21,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace dr         = "urn:eigenius:demo:dr";
+namespace prov       = "urn:eigenius:prov";
 
 // ─── Domain predicate ──────────────────────────────────────────────
 
@@ -52,8 +53,8 @@ data dr:DoseResponseExists : core:string -> Prop, stats:PopulationLevel {
 // flattened — 9 rows × 3 floats = 27 floats.
 
 resource dr:dose_response_2026_04_15 : stats:SampleSetResource {
-    reflection:source      = "instrument-log:dose-response-2026-04-15-RCBD";
-    reflection:observed_at = "2026-04-15T09:30:00Z";
+    prov:was_generated_by      = "instrument-log:dose-response-2026-04-15-RCBD";
+    prov:observed_at = "2026-04-15T09:30:00Z";
 
     stats:sample_set_value = stats:RCBD(
         3,    // n_blocks (cohorts)
@@ -76,10 +77,10 @@ resource dr:dose_response_2026_04_15 : stats:SampleSetResource {
     );
 }
 
-resource dr:dose_response_trace : reflection:ObservationTrace {
-    reflection:resource  = dr:dose_response_2026_04_15;
-    reflection:source    = "instrument-log:dose-response-2026-04-15-RCBD";
-    reflection:timestamp = "2026-04-15T09:30:00Z";
+resource dr:dose_response_trace : prov:ObservationTrace {
+    prov:resource  = dr:dose_response_2026_04_15;
+    prov:was_generated_by    = "instrument-log:dose-response-2026-04-15-RCBD";
+    prov:timestamp = "2026-04-15T09:30:00Z";
 }
 
 // ─── The RCBD StatisticalAnalysisPlan ─────────────────────────────────────
@@ -100,8 +101,8 @@ resource dr:claim_dose_response_exists : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource dr:claim_dose_response_exists_trace : reflection:ProgramTrace {
-    reflection:resource  = dr:claim_dose_response_exists;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-04-15T09:30:00Z";
+resource dr:claim_dose_response_exists_trace : prov:ProgramTrace {
+    prov:resource  = dr:claim_dose_response_exists;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-04-15T09:30:00Z";
 }

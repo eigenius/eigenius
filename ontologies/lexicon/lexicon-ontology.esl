@@ -22,6 +22,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";
+namespace prov       = "urn:eigenius:prov";
 
 // ── The entity top (D63 §8.3, decision ii) ────────────────────────────
 // The single foundational entity type — the universe a general predicate's
@@ -355,7 +356,7 @@ data lexicon:Cat : Type 1 {
 // ── The lexical-entry record ──────────────────────────────────────────
 class lexicon:LexicalEntry {
     description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, a grounding sense, and an epistemic grade. The unit the D62 bootstrap loop (§8) produces.";
-    requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type, lexicon:grade;
+    requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type;
     recommends lexicon:sense, lexicon:in_lexicon;
 }
 
@@ -421,13 +422,19 @@ property lexicon:scope_bearing : core:boolean {
     description = "The entry is a SCOPE-BEARING operator: applying it EMBEDS its argument under a connective and yields a new situation index, rather than decorating the argument's. Sentential negation, the modals, declarative do-support. Read once at seed time (dcg::lexicon::entry_to_item), which tags the leaf Combinator::ScopeOperator; the combinator then tags the operator's OUTPUT Combinator::Modal, and ProvGuard::LeftNotModal refuses a VP-adjunct that would attach ABOVE it — where it would land on the outer index and escape the operator's scope ('do not respond to X' must not mean 'do not respond, AND respond to X'). The distinction is core-en's: its Negation family (auxv.xsl, pos=V closed) is (s.1.from-6.E\\np)/(s.6.E2\\np), deriving a NEW index from its argument's, while its Adverb family (adv.xsl, pos=Adv) is s.1.E\\s.1.E with LF HasProp(E,P) — the SAME index, decorated. DECLARED rather than inferred from the category, because no category test separates negation over an adjectival VP from an adverb's adjective-modifier category: both are fwd(VP[adj], VP[adj]). Absent ⇒ false.";
     domain lexicon:LexicalEntry;
 }
-property lexicon:grade : core:resource {
-    description = "Epistemic grade of the entry — the SAME reflection:EpistemicStatus the rest of the stack uses (not a parallel enum). The §8 loop climbs Observed → Declared → Derived → Verified.";
-    class_types reflection:EpistemicStatus;
-    allows_only epistemic:observed, epistemic:declared,
-                epistemic:derived, epistemic:verified;
-    domain lexicon:LexicalEntry;
-}
+// `lexicon:grade` was here, and it was the clearest case in the tree of the
+// conflation this refactor removes — at the largest cardinality, 2,641,713
+// stamps on the converted chain, every one of them `epistemic:declared`.
+//
+// A lexical entry carries no proposition. Warrant asks what evidence exists for
+// a proposition, so asking what warrants a lexical entry is a category error
+// rather than an unanswered question, and the test is mechanical: does the
+// resource carry a proposition. The property therefore graded 2.6M resources on
+// an axis that does not apply to them, and the single value it ever took says so
+// — nothing ever climbed, because there was nothing to climb.
+//
+// What the stamp actually recorded is provenance: somebody asserted this entry.
+// That is `prov:was_attributed_to` on the entry, which the importers already set.
 
 // ── Lexicon identity (D65 §3) ─────────────────────────────────────────
 // A lexicon is a first-class Resource with a STABLE IRI (e.g. lexicon:wordnet),

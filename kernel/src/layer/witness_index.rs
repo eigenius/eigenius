@@ -70,7 +70,7 @@ const CONCLUSION_PROOF: &str = "urn:eigenius:justification:proof";
 ///   used to be `Derived` on its own IRI (D52); it now attests nothing, because a program's
 ///   output is not a ground — see `trace_category`.
 /// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
-///   `reflection:resource`. Reached through the triple index, since that property is
+///   `prov:resource`. Reached through the triple index, since that property is
 ///   `core:resource`-typed and therefore indexed.
 ///
 /// The target itself is resolved with [`Layer::resolve`] (a chain walk), because a trace committed
@@ -173,7 +173,7 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 /// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
 /// `VerifiedPropositionView`. That deferred the wrong half: the view is how a LEAN proof's
 /// proposition reaches the trace, not what makes a `VerificationTrace` admit a witness. The trace
-/// already names its target through `reflection:resource`, so `emit_from_trace` reads the target's
+/// already names its target through `prov:resource`, so `emit_from_trace` reads the target's
 /// `canonical_proposition` for it exactly as it does for the other three — nothing about the
 /// Verified category needs special handling here.
 ///
@@ -205,7 +205,7 @@ fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
     }
 }
 
-/// Visit each Trace resource **defined in this layer** whose `reflection:resource` is `target`,
+/// Visit each Trace resource **defined in this layer** whose `prov:resource` is `target`,
 /// returning `true` at the first one `f` accepts. Short-circuits; holds one resource at a time.
 ///
 /// **Only STORED layers can use the index.** `autoonload_dispatch` runs before `persist`, so the
@@ -445,7 +445,7 @@ pub fn default_asserts_proposition(
     ))
 }
 
-/// Read the `reflection:resource` property from a Trace resource and
+/// Read the `prov:resource` property from a Trace resource and
 /// parse it as an `Iri`. Returns `None` if the property is missing or
 /// malformed.
 fn resolve_target_iri(trace: &Resource) -> Option<Iri> {
@@ -564,7 +564,7 @@ mod tests {
         let mut r = Resource::new(iri(target_iri));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         let encoded = encode_type(prop).unwrap();
         r.set(iri(wk::CANONICAL_PROPOSITION), encoded);
@@ -645,7 +645,7 @@ mod tests {
         let mut bare = Resource::new(iri(target));
         bare.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         b.add_resource(bare).unwrap();
         b.add_resource(declaration_trace(
@@ -746,7 +746,7 @@ mod tests {
         let mut bare = Resource::new(iri(target));
         bare.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         user.add_resource(bare).unwrap();
         user.add_resource(declaration_trace(

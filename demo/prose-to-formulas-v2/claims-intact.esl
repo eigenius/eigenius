@@ -9,6 +9,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace umlscui = "urn:eigenius:umlscui";
 namespace v2 = "urn:eigenius:demo:v2";
 namespace wn = "urn:eigenius:wn";
+namespace prov       = "urn:eigenius:prov";
 
 resource v2:source : reference:Reference {
     core:description = "The source this encoding was derived from: demo/prose-to-formulas-v2/paragraph.txt (sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c). Minted document-locally — the file carries no DOI or PMID; pass an existing reference:Reference IRI to cite a bibliographic record instead.";
@@ -40,13 +41,13 @@ resource v2:claim_1 : encoding:EncodedClaim, encoding:Observation {
             )
         )
     );
-    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
 }
 
-resource v2:trace_1 : reflection:DeclarationTrace {
-    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
-    reflection:resource = "urn:eigenius:demo:v2:claim_1";
-    reflection:timestamp = "2026-08-03T00:00:00Z";
+resource v2:trace_1 : prov:DeclarationTrace {
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+    prov:resource = "urn:eigenius:demo:v2:claim_1";
+    prov:timestamp = "2026-08-03T00:00:00Z";
 }
 
 resource v2:decision_1 : encoding:DecisionPoint {
@@ -55,7 +56,7 @@ resource v2:decision_1 : encoding:DecisionPoint {
     encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))", "§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_1";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence states that MSI cancer models \"had\" (possessed/required) the exonuclease activity of WRN, where WRN refers to the protein (which actually carries out the exonuclease activity, as described in C0388246), and \"had\" in the sense of possessing/depending on that activity (v02203362), making reading [0] the best fit.";
+    prov:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence states that MSI cancer models \"had\" (possessed/required) the exonuclease activity of WRN, where WRN refers to the protein (which actually carries out the exonuclease activity, as described in C0388246), and \"had\" in the sense of possessing/depending on that activity (v02203362), making reading [0] the best fit.";
 }
 
 resource v2:unit_2 : encoding:DiscourseUnit {
@@ -84,13 +85,13 @@ resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
             )
         )
     );
-    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
 }
 
-resource v2:trace_2 : reflection:DeclarationTrace {
-    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
-    reflection:resource = "urn:eigenius:demo:v2:claim_2";
-    reflection:timestamp = "2026-08-03T00:00:00Z";
+resource v2:trace_2 : prov:DeclarationTrace {
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+    prov:resource = "urn:eigenius:demo:v2:claim_2";
+    prov:timestamp = "2026-08-03T00:00:00Z";
 }
 
 resource v2:decision_2 : encoding:DecisionPoint {
@@ -99,7 +100,7 @@ resource v2:decision_2 : encoding:DecisionPoint {
     encoding:runner_up_skeletons = ["§(the(ΣG#0:§. prep_of(G#0, §)).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_2";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: Consistent with sentence 0 which used \"WRN protein, human\" [C0388246], and the document refers to WRN as a protein entity (exonuclease and helicase activities are properties of the WRN protein), reading [0] correctly identifies WRN as the protein rather than the gene.";
+    prov:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: Consistent with sentence 0 which used \"WRN protein, human\" [C0388246], and the document refers to WRN as a protein entity (exonuclease and helicase activities are properties of the WRN protein), reading [0] correctly identifies WRN as the protein rather than the gene.";
 }
 
 resource v2:unit_3 : encoding:DiscourseUnit {
@@ -133,13 +134,13 @@ resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
             v2:claim_2
         )
     );
-    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
 }
 
-resource v2:trace_3 : reflection:DeclarationTrace {
-    reflection:declared_by = "urn:eigenius:reflection:agent:unattributed";
-    reflection:resource = "urn:eigenius:demo:v2:claim_3";
-    reflection:timestamp = "2026-08-03T00:00:00Z";
+resource v2:trace_3 : prov:DeclarationTrace {
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+    prov:resource = "urn:eigenius:demo:v2:claim_3";
+    prov:timestamp = "2026-08-03T00:00:00Z";
 }
 
 resource v2:decision_3 : encoding:DecisionPoint {
@@ -148,7 +149,7 @@ resource v2:decision_3 : encoding:DecisionPoint {
     encoding:runner_up_skeletons = ["§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)", "§(is_a(§, ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2)"];
     encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
     encoding:selected_claim = "urn:eigenius:demo:v2:claim_3";
-    reflection:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence uses \"show\" in the sense of \"provide evidence for\" (v01015244), consistent with the empirical findings context; \"WRN\" refers to the protein (C0388246) as established in sentences 0 and 1; and \"vulnerability\" best fits n05042871 (\"susceptibility to injury or attack\"), meaning MSI cancer models are susceptible when WRN is targeted.";
+    prov:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence uses \"show\" in the sense of \"provide evidence for\" (v01015244), consistent with the empirical findings context; \"WRN\" refers to the protein (C0388246) as established in sentences 0 and 1; and \"vulnerability\" best fits n05042871 (\"susceptibility to injury or attack\"), meaning MSI cancer models are susceptible when WRN is targeted.";
 }
 
 resource v2:binding_3_0 : encoding:AnaphorBinding {
@@ -158,13 +159,13 @@ resource v2:binding_3_0 : encoding:AnaphorBinding {
     encoding:bound_by = "urn:eigenius:encoding:binding_replay";
     encoding:confidence = 0.85;
     encoding:hole_var = "$demref$0_0";
-    reflection:rationale = "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim from sentence 1), it is the top-ranked antecedent, with the understanding that it collectively represents the set of findings established in the discourse.";
+    prov:rationale = "\"These findings\" is a plural anaphor referring to both prior claims (sentences 0 and 1), but since only one candidate is available (the most recent claim from sentence 1), it is the top-ranked antecedent, with the understanding that it collectively represents the set of findings established in the discourse.";
 }
 
-resource v2:run_trace : reflection:ProgramTrace {
-    reflection:resource = "urn:eigenius:demo:v2:structure";
-    reflection:source = "eigenius-encoding prose-to-eigon: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (source sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c)";
-    reflection:timestamp = "2026-08-03T00:00:00Z";
+resource v2:run_trace : prov:ProgramTrace {
+    prov:resource = "urn:eigenius:demo:v2:structure";
+    prov:was_generated_by = "eigenius-encoding prose-to-eigon: DCG parse (D63) of demo/prose-to-formulas-v2/paragraph.txt (source sha256 0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c)";
+    prov:timestamp = "2026-08-03T00:00:00Z";
 }
 
 resource v2:structure : encoding:ReasoningStructure {
@@ -173,5 +174,5 @@ resource v2:structure : encoding:ReasoningStructure {
     encoding:document = "urn:eigenius:demo:v2:source";
     encoding:source_path = "demo/prose-to-formulas-v2/paragraph.txt";
     encoding:source_sha256 = "0a383eaba0ca6c2530024b6ea3b4eb25d9ee102699e96036813737853ec8488c";
-    reflection:derivation = "urn:eigenius:demo:v2:run_trace";
+    prov:derivation = "urn:eigenius:demo:v2:run_trace";
 }

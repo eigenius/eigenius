@@ -56,6 +56,5 @@ resource wn:e_v00713167_rel_associated : lexicon:LexicalEntry {
     lexicon:sem        = wn:v00713167_rel;
     lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense      = "wn:associate.v.00713167";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:wordnet;
 }

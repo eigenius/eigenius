@@ -29,6 +29,7 @@ namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace pk         = "urn:eigenius:demo:pk";
+namespace prov       = "urn:eigenius:prov";
 
 // ─── Domain predicate ──────────────────────────────────────────────
 
@@ -38,8 +39,8 @@ data pk:DrugClearanceOverTime : core:string -> Prop, stats:PopulationLevel {
 // ─── SampleSet: 5 patients × 4 timepoints ─────────────────────────
 
 resource pk:clearance_study_2026_05_15 : stats:SampleSetResource {
-    reflection:source      = "clinical-trial-record:pk-clearance-2026-05-15";
-    reflection:observed_at = "2026-05-15T08:00:00Z";
+    prov:was_generated_by      = "clinical-trial-record:pk-clearance-2026-05-15";
+    prov:observed_at = "2026-05-15T08:00:00Z";
 
     stats:sample_set_value = stats:RepeatedMeasures(
         5,    // n_subjects
@@ -77,10 +78,10 @@ resource pk:clearance_study_2026_05_15 : stats:SampleSetResource {
     );
 }
 
-resource pk:clearance_study_trace : reflection:ObservationTrace {
-    reflection:resource  = pk:clearance_study_2026_05_15;
-    reflection:source    = "clinical-trial-record:pk-clearance-2026-05-15";
-    reflection:timestamp = "2026-05-15T08:00:00Z";
+resource pk:clearance_study_trace : prov:ObservationTrace {
+    prov:resource  = pk:clearance_study_2026_05_15;
+    prov:was_generated_by    = "clinical-trial-record:pk-clearance-2026-05-15";
+    prov:timestamp = "2026-05-15T08:00:00Z";
 }
 
 // ─── The repeated-measures StatisticalAnalysisPlan ────────────────────────
@@ -105,8 +106,8 @@ resource pk:claim_drug_clears_over_time : stats:StatisticalAnalysisPlan {
     stats:autocorrelation_structure = CompoundSymmetry();
 }
 
-resource pk:claim_drug_clears_over_time_trace : reflection:ProgramTrace {
-    reflection:resource  = pk:claim_drug_clears_over_time;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-05-15T08:00:00Z";
+resource pk:claim_drug_clears_over_time_trace : prov:ProgramTrace {
+    prov:resource  = pk:claim_drug_clears_over_time;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-05-15T08:00:00Z";
 }

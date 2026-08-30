@@ -219,7 +219,6 @@ fn push_entries(buf: &mut String, g: &GeneInfo, rep: &mut Report) {
              \x20   lexicon:sem        = ncbigene:g{id};\n\
              \x20   lexicon:sem_type   = type_expr( ncbi:Gene );\n\
              \x20   lexicon:sense      = \"ncbigene:{id}\";\n\
-             \x20   lexicon:grade      = epistemic:declared;\n\
              \x20   lexicon:in_lexicon = lexicon:ncbi_gene;\n\
              }}\n\n",
             id = g.gene_id,

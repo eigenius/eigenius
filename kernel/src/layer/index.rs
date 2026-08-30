@@ -1565,7 +1565,7 @@ mod mentions_tests {
         let mut holder = Resource::new(iri("urn:eigenius:test:holder"));
         holder.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
         );
         holder.set(iri("urn:eigenius:test:tx"), Value::Json(term));
         b.add_resource(holder).unwrap();

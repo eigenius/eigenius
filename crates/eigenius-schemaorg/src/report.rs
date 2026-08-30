@@ -38,7 +38,7 @@ pub const RESULT_IRI: &str = "urn:eigenius:obj:d57:generate_result";
 
 const IS_A: &str = "urn:eigenius:core:is_a";
 const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
-const SOURCE: &str = "urn:eigenius:reflection:source";
+const SOURCE: &str = "urn:eigenius:prov:was_generated_by";
 const OUTPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:output_content_hash";
 const INPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:input_content_hash";
 const COVERAGE: &str = "urn:eigenius:obj:d57:coverage";

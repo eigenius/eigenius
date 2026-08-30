@@ -21,8 +21,8 @@
 //! ## A parsed claim is a 2-resource cluster
 //!
 //! 1. the **`enc:EncodedClaim`** — `reflection:canonical_proposition = P` plus
-//!    `reflection:declared_by`, the agent taking responsibility for `P`;
-//! 2. its **`reflection:DeclarationTrace`** — which mints `IsDeclaredAs(claim_iri, P)` into the
+//!    `prov:was_attributed_to`, the agent taking responsibility for `P`;
+//! 2. its **`prov:DeclarationTrace`** — which mints `IsDeclaredAs(claim_iri, P)` into the
 //!    witness index at commit.
 //!
 //! Parsed sentences land **Declared**, by the agent or the source document's authors (D73 §6): the
@@ -41,77 +41,51 @@ use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
 
-const REFLECTION_DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
+const REFLECTION_DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 /// The bootstrap agent meaning "no agent was recorded" (D72 §3.1) — a real, resolvable
 /// resource, unlike the literals that used to sit in this slot.
-pub const UNATTRIBUTED_AGENT: &str = "urn:eigenius:reflection:agent:unattributed";
-const REFLECTION_TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
+pub const UNATTRIBUTED_AGENT: &str = "urn:eigenius:prov:agent:unattributed";
+const REFLECTION_TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
 /// `urn:eigenius:encoding:EncodedClaim` — the Derived cluster's claim class (D67 §1).
 const ENCODED_CLAIM_CLASS: &str = "urn:eigenius:encoding:EncodedClaim";
-/// `urn:eigenius:reflection:DeclarationTrace` — the trace that mints `IsDeclaredAs`. Parsed claims
+/// `urn:eigenius:prov:DeclarationTrace` — the trace that mints `IsDeclaredAs`. Parsed claims
 /// land through this since eigenius#201 / D73 §6; it was a `ProgramTrace` minting `IsDerivedAs`
 /// until `2026-08-21`. A `ProgramTrace` now mints nothing at all, so the move anticipated by
 /// several months what the three grounds made general.
 const DECLARATION_TRACE_CLASS: &str = wk::DECLARATION_TRACE;
 
-/// The epistemic grade of a claim. A **structural projection** of the `justification:Term` constructor
-/// (D39) — not a stored field. `Declared` is the honest floor a parsed proposition enters at; it climbs
-/// only on a real witness (observation / derivation / proof).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Grade {
-    Declared,
-    Observed,
-    Derived,
-    Verified,
-}
-
-/// What warrants a claim's assertion — the axis along which the grade climbs.
-///
-/// `#[non_exhaustive]` marks the growth axis: the literature-warrant climb (reshape §4 row 2 — a
-/// `reference:Citation`, itself a `DeclaredResource`, keeps the grade at Declared-but-attested)
-/// and the `Observed`/`Verified` climbs are the next increments.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Warrant {
-    /// The honest floor (reshape §4 row 1): the source document asserts the proposition.
-    Declared,
-    /// The PARSER produced the claim from a source span. Lands **Declared**, not Derived
-    /// (D73 §6 / eigenius#201, superseding the `2026-08-10` Derived-landing decision): the parse
-    /// establishes that the text parses to this well-typed term, not that the term is faithful to
-    /// what the author wrote (D61, unbuilt) nor that what the author wrote is true. The agent named
-    /// in `declared_by` is who takes responsibility — the source document's authors when encoding a
-    /// paper, the operating agent when an agent formulates its own claim.
-    Parsed,
-}
-
-impl Warrant {
-    /// The grade this warrant projects to. Public because a caller that builds a cluster through
-    /// [`ParsedClaimGrader::cluster`] directly (to control the IRIs) still has to state the
-    /// grade, and it must be THIS projection, not a second hand-written mapping.
-    pub fn grade(self) -> Grade {
-        match self {
-            Warrant::Declared => Grade::Declared,
-            // Not `Grade::Derived`: the parser is a formulation instrument, not a warrant
-            // (eigenius#201).
-            Warrant::Parsed => Grade::Declared,
-        }
-    }
-}
+// `Grade` and `Warrant` stood here, and they meant each other's referent.
+//
+// `Grade {Declared, Observed, Derived, Verified}` was the paper's GROUNDS.
+// `Warrant {Declared, Parsed}` was documented as "the axis along which the grade
+// climbs" and projected onto a Grade. The paper uses *warrant* for the axis whose
+// values are grounds, so the two words were swapped.
+//
+// Both are gone rather than renamed. `Grade` graded a claim on an axis that is
+// now computed from a justification term and stored nowhere. `Warrant`'s own
+// distinction was never warrant either: BOTH its variants projected to
+// `Grade::Declared`, and what separated them is that a parse run produced one —
+// which is provenance. The code already said so on the projection ("the parser is
+// a formulation instrument, not a warrant"), so the insight was present and only
+// the name was wrong. That distinction is now `prov:was_generated_by(parse run)`
+// against its absence, with `prov:was_attributed_to(agent)` on both, and the enum
+// has nothing left to carry. `Warrant::grade()` retires with them.
+//
+// Its `#[non_exhaustive]` growth path — "the Observed/Verified climbs are the
+// next increments" — is superseded: those are grounds, not refinements of one.
 
 /// The provenance of a claim: where its IRIs are rooted and what warrants it.
 pub struct ClaimSource<'a> {
     /// A deterministic IRI stem for the claim's cluster (e.g. `urn:eigenius:doc:<id>:s<n>`), so the
     /// declaring resource / trace / sentence get stable, dedup-friendly IRIs derived from it.
     pub stem: &'a str,
-    /// What warrants the assertion.
-    pub warrant: Warrant,
-    /// `reflection:declared_by` — REQUIRED by `reflection:DeclaredResource`, and
-    /// `reflection:timestamp` is REQUIRED by `reflection:DeclarationTrace`. Omitting either builds
+    /// `prov:was_attributed_to` — REQUIRED by `reflection:DeclaredResource`, and
+    /// `prov:timestamp` is REQUIRED by `prov:DeclarationTrace`. Omitting either builds
     /// a cluster that cannot actually commit (`MissingRequired`) — and in-process tests will not
     /// catch it, because `LayerBuilder` does not run the validator; only a real `eigenius load`
     /// does (found 2026-08-03).
     ///
-    /// Must be the **IRI of a `reflection:Agent`** since D72 §3.2 retyped the property: it is
+    /// Must be the **IRI of a `prov:Agent`** since D72 §3.2 retyped the property: it is
     /// written as a `ResourceRef`, so Rule 8 and Rule 22 require it to resolve same-or-lower.
     /// A program's name is not an answer to *who* — that belongs in `provenance`. Required by BOTH
     /// clusters since eigenius#201 made the parsed cluster Declared. `UNATTRIBUTED_AGENT` is the
@@ -145,8 +119,6 @@ pub struct GradedClaim {
     /// `None` for the parsed cluster — its trust story is the agent named in `declared_by`, with
     /// no certificate to check.
     pub gate_sentence: Option<Iri>,
-    /// The grade the claim commits at (projected from the [`Warrant`]).
-    pub grade: Grade,
 }
 
 /// Failure to build a claim cluster — the proposition didn't encode, or a derived IRI was malformed.
@@ -195,8 +167,8 @@ pub trait ClaimGrader {
 /// cluster
 ///
 /// 1. the **`enc:EncodedClaim`** — carries `reflection:canonical_proposition = P` and
-///    `reflection:declared_by`, the agent taking responsibility for `P`;
-/// 2. its **`reflection:DeclarationTrace`** — `reflection:resource → claim`, the same
+///    `prov:was_attributed_to`, the agent taking responsibility for `P`;
+/// 2. its **`prov:DeclarationTrace`** — `prov:resource → claim`, the same
 ///    `declared_by` and a timestamp — which mints `IsDeclaredAs(claim_iri, P)` into the witness
 ///    index at commit.
 ///
@@ -285,7 +257,6 @@ impl ClaimGrader for ParsedClaimGrader {
             resources: vec![claim, trace],
             claim_iri,
             gate_sentence: None,
-            grade: source.warrant.grade(),
         })
     }
 }

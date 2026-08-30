@@ -1,58 +1,11 @@
 [
   {
-    "@id": "urn:eigenius:reflection:DeclaredResource",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A resource asserted by a human as an axiom, definition, or design decision. The epistemic foundation — anchored in human thought and intent.",
-    "urn:eigenius:core:short_name": "DeclaredResource",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:declared_by"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:rationale",
-      "urn:eigenius:reflection:timestamp"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:ObservedResource",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A resource recorded from external reality with tracked provenance.",
-    "urn:eigenius:core:short_name": "ObservedResource",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:source"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:core:source_irl",
-      "urn:eigenius:reflection:observed_at",
-      "urn:eigenius:reflection:timestamp"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:DerivedResource",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A resource produced by a typed program from other resources. The epistemic category is asserted by `is_a`; the audit trail (a `derivation` pointer to the chain-resident `ProgramTrace`) is recorded when the kernel can produce one. RunProgram outputs and AutoOnLoad-fired Verdicts always carry a trace. EigenQL `FIBER ... INTO` commits and post-translation comorphism reify outputs are still derived by construction (the substrate produced them) but may not have a kernel-generated trace yet — `derivation` is recommended rather than required so those still validate cleanly.",
-    "urn:eigenius:core:short_name": "DerivedResource",
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:derivation"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:VerifiedResource",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A resource that carries a machine-checked formal proof.",
-    "urn:eigenius:core:short_name": "VerifiedResource",
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:DerivedResource"],
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:derivation",
-      "urn:eigenius:reflection:verification"
-    ]
-  },
-
-  {
     "@id": "urn:eigenius:reflection:InstitutionEmittedDerivation",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A DerivedResource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the test result the institution computed from the gated analysis spec + the data. Distinguished from author-authored DerivedResources (e.g. theorems committed by hand) because the kernel produced it deterministically from the (analysis, data) pair; It records what a run produced and grounds nothing on its own: a computed claim rests on the assertion that the PLAN denotes a function of its input, which no execution establishes, and on the INPUT, so the ground is App(Declared(plan), Observed(inputs)). The witness emitter used to walk these directly to admit IsDerivedAs(derivation_iri, canonical_proposition); that family is gone. Carries `reflection:from_subject` pointing at the gated subject (the analysis the kernel ran), `reflection:runtime_invocation` pointing at the producing RuntimeInvocation, and `reflection:canonical_proposition` carrying the chain-attested proposition. Statistics emits one per ANOVA effect; other institutions emit zero or more as appropriate.",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries reflection:from_subject (the gated subject), reflection:runtime_invocation (the producing invocation) and reflection:canonical_proposition (what it computed).",
     "urn:eigenius:core:short_name": "InstitutionEmittedDerivation",
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:DerivedResource"],
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:from_subject"
     ],
@@ -61,111 +14,48 @@
       "urn:eigenius:reflection:canonical_proposition"
     ]
   },
-
   {
     "@id": "urn:eigenius:reflection:from_subject",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "The gated subject (analysis spec, claim, etc.) the institution ran against to produce this derivation. Lets the per-derivation resource be navigated back to the resource that triggered its emission.",
     "urn:eigenius:core:short_name": "from_subject",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
   },
-
   {
     "@id": "urn:eigenius:reflection:runtime_invocation",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Back-pointer to the producing `runtime:RuntimeInvocation` on an InstitutionEmittedDerivation. The RuntimeInvocation in turn carries `runtime:output` pointing at this derivation, completing the bidirectional provenance link.",
     "urn:eigenius:core:short_name": "runtime_invocation",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
   },
-
-  {
-    "@id": "urn:eigenius:reflection:Agent",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "An entity that can assert something \u2014 a person, an organization, or a group acting as one (D72 \u00a73.1). Identity is the IRI, by convention urn:eigenius:reflection:agent:<id>; contact details and external identifiers are properties, because they change while the agent does not. Named by reflection:declared_by to record WHO asserted a resource; what GROUNDS an assertion is reflection:warranted_by, a different question with a different answer. Lives in `reflection` rather than a namespace of its own because declared_by's class_types must resolve same-or-lower (Rule 22), and `stamp_declared` injects a reflection reference into every ESL layer, so no layer carrying agents could sit below this one.",
-    "urn:eigenius:core:short_name": "Agent"
-  },
-  {
-    "@id": "urn:eigenius:reflection:Person",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Agent"],
-    "urn:eigenius:core:description": "An individual human. reflection:orcid is the preferred persistent external identifier \u2014 the discipline the reference ontology applies to DOI and PubMed ID: real, resolvable identifiers only, never fabricated.",
-    "urn:eigenius:core:short_name": "Person",
-    "urn:eigenius:core:recommends": ["urn:eigenius:reflection:orcid"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:Organization",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Agent"],
-    "urn:eigenius:core:description": "An institution, laboratory, company, project, or standards body asserting as a single entity \u2014 used where authorship is corporate rather than individual: a vocabulary maintainer, a core team, a consortium.",
-    "urn:eigenius:core:short_name": "Organization"
-  },
-  {
-    "@id": "urn:eigenius:reflection:orcid",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "ORCID iD, bare form '0000-0002-1825-0097' \u2014 the persistent identifier for a researcher. Must be a real, validated iD; never invent one.",
-    "urn:eigenius:core:short_name": "orcid",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
-  },
-  {
-    "@id": "urn:eigenius:reflection:agent:unattributed",
-    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:Agent"],
-    "urn:eigenius:core:description": "No agent was recorded for this declaration \u2014 the ESL compiler's default when no session agent is configured. An explicit marker of ABSENCE, never an assertion that this agent authored anything: naming a real party for unattributed content would be a worse falsehood than the 'esl-compiler' literal it replaces, because it would name someone who exists. Query for it to find declarations still needing attribution.",
-    "urn:eigenius:core:short_name": "unattributed"
-  },
-  {
-    "@id": "urn:eigenius:reflection:agent:eigenius_core_team",
-    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:Organization"],
-    "urn:eigenius:core:description": "The Eigenius maintainers \u2014 the declarer of the platform's own bootstrap ontologies, which genuinely are asserted by this group. Not a default for user-authored content.",
-    "urn:eigenius:core:short_name": "eigenius_core_team"
-  },
-
-  {
-    "@id": "urn:eigenius:reflection:EpistemicStatus",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "An epistemic status value: declared, observed, derived, or verified.",
-    "urn:eigenius:core:short_name": "EpistemicStatus"
-  },
-  {
-    "@id": "urn:eigenius:reflection:epistemic:declared",
-    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
-    "urn:eigenius:core:description": "Asserted by a human as axiom or definition.",
-    "urn:eigenius:core:short_name": "declared"
-  },
-  {
-    "@id": "urn:eigenius:reflection:epistemic:observed",
-    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
-    "urn:eigenius:core:description": "Recorded from external reality with provenance.",
-    "urn:eigenius:core:short_name": "observed"
-  },
-  {
-    "@id": "urn:eigenius:reflection:epistemic:derived",
-    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
-    "urn:eigenius:core:description": "Produced by a typed program from other resources.",
-    "urn:eigenius:core:short_name": "derived"
-  },
-  {
-    "@id": "urn:eigenius:reflection:epistemic:verified",
-    "urn:eigenius:core:is_a": ["urn:eigenius:reflection:EpistemicStatus"],
-    "urn:eigenius:core:description": "Carries a machine-checked formal proof.",
-    "urn:eigenius:core:short_name": "verified"
-  },
-
   {
     "@id": "urn:eigenius:reflection:Trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Abstract base class of all evaluation-trace nodes (D6b \u00a72). Carries no properties of its own; class-typed trace-child properties reference it so any concrete node class is admissible.",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "Abstract base class of all evaluation-trace nodes (D6b §2). Carries no properties of its own; class-typed trace-child properties reference it so any concrete node class is admissible.",
     "urn:eigenius:core:short_name": "Trace"
   },
   {
     "@id": "urn:eigenius:reflection:EmptyTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Absence of computation in a positional trace slot (a Map element, Reduce step, or Construct field whose evaluation was pure). Replaces the untyped empty embedded resource previously used as the placeholder.",
     "urn:eigenius:core:short_name": "EmptyTrace"
   },
   {
     "@id": "urn:eigenius:reflection:FieldTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
     "urn:eigenius:core:description": "One entry of a ConstructTrace's per-field traces: the constructed property's IRI plus the trace of the field expression's evaluation.",
     "urn:eigenius:core:short_name": "FieldTrace",
     "urn:eigenius:core:requires": [
@@ -175,8 +65,12 @@
   },
   {
     "@id": "urn:eigenius:reflection:ComponentTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a single IO component invocation. The memoization cache unit.",
     "urn:eigenius:core:short_name": "ComponentTrace",
     "urn:eigenius:core:requires": [
@@ -185,7 +79,6 @@
       "urn:eigenius:reflection:output"
     ],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:timestamp",
       "urn:eigenius:reflection:argument_hash",
       "urn:eigenius:reflection:provider",
       "urn:eigenius:reflection:model",
@@ -198,8 +91,12 @@
   },
   {
     "@id": "urn:eigenius:reflection:PureTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a pure (non-IO) component invocation.",
     "urn:eigenius:core:short_name": "PureTrace",
     "urn:eigenius:core:requires": [
@@ -209,8 +106,12 @@
   },
   {
     "@id": "urn:eigenius:reflection:ComorphismTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a comorphism dispatch (D14 §9.3 four-step pipeline). Records which Comorphism the program ran (`comorphism`), the chain IRI of the produced target-class resource (`target_iri`, `target_class` — D14 §9.3 step 4 chain reinsertion), and the trace of the source-expression evaluation (`source_trace`). Substrate-side per-step provenance for extract / reify lives in the chain-resident `RuntimeInvocation` (D31 §6.2), reachable from the produced resource's `derivation` link.",
     "urn:eigenius:core:short_name": "ComorphismTrace",
     "urn:eigenius:core:requires": [
@@ -224,11 +125,17 @@
   },
   {
     "@id": "urn:eigenius:reflection:LetTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a Let binding evaluation.",
     "urn:eigenius:core:short_name": "LetTrace",
-    "urn:eigenius:core:requires": ["urn:eigenius:reflection:name"],
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:name"
+    ],
     "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:value_trace",
       "urn:eigenius:reflection:body_trace"
@@ -236,8 +143,12 @@
   },
   {
     "@id": "urn:eigenius:reflection:MapTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a Map evaluation over a collection.",
     "urn:eigenius:core:short_name": "MapTrace",
     "urn:eigenius:core:requires": [
@@ -246,8 +157,12 @@
   },
   {
     "@id": "urn:eigenius:reflection:ReduceTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a Reduce (fold) evaluation.",
     "urn:eigenius:core:short_name": "ReduceTrace",
     "urn:eigenius:core:requires": [
@@ -256,11 +171,17 @@
   },
   {
     "@id": "urn:eigenius:reflection:CaseTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a Case expression evaluation.",
     "urn:eigenius:core:short_name": "CaseTrace",
-    "urn:eigenius:core:requires": ["urn:eigenius:reflection:branch_taken"],
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:branch_taken"
+    ],
     "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:scrutinee_trace",
       "urn:eigenius:reflection:branch_trace"
@@ -268,8 +189,12 @@
   },
   {
     "@id": "urn:eigenius:reflection:ConstructTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a Construct expression (building a typed resource).",
     "urn:eigenius:core:short_name": "ConstructTrace",
     "urn:eigenius:core:requires": [
@@ -278,17 +203,29 @@
   },
   {
     "@id": "urn:eigenius:reflection:ProjectTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Trace of a property projection.",
     "urn:eigenius:core:short_name": "ProjectTrace",
-    "urn:eigenius:core:requires": ["urn:eigenius:reflection:property"],
-    "urn:eigenius:core:recommends": ["urn:eigenius:reflection:source_trace"]
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:property"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:source_trace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:SeqTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:subclass_of": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:description": "Sequence of sibling traces from one structural expression with multiple effectful children (trace-tree completeness, F-5).",
     "urn:eigenius:core:short_name": "SeqTrace",
     "urn:eigenius:core:requires": [
@@ -296,206 +233,67 @@
     ]
   },
   {
-    "@id": "urn:eigenius:reflection:ProductionTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A record that some activity PRODUCED a resource — the abstract parent of the traces reflection:derivation can point at. Says only that the resource was produced and that this is the record of it; WHAT KIND OF ACTOR produced it is the concrete subclass's business (eigenius#205): reflection:ProgramTrace for a kernel-initiated run, reflection:ExternalExecutionTrace for an execution an author asserts happened elsewhere. Introduced because `derivation` was typed at ProgramTrace directly, so a class that REQUIRES a derivation could not be attested by a declared-external production at all. Widening the property to this parent makes the link expressible without conflating the two kinds: trace_category still matches the CONCRETE class, so Derived and Declared stay distinct.",
-    "urn:eigenius:core:short_name": "ProductionTrace",
-    "urn:eigenius:core:requires": ["urn:eigenius:reflection:resource"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:ExternalExecutionTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ProductionTrace"],
-    "urn:eigenius:core:description": "Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate. Admits IsDeclaredAs (eigenius#205): a transcription establishes only that someone asserts the run happened — no f : I -> O, so no specification, so nothing entailed (D73 §3.3). This was the one place the four-category split already refused to treat a run record as a ground of its own kind; with ProgramTrace grounding nothing either, the two now agree. The distinction was previously carried informally in prose: four WRN traces write '(linked-external)' into reflection:source, which is the signal that vocabulary was missing rather than content wrong. NOT a weaker ProgramTrace — a different claim. `source` says where it ran; `declared_by` says who vouches that it did.",
-    "urn:eigenius:core:short_name": "ExternalExecutionTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:resource",
-      "urn:eigenius:reflection:declared_by",
-      "urn:eigenius:reflection:source"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:timestamp",
-      "urn:eigenius:reflection:rationale"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:ProgramTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ProductionTrace"],
-    "urn:eigenius:core:description": "Trace recording that a resource was produced by a program (a kernel-evaluated `program` body or an institution-emitted DerivedResource per D49 §6). The minimum shape mirrors DeclarationTrace and ObservationTrace — `resource` (the target IRI), `source` (the program / procedure / institution that produced the resource, as a string), `timestamp` (when it was produced). The richer execution-trace shape (program/started_at/completed_at/trace_tree/output/metrics/etc.) is recommended optional metadata authored by kernel-emitted traces; user-authored ProgramTraces typically only fill the three required fields, matching the witness-emitter contract that reads `reflection:resource` uniformly across all four trace classes.",
-    "urn:eigenius:core:short_name": "ProgramTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:resource",
-      "urn:eigenius:reflection:source",
-      "urn:eigenius:reflection:timestamp"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:program",
-      "urn:eigenius:reflection:started_at",
-      "urn:eigenius:reflection:completed_at",
-      "urn:eigenius:reflection:trace_tree",
-      "urn:eigenius:reflection:input",
-      "urn:eigenius:reflection:output",
-      "urn:eigenius:reflection:total_tokens",
-      "urn:eigenius:reflection:total_latency_ms",
-      "urn:eigenius:reflection:cached_steps",
-      "urn:eigenius:reflection:executed_steps",
-      "urn:eigenius:reflection:epistemic_status",
-      "urn:eigenius:reflection:universe_level"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:DeclarationTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Trace recording that a resource was declared by a human.",
-    "urn:eigenius:core:short_name": "DeclarationTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:resource",
-      "urn:eigenius:reflection:declared_by",
-      "urn:eigenius:reflection:timestamp"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:rationale"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:ObservationTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Trace recording that a resource was observed from external reality.",
-    "urn:eigenius:core:short_name": "ObservationTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:resource",
-      "urn:eigenius:reflection:source",
-      "urn:eigenius:reflection:timestamp"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:core:source_irl",
-      "urn:eigenius:reflection:observed_at"
-    ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:VerificationTrace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Trace recording that a proof of a resource's proposition was checked by a proof system. The chain-side audit artifact paired with an IsVerifiedAs witness, on the same footing as DeclarationTrace / ObservationTrace / ProgramTrace for the other three grounding families (D39 \u00a75). TWO VERIFIERS PRODUCE THIS, distinguished by proof_system, not by class: an external prover (lean4, coq, agda) whose exported proof blob is checked, and the kernel itself, whose type-checked justification:Certificate certificate IS the proof term. Kernel-checking is verification -- treating the two as different kinds would say by naming what proof_system already says (eigenius#200).",
-    "urn:eigenius:core:short_name": "VerificationTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:resource",
-      "urn:eigenius:reflection:proof_system",
-      "urn:eigenius:reflection:proof_term",
-      "urn:eigenius:reflection:timestamp"
-    ],
-    "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:derivation_trace"
-    ]
-  },
-
-  {
-    "@id": "urn:eigenius:reflection:declared_by",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The agent who asserted this resource (D72 \u00a73.2). Resource-typed so Rule 8 and Rule 22 require the declarer to exist in the chain: a bare string like the ESL compiler's old \"esl-compiler\" literal is not an IRI and no longer commits. This is the agent axis only \u2014 what GROUNDS the assertion is reflection:warranted_by, and why in prose is reflection:rationale. Before D72 this one slot carried all three, and in practice carried the warrant.",
-    "urn:eigenius:core:short_name": "declared_by",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Agent"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:warranted_by",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The criterion, convention, source, or prior result that grounds this declaration \u2014 what warrants it, as opposed to who asserted it (reflection:declared_by) or why in prose (reflection:rationale). Carries no class_types: warranting resources are heterogeneous (a reference:Citation, a methodology convention, a criterion resource, a generator program) and no single class covers them yet (D72 \u00a73.3).",
-    "urn:eigenius:core:short_name": "warranted_by",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
-  },
-  {
-    "@id": "urn:eigenius:reflection:rationale",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Why this resource was declared.",
-    "urn:eigenius:core:short_name": "rationale",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
-  },
-  {
-    "@id": "urn:eigenius:reflection:source",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Description of the external source.",
-    "urn:eigenius:core:short_name": "source",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
-  },
-  {
-    "@id": "urn:eigenius:reflection:observed_at",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "When the observation was made.",
-    "urn:eigenius:core:short_name": "observed_at",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
-  },
-  {
-    "@id": "urn:eigenius:reflection:derivation",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Link to the ProductionTrace recording how this resource was produced. Typed at the PARENT (eigenius#205), so it admits a reflection:ProgramTrace for a kernel-initiated run and a reflection:ExternalExecutionTrace for one an author asserts happened elsewhere. It was typed at ProgramTrace directly, which made a declared-external production unlinkable on any class that requires a derivation — bench:TaskOutput does. Which kind produced it is read off the trace's own class, not this property.",
-    "urn:eigenius:core:short_name": "derivation",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProductionTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:verification",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Link to the VerificationTrace that proved this resource.",
-    "urn:eigenius:core:short_name": "verification",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:VerificationTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:timestamp",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "When the trace was recorded.",
-    "urn:eigenius:core:short_name": "timestamp",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
-  },
-  {
     "@id": "urn:eigenius:reflection:component",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "The component that was invoked.",
     "urn:eigenius:core:short_name": "component",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:program:Component"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:program:Component"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:input_hash",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Content hash of the component input (CBOR deterministic encoding).",
     "urn:eigenius:core:short_name": "input_hash",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },
   {
     "@id": "urn:eigenius:reflection:argument_hash",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Content hash of the component argument.",
     "urn:eigenius:core:short_name": "argument_hash",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },
   {
     "@id": "urn:eigenius:reflection:output",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "The output resource produced.",
     "urn:eigenius:core:short_name": "output",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
   },
   {
     "@id": "urn:eigenius:reflection:provider",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "LLM provider (anthropic, openai, etc.).",
     "urn:eigenius:core:short_name": "provider",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },
   {
     "@id": "urn:eigenius:reflection:model",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Model identifier.",
     "urn:eigenius:core:short_name": "model",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },
   {
     "@id": "urn:eigenius:reflection:prompt_tokens",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Number of tokens in the prompt.",
     "urn:eigenius:core:short_name": "prompt_tokens",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
@@ -503,7 +301,9 @@
   },
   {
     "@id": "urn:eigenius:reflection:completion_tokens",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Number of tokens in the completion.",
     "urn:eigenius:core:short_name": "completion_tokens",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
@@ -511,7 +311,9 @@
   },
   {
     "@id": "urn:eigenius:reflection:latency_ms",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Wall-clock latency in milliseconds.",
     "urn:eigenius:core:short_name": "latency_ms",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
@@ -519,122 +321,192 @@
   },
   {
     "@id": "urn:eigenius:reflection:deterministic",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Whether the result is reproducible.",
     "urn:eigenius:core:short_name": "deterministic",
     "urn:eigenius:core:data_type": "urn:eigenius:core:boolean"
   },
   {
     "@id": "urn:eigenius:reflection:cached",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Whether this result was served from the trace cache.",
     "urn:eigenius:core:short_name": "cached",
     "urn:eigenius:core:data_type": "urn:eigenius:core:boolean"
   },
   {
     "@id": "urn:eigenius:reflection:name",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Variable name in a LetTrace.",
     "urn:eigenius:core:short_name": "name",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:LetTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:value_trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Trace of the value expression in a Let binding.",
     "urn:eigenius:core:short_name": "value_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:LetTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:child_traces",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Child traces of a SeqTrace, in evaluation order.",
     "urn:eigenius:core:short_name": "child_traces",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:SeqTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:SeqTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "The trace node of a FieldTrace entry (EmptyTrace when the field evaluated purely).",
     "urn:eigenius:core:short_name": "trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:FieldTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:FieldTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:body_trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Trace of the body expression in a Let binding.",
     "urn:eigenius:core:short_name": "body_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:LetTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:element_traces",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Per-element traces in a MapTrace.",
     "urn:eigenius:core:short_name": "element_traces",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:MapTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:MapTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:step_traces",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Per-step accumulator traces in a ReduceTrace.",
     "urn:eigenius:core:short_name": "step_traces",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ReduceTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ReduceTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:branch_taken",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Which branch was taken in a CaseTrace.",
     "urn:eigenius:core:short_name": "branch_taken",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:CaseTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:branch_trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Trace of the taken branch body.",
     "urn:eigenius:core:short_name": "branch_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:CaseTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:scrutinee_trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Trace of the scrutinee expression in a CaseTrace.",
     "urn:eigenius:core:short_name": "scrutinee_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:CaseTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:field_traces",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Per-field traces in a ConstructTrace: an array of FieldTrace entries (property IRI + field trace).",
     "urn:eigenius:core:short_name": "field_traces",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:FieldTrace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ConstructTrace"]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:FieldTrace"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ConstructTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:source_trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Trace of the source resource in a ProjectTrace, or of the source-expression eval in a ComorphismTrace.",
     "urn:eigenius:core:short_name": "source_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:reflection:Trace"
+    ],
     "urn:eigenius:core:domain": [
       "urn:eigenius:reflection:ProjectTrace",
       "urn:eigenius:reflection:ComorphismTrace"
@@ -642,134 +514,62 @@
   },
   {
     "@id": "urn:eigenius:reflection:comorphism",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "IRI of the Comorphism dispatched by a ComorphismTrace.",
     "urn:eigenius:core:short_name": "comorphism",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ComorphismTrace"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ComorphismTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:target_iri",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Chain IRI of the target-class resource the comorphism produced (D14 §9.3 step 4 chain reinsertion).",
     "urn:eigenius:core:short_name": "target_iri",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ComorphismTrace"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ComorphismTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:target_class",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "IRI of the target-class the comorphism's reified output is an instance of.",
     "urn:eigenius:core:short_name": "target_class",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ComorphismTrace"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ComorphismTrace"
+    ]
   },
   {
     "@id": "urn:eigenius:reflection:property",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "The property accessed in a ProjectTrace, or constructed in a FieldTrace entry.",
     "urn:eigenius:core:short_name": "property",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace", "urn:eigenius:reflection:FieldTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:program",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The program that was executed.",
-    "urn:eigenius:core:short_name": "program",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:trace_tree",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The root of the tree-structured trace, mirroring the program's expression tree.",
-    "urn:eigenius:core:short_name": "trace_tree",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:input",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The input resource for a program execution.",
-    "urn:eigenius:core:short_name": "input",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:total_tokens",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Total tokens across all LLM calls.",
-    "urn:eigenius:core:short_name": "total_tokens",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:min_value": 0,
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:total_latency_ms",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Total wall-clock time for program execution.",
-    "urn:eigenius:core:short_name": "total_latency_ms",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:min_value": 0,
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:cached_steps",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Number of steps served from trace cache.",
-    "urn:eigenius:core:short_name": "cached_steps",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:min_value": 0,
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:executed_steps",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Number of steps that were actually executed.",
-    "urn:eigenius:core:short_name": "executed_steps",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:min_value": 0,
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:started_at",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "When execution started.",
-    "urn:eigenius:core:short_name": "started_at",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
-  },
-  {
-    "@id": "urn:eigenius:reflection:completed_at",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "When execution completed.",
-    "urn:eigenius:core:short_name": "completed_at",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:format": "urn:eigenius:core:formats:datetime"
-  },
-  {
-    "@id": "urn:eigenius:reflection:epistemic_status",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Epistemic status of the traced output.",
-    "urn:eigenius:core:short_name": "epistemic_status",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:EpistemicStatus"],
-    "urn:eigenius:core:allows_only": [
-      "urn:eigenius:reflection:epistemic:declared",
-      "urn:eigenius:reflection:epistemic:observed",
-      "urn:eigenius:reflection:epistemic:derived",
-      "urn:eigenius:reflection:epistemic:verified"
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:ProjectTrace",
+      "urn:eigenius:reflection:FieldTrace"
     ]
   },
   {
     "@id": "urn:eigenius:reflection:universe_level",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
     "urn:eigenius:core:description": "Universe stratification level. Level N traces reference level N-1 resources.",
     "urn:eigenius:core:short_name": "universe_level",
     "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
@@ -777,50 +577,24 @@
     "urn:eigenius:core:max_value": 2
   },
   {
-    "@id": "urn:eigenius:reflection:resource",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The resource this trace is about.",
-    "urn:eigenius:core:short_name": "resource",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
-  },
-  {
-    "@id": "urn:eigenius:reflection:proof_system",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Which verifier checked the proof. An external prover (lean4, coq, agda), or the Eigenius kernel itself (urn:eigenius:kernel) when the proof term is a type-checked justification:Certificate certificate. Illustrative, not an allows_only: adding a verifier must not be a bootstrap edit.",
-    "urn:eigenius:core:short_name": "proof_system",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:proof_term",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Conclusion carrying a justification:proof — the judgement holds(logic, t, P), a checker having verified t against P itself. NOT the conclusion whose CERTIFICATE type-checked, which is what this description said and what the emitter used to do: justification:judgement is holds(kernel, c, Certificate(j, P)), which says a checker verified the certificate c and does not say P. A certificate records the grounds a claim rests on; it is not factive, and minting Verified from it laundered a conclusion resting on nothing but Declared(...) into a proof exactly one citation downstream. A conclusion with no proof term admits no Verified witness. Both are IRIs; only the former is a blob.",
-    "urn:eigenius:core:short_name": "proof_term",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
-  },
-  {
-    "@id": "urn:eigenius:reflection:derivation_trace",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The ProgramTrace being verified. RECOMMENDED, not required (eigenius#200): a kernel-verified justification:Conclusion has no ProgramTrace to point at -- D39 \u00a74.2 satisfies its inherited derivation requirement with the certificate field, the certificate being the derivation. Requiring this field would force that case to point it at itself, a fiction to satisfy a schema.",
-    "urn:eigenius:core:short_name": "derivation_trace",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
-    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"],
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
-  },
-  {
     "@id": "urn:eigenius:reflection:canonical_proposition",
-    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The Prop-typed EigenTT proposition this resource canonically asserts (D49 §6). Optional; absence defaults to the term `Asserts(iri)` at witness-emission time (D39 §4.1). Value carries a D47-encoded `eigentt:Term` payload. Validated at commit: the value must decode cleanly through the D47 codec and type-check at `Prop`. The four ChainWitness predicate families (D49 §3) project this property onto kernel-internal witness inhabitants admissible at justification:Certificate.declared / .observed / .derived / .verified type-check time.",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The proposition this resource asserts, as an eigentt:Term. The WARRANT axis's input: warrant is what evidence exists for a proposition, so a resource carrying one can be asked the question and a resource carrying none cannot. That is the whole test, and it is mechanical. Carried no domain constraint after the grade classes were deleted — its domain had been DeclaredResource / ObservedResource / DerivedResource, which named three ways a resource came to exist and so constrained the warrant slot by a provenance fact, which is the conflation this ontology no longer makes.",
     "urn:eigenius:core:short_name": "canonical_proposition",
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
-    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
-    "urn:eigenius:eigentt:expected_type": {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
-    "urn:eigenius:core:domain": [
-      "urn:eigenius:reflection:DeclaredResource",
-      "urn:eigenius:reflection:ObservedResource",
-      "urn:eigenius:reflection:DerivedResource"
-    ]
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:eigentt:Term"
+    ],
+    "urn:eigenius:eigentt:expected_type": {
+      "ctor": "Sort",
+      "args": [
+        {
+          "ctor": "Zero",
+          "args": []
+        }
+      ]
+    }
   }
 ]

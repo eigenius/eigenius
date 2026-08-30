@@ -31,6 +31,16 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR THE PROVENANCE MIGRATION (`2026-08-30`), on TEN layers, which is the whole
+//! provenance axis moving off `reflection` onto `prov` plus the grade classes going away.
+//! `reflection` and `prov`'s consumers (`obo`, `justification`, `statistics`, `ingest`,
+//! `reference`, `lexicon`, `closed-class`, `encoding`) all reference the renamed properties;
+//! `eigentt-type-fragment` moved on a single prose mention of `proof_system`, which is the kind of
+//! one-line description edit that hashes exactly as loudly as a structural one. The four grade
+//! classes, `epistemic_status`, the four `epistemic:*` individuals and `EpistemicStatus` are
+//! deleted, `lexicon:grade` with them — 2,641,713 stamps on the converted chain, all
+//! `epistemic:declared`, on resources that carry no proposition and so have no warrant to grade.
+//!
 //! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
 //! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
 //! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
@@ -48,7 +58,7 @@
 //! lost `derived`, `sum_l`/`sum_r` now take a derivation for EACH branch, `spec_poly` dropped its
 //! unchecked audit tag and leaves the term index at `j`, and `witness:IsDerivedAs` is gone. The
 //! other two are description strings only, which move a hash just as surely: `statistics` and
-//! `reflection` described the deleted mechanism in class descriptions, and `reflection:proof_term`
+//! `reflection` described the deleted mechanism in class descriptions, and `prov:proof_term`
 //! carried the wrong account of what admits a Verified witness — a defect P3 stated in the
 //! ontology and deferred to here so it could ride one reseed instead of invalidating P2's
 //! mid-flight. The test named exactly the three files that were edited, which is the check that
@@ -103,27 +113,27 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "core:1892387054d3f4fb99048cf8fd9a8e7fab5285786ee6adc7aa7938dd36b6d385
-eigentt-type-fragment:262439f56bfaa793440679019de187b2c6fdc2604399bc1fbdd39a50df4df488
+eigentt-type-fragment:caf2da6f1bdfc92540fcf72d43831f82d0b9c953f295f0f6e17de1fcb84abced
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
-reflection:b1b818176ce92e5f6cfd203da5df87ba14cc8e1495e2817fdbf51f798c3cc683
-prov:0033ded22165ff610da93dcf3382f136413191c5e4f0d6667046f963a2566f89
-obo:cb157be55245c9ac73385e0ac0c605f0cde8ecb9d1246b07226008cbf8cf4d76
+reflection:80a5d9528b99ab2dc5a64e33f0bdf1c2cae4371fa26cce8375f625d59687ee6a
+prov:11628d9e1edeaf33ba6b8e046bf76b8b01d641d7e9e77496e6db41fd32639dd4
+obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
 institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
 runtime:5ef02306d25bc1b52e517114c8b7f2280ca20ad1d70607255198b4d54d8b4bfc
 formulas:2073d36b31311e89803a78f20dc28f376197d89eb75a384dbd429d2203455817
 lean-expressions:2b084735d270d8d1078e69e67de342b5d221f5f7a4939598582190f4c017d8f6
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:41c7dce62971e48bd5bdd08e97bac59e72f27fc38a7e36c4afdfcb3edc0e8d34
-justification:d06b3682f6b587e4449d05347ebda3a320f5d0ecdfe4592968e82ad5a9c370d2
-statistics:f95c0401edef61d987e493da8cf17cddfca06bf77db796ab828475e70122b5ce
+justification:54850e17bd0617aedd77038f76ada82935bb2b492adb51e18c6ea054d4958948
+statistics:21f467d30e50572f6786d9b00b9fa2252e6093617c572200dfc8c10902571d3d
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
-ingest:6b3b1de79a7b69ffa60337824a82598b26fa2e99166a18f19bb27f1d07e72b0a
-reference:be3de75381099e9934cd500a356ed14de0b3818e00b3af36835af4e035c0e250
+ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
+reference:33277845534074177e7c9015b0669c2fad20e35a8adc592f7df362914ecb152b
 logic:e23ffb70b63f80cea1a7287fa67f47d34f13270118e9c72f5904814470cec36a
-lexicon:3dbfb7e6a420d1954b6bca29402973f8b2723696c3671e694d3a537b93d2d087
+lexicon:c5787a8cda2584c786d9484b235f6631f613987e28564f5e3b43f7a754211882
 ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
-closed-class:cbac8f32e15ae7b013a723ccca044dc165099fd8edc7204a7255f095bb04dbc2
-encoding:e2f14e3a6ff9df0aa29c58144eda3aa22d83ed91381d908a03842aa07fa2c3f0
+closed-class:33288e5e89e02bdf5ae493742599a9da95d9fd949eb665831be8353a93f7eaf4
+encoding:af1273fd9c4103623b79ce16a0ab33ea2269f980c7779fafc80d9a49c9b94f10
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On

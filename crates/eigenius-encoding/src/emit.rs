@@ -21,7 +21,7 @@
 //!   enc:DiscourseUnit    prose + character span in the source
 //!   enc:ScopedUnit       (thin — unscoped; the whole chain is the scope)
 //!   enc:EncodedClaim     reflection:canonical_proposition = the parsed Prop, D47-encoded
-//!   reflection:DeclarationTrace ─▶ IsDeclaredAs claim_iri P   ← the witness downstream cites
+//!   prov:DeclarationTrace ─▶ IsDeclaredAs claim_iri P   ← the witness downstream cites
 //!   enc:DecisionPoint    which reading was taken, out of how many, and on whose authority
 //! ```
 //!
@@ -30,7 +30,7 @@
 //! ```text
 //!   reference:Reference       the source work every unit hangs off (minted, or cited by IRI)
 //!   enc:ReasoningStructure    the artifact ROOT — the claims, the source, the bytes parsed
-//!   reflection:ProgramTrace                            ← the RUN, recorded once (grounds nothing)
+//!   prov:ProgramTrace                            ← the RUN, recorded once (grounds nothing)
 //! ```
 //!
 //! The root exists so the artifact has a HANDLE: a service returns it, a notebook cell re-opens it,
@@ -65,7 +65,8 @@ use eigenius_kernel::program::eigentt_type_mirror::encode_type;
 use crate::select::Pin;
 
 const CORE: &str = "urn:eigenius:core";
-const REFL: &str = "urn:eigenius:reflection";
+/// The provenance axis. Split out of `reflection`; see `ontologies/prov/prov.esl`.
+const PROV: &str = "urn:eigenius:prov";
 const ENC: &str = "urn:eigenius:encoding";
 const REF: &str = "urn:eigenius:reference";
 
@@ -92,13 +93,13 @@ pub struct DocumentMeta<'a> {
     /// SHA-256 of the parsed bytes. A prose edit is then visible on the chain, not only in the
     /// propositions it changed.
     pub source_sha256: &'a str,
-    /// The `reflection:timestamp` on each DeclarationTrace. Caller-fixed so emission is reproducible.
+    /// The `prov:timestamp` on each DeclarationTrace. Caller-fixed so emission is reproducible.
     pub timestamp: &'a str,
-    /// `reflection:declared_by` — the agent taking responsibility for every claim this document
+    /// `prov:was_attributed_to` — the agent taking responsibility for every claim this document
     /// lands. REQUIRED since eigenius#201 made `enc:EncodedClaim` a `reflection:DeclaredResource`:
     /// a parse establishes form, not warrant, so a landed claim must name who asserts it (D73 §6).
     ///
-    /// Must be the IRI of a resolvable `reflection:Agent` (D72). For an encoded paper that is the
+    /// Must be the IRI of a resolvable `prov:Agent` (D72). For an encoded paper that is the
     /// paper's authors; for an agent formulating its own claims it is that agent.
     /// [`UNATTRIBUTED_AGENT`] is the honest value when the caller knows of no agent — it names the
     /// absence rather than hiding it behind the program that did the parsing.
@@ -351,7 +352,7 @@ pub fn emit_resources(
         match &s.selection {
             SentenceSelection::Pinned(pin) => {
                 dp.set(
-                    iri(&format!("{REFL}:rationale")),
+                    iri(&format!("{PROV}:rationale")),
                     Value::String(format!(
                         "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose \
                          sense-erased skeleton equals the human-verified pin. Structural disambiguation \
@@ -378,7 +379,7 @@ pub fn emit_resources(
                     );
                 }
                 dp.set(
-                    iri(&format!("{REFL}:rationale")),
+                    iri(&format!("{PROV}:rationale")),
                     Value::String(format!(
                         "Reading selected by the READING RANKER (d63-reading-selection): an \
                          untrusted choice in document context, recorded for audit — every \
@@ -394,7 +395,7 @@ pub fn emit_resources(
                     Value::ResourceRef(iri(&format!("{ENC}:authority_sole"))),
                 );
                 dp.set(
-                    iri(&format!("{REFL}:rationale")),
+                    iri(&format!("{PROV}:rationale")),
                     Value::String(
                         "Sole surviving reading — the forest offered exactly one felicitous \
                          parse; no selection existed to make."
@@ -467,7 +468,7 @@ pub fn emit_resources(
                 );
             }
             if let Some(r) = &b.rationale {
-                ab.set(iri(&format!("{REFL}:rationale")), Value::String(r.clone()));
+                ab.set(iri(&format!("{PROV}:rationale")), Value::String(r.clone()));
             }
             if let Some(c) = b.confidence {
                 ab.set(iri(&format!("{ENC}:confidence")), Value::Float(c));
@@ -520,7 +521,7 @@ pub fn emit_resources(
             iri(&format!("{ENC}:cut_kind")),
             Value::ResourceRef(iri(&format!("{ENC}:{kind}"))),
         );
-        cut.set(iri(&format!("{REFL}:rationale")), Value::String(rationale));
+        cut.set(iri(&format!("{PROV}:rationale")), Value::String(rationale));
         out.push(cut);
     }
 
@@ -562,26 +563,26 @@ pub fn emit_resources(
     // Emitted BEFORE the structure so the IRI it references is defined above it, matching the
     // ordering discipline the root already follows for `enc:claims`.
     let run_trace_iri = format!("{ns}:run_trace");
-    let mut run_trace = res(&run_trace_iri, &[&format!("{REFL}:ProgramTrace")]);
+    let mut run_trace = res(&run_trace_iri, &[&format!("{PROV}:ProgramTrace")]);
     run_trace.set(
-        iri(&format!("{REFL}:resource")),
+        iri(&format!("{PROV}:resource")),
         Value::ResourceRef(iri(&format!("{ns}:structure"))),
     );
     run_trace.set(
-        iri(&format!("{REFL}:source")),
+        iri(&format!("{PROV}:was_generated_by")),
         Value::String(format!(
             "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
              (source sha256 {source_sha256})"
         )),
     );
     run_trace.set(
-        iri(&format!("{REFL}:timestamp")),
+        iri(&format!("{PROV}:timestamp")),
         Value::String(timestamp.to_string()),
     );
     out.push(run_trace);
 
     structure.set(
-        iri(&format!("{REFL}:derivation")),
+        iri(&format!("{PROV}:derivation")),
         Value::ResourceRef(iri(&run_trace_iri)),
     );
     out.push(structure);
@@ -940,7 +941,7 @@ mod tests {
         // one ProgramTrace per SENTENCE — here that would be three.
         let program_traces: Vec<_> = resources
             .iter()
-            .filter(|r| class_is(r, "urn:eigenius:reflection:ProgramTrace"))
+            .filter(|r| class_is(r, "urn:eigenius:prov:ProgramTrace"))
             .collect();
         assert_eq!(
             program_traces.len(),
@@ -952,7 +953,7 @@ mod tests {
         // ...and it is on the RUN's output, not on a claim.
         let structure_iri = "urn:eigenius:test:doc:structure";
         assert_eq!(
-            program_traces[0]["urn:eigenius:reflection:resource"].as_str(),
+            program_traces[0]["urn:eigenius:prov:resource"].as_str(),
             Some(structure_iri),
             "the run's trace targets the ReasoningStructure"
         );
@@ -966,15 +967,15 @@ mod tests {
             "urn:eigenius:encoding:ReasoningStructure"
         ));
         assert!(
-            structure["urn:eigenius:reflection:derivation"].is_string()
-                || structure["urn:eigenius:reflection:derivation"].is_object(),
+            structure["urn:eigenius:prov:derivation"].is_string()
+                || structure["urn:eigenius:prov:derivation"].is_object(),
             "the structure points at its ProgramTrace (required by DerivedResource)"
         );
 
         // The propositions are Declared, one trace each, each naming an agent.
         let decl_traces: Vec<_> = resources
             .iter()
-            .filter(|r| class_is(r, "urn:eigenius:reflection:DeclarationTrace"))
+            .filter(|r| class_is(r, "urn:eigenius:prov:DeclarationTrace"))
             .collect();
         assert_eq!(
             decl_traces.len(),
@@ -983,7 +984,7 @@ mod tests {
         );
         for t in &decl_traces {
             assert!(
-                !t["urn:eigenius:reflection:declared_by"].is_null(),
+                !t["urn:eigenius:prov:was_attributed_to"].is_null(),
                 "a DeclarationTrace names who declared: {t}"
             );
         }

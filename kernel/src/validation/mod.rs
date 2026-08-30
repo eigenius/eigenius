@@ -1558,141 +1558,166 @@ mod tests {
         );
     }
 
+    // These exercised `requires` enforcement through the four grade classes. Those
+    // are deleted — a stored grade conflated provenance with warrant — so the same
+    // mechanism is exercised through the `prov` trace classes, which require things
+    // for reasons that survive: a declaration nobody stands behind establishes
+    // nothing, and an observation with no activity behind it names no origin.
+
     #[test]
-    fn declared_resource_with_declared_by_passes() {
+    fn a_declaration_trace_with_its_required_properties_passes() {
         let base = build_full_bootstrap_layer();
         let mut builder = LayerBuilder::new("test", Some(base));
 
+        // `prov:resource` is resource-typed, so Rule 22's closed-world check needs the
+        // subject on-chain. That it does is the point of the retype.
         builder
             .add_resource(make_resource(
-                "urn:eigenius:test:good_declared",
+                "urn:eigenius:test:subject",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+                )],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:good_trace",
                 vec![
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:DeclaredResource".to_string(),
+                            "urn:eigenius:prov:DeclarationTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:declared_by",
-                        Value::String("test user".into()),
+                        "urn:eigenius:prov:resource",
+                        Value::String("urn:eigenius:test:subject".into()),
+                    ),
+                    (
+                        "urn:eigenius:prov:was_attributed_to",
+                        Value::String("urn:eigenius:prov:agent:unattributed".into()),
+                    ),
+                    (
+                        "urn:eigenius:prov:timestamp",
+                        Value::String("2026-08-30T00:00:00Z".into()),
                     ),
                 ],
             ))
             .unwrap();
 
         let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        let declared_errors: Vec<_> = errors
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let mine: Vec<_> = errors
             .iter()
             .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:good_trace")
+            })
+            .collect();
+        assert!(
+            mine.is_empty(),
+            "a complete DeclarationTrace should pass: {mine:?}"
+        );
+    }
+
+    #[test]
+    fn a_declaration_trace_without_an_agent_fails() {
+        // The accountability requirement: `prov:was_attributed_to` is required
+        // because a declaration with no agent behind it asserts nothing anybody
+        // can be held to.
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // `prov:resource` is resource-typed, so Rule 22's closed-world check needs the
+        // subject on-chain. That it does is the point of the retype.
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:subject",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+                )],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_trace",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:prov:DeclarationTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:prov:resource",
+                        Value::String("urn:eigenius:test:subject".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        assert!(
+            errors.iter().any(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_trace")
+                    && e.rule == ValidationRule::MissingRequired
+            }),
+            "a DeclarationTrace without prov:was_attributed_to should fail"
+        );
+    }
+
+    #[test]
+    fn an_observation_trace_without_a_generating_activity_fails() {
+        // `prov:was_generated_by` is required so the instrument, release or run
+        // behind an observation is reachable from every claim that rests on it.
+        // It was a free-text `reflection:source` string, which could name an
+        // origin but not link to one.
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // `prov:resource` is resource-typed, so Rule 22's closed-world check needs the
+        // subject on-chain. That it does is the point of the retype.
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:subject",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+                )],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_observation",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:prov:ObservationTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:prov:resource",
+                        Value::String("urn:eigenius:test:subject".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        assert!(
+            errors.iter().any(|e| {
                 e.resource_id.as_ref().map(|i| i.as_str())
-                    == Some("urn:eigenius:test:good_declared")
-            })
-            .collect();
-        assert!(
-            declared_errors.is_empty(),
-            "DeclaredResource with 'declared_by' should pass: {declared_errors:?}"
-        );
-    }
-
-    #[test]
-    fn declared_resource_without_declared_by_fails() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_declared",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:DeclaredResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        assert!(
-            errors.iter().any(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_declared")
+                    == Some("urn:eigenius:test:bad_observation")
                     && e.rule == ValidationRule::MissingRequired
             }),
-            "DeclaredResource without 'declared_by' should fail"
-        );
-    }
-
-    #[test]
-    fn observed_resource_without_source_fails() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_observed",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:ObservedResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        assert!(
-            errors.iter().any(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_observed")
-                    && e.rule == ValidationRule::MissingRequired
-            }),
-            "ObservedResource without 'source' should fail"
-        );
-    }
-
-    #[test]
-    fn verified_resource_requires_both_derivation_and_verification() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
-        // VerifiedResource subclasses DerivedResource, so needs both
-        // 'derivation' (from DerivedResource) and 'verification' (its own)
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_verified",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:VerifiedResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        let verified_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_verified")
-                    && e.rule == ValidationRule::MissingRequired
-            })
-            .collect();
-        // Should require both 'derivation' and 'verification'
-        assert!(
-            verified_errors.len() >= 2,
-            "VerifiedResource should require both 'derivation' and 'verification', got {} errors: {verified_errors:?}",
-            verified_errors.len()
+            "an ObservationTrace without prov:was_generated_by should fail"
         );
     }
 
@@ -1943,19 +1968,19 @@ mod tests {
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                            "urn:eigenius:prov:ProgramTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:resource",
+                        "urn:eigenius:prov:resource",
                         Value::String("urn:eigenius:test:target_resource".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:source",
+                        "urn:eigenius:prov:was_generated_by",
                         Value::String("test-institution:validate".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:timestamp",
+                        "urn:eigenius:prov:timestamp",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
                     ),
                 ],
@@ -1992,25 +2017,25 @@ mod tests {
                 (
                     wk::IS_A,
                     Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:ProgramTrace".to_string(),
+                        "urn:eigenius:prov:ProgramTrace".to_string(),
                     )]),
                 ),
                 (
-                    "urn:eigenius:reflection:resource",
+                    "urn:eigenius:prov:resource",
                     Value::String("urn:eigenius:test:target_resource".to_string()),
                 ),
                 (
-                    "urn:eigenius:reflection:source",
+                    "urn:eigenius:prov:was_generated_by",
                     Value::String("test-institution:validate".to_string()),
                 ),
                 (
-                    "urn:eigenius:reflection:timestamp",
+                    "urn:eigenius:prov:timestamp",
                     Value::String("2026-04-23T12:00:00Z".to_string()),
                 ),
             ]
             .into_iter()
             .chain(std::iter::once((
-                "urn:eigenius:reflection:trace_tree",
+                "urn:eigenius:prov:trace_tree",
                 Value::Embedded(Box::new(tree)),
             )))
             .collect::<Vec<_>>()
@@ -2096,19 +2121,19 @@ mod tests {
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                            "urn:eigenius:prov:ProgramTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:source",
+                        "urn:eigenius:prov:was_generated_by",
                         Value::String("test:src".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:timestamp",
+                        "urn:eigenius:prov:timestamp",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:trace_tree",
+                        "urn:eigenius:prov:trace_tree",
                         Value::Embedded(Box::new(let_trace)),
                     ),
                 ],
@@ -2142,19 +2167,19 @@ mod tests {
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                            "urn:eigenius:prov:ProgramTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:resource",
+                        "urn:eigenius:prov:resource",
                         Value::String("urn:eigenius:test:target_resource".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:program",
+                        "urn:eigenius:prov:program",
                         Value::String("urn:eigenius:test:some_program".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:started_at",
+                        "urn:eigenius:prov:started_at",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
                     ),
                 ],
@@ -2183,21 +2208,21 @@ mod tests {
             .filter_map(|e| e.property.as_ref().map(|i| i.as_str()))
             .collect();
         assert!(
-            missing_props.contains("urn:eigenius:reflection:source"),
+            missing_props.contains("urn:eigenius:prov:was_generated_by"),
             "expected `source` to be flagged missing; flagged set = {missing_props:?}",
         );
         assert!(
-            missing_props.contains("urn:eigenius:reflection:timestamp"),
+            missing_props.contains("urn:eigenius:prov:timestamp"),
             "expected `timestamp` to be flagged missing; flagged set = {missing_props:?}",
         );
         // started_at is now recommended, not required — a trace with
         // started_at but missing timestamp must not flag started_at.
         assert!(
-            !missing_props.contains("urn:eigenius:reflection:started_at"),
+            !missing_props.contains("urn:eigenius:prov:started_at"),
             "`started_at` is recommended, not required: {missing_props:?}",
         );
         assert!(
-            !missing_props.contains("urn:eigenius:reflection:program"),
+            !missing_props.contains("urn:eigenius:prov:program"),
             "`program` is recommended, not required: {missing_props:?}",
         );
     }
@@ -3186,9 +3211,7 @@ mod class_fields_memo {
             let mut r = Resource::new(Iri::parse(&format!("urn:t:inst{n}")).unwrap());
             r.set(
                 Iri::parse(wk::IS_A).unwrap(),
-                Value::Array(vec![Value::ResourceRef(
-                    Iri::parse(wk::DECLARED_RESOURCE).unwrap(),
-                )]),
+                Value::Array(vec![Value::ResourceRef(Iri::parse(wk::CLASS).unwrap())]),
             );
             d.add_resource(r).unwrap();
         }

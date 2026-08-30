@@ -65,7 +65,6 @@ fn index_over_bootstrap() -> (Arc<Layer>, Parser) {
 fn linking_verb_takes_a_predicative_adjective() {
     const LINKING_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:remain_test : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
 resource lexicon:remained_e : lexicon:LexicalEntry {
     lexicon:form     = "remained";
@@ -73,7 +72,6 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:remain_test;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
     lexicon:sense    = "remain";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
     let ctx = bootstrap::bootstrap().expect("bootstrap");
@@ -113,7 +111,6 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
 /// seeds, so a sentence needs widen-on-failure to reach rank-1. (Both gate like a proper name.)
 const ZOB_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:zob_pl : lexicon:LexicalEntry {
     lexicon:form       = "zob";
     lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );
@@ -121,7 +118,6 @@ resource lexicon:zob_pl : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zob.0";
     lexicon:sense_rank = 0;
-    lexicon:grade      = epistemic:declared;
 }
 resource lexicon:zob_sg : lexicon:LexicalEntry {
     lexicon:form       = "zob";
@@ -130,7 +126,6 @@ resource lexicon:zob_sg : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zob.1";
     lexicon:sense_rank = 1;
-    lexicon:grade      = epistemic:declared;
 }
 "#;
 
@@ -161,7 +156,6 @@ fn index_with_zob(cap: usize) -> Parser {
 /// genuinely diverge from static, forcing the failure that widen-on-failure must then recover.
 const ZWORP_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:zworp_sg : lexicon:LexicalEntry {
     lexicon:form       = "zworp";
     lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );
@@ -169,7 +163,6 @@ resource lexicon:zworp_sg : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:CellLine );
     lexicon:sense      = "zworp.0";
     lexicon:sense_rank = 0;
-    lexicon:grade      = epistemic:declared;
 }
 resource lexicon:zworp_pl : lexicon:LexicalEntry {
     lexicon:form       = "zworp";
@@ -178,7 +171,6 @@ resource lexicon:zworp_pl : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zworp.1";
     lexicon:sense_rank = 1;
-    lexicon:grade      = epistemic:declared;
 }
 "#;
 
@@ -291,7 +283,6 @@ fn zib_layer() -> Arc<Layer> {
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
     let mut fixture = String::from(
         "namespace lexicon   = \"urn:eigenius:lexicon\";\n\
-         namespace epistemic = \"urn:eigenius:reflection:epistemic\";\n\
          resource lexicon:zib_needed : lexicon:LexicalEntry {\n\
              lexicon:form       = \"zib\";\n\
              lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );\n\
@@ -299,7 +290,6 @@ fn zib_layer() -> Arc<Layer> {
              lexicon:sem_type   = type_expr( lexicon:CellLine );\n\
              lexicon:sense      = \"zib.needed\";\n\
              lexicon:sense_rank = 0;\n\
-             lexicon:grade      = epistemic:declared;\n\
          }\n",
     );
     for i in 1..=16 {
@@ -311,7 +301,6 @@ fn zib_layer() -> Arc<Layer> {
                  lexicon:sem_type   = type_expr( lexicon:Gene );\n\
                  lexicon:sense      = \"zib.d{i}\";\n\
                  lexicon:sense_rank = {i};\n\
-                 lexicon:grade      = epistemic:declared;\n\
              }}\n"
         ));
     }
@@ -361,7 +350,6 @@ fn static_rank_fallback_recovers_a_sense_the_reranker_buried_beyond_widen_max() 
 /// the static cap keeps rank-0 (BRCA1); a reranker preferring `zarg.1` makes the cap keep HeLa.
 const ZARG_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:zarg_gene : lexicon:LexicalEntry {
     lexicon:form       = "zarg";
     lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
@@ -369,7 +357,6 @@ resource lexicon:zarg_gene : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zarg.0";
     lexicon:sense_rank = 0;
-    lexicon:grade      = epistemic:declared;
 }
 resource lexicon:zarg_cell : lexicon:LexicalEntry {
     lexicon:form       = "zarg";
@@ -378,7 +365,6 @@ resource lexicon:zarg_cell : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:CellLine );
     lexicon:sense      = "zarg.1";
     lexicon:sense_rank = 1;
-    lexicon:grade      = epistemic:declared;
 }
 "#;
 
@@ -575,7 +561,6 @@ fn derived_adjective_recognition_requires_a_known_base() {
 /// token could wrongly take the Slice-1 identity reading if the over-generation fix regressed.
 const DENOMINAL_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:base_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_base : lexicon:LexicalEntry {
     lexicon:form     = "base";
@@ -583,7 +568,6 @@ resource lexicon:e_base : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:base_rel;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:base.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 axiom lexicon:resemble_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_resemble : lexicon:LexicalEntry {
@@ -592,7 +576,6 @@ resource lexicon:e_resemble : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:resemble_rel;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:resemble.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 axiom lexicon:like_adj : lexicon:Entity -> Prop
 resource lexicon:e_like : lexicon:LexicalEntry {
@@ -601,7 +584,6 @@ resource lexicon:e_like : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:like_adj;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:like.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -929,7 +911,6 @@ fn close_apposition_subject_and_object() {
 /// subsumption (`WidgetConcept ≤ WidgetKind`), which the one-directional `group ≤ head` gate could not.
 const WIDGET_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace demo      = "urn:eigenius:demo";
 class demo:WidgetKind : lexicon:Entity { }
 class demo:WidgetConcept : demo:WidgetKind { }
@@ -941,7 +922,6 @@ resource lexicon:e_widget : lexicon:LexicalEntry {
     lexicon:sem      = demo:WidgetConcept;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "demo:widget";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_wob : lexicon:LexicalEntry {
     lexicon:form     = "Wob";
@@ -949,7 +929,6 @@ resource lexicon:e_wob : lexicon:LexicalEntry {
     lexicon:sem      = demo:wob;
     lexicon:sem_type = type_expr( demo:WidgetKind );
     lexicon:sense    = "demo:wob";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_bit : lexicon:LexicalEntry {
     lexicon:form     = "Bit";
@@ -957,7 +936,6 @@ resource lexicon:e_bit : lexicon:LexicalEntry {
     lexicon:sem      = demo:bit;
     lexicon:sem_type = type_expr( demo:WidgetKind );
     lexicon:sense    = "demo:bit";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -1031,7 +1009,6 @@ resource lexicon:beside_prep : lexicon:LexicalEntry {
     lexicon:sense       = "beside";
     lexicon:sense_rank  = 5;
     lexicon:in_lexicon  = lexicon:extra_lex;
-    lexicon:grade       = epistemic:declared;
 }
 "#;
 
@@ -2614,7 +2591,6 @@ fn resolve_open_substitutes_an_antecedent_and_re_gates() {
 // the Entity-typed pronoun holes cannot express.
 const DEMONSTRATIVE_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace core      = "urn:eigenius:core";
 
 // A SUBCLASS level under CellLine, for the re-gate subsumption probe: does the veto accept an
@@ -2636,7 +2612,6 @@ resource lexicon:yonder_subj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "yonder";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:yonder_obj : lexicon:LexicalEntry {
     core:description = "grammatical: test demonstrative determiner (object, sg).";
@@ -2645,7 +2620,6 @@ resource lexicon:yonder_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "yonder";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -2656,7 +2630,6 @@ resource lexicon:yonder_obj : lexicon:LexicalEntry {
 /// assert `closed.is_empty()`).
 const POOLED_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace core      = "urn:eigenius:core";
 resource lexicon:yonder_ne : lexicon:LexicalEntry {
     core:description = "test: named-entity reading of the demonstrative span (pooled-competition probe).";
@@ -2665,7 +2638,6 @@ resource lexicon:yonder_ne : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:hela_s3;
     lexicon:sem_type = type_expr( lexicon:HeLaSubline );
     lexicon:sense    = "urn:eigenius:lexicon:hela_s3";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -3429,7 +3401,6 @@ fn document_only_augmentation_harvests_bindings_and_flags_oov() {
 /// BM25 index can). The form `core:TextIndex` comes from the lexicon ontology (one per property), not here.
 const RECQ_FORM_INDEX_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 class lexicon:RecqHelicases : lexicon:Entity {
     description = "The RecQ helicase family (test concept, mirrors UMLS C0084304).";
 }
@@ -3438,7 +3409,6 @@ resource lexicon:e_recq_family : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_n(lexicon:RecqHelicases, lexicon:num_any) );
     lexicon:sem      = lexicon:RecqHelicases;
     lexicon:sem_type = type_expr( Set );
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -3567,7 +3537,6 @@ fn probe_recq_form_index_active_and_populated() {
 const DESCRIPTION_GROUNDING_FIXTURE: &str = r#"
 namespace demo      = "urn:eigenius:demo";
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 class demo:Gyrase : lexicon:Entity {
     description = "a bacterial topoisomerase enzyme that supercoils chromosomal dna in living cells";
 }
@@ -3577,7 +3546,6 @@ resource demo:e_supercoil : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = demo:v_supercoil;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -3794,14 +3762,12 @@ fn non_pp_verb_rejects_a_pp_complement() {
 /// PP-oblique WordNet frames). `prep_any` (the preposition-agnostic verb frame) accepts any marker.
 const CONTRIB_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:e_contributes : lexicon:LexicalEntry {
     lexicon:form     = "contributes";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:contribute.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 

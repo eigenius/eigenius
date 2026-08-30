@@ -2,8 +2,7 @@
   {
     "@id": "urn:eigenius:ingest:PinnedExternalFile",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ObservedResource"],
-    "urn:eigenius:core:description": "A data file too large to inline on the chain (or deliberately kept off-chain), tracked by content hash and located by a backend reference. The bytes live in an external store (Oxen, or a disk volume); only this typed node — reference + content_hash + media_type — travels on the chain. The substrate fetches + content-verifies + materializes it as an input to a computation (D53). The IRI is content-addressed from content_hash, so byte-identical files converge to one node. Inherits the reflection:source requirement from ObservedResource.",
+    "urn:eigenius:core:description": "A data file too large to inline on the chain (or deliberately kept off-chain), tracked by content hash and located by a backend reference. The bytes live in an external store (Oxen, or a disk volume); only this typed node — reference + content_hash + media_type — travels on the chain. The substrate fetches + content-verifies + materializes it as an input to a computation (D53). The IRI is content-addressed from content_hash, so byte-identical files converge to one node. Inherits the prov:was_generated_by requirement from ObservedResource.",
     "urn:eigenius:core:short_name": "PinnedExternalFile",
     "urn:eigenius:core:requires": [
       "urn:eigenius:ingest:reference",
@@ -241,7 +240,7 @@
   {
     "@id": "urn:eigenius:ingest:source",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The physical column name a component reads from (Croissant source-style). On a Dimension/Measure/Attribute in a long table; absent for the entity-per-column dimension of a wide matrix (its values come from the headers). Distinct from reflection:source (provenance). D53 §4.1.",
+    "urn:eigenius:core:description": "The physical column name a component reads from (Croissant source-style). On a Dimension/Measure/Attribute in a long table; absent for the entity-per-column dimension of a wide matrix (its values come from the headers). Distinct from prov:was_generated_by (provenance). D53 §4.1.",
     "urn:eigenius:core:short_name": "source",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": [

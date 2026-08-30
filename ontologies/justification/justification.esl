@@ -44,6 +44,7 @@ namespace dispatch      = "urn:eigenius:institution:dispatch_roles";
 namespace runtimes      = "urn:eigenius:institution:runtimes";
 namespace proc          = "urn:eigenius:reasoning:proc";
 namespace justification = "urn:eigenius:justification";
+namespace prov       = "urn:eigenius:prov";
 
 // ── ChainWitness predicates ──────────────────────────────────────────
 //
@@ -265,7 +266,7 @@ data justification:Certificate : justification:Term -> Prop -> Type 2 {
 // Citation by IRI is what goes, and only for unproved conclusions — the IRI was
 // standing in for a proof that did not exist.
 
-class justification:Conclusion : reflection:DerivedResource {
+class justification:Conclusion {
     description = "A chain-resident reasoning step: the thing a justification concludes. Carries ONE required judgement — `holds(kernel, c, Certificate(j, P))`, read as `the kernel verified that certificate c grounds a claim to P`. It does NOT assert P: a certificate records grounds, and no rule turns Certificate(j,P) into P. Replaces the three required slots this class used to carry (proposition + term + certificate), which were checked by three separate paths with nothing requiring them to be about the same claim — a certificate for one proposition could sit beside a different proposition and both checked clean. Folding them into the judgement's type is what makes the pairing the thing that gets checked. Named Conclusion rather than Sentence because `sentence` described the three-slot record; `Claim` is taken by enc:EncodedClaim.";
     requires justification:judgement;
     recommends justification:proof,
@@ -309,8 +310,8 @@ property justification:refutes : core:string {
 // not user-authored. Phase 8 wires the comorphism; this declaration
 // fixes the contract.
 
-class justification:VerifiedPropositionView : reflection:DerivedResource {
-    description = "Comorphism-reified view of a Lean (or future Coq/Agda/Idris) VerifiedResource's proposition, expressed as an EigenTT Prop term. The witness emitter for reflection:VerificationTrace looks up the view by source_verified_resource and reads canonical_proposition to build the IsVerifiedAs witness (D49 §7). Required, not optional: a view without a canonical_proposition is malformed.";
+class justification:VerifiedPropositionView {
+    description = "Comorphism-reified view of a Lean (or future Coq/Agda/Idris) VerifiedResource's proposition, expressed as an EigenTT Prop term. The witness emitter for prov:VerificationTrace looks up the view by source_verified_resource and reads canonical_proposition to build the IsVerifiedAs witness (D49 §7). Required, not optional: a view without a canonical_proposition is malformed.";
     requires justification:source_verified_resource,
              reflection:canonical_proposition;
 }
@@ -327,7 +328,7 @@ property justification:source_verified_resource : core:string {
 // than dispatching against existing ReasoningSentences. Each class
 // declares the shape its handler reads.
 
-class justification:EntailmentRequest : reflection:DerivedResource {
+class justification:EntailmentRequest {
     description = "Input to qc_entailment_query (D39 §4.3 OnDemand): ask whether the chain warrants the named candidate proposition. v1 of the handler performs a lookup-based search — it walks the layer chain for committed ReasoningSentences and returns Holds if any sentence's proposition matches the candidate. Undecidable otherwise (absence of evidence is not proof of impossibility). Bounded-depth proof search is follow-on work.";
     requires justification:candidate_proposition;
 }
@@ -339,7 +340,7 @@ property justification:candidate_proposition : core:inductive {
     domain justification:EntailmentRequest;
 }
 
-class justification:ConsistencyRequest : reflection:DerivedResource {
+class justification:ConsistencyRequest {
     description = "Input to qc_consistency_check (D39 §4.3 Decidable): ask whether the named set of ReasoningSentences is internally consistent. v1 returns Undecidable for any non-trivial input — the propositional-fragment decision procedure is follow-on work. The handler exists so the QueryClass IRI is dispatch-bound; reserved input shape so a richer handler can be plugged in without surface churn.";
     requires justification:sentence_set;
 }
@@ -495,7 +496,7 @@ property justification:fully_verified : core:boolean {
 }
 
 property justification:declared_grounds : core:value_array {
-    description = "The IRIs cited by Declared grounds — what the conclusion rests on that nobody proved. A UNION across alternatives, not an intersection: this is a question about exposure, and a ground appearing on any branch is one the conclusion may rest on. Pair with reflection:declared_by on each to get 'which agents are we trusting' (answerable only since D72 made declared_by a resolvable Agent).";
+    description = "The IRIs cited by Declared grounds — what the conclusion rests on that nobody proved. A UNION across alternatives, not an intersection: this is a question about exposure, and a ground appearing on any branch is one the conclusion may rest on. Pair with prov:was_attributed_to on each to get 'which agents are we trusting' (answerable only since D72 made declared_by a resolvable Agent).";
     element_type = core:string;
     domain justification:Projection;
 }

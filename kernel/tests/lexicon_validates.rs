@@ -66,14 +66,14 @@ fn json_layer(name: &str, parent: Option<Arc<Layer>>, sources: &[&str]) -> Arc<L
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// core → reflection(+eigentt) — the lexicon's parent chain.
+/// core → reflection(+eigentt) → prov — the lexicon's parent chain.
 fn base_chain() -> Arc<Layer> {
     let core = json_layer(
         "core",
         None,
         &[include_str!("../../ontologies/core/core-ontology.json")],
     );
-    json_layer(
+    let reflection = json_layer(
         "reflection",
         Some(core),
         &[
@@ -82,6 +82,11 @@ fn base_chain() -> Arc<Layer> {
             include_str!("../../ontologies/institution/institution-ontology.json"),
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],
+    );
+    esl_layer(
+        "prov",
+        include_str!("../../ontologies/prov/prov.esl"),
+        reflection,
     )
 }
 
@@ -575,7 +580,6 @@ fn gate_admits_well_formed_entries() {
 // `gate_entry`. The gate is therefore doing real work the storage gate cannot.
 const DRAFTS: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 
 // ⟦cat_np(Gene)⟧ = Gene, but sem_type claims CellLine — category and declared
 // type disagree (the cross-field check the recursor proves for real entries).
@@ -584,7 +588,6 @@ resource lexicon:e_bad_type : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:CellLine );
-    lexicon:grade    = epistemic:declared;
 }
 
 // cat and sem_type agree (Gene), but the `sem` points at a CellLine instance —
@@ -594,7 +597,6 @@ resource lexicon:e_bad_sem : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:Gene );
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -840,7 +842,6 @@ fn lexicon_instances_validate_and_available_lexica_is_a_plain_query() {
 // `lex_a`, `Gene` in `lex_b` — let us observe filtering + precedence directly.
 const SCOPED_LEXICA: &str = r#"
     namespace lexicon   = "urn:eigenius:lexicon";
-    namespace epistemic = "urn:eigenius:reflection:epistemic";
 
     resource lexicon:lex_a : lexicon:Lexicon { lexicon:source = "A"; }
     resource lexicon:lex_b : lexicon:Lexicon { lexicon:source = "B"; }
@@ -850,7 +851,6 @@ const SCOPED_LEXICA: &str = r#"
         lexicon:cat        = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:num_any) );
         lexicon:sem        = lexicon:CellLine;
         lexicon:sem_type   = type_expr( Set );
-        lexicon:grade      = epistemic:declared;
         lexicon:in_lexicon = lexicon:lex_a;
     }
     resource lexicon:e_widget_b : lexicon:LexicalEntry {
@@ -858,7 +858,6 @@ const SCOPED_LEXICA: &str = r#"
         lexicon:cat        = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
         lexicon:sem        = lexicon:Gene;
         lexicon:sem_type   = type_expr( Set );
-        lexicon:grade      = epistemic:declared;
         lexicon:in_lexicon = lexicon:lex_b;
     }
 "#;
@@ -1017,30 +1016,29 @@ fn bridge_yields_no_parse_for_type_mismatch() {
 
 const FEAT: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:f_n_sg : lexicon:LexicalEntry {
     lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:sg) );
-    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set );
 }
 resource lexicon:f_n_pl : lexicon:LexicalEntry {
     lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:pl) );
-    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set );
 }
 resource lexicon:f_n_any : lexicon:LexicalEntry {
     lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:num_any) );
-    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set );
 }
 resource lexicon:f_np_ent_sg : lexicon:LexicalEntry {
     lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
-    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Entity ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Entity );
 }
 resource lexicon:f_np_gene_sg : lexicon:LexicalEntry {
     lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
-    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Gene ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Gene );
 }
 resource lexicon:f_np_gene_pl : lexicon:LexicalEntry {
     lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );
-    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Gene ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Gene );
 }
 "#;
 
@@ -1101,22 +1099,21 @@ fn cat_subsumes_meets_features() {
 
 const DUAL: &str = r#"
 namespace core      = "urn:eigenius:core";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace lexicon   = "urn:eigenius:lexicon";
 resource lexicon:dual : lexicon:Gene, lexicon:CellLine {
     core:description = "an individual that is both a Gene and a CellLine";
 }
 resource lexicon:e_dual_gene : lexicon:LexicalEntry {
     lexicon:form = "dual"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
-    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:Gene ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:Gene );
 }
 resource lexicon:e_dual_cl : lexicon:LexicalEntry {
     lexicon:form = "dual"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:num_any) );
-    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:CellLine ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:CellLine );
 }
 resource lexicon:e_dual_ent : lexicon:LexicalEntry {
     lexicon:form = "dual"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
-    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:Entity ); lexicon:grade = epistemic:declared;
+    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:Entity );
 }
 "#;
 
@@ -1255,7 +1252,6 @@ fn every_gene_q_composes_and_reduces_to_prop() {
 // placeholder; only the `cat` field is read.)
 const DET_SHAPE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:e_det_shape : lexicon:LexicalEntry {
     lexicon:form     = "every";
     lexicon:cat      = type_expr(
@@ -1273,7 +1269,6 @@ resource lexicon:e_det_shape : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Gene;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "x";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -1378,7 +1373,6 @@ fn determiner_unifies_type_var_and_substitutes_through_result() {
 
 const DET_CAT_FORALL: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace logic     = "urn:eigenius:logic";
 
 // A general one-place predicate over entities — a stand-in VP semantics for the
@@ -1402,7 +1396,6 @@ resource lexicon:e_entity_noun : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Entity;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "x";
-    lexicon:grade    = epistemic:declared;
 }
 
 // The expected result of `every ▸ gene`: the concrete `S/(S\NP_Gene)`.
@@ -1420,7 +1413,6 @@ resource lexicon:e_det_result : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Gene;
     lexicon:sem_type = type_expr( (lexicon:Gene -> Prop) -> Prop );
     lexicon:sense    = "x";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 

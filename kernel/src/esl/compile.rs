@@ -1485,7 +1485,7 @@ impl Compiler {
             iri(crate::ontology::well_known::MACRO_DECL_JSON),
             Value::Json(decl_json),
         );
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -1520,7 +1520,7 @@ impl Compiler {
                 Value::String(j.clone()),
             );
         }
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -1588,7 +1588,7 @@ impl Compiler {
                 Value::String(d.clone()),
             );
         }
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -2151,7 +2151,7 @@ impl Compiler {
         // are appended here so a single inductive-type resource can
         // carry scope markers (`stats:PopulationLevel`, etc.) without
         // a separate companion `resource X : Marker {}` declaration
-        // (which would collide via `stamp_declared` + LayerBuilder
+        // (which would collide via `stamp_attribution` + LayerBuilder
         // last-wins).
         let mut is_a_values: Vec<Value> = vec![Value::String(wk::INDUCTIVE_TYPE.to_string())];
         for extra in &decl.extra_classes {
@@ -2318,7 +2318,7 @@ impl Compiler {
             .collect();
         r.set(iri(wk::CTORS), Value::Array(ctors?));
 
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -2454,7 +2454,7 @@ impl Compiler {
             );
         }
 
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -2565,7 +2565,7 @@ impl Compiler {
             }
         }
 
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -2596,7 +2596,7 @@ impl Compiler {
         // ProgramTraces, ObservationTraces, measured witnesses and imported data as
         // readily as human assertions, so inferring the epistemic category from the
         // keyword asserts something the compiler cannot know. The D71 demo artifact had
-        // a `reflection:ProgramTrace` whose own `source` names the producing lander
+        // a `prov:ProgramTrace` whose own `source` names the producing lander
         // stamped `DeclaredResource` + "a human asserted this". The author's `is_a` is
         // the category; the eight theory forms below still stamp, because writing
         // `axiom` or `class` IS a human assertion.
@@ -2842,7 +2842,7 @@ impl Compiler {
             Value::Embedded(Box::new(body)),
         );
 
-        stamp_declared(&mut r);
+        stamp_attribution(&mut r);
         Ok(vec![r])
     }
 
@@ -3604,11 +3604,9 @@ fn compute_witness_lambda_iri(resource: &Resource) -> Iri {
 /// Placeholder `declared_by` for an ESL declaration whose source
 /// names no declarer.
 ///
-/// `reflection:declared_by` answers "who declared this resource"
-/// (reflection ontology), and `reflection:DeclaredResource` — which
-/// [`stamp_declared`] puts on every compiled resource — `requires`
-/// it, so the property cannot simply be left off: an unattributed
-/// declaration would fail `MissingRequired` at commit. This value is
+/// `prov:was_attributed_to` answers "who declared this resource", and
+/// [`stamp_attribution`] puts it on every compiled resource that did not
+/// supply one, so the property is never simply left off. This value is
 /// the *absence* of an author attribution, not an answer to the
 /// question; it names the channel the declaration arrived through.
 /// A `declared_by` written in the ESL source is the real attribution
@@ -3616,7 +3614,7 @@ fn compute_witness_lambda_iri(resource: &Resource) -> Iri {
 /// The bootstrap agent meaning "no agent was recorded" (D72 §3.1). An explicit marker
 /// of absence, and a real resolvable resource — `declared_by` is resource-typed since
 /// D72 §3.2, so the old `"esl-compiler"` literal would now fail Rule 22 at commit.
-const UNATTRIBUTED_DECLARER: &str = "urn:eigenius:reflection:agent:unattributed";
+const UNATTRIBUTED_DECLARER: &str = "urn:eigenius:prov:agent:unattributed";
 
 /// Env var naming the agent to attribute declarations to for this compile.
 ///
@@ -3642,40 +3640,23 @@ fn declarer_from(configured: Option<&str>) -> String {
     }
 }
 
-/// Append `DeclaredResource` to `is_a` and default `declared_by` on a
-/// compiled resource (D6b epistemic stamping, Phase 10b Step 3).
+/// Default `prov:was_attributed_to` on a compiled resource.
 ///
-/// Both halves are additive, never overwriting:
-/// - `DeclaredResource` is appended only when `is_a` does not already
-///   carry it, so a decompile/recompile round trip is idempotent.
-/// - `declared_by` is set only when the source supplied none. The
-///   author's attribution is the accountability record the Declared
-///   category exists to carry (eigenius#141, eigenius#167); the
-///   compiler has no standing to replace it.
-fn stamp_declared(resource: &mut Resource) {
-    let is_a_iri = iri("urn:eigenius:core:is_a");
-    let declared_resource = crate::ontology::well_known::DECLARED_RESOURCE;
-    let mut types = match resource.get(&is_a_iri) {
-        Some(Value::Array(arr)) => arr.clone(),
-        // A single (non-array) is_a value is still a type assertion:
-        // keep it rather than dropping it on the floor.
-        Some(v @ (Value::String(_) | Value::ResourceRef(_))) => vec![v.clone()],
-        _ => Vec::new(),
-    };
-    let already_declared = types.iter().any(|v| match v {
-        Value::String(s) => s == declared_resource,
-        Value::ResourceRef(i) => i.as_str() == declared_resource,
-        _ => false,
-    });
-    if !already_declared {
-        types.push(Value::String(declared_resource.to_string()));
-    }
-    resource.set(is_a_iri, Value::Array(types));
-
+/// Additive, never overwriting: it is set only when the source supplied none,
+/// because the author's attribution is the accountability record and the
+/// compiler has no standing to replace it (eigenius#141, eigenius#167).
+///
+/// It also appended `reflection:DeclaredResource` to `is_a`, which is what the
+/// function was named for. That class is gone: it recorded a WARRANT grade on a
+/// resource whose provenance was the only thing actually known, and stamping it
+/// meant every ESL-authored resource in the tree asserted a grade nothing
+/// checked. What the stamp was really carrying is the attribution below —
+/// provenance, which every resource has — so that half survives alone.
+fn stamp_attribution(resource: &mut Resource) {
     let declared_by_iri = iri(crate::ontology::well_known::DECLARED_BY);
     if resource.get(&declared_by_iri).is_none() {
-        // A `ResourceRef`: `declared_by` is resource-typed with
-        // `class_types reflection:Agent`, so Rule 8 and Rule 22 require a declarer that
+        // A `ResourceRef`: `prov:was_attributed_to` is resource-typed with
+        // `class_types prov:Agent`, so Rule 8 and Rule 22 require a declarer that
         // resolves same-or-lower.
         resource.set(
             declared_by_iri,
@@ -4559,12 +4540,21 @@ mod tests {
         );
     }
 
-    // --- DeclaredResource stamping tests (Phase 10b) ---
+    // --- attribution stamping tests (Phase 10b; the grade half deleted) ---
 
-    fn has_declared_resource(r: &Resource) -> bool {
-        r.is_a()
-            .iter()
-            .any(|i| i.as_str() == crate::ontology::well_known::DECLARED_RESOURCE)
+    /// No compiled resource may carry a grade class in `is_a`. The compiler used to
+    /// append `reflection:DeclaredResource` to every class, property and program it
+    /// compiled; the class is deleted and the stamp with it, so this asserts absence.
+    fn has_grade_class(r: &Resource) -> bool {
+        r.is_a().iter().any(|i| {
+            matches!(
+                i.as_str(),
+                "urn:eigenius:reflection:DeclaredResource"
+                    | "urn:eigenius:reflection:ObservedResource"
+                    | "urn:eigenius:reflection:DerivedResource"
+                    | "urn:eigenius:reflection:VerifiedResource"
+            )
+        })
     }
 
     /// Reads through both value shapes: the compiler writes a `ResourceRef`, and CBOR
@@ -4576,7 +4566,7 @@ mod tests {
     }
 
     #[test]
-    fn esl_class_stamped_declared_resource() {
+    fn esl_class_gets_an_attribution_and_no_grade() {
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
@@ -4589,14 +4579,14 @@ mod tests {
         );
         let r = &resources[0];
         assert!(
-            has_declared_resource(r),
-            "ESL class should have DeclaredResource in is_a"
+            !has_grade_class(r),
+            "no compiled resource may carry a grade class"
         );
         assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
 
     #[test]
-    fn esl_property_stamped_declared_resource() {
+    fn esl_property_gets_an_attribution_and_no_grade() {
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
@@ -4609,8 +4599,8 @@ mod tests {
         );
         let r = &resources[0];
         assert!(
-            has_declared_resource(r),
-            "ESL property should have DeclaredResource in is_a"
+            !has_grade_class(r),
+            "no compiled resource may carry a grade class"
         );
         assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
@@ -4620,7 +4610,7 @@ mod tests {
     /// so the compiler cannot infer the epistemic category from the keyword. Renamed
     /// from `esl_resource_stamped_declared_resource`, which pinned the old behaviour.
     #[test]
-    fn esl_resource_is_not_stamped_declared_resource() {
+    fn esl_resource_gets_no_attribution() {
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
@@ -4633,8 +4623,8 @@ mod tests {
         );
         let r = &resources[0];
         assert!(
-            !has_declared_resource(r),
-            "the author's is_a is the epistemic category; the compiler must not add one"
+            !has_grade_class(r),
+            "no compiled resource may carry a grade class"
         );
         assert_eq!(
             declared_by(r),
@@ -4644,7 +4634,7 @@ mod tests {
     }
 
     #[test]
-    fn esl_program_stamped_declared_resource() {
+    fn esl_program_gets_an_attribution_and_no_grade() {
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
@@ -4657,8 +4647,8 @@ mod tests {
         );
         let r = &resources[0];
         assert!(
-            has_declared_resource(r),
-            "ESL program should have DeclaredResource in is_a"
+            !has_grade_class(r),
+            "no compiled resource may carry a grade class"
         );
         assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
@@ -4671,12 +4661,14 @@ mod tests {
     fn author_declared_by_survives_compilation() {
         let resources = compile_esl(
             r#"
+            namespace core = "urn:eigenius:core";
             namespace ref = "urn:eigenius:reflection";
+            namespace prov = "urn:eigenius:prov";
             namespace wrn = "urn:eigenius:pub:wrn";
 
-            resource wrn:bridge_msi_selective : ref:DeclaredResource {
-                ref:declared_by = "wrn-paper:selective-essentiality-criterion";
-                ref:rationale   = "Independent-platform replication is the warrant.";
+            resource wrn:bridge_msi_selective : core:Class {
+                prov:was_attributed_to = "wrn-paper:selective-essentiality-criterion";
+                prov:rationale   = "Independent-platform replication is the warrant.";
             }
         "#,
         );
@@ -4686,7 +4678,7 @@ mod tests {
             Some("wrn-paper:selective-essentiality-criterion".to_string()),
             "author-supplied declared_by must not be replaced by the compiler"
         );
-        assert!(has_declared_resource(r));
+        assert!(!has_grade_class(r));
     }
 
     /// A theory form with no configured session agent gets the unattributed marker.
@@ -4732,24 +4724,28 @@ mod tests {
     /// decompile/recompile round trip does not accumulate
     /// `DeclaredResource` entries.
     #[test]
-    fn declared_resource_tag_not_duplicated() {
+    fn compilation_adds_no_grade_class() {
         let resources = compile_esl(
             r#"
+            namespace core = "urn:eigenius:core";
             namespace ref = "urn:eigenius:reflection";
+            namespace prov = "urn:eigenius:prov";
             namespace ex = "urn:eigenius:example";
 
-            resource ex:rex : ref:DeclaredResource {
-                ref:declared_by = "someone";
+            resource ex:rex : core:Class {
+                prov:was_attributed_to = "someone";
             }
         "#,
         );
         let r = &resources[0];
-        let tags = r
-            .is_a()
-            .iter()
-            .filter(|i| i.as_str() == crate::ontology::well_known::DECLARED_RESOURCE)
-            .count();
-        assert_eq!(tags, 1, "DeclaredResource appended twice: {:?}", r.is_a());
+        // This pinned that the compiler appended `DeclaredResource` exactly once
+        // when the source already carried it. Nothing appends a grade class now,
+        // and an author who writes one gets no help either: the class does not
+        // resolve, so the resource fails at commit rather than being stamped twice.
+        assert!(
+            !has_grade_class(r),
+            "no grade class may survive compilation"
+        );
     }
 
     // --- `data` declaration compilation (Phase 11b step 8) ---
@@ -5450,8 +5446,8 @@ mod tests {
         );
         let r = &resources[0];
         assert!(
-            has_declared_resource(r),
-            "ESL data should have DeclaredResource in is_a"
+            !has_grade_class(r),
+            "no compiled resource may carry a grade class"
         );
         assert_eq!(declared_by(r), Some(UNATTRIBUTED_DECLARER.to_string()));
     }
@@ -5557,12 +5553,13 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:eigenius:example";
             namespace ref  = "urn:eigenius:reflection";
+            namespace prov = "urn:eigenius:prov";
 
             data ex:HasLowIC50 : core:string -> Prop {
             }
 
-            resource ex:with_alias : ref:DeclaredResource {
-                ref:declared_by = "test:alias";
+            resource ex:with_alias : core:Class {
+                prov:was_attributed_to = "test:alias";
                 ref:canonical_proposition = type_expr(
                     alias EIG = "urn:ex:EIG_0291"
                     in
@@ -5570,8 +5567,8 @@ mod tests {
                 );
             }
 
-            resource ex:without_alias : ref:DeclaredResource {
-                ref:declared_by = "test:alias";
+            resource ex:without_alias : core:Class {
+                prov:was_attributed_to = "test:alias";
                 ref:canonical_proposition = type_expr(
                     ex:HasLowIC50("urn:ex:EIG_0291")
                 );
@@ -5611,12 +5608,13 @@ mod tests {
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:eigenius:example";
             namespace ref  = "urn:eigenius:reflection";
+            namespace prov = "urn:eigenius:prov";
 
             data ex:HasLowIC50 : core:string -> Prop {
             }
 
-            resource ex:scope_test : ref:DeclaredResource {
-                ref:declared_by = "test:scope";
+            resource ex:scope_test : core:Class {
+                prov:was_attributed_to = "test:scope";
                 ref:canonical_proposition = type_expr(
                     alias x = "urn:ex:SHOULD_NOT_LEAK"
                     in
@@ -5624,8 +5622,8 @@ mod tests {
                 );
             }
 
-            resource ex:scope_expected : ref:DeclaredResource {
-                ref:declared_by = "test:scope";
+            resource ex:scope_expected : core:Class {
+                prov:was_attributed_to = "test:scope";
                 ref:canonical_proposition = type_expr(
                     forall (x : core:string) => ex:HasLowIC50(x)
                 );

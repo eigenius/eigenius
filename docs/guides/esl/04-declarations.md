@@ -202,10 +202,10 @@ axiom ex:strong_inhibitor_implication :
         screen:HasLowIC50(c) -> screen:StrongInhibitor(c)
 note: "Standard medicinal-chemistry threshold; CLSI EP09 alignment."
 
-resource ex:strong_inhibitor_implication_trace : reflection:DeclarationTrace {
-    reflection:resource    = ex:strong_inhibitor_implication;
-    reflection:declared_by = "literature:smith_et_al_2024";
-    reflection:timestamp   = "2026-04-10T09:00:00Z";
+resource ex:strong_inhibitor_implication_trace : prov:DeclarationTrace {
+    prov:resource    = ex:strong_inhibitor_implication;
+    prov:was_attributed_to = "literature:smith_et_al_2024";
+    prov:timestamp   = "2026-04-10T09:00:00Z";
 }
 ```
 

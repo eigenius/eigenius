@@ -4,7 +4,7 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:pub:wrn:XenograftTable"
     ],
-    "urn:eigenius:reflection:source": "wrn-paper Fig 2d KM12 shWRN1 xenograft tumor volumes (Dox-on vs Dox-off), per-row [volume, day, mouse, dox]",
+    "urn:eigenius:prov:was_generated_by": "wrn-paper Fig 2d KM12 shWRN1 xenograft tumor volumes (Dox-on vs Dox-off), per-row [volume, day, mouse, dox]",
     "urn:eigenius:benchmark:extracted_from_slice": "data/slices/wrn_sourcedata_Fig2_MOESM3.xlsx",
     "urn:eigenius:benchmark:extracted_from_sha256": "e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e",
     "urn:eigenius:benchmark:extraction_columns": "Fig 2d sheet, shWRN1 condition: per-mouse 'Volume' rows (tumor volume mm^3) across 'Days after randomization', Dox-on (+Dox, WRN-depleted) and Dox-off arms",

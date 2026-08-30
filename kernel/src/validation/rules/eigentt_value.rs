@@ -335,7 +335,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         r.set(iri("urn:eigenius:test:tx"), value);
         r
@@ -363,10 +363,10 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         r.set(
-            iri("urn:eigenius:reflection:declared_by"),
+            iri("urn:eigenius:prov:was_attributed_to"),
             Value::String("test:eigentt_value".into()),
         );
         r.set(iri(wk::CANONICAL_PROPOSITION), value);
@@ -592,7 +592,7 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:missing"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         top.add_resource(r).unwrap();
         let layer = Arc::new(top.build(LayerStorage::in_memory()));

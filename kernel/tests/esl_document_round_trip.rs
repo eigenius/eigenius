@@ -173,7 +173,7 @@ fn every_declaration_form_round_trips_through_esl() {
 ///
 /// 1. **Compiler-added provenance.** Recompiling mints stable constructor `@id`s
 ///    (`core:Level:Zero`), adds `reflection:DeclaredResource` to `is_a`, and stamps
-///    `reflection:declared_by`. The hand-authored JSON has none of these — it is under-specified
+///    `prov:was_attributed_to`. The hand-authored JSON has none of these — it is under-specified
 ///    relative to compiler output, so the difference runs the other way from a loss.
 ///
 /// `core:description` and `core:arg_name` were on this list until eigenius#221 added the surface
@@ -190,7 +190,7 @@ fn every_shipped_inductive_round_trips_through_esl() {
             match v {
                 Value::Object(o) => {
                     o.remove("@id");
-                    o.remove("urn:eigenius:reflection:declared_by");
+                    o.remove("urn:eigenius:prov:was_attributed_to");
                     o.remove("urn:eigenius:core:is_a");
                     // The compiler writes explicit empty arrays where hand-authored JSON omits
                     // the key. Absent and empty mean the same thing for all three, so normalise.

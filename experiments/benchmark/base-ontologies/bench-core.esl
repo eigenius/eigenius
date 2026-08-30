@@ -10,7 +10,7 @@
 //   - ToolArtifact : the typed tool boundary. The kernel never checks
 //     what RDKit / pymatgen / sklearn computed; it checks that a named
 //     tool produced a typed output from typed inputs (D50 §9, §12). A
-//     ToolArtifact is a DerivedResource, so its `reflection:derivation`
+//     ToolArtifact is a DerivedResource, so its `prov:derivation`
 //     ProgramTrace yields an `IsDerivedAs` witness the D49 emitter admits
 //     — that is what lets a justification:Conclusion cite it via DerivedEvidence.
 //
@@ -32,6 +32,7 @@ namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
 namespace bench      = "urn:eigenius:benchmark";
+namespace prov       = "urn:eigenius:prov";
 
 // ── Typed tool boundary ──────────────────────────────────────────────
 

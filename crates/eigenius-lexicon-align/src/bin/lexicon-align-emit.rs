@@ -151,10 +151,6 @@ fn main() -> ExitCode {
                     form,
                     sense: as_str(r.get(&Iri::parse("urn:eigenius:lexicon:sense").unwrap()))
                         .unwrap_or_default(),
-                    grade: qname(
-                        &as_str(r.get(&Iri::parse("urn:eigenius:lexicon:grade").unwrap()))
-                            .unwrap_or_default(),
-                    ),
                     in_lexicon: qname(
                         &as_str(r.get(&Iri::parse("urn:eigenius:lexicon:in_lexicon").unwrap()))
                             .unwrap_or_default(),

@@ -29,7 +29,7 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
 
 use crate::claim_kind::{frame_kind, KindClassifier, KIND_ASSERTION};
-use crate::grade::{ClaimGrader, ClaimSource, GradedClaim, ParsedClaimGrader, Warrant};
+use crate::grade::{ClaimGrader, ClaimSource, GradedClaim, ParsedClaimGrader};
 
 /// The [`ClaimLander`] realization (D68 §4/§6): lands each encoded sentence as the Derived
 /// cluster, with the discourse kind assigned by (1) the deterministic frame table, else (2) the
@@ -57,7 +57,7 @@ impl<'a> DerivedClaimLander<'a> {
             doc_id: doc_id.to_string(),
             // An agent IRI, not a program's name: `declared_by` is resource-typed since
             // D72 §3.2, and "which program computed this" is already recorded as the
-            // ProgramTrace's `reflection:source`. A caller who knows the asserting agent
+            // ProgramTrace's `prov:was_generated_by`. A caller who knows the asserting agent
             // supplies it; absent that, the honest value is the absence marker.
             declared_by: crate::grade::UNATTRIBUTED_AGENT.to_string(),
             timestamp: "2026-08-03T00:00:00Z".to_string(),
@@ -142,7 +142,6 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                     resources: vec![claim, trace],
                     claim_iri,
                     gate_sentence: None,
-                    grade: Warrant::Parsed.grade(),
                 }
             }
             None => ParsedClaimGrader
@@ -150,7 +149,6 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                     item.sem(),
                     &ClaimSource {
                         stem: &format!("urn:eigenius:doc:{}:s{}", self.doc_id, ordinal),
-                        warrant: Warrant::Parsed,
                         declared_by: &self.declared_by,
                         timestamp: &self.timestamp,
                         provenance: &provenance,

@@ -457,7 +457,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     target.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk_local::DECLARED_RESOURCE).unwrap(),
+            Iri::parse(wk_local::CLASS).unwrap(),
         )]),
     );
 
@@ -564,7 +564,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
     target.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk_local::DECLARED_RESOURCE).unwrap(),
+            Iri::parse(wk_local::CLASS).unwrap(),
         )]),
     );
     target.set(
@@ -976,7 +976,7 @@ fn a_proof_carrying_conclusion_emits_a_kernel_verification_trace() {
     // to point at, and pointing the slot at itself would be a fiction.
     assert!(
         trace
-            .get(&Iri::parse("urn:eigenius:reflection:derivation_trace").unwrap())
+            .get(&Iri::parse("urn:eigenius:prov:derivation_trace").unwrap())
             .is_none(),
         "the kernel case must not invent a derivation_trace"
     );
@@ -1078,13 +1078,11 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     let mut artifact = Resource::new(target_iri.clone());
     artifact.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::DECLARED_RESOURCE).unwrap(),
-        )]),
+        Value::Array(vec![Value::ResourceRef(Iri::parse(wk::CLASS).unwrap())]),
     );
     artifact.set(
         Iri::parse(wk::DECLARED_BY).unwrap(),
-        Value::String("urn:eigenius:reflection:agent:unattributed".into()),
+        Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
     artifact.set(
         Iri::parse(wk::CANONICAL_PROPOSITION).unwrap(),
@@ -1104,10 +1102,10 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     );
     trace.set(
         Iri::parse(wk::DECLARED_BY).unwrap(),
-        Value::String("urn:eigenius:reflection:agent:unattributed".into()),
+        Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
     trace.set(
-        Iri::parse("urn:eigenius:reflection:source").unwrap(),
+        Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
         Value::String("R 4.3.3 recompute run outside the kernel (linked-external)".into()),
     );
 

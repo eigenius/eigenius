@@ -127,7 +127,7 @@ mod tests {
         // structurally a DeclaredResource, attributed to the source
         // graph IRI.
         let declared_by_iri =
-            eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:reflection:declared_by")
+            eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:prov:was_attributed_to")
                 .unwrap();
         match nucleus.get(&declared_by_iri) {
             Some(eigenius_kernel::ontology::resource::Value::String(s)) => {

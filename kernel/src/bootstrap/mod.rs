@@ -1266,16 +1266,14 @@ class p:Cat { description = "a dog"; }"#;
     #[test]
     fn can_resolve_reflection_classes() {
         let ctx = bootstrap().unwrap();
+        // Only the EVALUATION family is left here. The provenance traces
+        // (ProgramTrace / DeclarationTrace / ObservationTrace / VerificationTrace)
+        // moved to `prov`, which is what `prov_layer_smoke.rs` covers; the two
+        // families had shared the word `Trace` and nothing else.
         for class in [
-            "DeclaredResource",
-            "ObservedResource",
-            "DerivedResource",
-            "VerifiedResource",
+            "Trace",
             "ComponentTrace",
-            "ProgramTrace",
-            "DeclarationTrace",
-            "ObservationTrace",
-            "VerificationTrace",
+            "PureTrace",
             "LetTrace",
             "MapTrace",
             "CaseTrace",
@@ -1290,13 +1288,33 @@ class p:Cat { description = "a dog"; }"#;
     }
 
     #[test]
-    fn can_resolve_epistemic_statuses() {
+    fn the_epistemic_grade_vocabulary_is_gone() {
+        // The four `epistemic:*` individuals were the stored grade, and a stored
+        // grade conflates the two axes: how a resource came to exist is
+        // provenance and applies to everything, while what evidence exists for
+        // its proposition is warrant and applies only to resources carrying one.
+        // Warrant is now computed from a justification term and stored nowhere,
+        // so a resource that resolved one of these was asserting a grade nothing
+        // checked.
         let ctx = bootstrap().unwrap();
         for status in ["declared", "observed", "derived", "verified"] {
             let iri = Iri::parse(&format!("urn:eigenius:reflection:epistemic:{status}")).unwrap();
             assert!(
-                ctx.resolve(&iri).is_some(),
-                "should resolve epistemic status {status}"
+                ctx.resolve(&iri).is_none(),
+                "epistemic status `{status}` must not resolve — the grade vocabulary is deleted"
+            );
+        }
+        for class in [
+            "urn:eigenius:reflection:EpistemicStatus",
+            "urn:eigenius:reflection:DeclaredResource",
+            "urn:eigenius:reflection:ObservedResource",
+            "urn:eigenius:reflection:DerivedResource",
+            "urn:eigenius:reflection:VerifiedResource",
+        ] {
+            let iri = Iri::parse(class).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_none(),
+                "grade class `{class}` must not resolve"
             );
         }
     }
@@ -1542,10 +1560,7 @@ class p:Cat { description = "a dog"; }"#;
         );
         r.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![
-                Value::String(wk::VERDICT.to_string()),
-                Value::String(wk::DERIVED_RESOURCE.to_string()),
-            ]),
+            Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
         );
         r.set(
             Iri::parse(wk::CTOR_NAME).unwrap(),
@@ -1591,12 +1606,13 @@ class p:Cat { description = "a dog"; }"#;
 
         let sample_set_cell = r#"
 namespace reflection = "urn:eigenius:reflection";
+namespace prov = "urn:eigenius:prov";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
 
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-11";
-    reflection:observed_at = "2026-03-11T10:18:42Z";
+    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-11";
+    prov:observed_at = "2026-03-11T10:18:42Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [78.0, 82.0, 85.0, 88.0, 91.0, 86.0],

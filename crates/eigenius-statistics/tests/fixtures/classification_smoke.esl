@@ -11,10 +11,11 @@ namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace demo       = "urn:eigenius:demo:classify";
+namespace prov       = "urn:eigenius:prov";
 
 resource demo:set : stats:SampleSetResource {
-    reflection:source      = "synthetic two-group classification smoke";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = "synthetic two-group classification smoke";
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     stats:sample_set_value = stats:IID(
         [-2.0, -1.0, -0.5, 0.5],
@@ -23,10 +24,10 @@ resource demo:set : stats:SampleSetResource {
     );
 }
 
-resource demo:set_trace : reflection:ObservationTrace {
-    reflection:resource  = demo:set;
-    reflection:source    = "synthetic";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource demo:set_trace : prov:ObservationTrace {
+    prov:resource  = demo:set;
+    prov:was_generated_by    = "synthetic";
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource demo:plan : stats:ClassificationAnalysisPlan {
@@ -36,8 +37,8 @@ resource demo:plan : stats:ClassificationAnalysisPlan {
     stats:min_sensitivity         = 0.9;
 }
 
-resource demo:plan_trace : reflection:ProgramTrace {
-    reflection:resource  = demo:plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource demo:plan_trace : prov:ProgramTrace {
+    prov:resource  = demo:plan;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }

@@ -357,7 +357,6 @@ fn emit_entry(
          \x20   lexicon:sem        = umlscui:{cui};\n\
          \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
          \x20   lexicon:sense      = \"umls:{cui}\";\n\
-         \x20   lexicon:grade      = epistemic:declared;\n\
          \x20   lexicon:in_lexicon = lexicon:umls;\n\
          }}\n\n",
         form = esc(form),

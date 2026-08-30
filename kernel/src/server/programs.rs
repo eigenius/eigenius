@@ -26,6 +26,10 @@ use crate::program::expr;
 use std::sync::Arc;
 use tonic::{Response, Status};
 
+/// The kernel's program evaluator, as a `prov:Activity`. Declared in
+/// `ontologies/prov/prov.esl` so a run's trace has something on-chain to name.
+const KERNEL_RUN_PROGRAM_ACTIVITY: &str = "urn:eigenius:prov:activity:kernel_run_program";
+
 /// Names for `ValidateProgramResponse::checks_performed`. A name is
 /// emitted only by the code path that runs the check it names, so the
 /// list is a record of what happened rather than a description of what
@@ -177,21 +181,18 @@ impl EigeniusService {
         {
             use crate::ontology::well_known as wk;
             let is_a_iri = Iri::parse("urn:eigenius:core:is_a").unwrap();
-            let mut types = match output.get(&is_a_iri) {
+            let types = match output.get(&is_a_iri) {
                 Some(crate::ontology::resource::Value::Array(arr)) => arr.clone(),
                 _ => Vec::new(),
             };
-            types.push(crate::ontology::resource::Value::String(
-                wk::DERIVED_RESOURCE.to_string(),
-            ));
             output.set(is_a_iri, crate::ontology::resource::Value::Array(types));
+            // The run is recorded by the ProductionTrace this points at. It used to
+            // also stamp `DerivedResource` and nominate `epistemic_status =
+            // epistemic:derived` — a resource declaring its own grade, which is the
+            // self-nomination the design forbids, on an axis that no longer exists.
             output.set(
                 Iri::parse(wk::DERIVATION).unwrap(),
                 crate::ontology::resource::Value::String(trace_iri_str.clone()),
-            );
-            output.set(
-                Iri::parse(wk::EPISTEMIC_STATUS).unwrap(),
-                crate::ontology::resource::Value::String(wk::EPISTEMIC_DERIVED.to_string()),
             );
         }
 
@@ -200,7 +201,7 @@ impl EigeniusService {
             Iri::parse("urn:eigenius:core:is_a").unwrap(),
             crate::ontology::resource::Value::Array(vec![
                 crate::ontology::resource::Value::String(
-                    "urn:eigenius:reflection:ProgramTrace".to_string(),
+                    "urn:eigenius:prov:ProgramTrace".to_string(),
                 ),
             ]),
         );
@@ -215,21 +216,25 @@ impl EigeniusService {
         // fills every one.
         if let Some(out_id) = output.id() {
             trace_resource.set(
-                Iri::parse("urn:eigenius:reflection:resource").unwrap(),
+                Iri::parse("urn:eigenius:prov:resource").unwrap(),
                 crate::ontology::resource::Value::String(out_id.as_str().to_string()),
             );
         }
+        // `prov:was_generated_by` is resource-typed, so the run needs an Activity
+        // to point at rather than the free-text `"kernel:run_program"` this used to
+        // write. The activity is the kernel's own program-running facility; it is
+        // committed alongside the trace so the reference resolves.
         trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:source").unwrap(),
-            crate::ontology::resource::Value::String("kernel:run_program".to_string()),
+            Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
+            crate::ontology::resource::Value::String(KERNEL_RUN_PROGRAM_ACTIVITY.to_string()),
         );
         trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:timestamp").unwrap(),
+            Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
             crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
         );
         if let Some(prog_id) = program.id() {
             trace_resource.set(
-                Iri::parse("urn:eigenius:reflection:program").unwrap(),
+                Iri::parse("urn:eigenius:prov:program").unwrap(),
                 crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
             );
         }
@@ -237,25 +242,25 @@ impl EigeniusService {
         if let Some(ref trace) = root_trace {
             let trace_tree = crate::program::trace::trace_to_resource(trace);
             trace_resource.set(
-                Iri::parse("urn:eigenius:reflection:trace_tree").unwrap(),
+                Iri::parse("urn:eigenius:prov:trace_tree").unwrap(),
                 crate::ontology::resource::Value::Embedded(Box::new(trace_tree)),
             );
         }
         // Required: started_at, completed_at (ISO 8601)
         trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:started_at").unwrap(),
+            Iri::parse("urn:eigenius:prov:started_at").unwrap(),
             crate::ontology::resource::Value::String(millis_to_iso8601(started_at_ms)),
         );
         trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:completed_at").unwrap(),
+            Iri::parse("urn:eigenius:prov:completed_at").unwrap(),
             crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
         );
         trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:total_tokens").unwrap(),
+            Iri::parse("urn:eigenius:prov:total_tokens").unwrap(),
             crate::ontology::resource::Value::Integer(total_tokens),
         );
         trace_resource.set(
-            Iri::parse("urn:eigenius:reflection:executed_steps").unwrap(),
+            Iri::parse("urn:eigenius:prov:executed_steps").unwrap(),
             crate::ontology::resource::Value::Integer(executed_steps),
         );
         // Recommended: universe_level = 0 (traces about domain resources)
@@ -345,11 +350,11 @@ impl EigeniusService {
             }
             // Commit the program resource itself when it carries an `@id` and isn't
             // already chain-resident or among the produced/output resources — so the
-            // committed `ProgramTrace`'s `reflection:program` reference resolves
+            // committed `ProgramTrace`'s `prov:program` reference resolves
             // (reference integrity, Rule 22). Inline `RunProgram` supplies the program
             // as bytes that never otherwise reach the chain; `RunProgramByIri`'s program
             // is already committed (`resolve` finds it), so this is a no-op there. Same
-            // provenance fix as the output-resource commit above (`reflection:resource`).
+            // provenance fix as the output-resource commit above (`prov:resource`).
             if let Some(prog_id) = program.id().cloned() {
                 let already = produced_resources.iter().any(|r| r.id() == Some(&prog_id))
                     || output.id() == Some(&prog_id);

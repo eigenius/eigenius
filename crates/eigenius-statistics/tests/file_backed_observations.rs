@@ -49,17 +49,18 @@ const FIXTURE: &str = r#"
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
+namespace prov = "urn:eigenius:prov";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
 
 resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
-    reflection:declared_by = "methodology:kinase-glo-emax-floor";
-    reflection:rationale   = "E_max plateau excludes the inverse direction; licenses the one-sided path.";
+    prov:was_attributed_to = "methodology:kinase-glo-emax-floor";
+    prov:rationale   = "E_max plateau excludes the inverse direction; licenses the one-sided path.";
 }
 
 resource screen:ss_file_backed : stats:SampleSetResource {
-    reflection:source      = "depmap-slice:ic50-confirmatory";
-    reflection:observed_at = "2026-03-11T10:18:42Z";
+    prov:was_generated_by      = "depmap-slice:ic50-confirmatory";
+    prov:observed_at = "2026-03-11T10:18:42Z";
 
     // Observations live off-chain (D53 §6.1): the inline slot is empty;
     // the verifier reads the `ic50` column of the PinnedExternalFile.
@@ -160,7 +161,7 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
             ))]),
         );
         file.set(
-            iri("urn:eigenius:reflection:source"),
+            iri("urn:eigenius:prov:was_generated_by"),
             Value::String("depmap-slice:ic50-confirmatory".into()),
         );
         file.set(

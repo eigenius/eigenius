@@ -136,7 +136,7 @@ pub struct Args {
     /// Regenerated on every run — this is the layer the prose determines.
     #[arg(long)]
     out: PathBuf,
-    /// The `reflection:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
+    /// The `prov:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
     /// byte-reproducible.
     #[arg(long, default_value = "2026-08-03T00:00:00Z")]
     timestamp: String,
@@ -490,7 +490,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             timestamp: &args.timestamp,
             // No agent is threaded through this surface yet, so the claim names the absence
             // rather than hiding it behind the program that parsed it (eigenius#201 / D72).
-            // Supplying a real `reflection:Agent` is D71's `land` story: the moment a
+            // Supplying a real `prov:Agent` is D71's `land` story: the moment a
             // formulation becomes an assertion is the moment someone takes responsibility.
             declared_by: crate::UNATTRIBUTED_AGENT,
             source_ref: args.source_ref.as_deref(),

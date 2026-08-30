@@ -800,7 +800,7 @@ mod tests {
             // Branch B: a resource that REFERENCES C without defining it.
             vec![make_resource(
                 "urn:test:R",
-                &[wk::DECLARED_RESOURCE],
+                &[wk::CLASS],
                 &[("urn:test:about", Value::ResourceRef(iri(class_c)))],
             )],
         );

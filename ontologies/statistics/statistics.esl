@@ -776,7 +776,7 @@ macro stats:RepeatedMeasures(
 // their own provenance (ObservationTrace, source, observed_at) and
 // can be cited by multiple claims independently.
 
-class stats:SampleSetResource : reflection:ObservedResource {
+class stats:SampleSetResource {
     description = "Chain-resident wrapper carrying a raw SampleSet inductive value. The StatisticalAnalysisPlan's sample_set property references this resource by IRI; the institution's verifier reads sample_set_value to recompute the claim. Subclassing ObservedResource gives the SampleSet the standard provenance fields (source, observed_at, ObservationTrace witness).";
     requires stats:sample_set_value;
     recommends stats:observations_source, stats:observations_column;

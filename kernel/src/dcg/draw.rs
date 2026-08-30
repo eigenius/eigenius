@@ -50,7 +50,8 @@ use crate::ontology::resource::{Resource, Value};
 use sha2::{Digest, Sha256};
 
 const CORE: &str = "urn:eigenius:core";
-const REFL: &str = "urn:eigenius:reflection";
+/// The provenance axis. Split out of `reflection`; see `ontologies/prov/prov.esl`.
+const PROV: &str = "urn:eigenius:prov";
 const ENC: &str = "urn:eigenius:encoding";
 
 /// Which proposer an exchange came from. Mirrors the closed `enc:DrawSeam` enumeration — adding a
@@ -171,7 +172,7 @@ pub fn draw_resources(
             );
         }
         r.set(
-            iri(&format!("{REFL}:timestamp"))?,
+            iri(&format!("{PROV}:timestamp"))?,
             Value::String(timestamp.to_string()),
         );
         out.push(r);

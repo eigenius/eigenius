@@ -127,7 +127,7 @@ pub struct FormalizeRequest {
     pub doc_id: String,
     /// IRI prefix for the emitted resources.
     pub ns: String,
-    /// The `reflection:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
+    /// The `prov:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
     pub timestamp: String,
     /// D65 §4 parse scope — ordered `lexicon:Lexicon` IRIs. `None` is the whole chain.
     pub scope: Option<Vec<Iri>>,

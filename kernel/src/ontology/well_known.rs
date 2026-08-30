@@ -446,10 +446,14 @@ pub const ENC_BASE64: &str = "urn:eigenius:core:encodings:base64";
 // --- Reflection namespace (D6b, Phase 10b) ---
 
 pub const UNIVERSE_LEVEL: &str = "urn:eigenius:reflection:universe_level";
-pub const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
-pub const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
-pub const OBSERVED_RESOURCE: &str = "urn:eigenius:reflection:ObservedResource";
-pub const VERIFIED_RESOURCE: &str = "urn:eigenius:reflection:VerifiedResource";
+// The four grade classes stood here. They stamped a WARRANT grade onto a
+// resource, which conflated the two axes: how a resource came to exist is
+// provenance and applies to everything, while what evidence exists for its
+// proposition is warrant and applies only to a resource carrying one. Warrant is
+// now computed from a justification term and stored nowhere, so there is nothing
+// for a class to name. `VerifiedResource subclass_of DerivedResource` went with
+// them — it asserted an ordering between two grades the design holds to be
+// independent.
 /// `reflection:InstitutionEmittedDerivation` — marker subclass of
 /// `DerivedResource` for resources the kernel commits as side-effects of
 /// AutoOnLoad institution dispatches. It records what the run produced and
@@ -467,10 +471,12 @@ pub const FROM_SUBJECT: &str = "urn:eigenius:reflection:from_subject";
 /// `reflection:runtime_invocation` — back-pointer to the producing
 /// `RuntimeInvocation` on an `InstitutionEmittedDerivation`.
 pub const RUNTIME_INVOCATION: &str = "urn:eigenius:reflection:runtime_invocation";
-pub const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
-pub const DERIVATION: &str = "urn:eigenius:reflection:derivation";
-pub const EPISTEMIC_STATUS: &str = "urn:eigenius:reflection:epistemic_status";
-pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";
+pub const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
+pub const DERIVATION: &str = "urn:eigenius:prov:derivation";
+// `epistemic_status` and the four `epistemic:*` individuals went with the grade
+// classes. The property let a trace nominate the grade of its own output, which
+// is the self-nomination the design forbids: the thing being graded chose its
+// own grade and nothing checked the choice.
 
 // --- D49 ChainWitness: Trace event classes + canonical proposition ---
 //
@@ -480,25 +486,25 @@ pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";
 // materialised into an index (D66 slice 0).
 
 /// Resource recording that a resource was declared by a human/agent.
-/// Carries `reflection:resource` (target IRI). Per D49 §6, a successful
+/// Carries `prov:resource` (target IRI). Per D49 §6, a successful
 /// commit emits an `IsDeclaredAs` witness for the target resource.
-pub const DECLARATION_TRACE: &str = "urn:eigenius:reflection:DeclarationTrace";
+pub const DECLARATION_TRACE: &str = "urn:eigenius:prov:DeclarationTrace";
 /// Resource recording that a resource was observed from external reality.
-/// Carries `reflection:resource` and `reflection:source`. Per D49 §6, a
+/// Carries `prov:resource` and `prov:was_generated_by`. Per D49 §6, a
 /// successful commit emits an `IsObservedAs` witness.
-pub const OBSERVATION_TRACE: &str = "urn:eigenius:reflection:ObservationTrace";
+pub const OBSERVATION_TRACE: &str = "urn:eigenius:prov:ObservationTrace";
 /// Resource recording a complete program execution. Pure provenance: it admits
 /// no witness, because the fact that a computation ran grounds nothing. What a
 /// computed claim rests on is `App(Declared(plan), Observed(inputs))`, whose two
 /// halves come from the plan's [`DECLARATION_TRACE`] and the input's
 /// [`OBSERVATION_TRACE`].
-pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
+pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
 /// whose exported blob D49 §7's `Lean → Reasoning` comorphism reifies into a
 /// `justification:VerifiedPropositionView`, and the kernel, whose type-checked `justification:Certificate`
 /// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
-pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
+pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
 
 /// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
 /// (eigenius#205). Admits `IsDeclaredAs`: a transcription has no `f : I -> O`, so no
@@ -507,21 +513,21 @@ pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace"
 /// kind before the three-grounds change made that uniform.
 pub const EXTERNAL_EXECUTION_TRACE: &str = "urn:eigenius:reflection:ExternalExecutionTrace";
 
-/// `reflection:resource` — the target IRI a Trace points at. Common to
+/// `prov:resource` — the target IRI a Trace points at. Common to
 /// all four Trace classes (semantically; for `ProgramTrace` the role is
 /// played by the output resource's own IRI, not a separate property).
-pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
+pub const REFLECTION_RESOURCE: &str = "urn:eigenius:prov:resource";
 
-/// `reflection:proof_system` — which verifier checked the proof recorded by a
+/// `prov:proof_system` — which verifier checked the proof recorded by a
 /// [`VERIFICATION_TRACE`]: an external prover (`lean4`, `coq`, `agda`) or `urn:eigenius:kernel`.
-pub const PROOF_SYSTEM: &str = "urn:eigenius:reflection:proof_system";
+pub const PROOF_SYSTEM: &str = "urn:eigenius:prov:proof_system";
 
-/// `reflection:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
+/// `prov:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
 /// prover's blob, or the chain-resident IRI of the `justification:Conclusion` whose certificate checked.
-pub const PROOF_TERM: &str = "urn:eigenius:reflection:proof_term";
+pub const PROOF_TERM: &str = "urn:eigenius:prov:proof_term";
 
-/// `reflection:timestamp` — when a Trace's event occurred. Required by every Trace class.
-pub const TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
+/// `prov:timestamp` — when a Trace's event occurred. Required by every Trace class.
+pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
 
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded

@@ -13,9 +13,10 @@ namespace core          = "urn:eigenius:core";
 namespace reflection    = "urn:eigenius:reflection";
 namespace reasoning     = "urn:eigenius:reasoning";
 namespace screen        = "urn:eigenius:demo:screen";
-namespace agent         = "urn:eigenius:reflection:agent";
+namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
 
 class screen:CellLine : core:Resource {
     description = "A cell line. A class — not a proposition.";
@@ -27,20 +28,20 @@ data screen:IsInhibitory : Prop {
 // ── The class-as-proposition sentence ────────────────────────────────
 
 resource screen:rule_class : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_illustrative;
-    reflection:rationale   = "Declares a CLASS as though it were a proposition.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:rationale   = "Declares a CLASS as though it were a proposition.";
 
     reflection:canonical_proposition = type_expr(
         screen:CellLine
     );
 }
 
-resource screen:rule_class_trace : reflection:DeclarationTrace {
-    reflection:resource     = screen:rule_class;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_illustrative;
-    reflection:timestamp    = "2026-04-10T09:00:00Z";
+resource screen:rule_class_trace : prov:DeclarationTrace {
+    prov:resource     = screen:rule_class;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
 }
 
 resource screen:concl_class : justification:Conclusion {
@@ -64,20 +65,20 @@ resource screen:concl_class : justification:Conclusion {
 // ── The control: a genuine Prop in the same slot ─────────────────────
 
 resource screen:rule_prop : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_illustrative;
-    reflection:rationale   = "Declares a genuine Prop-sorted proposition.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:rationale   = "Declares a genuine Prop-sorted proposition.";
 
     reflection:canonical_proposition = type_expr(
         screen:IsInhibitory
     );
 }
 
-resource screen:rule_prop_trace : reflection:DeclarationTrace {
-    reflection:resource     = screen:rule_prop;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_illustrative;
-    reflection:timestamp    = "2026-04-10T09:00:00Z";
+resource screen:rule_prop_trace : prov:DeclarationTrace {
+    prov:resource     = screen:rule_prop;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
 }
 
 resource screen:concl_prop : justification:Conclusion {
@@ -99,7 +100,7 @@ resource screen:concl_prop : justification:Conclusion {
 }
 
 resource screen:warrant_illustrative : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Illustrative warrant for this fixture's declarations. A test fixture, not a real literature warrant.";
     core:short_name = "warrant_illustrative";
 }

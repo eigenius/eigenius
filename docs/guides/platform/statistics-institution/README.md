@@ -182,8 +182,8 @@ The high-level shape, modeled on the IC50 fixture:
 
    ```esl
    resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-       reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-       reflection:observed_at = "2026-03-04T14:22:11Z";
+       prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+       prov:observed_at = "2026-03-04T14:22:11Z";
 
        stats:sample_set_value = stats:SingleSampleEstimate(
            [72.0, 85.0, 100.0],
@@ -191,10 +191,10 @@ The high-level shape, modeled on the IC50 fixture:
        );
    }
 
-   resource screen:m_eig0291_sampleset_trace : reflection:ObservationTrace {
-       reflection:resource  = screen:m_eig0291_sampleset;
-       reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-       reflection:timestamp = "2026-03-04T14:22:11Z";
+   resource screen:m_eig0291_sampleset_trace : prov:ObservationTrace {
+       prov:resource  = screen:m_eig0291_sampleset;
+       prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+       prov:timestamp = "2026-03-04T14:22:11Z";
    }
    ```
 
@@ -221,10 +221,10 @@ The high-level shape, modeled on the IC50 fixture:
        stats:outlier_exclusion = Identity();
    }
 
-   resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
-       reflection:resource  = screen:claim_eig0291_lowic50;
-       reflection:source    = "statistics-institution:validate_analysis_plan";
-       reflection:timestamp = "2026-03-04T14:22:11Z";
+   resource screen:claim_eig0291_lowic50_trace : prov:ProgramTrace {
+       prov:resource  = screen:claim_eig0291_lowic50;
+       prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+       prov:timestamp = "2026-03-04T14:22:11Z";
    }
    ```
 

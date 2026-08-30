@@ -2774,7 +2774,7 @@ mod tests {
         r.set(
             Iri::parse(wk::IS_A).unwrap(),
             RV::Array(vec![
-                RV::ResourceRef(Iri::parse(wk::DECLARED_RESOURCE).unwrap()),
+                RV::ResourceRef(Iri::parse(wk::PROPERTY).unwrap()),
                 RV::ResourceRef(Iri::parse(wk::CLASS).unwrap()),
             ]),
         );
@@ -4076,7 +4076,7 @@ mod tests {
         let mut target = Resource::new(Iri::parse(target_iri_str).unwrap());
         target.set(
             Iri::parse(wk_local::IS_A).unwrap(),
-            RVal::Array(vec![RVal::String(wk_local::DECLARED_RESOURCE.to_string())]),
+            RVal::Array(vec![RVal::String(wk_local::CLASS.to_string())]),
         );
         target.set(
             Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),

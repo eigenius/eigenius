@@ -64,7 +64,7 @@ pub struct WitnessKey {
 
 1. **Skip.** `LayerHandle::has_witness_candidates` is stamped at write time over the layer's resources. A layer holding no Trace, no `InstitutionEmittedDerivation` and no `justification:Conclusion` answers `false` with no probe at all — a lexicon layer stops here.
 2. **Self-attesting.** `Layer::get_resource` on the key's IRI, which is layer-local. If that resource is a `justification:Conclusion` and the key's category is `Verified`, or an `InstitutionEmittedDerivation` and the category is `Derived`, build the key it would emit and compare it to the key asked for.
-3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `reflection:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `reflection:canonical_proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
+3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `prov:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `reflection:canonical_proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
 
 An earlier implementation did materialize an index: `build_witness_index` walked the layer at construction and cached a `BTreeMap<WitnessKey, ()>` in a `OnceLock` on the `Layer`, and lookup was a membership test. **D66 slice 0 removed all of it.** The map cost memory proportional to the layer's trace count for the layer's whole lifetime and reduced every miss to a bare `false` carrying no reason; direct lookup is O(1) in memory and holds the specific resource at the point of the decision. There is no `Layer::chain_witness_index` method and nothing is cached.
 
@@ -119,12 +119,12 @@ The capstone fixture at [`crates/eigenius-reasoning/tests/fixtures/drug_screenin
 HasLowIC50, StrongInhibitor                     [PopulationLevel-marked predicates in Prop]
   ↑ canonical_proposition
 rule_strong                                     [DeclaredResource — literature rule]
-  │ ↑ reflection:resource
+  │ ↑ prov:resource
   │  rule_strong_trace                          [DeclarationTrace — admits IsDeclaredAs]
   │
   ↑ canonical_proposition
 bridge_eig0291_lowic50                          [DeclaredResource — statistical → domain]
-  │ ↑ reflection:resource
+  │ ↑ prov:resource
   │  bridge_eig0291_lowic50_trace               [DeclarationTrace — admits IsDeclaredAs]
   │
 claim_eig0291_lowic50                           [StatisticalAnalysisPlan — carries no
@@ -132,7 +132,7 @@ claim_eig0291_lowic50                           [StatisticalAnalysisPlan — car
   │ ↑ sample_set
   │  m_eig0291_sampleset                        [SampleSetResource — raw IC50 reads
   │  │                                           72, 85, 100 nM]
-  │  ↑ reflection:resource
+  │  ↑ prov:resource
   │   m_eig0291_sampleset_trace                 [ObservationTrace — admits IsObservedAs]
   │ ↑ directionality
   │  witness_kinaseglo_floor                    [ImpossibilityWitness — licenses the
@@ -179,8 +179,8 @@ The high-level shape, modeled on the drug-screening fixture:
 
    ```esl
    resource screen:rule_strong : reflection:DeclaredResource {
-       reflection:declared_by = "literature:smith_et_al_2024";
-       reflection:rationale   = "IC50 < 100 nM is the standard threshold.";
+       prov:was_attributed_to = "literature:smith_et_al_2024";
+       prov:rationale   = "IC50 < 100 nM is the standard threshold.";
        reflection:canonical_proposition = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
            ->
@@ -188,10 +188,10 @@ The high-level shape, modeled on the drug-screening fixture:
        );
    }
 
-   resource screen:rule_strong_trace : reflection:DeclarationTrace {
-       reflection:resource    = screen:rule_strong;
-       reflection:declared_by = "literature:smith_et_al_2024";
-       reflection:timestamp   = "2026-04-10T09:00:00Z";
+   resource screen:rule_strong_trace : prov:DeclarationTrace {
+       prov:resource    = screen:rule_strong;
+       prov:was_attributed_to = "literature:smith_et_al_2024";
+       prov:timestamp   = "2026-04-10T09:00:00Z";
    }
    ```
 

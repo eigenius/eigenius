@@ -4,7 +4,7 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:ingest:PinnedExternalFile"
     ],
-    "urn:eigenius:reflection:source": "Derived from wrn_sourcedata_EDFig7_MOESM10.xlsx (panels 7b/7d) via extract/patm-ed7-extract.R; tidy per-cell phospho-ATM(S1981) foci counts",
+    "urn:eigenius:prov:was_generated_by": "Derived from wrn_sourcedata_EDFig7_MOESM10.xlsx (panels 7b/7d) via extract/patm-ed7-extract.R; tidy per-cell phospho-ATM(S1981) foci counts",
     "urn:eigenius:ingest:reference": "file://wrn-slices/patm_foci_long.csv",
     "urn:eigenius:ingest:content_hash": "sha256:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de",
     "urn:eigenius:ingest:media_type": "text/csv",

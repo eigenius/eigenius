@@ -77,9 +77,9 @@ const SOURCE_IRL: &str = "urn:eigenius:core:source_irl";
 const CORE_CLASS: &str = "urn:eigenius:core:Class";
 const CORE_PROPERTY: &str = "urn:eigenius:core:Property";
 const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
-const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
+const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 const DECLARED_BY_VALUE: &str = "urn:schema_org";
-const ORGANIZATION: &str = "urn:eigenius:reflection:Organization";
+const ORGANIZATION: &str = "urn:eigenius:prov:Organization";
 
 // core scalars + formats
 const D_STRING: &str = "urn:eigenius:core:string";
@@ -380,7 +380,7 @@ fn common_meta(r: &mut Resource, n: &Json, https: &str) {
     r.set(iri(DECLARED_BY), Value::ResourceRef(iri(DECLARED_BY_VALUE)));
 }
 
-/// The schema.org project as a `reflection:Organization`, emitted into this layer so
+/// The schema.org project as a `prov:Organization`, emitted into this layer so
 /// every term's `declared_by` resolves.
 ///
 /// `urn:schema_org` was already the value every term carried; it is now the IRI of a
