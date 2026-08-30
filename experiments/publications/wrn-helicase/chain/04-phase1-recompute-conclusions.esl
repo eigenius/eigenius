@@ -96,7 +96,7 @@ resource wrn:concl_refine_recomputed : justification:Conclusion {
     justification:judgement = type_expr(
         alias
             SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
-            PLAN   = "urn:eigenius:pub:wrn:wrn_corr_plan",
+            PLAN   = "urn:eigenius:pub:wrn:wrn_corr_plan_yields_main_effect",
             BRIDGE = "urn:eigenius:pub:wrn:bridge_mutator_load",
 
             OBS    = core:Asserts(SS),

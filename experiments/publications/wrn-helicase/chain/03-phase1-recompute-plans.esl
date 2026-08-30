@@ -212,41 +212,12 @@ resource wrn:wrn_corr_sampleset_trace : reflection:ObservationTrace {
 resource wrn:wrn_corr_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set = wrn:wrn_corr_sampleset;
 
-    // The reproducibility claim, as a universal over sample sets. Read: for any
-    // recorded sample set, applying THIS plan to it yields a negative Spearman
-    // rho. `spec_poly` instantiates it at the specific set; `app` then composes
-    // it with that set's observation.
-    reflection:canonical_proposition = type_expr(
-        forall (s : core:string) =>
-            core:Asserts(s) -> stats:lt(stats:spearman_rho(s), 0.0)
-    );
 
     stats:alpha               = 0.05;
     stats:effect_size         = Absolute(0.0, "spearman_rho");
     stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:mutator_load_directionality_witness");
     stats:variance_assumption = RankBased();
     stats:outlier_exclusion   = Identity();
-}
-
-// ── The reproducibility declaration (P4) ─────────────────────────────
-//
-// `App(Declared(plan), Observed(inputs))` needs BOTH witnesses. The plan half
-// did not exist: a plan carried only the ProgramTrace of its run, which mints
-// `IsDerivedAs` — the family this phase deletes.
-//
-// What the composite needs is the assertion that this plan DENOTES A FUNCTION
-// of its input, and no run record can establish that: determinism is an
-// empirical fact about the environment, not a property recoverable from having
-// executed once. So it is declared, by an accountable agent, as a UNIVERSAL
-// over sample sets — the claim is about the method, not about the answer.
-// Instantiating it at a specific sample set is what yields the specific
-// statistic, which is why this is a `forall` discharged by `spec_poly` rather
-// than a flat leaf asserting the number in advance.
-resource wrn:wrn_corr_plan_reproducible_trace : reflection:DeclarationTrace {
-    reflection:resource     = wrn:wrn_corr_plan;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = wrn:warrant_wrn_recompute;
-    reflection:timestamp    = "2026-08-29T00:00:00Z";
 }
 
 resource wrn:wrn_corr_plan_trace : reflection:ProgramTrace {
@@ -1724,3 +1695,401 @@ resource wrn:warrant_viability_impairment_directionality : reflection:DeclaredRe
     core:short_name = "warrant_viability_impairment_directionality";
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Reproducibility declarations (P4)
+// ══════════════════════════════════════════════════════════════════════
+//
+// `App(Declared(plan), Observed(inputs))` needs BOTH witnesses, and the plan
+// half did not exist: a plan carried only the ProgramTrace of its run, which
+// mints `IsDerivedAs` — the family this phase deletes.
+//
+// What the composite needs is the assertion that the plan DENOTES A FUNCTION of
+// its input. No run record establishes that: determinism is an empirical fact
+// about the environment, not a property recoverable from having executed once.
+// So it is DECLARED, by an accountable agent, and declared as a UNIVERSAL over
+// sample sets — the claim is about the method, not the answer. Instantiating it
+// at a specific set (`spec_poly`) is what yields the specific statistic, so
+// nobody has to assert the number in advance.
+//
+// One declaration per (plan, EFFECT), not per plan: `IsDeclaredAs` carries one
+// proposition per IRI, and a plan emitting two effects — `biomarker_plan` does —
+// is two functions. That is also the design's own reading of `Declared(f : I -> O)`.
+
+// The ground of the reproducibility declarations below. Distinct from the
+// paper's own warrants (`wrn:warrant_*_criterion`, minted by the D72
+// migration): those record why the AUTHORS asserted a criterion. This one
+// records why the recompute effort asserts that its analysis plans denote
+// functions — a claim about this chain's methods, not about the publication.
+resource wrn:warrant_plan_reproducibility : reflection:DeclaredResource {
+    reflection:declared_by = agent:eigenius_core_team;
+    core:description = "Each analysis plan below pins its statistic, alpha, directionality, variance assumption and outlier rule, and runs deterministically over a content-hashed slice. Those together are what make the plan a function of its input rather than of the occasion — which is the claim `Declared(plan)` carries and which no execution record could establish on its own.";
+    core:short_name = "warrant_plan_reproducibility";
+}
+
+resource wrn:wrn_dep_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying wrn_dep_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:wrn_dep_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:wrn_dep_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mutator_load_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying mutator_load_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:mutator_load_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:mutator_load_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:coloc_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying coloc_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:coloc_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:coloc_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_shrna_KM12_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying apop_shrna_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:apop_shrna_KM12_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:apop_shrna_KM12_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:hcr_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying hcr_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:hcr_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:hcr_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:wrn_recq_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying wrn_recq_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:wrn_recq_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:wrn_recq_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:biomarker_plan_yields_ppv : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying biomarker_plan to any recorded sample set yields its ppv. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:ge(stats:ppv(s), 0.7)
+    );
+}
+resource wrn:biomarker_plan_yields_ppv_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:biomarker_plan_yields_ppv;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:biomarker_plan_yields_sensitivity : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying biomarker_plan to any recorded sample set yields its sensitivity. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:ge(stats:sensitivity(s), 0.9)
+    );
+}
+resource wrn:biomarker_plan_yields_sensitivity_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:biomarker_plan_yields_sensitivity;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:p53_dep_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying p53_dep_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:p53_dep_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:p53_dep_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:viab_KM12_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying viab_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:viab_KM12_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:viab_KM12_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:viab_OVK18_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying viab_OVK18_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)
+    );
+}
+resource wrn:viab_OVK18_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:viab_OVK18_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:cc_KM12_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying cc_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:cc_KM12_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:cc_KM12_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:cc_SW48_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying cc_SW48_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)
+    );
+}
+resource wrn:cc_SW48_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:cc_SW48_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:cc_OVK18_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying cc_OVK18_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)
+    );
+}
+resource wrn:cc_OVK18_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:cc_OVK18_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_KM12_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying apop_KM12_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_KM12_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:apop_KM12_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_SW48_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying apop_SW48_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_SW48_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:apop_SW48_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_OVK18_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying apop_OVK18_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_OVK18_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:apop_OVK18_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mmr_rescue_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying mmr_rescue_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
+    );
+}
+resource wrn:mmr_rescue_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:mmr_rescue_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mmr_resens1_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying mmr_resens1_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)
+    );
+}
+resource wrn:mmr_resens1_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:mmr_resens1_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mmr_resens2_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying mmr_resens2_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)
+    );
+}
+resource wrn:mmr_resens2_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:mmr_resens2_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:rescue_wt_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying rescue_wt_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:rescue_wt_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:rescue_wt_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:rescue_e84a_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying rescue_e84a_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:mean_diff_of(s), 0.0)
+    );
+}
+resource wrn:rescue_e84a_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:rescue_e84a_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:wrn_corr_plan_yields_main_effect : reflection:DeclaredResource {
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:rationale    = "Applying wrn_corr_plan to any recorded sample set yields its main_effect. A claim about the method, discharged per sample set by spec_poly.";
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+            core:Asserts(s) -> stats:lt(stats:spearman_rho(s), 0.0)
+    );
+}
+resource wrn:wrn_corr_plan_yields_main_effect_trace : reflection:DeclarationTrace {
+    reflection:resource     = wrn:wrn_corr_plan_yields_main_effect;
+    reflection:declared_by  = agent:eigenius_core_team;
+    reflection:warranted_by = wrn:warrant_plan_reproducibility;
+    reflection:timestamp    = "2026-08-29T00:00:00Z";
+}
