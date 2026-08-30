@@ -69,6 +69,10 @@ pub enum ValidationRule {
     ConditionalRequirement,
     InstitutionValidation,
     UniverseStratificationViolation,
+    /// A conclusion's justification is not well-founded: every alternative in its
+    /// support passes back through the conclusion itself (P6 / the paper §"Well-Foundedness
+    /// Conditions"). Vacuous on a premise with no support to inspect.
+    NotWellFounded,
     /// A class or property declaration references an IRI that doesn't
     /// resolve to a resource of the expected kind in the layer chain.
     /// Examples: `is_a` referencing a missing class, `requires`
@@ -519,6 +523,13 @@ impl Validator {
         // property value must resolve to a chain resident (closes the open-world
         // "skip — might be external" hole; enforces the same-or-lower invariant).
         errors.extend(self.check_reference_integrity(resource, &res_id));
+
+        // Rule 23: Well-foundedness — a premise's support may not transitively include
+        // the premise. Evaluated over the DECODED TERM rather than the `core:mentions`
+        // edge set, because support reads `Sum` disjunctively and an edge-set walk would
+        // falsely reject a conclusion one of whose branches avoids the cycle. See
+        // `kernel/src/justification/wellfounded.rs`.
+        errors.extend(self.check_well_founded(resource, &res_id));
 
         // Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
         // For Comorphism resources, verify that `export_format` and

@@ -32,3 +32,38 @@ pub(super) mod pattern;
 pub(super) mod range;
 pub(super) mod reference_integrity;
 pub(super) mod type_check;
+
+/// Rule 23 — well-foundedness of a conclusion's justification.
+///
+/// A premise's support may not transitively include the premise. The condition is
+/// vacuous on anything with no support to inspect, which is the carve-out Artemov's
+/// constant specifications require: `c : A(c)` is sound as a POSTULATE, and postulated
+/// self-reference is strictly necessary for realizing certain S4 theorems in LP. Only
+/// DERIVED circularity has a support graph, and only derived circularity is unsound.
+impl super::Validator {
+    pub(in crate::validation) fn check_well_founded(
+        &self,
+        resource: &crate::ontology::resource::Resource,
+        res_id: &Option<crate::ontology::iri::Iri>,
+    ) -> Vec<super::ValidationError> {
+        let Some(iri) = res_id else {
+            return vec![];
+        };
+        if !resource
+            .is_a()
+            .iter()
+            .any(|c| c.as_str() == "urn:eigenius:justification:Conclusion")
+        {
+            return vec![];
+        }
+        match crate::justification::wellfounded::check(&self.layer, iri) {
+            Ok(()) => vec![],
+            Err(e) => vec![super::ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: super::ValidationRule::NotWellFounded,
+                message: e.to_string(),
+            }],
+        }
+    }
+}

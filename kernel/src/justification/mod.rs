@@ -72,6 +72,8 @@
 
 use std::collections::BTreeSet;
 
+pub mod wellfounded;
+
 use crate::nbe::term::Exp;
 
 /// Ceiling on the number of alternative support sets. Exceeding it is an ERROR, never a silent
