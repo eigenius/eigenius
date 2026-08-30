@@ -266,6 +266,17 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/reflection/reflection-ontology.json"),
         format: OntologyFormat::Json,
     },
+    // prov — the provenance axis (Agent / Activity / the four provenance Traces
+    // and the relations between them), mapped onto W3C PROV-O. Above reflection
+    // because `prov:ProgramTrace.trace_tree` points into the kernel's
+    // evaluation-trace family, which is the one link between the two; nothing
+    // left in reflection points back, so the order is forced in one direction
+    // only. Below obo, which carries `prov:was_attributed_to` on its entries.
+    BootstrapOntology {
+        name: "prov",
+        source: include_str!("../../../ontologies/prov/prov.esl"),
+        format: OntologyFormat::Esl,
+    },
     // obo — shared OBO meta-vocabulary used by the obograph importer (M9.2): the
     // four synonym Properties + the `inverseOf` RBox axiom imported GO / ChEBI
     // layers reference. Depends on reflection (entries carry
@@ -984,7 +995,9 @@ class p:Cat { description = "a dog"; }"#;
         assert!(!institution.is_root());
         let obo = institution.parent().unwrap();
         assert!(!obo.is_root());
-        let reflection = obo.parent().unwrap();
+        let prov = obo.parent().unwrap();
+        assert!(!prov.is_root());
+        let reflection = prov.parent().unwrap();
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());

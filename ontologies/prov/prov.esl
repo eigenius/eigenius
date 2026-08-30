@@ -1,0 +1,306 @@
+// prov — the provenance axis.
+//
+// Provenance and warrant are orthogonal properties of a resource and need
+// distinct vocabularies:
+//
+//   axis        question                                  applies to
+//   ─────────── ───────────────────────────────────────── ─────────────────────
+//   provenance  how did this artifact come to exist?      every resource
+//   warrant     what evidence exists for its proposition? resources carrying one
+//
+// Most resources have provenance and no warrant. A lexicon entry, a class
+// declaration, an imported concept: none carries a proposition, so asking what
+// proves it is a category error rather than an unanswered question. The test is
+// mechanical — does the resource carry a proposition.
+//
+// The axes are INDEPENDENT, not ordered. A hand-authored claim with a checked
+// proof is Verified warrant over Declared provenance. A machine-generated claim
+// with no proof is not Verified. Where the term came from does not move it.
+//
+// This ontology owns the first axis. The second lives in `justification`, where
+// warrant is COMPUTED from a justification term rather than stored.
+//
+// WHY IT IS ITS OWN LAYER. This vocabulary sat inside `reflection` and was
+// interleaved with the kernel's evaluation machinery, which put two unrelated
+// families under one word: `reflection:Trace` with LetTrace / MapTrace /
+// CaseTrace / ... records how a PROGRAM EVALUATED, while DeclarationTrace /
+// ObservationTrace / ProductionTrace / VerificationTrace record HOW A RESOURCE
+// CAME TO EXIST. The second family was parentless and shared nothing with the
+// first but the name. Splitting them leaves `reflection` as the kernel's
+// self-description and puts the provenance family behind a namespace that says
+// what it is.
+//
+// MAPPING, NOT ADOPTION (following the schema.org precedent in D57). Names below
+// map onto W3C PROV-O, but the IRIs are this platform's own: PROV is OWL with
+// open-world semantics, while these resources are typed with `requires` enforced
+// at commit, so adopting the IRIs would mean redeclaring them in this type
+// system anyway. The mapping is recorded per declaration so a downward
+// projection to PROV tooling is mechanical.
+//
+//   this ontology              PROV-O
+//   ───────────────────────── ────────────────────────
+//   (any core:Resource)        prov:Entity
+//   prov:Agent / Person / Organization
+//                              prov:Agent / Person / Organization
+//   prov:Activity              prov:Activity
+//   prov:was_attributed_to     prov:wasAttributedTo
+//   prov:was_generated_by      prov:wasGeneratedBy
+//   prov:was_associated_with   prov:wasAssociatedWith
+//   prov:used                  prov:used
+//   prov:had_primary_source    prov:hadPrimarySource
+//   prov:started_at            prov:startedAtTime
+//   prov:completed_at          prov:endedAtTime
+//
+// `prov:Entity` needs no declaration: every resource in this system is one.
+//
+// WHAT PROV CANNOT CARRY, and why warrant is not here. `prov:Entity` is
+// deliberately opaque — it models identity and lineage, not semantic content —
+// so PROV terminates exactly where warrant begins. `prov:wasDerivedFrom` in
+// particular covers truth-preserving and guessed derivation equally, and a
+// producer can assert one without having performed it. It is sound as
+// provenance and unusable as warrant, which is why nothing in this ontology
+// grades anything.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace prov       = "urn:eigenius:prov";
+namespace agent      = "urn:eigenius:prov:agent";
+
+// ── Agents ───────────────────────────────────────────────────────────
+//
+// Who is accountable. An Agent is the target of `prov:was_attributed_to`, which
+// is what makes a declaration answerable to somebody rather than free-floating.
+
+class prov:Agent {
+    description = "A party that can be held accountable for an assertion or an activity: a person, an organization, or a software agent. Maps prov:Agent. The target of prov:was_attributed_to (who asserted this) and prov:was_associated_with (who ran this).";
+    recommends core:short_name, core:description;
+}
+
+class prov:Person : prov:Agent {
+    description = "An individual human agent. Maps prov:Person.";
+    recommends prov:orcid;
+}
+
+class prov:Organization : prov:Agent {
+    description = "An institutional agent — a lab, a company, a working group, a project team. Maps prov:Organization.";
+}
+
+property prov:orcid : core:string {
+    description = "ORCID identifier for a Person, as the bare 16-digit form. The one external identifier worth privileging: it is the scholarly world's agent identity and makes attribution resolvable outside this chain.";
+    domain prov:Person;
+}
+
+// ── The two bootstrap agents ─────────────────────────────────────────
+
+resource agent:unattributed : prov:Agent {
+    core:description = "No agent was recorded for this declaration — the ESL compiler's default when no session agent is configured. An explicit marker of ABSENCE, never an assertion that this agent authored anything: naming a real party for unattributed content would be a worse falsehood than the 'esl-compiler' literal it replaces, because it would name someone who exists. Query for it to find declarations still needing attribution.";
+    core:short_name = "unattributed";
+}
+
+resource agent:eigenius_core_team : prov:Organization {
+    core:description = "The Eigenius maintainers — the declarer of the platform's own bootstrap ontologies, which genuinely are asserted by this group. Not a default for user-authored content.";
+    core:short_name = "eigenius_core_team";
+}
+
+// ── Activities ───────────────────────────────────────────────────────
+//
+// The event that produced something.
+//
+// This is the axis's missing middle, and its absence is what made provenance
+// untraversable. An observation named its origin in a free-text string —
+// `"instrument-log:kinase-glo-plate-2026-03-11"`, `"depmap:18Q4 (Supp Table 1)"` —
+// so the origin was not a node in the graph. *Which claims rest on this
+// instrument* had no answer, and a warrant computed by walking relations had
+// nothing to walk.
+//
+// An Activity is NOT a Trace. The Activity is the event; the Trace is this
+// chain's assertion that the event happened and what it produced. The lab that
+// ran the plate and the author who committed the reading need not be the same
+// party, and keeping them separate is what lets each be named.
+
+class prov:Activity {
+    description = "An event that produced something: an instrument run, a data release, a program invocation, a publication's figure. Maps prov:Activity. Not a Trace — the Activity is the event, a Trace is this chain's assertion that it happened. runtime:RuntimeInvocation is an Activity and subclasses this rather than standing beside it as a second notion of the same thing.";
+    recommends prov:used, prov:was_associated_with,
+               prov:started_at, prov:completed_at,
+               core:short_name, core:description;
+}
+
+property prov:used : core:resource_array {
+    description = "The resources this Activity consumed. Maps prov:used. Resource-typed, so `which claims rest on this input` is a graph walk rather than a text search over descriptions.";
+    domain prov:Activity;
+}
+
+property prov:was_associated_with : core:resource {
+    description = "The Agent responsible for this Activity. Maps prov:wasAssociatedWith. Distinct from prov:was_attributed_to, which attributes an ASSERTION: this attributes the EVENT. The lab that ran the plate and the author who recorded the reading are frequently different parties.";
+    class_types prov:Agent;
+    domain prov:Activity;
+}
+
+property prov:started_at : core:string {
+    description = "When the Activity began, ISO-8601. Maps prov:startedAtTime.";
+    domain prov:Activity;
+}
+
+property prov:completed_at : core:string {
+    description = "When the Activity ended, ISO-8601. Maps prov:endedAtTime.";
+    domain prov:Activity;
+}
+
+// ── The core relations ───────────────────────────────────────────────
+
+property prov:was_attributed_to : core:resource {
+    description = "The Agent who asserted this resource. Maps prov:wasAttributedTo. The accountability link: a declaration with no agent behind it asserts nothing anybody can be held to. Distinct from prov:was_associated_with, which names who ran an activity rather than who vouches for a claim.";
+    class_types prov:Agent;
+}
+
+property prov:was_generated_by : core:resource {
+    description = "The Activity that produced this resource. Maps prov:wasGeneratedBy. Was a free-text `reflection:source` string until the provenance axis was made relational; the string form could name an origin but not link to it, so no query could reach the instrument, release or run behind an observation.";
+    class_types prov:Activity;
+}
+
+property prov:had_primary_source : core:resource {
+    description = "The criterion, convention, citation, or prior result a declaration rests on — the declared REASON it was made, as opposed to who made it (prov:was_attributed_to) or why in prose (prov:rationale). Maps prov:hadPrimarySource. Carries no class_types: these are heterogeneous (a reference:Citation, a methodology convention, a criterion resource, a generator program) and no single class covers them. Was named `warranted_by`, which was wrong twice over: it is provenance rather than warrant, and warrant under this design is computed from a justification term and stored nowhere. prov:hadPrimarySource is a subproperty of prov:wasDerivedFrom, which is an entanglement rather than a clean borrow, but harmless here — the objection to wasDerivedFrom is to reading it as warrant, which this does not.";
+}
+
+property prov:rationale : core:string {
+    description = "Why this was asserted, in prose, for a human reader. Deliberately unstructured and deliberately not machine-consumed: it is the place for the reasoning that resisted formalization. Nothing computes over it.";
+}
+
+property prov:timestamp : core:string {
+    description = "When the recorded event occurred, ISO-8601. On a Trace this is when the declaration, observation, production or verification took place. reflection:ComponentTrace used to recommend this property as well, which was its only non-provenance user and only ever a recommendation; that recommendation was dropped rather than duplicating a `when` property on both sides of the split, since a component evaluation's timing is what prov:started_at and prov:completed_at record.";
+}
+
+property prov:observed_at : core:string {
+    description = "When an observation was taken, ISO-8601, where that differs from when it was recorded on the chain.";
+}
+
+// ── Traces: the chain's assertions that an event happened ────────────
+//
+// Four kinds, one per way a resource comes to exist. Each names the resource it
+// is about (`prov:resource`) and when (`prov:timestamp`); what else it requires
+// is what that kind of coming-into-existence needs somebody to say.
+//
+// These are ASSERTIONS ABOUT provenance, not the provenance itself: the Trace is
+// chain-resident and committed by whoever loaded the data, while the Activity it
+// points at through `prov:was_generated_by` is the event in the world.
+//
+// They are also NOT `reflection:Trace`. That name belongs to the kernel's
+// program-evaluation machinery — LetTrace, MapTrace, CaseTrace and the rest,
+// which record how an expression reduced. The two families shared a word and
+// nothing else, which is why this one now lives here.
+
+class prov:Trace {
+    description = "A chain-resident record that some event brought a resource into existence, or established something about it. The abstract parent of the four provenance traces. Unrelated to reflection:Trace, which records how a program EVALUATED — these record how a resource CAME TO EXIST.";
+    requires prov:resource;
+    recommends prov:timestamp;
+}
+
+property prov:resource : core:resource {
+    description = "The resource this Trace is about. Resource-typed, so the trace and its subject are linked in the graph rather than by a name that has to be resolved by hand.";
+    domain prov:Trace;
+}
+
+class prov:DeclarationTrace : prov:Trace {
+    description = "Records that a resource was DECLARED — an accountable agent asserted it. Requires the agent, because a declaration nobody stands behind establishes nothing.";
+    requires prov:resource, prov:was_attributed_to, prov:timestamp;
+    recommends prov:rationale, prov:had_primary_source;
+}
+
+class prov:ObservationTrace : prov:Trace {
+    description = "Records that a resource was OBSERVED — read off the world by an instrument, a survey, a released dataset. Requires the Activity that produced it, so the instrument or release is reachable from every claim that rests on it.";
+    requires prov:resource, prov:was_generated_by, prov:timestamp;
+    recommends prov:observed_at, prov:source_irl;
+}
+
+class prov:ProductionTrace : prov:Trace {
+    description = "Records that some activity PRODUCED a resource — the parent of the traces prov:derivation points at. Says only that the resource was produced and that this is the record of it. Introduced (eigenius#205) because `derivation` was typed at ProgramTrace directly, so a class REQUIRING a derivation could not be attested by a production the kernel did not run.";
+    requires prov:resource;
+}
+
+class prov:ProgramTrace : prov:ProductionTrace {
+    description = "Records that a resource was produced by a program run — a kernel-evaluated program body, an institution emission, or a run an author asserts happened elsewhere. PURE PROVENANCE: it admits no witness and grounds nothing, because the fact that a computation ran establishes neither that the plan computes what it claims to nor what it was applied to. A computed claim rests on App(Declared(plan), Observed(inputs)), and neither half comes from here. When the kernel did not initiate the run, prov:was_attributed_to names who asserts that it happened; the richer execution metadata is optional and kernel-authored.";
+    requires prov:resource, prov:was_generated_by, prov:timestamp;
+    recommends prov:was_attributed_to, prov:rationale,
+               prov:program, prov:started_at, prov:completed_at,
+               prov:trace_tree, prov:input, reflection:output,
+               prov:total_tokens, prov:total_latency_ms,
+               prov:cached_steps, prov:executed_steps;
+}
+
+class prov:VerificationTrace : prov:Trace {
+    description = "Records that a proof of a resource's proposition was CHECKED by a proof system. Two verifiers produce one, distinguished by prov:proof_system rather than by class: an external prover (lean4, coq, agda) whose exported blob is checked, and the kernel itself, whose type-checked justification:Certificate is the proof term. Kernel-checking is verification; treating the two as different kinds would make the ground depend on which checker ran.";
+    requires prov:resource, prov:proof_system, prov:proof_term, prov:timestamp;
+    recommends prov:derivation_trace;
+}
+
+// ── Trace-borne properties ───────────────────────────────────────────
+
+property prov:source_irl : core:string {
+    description = "A URL or locator for the observed source, where one exists and is stable.";
+    format = formats:iri;
+    domain prov:ObservationTrace;
+}
+
+property prov:derivation : core:resource {
+    description = "The ProductionTrace recording how this resource was produced.";
+    class_types prov:ProductionTrace;
+}
+
+property prov:verification : core:resource {
+    description = "The VerificationTrace recording that this resource's proposition was checked.";
+    class_types prov:VerificationTrace;
+}
+
+property prov:proof_system : core:string {
+    description = "Which checker established the proof — `lean4`, `coq`, `agda`, or `kernel` when the type-checked certificate is itself the proof term. Distinguishes the two verifiers a VerificationTrace can come from, without making them different classes.";
+    domain prov:VerificationTrace;
+}
+
+property prov:proof_term : core:string {
+    description = "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Conclusion carrying a justification:proof — the judgement holds(logic, t, P), a checker having verified t against P itself. NOT the conclusion whose CERTIFICATE type-checked: justification:judgement is holds(kernel, c, Certificate(j, P)), which says a checker verified the certificate c and does not say P. A certificate records grounds and is not factive, and minting Verified from one laundered a conclusion resting on nothing but Declared(...) into a proof exactly one citation downstream. Both are IRIs; only the former is a blob.";
+    format = formats:iri;
+    domain prov:VerificationTrace;
+}
+
+property prov:derivation_trace : core:resource {
+    description = "The ProgramTrace of the run that produced the proof, where the proof was itself computed.";
+    class_types prov:ProgramTrace;
+    domain prov:VerificationTrace;
+}
+
+property prov:program : core:resource {
+    description = "The program resource whose evaluation this trace records.";
+    domain prov:ProgramTrace;
+}
+
+property prov:input : core:resource {
+    description = "The input resource the recorded program run was applied to.";
+    domain prov:ProgramTrace;
+}
+
+property prov:trace_tree : core:resource {
+    description = "The root of the kernel's step-by-step evaluation trace for this run — a reflection:Trace. One of two links from the provenance axis into the kernel's self-description (the other is reflection:output on ProgramTrace, which ComponentTrace and PureTrace REQUIRE, so it stays there): this says WHAT produced the resource, that says HOW the expression reduced. Both point downward, from prov into reflection; nothing in reflection points back, which is what fixes the layer order.";
+    class_types reflection:Trace;
+    domain prov:ProgramTrace;
+}
+
+property prov:total_tokens : core:integer {
+    description = "Total LLM tokens consumed across the run, where any step called a model.";
+    domain prov:ProgramTrace;
+}
+
+property prov:total_latency_ms : core:integer {
+    description = "Wall-clock milliseconds for the run.";
+    domain prov:ProgramTrace;
+}
+
+property prov:cached_steps : core:integer {
+    description = "How many steps were served from cache rather than executed.";
+    domain prov:ProgramTrace;
+}
+
+property prov:executed_steps : core:integer {
+    description = "How many steps actually executed.";
+    domain prov:ProgramTrace;
+}

@@ -31,6 +31,17 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
+//! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
+//! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
+//! families under one word: `reflection:Trace` with LetTrace / MapTrace / CaseTrace records how a
+//! PROGRAM EVALUATED, while the parentless DeclarationTrace / ObservationTrace / ProductionTrace /
+//! VerificationTrace record HOW A RESOURCE CAME TO EXIST. `prov` sits ABOVE `reflection` and that
+//! direction is forced: `prov:ProgramTrace` reaches into the evaluation family through
+//! `prov:trace_tree` and `reflection:output`, and nothing in `reflection` reaches back. This entry
+//! records only the layer's ADDITION; the migration that empties the moved declarations out of
+//! `reflection` moves that layer too and is recorded separately.
+//!
 //! IT FIRED ON THE THREE-GROUNDS CHANGE (`2026-08-30`): `justification`, `statistics` and
 //! `reflection`. `justification` is the substantive one — `justification:Term` went from seven
 //! constructors to five (`DerivedEvidence` and `SpecStr` removed), `justification:Certificate`
@@ -95,6 +106,7 @@ const EXPECTED: &str = "core:1892387054d3f4fb99048cf8fd9a8e7fab5285786ee6adc7aa7
 eigentt-type-fragment:262439f56bfaa793440679019de187b2c6fdc2604399bc1fbdd39a50df4df488
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
 reflection:b1b818176ce92e5f6cfd203da5df87ba14cc8e1495e2817fdbf51f798c3cc683
+prov:0033ded22165ff610da93dcf3382f136413191c5e4f0d6667046f963a2566f89
 obo:cb157be55245c9ac73385e0ac0c605f0cde8ecb9d1246b07226008cbf8cf4d76
 institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
 runtime:5ef02306d25bc1b52e517114c8b7f2280ca20ad1d70607255198b4d54d8b4bfc
