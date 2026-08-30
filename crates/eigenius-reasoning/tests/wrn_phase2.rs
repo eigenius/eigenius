@@ -100,6 +100,23 @@ fn esl_against_pending(
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
 
+    // STRUCTURAL validation, which `LayerBuilder::build` does not run and
+    // `esl::compile_against_layer` does not either — it compiles, it does not
+    // validate. Without it the chain is checked only for its conclusions'
+    // certificates, so a resource-typed property naming something nothing
+    // resolves, a required property left off, or a deleted class all commit
+    // clean here and fail on a real load. `00-wrn-vocabulary.esl`'s header
+    // records that costing two months.
+    let structural = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
+    assert!(
+        structural.is_empty(),
+        "{name}: the layer must validate structurally — the live loader runs this and \
+         these tests did not, which is how the chain silently stopped loading once before. \
+         {} error(s): {:#?}",
+        structural.len(),
+        structural.iter().take(10).collect::<Vec<_>>()
+    );
+
     let ctx = ExecutionContext::new(
         layer.clone(),
         name,
@@ -209,6 +226,7 @@ fn wrn_phase2_validation_chain_validates() {
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
             include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
+            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
                 b.add_resource(r).unwrap();
@@ -216,8 +234,17 @@ fn wrn_phase2_validation_chain_validates() {
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
+    // `prov` — the provenance axis, above reflection and below everything that
+    // names an agent, a trace or an attribution.
+    let prov = {
+        let mut b = LayerBuilder::new("prov", Some(reflection));
+        for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    };
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(reflection));
+        let mut b = LayerBuilder::new("reasoning", Some(prov));
         for r in esl::compile(include_str!(
             "../../../ontologies/justification/justification.esl"
         ))
@@ -232,9 +259,17 @@ fn wrn_phase2_validation_chain_validates() {
         &reasoning,
         "statistics",
     );
+    // `reference` — the literature layer uses reference:Citation, and this chain
+    // never carried the ontology declaring it. Nothing noticed because the layers
+    // were built without structural validation.
+    let reference = esl_against(
+        include_str!("../../../ontologies/reference/reference.esl"),
+        &statistics,
+        "reference",
+    );
     let bench_core = esl_against(
         include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl"),
-        &statistics,
+        &reference,
         "bench-core",
     );
     let harness = esl_against(

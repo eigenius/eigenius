@@ -74,6 +74,10 @@ use crate::program::eigentt_type_mirror::decode_type;
 /// The `urn:` of the `eigentt:Term` inductive — the range marker designating a
 /// property value as a D47-encoded EigenTT tree.
 const TERM_IRI: &str = "urn:eigenius:eigentt:Term";
+/// The `urn:` of the `eigentt:Judgement` inductive — the other range marker this
+/// rule owns. Its values are D47-encoded exactly as `eigentt:Term`'s are, so the
+/// generic inductive walk cannot read them.
+const JUDGEMENT_IRI: &str = "urn:eigenius:eigentt:Judgement";
 
 impl Validator {
     /// Rule 21 — check every term-valued slot. See the module docs.
@@ -85,15 +89,19 @@ impl Validator {
         res_id: &Option<Iri>,
         owner: &Resource,
     ) -> Vec<ValidationError> {
-        let ranged_on_term = Iri::parse(TERM_IRI)
-            .ok()
-            .and_then(|t| {
-                prop_def
-                    .get(&wk::iri(wk::CLASS_TYPES))
-                    .map(|v| v.as_iri_array().contains(&t))
-            })
-            .unwrap_or(false);
-        if !ranged_on_term || is_declaration_internal(prop_iri) {
+        let ranged_on = |iri_str: &str| {
+            Iri::parse(iri_str)
+                .ok()
+                .and_then(|t| {
+                    prop_def
+                        .get(&wk::iri(wk::CLASS_TYPES))
+                        .map(|v| v.as_iri_array().contains(&t))
+                })
+                .unwrap_or(false)
+        };
+        let ranged_on_term = ranged_on(TERM_IRI);
+        let ranged_on_judgement = ranged_on(JUDGEMENT_IRI);
+        if (!ranged_on_term && !ranged_on_judgement) || is_declaration_internal(prop_iri) {
             return vec![];
         }
 
@@ -106,6 +114,66 @@ impl Validator {
             }]
         };
 
+        let mut ctx = crate::nbe::check::CheckCtx::with_layer(
+            crate::nbe::env::Rho::Nil,
+            Vec::new(),
+            std::sync::Arc::clone(&self.layer),
+        );
+
+        // A JUDGEMENT slot. `eigentt:Judgement`'s own description states the
+        // contract: "A slot ranging over this type is checked in CHECK mode —
+        // decode both fields, check `type` is a type, check `term` against it —
+        // so no slot relies on inference and no exemption list is needed." That
+        // is what happens here.
+        //
+        // Nothing did it until now. Rule 21 selected only on `eigentt:Term`, so a
+        // Judgement slot fell through to Rule 16's generic inductive walk — which
+        // reads the D32 tagged-dict form, while a Judgement is stored D47-encoded
+        // as an `App` spine. Every judgement on every chain therefore reported
+        // "ctor `App` not declared on InductiveType `eigentt:Judgement`", and no
+        // test saw it because the chains that carry judgements are built with
+        // `LayerBuilder::build`, which does not validate.
+        if ranged_on_judgement {
+            let j = match crate::program::eigentt_type_mirror::decode_judgement(value, &self.layer)
+            {
+                Ok(j) => j,
+                Err(e) => {
+                    return err(
+                        ValidationRule::TermMalformed,
+                        format!("{prop_iri} does not decode as an eigentt:Judgement: {e}"),
+                    )
+                }
+            };
+            if let Err(reason) = crate::nbe::check::check_type(&mut ctx, &j.typ) {
+                return err(
+                    ValidationRule::TermIllTyped,
+                    format!("{prop_iri}'s `type` field is not a type: {reason}"),
+                );
+            }
+            // `check` takes the type as a VALUE, so evaluate it first — the same
+            // order the contract states: the type is checked to be a type, then
+            // the term is checked against it.
+            let typ_val = match ctx.eval(&j.typ, &crate::nbe::env::Rho::Nil) {
+                Ok(v) => v,
+                Err(e) => {
+                    return err(
+                        ValidationRule::TermIllTyped,
+                        format!("{prop_iri}'s `type` field does not evaluate: {e}"),
+                    )
+                }
+            };
+            return match crate::nbe::check::check(&mut ctx, &j.term, &typ_val) {
+                Ok(()) => vec![],
+                Err(reason) => err(
+                    ValidationRule::TermIllTyped,
+                    format!(
+                        "{prop_iri}'s `term` does not inhabit its `type` under logic {}: {reason}",
+                        j.logic
+                    ),
+                ),
+            };
+        }
+
         let exp = match decode_type(value, &self.layer) {
             Ok(e) => e,
             Err(e) => {
@@ -115,12 +183,6 @@ impl Validator {
                 )
             }
         };
-
-        let mut ctx = crate::nbe::check::CheckCtx::with_layer(
-            crate::nbe::env::Rho::Nil,
-            Vec::new(),
-            std::sync::Arc::clone(&self.layer),
-        );
 
         // Case 2 — the value must itself be a type.
         if matches!(

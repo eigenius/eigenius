@@ -31,13 +31,13 @@ data screen:StrongInhibitor : core:string -> Prop {
 // Two sources agreeing is exactly the shape `Sum` is for: either one carries
 // the conclusion, so losing one costs nothing.
 
-resource screen:warrant_two_source_agreement : reflection:DeclaredResource {
+resource screen:warrant_two_source_agreement : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Two independent reviews reach the same designation for EIG_0291. Either supports it alone, which is what makes the pair a Sum rather than an App.";
     core:short_name = "warrant_two_source_agreement";
 }
 
-resource screen:review_a : reflection:DeclaredResource {
+resource screen:review_a : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_two_source_agreement;
     prov:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
@@ -53,7 +53,7 @@ resource screen:review_a_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-04-10T09:00:00Z";
 }
 
-resource screen:review_b : reflection:DeclaredResource {
+resource screen:review_b : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_two_source_agreement;
     prov:rationale    = "Second independent review reaches the same designation.";

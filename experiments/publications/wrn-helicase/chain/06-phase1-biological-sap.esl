@@ -43,7 +43,7 @@ namespace prov       = "urn:eigenius:prov";
 // the script via grepl("WRN", guide)). Same source data as
 // wrn:viab_KM12_sampleset (ED Fig 3b, Nature Source Data, pinned); here modeled
 // with the guide as the biological replication unit.
-class wrn:CompetitionTable : reflection:ObservedResource {
+class wrn:CompetitionTable {
     description = "KM12 day-10 competition-assay relative-ratio table (ED Fig 3b) consumed by the biological-unit lme4 RuntimeScript program. Columns: viab_value, viab_guide. An ObservedResource so it carries the same tier-1 extraction pins (bench:extracted_from_*) as the SampleSets — the input data is traced to the pinned source slice via a re-runnable recipe, not trusted as typed-in numbers.";
 }
 
@@ -69,7 +69,7 @@ resource wrn:concl_viab_KM12_biological : justification:Conclusion {
 // nested-ANOVA dispatch, P = 2.74e-19 — to the biological-stratum warrant
 // (wrn:viab_KM12_bio_lme4:result, mixed-model LRT, P ≈ 2.15e-6). The conclusion
 // is robust under both; the published value is a pseudoreplication artifact.
-resource wrn:viab_KM12_dual_sap : reflection:DeclaredResource {
+resource wrn:viab_KM12_dual_sap : prov:Source {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication;
     prov:rationale   = "The published competition-assay SAP (wrn:viab_KM12_plan, lm(value ~ is_WRN + guide) %>% anova) tests the WRN effect against the technical within-guide residual (25 df, P = 2.74e-19); the biological-unit SAP (wrn:viab_KM12_bio_lme4:result, lmer(value ~ is_WRN + (1|guide)) LRT) tests against the between-guide variance (P ≈ 2.15e-6). Same data; the guide is the biological replication unit and the 6 reps per guide are technical. The conclusion — WRN depletion impairs KM12 viability — is robust under both (p < 0.01), but the published P overstates the evidence by ~13 orders of magnitude (pseudoreplication; Hurlbert 1984, Lazic 2016, Blainey/Krzywinski/Altman 2014). The paper is internally inconsistent: its in-vivo arm (concl_vivo) already uses the mixed-effects approach.";
@@ -83,7 +83,7 @@ resource wrn:viab_KM12_dual_sap_trace : prov:DeclarationTrace {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication : reflection:DeclaredResource {
+resource wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication : prov:Source {
     prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `recompute-findings:F4-competition-assay-pseudoreplication`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_recompute_findings_f4_competition_assay_pseudoreplication";

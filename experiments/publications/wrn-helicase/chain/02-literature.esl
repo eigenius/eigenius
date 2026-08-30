@@ -519,7 +519,7 @@ resource wrn:authors : prov:Agent {
     core:short_name = "wrn_authors";
 }
 
-resource wrn:warrant_wrn_literature : reflection:DeclaredResource {
+resource wrn:warrant_wrn_literature : prov:Source {
     prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-literature`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_wrn_literature";

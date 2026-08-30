@@ -27,7 +27,7 @@ data screen:IsInhibitory : Prop {
 
 // ── The class-as-proposition sentence ────────────────────────────────
 
-resource screen:rule_class : reflection:DeclaredResource {
+resource screen:rule_class : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_illustrative;
     prov:rationale   = "Declares a CLASS as though it were a proposition.";
@@ -64,7 +64,7 @@ resource screen:concl_class : justification:Conclusion {
 
 // ── The control: a genuine Prop in the same slot ─────────────────────
 
-resource screen:rule_prop : reflection:DeclaredResource {
+resource screen:rule_prop : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_illustrative;
     prov:rationale   = "Declares a genuine Prop-sorted proposition.";
@@ -99,7 +99,7 @@ resource screen:concl_prop : justification:Conclusion {
 
 }
 
-resource screen:warrant_illustrative : reflection:DeclaredResource {
+resource screen:warrant_illustrative : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Illustrative warrant for this fixture's declarations. A test fixture, not a real literature warrant.";
     core:short_name = "warrant_illustrative";

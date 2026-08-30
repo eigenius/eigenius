@@ -96,7 +96,7 @@ resource demo:plan_ES2_trace : prov:ProgramTrace {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource demo:warrant_wrn_paper_viability_impairment_directionality : reflection:DeclaredResource {
+resource demo:warrant_wrn_paper_viability_impairment_directionality : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `wrn-paper:viability-impairment-directionality`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_wrn_paper_viability_impairment_directionality";

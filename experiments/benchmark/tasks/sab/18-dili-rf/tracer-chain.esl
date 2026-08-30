@@ -52,7 +52,7 @@ data s18:ImplementsDILIPredictor : core:string -> Prop {
 
 // ─── Phase 2: the methodological decisions ─────────────────────────
 
-resource s18:conf_featurization : reflection:DeclaredResource {
+resource s18:conf_featurization : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = s18:warrant_agent_sab18_method;
     prov:rationale   = "Featurize standardised_smiles with ECFP / Morgan fingerprints (radius 2, 2048 bits). Warrant: the domain knowledge names Morgan fingerprints (spec); radius 2 / 2048 bits is the ECFP4 convention, matching the gold DILI_models_ECFP_RF.py.";
@@ -67,7 +67,7 @@ resource s18:conf_featurization_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-06-12T11:00:00Z";
 }
 
-resource s18:conf_label_mapping : reflection:DeclaredResource {
+resource s18:conf_label_mapping : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = s18:warrant_agent_sab18_method;
     prov:rationale   = "Collapse the 4-way vDILIConcern to binary: 'vMost-DILI-Concern' and 'vLess-DILI-Concern' -> DILI (positive); 'vNo-DILI-Concern' and 'sider_inactive' -> NoDILI (negative). Warrant: the instruction states this mapping verbatim (spec). The error-prone reading the discipline pins down: sider_inactive is NEGATIVE (not dropped), and vLess is POSITIVE.";
@@ -82,7 +82,7 @@ resource s18:conf_label_mapping_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-06-12T11:00:01Z";
 }
 
-resource s18:conf_configs : reflection:DeclaredResource {
+resource s18:conf_configs : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = s18:warrant_agent_sab18_method;
     prov:rationale   = "Build the three configurations from the train.csv row ranges (1-based inclusive: MC 1-173, LC 174-433, NC 434-660, sider 661-923): MCNC = MC+ vs NC-, MCLCNC = MC/LC+ vs NC-, all = MC/LC+ vs NC/sider-. Warrant: the instruction defines the splits and the three configs (spec). The interpretation the discipline pins down: the ranges are row positions, 1-based inclusive.";
@@ -97,7 +97,7 @@ resource s18:conf_configs_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-06-12T11:00:02Z";
 }
 
-resource s18:conf_model_selection : reflection:DeclaredResource {
+resource s18:conf_model_selection : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = s18:warrant_agent_sab18_method;
     prov:rationale   = "Per config, train a RandomForest with hyperparameters chosen by 5-fold cross-validated grid search (number of trees, max depth, min samples split/leaf), then refit on the best hyperparameter. Warrant: the instruction requires 5-fold CV + hyperparameter search and 'the model trained on the best hyperparameter' (spec).";
@@ -112,7 +112,7 @@ resource s18:conf_model_selection_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-06-12T11:00:03Z";
 }
 
-resource s18:conf_output_format : reflection:DeclaredResource {
+resource s18:conf_output_format : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = s18:warrant_agent_sab18_method;
     prov:rationale   = "For each config write pred_results/{config}_RF.csv (MCNC_RF.csv, MCLCNC_RF.csv, all_RF.csv) with columns standardised_smiles and label, label in {DILI, NoDILI}. Warrant: the instruction specifies the filenames, columns, and label vocabulary (spec).";
@@ -129,7 +129,7 @@ resource s18:conf_output_format_trace : prov:DeclarationTrace {
 
 // ─── Phase 3: the acceptance rule ──────────────────────────────────
 
-resource s18:impl_rule : reflection:DeclaredResource {
+resource s18:impl_rule : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = s18:warrant_benchmark_sab18_acceptance;
     prov:rationale   = "A solution implements the required DILI predictor iff it conforms on every methodological axis: featurization, label mapping, configurations, model selection, and output format.";
@@ -232,7 +232,7 @@ resource s18:concl_solution_implements : justification:Conclusion {
 
 // ─── Phase 5: the deliverable ──────────────────────────────────────
 
-resource s18:solution : bench:TaskOutput, reflection:DerivedResource {
+resource s18:solution : bench:TaskOutput {
     bench:task             = "urn:eigenius:bench:sab18:task";
     bench:deliverable_kind = "python_source";
     bench:reasoning_chain  = ["urn:eigenius:bench:sab18:concl_solution_implements"];
@@ -359,13 +359,13 @@ resource s18:block_output : bench:CodeBlock {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource s18:warrant_agent_sab18_method : reflection:DeclaredResource {
+resource s18:warrant_agent_sab18_method : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `agent:sab18-method`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_agent_sab18_method";
 }
 
-resource s18:warrant_benchmark_sab18_acceptance : reflection:DeclaredResource {
+resource s18:warrant_benchmark_sab18_acceptance : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `benchmark:sab18-acceptance`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_benchmark_sab18_acceptance";

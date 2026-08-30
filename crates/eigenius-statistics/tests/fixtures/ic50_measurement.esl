@@ -55,6 +55,7 @@ namespace screen_confirmatory_result =
     "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result";
 namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
 
@@ -159,8 +160,7 @@ resource screen:claim_eig0291_confirmatory_holds : stats:StatisticalAnalysisPlan
 
 resource screen_confirmatory_result:main_effect :
     stats:StatisticalAnalysisResult,
-    reflection:InstitutionEmittedDerivation,
-    reflection:DerivedResource
+    reflection:InstitutionEmittedDerivation
 {
     reflection:from_subject          = screen:claim_eig0291_confirmatory_holds;
     stats:verdict_ctor               = "Holds";
@@ -178,7 +178,7 @@ resource screen_confirmatory_result:main_effect :
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredResource {
+resource screen:warrant_methodology_kinase_glo_emax_floor : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `methodology:kinase-glo-emax-floor`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_methodology_kinase_glo_emax_floor";
@@ -195,13 +195,13 @@ resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredR
 // `App(Declared(plan_yields_effect), Observed(sampleset))`, and these are the
 // declared halves.
 
-resource screen:warrant_plan_reproducibility : reflection:DeclaredResource {
+resource screen:warrant_plan_reproducibility : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Each analysis plan below pins its statistic, alpha, directionality, variance assumption and outlier rule over a recorded sample set. Those together are what make a plan a function of its input rather than of the occasion — the claim `Declared(plan)` carries, and the one no execution record could establish on its own.";
     core:short_name = "warrant_plan_reproducibility";
 }
 
-resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : reflection:DeclaredResource {
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_plan_reproducibility;
     prov:rationale    = "Applying claim_eig0291_confirmatory_holds to the confirmatory sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";

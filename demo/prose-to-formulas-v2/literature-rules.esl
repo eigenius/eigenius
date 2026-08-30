@@ -49,6 +49,7 @@ namespace umlscui    = "urn:eigenius:umlscui";
 namespace wn         = "urn:eigenius:wn";
 namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // The classes the rule mentions, drawn from two different lexicons the graph already held:
 //
@@ -64,7 +65,7 @@ namespace prov       = "urn:eigenius:prov";
 // definition, or design decision — as opposed to something observed, derived, or machine-verified.
 // The class requires `declared_by` and recommends `rationale` and `timestamp`. Nothing about a
 // Declared resource claims it is true; it claims someone stood behind it, and says who.
-resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
+resource onco2:lit_rule_exo_implies_helicase : justification:Claim {
     // WHO stands behind the rule. A citation slot: in a real chain this would identify the paper.
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = onco2:warrant_literature_illustrative_dependency_rule;
@@ -119,7 +120,7 @@ resource onco2:lit_rule_exo_implies_helicase_trace : prov:DeclarationTrace {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource onco2:warrant_literature_illustrative_dependency_rule : reflection:DeclaredResource {
+resource onco2:warrant_literature_illustrative_dependency_rule : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `literature:illustrative-dependency-rule`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_literature_illustrative_dependency_rule";

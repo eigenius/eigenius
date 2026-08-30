@@ -33,6 +33,7 @@ namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
 namespace bench      = "urn:eigenius:benchmark";
 namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // ── Typed tool boundary ──────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ property bench:tool_parameters : core:string {
 
 // ── Measurement ──────────────────────────────────────────────────────
 
-class bench:Measurement : reflection:ObservedResource {
+class bench:Measurement {
     description = "A scalar measurement: a value, its unit, and the quantity it measures. Observed by default (instrument/assay/dataset); computed quantities are ToolArtifacts instead.";
     requires bench:value, bench:unit, bench:quantity;
 }
@@ -82,7 +83,7 @@ property bench:quantity : core:string {
 
 // ── Dataset (observed input) ─────────────────────────────────────────
 
-class bench:Dataset : reflection:ObservedResource {
+class bench:Dataset {
     description = "An input dataset recorded from external reality, with provenance (the file path / locator the task supplies).";
     requires bench:dataset_path;
     recommends bench:dataset_description;
@@ -113,27 +114,22 @@ property bench:dataset_description : core:string {
 
 property bench:extracted_from_slice : core:string {
     description = "Filename / locator of the pinned source slice the inlined data was projected from (provenance per data/MANIFEST.md).";
-    domain reflection:ObservedResource;
 }
 
 property bench:extracted_from_sha256 : core:string {
     description = "Full sha256 of the source slice — the content-address pin anchor the extractor enforces before reading.";
-    domain reflection:ObservedResource;
 }
 
 property bench:extraction_columns : core:string {
     description = "The slice column(s) the inlined values come from (e.g. 'avg_WRN_dep', or 'ms_deletions_normed,avg_WRN_dep').";
-    domain reflection:ObservedResource;
 }
 
 property bench:extraction_filter : core:string {
     description = "The row filter + sort + grouping that selects the inlined values (e.g. 'CCLE_MSI in {MSI,MSS} & common_MSI_lineage; group A=MSI,B=MSS; sorted asc; NaN/NA dropped').";
-    domain reflection:ObservedResource;
 }
 
 property bench:extraction_recipe : core:string {
     description = "Pointer to the committed extractor that re-derives + verifies this array (script path + resource name), e.g. 'extract/extract_samplesets.py#wrn:wrn_dep_sampleset'.";
-    domain reflection:ObservedResource;
 }
 
 // ── Linking-predicate convention ─────────────────────────────────────

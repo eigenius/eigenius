@@ -34,6 +34,7 @@ namespace litclaim      = "urn:eigenius:pub:wrn:litclaim";
 namespace justification = "urn:eigenius:justification";
 namespace stats         = "urn:eigenius:measurements";
 namespace prov       = "urn:eigenius:prov";
+namespace wrnact     = "urn:eigenius:pub:wrn:activity";
 
 // ════════════════════════════════════════════════════════════════════
 // C-VIVO — in vivo + patient-derived validation
@@ -56,32 +57,38 @@ namespace prov       = "urn:eigenius:prov";
 // materialized before this chain layer is loaded — D54 lemma-citation order).
 //
 // Minimal class for the program's typed input (the xenograft table).
-class wrn:XenograftTable : reflection:ObservedResource {
+class wrn:XenograftTable {
     description = "The KM12 shWRN1 xenograft tumor-volume table (Fig 2d) consumed by the lme4 in-vivo-dependence RuntimeScript program (D56). Columns: vivo_volume, vivo_day, vivo_mouse, vivo_dox. An ObservedResource so it carries the same tier-1 extraction pins (bench:extracted_from_*) as the SampleSets — the input data is traced to the pinned source slice via a re-runnable recipe.";
 }
 
 // Linked-external: the C911 seed-matched control is inert in vivo.
-resource wrn:vivo_seed_control : bench:ToolArtifact, reflection:DeclaredResource {
+resource wrn:vivo_seed_control : bench:ToolArtifact {
     prov:was_attributed_to = wrn:authors;
     bench:tool            = "C911 seed-control xenograft (shWRN1 vs shWRN1-C911)";
     bench:produced_from   = ["wrn-paper:Fig-2d"];
     bench:tool_parameters = "shWRN1-C911 (nt 9-11 of shWRN1 mutated to complement, preserving the off-target 'seed') does NOT impair KM12 xenograft growth, whereas on-target shWRN1 does. The seed-matched control is inert. LINKED-EXTERNAL.";
-    prov:derivation = wrn:vivo_seed_control_trace;
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:fig_2d_seed_control;
     reflection:canonical_proposition = type_expr(
         onco:SeedControlInert("WRN", "xenograft_growth")
     );
 }
-resource wrn:vivo_seed_control_trace : reflection:ExternalExecutionTrace {
+resource wrn:vivo_seed_control_trace : prov:DeclarationTrace {
     prov:was_attributed_to = wrn:authors;
     prov:resource  = wrn:vivo_seed_control;
-    prov:was_generated_by    = "wrn-paper:Fig-2d C911 seed control (linked-external)";
+    prov:was_generated_by    = wrnact:fig_2d_seed_control;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // Declared: the seed-control inference. An shRNA's off-target activity is
 // driven by its 'seed'; a seed-matched but on-target-disrupted control
 // (C911) that is inert isolates the on-target effect.
-resource wrn:seed_control_rule : reflection:DeclaredResource {
+resource wrn:seed_control_rule : justification:Claim {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_c911_seed_control_logic;
     prov:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence, and a C911 seed-preserving control isolates on-target from seed off-target effects (Buehler 2012 [16], a litclaim premise): shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. Given that control's validity, if the seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
@@ -155,7 +162,7 @@ resource wrn:concl_vivo_ontarget : justification:Conclusion {
 // → wrn:lit:lit_ps15_readout]). The p53_activation_rule composes that premise
 // with the measured fact; concl_p53_activation discharges it (the if_ed5 witness
 // is minted by the R run; lit_ps15_readout by its DeclarationTrace).
-resource wrn:p53_activation_rule : reflection:DeclaredResource {
+resource wrn:p53_activation_rule : justification:Claim {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_p53_activation_readout;
     prov:rationale   = "Phospho-p53(Ser15) is an ATR/ATM DNA-damage-response target that marks p53 activation (Loughery 2014, the lit_ps15_readout premise). Given that, if WRN depletion raises p-p53(S15) (and the p53 target p21) in MSI cells, WRN depletion activates the p53 response in MSI.";
@@ -186,22 +193,22 @@ resource wrn:concl_p53_activation : justification:Conclusion {
             AP   = onco:ActivatesP53Response("WRN", "MSI"),
             RULE_P = PS15 -> RM -> AP,
             jPS15 = Declared(LIT),
-            jRM   = justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a")),
+            jRM   = justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519")),
             cert1 = app(PS15, RM -> AP, Declared(RULE), jPS15,
                         declared(RULE, RULE_P), declared(LIT, PS15))
         in
         holds( eigentt:logic_kernel,
                app(RM, AP, justification:App(Declared(RULE), jPS15), jRM,
-               cert1, app(core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a"), onco:RaisesP53DamageMarkers("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a"),
-                       declared("urn:eigenius:pub:wrn:if_ed5_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a") -> onco:RaisesP53DamageMarkers("WRN", "MSI")),
-                       observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a", core:Asserts("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a")))),
+               cert1, app(core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"), onco:RaisesP53DamageMarkers("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"),
+                       declared("urn:eigenius:pub:wrn:if_ed5_yields_result", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519") -> onco:RaisesP53DamageMarkers("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519")))),
                justification:Certificate(
                    justification:App(
                        justification:App(
                            Declared("urn:eigenius:pub:wrn:p53_activation_rule"),
                            Declared("urn:eigenius:pub:wrn:lit:lit_ps15_readout")
                        ),
-                       justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:pub:wrn:input_8d26fbb8aafb610a"))
+                       justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"))
                    ),
                    onco:ActivatesP53Response("WRN", "MSI") ) )
     );
@@ -222,11 +229,11 @@ resource wrn:concl_paralog : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               app(core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6"),
-                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
-                       observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6", core:Asserts("urn:eigenius:pub:wrn:input_14e82c398188b9f6"))),
+               app(core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"),
+                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"))),
                justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:pub:wrn:input_14e82c398188b9f6")),
+                   justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed")),
                    onco:NotExplainedByParalogLoss("WRN", "MSI") ) )
     );
 }
@@ -243,20 +250,26 @@ resource wrn:concl_paralog : justification:Conclusion {
 // the Chk2(T68) western blot (ED 7e — band levels, no per-cell numeric data) and
 // the shRNA in-vitro/in-vivo γH2AX confirmation (Fig 2e / ED 7e, CRISPR-artifact
 // control). No source-data sheet exists for either.
-resource wrn:mech_dsb : bench:ToolArtifact, reflection:DeclaredResource {
+resource wrn:mech_dsb : bench:ToolArtifact {
     prov:was_attributed_to = wrn:authors;
     bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
     bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
     bench:tool_parameters = "WRN silencing substantially increased γH2AX and 53BP1 foci (DSB markers) in MSI but not MSS cells; corroborated by increased phospho-ATM(S1981) foci and Chk2(T68) phosphorylation; confirmed with shRNA in vitro and in vivo (not a CRISPR/Cas9 artifact). LINKED-EXTERNAL.";
-    prov:derivation = wrn:mech_dsb_trace;
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:dsb_marker_if;
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
     );
 }
-resource wrn:mech_dsb_trace : reflection:ExternalExecutionTrace {
+resource wrn:mech_dsb_trace : prov:DeclarationTrace {
     prov:was_attributed_to = wrn:authors;
     prov:resource  = wrn:mech_dsb;
-    prov:was_generated_by    = "wrn-paper:Fig-4 / ED-Fig-6,7 DSB-marker IF (linked-external)";
+    prov:was_generated_by    = wrnact:dsb_marker_if;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -264,7 +277,7 @@ resource wrn:mech_dsb_trace : reflection:ExternalExecutionTrace {
 // response (ATM/ATR → p53; G2/M & E2F down, apoptosis up by GSEA; annexin V
 // death; p53-S15 & p21 IF) and are directly toxic — independent of p53 status
 // (explaining why p53-impaired MSI cells are also sensitive).
-resource wrn:mech_rule : reflection:DeclaredResource {
+resource wrn:mech_rule : justification:Claim {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_dsb_ddr_mechanism;
     prov:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The DSB lesion is now reproduced-external in both markers (γH2AX intensity + foci via concl_dsb_gh2ax/concl_dsb_gh2ax_foci; 53BP1 foci via concl_dsb_foci), and the upstream DDR signaling that bridges DSBs to p53 is reproduced via pATM(S1981) (concl_ddr_signaling, onco:ActivatesDSBResponse) — so the lethality claim rests on recomputed DSB + DDR-signaling readouts PLUS the two kernel-recomputed DDR endpoints; only the Chk2(T68) western remains linked.";
@@ -315,11 +328,11 @@ resource wrn:concl_dsb_foci : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               app(core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee"),
-                       declared("urn:eigenius:pub:wrn:foci_dsb_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee") -> onco:CausesDSBs("WRN", "MSI")),
-                       observed("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee", core:Asserts("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee"))),
+               app(core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83"),
+                       declared("urn:eigenius:pub:wrn:foci_dsb_yields_result", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83"))),
                justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:pub:wrn:input_1ba6dc6f78b10cee")),
+                   justification:App(Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83")),
                    onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
@@ -338,11 +351,11 @@ resource wrn:concl_dsb_gh2ax : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               app(core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"),
-                       declared("urn:eigenius:pub:wrn:gh2ax_yields_result", core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")),
-                       observed("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95", core:Asserts("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"))),
+               app(core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"),
+                       declared("urn:eigenius:pub:wrn:gh2ax_yields_result", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"))),
                justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:pub:wrn:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95")),
+                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95")),
                    onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
@@ -350,11 +363,11 @@ resource wrn:concl_dsb_gh2ax_foci : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               app(core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:pub:wrn:input_70abbad2f5319ae1"),
-                       declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1") -> onco:CausesDSBs("WRN", "MSI")),
-                       observed("urn:eigenius:pub:wrn:input_70abbad2f5319ae1", core:Asserts("urn:eigenius:pub:wrn:input_70abbad2f5319ae1"))),
+               app(core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c"),
+                       declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c") -> onco:CausesDSBs("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c"))),
                justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:pub:wrn:input_70abbad2f5319ae1")),
+                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c")),
                    onco:CausesDSBs("WRN", "MSI") ) )
     );
 }
@@ -372,11 +385,11 @@ resource wrn:concl_ddr_signaling : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               app(core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece"), onco:ActivatesDSBResponse("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:pub:wrn:input_9a718df80087dece"),
-                       declared("urn:eigenius:pub:wrn:patm_yields_result", core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece") -> onco:ActivatesDSBResponse("WRN", "MSI")),
-                       observed("urn:eigenius:pub:wrn:input_9a718df80087dece", core:Asserts("urn:eigenius:pub:wrn:input_9a718df80087dece"))),
+               app(core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de"), onco:ActivatesDSBResponse("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de"),
+                       declared("urn:eigenius:pub:wrn:patm_yields_result", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de") -> onco:ActivatesDSBResponse("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de"))),
                justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:pub:wrn:input_9a718df80087dece")),
+                   justification:App(Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de")),
                    onco:ActivatesDSBResponse("WRN", "MSI") ) )
     );
 }
@@ -589,20 +602,26 @@ resource wrn:concl_mech : justification:Conclusion {
 // after shWRN1 induction directly showed diffuse chromosomal DSBs WITHOUT
 // telomeric end-to-end fusions or signal loss — ruling out a telomere defect
 // as the basis of the synthetic lethality.
-resource wrn:fish_readout : bench:ToolArtifact, reflection:DeclaredResource {
+resource wrn:fish_readout : bench:ToolArtifact {
     prov:was_attributed_to = wrn:authors;
     bench:tool            = "telomere PNA-FISH of metaphase spreads (± shWRN1)";
     bench:produced_from   = ["wrn-paper:Fig-4d", "wrn-paper:Fig-4e", "wrn-paper:ED-Fig-8a"];
     bench:tool_parameters = "WRN silencing induced DSB/fragmentation throughout chromosomes in MSI but not MSS cells, with NO specific telomeric defects (no increased end-to-end fusions, no telomeric signal loss). The synthetic lethality is not via a telomere defect — an explicitly tested-and-rejected hypothesis. LINKED-EXTERNAL.";
-    prov:derivation = wrn:fish_readout_trace;
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:ed_fig_8a;
     reflection:canonical_proposition = type_expr(
         onco:NotViaTelomereDefect("WRN", "MSI")
     );
 }
-resource wrn:fish_readout_trace : reflection:ExternalExecutionTrace {
+resource wrn:fish_readout_trace : prov:DeclarationTrace {
     prov:was_attributed_to = wrn:authors;
     prov:resource  = wrn:fish_readout;
-    prov:was_generated_by    = "wrn-paper:Fig-4d,e / ED-Fig-8a telomere-FISH (linked-external)";
+    prov:was_generated_by    = wrnact:ed_fig_8a;
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
@@ -620,19 +639,19 @@ resource wrn:concl_not_telomere : justification:Conclusion {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource wrn:warrant_c911_seed_control_logic : reflection:DeclaredResource {
+resource wrn:warrant_c911_seed_control_logic : prov:Source {
     prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:c911-seed-control-logic`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_c911_seed_control_logic";
 }
 
-resource wrn:warrant_dsb_ddr_mechanism : reflection:DeclaredResource {
+resource wrn:warrant_dsb_ddr_mechanism : prov:Source {
     prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:dsb-ddr-mechanism`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_dsb_ddr_mechanism";
 }
 
-resource wrn:warrant_p53_activation_readout : reflection:DeclaredResource {
+resource wrn:warrant_p53_activation_readout : prov:Source {
     prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:p53-activation-readout`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_p53_activation_readout";

@@ -251,6 +251,38 @@ data justification:Certificate : justification:Term -> Prop -> Type 2 {
         justification:Certificate(j, P(x)),
 }
 
+// ── justification:Claim ─────────────────────────────────────────────
+//
+// A chain-resident resource carrying a proposition: a literature rule, a
+// statistical-to-domain bridge, a claim that an analysis plan denotes a function
+// of its input, an instrument reading put on chain.
+//
+// **Warrant applies to exactly these, and the test is mechanical.** Warrant asks
+// what evidence exists for a proposition, so a resource carrying none cannot be
+// asked the question — asking it is a category error rather than an unanswered
+// question. This class is where that test is enforced, by requiring the
+// proposition.
+//
+// **Ground-neutral, deliberately.** `Certificate.declared(iri, P)` and
+// `Certificate.observed(iri, P)` both cite a resource of this kind; which ground
+// applies is which provenance trace the resource carries, not what class it is.
+// That is the separation the grade classes collapsed: `DeclaredResource` and
+// `ObservedResource` made the ground a KIND OF RESOURCE, so a reading and a rule
+// were different types of thing rather than the same kind of thing with
+// different origins. `enc:EncodedClaim` is the parser-produced special case.
+//
+// The witness a citation consumes is minted from the resource's trace, and
+// `IsDeclaredAs(iri, P)` cannot exist for a resource that states no `P`. Without
+// the requirement below, that failure surfaces as a missing witness at
+// certificate-check time rather than as a missing property at commit — later,
+// and further from the cause.
+
+class justification:Claim {
+    description = "A chain-resident resource carrying a proposition — a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input, an instrument reading. Cited as a ground by justification:Certificate.declared or .observed through Declared(iri) / Observed(iri). REQUIRES reflection:canonical_proposition: carrying a proposition is what makes a resource citable, and what makes warrant a question that applies to it at all. Ground-neutral by design — which of Declared or Observed applies is which prov trace the resource carries, not which class it is, which is the separation the deleted grade classes collapsed. Who asserted it, or what activity produced it, lives on that trace.";
+    requires reflection:canonical_proposition;
+    recommends prov:had_primary_source, core:description, core:short_name;
+}
+
 // ── justification:Conclusion (D39 §4.2) ─────────────────────────────────────
 //
 // The chain-resident pairing of a proposition with a justification:Term

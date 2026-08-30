@@ -116,7 +116,7 @@ data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
 // Specialised to EIG_0291. The antecedent is the domain predicate
 // that the bridge lifts the statistical claim into.
 
-resource screen:rule_strong : reflection:DeclaredResource {
+resource screen:rule_strong : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
     prov:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
@@ -203,8 +203,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
 
 resource screen_result:main_effect :
     stats:StatisticalAnalysisResult,
-    reflection:InstitutionEmittedDerivation,
-    reflection:DerivedResource
+    reflection:InstitutionEmittedDerivation
 {
     reflection:from_subject          = screen:claim_eig0291_lowic50;
     stats:verdict_ctor               = "Holds";
@@ -231,13 +230,13 @@ resource screen_result:main_effect :
 // `App(Declared(plan_yields_main_effect), Observed(sampleset))`, and this is the
 // declared half.
 
-resource screen:warrant_plan_reproducibility : reflection:DeclaredResource {
+resource screen:warrant_plan_reproducibility : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "The analysis plan pins its statistic, alpha, directionality, variance assumption and outlier rule over a recorded sample set. Those together are what make it a function of its input rather than of the occasion — the claim `Declared(plan)` carries, and the one no execution record could establish on its own.";
     core:short_name = "warrant_plan_reproducibility";
 }
 
-resource screen:claim_eig0291_lowic50_yields_main_effect : reflection:DeclaredResource {
+resource screen:claim_eig0291_lowic50_yields_main_effect : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_plan_reproducibility;
     prov:rationale    = "Applying claim_eig0291_lowic50 to the recorded sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
@@ -266,7 +265,7 @@ resource screen:claim_eig0291_lowic50_yields_main_effect_trace : prov:Declaratio
 //
 // Monomorphic — one bridge resource per (sample_set, compound) pair.
 
-resource screen:bridge_eig0291_lowic50 : reflection:DeclaredResource {
+resource screen:bridge_eig0291_lowic50 : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_methodology_ic50_classification_convention;
     prov:rationale   = "The medicinal-chemistry convention that a sample's mean IC50 being statistically below 100 nM justifies classifying the underlying compound as HasLowIC50 at the assayed target. Specialised to the EIG_0291 sample-set / compound pair; the polymorphic shape would universally-quantify over (sample_set, compound) with an explicit `sample_for(s, c)` premise.";
@@ -419,19 +418,19 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource screen:warrant_literature_smith_et_al_2024_3_2 : reflection:DeclaredResource {
+resource screen:warrant_literature_smith_et_al_2024_3_2 : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `literature:smith_et_al_2024_3.2`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_literature_smith_et_al_2024_3_2";
 }
 
-resource screen:warrant_methodology_ic50_classification_convention : reflection:DeclaredResource {
+resource screen:warrant_methodology_ic50_classification_convention : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `methodology:ic50-classification-convention`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_methodology_ic50_classification_convention";
 }
 
-resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredResource {
+resource screen:warrant_methodology_kinase_glo_emax_floor : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `methodology:kinase-glo-emax-floor`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_methodology_kinase_glo_emax_floor";

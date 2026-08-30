@@ -169,6 +169,18 @@ property prov:was_generated_by : core:resource {
     class_types prov:Activity;
 }
 
+// A thing a declaration can rest on: a criterion, a convention, a published
+// result, a methodology. Named by `prov:had_primary_source`, and carrying no
+// proposition of its own — which is what separates it from
+// `justification:Assertion`. Asking what warrants a Source is a category error:
+// it states nothing to be warranted, it is the stated reason something else was
+// asserted.
+
+class prov:Source {
+    description = "A criterion, convention, published result or methodology that a declaration rests on. The target of prov:had_primary_source. Carries no proposition — it is the stated REASON an assertion was made, not an assertion itself, so it has provenance and no warrant. Many are stubs: the identifier was recorded because a declaration named it, while its content lives outside this chain.";
+    recommends core:description, core:short_name, prov:was_attributed_to;
+}
+
 property prov:had_primary_source : core:resource {
     description = "The criterion, convention, citation, or prior result a declaration rests on — the declared REASON it was made, as opposed to who made it (prov:was_attributed_to) or why in prose (prov:rationale). Maps prov:hadPrimarySource. Carries no class_types: these are heterogeneous (a reference:Citation, a methodology convention, a criterion resource, a generator program) and no single class covers them. Was named `warranted_by`, which was wrong twice over: it is provenance rather than warrant, and warrant under this design is computed from a justification term and stored nowhere. prov:hadPrimarySource is a subproperty of prov:wasDerivedFrom, which is an entanglement rather than a clean borrow, but harmless here — the objection to wasDerivedFrom is to reading it as warrant, which this does not.";
 }

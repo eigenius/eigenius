@@ -43,6 +43,9 @@ const OPERATOR_IRI: &str = "urn:eigenius:formulas:Operator";
 /// `ConstRef` resolution check (D47 §5) can short-circuit when
 /// the inductive being walked isn't `eigentt:Term`.
 const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:Term";
+///  values are D47-encoded as an App spine, not D32 tagged
+/// dicts, so this walk cannot read them either. Rule 21 owns both.
+const EIGENTT_JUDGEMENT_IRI: &str = "urn:eigenius:eigentt:Judgement";
 
 /// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
 /// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
@@ -168,7 +171,7 @@ impl Validator {
         // (`check_type_expr_well_typed`, eigentt_value.rs): decode + NbE
         // type-check. Skip the generic inductive walk here so the two don't
         // produce duplicate diagnostics — Rule 21 is the single eigentt owner.
-        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI {
+        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI || ind_iri.as_str() == EIGENTT_JUDGEMENT_IRI {
             return vec![];
         }
 

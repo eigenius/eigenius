@@ -49,7 +49,7 @@ data screen:StrongInhibitor : core:string -> Prop {
 // `canonical_proposition` is `forall c, HasLowIC50(c) ->
 // StrongInhibitor(c)` — a Pi over `core:string` with a Prop body.
 
-resource screen:rule_strong : reflection:DeclaredResource {
+resource screen:rule_strong : justification:Claim {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
     prov:rationale   = "Universal: any compound with HasLowIC50 is a StrongInhibitor at that target.";
@@ -69,7 +69,7 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 
 // ─── Step 3: bench observation + trace (unchanged in shape) ────────
 
-resource screen:m_eig0291 : reflection:ObservedResource {
+resource screen:m_eig0291 : justification:Claim {
     prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
     prov:observed_at = "2026-03-04T14:22:11Z";
 
@@ -166,7 +166,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource screen:warrant_literature_smith_et_al_2024_3_2 : reflection:DeclaredResource {
+resource screen:warrant_literature_smith_et_al_2024_3_2 : prov:Source {
     prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `literature:smith_et_al_2024_3.2`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_literature_smith_et_al_2024_3_2";

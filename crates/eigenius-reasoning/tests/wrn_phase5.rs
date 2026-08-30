@@ -87,6 +87,23 @@ fn esl_against_pending(
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
 
+    // STRUCTURAL validation, which `LayerBuilder::build` does not run and
+    // `esl::compile_against_layer` does not either — it compiles, it does not
+    // validate. Without it the chain is checked only for its conclusions'
+    // certificates, so a resource-typed property naming something nothing
+    // resolves, a required property left off, or a deleted class all commit
+    // clean here and fail on a real load. `00-wrn-vocabulary.esl`'s header
+    // records that costing two months.
+    let structural = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
+    assert!(
+        structural.is_empty(),
+        "{name}: the layer must validate structurally — the live loader runs this and \
+         these tests did not, which is how the chain silently stopped loading once before. \
+         {} error(s): {:#?}",
+        structural.len(),
+        structural.iter().take(10).collect::<Vec<_>>()
+    );
+
     let ctx = ExecutionContext::new(
         layer.clone(),
         name,
@@ -167,6 +184,7 @@ fn build_ctx() -> ExecutionContext {
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
             include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
+            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
                 b.add_resource(r).unwrap();
@@ -174,8 +192,17 @@ fn build_ctx() -> ExecutionContext {
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
+    // `prov` — the provenance axis, above reflection and below everything that
+    // names an agent, a trace or an attribution.
+    let prov = {
+        let mut b = LayerBuilder::new("prov", Some(reflection));
+        for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    };
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(reflection));
+        let mut b = LayerBuilder::new("reasoning", Some(prov));
         for r in esl::compile(include_str!(
             "../../../ontologies/justification/justification.esl"
         ))
@@ -190,9 +217,17 @@ fn build_ctx() -> ExecutionContext {
         &reasoning,
         "statistics",
     );
+    // `reference` — the literature layer uses reference:Citation, and this chain
+    // never carried the ontology declaring it. Nothing noticed because the layers
+    // were built without structural validation.
+    let reference = esl_against(
+        include_str!("../../../ontologies/reference/reference.esl"),
+        &statistics,
+        "reference",
+    );
     let bench_core = esl_against(
         include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl"),
-        &statistics,
+        &reference,
         "bench-core",
     );
     let harness = esl_against(
@@ -245,11 +280,35 @@ fn build_ctx() -> ExecutionContext {
     // reproducibility claims (as declarations). It must precede 08, whose
     // conclusions cite both: `emit_from_trace` resolves a trace's target on the
     // chain, so the targets have to be in an ancestor layer.
+    // The programs' real inputs: content-addressed PinnedExternalFiles with
+    // reference + content_hash + media_type, declared beside each program.
+    // 08a used to mint hash-less stand-ins whose IRIs were TRUNCATED PREFIXES of
+    // these — `wrn:input_8d26fbb8aafb610a` for
+    // `ingest:file:8d26fbb8aafb610a4952…` — so an observation named 16 hex digits
+    // of a hash instead of pointing at the bytes.
+    let program_inputs = {
+        let mut b = LayerBuilder::new("wrn-program-inputs", Some(phase2.clone()));
+        for src in [
+            include_str!("../../../experiments/publications/wrn-helicase/programs/invivo/xenograft-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/invivo/km12-competition-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/foci-ed6-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-foci-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-intensity-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/if-ed5-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/patm-foci-input.json"),
+            include_str!("../../../experiments/publications/wrn-helicase/programs/specificity/paralog-ed9a-input.json"),
+        ] {
+            for r in eigon_json::parse_document(src).unwrap() {
+                b.add_resource(r).unwrap();
+            }
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    };
     let provenance = esl_against(
         include_str!(
             "../../../experiments/publications/wrn-helicase/chain/08a-program-provenance.esl"
         ),
-        &phase2,
+        &program_inputs,
         "wrn-08a",
     );
     let phase3 = esl_against_pending(

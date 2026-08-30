@@ -70,7 +70,20 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     for r in resources {
         b.add_resource(r).unwrap();
     }
-    Arc::new(b.build(LayerStorage::in_memory()))
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    // STRUCTURAL validation, which `LayerBuilder::build` does not run and
+    // `esl::compile_against_layer` does not either — it compiles, it does not
+    // validate. `00-wrn-vocabulary.esl`'s header records that gap costing two
+    // months of a chain that could not load while every test stayed green.
+    let structural = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
+    assert!(
+        structural.is_empty(),
+        "{name}: the layer must validate structurally. {} error(s): {:#?}",
+        structural.len(),
+        structural.iter().take(10).collect::<Vec<_>>()
+    );
+    layer
 }
 
 /// Dispatch the statistics institution on `plan_iri`, assert every
@@ -187,6 +200,7 @@ fn wrn_warrants_kernel_recomputed() {
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
             include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
+            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
                 b.add_resource(r).unwrap();
@@ -194,8 +208,17 @@ fn wrn_warrants_kernel_recomputed() {
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
+    // `prov` — the provenance axis, above reflection and below everything that
+    // names an agent, a trace or an attribution.
+    let prov = {
+        let mut b = LayerBuilder::new("prov", Some(reflection));
+        for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    };
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(reflection));
+        let mut b = LayerBuilder::new("reasoning", Some(prov));
         for r in esl::compile(include_str!(
             "../../../ontologies/justification/justification.esl"
         ))
@@ -210,9 +233,17 @@ fn wrn_warrants_kernel_recomputed() {
         &reasoning,
         "statistics",
     );
+    // `reference` — the literature layer uses reference:Citation, and this chain
+    // never carried the ontology declaring it. Nothing noticed because the layers
+    // were built without structural validation.
+    let reference = esl_against(
+        include_str!("../../../ontologies/reference/reference.esl"),
+        &statistics,
+        "reference",
+    );
     let bench_core = esl_against(
         include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl"),
-        &statistics,
+        &reference,
         "bench-core",
     );
     let harness = esl_against(
@@ -225,15 +256,23 @@ fn wrn_warrants_kernel_recomputed() {
         &harness,
         "onco",
     );
+    // 02-literature declares `wrn:authors`, the agent every plan declaration in 03
+    // is attributed to. This chain skipped it, and nothing noticed because the
+    // layers were built without structural validation.
+    let literature = esl_against(
+        include_str!("../../../experiments/publications/wrn-helicase/chain/02-literature.esl"),
+        &onco,
+        "wrn-literature",
+    );
     // D54 two-phase load: the plans (emitters: SampleSets +
-    // StatisticalAnalysisPlans + ImpossibilityWitnesses + DeclaredResource
-    // bridges) must load before the conclusions (consumers: the
-    // `concl_*_recomputed` ReasoningSentences citing the emitted witnesses).
+    // StatisticalAnalysisPlans + ImpossibilityWitnesses + the plan-reproducibility
+    // Claims) must load before the conclusions (consumers: the
+    // `concl_*_recomputed` Conclusions citing the emitted witnesses).
     let recompute_plans = esl_against(
         include_str!(
             "../../../experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl"
         ),
-        &onco,
+        &literature,
         "wrn-recompute-plans",
     );
     let recompute = esl_against(
