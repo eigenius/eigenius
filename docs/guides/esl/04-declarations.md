@@ -616,7 +616,7 @@ Use a `macro` when:
 Use a `program` ([§4.7](#4-7-program)) when:
 - The function takes a real input value and produces a transformed output.
 - The body has computational content the kernel should evaluate.
-- The function may be cited by reasoning sentences via `DerivedEvidence` — programs leave provenance through traces, macros don't.
+- The function's output may be cited by a conclusion once an accountable agent declares that the program denotes a function of its input — programs leave provenance through traces, macros don't.
 
 Source: [`parse_macro`](../../../kernel/src/esl/parser.rs), [`MacroDecl` AST type](../../../kernel/src/esl/ast.rs), [`compile_macro_resource`](../../../kernel/src/esl/compile.rs), [`expand_macro_call`](../../../kernel/src/esl/compile.rs), [`collect_macros_from_layer`](../../../kernel/src/esl/compile.rs) (cross-file visibility).
 

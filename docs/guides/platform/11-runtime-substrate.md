@@ -272,7 +272,7 @@ pure transform; the kernel does everything else.
   the tool in its `image_digest`-pinned image (the orchestrator resolves the digest the
   env carries — it does **not** build at dispatch). The substrate provisions inputs by
   `content_hash` (§11 external-file resolver); the tool returns its result as
-  **Eigon-CBOR**, and the kernel commits it under a `ProgramTrace → IsDerivedAs`. A
+  **Eigon-CBOR**, and the kernel commits it under a `prov:ProgramTrace`, which records the run and grounds nothing. A
   downstream reasoning certificate then discharges `derived(result, P)` over it — the
   WRN wrapped-program pattern, **no new institution**.
 - **Kernel-tracked build recipe.** `eigenius env build --language oci

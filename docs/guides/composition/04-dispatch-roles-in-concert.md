@@ -84,23 +84,25 @@ reasoning stack is the **statistics → reasoning** pipeline:
 1. **D52 fires first.** A commit of a `stats:StatisticalAnalysisPlan` resource
    triggers the statistics institution's `validate_analysis_plan`
    AutoOnLoad gate. The verifier recomputes the claim from the cited
-   `SampleSet`'s raw replicates, returns `Verdict::Holds`, and (as a side
-   effect of the trace + canonical_proposition pair already on the chain)
-   the layer's witness index admits an `IsDerivedAs(claim_iri,
-   canonical_proposition)` entry.
+   `SampleSet`'s raw replicates, returns `Verdict::Holds`, and emits a
+   per-effect result carrying the derived `canonical_proposition`. That
+   result RECORDS what ran; it admits no witness, because the fact that a
+   computation happened grounds nothing.
 2. **D39 fires next.** If the same commit also includes a
-   `justification:Conclusion` whose certificate cites the just-committed
-   claim via `DerivedEvidence(claim_iri)`, the reasoning institution's
-   `validate_justification` AutoOnLoad gate fires. The kernel's NbE checker
-   walks the certificate's `justification:Certificate.derived` constructor, consults the
-   layer's witness index for the matching `IsDerivedAs` entry — which the
-   D52 commit just admitted — and the certificate type-checks.
+   `justification:Conclusion` whose certificate cites the computed ground
+   `App(Declared(plan_yields), Observed(sample_set))`, the reasoning
+   institution's `validate_justification` AutoOnLoad gate fires. The kernel's
+   NbE checker walks the inner `justification:Certificate.app`, consults the
+   witness index for the `IsDeclaredAs` entry (the plan's reproducibility
+   claim) and the `IsObservedAs` entry (the sample set's observation trace),
+   and the certificate type-checks.
 
 The cascade is **mechanical, not coordinated**. D52 doesn't know D39 is
 about to fire; D39 doesn't know D52 ran. They share the chain artifact
-shape — `DerivedResource` + `ProgramTrace` + `canonical_proposition` —
-that the witness index reads from. The composition emerges from each
-institution honouring the shared chain shape independently.
+shape — a resource carrying `canonical_proposition`, plus the `prov` trace
+attesting how it came to exist — that the witness index reads from. The
+composition emerges from each institution honouring the shared chain shape
+independently.
 
 For the operational walkthrough — the full sequence of EigenQL inspection
 calls that surface the cascade's audit trail — see

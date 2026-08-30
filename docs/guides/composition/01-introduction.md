@@ -83,7 +83,7 @@ The kinase notebook covers cross-numerical-institution composition: five Julia i
 | Composition shape | Bridge mechanism | Worked example |
 |---|---|---|
 | **Numerical → numerical** | Declared comorphisms over `formulas:FormulaTerm` (extract → transformation → reify pipeline). | Kinase notebook — Symbolics → JuMP, Catalyst → DiffEq, Symbolics → IntervalArithmetic. |
-| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:TypeExpr` propositions. | D52 `StatisticalAnalysisPlan` verdict emits a `DerivedResource` with `canonical_proposition`; a D39 `justification:Conclusion` cites it via `DerivedEvidence` and the witness index admits the grounding. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
+| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:TypeExpr` propositions. | D52 `StatisticalAnalysisPlan` validation emits a result with `canonical_proposition`; a D39 `justification:Conclusion` grounds on `App(Declared(plan_yields), Observed(sample_set))`, whose halves the witness index admits. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
 
 The two shapes are structurally different: comorphisms are *active* translations (one institution's runtime is invoked, output is reified back into the chain), while the witness-index path is *passive* — D39 doesn't call D52, it just reads the chain artifact D52 emitted. Both are first-class composition mechanisms; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index).
 

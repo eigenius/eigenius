@@ -2,7 +2,7 @@
 
 Slow-walk worked example of D52, the platform's measurement-statistics institution. Walks the full chain from raw replicate readings on the chain to a typed Holds/Fails verdict mechanically derived from those readings.
 
-Read this if you want to know what a `StatisticalAnalysisPlan` commit does, how the seven dispatch positions split across the experimental-design space, what each opinionated stance (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard) actually enforces, or how the institution's emitted `DerivedResource` becomes a citable evidence node for the [D39 reasoning institution](../reasoning-institution/README.md).
+Read this if you want to know what a `StatisticalAnalysisPlan` commit does, how the seven dispatch positions split across the experimental-design space, what each opinionated stance (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard) actually enforces, or how the institution's emitted result carries the proposition a D39 conclusion is grounded in, for the [D39 reasoning institution](../reasoning-institution/README.md).
 
 Design spec: [**D52 Measurement Statistics Institution**](../../../design/d52-measurement-statistics-institution.md). Implementation: [`crates/eigenius-statistics/`](../../../../crates/eigenius-statistics/). Ontology: [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 
@@ -27,7 +27,7 @@ Every `stats:StatisticalAnalysisPlan` resource carries the same seven slots, plu
 | `sample_set` | IRI of a `SampleSetResource` | The raw replicates the verifier recomputes against. |
 | `null_hypothesis` | EigenTT proposition | The null the test is rejecting against — propagated to the verdict for audit. |
 | `alternative_hypothesis` | EigenTT proposition | The alternative the test is asserting — used for diagnostic shape. |
-| `canonical_proposition` (`reflection:` inherited) | EigenTT proposition | The predicate the claim establishes when the test holds. This is what downstream `DerivedEvidence` consumers read; the witness index hashes it. |
+| `canonical_proposition` (`reflection:` inherited) | EigenTT proposition | The predicate the claim establishes when the test holds. This is the proposition a downstream plan-reproducibility `justification:Claim` is written against; the witness index hashes it, and the two must match. |
 | `alpha` | Float | Type-I error threshold, unadjusted. Multiple-testing correction is a higher-level institution. |
 | `effect_size` | `Absolute(magnitude, units)` / `Relative(ratio)` / `StandardizedCohensD` / `StandardizedHedgesG` | The asserted effect — for `SingleSampleEstimate`, the threshold the mean must cross. |
 | `directionality` | `TwoSided()` / `OneSidedWitnessed(witness_iri)` | Whether the test is two-sided (the safe default) or one-sided with a chain-resident impossibility witness ([§7.1](#7-1-opinionated-stance-onesidedwitnessed-requires-an-impossibility-witness)). |
@@ -69,7 +69,7 @@ The qualifier is load-bearing. The institution's three `QueryClass` resources de
 
 4. **Check the §7.4 epistemic-scope and emit the verdict.** Walk the claim's `canonical_proposition`'s head predicate, look up its `is_a` markers (`PopulationLevel` / `MeasurementLevel`), and confirm the SampleSet's replication kind admits propositions of that scope ([§7.4](#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions)). Compare the test's p-value against `alpha` (halved if OneSidedWitnessed), and emit the outcome as **two** resources.
 
-**The gate verdict and the statistical decision are different things.** The `Verdict` the gate emits attests only that the plan was structurally runnable: parameters well formed, dispatch matched, test executed. It is `Holds` for a test that did not reject, too. The per-effect statistical decision rides on a separate `stats:StatisticalAnalysisResult` derivation at `{plan_iri}:result:{effect_name}`, in its `stats:verdict_ctor` property — `Holds` when that effect rejected under the plan's alpha, `Fails` with an `AlphaNotCrossed: computed p = …, threshold alpha = …` note when it did not. A non-rejecting result is a first-class chain artifact rather than a failed commit; the chain attests the negative result. Only a per-effect `Holds` carries a `canonical_proposition`, which is what keeps a non-rejecting result from admitting an `IsDerivedAs` witness.
+**The gate verdict and the statistical decision are different things.** The `Verdict` the gate emits attests only that the plan was structurally runnable: parameters well formed, dispatch matched, test executed. It is `Holds` for a test that did not reject, too. The per-effect statistical decision rides on a separate `stats:StatisticalAnalysisResult` derivation at `{plan_iri}:result:{effect_name}`, in its `stats:verdict_ctor` property — `Holds` when that effect rejected under the plan's alpha, `Fails` with an `AlphaNotCrossed: computed p = …, threshold alpha = …` note when it did not. A non-rejecting result is a first-class chain artifact rather than a failed commit; the chain attests the negative result. Only a per-effect `Holds` carries a `canonical_proposition`, which is what keeps a non-rejecting result from carrying a proposition anything downstream could be grounded in.
 
 A step that fails before the test runs is different again: it produces a gate `Verdict::Fails` carrying a diagnostic string and no `StatisticalAnalysisResult` at all, and the commit is rejected. Both resources carry the computed statistic and p-value in the standard `(stats:computed_statistic, stats:computed_p_value)` slots, plus any per-dispatch note — the SplitPlot omnibus diagnostic naming which of three F-tests produced the reported p-value, say, or the §7.2 dual-verdict note enumerating both with-exclusion and without-exclusion numerics.
 
@@ -164,7 +164,7 @@ claim_eig0291_lowic50                      [StatisticalAnalysisPlan]
 Verdict("Fails", AlphaNotCrossed: computed p = 0.218..., threshold alpha = 0.05)
 ```
 
-The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) reads it to admit `IsDerivedAs(claim_iri, HasLowIC50(...))`; downstream [D39 reasoning sentences](../reasoning-institution/README.md) cite the claim via `DerivedEvidence` and consume the witness via `justification:Certificate.derived`.
+The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Claim` can be written against exactly it; downstream [D39 conclusions](../reasoning-institution/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
 
 Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_analysis_plan` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
 
@@ -251,26 +251,34 @@ D52 lands the verifier across the seven dispatch positions in phases. The Phase 
 | Dual-verdict ESD on grouped dispatches | ❌ Tracked | [#80](https://github.com/eigenius/eigenius/issues/80) |
 | MethodComparisonAnalysisPlan + Passing-Bablok | ✅ Wired | 5 (§7.3) |
 | PassingBablokResidual exclusion on MethodComparison | ❌ Tracked | [#81](https://github.com/eigenius/eigenius/issues/81) |
-| Materialized dual-verdict commit shape (two DerivedResources via `stats:dual_verdict_pair`) | ❌ Tracked | [#82](https://github.com/eigenius/eigenius/issues/82) |
+| Materialized dual-verdict commit shape (two result resources via `stats:dual_verdict_pair`) | ❌ Tracked | [#82](https://github.com/eigenius/eigenius/issues/82) |
 
 Wired cells run on the [`crates/eigenius-statistics/`](../../../../crates/eigenius-statistics/) implementation; unwired cells reject up front with a structured diagnostic naming the unimplemented combination and the GitHub issue tracking it.
 
 ## Composition with the reasoning institution
 
-The statistics institution's emitted verdict — specifically the claim resource itself, since `StatisticalAnalysisPlan IS the chain-resident DerivedResource` — becomes a citable evidence node for D39 reasoning sentences. The composition pattern:
+The statistics institution's per-effect result carries the proposition a D39 conclusion is ultimately grounded in — though not by citing the result, which records a run and grounds nothing. The composition pattern:
 
 ```text
-raw IC50 readings (ObservedResource + ObservationTrace)
+raw IC50 readings + prov:ObservationTrace   → witness index admits IsObservedAs(sample_set, Asserts(s))
   → D52 validate_analysis_plan AutoOnLoad fires
-  → Verdict::Holds; claim_eig0291_lowic50 is committed as DerivedResource
-  → ProgramTrace pairs → witness index admits IsDerivedAs(claim_iri, HasLowIC50(...))
-  → D39 justification:Conclusion cites claim_iri via DerivedEvidence
+  → Verdict::Holds; a per-effect StatisticalAnalysisResult carries the derived proposition
+  → that result RECORDS the run and admits NO witness
+  → an author commits a justification:Claim: Asserts(s) -> HasLowIC50(...)
+      + prov:DeclarationTrace          → admits IsDeclaredAs(plan_yields, ...)
+  → D39 justification:Conclusion cites App(Declared(plan_yields), Observed(sample_set))
   → D39 validate_justification AutoOnLoad fires
-  → certificate's justification:Certificate.derived consumes the IsDerivedAs witness
+  → the inner app consumes the IsDeclaredAs and IsObservedAs witnesses
   → Verdict::Holds for the reasoning conclusion (e.g., StrongInhibitor(EIG_0291))
 ```
 
-The two institutions don't call each other — they share the chain artifact shape (`DerivedResource` + `ProgramTrace` + `canonical_proposition`) that the witness index reads from. D52 emits the artifact; D39 reads the witness; the composition works because both honour the shared chain shape independently.
+The declaration is not ceremony. A computed claim rests on the plan denoting a
+function of its input — which an accountable agent asserts, and which no execution
+establishes, since determinism is a fact about the environment rather than something
+recoverable from a run record — and on the input being observed. The run record
+supplies neither.
+
+The two institutions don't call each other — they share the chain artifact shape (a resource carrying `canonical_proposition`, plus the `prov` trace attesting how it came to exist) that the witness index reads from. D52 emits the artifact; D39 reads the witness; the composition works because both honour the shared chain shape independently.
 
 Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-stats-and-reasoning-walkthrough.md).
 
@@ -282,14 +290,14 @@ Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-s
 - **`Verdict::Fails` with `WrongTestForDesign`** — the bundle's product position has no dispatch arm. Either the SampleSet smart constructor produces a position the verifier doesn't yet support (check the [phase-completeness matrix](#phase-completeness-matrix)), or the macro is being misused (e.g., a `Bundle(...)` literal with the wrong axis ctors). The diagnostic prints the actual position tuple.
 - **A `Verdict::Fails` naming the SampleSet or an axis slot** — the SampleSet's `sample_set_value` couldn't be decoded as a `Bundle(...)`. Usually means a smart constructor was used incorrectly (wrong number of args, wrong axis ctor names). Compare against the smart-constructor signatures in [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 - **`Verdict::Fails` with `OutlierExclusion not yet wired for {dispatch}`** — you asserted a non-`Identity` exclusion functor on a dispatch position that doesn't yet support it. Either use `Identity()` for now, or follow the GitHub issue link in the diagnostic to track the extension.
-- **Claim accepted but a downstream D39 sentence fails with `no admitted IsDerivedAs witness`** — the plan committed but the cited IRI admits no witness. Three things to check, in order. Is the sentence citing the *plan*? It should cite the per-effect `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`: the plan carries no `canonical_proposition`, and the result is the artifact the kernel stamps `reflection:InstitutionEmittedDerivation`, which is what makes it self-attest a witness with no companion trace. Did the effect actually reject? A per-effect `Fails` carries no `canonical_proposition` by design, so it admits no witness. Did the plan go through `load`? A plan committed by `FIBER INTO` or as program output was never gated, so no result exists at all.
+- **Claim accepted but a downstream D39 conclusion fails with `no admitted IsDeclaredAs witness`** — the plan committed, but no reproducibility declaration was written against the result's proposition, or the cited IRI admits no witness. Three things to check, in order. Is the sentence citing the *plan*? It should cite the per-effect `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`: the plan carries no `canonical_proposition`, and the result is the artifact the kernel stamps `reflection:InstitutionEmittedDerivation`, which is what makes it self-attest a witness with no companion trace. Did the effect actually reject? A per-effect `Fails` carries no `canonical_proposition` by design, so it admits no witness. Did the plan go through `load`? A plan committed by `FIBER INTO` or as program output was never gated, so no result exists at all.
 
 **Diagnostics are strings, not variants.** `AlphaNotCrossed`, `WrongTestForDesign` and `EpistemicScopeViolation` are conventional prefixes the handler writes into the one `urn:eigenius:institution:diagnostic` slot. Most other rejections carry a prose sentence with no prefix. Match on text, not on a type.
 
 ## Cross-references
 
 - [**D52 design spec**](../../../design/d52-measurement-statistics-institution.md) — full design rationale, the universal-claim schema's intersection-of-standards table, the five-axis design space, the opinionated-stances appendix, and the §9 phase plan with the per-phase completeness matrix.
-- [**Reasoning institution tutorial**](../reasoning-institution/README.md) — the D39 institution that consumes D52 verdicts as `DerivedEvidence` groundings.
+- [**Reasoning institution tutorial**](../reasoning-institution/README.md) — the D39 institution whose conclusions ground on `App(Declared(plan), Observed(inputs))` over D52's recomputed propositions.
 - [**ESL §4.5a Multi-class data declarations**](../../esl/04-declarations.md#4-5a-multi-class-data-declarations-marker-classes-d52-12) — the `data : Prop, stats:PopulationLevel` syntax used for §7.4 scope markers.
 - [**ESL §4.9 macro declarations**](../../esl/04-declarations.md#4-9-macro-compile-time-smart-constructors-d52-12) — the compile-time AST substitution mechanism the seven smart constructors use.
 - [**ESL §5.14a type_expr(...)**](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the chain-mirrored EigenTT type fragment used for the proposition slots.

@@ -38,25 +38,55 @@ cannot record "X holds" without the thing that makes X hold.
   `eigenius branch create <obj-slug> --from <main-head>`; commit everything below
   onto it.
 
-## The epistemic contract — grade every claim
+## The epistemic contract — two axes, three grounds
 
-Every claim lands as one of four grades; each grade has an admission cost the
-kernel enforces. Never let a claim float ungraded.
+**Provenance and warrant are orthogonal.** Do not conflate them; the vocabulary
+used to, and the conflation is what this method most often gets wrong.
 
-| Grade | Means | What it requires on chain | Witness |
+| axis | question | applies to |
+|---|---|---|
+| provenance | how did this artifact come to exist? | **every** resource |
+| warrant | what evidence exists for its proposition? | only resources carrying a proposition |
+
+Most resources have provenance and no warrant. A lexicon entry, a class
+declaration, an imported concept carries no proposition, so asking what proves it
+is a **category error**, not an unanswered question. The test is mechanical: does
+the resource carry a `reflection:canonical_proposition`.
+
+**There are three grounds, not four.** A ground is what a certificate cites.
+
+| Ground | Means | What it needs on chain | Witness |
 |---|---|---|---|
-| **Observed** | recorded from reality | `reflection:ObservedResource` + provenance (a pinned source / content hash) + an `ObservationTrace` | `IsObservedAs` |
-| **Declared** | asserted on authority/design | `reflection:DeclaredResource` + `prov:rationale` + a `DeclarationTrace` | `IsDeclaredAs` |
-| **Derived** | computed | a `DerivedResource` a program/institution emits, carrying `canonical_proposition`, under a `ProgramTrace` | `IsDerivedAs` |
-| **Verified** | kernel-checked reasoning | a `justification:Conclusion` whose judgement type-checks → `Holds` | `IsVerifiedAs` |
+| **Declared** | asserted on authority/design | a `justification:Claim` carrying the proposition + a `prov:DeclarationTrace` naming the agent | `IsDeclaredAs` |
+| **Observed** | read off the world | the observed resource + a `prov:ObservationTrace` naming the `prov:Activity` that produced it | `IsObservedAs` |
+| **Verified** | kernel-checked | a `justification:Conclusion` carrying a `justification:proof` — the judgement `holds(logic, t, P)` | `IsVerifiedAs` |
 
-Each of the first three witnesses is emitted by the per-layer witness index **from a
-trace resource** (`ObservationTrace` / `DeclarationTrace` / `ProgramTrace`) whose
-`prov:resource` points at the target and whose target carries
-`reflection:canonical_proposition` — so `observed(iri, P)` / `declared(iri, P)` /
-`derived(iri, P)` only resolve when that trace exists in an **ancestor layer** of the
-citing sentence (load emitters before consumers — the
-`04a-evidence`-before-`04b-conclusions` / recompute-plans-before-conclusions split).
+**`Computed` is not a fourth ground; it is a term shape.** A computed claim is
+`App(Declared(plan), Observed(inputs))`: the plan is DECLARED to denote a function
+of its input — which an accountable agent asserts and no execution can establish,
+because determinism is a fact about the environment rather than something
+recoverable from a run record — and the input is OBSERVED. `Sampled` is likewise
+just a bare `Observed` leaf.
+
+**A `prov:ProgramTrace` grounds NOTHING.** It records that a run happened. If you
+want a computed claim to stand, commit the plan's reproducibility declaration and
+the input's observation; the run record is provenance and cites nothing.
+
+**Nothing stores a grade.** There is no `DeclaredResource` / `ObservedResource` /
+`DerivedResource` / `VerifiedResource` class and no `epistemic_status` — a stored
+grade let the thing being graded nominate its own grade. Warrant is COMPUTED from
+the justification term (`crates/eigenius-reasoning/src/project.rs`: `support`,
+`leaves_of`, `is_fully_verified`, `survives_without`), and it is a Rust-API answer,
+not an EigenQL one. Provenance IS an EigenQL query — `prov:was_attributed_to`,
+`prov:was_generated_by`, `prov:used`, `prov:had_primary_source` are all
+resource-typed, so *which claims rest on this instrument* is a join.
+
+Each witness is emitted by the per-layer witness index **from a trace resource**
+whose `prov:resource` points at the target and whose target carries
+`reflection:canonical_proposition` — so `declared(iri, P)` / `observed(iri, P)`
+only resolve when that trace exists in an **ancestor layer** of the citing
+conclusion (load emitters before consumers — the recompute-plans-before-conclusions
+split).
 
 A bare opinion is, at most, a **Declared hypothesis** — and it must say so, with a
 rationale. If you want it to count as fact, it must become Derived (run it) or
@@ -75,14 +105,20 @@ verify intent/grounding. A *mechanized* faithfulness/grounding check is graded
 auto-Verified**; only a human spot-check or a proof-level correspondence reaches
 **Verified**.
 
-**Reach for the strongest grade the mechanics allow — don't settle for Declared.**
-A claim you'd write as Declared often has a stronger *mechanical* witness available:
-content-hash a file → **Observed**; run the producer as a program *through the kernel*
-(the D60 `oci` tool runtime / D56 wrapped-program → `ProgramTrace → IsDerivedAs`) →
-**Derived**; a load that validates (0 errors) or a query that returns the expected
-result → **Verified-by-check**. Auditing your Declared claims for these upgrade paths
-is the method of the D57 mechanical-evidence pass — and the act of producing the
-witness routinely *catches a bug the assertion hid* (it found two real generator bugs).
+**Reach for the strongest ground the mechanics allow — don't settle for a bare
+Declared.** A claim you'd write as Declared often has a stronger *mechanical*
+witness available: content-hash a file and give it a `prov:ObservationTrace` →
+**Observed**; run the producer through the kernel (the D60 `oci` tool runtime / D56
+wrapped-program) and declare the plan's reproducibility → the composite
+`App(Declared(plan), Observed(input))`; a load that validates (0 errors) or a query
+returning the expected result → a checked judgement. Auditing your Declared claims
+for these upgrade paths is the method of the D57 mechanical-evidence pass — and
+producing the witness routinely *catches a bug the assertion hid* (it found two
+real generator bugs).
+
+Note what running the program does NOT buy you: the run alone grounds nothing. The
+upgrade is the plan DECLARATION plus the input OBSERVATION, and both need an
+accountable agent behind them.
 
 ## The loop
 
@@ -197,26 +233,54 @@ change. Name what evidence kind will discharge each (Observed/Derived/Declared).
 For each step: make the evidence first, commit the witness, then the sentence that
 cites it. Three shapes:
 
-- **Observed** — commit an `ObservedResource` (a pinned source, a content-hashed
-  `ingest:PinnedExternalFile`) **plus an `ObservationTrace`** pointing at it
-  (`prov:resource = <iri>`); the trace is what makes the witness index emit
-  `IsObservedAs`, so `observed(iri, P)` resolves. Without the trace the resource
-  loads but cannot be cited.
-- **Derived** — run a program / institution (see `eigenius` skill: `run`,
-  `RunRuntimeScript`, the statistics institution); it emits a `DerivedResource`
-  with `canonical_proposition` set **only when the computation supports it** (e.g.
-  `if (direction & significance) set_proposition`), committed under a `ProgramTrace`.
-  To get a Derived witness from *any* pinned tool (not just R/an institution), run it
-  through the D60 generic `oci` tool runtime — `eigenius env build --language oci` +
-  `eigenius run` — the WRN wrapped-program pattern, no new institution. Then:
+- **Observed** — commit the observed resource (a pinned source, a content-hashed
+  `ingest:PinnedExternalFile`) **plus a `prov:ObservationTrace`** pointing at it
+  (`prov:resource = <iri>`) and naming the `prov:Activity` that produced it
+  (`prov:was_generated_by`). The trace is what makes the witness index emit
+  `IsObservedAs`, so `observed(iri, P)` resolves. Without it the resource loads but
+  cannot be cited. `was_generated_by` is resource-typed: name the instrument run or
+  data release as an Activity resource, never as a string.
+- **Computed** — run a program / institution (see `eigenius` skill: `run`,
+  `RunRuntimeScript`, the statistics institution); it emits a result carrying
+  `canonical_proposition` **only when the computation supports it** (e.g.
+  `if (direction & significance) set_proposition`), under a `prov:ProgramTrace`. For
+  *any* pinned tool, use the D60 generic `oci` runtime — `eigenius env build
+  --language oci` + `eigenius run` — the WRN wrapped-program pattern, no new
+  institution.
+
+  **The run is not the ground.** Commit a `justification:Claim` asserting that the
+  plan denotes a function of its input, with a `prov:DeclarationTrace` behind it,
+  and cite the composite:
 ```esl
+resource obj:plan_yields_result : justification:Claim {
+    prov:was_attributed_to  = agent:<who-vouches>;
+    prov:had_primary_source = obj:warrant_plan_reproducibility;
+    prov:rationale = "Applying <plan> to its recorded input yields <result>. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:obj:<slug>:input") -> obj:Result("x")
+    );
+}
+resource obj:plan_yields_result_trace : prov:DeclarationTrace {
+    prov:resource          = obj:plan_yields_result;
+    prov:was_attributed_to = agent:<who-vouches>;
+    prov:timestamp         = "<iso8601>";
+}
+
 resource obj:concl_x : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:obj:<slug>:subject";
     justification:judgement   = type_expr(
         holds( eigentt:logic_kernel,
-               derived("urn:eigenius:obj:<slug>:x:result", obj:Result("x")),
+               app( core:Asserts("urn:eigenius:obj:<slug>:input"), obj:Result("x"),
+                    Declared("urn:eigenius:obj:<slug>:plan_yields_result"),
+                    Observed("urn:eigenius:obj:<slug>:input"),
+                    declared("urn:eigenius:obj:<slug>:plan_yields_result",
+                             core:Asserts("urn:eigenius:obj:<slug>:input") -> obj:Result("x")),
+                    observed("urn:eigenius:obj:<slug>:input",
+                             core:Asserts("urn:eigenius:obj:<slug>:input")) ),
                justification:Certificate(
-                   DerivedEvidence("urn:eigenius:obj:<slug>:x:result"),
+                   justification:App(
+                       Declared("urn:eigenius:obj:<slug>:plan_yields_result"),
+                       Observed("urn:eigenius:obj:<slug>:input")),
                    obj:Result("x") ) )
     );
 }
@@ -231,9 +295,12 @@ happily beside a different `proposition`. Now the pairing is what gets checked.
 The judgement reads: *the kernel verified that this certificate grounds this
 proposition*. It does **not** say the proposition is true — that is the point of the
 separation, and no rule turns one into the other.
-- **Declared** rule/judgment — `DeclaredResource` + rationale + `DeclarationTrace`
-  (the anchor shape, minus the citation), carrying the rule as
-  `canonical_proposition`.
+- **Declared** rule/judgment — a `justification:Claim` carrying the rule as
+  `reflection:canonical_proposition`, with `prov:rationale`, a
+  `prov:DeclarationTrace`, and `prov:was_attributed_to` naming who stands behind it.
+  A declaration with no agent asserts nothing anybody can be held to. If the reason
+  it was asserted is itself a resource — a criterion, a convention, a citation —
+  name it with `prov:had_primary_source`, whose target is a `prov:Source`.
 
 Match the measure to the claim. Reproducing a published result means matching the
 *reported* number, not just the sign — a wrong measure that merely agrees in

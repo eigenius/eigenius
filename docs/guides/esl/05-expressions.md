@@ -330,7 +330,7 @@ The `type_expr(HasLowIC50(...))` expression compiles to a `Value::Json` carrying
 }
 ```
 
-…which the chain validator type-checks against `eigentt:TypeExpr`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDerivedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
+…which the chain validator type-checks against `eigentt:TypeExpr`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDeclaredAs` / `IsObservedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
 
 ### What grammar the inner expression accepts
 
@@ -395,7 +395,7 @@ The resulting value lands in the resource's property slot just like any other pr
 
 ### Where this appears in practice
 
-- `reflection:canonical_proposition` on every `DerivedResource` subclass (StatisticalAnalysisPlan, justification:Conclusion, custom institution-emitted derived resources) — the proposition the resource asserts.
+- `reflection:canonical_proposition` on every resource carrying a proposition (StatisticalAnalysisPlan, justification:Claim, custom institution-emitted derived resources) — the proposition the resource asserts.
 - `eigentt:axiom_statement` on every `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) — surface-compiled via the same lowering path.
 - `stats:null_hypothesis` / `stats:alternative_hypothesis` on `StatisticalAnalysisPlan` — the null and alternative the verifier reports in the verdict's audit trail.
 - `justification:proposition` on `justification:Conclusion` — the proposition the certificate type-checks against.

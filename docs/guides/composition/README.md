@@ -64,7 +64,7 @@ The chapters build on each other:
    — the second composition shape, traced end-to-end: raw IC50 readings
    → D52 `StatisticalAnalysisPlan` Holds → witness-index admission →
    D39 `justification:Conclusion` certificate consumes the witness via
-   `DerivedEvidence` → `StrongInhibitor` conclusion. No comorphism
+   `App(Declared(plan), Observed(input))` → `StrongInhibitor` conclusion. No comorphism
    between the institutions; the composition runs through the shared
    `eigentt:TypeExpr` proposition slot.
 8. **[Composition patterns](08-patterns.md)** — when to share a payload

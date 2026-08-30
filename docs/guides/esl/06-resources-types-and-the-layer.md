@@ -67,7 +67,7 @@ Layer access happens at three moments:
 
 3. **Constraint firing** ([`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) `NativeDecide` arm). When a property's declared constraint (e.g., `min_value`, regex pattern, or institution-decided predicate) needs to fire during type-check, the kernel reaches through the property IRI to the layer to find the constraint, then dispatches.
 
-4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `justification:Certificate.declared` / `.observed` / `.derived` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsDerivedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
+4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `justification:Certificate.declared` / `.observed` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
 
 Two consequences:
 
@@ -82,7 +82,6 @@ Some `Prop`-typed inductive families have **no surface constructors at all**. Th
 ```
 core:IsDeclaredAs : core:iri -> Prop -> Prop
 core:IsObservedAs : core:iri -> Prop -> Prop
-core:IsDerivedAs  : core:iri -> Prop -> Prop
 core:IsVerifiedAs : core:iri -> Prop -> Prop
 ```
 
@@ -90,20 +89,41 @@ Each says "the resource at this IRI was committed with this canonical propositio
 
 | Witness family | Admitted from |
 |---|---|
-| `IsDeclaredAs(iri, P)` | `DeclarationTrace` + `DeclaredResource` at IRI with `canonical_proposition = P` |
-| `IsObservedAs(iri, P)` | `ObservationTrace` + `ObservedResource` at IRI with `canonical_proposition = P` |
-| `IsDerivedAs(iri, P)` | `ProgramTrace` + `DerivedResource` at IRI with `canonical_proposition = P` |
-| `IsVerifiedAs(iri, P)` | `ProgramTrace` + `VerifiedResource` at IRI with `canonical_proposition = P` |
+| `IsDeclaredAs(iri, P)` | `prov:DeclarationTrace` + a resource at IRI with `canonical_proposition = P` |
+| `IsObservedAs(iri, P)` | `prov:ObservationTrace` + a resource at IRI with `canonical_proposition = P` |
+| `IsVerifiedAs(iri, P)` | a `justification:Conclusion` at IRI carrying a `justification:proof` of `P` |
+
+**Three families, and `prov:ProgramTrace` admits none of them.** There is no
+`IsDerivedAs`: the fact that a computation ran grounds nothing, because a computed
+claim rests on the plan being DECLARED to denote a function of its input — which no
+execution establishes — and on the input being OBSERVED. The composite
+`App(Declared(plan), Observed(inputs))` is built from the two families that remain.
+
+Note also what the admission does NOT require: a particular class on the target.
+There were `DeclaredResource` / `ObservedResource` / `DerivedResource` /
+`VerifiedResource` classes, and admission checked them. A stored grade let the thing
+being graded nominate its own grade, and it made the ground a KIND OF RESOURCE, so a
+reading and a rule were different types rather than the same kind of thing with
+different origins. Which ground applies is now which TRACE the resource carries.
 
 These predicates are **opaque from the surface** — there is no ESL constructor that takes a chain identifier and produces a witness. The kernel materialises them during type-check by querying the layer's `chain_witness_index` (a `BTreeMap<WitnessKey, ()>` keyed by `(category, iri, prop_hash)`), populated at layer construction time from the layer's trace resources. The `prop_hash` is SHA-256 of the [D47-encoded](../../design/d47-chain-mirrored-eigentt-type-fragment.md) canonical proposition; two requests for the same `(category, iri, P)` hit the same key regardless of where `P` is mentioned in the program.
 
 ### Why this mechanism exists
 
-`Prop`-typed inductives with no surface constructors are the type-theoretic shape that **only the kernel can produce inhabitants of**. The chain author commits a trace + resource pair; the kernel admits the corresponding witness. There is no way to fake one — no constructor to invoke, no IRI manipulation that bypasses the trace check, no out-of-band admission. This is what makes [D39's reasoning](../../design/d39-justification-logic.md) auditable: every `Declared` / `Observed` / `DerivedEvidence` / `Verified` justification consumes a witness the kernel only admits when the chain artifact is actually present, so the audit trail from "this reasoning sentence Holds" to "this measurement was committed" cannot be broken.
+`Prop`-typed inductives with no surface constructors are the type-theoretic shape that **only the kernel can produce inhabitants of**. The chain author commits a trace + resource pair; the kernel admits the corresponding witness. There is no way to fake one — no constructor to invoke, no IRI manipulation that bypasses the trace check, no out-of-band admission. This is what makes [D39's reasoning](../../design/d39-justification-logic.md) auditable: every `Declared` / `Observed` / `Verified` ground consumes a witness the kernel only admits when the chain artifact is actually present, so the audit trail from "this reasoning sentence Holds" to "this measurement was committed" cannot be broken.
 
-### Subclass coercion
+### No coercion between families
 
-The reflection ontology declares `VerifiedResource : DerivedResource`. The witness index implements a corresponding coercion: when the type-checker requests `IsDerivedAs(iri, P)` and only `IsVerifiedAs(iri, P)` is admitted, the lookup admits the request via coercion (a verified resource is a fortiori a derived one). The reverse direction is not admitted — `IsVerifiedAs` carries a stronger commitment than `IsDerivedAs` and the witness index respects that.
+The three families are independent, and the lookup does not silently convert one into
+another even when the IRIs match.
+
+There used to be one exception: a request for `IsDerivedAs(iri, P)` also tried the
+matching `IsVerifiedAs` key, on the authority of `VerifiedResource subclass_of
+DerivedResource`. It let a proof-checked conclusion satisfy a `derived(…)` citation,
+collapsing the distinction between "a program produced this" and "the kernel verified
+this" at the lookup. It also implemented a lattice over the categories as a match arm
+rather than by reading `subclass_of`, so the ontology could not have disagreed with
+it. It is gone with the `Derived` family itself.
 
 ### Failure mode
 

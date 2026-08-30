@@ -152,7 +152,7 @@ lean-institution → reasoning → statistics → notebook → ingest → refere
 logic → lexicon → ontology → closed-class
 ```
 
-`core` defines `Class`, `Property` and the primitive data types; `program` the `Let` / `Apply` / `Lambda` expression classes; `reflection` the four epistemic categories (`DeclaredResource`, `ObservedResource`, `DerivedResource`, `VerifiedResource`); `institution` the `Institution` and `Comorphism` classes; and so on up the chain. Every loaded file or program references these via IRI.
+`core` defines `Class`, `Property` and the primitive data types; `program` the `Let` / `Apply` / `Lambda` expression classes; `reflection` the kernel's evaluation-trace family and `reflection:canonical_proposition`; `prov` the provenance axis (`Agent`, `Activity`, the four provenance traces, and the relations between them); `institution` the `Institution` and `Comorphism` classes; and so on up the chain. Every loaded file or program references these via IRI.
 
 The source files are under [`ontologies/`](../../../ontologies/) and are `include_str!`'d into the binary — ten `.json`, three Lean `.eigon.json`, and seven `.esl`. The same `BOOTSTRAP_CHAIN` array feeds both the chain build and the D13 manifest hash the persistent boot path compares, so a layer can never be in one and not the other.
 
