@@ -28,8 +28,14 @@ arguments, and is subject to the rules every resource is subject to:
 }
 ```
 
-Inline it is `Value::Embedded`; named, it is `Value::ResourceRef`. Those are the two forms every
-resource-valued slot already has. `Value` gains **no** variants.
+Inline, it is `Value::Embedded`. Named, it is **the resource's IRI** — and the design deliberately
+does not say which variant carries that IRI, because nothing may depend on it: the parser and CBOR
+both produce `Value::String`, `canonicalise_resource_refs` may have upgraded it to
+`Value::ResourceRef`, and `Value::as_iri` accepts either. Reading a reference goes through that
+accessor, never through a match.
+
+`Value` gains **no** variants. That is the point, and it is what makes the two forms above the same
+two forms every resource-valued slot already has.
 
 Five rules follow. They are the type discipline; the representation above is a consequence of them,
 and every place the code disagreed with them is listed in §4.
@@ -126,7 +132,11 @@ preserve them (`Text` decodes to `String`, a bare `Map` to `Embedded`,
 [`eigon_cbor.rs:379`, `:402`](../../kernel/src/ontology/eigon_cbor.rs#L379)). They are `Embedded`
 and `ResourceRef` rediscovered on the wrong discriminant.
 
-*`ResourceRef` is the existing instance of that mistake* and this note does not fix it. It is
+**This is why §1 declines to name a variant for the reference form.** `ResourceRef` is the existing
+instance of the same mistake, so building on it would import the defect this rule exists to avoid.
+A reference is an IRI, and which variant holds it is not part of the design.
+
+*The debt itself*, recorded and not fixed here. `ResourceRef` is
 `String` plus a schema lookup, produced only by
 [`canonicalise_resource_refs`](../../kernel/src/layer/mod.rs#L1305) at
 [build time](../../kernel/src/layer/mod.rs#L1073) and lost on the next serialisation. Hence 142 call
@@ -207,9 +217,13 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    for `value_array` and admits only the five primitives. Either `element_type` becomes optional when
    the types are determined elsewhere, or `core:args` is not a `value_array`. R4 says where the types
    come from; it does not say how the property declares that.
-2. **`ResourceRef`.** §2 R5 names it as the same mistake this note avoids, at 142 reconciling call
-   sites and 28 "accept both" comments. Out of scope here, and it should not be unwound during a
-   reseed that already perturbs equality-sensitive paths.
+2. **`ResourceRef`, and it is the SAME question as item 1.** Whether a bare IRI in `core:args` is a
+   reference or a `core:string` literal is decided by the constructor's declared argument type (R4)
+   — and whether a bare IRI in a `core:resource` slot is a reference is decided by `data_type`. One
+   fix serves both: interpretation at a schema-aware accessor, and no variant claiming to be
+   canonical. 142 reconciling call sites and 28 "accept both" comments are what the current answer
+   costs. Out of scope here, and it should not be unwound during a reseed that already perturbs
+   equality-sensitive paths.
 3. **The wire abbreviation.** Whether `ctor` / `args` may appear as short keys, expanded on read, the
    way a `ResourceRef` already serialises as a bare IRI string. A codec table entry, reversible, and
    explicitly NOT a design fork — an earlier draft made it one on a size argument that does not
