@@ -1069,21 +1069,24 @@ pub fn certificate_type(j: &Value, p: &Value) -> Result<Value, EncodeError> {
 /// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
 /// `eigentt:Logic` individual and two encoded terms.
 ///
-/// The inverse of [`decode_judgement`]. A constructor application encodes as a
-/// `CtorApp` carrying its own arguments (D83 §3.4) — the shape for any
-/// chain-declared inductive.
+/// The inverse of [`decode_judgement`].
+///
+/// A `justification:judgement` slot is ranged at `eigentt:Judgement`, so the value is
+/// that inductive's own constructor written plainly — D32 §3.7's tagged dict, with no
+/// `CtorApp` wrapper naming a type the slot already declares (D83 §4.2).
+///
+/// `holds`'s first argument is typed `eigentt:Logic`, which is a CLASS, so it encodes as
+/// a bare IRI string per D32 §3.7's class row — not as a `ConstRef` term. The other two
+/// are `eigentt:Term`s and carry the eigentt encoding.
+///
+/// Until D83 this emitted `CtorApp(eigentt:Judgement, holds, …)`, an `eigentt:Term` value
+/// standing in a slot declared `eigentt:Judgement`. That is what made Rule 16 report
+/// "ctor `App` not declared on InductiveType `eigentt:Judgement`" for every judgement on
+/// every chain, and what P5 worked around by exempting the type from Rule 16 entirely.
 pub fn encode_judgement(logic_iri: &str, term: &Value, typ: &Value) -> Result<Value, EncodeError> {
     Ok(Value::Json(ctor(
-        "CtorApp",
-        vec![
-            json!("urn:eigenius:eigentt:Judgement"),
-            json!("holds"),
-            serde_json::Value::Array(vec![
-                ctor("ConstRef", vec![json!(logic_iri)]),
-                value_json(term)?,
-                value_json(typ)?,
-            ]),
-        ],
+        "holds",
+        vec![json!(logic_iri), value_json(term)?, value_json(typ)?],
     )))
 }
 
@@ -1111,46 +1114,76 @@ pub struct Judgement {
 
 /// Decode a stored `eigentt:Judgement` value into its three fields.
 ///
-/// A judgement is `holds(logic, term, type)` — an ordinary constructor
-/// application, so it decodes through [`decode_type`] like any other term and
-/// this only names the parts.
+/// The value is `eigentt:Judgement`'s own constructor in D32 §3.7 form —
+/// `{"ctor": "holds", "args": [<logic>, <term>, <type>]}` — because the slot holding it
+/// declares that inductive (D83 §4.2). The two term arguments are `eigentt:Term`s and
+/// decode through [`decode_type`]; the logic is a class reference and is a bare IRI
+/// string, so it is read, not decoded.
 pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, DecodeError> {
-    let exp = decode_type(value, layer)?;
-    match &exp {
-        Exp::InductiveCtor(_, name, args) if name.as_str() == "holds" && args.len() == 3 => {
-            let logic = match &args[0] {
-                // An `eigentt:Logic` inhabitant is a RESOURCE, so a reference
-                // to one decodes to `EigonResource` carrying the whole record —
-                // not to a `Const`. That is a consequence of Logic being a
-                // class with individuals rather than an inductive with nullary
-                // constructors, and it is the shape this has to read.
-                Exp::EigonResource(r) => match r.id() {
-                    Some(iri) => iri.clone(),
-                    None => {
-                        return Err(DecodeError::MalformedValue(
-                            "a judgement's logic names an embedded resource with no @id"
-                                .to_string(),
-                        ))
-                    }
-                },
-                Exp::Const(iri, _) | Exp::EigonClass(iri) => iri.clone(),
-                Exp::InductiveCtor(iri, _, _) => iri.clone(),
-                other => {
-                    return Err(DecodeError::MalformedValue(format!(
-                        "a judgement's logic must name an eigentt:Logic individual, got {other:?}"
-                    )))
-                }
-            };
-            Ok(Judgement {
-                logic,
-                term: args[1].clone(),
-                typ: args[2].clone(),
-            })
+    let json = match value {
+        Value::Json(j) => j,
+        other => {
+            return Err(DecodeError::MalformedValue(format!(
+                "expected Value::Json for a judgement, got {other:?}"
+            )))
         }
-        other => Err(DecodeError::MalformedValue(format!(
-            "expected a judgement `holds(logic, term, type)`, got {other:?}"
-        ))),
+    };
+    let obj = json.as_object().ok_or_else(|| {
+        DecodeError::MalformedValue(format!("a judgement must be a JSON object, got {json}"))
+    })?;
+    match obj.get("ctor").and_then(serde_json::Value::as_str) {
+        Some("holds") => {}
+        Some(other) => {
+            return Err(DecodeError::MalformedValue(format!(
+                "expected a judgement `holds(logic, term, type)`, got ctor `{other}`"
+            )))
+        }
+        None => {
+            return Err(DecodeError::MalformedValue(
+                "a judgement is missing its string `ctor` field".to_string(),
+            ))
+        }
     }
+    let args = obj
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], |a| a);
+    if args.len() != 3 {
+        return Err(DecodeError::WrongArgCount {
+            ctor: "holds",
+            expected: 3,
+            actual: args.len(),
+        });
+    }
+    // `eigentt:Logic` is a class with individuals, not an inductive, so its inhabitant is
+    // a reference: a bare IRI string, or an embedded resource carrying an `@id`.
+    let logic_str = match &args[0] {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Object(o) => match o.get("@id").and_then(serde_json::Value::as_str) {
+            Some(id) => id.to_string(),
+            None => {
+                return Err(DecodeError::MalformedValue(
+                    "a judgement's logic names an embedded resource with no @id".to_string(),
+                ))
+            }
+        },
+        other => {
+            return Err(DecodeError::MalformedValue(format!(
+                "a judgement's logic must name an eigentt:Logic individual, got {other}"
+            )))
+        }
+    };
+    let logic = Iri::parse(&logic_str).map_err(|e| {
+        DecodeError::MalformedValue(format!(
+            "a judgement's logic IRI `{logic_str}` is invalid: {e}"
+        ))
+    })?;
+    let ctx = DecodeCtx { layer };
+    Ok(Judgement {
+        logic,
+        term: decode_type_json(&args[1], &ctx)?,
+        typ: decode_type_json(&args[2], &ctx)?,
+    })
 }
 
 /// Project the two indices out of a `justification:Certificate(j, P)` type.

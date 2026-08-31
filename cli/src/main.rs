@@ -1799,19 +1799,24 @@ fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
     } else {
         eigenius_kernel::esl::print::Layout::Flat
     };
-    let source =
-        eigenius_kernel::esl::print::print_document_with(&doc, layout).unwrap_or_else(|e| {
+    // Against a bootstrapped layer, for two reasons. The value dialect omits the decl IRI,
+    // so the namespace to qualify a bare constructor with comes from the property's declared
+    // inductive — `justification:judgement` holds an `eigentt:Judgement`, and guessing from
+    // the property's own namespace yields `justification:holds`, which names nothing (D83
+    // §4.2). And with `--verify`, constructor short names resolve through the same chain's
+    // ctor table, which is where `justification:Certificate`'s constructors live.
+    let ctx = bootstrap::bootstrap().unwrap_or_else(|e| {
+        eprintln!("Bootstrap failed: {e}");
+        std::process::exit(1);
+    });
+    let slots = eigenius_kernel::esl::compile::collect_ctors_from_layer(ctx.head()).inductive_slots;
+    let source = eigenius_kernel::esl::print::print_document_with_slots(&doc, layout, slots)
+        .unwrap_or_else(|e| {
             eprintln!("{file}: cannot decompile: {e}");
             std::process::exit(1);
         });
 
     if verify {
-        // Against a bootstrapped layer: constructor short names resolve through the chain's ctor
-        // table, which is where `justification:Certificate`'s constructors live.
-        let ctx = bootstrap::bootstrap().unwrap_or_else(|e| {
-            eprintln!("Bootstrap failed: {e}");
-            std::process::exit(1);
-        });
         let resources = eigenius_kernel::esl::compile_against_layer(&source, ctx.head())
             .unwrap_or_else(|errors| {
                 eprintln!("{file}: decompiled source does not compile:");

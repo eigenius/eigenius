@@ -43,9 +43,6 @@ const OPERATOR_IRI: &str = "urn:eigenius:formulas:Operator";
 /// `ConstRef` resolution check (D47 §5) can short-circuit when
 /// the inductive being walked isn't `eigentt:Term`.
 const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:Term";
-///  values are D47-encoded as an App spine, not D32 tagged
-/// dicts, so this walk cannot read them either. Rule 21 owns both.
-const EIGENTT_JUDGEMENT_IRI: &str = "urn:eigenius:eigentt:Judgement";
 
 /// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
 /// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
@@ -171,7 +168,17 @@ impl Validator {
         // (`check_type_expr_well_typed`, eigentt_value.rs): decode + NbE
         // type-check. Skip the generic inductive walk here so the two don't
         // produce duplicate diagnostics — Rule 21 is the single eigentt owner.
-        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI || ind_iri.as_str() == EIGENTT_JUDGEMENT_IRI {
+        //
+        // `eigentt:Judgement` was exempted alongside it by P5 and is NOT any more (D83
+        // §4.3). The exemption was a workaround for a shape disagreement, not a division
+        // of labour: a judgement was stored as `CtorApp(eigentt:Judgement, holds, …)`, an
+        // `eigentt:Term` value in a slot declaring `eigentt:Judgement`, so this walk read
+        // `App` as the constructor and reported "ctor `App` not declared" for every
+        // judgement on every chain. A judgement is now written as `holds(…)` — D32 §3.7's
+        // tagged dict against the inductive the slot declares — so this walk reads it
+        // correctly and Rule 21 keeps only the job the generic walk cannot do: decoding
+        // the two terms and NbE-checking one against the other.
+        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI {
             return vec![];
         }
 

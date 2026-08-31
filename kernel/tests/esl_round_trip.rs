@@ -127,6 +127,7 @@ fn print_then_compile(term: &Value, prop_ns: &str, layer: &Layer) -> Result<Valu
 fn every_demo_term_round_trips_through_esl() {
     let ctx = eigenius_kernel::bootstrap::bootstrap().expect("in-memory bootstrap");
     let layer = ctx.head();
+    let slots = eigenius_kernel::esl::compile::collect_ctors_from_layer(layer).inductive_slots;
     let mut checked = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
@@ -144,11 +145,17 @@ fn every_demo_term_round_trips_through_esl() {
         );
         for (label, term) in terms_in(&doc) {
             checked += 1;
-            // The inductive a property's values inhabit is declared in the same ontology as the
-            // property, so the property IRI minus its local name is the ctor namespace.
-            let prop_ns = label
+            // The namespace to qualify a value-dialect constructor with is the DECLARED
+            // INDUCTIVE's, read off the chain. It was taken from the property's own namespace
+            // on the premise that the two coincide; `justification:judgement` holds an
+            // `eigentt:Judgement` and does not.
+            let prop_iri = label
                 .rsplit_once(" :: ")
-                .and_then(|(_, p)| p.rsplit_once(':'))
+                .map(|(_, p)| p.to_string())
+                .unwrap_or_default();
+            let owner = slots.get(&prop_iri).cloned().unwrap_or(prop_iri);
+            let prop_ns = owner
+                .rsplit_once(':')
                 .map(|(ns, _)| ns.to_string())
                 .unwrap_or_default();
             match print_then_compile(&term, &prop_ns, layer) {
