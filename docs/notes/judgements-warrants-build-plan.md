@@ -1135,16 +1135,25 @@ declarations went dead with them (`institution`, `reasoning`, `dispatch`, `runti
 15 more dead `namespace reasoning` lines across fixtures, experiments and the demo — every one
 unused, verified before removal.
 
-**One residual, left declared.** `justification:Projection` and `justification:ProjectionRequest`
-survive with **no producer and no consumer anywhere in the tree**. The plan's disposition for
+**The projection shapes went too.** `justification:Projection`,
+`justification:ProjectionRequest` and their eight properties are deleted. They were left standing
+for one commit while the question was raised, then removed. The plan's disposition for
 `qc_project_justification` was explicit — *"delete the QueryClass and its dispatch wrapper;
-`project.rs`'s algebra stays"* — and said nothing about the result and request shapes. The algebra
-is live in `kernel/src/justification/` (`support`, `is_fully_verified`, `leaves_of`,
-`survives_without`, `cited_iris`) as ordinary functions; these two classes were the institution's
-way of reporting it. By the same posture the plan applies to `qc_consistency_check` — *"a reserved
-IRI for an unbuilt decision procedure is the follow-up-issue pattern the project's posture
-rejects"* — they should go too, but that is a wider call than this step's mandate and it is
-recorded here rather than taken silently.
+`project.rs`'s algebra stays"* — and said nothing about the result and request shapes, but they
+existed only to carry that query's input and output, so the route's deletion left them with no
+producer and no consumer anywhere in the tree. The same posture the plan applies to
+`qc_consistency_check` decides it: *"a reserved IRI for an unbuilt decision procedure is the
+follow-up-issue pattern the project's posture rejects."*
+
+The **algebra is untouched** and answers every question D73 §1.2 lists —
+`kernel/src/justification/` exposes `support`, `is_fully_verified`, `leaves_of`,
+`survives_without` and `cited_iris` as ordinary functions over a retained term. What is gone is a
+chain-resident request/report pair nothing ever wrote. `justification.esl`'s warrant section said
+warrant was reached *"through a `justification:ProjectionRequest` whose result is a
+`justification:Projection` below"* and pointed at `crates/eigenius-reasoning/src/project.rs`; both
+halves of that sentence were false by the time it was read, and it now names the kernel functions.
+
+`nothing_the_reasoning_institution_declared_still_resolves` pins all eighteen deleted IRIs.
 
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's

@@ -162,8 +162,9 @@ data justification:Certificate : justification:Term -> Prop -> Type 2 {
     //
     // Cost, measured: zero at the time of the change. No authored artifact in
     // the tree used `Sum`; the only occurrences were this declaration and two
-    // synthetic `Exp` values in `project.rs` and `tests/projection.rs`. Which is
-    // the argument for doing it before the first real `Sum` is committed.
+    // synthetic `Exp` values in the reasoning crate's `project.rs` and
+    // `tests/projection.rs`, both deleted at P7. Which is the argument for doing
+    // it before the first real `Sum` is committed.
     sum_l :
         forall (P : Prop,
                 j1 : justification:Term,
@@ -406,14 +407,14 @@ property justification:source_verified_resource : core:string {
 // filter on was the stored grade, precisely because `is_a` is an array of IRI
 // strings — and that is the fact this design removes.
 //
-// So warrant is a **Rust-API answer** in the interim: `support`, `leaves_of`,
-// `is_fully_verified`, `survives_without` in
-// `crates/eigenius-reasoning/src/project.rs`, reached through a
-// `justification:ProjectionRequest` whose result is a `justification:Projection`
-// below. "Warrant becomes a query" must not be read as "an EigenQL query"; it is
-// not one, and pretending otherwise would send a reader to a language that
-// cannot answer. The real fix is the λProlog extension over EigenQL's Datalog
-// foundation, tracked separately.
+// So warrant is a **Rust-API answer**: `support`, `leaves_of`, `is_fully_verified`,
+// `survives_without` and `cited_iris` in `kernel/src/justification/`, called directly on a
+// retained term. There is no chain-resident request or report shape — P7 deleted the pair
+// that existed, because the QueryClass routing between them went with the institution and
+// nothing else ever wrote one. "Warrant becomes a query" must not be read as "an EigenQL
+// query"; it is not one, and pretending otherwise would send a reader to a language that
+// cannot answer. The real fix is the λProlog extension over EigenQL's Datalog foundation,
+// tracked separately.
 //
 // PROVENANCE, by contrast, IS an EigenQL query now, and that is the point of
 // making it relational: `prov:was_attributed_to`, `prov:was_generated_by`,
@@ -421,71 +422,20 @@ property justification:source_verified_resource : core:string {
 // claims rest on this instrument` is a join. It was a free-text string, and no
 // query could ask it at all.
 
-class justification:ProjectionRequest {
-    description = "Input to qc_project_justification (D73 §1.2): ask what a committed justification:Conclusion's justification:Term rests on. Names the sentence; optionally names one IRI to test the counterfactual against.";
-    requires justification:subject_sentence;
-    recommends justification:counterfactual_iri;
-}
-
-property justification:subject_sentence : core:resource {
-    description = "The justification:Conclusion whose justification:Term is being projected.";
-    class_types justification:Conclusion;
-}
-
-property justification:counterfactual_iri : core:string {
-    description = "An IRI to withdraw: would the conclusion still stand without it? Answered in justification:survives_without. A plain string, not a resource reference — the question is asked ABOUT a citation, and asking it of an IRI the chain no longer resolves is the point, so Rule 22's closed-world check must not apply.";
-    format = formats:iri;
-}
-
-class justification:Projection {
-    description = "The result of projecting a justification:Term: its support (the alternative minimal ground-sets, any one of which carries the conclusion) read along each axis D73 §1.2 names. A REPORT, never an assertion — it states what the term rests on, not that any of it is true, and carries no canonical_proposition for that reason.";
-    requires justification:subject_sentence, justification:support_count, justification:fully_verified;
-    recommends justification:declared_grounds, justification:observed_grounds,
-               justification:verified_grounds, justification:counterfactual_iri, justification:survives_without;
-}
-
-property justification:support_count : core:integer {
-    description = "How many alternative ground-sets the term admits. 1 means a single chain of dependencies with no fallback; >1 means Sum offered alternatives.";
-    domain justification:Projection;
-}
-
-property justification:fully_verified : core:boolean {
-    description = "Whether EVERY ground of SOME alternative is Verified. Existential over alternatives because Sum is disjunctive: one fully-verified branch verifies the conclusion even where another rests on a declaration.";
-    domain justification:Projection;
-}
-
-property justification:declared_grounds : core:value_array {
-    description = "The IRIs cited by Declared grounds — what the conclusion rests on that nobody proved. A UNION across alternatives, not an intersection: this is a question about exposure, and a ground appearing on any branch is one the conclusion may rest on. Pair with prov:was_attributed_to on each to get 'which agents are we trusting' (answerable only since D72 made declared_by a resolvable Agent).";
-    element_type = core:string;
-    domain justification:Projection;
-}
-
-property justification:observed_grounds : core:value_array {
-    description = "The IRIs cited by Observed grounds — which measurements the conclusion rests on. Union across alternatives, as for declared_grounds.";
-    element_type = core:string;
-    domain justification:Projection;
-}
-
-property justification:verified_grounds : core:value_array {
-    description = "The IRIs cited by Verified grounds — which checked proofs the conclusion rests on. Union across alternatives.";
-    element_type = core:string;
-    domain justification:Projection;
-}
-
-property justification:survives_without : core:boolean {
-    description = "Whether SOME alternative cites justification:counterfactual_iri nowhere — would the conclusion still stand having lost it. Present only when the request named one. THE counterfactual D73 §1.2 argues the retained polynomial buys: a stored scalar grade cannot answer it, because it records what the grounds came to rather than what they were.";
-    domain justification:Projection;
-}
-
-// The `qc_project_justification` QueryClass stood here. P7 deleted it with the institution
-// that hosted it — the ontology already said it was not an institutional act ("returns a
-// justification:Projection, not a Verdict: this reports what the term rests on, it does not
-// judge it"), and it had zero callers. The ALGEBRA it dispatched to is live and moved to the
-// kernel at P6.0: `kernel/src/justification/mod.rs` exposes `support`, `is_fully_verified`,
-// `leaves_of`, `survives_without` and `cited_iris` as ordinary functions over a retained term.
+// ── What P7 deleted here ─────────────────────────────────────────────
 //
-// `justification:Projection` and `justification:ProjectionRequest` above are left declared and
-// currently have no producer or consumer anywhere in the tree — see the build plan's P7 notes.
+// `justification:ProjectionRequest`, `justification:Projection` and their eight properties
+// stood here, with `reasoning:qc_project_justification` as the route between them. All three
+// went at P7: the QueryClass with the institution that hosted it, and the two shapes because
+// they existed only to carry that query's input and output. With the route gone they had no
+// producer and no consumer anywhere in the tree.
+//
+// The ALGEBRA is live and unaffected. It moved to `kernel/src/justification/` at P6.0 and is
+// reached as ordinary Rust functions over a retained term: `support`, `is_fully_verified`,
+// `leaves_of`, `survives_without`, `cited_iris`. Every question the section above lists is
+// answerable today; what is gone is a chain-resident request/report pair that nothing built.
+// Re-declaring them is cheap when something needs to persist a projection — and until then a
+// declared shape with no writer is the reserved-IRI pattern this project rejects.
 
 // ── Reasoning → Lean comorphism — deferred to gh #73 ─────────────────
 //

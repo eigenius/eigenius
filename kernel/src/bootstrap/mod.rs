@@ -1378,14 +1378,18 @@ class p:Cat { description = "a dog"; }"#;
     }
 
     #[test]
-    fn the_reasoning_namespace_resolves_to_nothing() {
+    fn nothing_the_reasoning_institution_declared_still_resolves() {
         // P7 deleted the Reasoning institution, its ExportFormat, all four QueryClasses, and
-        // the EntailmentRequest / ConsistencyRequest input classes. ValidateJustification was
-        // absorbed into commit by P2, EntailmentQuery's question is a witness-index lookup,
-        // ConsistencyCheck returned Undecidable for every non-empty input, and
-        // ProjectJustification's algebra moved to `kernel/src/justification/` at P6.0. With no
-        // handler left the institution hosted nothing, so `urn:eigenius:reasoning` names
-        // nothing on a bootstrapped chain.
+        // the five input/output classes that existed only to shape those queries.
+        // ValidateJustification was absorbed into commit by P2, EntailmentQuery's question is
+        // a witness-index lookup, ConsistencyCheck returned Undecidable for every non-empty
+        // input, and ProjectJustification's algebra moved to `kernel/src/justification/` at
+        // P6.0. With no handler left the institution hosted nothing.
+        //
+        // `urn:eigenius:reasoning` names nothing at all now. The `justification:` entries
+        // below are the request and report shapes whose only route was a deleted QueryClass —
+        // they are listed here rather than left declared, because a shape with no writer is
+        // the reserved-IRI pattern this project rejects.
         let ctx = bootstrap().unwrap();
         for iri in [
             "urn:eigenius:reasoning:reasoning_institution",
@@ -1396,6 +1400,19 @@ class p:Cat { description = "a dog"; }"#;
             "urn:eigenius:reasoning:qc_project_justification",
             "urn:eigenius:justification:EntailmentRequest",
             "urn:eigenius:justification:ConsistencyRequest",
+            // The projection request/report pair went with the QueryClass that routed
+            // between them. The ALGEBRA is live in `kernel/src/justification/`; what is
+            // gone is a chain-resident shape nothing ever wrote.
+            "urn:eigenius:justification:ProjectionRequest",
+            "urn:eigenius:justification:Projection",
+            "urn:eigenius:justification:subject_sentence",
+            "urn:eigenius:justification:counterfactual_iri",
+            "urn:eigenius:justification:support_count",
+            "urn:eigenius:justification:fully_verified",
+            "urn:eigenius:justification:declared_grounds",
+            "urn:eigenius:justification:observed_grounds",
+            "urn:eigenius:justification:verified_grounds",
+            "urn:eigenius:justification:survives_without",
         ] {
             let parsed = Iri::parse(iri).unwrap();
             assert!(
