@@ -3,6 +3,12 @@
 **Status: proposed.** Written `2026-08-30`, during P6.2 of the judgements-and-warrants refactor
 ([`docs/notes/judgements-warrants-build-plan.md`](../notes/judgements-warrants-build-plan.md)).
 
+**Superseded in part by [D84](d84-an-inductive-value-is-a-resource.md)**, which makes an inductive
+value a `Resource`. D84 supersedes §3.1, §3.4 and §4.2, and withdraws §4.1; §3.2 and §3.3 stand and
+become the general case rather than the special one they are written as here. The sections below are
+left as written, each carrying a pointer, because the reasoning that produced them is what led to
+D84 and deleting it would hide the path.
+
 **Supersedes** D32 §3.7 and the encoding half of D47 §4. Both stay in force for everything else
 they say; this note replaces only the question *what does an inductive value look like on the
 chain*.
@@ -107,6 +113,10 @@ eigentt family, which is the only family with a second reader.
 
 ### 3.1 Inline
 
+> **Superseded by D84 §3.2.** The inductive type IS carried: an inductive value is a resource
+> and declares its `is_a`. The slot's `class_types` becomes a constraint to check it against.
+
+
 ```json
 { "ctor": "<ctor_name>", "args": [<arg₁>, …, <argₙ>] }
 ```
@@ -191,6 +201,11 @@ evaluated over decoded terms.
 
 ### 3.4 A value from another inductive, embedded in an eigentt term
 
+> **Superseded by D84 §3.1.** `CtorApp` is deleted, not widened. It exists to name an inductive
+> when the slot cannot; a value that carries its own `is_a` names itself. The retirement of the
+> `App` spine stands — `App` means application and nothing else.
+
+
 `eigentt:Term` is a universal term language, and a slot declared `eigentt:Term` routinely holds a
 value belonging to some other inductive. `eigentt:Judgement.holds` declares
 `term : eigentt:Term` and `type : eigentt:Term`, while the values stored there are
@@ -227,6 +242,12 @@ type is `eigentt:Term` and the value's type is something else. Each does a job t
 ## 4. What changes
 
 ### 4.1 `Value` splits three ways
+
+> **WITHDRAWN — see D84 §5.** Implemented and reverted the same day. The cited live consequence
+> does not exist: `json_mentions_of_value` has one caller and it is already gated on `data_type`.
+> And the variants are `Embedded` and `ResourceRef` rediscovered on a schema discriminant instead
+> of a shape one, so neither the parser nor CBOR can carry them.
+
 
 ```rust
 Json(serde_json::Value)   // genuinely opaque — `core:json`
@@ -268,6 +289,10 @@ declarations being visible to their own canonicalisation pass. `core:inductive` 
 property's `data_type`. The argument for the split is the doc comment above, not a live defect.
 
 ### 4.2 The expected inductive is threaded through decode
+
+> **Superseded by D84 §3.3.** Threading exists so a value can be written at a type it does not
+> state. A self-describing value states it.
+
 
 `decode_type(value, layer)` gains the declared inductive: at the top of a slot it is the property's
 single `class_types` entry; below, it is the enclosing constructor's `arg_types[i]`. That is what
