@@ -146,15 +146,20 @@ fn instance(local: &str, date: &str) -> Resource {
 /// future change to `canonicalise_resource_refs` that stops rewriting the
 /// slot doesn't quietly turn the tests below into tautologies.
 #[test]
-fn format_slot_is_a_resource_ref_after_build() {
+fn format_slot_reads_as_an_iri_after_build() {
     let (ctx, _backend) = chain_with_a_date_property();
     let prop_def = ctx.head().resolve(&iri(MEASURED_ON)).expect("property");
     let slot = prop_def
         .get(&iri("urn:eigenius:core:format"))
         .expect("format slot");
-    assert!(
-        matches!(slot, Value::ResourceRef(_)),
-        "expected the format slot to be canonicalised to a ResourceRef, got {slot:?}"
+    // This asserted `matches!(slot, Value::ResourceRef(_))` — that a build-time pass had
+    // upgraded the parsed string. The pass is gone: it promised readers "one shape per
+    // data_type" and could not keep it, because `ResourceRef` encodes to CBOR `Text` and
+    // reads back as `String`. What a reader is entitled to is the IRI, through `as_iri`.
+    assert_eq!(
+        slot.as_iri().map(|i| i.as_str().to_string()).as_deref(),
+        Some("urn:eigenius:core:formats:date"),
+        "the format slot must read as an IRI, got {slot:?}"
     );
 }
 

@@ -128,9 +128,14 @@ fn encoding_ontology_is_expressible_and_validates() {
     };
     let mut got: Vec<String> = vals
         .iter()
-        .map(|v| match v {
-            Value::ResourceRef(i) => i.as_str().to_string(),
-            other => panic!("allows_only entry should be a ResourceRef, got {other:?}"),
+        // The IRI, not the variant that carries it. `Value::as_iri` reads either shape —
+        // the contract now that nothing upgrades a parsed `String` to a `ResourceRef`,
+        // because that upgrade never survived a storage round trip.
+        .map(|v| {
+            v.as_iri()
+                .unwrap_or_else(|| panic!("allows_only entry should be an IRI, got {v:?}"))
+                .as_str()
+                .to_string()
         })
         .collect();
     got.sort();
@@ -165,9 +170,14 @@ fn encoding_ontology_is_expressible_and_validates() {
     };
     let mut got: Vec<String> = vals
         .iter()
-        .map(|v| match v {
-            Value::ResourceRef(i) => i.as_str().to_string(),
-            other => panic!("allows_only entry should be a ResourceRef, got {other:?}"),
+        // The IRI, not the variant that carries it. `Value::as_iri` reads either shape —
+        // the contract now that nothing upgrades a parsed `String` to a `ResourceRef`,
+        // because that upgrade never survived a storage round trip.
+        .map(|v| {
+            v.as_iri()
+                .unwrap_or_else(|| panic!("allows_only entry should be an IRI, got {v:?}"))
+                .as_str()
+                .to_string()
         })
         .collect();
     got.sort();
