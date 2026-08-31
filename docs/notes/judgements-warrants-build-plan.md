@@ -1082,6 +1082,38 @@ and `the_fixture_chain_validates_clean` now asserts the chain is clean before an
 it — otherwise a filtered "no errors" result cannot distinguish a passing check from a broken
 fixture.
 
+### P7 step 2 — `witness:Is*As` moves to core *(done `2026-08-31`)*
+
+The three predicates were `data` declarations in `justification.esl`. They are now declared in
+`ontologies/core/core-ontology.json` as `core:InductiveType`, unchanged in shape — two indices
+(`core:string -> Prop -> Prop`), zero ctors, same IRIs. `justification.esl` still *references*
+them from the `Certificate` ctor telescopes, which is the ordinary direction across a layer
+boundary; it no longer declares them.
+
+The precedent is `eigentt:Term`, which sits in core for the same class of reason and states it in
+its own description: *"the IRI keeps its `eigentt:` prefix because a namespace is a naming
+convention, not a layer assertion (eigenius#188 / N4)."* The `witness:` prefix is kept.
+
+**What this eliminates rather than guards.** `check_hooks.rs` resolves these three IRIs and then
+checks what it finds — *"expected 2 indices (iri, P), got {n} … the chain ontology drifted from
+the kernel's expectation."* That guard exists because the declaration was owned by a layer the
+kernel does not control. The arity and the zero-ctor opacity are now asserted directly against
+core by `core_declares_the_three_witness_predicates_with_the_arity_the_kernel_assumes`, and
+`reasoning_ontology_esl_compiles` asserts the negative — that `justification.esl` does not declare
+them — so the two halves of the move are pinned from both sides.
+
+**Manifest:** `core` and `justification` moved, and nothing else — 3 resources crossed the
+boundary and the layer count is unchanged. `EXPECTED` updated in the same commit; the reseed
+batches with P7's remaining bootstrap edits.
+
+### P7 step 3 — the crate deletion *(in progress)*
+
+The 13 test files left in `crates/eigenius-reasoning/tests/` reference `eigenius_reasoning` **zero
+times** — step 1 rewrote them onto the kernel's check — so they relocate verbatim. The external
+surface is three items across five files: `ReasoningInstitution` (registered by `cli/src/main.rs`
+and `crates/eigenius-statistics/src/startup.rs`), `validate::do_validate_justification` (called by
+three test files, converted the same way step 1 converted eleven), and `startup`.
+
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's
 implementation, to the trusted computing base.

@@ -6168,27 +6168,47 @@ mod tests {
 
     #[test]
     fn reasoning_ontology_esl_compiles() {
-        // D39 Phase 3 — the authored reasoning.esl source must compile
+        // D39 Phase 3 — the authored justification.esl source must compile
         // cleanly. Locks the structural contract: namespace declarations,
-        // three `ChainWitness.Is*As` zero-ctor predicates, the
-        // `justification:Term` five-ctor inductive, and the `justification:Certificate`
-        // seven-ctor indexed inductive predicate. Any future edit to the
-        // file or to the ESL surface that breaks this round-trip needs
-        // to be deliberate.
+        // the `justification:Term` five-ctor inductive, and the
+        // `justification:Certificate` seven-ctor indexed inductive predicate.
+        // Any future edit to the file or to the ESL surface that breaks this
+        // round-trip needs to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
-        let resources = esl::compile(source).expect("reasoning.esl must compile");
+        let resources = esl::compile(source).expect("justification.esl must compile");
 
-        // Expect: 3 ChainWitness predicates + 1 justification:Term
-        //         + 1 justification:Certificate = 5 inductive-type Resources.
+        // Expect: 1 justification:Term + 1 justification:Certificate.
+        // The three `witness:Is*As` predicates were here until P7 and are NOT
+        // any more — see below.
         let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
-        let ind_count = resources
+        let inductives: Vec<_> = resources
             .iter()
             .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
-            .count();
+            .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect();
         assert!(
-            ind_count >= 5,
-            "expected at least 5 inductive Resources in reasoning.esl, found {ind_count}"
+            inductives.len() >= 2,
+            "expected at least 2 inductive Resources in justification.esl, found {}: {inductives:?}",
+            inductives.len()
         );
+
+        // **The witness types are declared in CORE, not here.** The kernel
+        // constructs their inhabitants (`layer::synthesize_chain_witness`), so a
+        // type the kernel inhabits cannot be owned by a layer above it: while they
+        // lived here, an edit to this file could change the arity `check_hooks.rs`
+        // assumes, or remove the declaration it resolves by IRI. The certificate
+        // ctors below still REFERENCE them across the layer boundary, which is the
+        // ordinary direction and is what the rest of this test exercises.
+        for witness in [
+            crate::ontology::well_known::CHAIN_WITNESS_IS_DECLARED_AS,
+            crate::ontology::well_known::CHAIN_WITNESS_IS_OBSERVED_AS,
+            crate::ontology::well_known::CHAIN_WITNESS_IS_VERIFIED_AS,
+        ] {
+            assert!(
+                !inductives.iter().any(|i| i == witness),
+                "`{witness}` must be declared in core-ontology.json, not justification.esl"
+            );
+        }
 
         // Phase 4 added two resource classes (justification:Conclusion +
         // VerifiedPropositionView) + their property declarations.
@@ -6252,19 +6272,58 @@ mod tests {
                 && r.is_a().iter().any(|c| c == &ef_class)),
             "reasoning.esl missing the ef_justification ExportFormat resource"
         );
+    }
 
-        // Spot-check: the three witness IRIs are present.
-        use crate::ontology::well_known as wk_local;
+    #[test]
+    fn core_declares_the_three_witness_predicates_with_the_arity_the_kernel_assumes() {
+        // The other half of the P7 move asserted above. `check_hooks.rs` resolves these three
+        // IRIs and then GUARDS the shape it finds — "expected 2 indices (iri, P), got {n} …
+        // the chain ontology drifted from the kernel's expectation". That guard existed
+        // because the declaration was owned by a layer the kernel does not control. It is
+        // owned by core now, so the drift it guards against is checked here instead of only
+        // being diagnosed at synthesis time.
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let resources = eigon_json::parse_document(core_json).expect("core-ontology parses");
+        let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
+
         for expected in &[
-            wk_local::CHAIN_WITNESS_IS_DECLARED_AS,
-            wk_local::CHAIN_WITNESS_IS_OBSERVED_AS,
-            wk_local::CHAIN_WITNESS_IS_VERIFIED_AS,
+            crate::ontology::well_known::CHAIN_WITNESS_IS_DECLARED_AS,
+            crate::ontology::well_known::CHAIN_WITNESS_IS_OBSERVED_AS,
+            crate::ontology::well_known::CHAIN_WITNESS_IS_VERIFIED_AS,
         ] {
+            let r = resources
+                .iter()
+                .find(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false))
+                .unwrap_or_else(|| panic!("core-ontology.json must declare `{expected}`"));
             assert!(
-                resources
-                    .iter()
-                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)),
-                "reasoning.esl missing witness IRI {expected}"
+                r.is_a().iter().any(|c| c == &inductive_iri),
+                "`{expected}` must be a core:InductiveType"
+            );
+
+            // `core:string -> Prop -> Prop`: two indices, and the hook reads `indices[0]` as
+            // the IRI and `indices[1]` as the proposition.
+            let indices = r
+                .get(&iri(crate::ontology::well_known::INDICES))
+                .and_then(|v| match v {
+                    Value::Array(a) => Some(a.len()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("`{expected}` must carry core:indices as an array"));
+            assert_eq!(indices, 2, "`{expected}` must have 2 indices (iri, P)");
+
+            // Zero ctors is what makes the type opaque: the kernel's synthesis against a
+            // committed trace is the ONLY route to an inhabitant. A ctor here would let an
+            // author write down a witness, which is the whole thing the design forbids.
+            let ctors = r
+                .get(&iri(crate::ontology::well_known::CTORS))
+                .and_then(|v| match v {
+                    Value::Array(a) => Some(a.len()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("`{expected}` must carry core:ctors as an array"));
+            assert_eq!(
+                ctors, 0,
+                "`{expected}` must have zero ctors — no user-constructible inhabitant"
             );
         }
     }

@@ -48,18 +48,15 @@ namespace prov       = "urn:eigenius:prov";
 
 // ── ChainWitness predicates ──────────────────────────────────────────
 //
-// Each is `core:string -> Prop -> Prop`: the IRI of the underlying
-// reflection-ontology resource and the proposition that resource carries.
-// Zero ctors enforces opacity — no user-constructible inhabitant exists.
-
-data witness:IsDeclaredAs : core:string -> Prop -> Prop {
-}
-
-data witness:IsObservedAs : core:string -> Prop -> Prop {
-}
-
-data witness:IsVerifiedAs : core:string -> Prop -> Prop {
-}
+// `witness:IsDeclaredAs`, `witness:IsObservedAs` and `witness:IsVerifiedAs` are declared in
+// CORE (`ontologies/core/core-ontology.json`), not here. The kernel CONSTRUCTS their
+// inhabitants — `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the
+// layer's witness index holds a matching key — and a type the kernel inhabits cannot be
+// owned by a layer above it. While they lived here, an edit to this file could change the
+// arity `check_hooks.rs` assumes or remove the declaration it resolves by IRI, which is why
+// that hook still carries an "the chain ontology drifted from the kernel's expectation"
+// guard. The certificate ctors below reference them across the layer boundary, which is the
+// ordinary direction.
 
 // ── justification:Term ────────────────────────────────────────────────
 //
