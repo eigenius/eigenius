@@ -41,11 +41,6 @@ use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
-use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 /// Stack core + reflection + eigentt + institution + justification, then the
 /// named fixture.
@@ -71,8 +66,26 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
+    // `prov` (P5). The fixtures carry `prov:was_attributed_to`, `prov:had_primary_source`,
+    // `prov:rationale` and `prov:DeclarationTrace`; without this layer none of them resolve and
+    // the chain reports a dozen `UnresolvedClassReference`s. That went unnoticed because this
+    // test never asserted the layer validates — the same gap that let `00-wrn-vocabulary.esl`
+    // stop loading for two months. It asserts it now, below.
+    //
+    // Sits above `reflection` and below `justification`, matching `BOOTSTRAP_CHAIN`.
+    let prov_resources = esl::compile_against_layer(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+    )
+    .expect("prov.esl compiles");
+    let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
+    for r in prov_resources {
+        prov_builder.add_resource(r).unwrap();
+    }
+    let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
+
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
     for r in esl::compile(reasoning_source).expect("justification.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();
     }
@@ -94,30 +107,44 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
     )
 }
 
-/// Validate a conclusion and return `(ctor_name, diagnostic)`.
-fn validate(ctx: &ExecutionContext, sentence_iri: &str) -> (String, Option<String>) {
-    let iri = Iri::parse(sentence_iri).expect("sentence IRI");
-    let sentence_arc = ctx
-        .resolve(&iri)
-        .unwrap_or_else(|| panic!("conclusion `{iri}` should be on the chain"));
-    let sentence = (*sentence_arc).clone();
+/// Every validation error the chain reports for `sentence_iri`'s judgement.
+///
+/// This called `do_validate_justification` and read a `Verdict` off the outcome. The check
+/// it was reading is no longer that handler's: P2 moved it to commit, and `validate.rs` says
+/// so — *"the pairing this handler used to check by hand is checked at commit by the uniform
+/// check-mode rule … the check itself is no longer this handler's to own"*. What the handler
+/// still produced was the institutional verdict, which is provenance, and P7 dissolves the
+/// institution that produced it.
+///
+/// So the assertion moves to the thing that does the checking: Rule 21 decodes the judgement,
+/// checks its `type` is a type, and checks its `term` against it. That is the same check the
+/// handler reconstructed by hand — and stricter, because the type comes from the stored
+/// judgement rather than being rebuilt from the declaration.
+fn judgement_errors(ctx: &ExecutionContext, sentence_iri: &str) -> Vec<String> {
+    eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| {
+            e.resource_id
+                .as_ref()
+                .is_some_and(|i| i.as_str() == sentence_iri)
+        })
+        .map(|e| e.message)
+        .collect()
+}
 
-    let inst = ReasoningInstitution::new();
-    let outcome = do_validate_justification(&inst, &sentence, ctx)
-        .expect("validate handler returns an outcome");
-
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    (ctor, diagnostic)
+/// The whole chain validates. Asserted separately from the judgement so a fixture that
+/// references vocabulary the chain lacks cannot masquerade as a certificate failure — which
+/// is what it did here: the fixtures carry `prov:` properties that did not resolve, and
+/// nothing noticed because this test never ran the validator.
+fn assert_chain_is_clean(ctx: &ExecutionContext) {
+    let errors = eigenius_kernel::validation::Validator::new(ctx.head().clone()).validate();
+    assert!(
+        errors.is_empty(),
+        "the fixture chain must validate cleanly; {} error(s): {:#?}",
+        errors.len(),
+        errors.iter().take(5).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -128,11 +155,11 @@ fn a_sum_over_two_grounded_branches_holds() {
         include_str!("fixtures/sum_requires_both_branches.esl"),
         "sum-two-real-sources",
     );
-    let (ctor, diagnostic) = validate(&ctx, "urn:eigenius:demo:screen:concl_two_real_sources");
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "a Sum whose branches both ground must commit; got {ctor}, diagnostic: {diagnostic:?}"
+    assert_chain_is_clean(&ctx);
+    let errors = judgement_errors(&ctx, "urn:eigenius:demo:screen:concl_two_real_sources");
+    assert!(
+        errors.is_empty(),
+        "a Sum whose branches both ground must commit; got {errors:#?}"
     );
 }
 
@@ -146,13 +173,12 @@ fn a_sum_whose_fallback_cites_an_ungroundable_iri_is_refused() {
         include_str!("fixtures/sum_phantom_fallback.esl"),
         "sum-phantom-fallback",
     );
-    let (ctor, diagnostic) = validate(&ctx, "urn:eigenius:demo:screen:concl_phantom_fallback");
-    assert_ne!(
-        ctor,
-        wk::VERDICT_HOLDS,
+    let errors = judgement_errors(&ctx, "urn:eigenius:demo:screen:concl_phantom_fallback");
+    assert!(
+        !errors.is_empty(),
         "a Sum whose fallback branch cites an ungroundable IRI must not commit"
     );
-    let diagnostic = diagnostic.unwrap_or_default();
+    let diagnostic = errors.join("\n");
     assert!(
         diagnostic.contains("review_absent"),
         "the diagnostic must name the branch that could not be grounded; got: {diagnostic}"

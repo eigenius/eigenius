@@ -55,8 +55,11 @@ analysis surfaced. Only a live heap profile will name the owner.
 
 ## 2. Measured facts (decisive)
 
-**RocksDB pinned memory on the loaded c3 snapshot** — via `storage/rocksdb/tests/snapshot_memory_probe.rs`
-(`#[ignore]`; `EIGENIUS_DB_SNAPSHOT=<store> cargo test -p eigenius-storage-rocksdb --test snapshot_memory_probe -- --ignored --nocapture`):
+**RocksDB pinned memory on the loaded c3 snapshot.** Measured by an `#[ignore]`d diagnostic,
+`storage/rocksdb/tests/snapshot_memory_probe.rs`, which opened a snapshot with the same options
+`RocksStore::open` uses and dumped the memory-relevant properties per column family. The probe was
+deleted on `2026-08-31`: it answered a one-time question, never gated anything, and the answer is the
+table below. Recreate it from that description if the question is ever reopened.
 
 | CF | table-readers-mem (pinned RAM) | live-sst-size | num-keys |
 |---|---|---|---|
