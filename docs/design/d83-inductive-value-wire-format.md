@@ -277,12 +277,27 @@ With one shape, `walk_inductive_value` reads every inductive value including `ei
 — but the two no longer disagree about the shape, and P5's exemption of `eigentt:Judgement` from
 Rule 16 can be withdrawn.
 
-Rule 16 needs §3.4's escape hatch too, for the same reason decode does. It resolves each argument
-against `arg_types[i]`, which for `CtorApp` says `eigentt:Term`; the elements are actually values of
-the inductive named by `decl_iri`. So `CtorApp` is one arm in Rule 16 as well — switch the expected
-inductive to `decl_iri`, resolve `ctor_name` on it, and check the arg list against THAT ctor's
-`arg_types`. Getting this wrong is how the escape hatch would go unvalidated, which is close to its
-state today: Rule 16 has no `CtorApp` arm at all and simply reports the spine as malformed.
+**Rule 16 does NOT get a `CtorApp` arm.** This section called for one — switch the expected
+inductive to `decl_iri`, resolve `ctor_name` on it, check the arg list against THAT ctor's
+`arg_types` — on the reasoning that the escape hatch would otherwise go unvalidated. It was
+written and then withdrawn, for two reasons found by writing it.
+
+It is **wrong for a typed constructor.** `core:ctor_type` carries a full Π-telescope and, when
+present, `arg_types` is absent — the form every ctor of an indexed inductive uses. Arity read off
+`arg_types` is therefore `0` for `justification:Certificate.declared`, and the arm rejected 107
+well-formed values across the WRN chains on its first run.
+
+It is **redundant.** Every `CtorApp` on the chain sits inside a slot ranged at `eigentt:Term` or
+`eigentt:Judgement`, and Rule 21 owns both: it decodes and NbE-checks them, which validates
+constructor names and arities against the environment. D76 Phase B removed this same check from
+the decoder for this same reason — *"the type checker does anyway (`check_ctor_unknown_name`), and
+does with the environment in hand rather than at decode time"* — and Rule 16 already skips
+`eigentt:Term` so the two do not produce duplicate diagnostics.
+
+What Rule 16 does check is the escape hatch's own SHAPE, and §3.4 is what made that possible:
+`CtorApp`'s third argument is declared `[eigentt:Term]`, so a non-array argument list or a
+non-string `decl_iri` is caught by the generic walk. Before §3.4 the arguments were not part of the
+node at all, and the surrounding `App` spine was reported as a malformed value.
 
 ### 4.4 There is no migration
 
@@ -314,6 +329,7 @@ window is open and will close.
 | `decode_type`'s context-free signature | the threaded declared inductive (§4.2) |
 | `Value::Json` as the carrier for inductive values | `Value::Inductive` (§4.1) |
 | Rule 21's exemption of `eigentt:Judgement` from Rule 16 | one shape, both rules read it |
+| `decode_type`'s two-argument `CtorApp` + the `App` fold | §3.4's three-argument form |
 | the inline-only restriction on inductive arguments | §3.3, the reference form |
 
 ---
