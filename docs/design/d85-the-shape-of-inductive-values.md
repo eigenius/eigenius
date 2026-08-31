@@ -146,6 +146,42 @@ sites of `as_iri_str` / `as_iri` / `as_iri_array` to reconcile it, and a special
 [`as_iri_array`'s own doc](../../kernel/src/ontology/resource.rs#L179): *"the distinction between
 string literals and resource references is made by the property's data_type, not at parse time."*
 
+### R5a — what a traversal does at each variant
+
+R5 leaves this implicit and it should not be. Once an inductive value is `Embedded`, the two
+container variants mean exactly one thing each, and a reader that walks a value tree for references
+has no discretion:
+
+| variant | meaning | descend? |
+|---|---|---|
+| `Embedded` | a resource — an inline inductive value, or any other typed instance | **yes**; its IRIs are references |
+| `Json` | `core:json`, and only that: opaque, "not validated by the ontology" | **no**; an IRI inside opaque data is not a reference |
+
+*This is not a style preference; the tree currently gives three different answers.* Eight functions
+implement the same value-tree traversal — `declaration_order::value_refs`,
+`supporting::collect_refs_from_value`, `merge/lca::collect_iri_refs_into`,
+`merge/cascade::collect_orphaned_refs_in_value`, `merge/resolve::value_mentions_iri`,
+`merge/resolve::substitute_iri_in_value`, `dcg/chart/attribute::value_refs`, and the JSON twin
+`term_mentions::json_mentions` — about 240 lines. On `Value::Json` they variously descend, ignore,
+or descend conditionally on whether the property is term-valued. D79 §2.2 had to make `value_refs`
+call `json_mentions` so that `core:mentions` and `MutualInductives` would agree; that repaired one
+pair of the eight.
+
+The three-way split exists only because `Value::Json` today carries both jobs — genuinely opaque
+data AND inductive values, whose interior IRIs *are* references. §1 separates them, so the
+conditional (`if term_valued`) is not needed: the variant already says which is which.
+
+**Consolidation follows this note; it must not precede it.** Six of the eight differ only in what
+happens at a string leaf, so they collapse to one visitor plus one rebuilding variant — but doing
+that before the `Json`/`Embedded` split would have to pick one of the three current answers and
+would freeze it. `json_mentions` then disappears outright: an inductive value's interior is `Value`,
+so the traversal that already handles `Embedded` handles it.
+
+`dcg/chart/attribute::value_refs` is the other outlier — it does not descend into `Embedded` at all.
+Not reachable today, because its one caller passes `core:is_a`, a flat array of IRI strings. It is
+still wrong by the table above, and it is the kind of wrong that is invisible until someone reuses a
+function whose name promises the general traversal.
+
 ---
 
 ## 3. What the rules give
