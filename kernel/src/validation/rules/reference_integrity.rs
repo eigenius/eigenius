@@ -62,7 +62,8 @@ impl Validator {
                     res_id,
                     &is_a_prop,
                     format!(
-                        "is_a target '{target}' resolves to a resource that is not a core:Class"
+                        "is_a target '{target}' resolves to a resource that is neither a \
+                         core:Class nor a core:InductiveType"
                     ),
                 )),
                 None => errors.push(unresolved(

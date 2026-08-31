@@ -117,24 +117,39 @@ An inductive value becomes chain-resident by acquiring an identity and declaring
 
 ```json
 {
-  "@id":  "urn:eigenius:pub:wrn:cellcycle_recompute_proof",
-  "core:is_a": ["urn:eigenius:justification:Certificate"],
-  "ctor": "app",
-  "args": [ … ]
+  "@id": "urn:eigenius:pub:wrn:cellcycle_recompute_proof",
+  "urn:eigenius:core:is_a":  ["urn:eigenius:justification:Certificate"],
+  "urn:eigenius:core:ctor":  "app",
+  "urn:eigenius:core:args":  [ … ]
 }
 ```
 
-`is_a` names the **InductiveType**, not a Class. The resource *is* the value: `ctor` and `args` are
-reserved keys of the Eigon-JSON object model when `is_a` names an inductive, exactly as `@id` and
-`core:is_a` are reserved everywhere.
+`is_a` names the **InductiveType**, not a Class — **exactly one, with no Class alongside it**. A
+value has one type; the array shape is inherited from `is_a` generally, not a licence to give a
+value two.
 
-This needs no new class and no wrapper property. It is the same relationship `Embedded` and
-`ResourceRef` already have for resources — an embedded resource is an object without an `@id`; a
-referenced one is the same object with one — lifted to inductive values.
+This needs no new class and no wrapper. It is the same relationship `Embedded` and `ResourceRef`
+already have for resources — an embedded resource is an object without an `@id`, a referenced one is
+the same object with one — lifted to inductive values.
 
-**Rejected alternative:** a wrapper, `{"@id": …, "is_a": [D], "core:inductive_value": {…}}`. It
-avoids reserving `ctor`/`args`, but it states the type twice — once in `is_a` and once in the
-wrapper property's `class_types` — with nothing keeping the two honest.
+**Two new properties**, neither of which collides with anything (`core:ctors`, `core:ctor_type` and
+`core:ctor_name` exist, and belong to the DECLARATION vocabulary; `core:ctor` and `core:args` are
+free):
+
+| property | `data_type` | meaning |
+|---|---|---|
+| `core:ctor` | `core:string` | the constructor this value applies |
+| `core:args` | `core:value_array` | its arguments, each encoded per §3.1's table |
+
+**Why IRI keys and not bare `ctor` / `args`.** D1 §2.1 states that *"`@id` is the only reserved key
+in Eigon-JSON"*, and D1 §3.1 that *"all property keys in Eigon-JSON are full IRIs."* Reserving two
+more keys would make both sentences false and require amending D1. Declaring two ordinary properties
+requires amending nothing, and they then validate like any other property.
+
+Note this costs no consistency with §3.1. A resource's KEYS are IRIs; a VALUE's internal structure
+is not a resource, so the bare `ctor` / `args` inside `core:args`' elements are not property keys and
+never were — which is why D32 §3.7's tagged dict has always coexisted with D1 §3.1 without
+contradiction. The boundary is exactly where §3.1 stops and §3.2 begins.
 
 ### 3.3 As a reference
 
@@ -223,14 +238,17 @@ doing it now rather than after: the window in which it is free is open and will 
 
 ---
 
-## 6. Open
+## 6. Settled while drafting
 
-1. **Reserving `ctor` and `args`.** §3.2 makes them reserved keys when `is_a` names an inductive.
-   No current resource uses either as a property IRI (they are unprefixed, and every property key on
-   the chain is a `urn:`), so the collision risk is nil today — but it is a change to the object
-   model and should be stated in D1 rather than only here.
-2. **Whether `is_a` on a value resource may name more than one inductive.** A value has one type;
-   the array shape is inherited from `is_a` generally. Proposed: exactly one InductiveType, and no
-   Class alongside it.
-3. **Rule 22's diagnostic.** It already admits an `is_a` target that is an `InductiveType` but its
-   error text still says *"resolves to a resource that is not a core:Class"*.
+1. **Reserved keys — resolved, and the reason is D1.** An earlier draft made `ctor` and `args`
+   reserved keys of the object model. D1 §2.1 says `@id` is the only reserved key and §3.1 says
+   every property key is a full IRI; reserving two more would falsify both and require amending D1.
+   §3.2 declares two ordinary properties instead, so D1 stands untouched. The collision risk was
+   measured and nil either way — every property key on every resource today is `urn:`-prefixed, and
+   all 173 `ctor` / `args` occurrences sit inside value objects — but "nil risk" was never the
+   objection; a document stating something that would become false was.
+2. **One inductive per value resource.** `is_a` names exactly one InductiveType and no Class.
+3. **Rule 22's diagnostic — fixed.** It already admitted an `is_a` target that is an InductiveType,
+   while its rejection message still read *"resolves to a resource that is not a core:Class"*. The
+   check permitted inductives; only the message never caught up. Left alone it would have misled
+   the first person to debug a §3.2 value resource into believing the shape was illegal.
