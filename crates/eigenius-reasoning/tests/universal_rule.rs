@@ -44,10 +44,6 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 fn build_universal_rule_chain() -> ExecutionContext {
     let core_json = include_str!("../../../ontologies/core/core-ontology.json");
@@ -131,31 +127,26 @@ fn universal_rule_with_spec_poly_validates_to_holds() {
 
     let sentence_iri =
         Iri::parse("urn:eigenius:demo:screen:concl_eig0291_strong").expect("sentence IRI");
-    let sentence_arc = ctx
-        .resolve(&sentence_iri)
+    ctx.resolve(&sentence_iri)
         .unwrap_or_else(|| panic!("sentence `{sentence_iri}` should be on the chain"));
-    let sentence = (*sentence_arc).clone();
 
-    let inst = ReasoningInstitution::new();
-    let outcome = do_validate_justification(&inst, &sentence, &ctx)
-        .expect("validate handler returns an outcome");
+    // The check is Rule 21's since P2 moved it to commit: it decodes the judgement, checks
+    // its `type` is a type, and checks its `term` against it. Read the errors it reports for
+    // this conclusion; an empty set is what the handler used to report as `Holds`.
+    let diagnostic = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == sentence_iri))
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
 
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
+    assert!(
+        diagnostic.is_empty(),
         "expected Holds for the universal rule + spec_poly certificate; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+         got: {diagnostic}"
     );
 }

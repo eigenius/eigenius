@@ -16,9 +16,6 @@ use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
@@ -115,30 +112,23 @@ fn sab18_dili_rf_validates_to_holds_and_covers() {
     // ── reasoning validates to Holds ──
     let sentence_iri =
         Iri::parse("urn:eigenius:bench:sab18:concl_solution_implements").expect("sentence IRI");
-    let sentence = (*ctx
-        .resolve(&sentence_iri)
-        .unwrap_or_else(|| panic!("sentence `{sentence_iri}` should be on the chain")))
-    .clone();
+    ctx.resolve(&sentence_iri)
+        .unwrap_or_else(|| panic!("sentence `{sentence_iri}` should be on the chain"));
 
-    let inst = ReasoningInstitution::new();
-    let outcome = do_validate_justification(&inst, &sentence, &ctx)
-        .expect("validate handler returns an outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "expected Holds; got {ctor}, diagnostic: {diagnostic:?}"
-    );
+    // The check is Rule 21's since P2 moved it to commit: it decodes the judgement, checks
+    // its `type` is a type, and checks its `term` against it. Read the errors it reports for
+    // this conclusion; an empty set is what the handler used to report as `Holds`.
+    let diagnostic = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == sentence_iri))
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    assert!(diagnostic.is_empty(), "expected Holds; got: {diagnostic}");
 
     // ── coverage check: decision ↔ code-block overlay ──
     let payload = ctx

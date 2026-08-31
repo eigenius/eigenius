@@ -30,10 +30,6 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 /// Statistics-institution-recomputed conclusions (their plan declarations and input
 /// observations are
@@ -134,29 +130,18 @@ fn esl_against_pending(
     layer
 }
 
-fn verdict(
-    ctx: &ExecutionContext,
-    inst: &ReasoningInstitution,
-    iri: &str,
-) -> (String, Option<String>) {
-    let sentence = (*ctx
-        .resolve(&Iri::parse(iri).expect("sentence IRI"))
-        .unwrap_or_else(|| panic!("sentence `{iri}` should be on the chain")))
-    .clone();
-    let outcome =
-        do_validate_justification(inst, &sentence, ctx).expect("validate handler returns outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    (ctor, diagnostic)
+/// The validation errors naming this conclusion, joined. Empty is what the handler used to
+/// report as `Holds`; the check moved to commit at P2 and is Rule 21's.
+fn judgement_diagnostic(ctx: &ExecutionContext, iri: &str) -> String {
+    ctx.resolve(&Iri::parse(iri).expect("sentence IRI"))
+        .unwrap_or_else(|| panic!("sentence `{iri}` should be on the chain"));
+    eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| i.as_str() == iri))
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn build_ctx() -> ExecutionContext {
@@ -332,20 +317,11 @@ fn build_ctx() -> ExecutionContext {
 #[test]
 fn wrn_phase5_cmmr_and_cmain_validate() {
     let ctx = build_ctx();
-    let inst = ReasoningInstitution::new();
 
-    let (ctor, diag) = verdict(&ctx, &inst, "urn:eigenius:pub:wrn:concl_mmr");
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "C-MMR should Hold; diagnostic: {diag:?}"
-    );
+    let diag = judgement_diagnostic(&ctx, "urn:eigenius:pub:wrn:concl_mmr");
+    assert!(diag.is_empty(), "C-MMR should type-check; got: {diag}");
 
     // C-MAIN: the thesis, by modus ponens over the synthesis implication.
-    let (ctor, diag) = verdict(&ctx, &inst, "urn:eigenius:pub:wrn:concl_main");
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "C-MAIN should Hold; diagnostic: {diag:?}"
-    );
+    let diag = judgement_diagnostic(&ctx, "urn:eigenius:pub:wrn:concl_main");
+    assert!(diag.is_empty(), "C-MAIN should type-check; got: {diag}");
 }

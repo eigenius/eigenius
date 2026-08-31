@@ -35,10 +35,6 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 /// core + reflection/eigentt/institution + `reasoning.esl` + the fixture.
 fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext {
@@ -106,46 +102,44 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     )
 }
 
-/// `(verdict ctor, diagnostic)` for the fixture's one `justification:Conclusion`.
-fn verdict(reasoning_source: &str) -> (String, Option<String>) {
+/// The validation errors for the fixture's one `justification:Conclusion`, joined.
+/// Empty is what the handler used to report as `Holds`.
+fn judgement_diagnostic(reasoning_source: &str) -> String {
     let ctx = build_chain(
         reasoning_source,
         include_str!("fixtures/spec_poly_set_domain.esl"),
     );
     let sentence_iri = Iri::parse("urn:eigenius:demo:poly:concl").expect("sentence IRI");
-    let sentence = (*ctx
-        .resolve(&sentence_iri)
-        .expect("sentence is on the chain"))
-    .clone();
+    ctx.resolve(&sentence_iri)
+        .expect("sentence is on the chain");
 
-    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
-        .expect("validate handler returns an outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    (ctor, diagnostic)
+    // The check is Rule 21's since P2 moved it to commit: it decodes the judgement, checks
+    // its `type` is a type, and checks its `term` against it. Read the errors it reports for
+    // this conclusion; an empty set is what the handler used to report as `Holds`.
+    let diagnostic = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == sentence_iri))
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    diagnostic
 }
 
 /// The shipped ontology binds `T : Type 1`, so instantiating `T := Set` is
 /// `Set : Type 1` — legal by stratification — and the demo's certificate holds.
 #[test]
 fn spec_poly_holds_as_shipped() {
-    let (ctor, diagnostic) = verdict(include_str!(
+    let diagnostic = judgement_diagnostic(include_str!(
         "../../../ontologies/justification/justification.esl"
     ));
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
+    assert!(
+        diagnostic.is_empty(),
         "spec_poly at T := Set must hold against the shipped `T : Type 1` binder; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+         got: {diagnostic}"
     );
 }
 
@@ -162,13 +156,11 @@ fn spec_poly_at_a_set_domain_is_rejected() {
         source.contains("forall (T : Set,"),
         "the `spec_poly` domain binder moved — this rewrite no longer applies"
     );
-    let (ctor, diagnostic) = verdict(&source);
-    assert_eq!(
-        ctor,
-        wk::VERDICT_FAILS,
-        "a `T : Set` binder instantiated at `Set` is `Set : Set`; got {ctor}"
+    let diagnostic = judgement_diagnostic(&source);
+    assert!(
+        !diagnostic.is_empty(),
+        "a `T : Set` binder instantiated at `Set` is `Set : Set` and must be rejected"
     );
-    let diagnostic = diagnostic.unwrap_or_default();
     assert!(
         diagnostic.contains("universe stratification"),
         "expected a universe-stratification diagnostic, got: {diagnostic}"
