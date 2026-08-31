@@ -233,15 +233,27 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::Fst(p) => Ok(ctor("Fst", vec![encode_type_json(p)?])),
         Exp::Snd(p) => Ok(ctor("Snd", vec![encode_type_json(p)?])),
         Exp::InductiveCtor(iri, ctor_name, args) => {
-            // Encode `D.c(a1, ..., aN)` as
-            //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
-            // gh #75: the stable identifier is the IRI, which the node now carries
-            // directly (D76 Phase B) instead of inside a declaration.
-            let mut current = ctor("CtorApp", vec![json!(iri.as_str()), json!(ctor_name)]);
-            for arg in args {
-                current = ctor("App", vec![current, encode_type_json(arg)?]);
-            }
-            Ok(current)
+            // D83 §3.4 — encode `D.c(a₁, …, aₙ)` as `CtorApp(D.iri, c, [a₁, …, aₙ])`.
+            //
+            // This was an `App` spine over a two-argument `CtorApp` until D83. The spine
+            // made `App` mean two things — application, and the encoding's currying device —
+            // and decode told them apart structurally, by folding an argument into the head
+            // whenever the spine bottomed out at a `CtorApp`. The fold always won, so a
+            // saturated constructor application applied to a further argument (`D.c(a) b`)
+            // could not round-trip: it came back as `D.c(a, b)`.
+            //
+            // gh #75: the stable identifier is the IRI, which the node carries directly
+            // (D76 Phase B) instead of inside a declaration.
+            let encoded: Result<Vec<serde_json::Value>, EncodeError> =
+                args.iter().map(encode_type_json).collect();
+            Ok(ctor(
+                "CtorApp",
+                vec![
+                    json!(iri.as_str()),
+                    json!(ctor_name),
+                    serde_json::Value::Array(encoded?),
+                ],
+            ))
         }
         // eigenius#71 — literal primitive values. The `LitString` /
         // `LitInt` / `LitFloat` ctors land on the chain as
@@ -669,18 +681,12 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             if is_definition_head(&args[0], ctx) {
                 return peel_and_substitute(head, arg);
             }
-            // Spine folding: if head is an InductiveType / CodataType /
-            // InductiveCtor, append arg to its args list. Otherwise
-            // produce a plain App.
+            // D83 §3.4 — `App` is application and nothing else. It folded an argument
+            // into the head's arg list when the head was an `Exp::InductiveCtor`, which is
+            // how the retired `CtorApp` spine was read; `CtorApp` now carries its own
+            // arguments, so an `App` over a constructor application is exactly what it
+            // says — that application applied to a further argument.
             match head {
-                Exp::InductiveCtor(decl, name, mut existing) => {
-                    // D48 / eigenius#71: CtorApp via App-currying. The
-                    // bottom of the App spine is `CtorApp(D, c)`
-                    // (decoded to `Exp::InductiveCtor(decl, c, [])`);
-                    // each enclosing App appends an arg.
-                    existing.push(arg);
-                    Ok(Exp::InductiveCtor(decl, name, existing))
-                }
                 // EigonClass / EigonPrimitive are nullary type-formers;
                 // applying them via App is malformed input.
                 head @ (Exp::EigonClass(_) | Exp::EigonPrimitive(_)) => Err(
@@ -751,7 +757,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             Ok(Exp::Snd(Box::new(decode_type_json(&args[0], ctx)?)))
         }
         "CtorApp" => {
-            expect_arg_count("CtorApp", 2, args)?;
+            expect_arg_count("CtorApp", 3, args)?;
             let decl_iri_str = arg_string("CtorApp", 0, &args[0])?;
             let ctor_name = arg_string("CtorApp", 1, &args[1])?;
             let decl_iri = Iri::parse(&decl_iri_str).map_err(|e| {
@@ -761,11 +767,23 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                     &format!("invalid decl IRI `{decl_iri_str}`: {e}"),
                 )
             })?;
-            // Resolve the decl IRI through the layer chain, then
-            // verify the named ctor exists on it. Multi-arg invocations
-            // are layered via App on the decode side (see the "App" arm
-            // above, which folds args into Exp::InductiveCtor's args
-            // vec); CtorApp produces the nullary base.
+            // D83 §3.4 — the arguments are the third slot, a JSON array. They were an
+            // enclosing `App` spine that the "App" arm folded back in; that made `App`
+            // ambiguous and cost `D.c(a) b`, which is now expressible.
+            let arg_array = match &args[2] {
+                serde_json::Value::Array(a) => a,
+                other => {
+                    return Err(wrong_shape(
+                        "CtorApp",
+                        2,
+                        &format!("arguments must be an array, got {other}"),
+                    ))
+                }
+            };
+            let ctor_args = arg_array
+                .iter()
+                .map(|a| decode_type_json(a, ctx))
+                .collect::<Result<Vec<_>, _>>()?;
             //
             // **D76 Phase B — no resolution here.** This called
             // `resolve_inductive_decl_for_ctor`, which decoded the ENTIRE target
@@ -775,7 +793,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             // it recursed unboundedly. It also verified the constructor name — which
             // the type checker does anyway (`check_ctor_unknown_name`), and does with
             // the environment in hand rather than at decode time.
-            Ok(Exp::InductiveCtor(decl_iri, ctor_name, Vec::new()))
+            Ok(Exp::InductiveCtor(decl_iri, ctor_name, ctor_args))
         }
         // eigenius#71 — literal primitive values. The matching encode
         // arms emit `{"ctor": "LitString", "args": [<json-value>]}`
@@ -1051,17 +1069,22 @@ pub fn certificate_type(j: &Value, p: &Value) -> Result<Value, EncodeError> {
 /// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
 /// `eigentt:Logic` individual and two encoded terms.
 ///
-/// The inverse of [`decode_judgement`]. A constructor application encodes as
-/// `App`s folded over a `CtorApp` base, which is the D47 shape for any
+/// The inverse of [`decode_judgement`]. A constructor application encodes as a
+/// `CtorApp` carrying its own arguments (D83 §3.4) — the shape for any
 /// chain-declared inductive.
 pub fn encode_judgement(logic_iri: &str, term: &Value, typ: &Value) -> Result<Value, EncodeError> {
-    let base = ctor(
+    Ok(Value::Json(ctor(
         "CtorApp",
-        vec![json!("urn:eigenius:eigentt:Judgement"), json!("holds")],
-    );
-    let l = ctor("App", vec![base, ctor("ConstRef", vec![json!(logic_iri)])]);
-    let t = ctor("App", vec![l, value_json(term)?]);
-    Ok(Value::Json(ctor("App", vec![t, value_json(typ)?])))
+        vec![
+            json!("urn:eigenius:eigentt:Judgement"),
+            json!("holds"),
+            serde_json::Value::Array(vec![
+                ctor("ConstRef", vec![json!(logic_iri)]),
+                value_json(term)?,
+                value_json(typ)?,
+            ]),
+        ],
+    )))
 }
 
 /// Unwrap a `Value::Json` payload, which is what every encoded term is.
@@ -1679,7 +1702,7 @@ mod tests {
 
     #[test]
     fn encodes_nullary_inductive_ctor() {
-        // Nat.zero — encoded as CtorApp(urn:_:Nat, zero) with no args.
+        // Nat.zero — encoded as CtorApp(urn:_:Nat, zero, []) with an empty argument list.
         let nat_decl = Arc::new(InductiveDecl {
             uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
@@ -1696,13 +1719,20 @@ mod tests {
         let v = encode_type(&zero).unwrap();
         assert_eq!(
             v,
-            Value::Json(ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("zero")]))
+            Value::Json(ctor_obj(
+                "CtorApp",
+                vec![json!("urn:_:Nat"), json!("zero"), json!([])]
+            ))
         );
     }
 
     #[test]
-    fn encodes_unary_inductive_ctor_via_app_currying() {
-        // Nat.succ(x) — encoded as App(CtorApp(urn:_:Nat, succ), Var(x))
+    fn encodes_unary_inductive_ctor_with_a_flat_argument_list() {
+        // Nat.succ(x) — encoded as CtorApp(urn:_:Nat, succ, [Var(x)]).
+        //
+        // This was `App(CtorApp(urn:_:Nat, succ), Var(x))` until D83 §3.4, an `App` spine
+        // that decode folded back into the head's argument list. The fold always won, so
+        // `Nat.succ(x) y` could not round-trip; `App` now means application only.
         let nat_decl = Arc::new(InductiveDecl {
             uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
@@ -1721,9 +1751,36 @@ mod tests {
             vec![Exp::Var("x".to_string())],
         );
         let v = encode_type(&succ_x).unwrap();
-        let ctor_app = ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("succ")]);
         let var_x = ctor_obj("Var", vec![json!("x")]);
-        assert_eq!(v, Value::Json(ctor_obj("App", vec![ctor_app, var_x])));
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj(
+                "CtorApp",
+                vec![
+                    json!("urn:_:Nat"),
+                    json!("succ"),
+                    serde_json::Value::Array(vec![var_x]),
+                ]
+            ))
+        );
+    }
+
+    /// The round trip the retired `App` spine could not make: a saturated constructor
+    /// application applied to a further argument. Decode folded the outer `App` into
+    /// `succ`'s argument list and returned `Nat.succ(x, y)` — a different term.
+    #[test]
+    fn a_constructor_application_applied_to_a_further_argument_round_trips() {
+        let nat = crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap();
+        let applied = Exp::App(
+            Box::new(Exp::InductiveCtor(
+                nat,
+                "succ".to_string(),
+                vec![Exp::Var("x".to_string())],
+            )),
+            Box::new(Exp::Var("y".to_string())),
+        );
+        let v = encode_type(&applied).unwrap();
+        assert_eq!(decode_type(&v, &empty_layer()).unwrap(), applied);
     }
 
     #[test]
@@ -1814,18 +1871,21 @@ mod tests {
             panic!("expected Value::Json");
         };
 
-        // Walk the outer App to verify shape:
-        //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
+        // Walk the outer App to verify shape (D83 §3.4):
+        //   App(ConstRef(AssayShape), CtorApp(Nat, succ, [CtorApp(Nat, zero, [])]))
+        //
+        // The index application stays an `App` — `AssayShape` is a type former, not a
+        // constructor. Only the constructor spine collapsed.
         assert_eq!(j["ctor"], "App");
         assert_eq!(j["args"][0]["ctor"], "ConstRef");
         assert_eq!(j["args"][0]["args"][0], "urn:_:AssayShape");
-        assert_eq!(j["args"][1]["ctor"], "App");
-        assert_eq!(j["args"][1]["args"][0]["ctor"], "CtorApp");
-        assert_eq!(j["args"][1]["args"][0]["args"][0], "urn:_:Nat");
-        assert_eq!(j["args"][1]["args"][0]["args"][1], "succ");
-        assert_eq!(j["args"][1]["args"][1]["ctor"], "CtorApp");
-        assert_eq!(j["args"][1]["args"][1]["args"][0], "urn:_:Nat");
-        assert_eq!(j["args"][1]["args"][1]["args"][1], "zero");
+        assert_eq!(j["args"][1]["ctor"], "CtorApp");
+        assert_eq!(j["args"][1]["args"][0], "urn:_:Nat");
+        assert_eq!(j["args"][1]["args"][1], "succ");
+        assert_eq!(j["args"][1]["args"][2][0]["ctor"], "CtorApp");
+        assert_eq!(j["args"][1]["args"][2][0]["args"][0], "urn:_:Nat");
+        assert_eq!(j["args"][1]["args"][2][0]["args"][1], "zero");
+        assert_eq!(j["args"][1]["args"][2][0]["args"][2], serde_json::json!([]));
     }
 }
 

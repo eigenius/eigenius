@@ -855,6 +855,12 @@
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "ctor_name",
             "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "args",
+            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:Term"]},
+            "urn:eigenius:core:cardinality": "list"
           }
         ]
       },
@@ -980,6 +986,14 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Optional readable name for an InductiveArgType slot (e.g. `head`, `tail`, `name`, `body`). Mirror generators use it for typed-language struct field names; chain readers use it for diagnostics. ESL-compiled inductives may omit it (the compiler carries the source-position pattern through other channels). Recommended-not-required so existing ESL-emitted ctors continue to validate.",
     "urn:eigenius:core:short_name": "arg_name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
+  },
+  {
+    "@id": "urn:eigenius:core:cardinality",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Cardinality of an InductiveArgType slot. Absent means exactly one value of the declared `type_name`; the single accepted value `\"list\"` means zero or more, encoded on the wire as a JSON array of the element encoding. D32 \u00a73.7 specified this row of the argument-encoding table from the start and nothing implemented it, so a constructor argument could not be a sequence: the only way to express one was `core:List(A)` via `type_args`, whose value encoding is a cons/nil tagged-dict chain rather than an array. D83 \u00a73.4 needs the array form for `eigentt:Term.CtorApp`, whose third argument is the argument list of the constructor it names \u2014 hand-authored, and matching the kernel's `Exp::InductiveCtor(iri, name, args)` where `args` is a `Vec`. A list slot's kernel telescope type is `core:List(<type_name>)`, so the declaration stays honest about what it holds; only the encoding is flat.",
+    "urn:eigenius:core:short_name": "cardinality",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
   },

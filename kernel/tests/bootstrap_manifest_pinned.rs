@@ -41,6 +41,14 @@
 //! deleted, `lexicon:grade` with them — 2,641,713 stamps on the converted chain, all
 //! `epistemic:declared`, on resources that carry no proposition and so have no warrant to grade.
 //!
+//! IT FIRED FOR THE D83 WIRE FORMAT (`2026-08-30`), on ONE layer, `core`, which is where
+//! `eigentt:Term` is declared. `CtorApp` went from two arguments to three: the constructor's
+//! own argument list, previously carried by an enclosing `App` spine that decode folded back
+//! in. The fold made `App` mean two things — application, and the encoding's currying device —
+//! and it always won, so `D.c(a) b` could not round-trip. `core:cardinality` is declared in
+//! the same move: D32 §3.7 specified a `cardinality: list` row of the argument-encoding table
+//! and nothing implemented it, so a constructor argument could not be a sequence at all.
+//!
 //! IT FIRED ON A PROSE FIX (`2026-08-30`), on ONE layer, `lexicon`, for a description string.
 //! `LexicalEntry` still advertised "and an epistemic grade" after the grade migration above deleted
 //! `lexicon:grade` — the property went, the sentence promising it did not. Nothing referenced the
@@ -120,7 +128,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:1892387054d3f4fb99048cf8fd9a8e7fab5285786ee6adc7aa7938dd36b6d385
+const EXPECTED: &str = "core:9526744214511cd33ec513ed97de9f7b27b6ca72b3eb0e554b3b39af470490f9
 eigentt-type-fragment:caf2da6f1bdfc92540fcf72d43831f82d0b9c953f295f0f6e17de1fcb84abced
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
 reflection:80a5d9528b99ab2dc5a64e33f0bdf1c2cae4371fa26cce8375f625d59687ee6a

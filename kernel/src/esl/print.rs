@@ -498,7 +498,24 @@ impl Printer<'_> {
                 // `split` on the DECL IRI yields the alias for the ontology it lives in; the ctor
                 // short name replaces the decl's own local part.
                 let (alias, _decl_local) = self.ns.split(&decl).map_err(|e| self.err(e, path))?;
-                Ok(format!("{alias}:{name}"))
+                let head = format!("{alias}:{name}");
+                // D83 §3.4 — the arguments are the third slot. They arrived through an enclosing
+                // `App` spine until D83, so this arm printed the bare head and the "App" arm
+                // supplied the call syntax; a nullary constructor still prints bare.
+                let ctor_args: Vec<&Value> = match args.get(2) {
+                    None => Vec::new(),
+                    Some(Value::Array(a)) => a.iter().collect(),
+                    Some(other) => {
+                        return Err(self.err(
+                            format!("`CtorApp` arguments must be an array, got {other}"),
+                            path,
+                        ))
+                    }
+                };
+                if ctor_args.is_empty() {
+                    return Ok(head);
+                }
+                self.render_call(head, &ctor_args, "CtorApp", path, ind)
             }
 
             // `Type n` is the ONLY undelimited multi-token form the printer emits, so it is the
@@ -619,27 +636,7 @@ impl Printer<'_> {
                 let (head, spine) = unfold_app(v);
                 let head_path = format!("{path}{}", "App[0].".repeat(spine.len()));
                 let h = self.go(head, Prec::Atom, &head_path, ind)?;
-                let arg_col = ind + STEP;
-                let mut parts = Vec::with_capacity(spine.len());
-                for (i, a) in spine.iter().enumerate() {
-                    let col = if self.layout == Layout::Pretty {
-                        arg_col
-                    } else {
-                        ind
-                    };
-                    parts.push(self.go(a, Prec::Arrow, &format!("{path}App#{i}."), col)?);
-                }
-                Ok(if self.layout == Layout::Pretty {
-                    // One argument per line: the spine's shape is the whole point of breaking.
-                    format!(
-                        "{h}(\n{:arg_col$}{}\n{:ind$})",
-                        "",
-                        parts.join(&format!(",\n{:arg_col$}", "")),
-                        ""
-                    )
-                } else {
-                    format!("{h}({})", parts.join(", "))
-                })
+                self.render_call(h, &spine, "App", path, ind)
             }
 
             other => Err(self.err(
@@ -647,6 +644,42 @@ impl Printer<'_> {
                 path,
             )),
         }
+    }
+}
+
+impl Printer<'_> {
+    /// Render `head(a₁, …, aₙ)` in the active layout. Shared by the `App` spine and by
+    /// `CtorApp`, which carries its arguments directly (D83 §3.4) — both print ESL's one
+    /// call syntax, and printing them from one place is what keeps them identical.
+    fn render_call(
+        &mut self,
+        head: String,
+        call_args: &[&Value],
+        tag: &str,
+        path: &str,
+        ind: usize,
+    ) -> Result<String, PrintError> {
+        let arg_col = ind + STEP;
+        let mut parts = Vec::with_capacity(call_args.len());
+        for (i, a) in call_args.iter().enumerate() {
+            let col = if self.layout == Layout::Pretty {
+                arg_col
+            } else {
+                ind
+            };
+            parts.push(self.go(a, Prec::Arrow, &format!("{path}{tag}#{i}."), col)?);
+        }
+        Ok(if self.layout == Layout::Pretty {
+            // One argument per line: the spine's shape is the whole point of breaking.
+            format!(
+                "{head}(\n{:arg_col$}{}\n{:ind$})",
+                "",
+                parts.join(&format!(",\n{:arg_col$}", "")),
+                ""
+            )
+        } else {
+            format!("{head}({})", parts.join(", "))
+        })
     }
 }
 
@@ -687,7 +720,7 @@ fn escape(s: &str) -> String {
 /// This is NOT D47. Compare the two encodings of the same idea:
 ///
 /// ```text
-/// D47 (type position):    {"ctor":"App","args":[{"ctor":"CtorApp","args":[<decl>,"app"]}, …]}
+/// D47 (type position):    {"ctor":"CtorApp","args":[<decl>,"app",[…]]}
 /// value dialect:          {"ctor":"Declared","args":["urn:eigenius:…"]}
 /// ```
 ///
@@ -1052,18 +1085,28 @@ fn print_arg_type(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, 
         path: path.to_string(),
     })?;
     let head = print_kind(head, ns, path)?;
+    // D83 §3.4 — a `cardinality: list` slot prints `[T]`. Without this the round trip
+    // recompiles the declaration without its cardinality and silently narrows the slot
+    // to a single element.
+    let list = o.get(wk::CARDINALITY).and_then(Value::as_str) == Some(wk::CARDINALITY_LIST);
     let args = o
         .get(wk::TYPE_ARGS)
         .and_then(Value::as_array)
         .map_or(&[][..], |a| a);
-    if args.is_empty() {
-        return Ok(head);
-    }
     let rendered: Vec<String> = args
         .iter()
         .map(|a| print_arg_type(a, ns, path))
         .collect::<Result<_, _>>()?;
-    Ok(format!("{head}({})", rendered.join(", ")))
+    let applied = if rendered.is_empty() {
+        head
+    } else {
+        format!("{head}({})", rendered.join(", "))
+    };
+    Ok(if list {
+        format!("[{applied}]")
+    } else {
+        applied
+    })
 }
 
 /// A kind or type reference — the `eigentt:Term` head that `Compiler::lower_kind` produced.

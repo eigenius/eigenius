@@ -2080,7 +2080,7 @@ impl Compiler {
                             .unwrap_or(ctor_iri_str);
                         json!({
                             "ctor": "CtorApp",
-                            "args": [parent_iri_str, name.name.clone()],
+                            "args": [parent_iri_str, name.name.clone(), []],
                         })
                     } else {
                         // Namespace-resolve, then check via
@@ -2094,7 +2094,7 @@ impl Compiler {
                                 .unwrap_or(ctor_iri_str);
                             json!({
                                 "ctor": "CtorApp",
-                                "args": [parent_iri_str, name.name.clone()],
+                                "args": [parent_iri_str, name.name.clone(), []],
                             })
                         } else {
                             // Primitive IRIs ride the ConstRef path
@@ -2104,9 +2104,20 @@ impl Compiler {
                         }
                     }
                 };
+                let arg_jsons = args
+                    .iter()
+                    .map(|arg| self.encode_type_expr_to_json(arg, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                // D83 §3.4 — a constructor application carries its own arguments in its
+                // third slot. Only a non-constructor head App-curries, and there `App`
+                // means application: the two are no longer the same node.
+                let mut head_json = head_json;
+                if head_json.get("ctor").and_then(serde_json::Value::as_str) == Some("CtorApp") {
+                    head_json["args"][2] = serde_json::Value::Array(arg_jsons);
+                    return Ok(head_json);
+                }
                 let mut acc = head_json;
-                for arg in args {
-                    let arg_json = self.encode_type_expr_to_json(arg, scope)?;
+                for arg_json in arg_jsons {
                     acc = json!({
                         "ctor": "App",
                         "args": [acc, arg_json],
@@ -2361,6 +2372,15 @@ impl Compiler {
             .map(|p| self.compile_ctor_arg_type(p, params))
             .collect();
         ar.set(iri(wk::TYPE_ARGS), Value::Array(type_args?));
+
+        // D83 §3.4 — `[T]` is a list slot. Absent means exactly one, so nothing is
+        // emitted for the common case and existing declarations are byte-identical.
+        if arg.list {
+            ar.set(
+                iri(wk::CARDINALITY),
+                Value::String(wk::CARDINALITY_LIST.to_string()),
+            );
+        }
 
         Ok(Value::Embedded(Box::new(ar)))
     }

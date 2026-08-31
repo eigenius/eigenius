@@ -120,6 +120,18 @@ fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
             "#,
         ),
         (
+            "data with a list-cardinality argument (D83 §3.4)",
+            "urn:eigenius:ex:Expr",
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:ex";
+            data ex:Expr {
+                lit(core:integer),
+                sum(terms : [ex:Expr]),
+            }
+            "#,
+        ),
+        (
             "plain class (the control — this form already round-trips)",
             "urn:eigenius:ex:Dog",
             r#"
@@ -131,6 +143,41 @@ fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
             "#,
         ),
     ]
+}
+
+/// The round trip above pins that `[T]` is STABLE; it would pass just as well if both
+/// halves dropped the cardinality. This pins that the surface form actually reaches the
+/// resource, which is what makes the slot a list rather than a single element.
+#[test]
+fn a_bracketed_argument_compiles_to_cardinality_list() {
+    let json = compile_to_json(
+        r#"
+        namespace ex = "urn:eigenius:ex";
+        data ex:Expr {
+            lit(ex:Expr),
+            sum(terms : [ex:Expr]),
+        }
+        "#,
+    );
+    let ctors = json["urn:eigenius:ex:Expr"]["urn:eigenius:core:ctors"]
+        .as_array()
+        .expect("ctors array");
+    let arg_of = |name: &str| -> Value {
+        ctors
+            .iter()
+            .find(|c| c["urn:eigenius:core:ctor_name"] == name)
+            .expect("ctor present")["urn:eigenius:core:arg_types"][0]
+            .clone()
+    };
+    assert_eq!(
+        arg_of("sum")["urn:eigenius:core:cardinality"],
+        Value::String("list".into()),
+        "`[T]` must set cardinality"
+    );
+    assert!(
+        arg_of("lit").get("urn:eigenius:core:cardinality").is_none(),
+        "a bare `T` must not set cardinality — absent is the single-element default"
+    );
 }
 
 #[test]

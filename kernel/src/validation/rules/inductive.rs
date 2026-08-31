@@ -341,6 +341,36 @@ impl Validator {
                     continue;
                 }
             };
+            // D83 §3.4 — a `cardinality: list` slot holds a JSON array of the element
+            // encoding, not one element. Checking the array itself against `type_name`
+            // would report every list as a type mismatch.
+            if arg_type_decl
+                .get(&iri(wk::CARDINALITY))
+                .and_then(Value::as_str)
+                == Some(wk::CARDINALITY_LIST)
+            {
+                let Some(elems) = arg_value.as_array() else {
+                    out.push(ValidationError {
+                        resource_id: res_id.clone(),
+                        property: None,
+                        rule: ValidationRule::InductiveValueMismatch,
+                        message: format!(
+                            "{child_path}: `cardinality: list` slot expects a JSON array, got {arg_value}"
+                        ),
+                    });
+                    continue;
+                };
+                for (k, elem) in elems.iter().enumerate() {
+                    self.check_inductive_arg(
+                        elem,
+                        &type_name,
+                        format!("{child_path}[{k}]"),
+                        res_id,
+                        out,
+                    );
+                }
+                continue;
+            }
             self.check_inductive_arg(arg_value, &type_name, child_path, res_id, out);
         }
     }
@@ -776,6 +806,158 @@ mod tests {
                 }]
             }]
         })
+    }
+
+    /// A `Nat = zero | succ(Nat) | sum([Nat])` layer — the third constructor takes a
+    /// `cardinality: list` slot (D83 §3.4).
+    fn build_nat_with_list_ctor_layer() -> Arc<Layer> {
+        let core = build_core_layer();
+        let mut builder = LayerBuilder::new("test_nat_list", Some(core));
+
+        let zero_ctor = make_resource(
+            "urn:eigenius:test:NatL:zero",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String("zero".into())),
+                (wk::ARG_TYPES, Value::Array(vec![])),
+            ],
+        );
+        // ctor `sum(terms: [NatL])` — a list slot.
+        let sum_arg = make_resource(
+            "urn:eigenius:test:NatL:sum:terms",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+                ),
+                (wk::ARG_NAME, Value::String("terms".into())),
+                (
+                    wk::TYPE_NAME,
+                    Value::Json(serde_json::json!({
+                        "ctor": "ConstRef", "args": ["urn:eigenius:test:NatL"],
+                    })),
+                ),
+                (
+                    wk::CARDINALITY,
+                    Value::String(wk::CARDINALITY_LIST.to_string()),
+                ),
+            ],
+        );
+        let sum_ctor = make_resource(
+            "urn:eigenius:test:NatL:sum",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String("sum".into())),
+                (
+                    wk::ARG_TYPES,
+                    Value::Array(vec![Value::Embedded(Box::new(sum_arg))]),
+                ),
+            ],
+        );
+        let nat = make_resource(
+            "urn:eigenius:test:NatL",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+                ),
+                (wk::SHORT_NAME, Value::String("NatL".into())),
+                (
+                    wk::CTORS,
+                    Value::Array(vec![
+                        Value::Embedded(Box::new(zero_ctor)),
+                        Value::Embedded(Box::new(sum_ctor)),
+                    ]),
+                ),
+            ],
+        );
+        let prop = make_resource(
+            "urn:eigenius:test:natl_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("natl_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:NatL"))]),
+                ),
+            ],
+        );
+        builder.add_resource(nat).unwrap();
+        builder.add_resource(prop).unwrap();
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    fn natl_errors(value: serde_json::Value) -> Vec<String> {
+        let base = build_nat_with_list_ctor_layer();
+        let mut top = LayerBuilder::new("test_top", Some(base));
+        top.add_resource(make_resource(
+            "urn:eigenius:test:nl",
+            vec![("urn:eigenius:test:natl_value", Value::Json(value))],
+        ))
+        .unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        Validator::new(Arc::clone(&layer))
+            .validate()
+            .into_iter()
+            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
+            .map(|e| e.message)
+            .collect()
+    }
+
+    /// D83 §3.4 — a list slot takes a JSON array, and every element is checked.
+    #[test]
+    fn a_list_slot_accepts_an_array_and_checks_each_element() {
+        let errors = natl_errors(serde_json::json!({
+            "ctor": "sum",
+            "args": [[{"ctor": "zero", "args": []}, {"ctor": "zero", "args": []}]],
+        }));
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+    }
+
+    /// An empty list is a well-formed list — this is `CtorApp`'s nullary case, which
+    /// every nullary constructor application on the chain now carries.
+    #[test]
+    fn a_list_slot_accepts_the_empty_array() {
+        let errors = natl_errors(serde_json::json!({"ctor": "sum", "args": [[]]}));
+        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
+    }
+
+    /// The element type is still enforced inside the list. Without the per-element walk
+    /// a list slot would be the one place an arbitrary value could be smuggled in.
+    #[test]
+    fn a_list_slot_rejects_a_bad_element() {
+        let errors = natl_errors(serde_json::json!({
+            "ctor": "sum",
+            "args": [[{"ctor": "zero", "args": []}, {"ctor": "nope", "args": []}]],
+        }));
+        assert!(
+            errors.iter().any(|m| m.contains("`nope` not declared")),
+            "expected the bad element to be named, got {errors:?}"
+        );
+    }
+
+    /// A single value where a list is declared is rejected rather than silently read as a
+    /// one-element list — the encoding says array, so a non-array is malformed.
+    #[test]
+    fn a_list_slot_rejects_a_bare_element() {
+        let errors = natl_errors(serde_json::json!({
+            "ctor": "sum",
+            "args": [{"ctor": "zero", "args": []}],
+        }));
+        assert!(
+            errors.iter().any(|m| m.contains("expects a JSON array")),
+            "expected an array-shape error, got {errors:?}"
+        );
     }
 
     #[test]
