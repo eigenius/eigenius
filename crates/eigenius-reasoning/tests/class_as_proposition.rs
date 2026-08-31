@@ -30,11 +30,6 @@ use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
-use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 /// core + reflection/eigentt/institution + `reasoning.esl` + the fixture.
 fn build_chain() -> ExecutionContext {
@@ -57,7 +52,22 @@ fn build_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
+    // `prov` (P5). These fixtures carry `prov:` properties and trace classes; without this
+    // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
+    // that no assertion here was looking at. Sits above `reflection` and below
+    // `justification`, matching `BOOTSTRAP_CHAIN`.
+    let prov_resources = esl::compile_against_layer(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+    )
+    .expect("prov.esl compiles");
+    let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
+    for r in prov_resources {
+        prov_builder.add_resource(r).unwrap();
+    }
+    let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
+
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
     for r in esl::compile(include_str!(
         "../../../ontologies/justification/justification.esl"
     ))
@@ -94,43 +104,36 @@ fn build_chain() -> ExecutionContext {
     )
 }
 
-/// `(verdict ctor, diagnostic)` for one of the fixture's `justification:Conclusion`s.
-fn verdict(local_name: &str) -> (String, Option<String>) {
+/// Every validation error the chain reports for one of the fixture's `justification:Conclusion`s.
+///
+/// This read a `Verdict` off `do_validate_justification`. That handler no longer owns the
+/// check — P2 moved it to commit, and `validate.rs` says so: *"the pairing this handler used
+/// to check by hand is checked at commit by the uniform check-mode rule."* Rule 21 decodes the
+/// judgement, checks its `type` is a type and its `term` against it, which is the same check.
+fn judgement_errors(local_name: &str) -> Vec<String> {
     let ctx = build_chain();
-    let sentence_iri =
-        Iri::parse(&format!("urn:eigenius:demo:screen:{local_name}")).expect("sentence IRI");
-    let sentence = (*ctx
-        .resolve(&sentence_iri)
-        .expect("sentence is on the chain"))
-    .clone();
-
-    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
-        .expect("validate handler returns an outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    (ctor, diagnostic)
+    let sentence_iri = format!("urn:eigenius:demo:screen:{local_name}");
+    eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| {
+            e.resource_id
+                .as_ref()
+                .is_some_and(|i| i.as_str() == sentence_iri)
+        })
+        .map(|e| e.message)
+        .collect()
 }
 
 /// A certificate naming a class in its `P : Prop` slot is rejected.
 #[test]
 fn a_class_does_not_discharge_a_prop_obligation() {
-    let (ctor, diagnostic) = verdict("concl_class");
-    assert_eq!(
-        ctor,
-        wk::VERDICT_FAILS,
-        "`declared(iri, screen:CellLine, _)` puts a class in a `P : Prop` slot; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+    let errors = judgement_errors("concl_class");
+    assert!(
+        !errors.is_empty(),
+        "`declared(iri, screen:CellLine, _)` puts a class in a `P : Prop` slot and must be refused"
     );
-    let diagnostic = diagnostic.unwrap_or_default();
+    let diagnostic = errors.join("\n");
     assert!(
         diagnostic.contains("universe stratification"),
         "expected a universe-stratification diagnostic, got: {diagnostic}"
@@ -140,11 +143,9 @@ fn a_class_does_not_discharge_a_prop_obligation() {
 /// The same shape with a genuine `Prop`-sorted inductive still validates.
 #[test]
 fn a_proposition_still_discharges_a_prop_obligation() {
-    let (ctor, diagnostic) = verdict("concl_prop");
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "a Prop-sorted inductive in the same slot must still hold; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+    let errors = judgement_errors("concl_prop");
+    assert!(
+        errors.is_empty(),
+        "a Prop-sorted inductive in the same slot must still hold; got {errors:#?}"
     );
 }

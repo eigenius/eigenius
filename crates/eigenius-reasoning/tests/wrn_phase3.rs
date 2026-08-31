@@ -38,10 +38,6 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 /// Statistics-institution-recomputed conclusions. Their plan declarations and input
 /// observations are committed by the statistics layer's own AutoOnLoad, which this
@@ -119,34 +115,26 @@ fn esl_against_pending(
         structural.iter().take(10).collect::<Vec<_>>()
     );
 
-    let ctx = ExecutionContext::new(
-        layer.clone(),
-        name,
-        ExecutionMode::ReadOnly,
-        LayerStorage::in_memory(),
-    );
-    let inst = ReasoningInstitution::new();
+    // Every conclusion's judgement must type-check. This ran `do_validate_justification` and
+    // read a `Verdict`; the check it was reading moved to commit at P2, so it now reads the
+    // errors Rule 21 produces — same check, taken from where it lives. The `pending` skip is
+    // preserved exactly: those conclusions' witnesses arrive out of band.
     let sentence_class = "urn:eigenius:justification:Conclusion";
+    let all_errors = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
     for r in &resources {
         if !r.is_a().iter().any(|c| c.as_str() == sentence_class) {
             continue;
         }
         let iri = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
-        let outcome =
-            do_validate_justification(&inst, r, &ctx).expect("validate handler returns outcome");
-        let ctor = outcome
-            .output
-            .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-            .and_then(Value::as_str)
-            .unwrap_or("<none>");
-        if ctor != wk::VERDICT_HOLDS && !pending.iter().any(|p| *p == iri) {
-            let diag = outcome
-                .output
-                .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-                .and_then(Value::as_str)
-                .unwrap_or("");
+        let diag = all_errors
+            .iter()
+            .filter(|e| e.resource_id.as_ref().is_some_and(|i| i.as_str() == iri))
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !diag.is_empty() && !pending.iter().any(|p| *p == iri) {
             panic!(
-                "esl_against({name}): conclusion `{iri}` did not Hold (got {ctor}) — the live \
+                "esl_against({name}): conclusion `{iri}` did not type-check — the live \
                  AutoOnLoad gate would reject this layer, so a downstream lemma citation of it \
                  would be unsound. diagnostic: {diag}\n  If its witness is produced out of band \
                  (R runtime / statistics institution AutoOnLoad, not run in this harness), add \
@@ -157,34 +145,30 @@ fn esl_against_pending(
     layer
 }
 
-fn assert_holds(ctx: &ExecutionContext, inst: &ReasoningInstitution, iri: &str) {
-    let sentence = (*ctx
-        .resolve(&Iri::parse(iri).expect("sentence IRI"))
-        .unwrap_or_else(|| panic!("sentence `{iri}` should be on the chain")))
-    .clone();
-    let outcome =
-        do_validate_justification(inst, &sentence, ctx).expect("validate handler returns outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "expected Holds for `{iri}`; got {ctor}, diagnostic: {diagnostic:?}"
+/// The conclusion's judgement type-checks — no validation error names it.
+///
+/// Read a `Verdict` off `do_validate_justification` until P7. The check moved to commit at
+/// P2, so this reads Rule 21's errors instead: it decodes the judgement, checks its `type` is
+/// a type, and checks its `term` against it.
+fn assert_holds(ctx: &ExecutionContext, iri: &str) {
+    ctx.resolve(&Iri::parse(iri).expect("sentence IRI"))
+        .unwrap_or_else(|| panic!("sentence `{iri}` should be on the chain"));
+    let diagnostic = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| i.as_str() == iri))
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        diagnostic.is_empty(),
+        "expected `{iri}` to type-check; got: {diagnostic}"
     );
 }
 
 /// Builds the full WRN chain up to phase-3 in-process and returns a read-only
 /// execution context plus a Reasoning institution to validate against.
-fn build_phase3_ctx() -> (ExecutionContext, ReasoningInstitution) {
+fn build_phase3_ctx() -> ExecutionContext {
     let core = {
         let mut b = LayerBuilder::new("core", None);
         for r in
@@ -344,13 +328,12 @@ fn build_phase3_ctx() -> (ExecutionContext, ReasoningInstitution) {
         &[],
     );
 
-    let ctx = ExecutionContext::new(
+    ExecutionContext::new(
         phase3,
         "wrn-phase3",
         ExecutionMode::ReadOnly,
         LayerStorage::in_memory(),
-    );
-    (ctx, ReasoningInstitution::new())
+    )
 }
 
 /// The mechanism chain validates hermetically: every conclusion here discharges
@@ -361,11 +344,11 @@ fn build_phase3_ctx() -> (ExecutionContext, ReasoningInstitution) {
 /// transcribed run establishes.
 #[test]
 fn wrn_phase3_mechanism_chain_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_vivo_ontarget");
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb");
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_mech");
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_not_telomere");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_vivo_ontarget");
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_dsb");
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_mech");
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_not_telomere");
 }
 
 /// `concl_vivo` (in-vivo WRN dependence) grounds on
@@ -383,8 +366,8 @@ fn wrn_phase3_mechanism_chain_validates() {
 /// and only appeared to because the citation named a run artifact.
 #[test]
 fn wrn_phase3_invivo_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_vivo");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_vivo");
 }
 
 /// `concl_p53_activation` (C-MECH p53 arm) grounds on
@@ -394,8 +377,8 @@ fn wrn_phase3_invivo_validates() {
 /// p21 +0.310, p53-null KM12 control p21_null_logfc < 0).
 #[test]
 fn wrn_phase3_p53_activation_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_p53_activation");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_p53_activation");
 }
 
 /// `concl_dsb_foci` (the reproduced-external 53BP1 DSB-foci corroboration of
@@ -405,8 +388,8 @@ fn wrn_phase3_p53_activation_validates() {
 /// (Step 3h: CausesDSBs Holds, condition×MSI interaction +1.82, p ≈ 2.6e-142).
 #[test]
 fn wrn_phase3_dsb_foci_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_foci");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_dsb_foci");
 }
 
 /// `concl_dsb_gh2ax` (the γH2AX-intensity leg of `CausesDSBs`, ED Fig 6c) grounds
@@ -416,8 +399,8 @@ fn wrn_phase3_dsb_foci_validates() {
 /// published statistic).
 #[test]
 fn wrn_phase3_dsb_gh2ax_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_gh2ax");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_dsb_gh2ax");
 }
 
 /// `concl_dsb_gh2ax_foci` (the γH2AX-foci leg of `CausesDSBs`, ED Fig 6a/6d)
@@ -427,8 +410,8 @@ fn wrn_phase3_dsb_gh2ax_validates() {
 /// live by `demo/wrn-helicase/run.sh` (interaction +7.3, foci ×3.4 MSI vs ×1.0 MSS).
 #[test]
 fn wrn_phase3_dsb_gh2ax_foci_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_gh2ax_foci");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_dsb_gh2ax_foci");
 }
 
 /// `concl_ddr_signaling` (the DDR-signaling leg, `ActivatesDSBResponse`, ED Fig
@@ -439,8 +422,8 @@ fn wrn_phase3_dsb_gh2ax_foci_validates() {
 /// bridge the paper draws from DSBs to p53.
 #[test]
 fn wrn_phase3_ddr_signaling_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_ddr_signaling");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_ddr_signaling");
 }
 
 /// `concl_paralog` (ED Fig 9a specificity) grounds on
@@ -451,6 +434,6 @@ fn wrn_phase3_ddr_signaling_validates() {
 /// controlling for each paralogue's loss).
 #[test]
 fn wrn_phase3_paralog_validates() {
-    let (ctx, inst) = build_phase3_ctx();
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_paralog");
+    let ctx = build_phase3_ctx();
+    assert_holds(&ctx, "urn:eigenius:pub:wrn:concl_paralog");
 }

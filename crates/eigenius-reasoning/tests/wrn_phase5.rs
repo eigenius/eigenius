@@ -104,34 +104,26 @@ fn esl_against_pending(
         structural.iter().take(10).collect::<Vec<_>>()
     );
 
-    let ctx = ExecutionContext::new(
-        layer.clone(),
-        name,
-        ExecutionMode::ReadOnly,
-        LayerStorage::in_memory(),
-    );
-    let inst = ReasoningInstitution::new();
+    // Every conclusion's judgement must type-check. This ran `do_validate_justification` and
+    // read a `Verdict`; the check it was reading moved to commit at P2, so it now reads the
+    // errors Rule 21 produces — same check, taken from where it lives. The `pending` skip is
+    // preserved exactly: those conclusions' witnesses arrive out of band.
     let sentence_class = "urn:eigenius:justification:Conclusion";
+    let all_errors = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
     for r in &resources {
         if !r.is_a().iter().any(|c| c.as_str() == sentence_class) {
             continue;
         }
         let iri = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
-        let outcome =
-            do_validate_justification(&inst, r, &ctx).expect("validate handler returns outcome");
-        let ctor = outcome
-            .output
-            .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-            .and_then(Value::as_str)
-            .unwrap_or("<none>");
-        if ctor != wk::VERDICT_HOLDS && !pending.iter().any(|p| *p == iri) {
-            let diag = outcome
-                .output
-                .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-                .and_then(Value::as_str)
-                .unwrap_or("");
+        let diag = all_errors
+            .iter()
+            .filter(|e| e.resource_id.as_ref().is_some_and(|i| i.as_str() == iri))
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !diag.is_empty() && !pending.iter().any(|p| *p == iri) {
             panic!(
-                "esl_against({name}): conclusion `{iri}` did not Hold (got {ctor}) — the live \
+                "esl_against({name}): conclusion `{iri}` did not type-check — the live \
                  AutoOnLoad gate would reject this layer, so a downstream lemma citation of it \
                  would be unsound. diagnostic: {diag}\n  If its witness is produced out of band \
                  (R runtime / statistics institution AutoOnLoad, not run in this harness), add \

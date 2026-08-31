@@ -67,7 +67,22 @@ fn sab16_compound_filter_validates_to_holds() {
 
     // reasoning (compiled standalone, as drug_screening.rs does)
     let reasoning_src = include_str!("../../../ontologies/justification/justification.esl");
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
+    // `prov` (P5). These fixtures carry `prov:` properties and trace classes; without this
+    // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
+    // that no assertion here was looking at. Sits above `reflection` and below
+    // `justification`, matching `BOOTSTRAP_CHAIN`.
+    let prov_resources = esl::compile_against_layer(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+    )
+    .expect("prov.esl compiles");
+    let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
+    for r in prov_resources {
+        prov_builder.add_resource(r).unwrap();
+    }
+    let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
+
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
     for r in esl::compile(reasoning_src).expect("reasoning.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();
     }
