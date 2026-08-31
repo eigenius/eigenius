@@ -54,7 +54,6 @@
 namespace core          = "urn:eigenius:core";
 namespace formats       = "urn:eigenius:core:formats";
 namespace reflection    = "urn:eigenius:reflection";
-namespace reasoning     = "urn:eigenius:reasoning";
 namespace stats         = "urn:eigenius:measurements";
 namespace screen        = "urn:eigenius:demo:screen";
 namespace agent         = "urn:eigenius:prov:agent";

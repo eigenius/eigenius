@@ -51,8 +51,6 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 use eigenius_statistics::institution::iris;
 use eigenius_statistics::StatisticsInstitution;
 
@@ -152,31 +150,30 @@ fn recompute_finalized(
         .collect()
 }
 
-/// Type-check a reasoning sentence against the (recomputed-result-bearing)
-/// context and assert Holds.
+/// Assert the committed conclusion at `sentence_iri` type-checks against the
+/// (recomputed-result-bearing) chain.
+///
+/// Was a `ValidateJustification` dispatch through the Reasoning institution, reading the
+/// `Verdict` it returned. P2 moved the certificate check to commit and P7 dissolves the
+/// institution, so this reads what validation reports about the sentence instead. The
+/// sentence is already on the chain — these tests resolve it rather than building it — so
+/// validating the chain and filtering to its IRI is the whole conversion.
 fn assert_reasoning_holds(ctx: &ExecutionContext, sentence_iri: &str) {
-    let inst = ReasoningInstitution::new();
-    let sentence = (*ctx
-        .resolve(&Iri::parse(sentence_iri).unwrap())
-        .unwrap_or_else(|| panic!("sentence `{sentence_iri}` on chain")))
-    .clone();
-    let outcome = do_validate_justification(&inst, &sentence, ctx).expect("validate outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict ctor")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "`{sentence_iri}` should type-check against the kernel-recomputed result; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+    let iri = Iri::parse(sentence_iri).unwrap();
+    assert!(
+        ctx.resolve(&iri).is_some(),
+        "sentence `{sentence_iri}` on chain"
+    );
+    let errors: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == iri))
+        .map(|e| e.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "`{sentence_iri}` should type-check against the kernel-recomputed result; got:\n{}",
+        errors.join("\n")
     );
 }
 

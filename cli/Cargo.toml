@@ -38,7 +38,6 @@ eigenius-lean = { path = "../crates/eigenius-lean" }
 # bounded by the kernel's type-theory implementation. Linked in
 # alongside Lean so AutoOnLoad ValidateJustification on every
 # justification:Conclusion commit dispatches as a direct function call.
-eigenius-reasoning = { path = "../crates/eigenius-reasoning" }
 eigenius-encoding = { path = "../crates/eigenius-encoding" }
 # D52: the measurement-statistics institution's validator runs
 # in-process — deterministic IEEE-754 numerics (ndarray + statrs); no

@@ -1016,7 +1016,6 @@ dependencies = [
  "eigenius-lean",
  "eigenius-oci",
  "eigenius-r",
- "eigenius-reasoning",
  "eigenius-runtime-substrate",
  "eigenius-statistics",
  "eigenius-storage-rocksdb",
@@ -1063,7 +1062,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eigenius-kernel",
- "eigenius-reasoning",
  "eigenius-storage-rocksdb",
  "eigenius-wordnet",
  "schemars",
@@ -1243,16 +1241,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eigenius-reasoning"
-version = "0.1.0"
-dependencies = [
- "eigenius-kernel",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "eigenius-runtime-substrate"
 version = "0.1.0"
 dependencies = [
@@ -1277,7 +1265,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eigenius-kernel",
- "eigenius-reasoning",
  "serde",
  "serde_json",
  "sha2",
@@ -1300,7 +1287,6 @@ name = "eigenius-statistics"
 version = "0.1.0"
 dependencies = [
  "eigenius-kernel",
- "eigenius-reasoning",
  "ndarray",
  "serde_json",
  "sha2",

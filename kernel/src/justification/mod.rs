@@ -20,7 +20,7 @@
 //! does this term rest on*. `nbe/` is the wrong home for either, because this is a reading
 //! of one particular inductive, not type theory.
 //!
-//! It moved here from `crates/eigenius-reasoning/src/project.rs` because the kernel needs
+//! It moved here from the reasoning crate's `project.rs` (deleted at P7) because the kernel needs
 //! the ALGEBRA, not the edge set. The well-foundedness check is stated over a term's
 //! support, and support reads `Sum` disjunctively: `Sum(a, b)` is carried by either branch
 //! alone, so a cycle through `a` while `b` is acyclic leaves the conclusion well-founded.
@@ -29,8 +29,8 @@
 //! admit is caught by the next check. No predicate filter recovers the distinction, because
 //! it is not in the edges at all.
 //!
-//! The `do_project_justification` dispatch wrapper did NOT move: it is institution surface,
-//! and stays in `crates/eigenius-reasoning` until P7 deletes it with the rest.
+//! The `do_project_justification` dispatch wrapper did NOT move: it was institution surface,
+//! and P7 deleted it with the rest of the crate.
 //!
 //! **This is what justification logic buys over modal epistemic logic.** A stored scalar grade
 //! ("this claim is Derived") answers one question and forgets the reasons. The polynomial keeps

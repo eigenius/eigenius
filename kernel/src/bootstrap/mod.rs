@@ -402,7 +402,7 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
     //
     // BOOTSTRAPPED because the kernel already depends on it: `dcg::parse::resolve`
     // hardcodes `urn:eigenius:encoding:EncodedClaim` to find a landed claim's kind
-    // class, and `eigenius-reasoning` carries the six kind IRIs as consts. Leaving
+    // class, and the reasoning crate carried the six kind IRIs as consts. Leaving
     // the vocabulary in a user layer did not remove that dependency, it only made
     // it undeclared — `FormalizeDocument` degraded quietly on a chain without it.
     // Same bar `reasoning` / `statistics` / `lean-institution` already clear.
@@ -1354,14 +1354,11 @@ class p:Cat { description = "a dog"; }"#;
     }
 
     #[test]
-    fn bootstrap_includes_reasoning_layer_artifacts() {
-        // D39 Phase 8 — confirm the reasoning layer's load_esl_layer
-        // call produced the expected chain artifacts: the 4 ChainWitness
-        // predicates, the 2 indexed inductives (justification:Term +
-        // justification:Certificate), the 2 resource classes (justification:Conclusion +
-        // VerifiedPropositionView), the 2 query-request classes
-        // (EntailmentRequest + ConsistencyRequest), the institution
-        // resource, the 3 QueryClasses, and the ExportFormat.
+    fn bootstrap_resolves_the_justification_layer_artifacts() {
+        // The two indexed inductives (justification:Term + justification:Certificate) and the
+        // two resource classes, plus the three witness predicates the certificate ctors
+        // reference — those now resolve from CORE, which is the point of the P7 move: the
+        // kernel constructs their inhabitants, so they cannot be owned by a layer above it.
         let ctx = bootstrap().unwrap();
         for iri in [
             "urn:eigenius:witness:IsDeclaredAs",
@@ -1371,18 +1368,39 @@ class p:Cat { description = "a dog"; }"#;
             "urn:eigenius:justification:Certificate",
             "urn:eigenius:justification:Conclusion",
             "urn:eigenius:justification:VerifiedPropositionView",
-            "urn:eigenius:justification:EntailmentRequest",
-            "urn:eigenius:justification:ConsistencyRequest",
-            "urn:eigenius:reasoning:reasoning_institution",
-            "urn:eigenius:reasoning:qc_validate_justification",
-            "urn:eigenius:reasoning:qc_entailment_query",
-            "urn:eigenius:reasoning:qc_consistency_check",
-            "urn:eigenius:reasoning:ef_justification",
         ] {
             let parsed = Iri::parse(iri).unwrap();
             assert!(
                 ctx.resolve(&parsed).is_some(),
-                "bootstrap should resolve reasoning-layer artifact `{iri}`"
+                "bootstrap should resolve justification-layer artifact `{iri}`"
+            );
+        }
+    }
+
+    #[test]
+    fn the_reasoning_namespace_resolves_to_nothing() {
+        // P7 deleted the Reasoning institution, its ExportFormat, all four QueryClasses, and
+        // the EntailmentRequest / ConsistencyRequest input classes. ValidateJustification was
+        // absorbed into commit by P2, EntailmentQuery's question is a witness-index lookup,
+        // ConsistencyCheck returned Undecidable for every non-empty input, and
+        // ProjectJustification's algebra moved to `kernel/src/justification/` at P6.0. With no
+        // handler left the institution hosted nothing, so `urn:eigenius:reasoning` names
+        // nothing on a bootstrapped chain.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:reasoning:reasoning_institution",
+            "urn:eigenius:reasoning:ef_justification",
+            "urn:eigenius:reasoning:qc_validate_justification",
+            "urn:eigenius:reasoning:qc_entailment_query",
+            "urn:eigenius:reasoning:qc_consistency_check",
+            "urn:eigenius:reasoning:qc_project_justification",
+            "urn:eigenius:justification:EntailmentRequest",
+            "urn:eigenius:justification:ConsistencyRequest",
+        ] {
+            let parsed = Iri::parse(iri).unwrap();
+            assert!(
+                ctx.resolve(&parsed).is_none(),
+                "`{iri}` was retired at P7 and must not resolve"
             );
         }
     }

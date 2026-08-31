@@ -28,7 +28,7 @@ fn fail(stage: &str, errs: Vec<impl std::fmt::Debug>) -> ! {
 #[test]
 fn bench_core_and_mol_round_trip() {
     // core
-    let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+    let core_json = include_str!("../../ontologies/core/core-ontology.json");
     let core_resources = eigon_json::parse_document(core_json).unwrap();
     let mut core_builder = LayerBuilder::new("core", None);
     for r in core_resources {
@@ -37,25 +37,23 @@ fn bench_core_and_mol_round_trip() {
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
     // reflection (+ eigentt + institution), as in drug_screening.rs
-    let reflection_json = include_str!("../../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../ontologies/reflection/reflection-ontology.json");
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in eigon_json::parse_document(reflection_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();
     }
-    let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
+    let eigentt_json = include_str!("../../ontologies/eigentt/eigentt-type-fragment.json");
     for r in eigon_json::parse_document(eigentt_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();
     }
-    let institution_json =
-        include_str!("../../../ontologies/institution/institution-ontology.json");
+    let institution_json = include_str!("../../ontologies/institution/institution-ontology.json");
     for r in eigon_json::parse_document(institution_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     // bench-core, compiled against reflection
-    let bench_core_src =
-        include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl");
+    let bench_core_src = include_str!("../../experiments/benchmark/base-ontologies/bench-core.esl");
     let bench_core_resources = esl::compile_against_layer(bench_core_src, &reflection)
         .unwrap_or_else(|errs| fail("bench-core.esl compile", errs));
     assert!(
@@ -69,7 +67,7 @@ fn bench_core_and_mol_round_trip() {
     let bench_core = Arc::new(bc_builder.build(LayerStorage::in_memory()));
 
     // harness-ontology (bench:TaskOutput), compiled against bench-core
-    let harness_src = include_str!("../../../experiments/benchmark/harness-ontology.esl");
+    let harness_src = include_str!("../../experiments/benchmark/harness-ontology.esl");
     let harness_resources = esl::compile_against_layer(harness_src, &bench_core)
         .unwrap_or_else(|errs| fail("harness-ontology.esl compile", errs));
     assert!(
@@ -83,7 +81,7 @@ fn bench_core_and_mol_round_trip() {
     let harness = Arc::new(harness_builder.build(LayerStorage::in_memory()));
 
     // mol, compiled against harness (linear chain: bench-core → harness → mol)
-    let mol_src = include_str!("../../../experiments/benchmark/base-ontologies/mol.esl");
+    let mol_src = include_str!("../../experiments/benchmark/base-ontologies/mol.esl");
     let mol_resources = esl::compile_against_layer(mol_src, &harness)
         .unwrap_or_else(|errs| fail("mol.esl compile", errs));
     assert!(!mol_resources.is_empty(), "mol produced no resources");

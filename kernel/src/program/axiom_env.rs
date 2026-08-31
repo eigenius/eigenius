@@ -372,7 +372,7 @@ mod tests {
     /// the result. Without [`crate::nbe::term::Exp::EigonAxiom`] +
     /// the layer's cached `axiom_env()` accessor, `decode_type` would
     /// fail at `ConstRefWrongClass` and the bridge-resource fixture
-    /// pattern in `crates/eigenius-reasoning/tests/fixtures/` would
+    /// pattern in `kernel/tests/fixtures/` would
     /// have no path to compose statistical → domain propositions.
     #[test]
     fn axiom_reference_decodes_and_type_checks() {

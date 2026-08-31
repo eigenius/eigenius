@@ -38,7 +38,7 @@ use eigenius_kernel::ontology::iri::Iri;
 
 /// core + reflection/eigentt/institution + `reasoning.esl` + the fixture.
 fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext {
-    let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+    let core_json = include_str!("../../ontologies/core/core-ontology.json");
     let mut core_builder = LayerBuilder::new("core", None);
     for r in eigon_json::parse_document(core_json).unwrap() {
         core_builder.add_resource(r).unwrap();
@@ -47,9 +47,9 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
 
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for src in [
-        include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        include_str!("../../../ontologies/institution/institution-ontology.json"),
+        include_str!("../../ontologies/reflection/reflection-ontology.json"),
+        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+        include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(src).unwrap() {
             reflection_builder.add_resource(r).unwrap();
@@ -61,11 +61,9 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources = esl::compile_against_layer(
-        include_str!("../../../ontologies/prov/prov.esl"),
-        &reflection,
-    )
-    .expect("prov.esl compiles");
+    let prov_resources =
+        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+            .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -134,7 +132,7 @@ fn judgement_diagnostic(reasoning_source: &str) -> String {
 #[test]
 fn spec_poly_holds_as_shipped() {
     let diagnostic = judgement_diagnostic(include_str!(
-        "../../../ontologies/justification/justification.esl"
+        "../../ontologies/justification/justification.esl"
     ));
     assert!(
         diagnostic.is_empty(),
@@ -150,7 +148,7 @@ fn spec_poly_holds_as_shipped() {
 /// drift, and the assertion below fails loudly if the binder ever moves again.
 #[test]
 fn spec_poly_at_a_set_domain_is_rejected() {
-    let source = include_str!("../../../ontologies/justification/justification.esl")
+    let source = include_str!("../../ontologies/justification/justification.esl")
         .replace("forall (T : Type 1,", "forall (T : Set,");
     assert!(
         source.contains("forall (T : Set,"),

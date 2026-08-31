@@ -172,7 +172,7 @@ fn build_phase3_ctx() -> ExecutionContext {
     let core = {
         let mut b = LayerBuilder::new("core", None);
         for r in
-            eigon_json::parse_document(include_str!("../../../ontologies/core/core-ontology.json"))
+            eigon_json::parse_document(include_str!("../../ontologies/core/core-ontology.json"))
                 .unwrap()
         {
             b.add_resource(r).unwrap();
@@ -182,10 +182,10 @@ fn build_phase3_ctx() -> ExecutionContext {
     let reflection = {
         let mut b = LayerBuilder::new("reflection", Some(core));
         for src in [
-            include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-            include_str!("../../../ontologies/institution/institution-ontology.json"),
-            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
+            include_str!("../../ontologies/reflection/reflection-ontology.json"),
+            include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+            include_str!("../../ontologies/institution/institution-ontology.json"),
+            include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
                 b.add_resource(r).unwrap();
@@ -197,7 +197,7 @@ fn build_phase3_ctx() -> ExecutionContext {
     // names an agent, a trace or an attribution.
     let prov = {
         let mut b = LayerBuilder::new("prov", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+        for r in esl::compile(include_str!("../../ontologies/prov/prov.esl")).unwrap() {
             b.add_resource(r).unwrap();
         }
         Arc::new(b.build(LayerStorage::in_memory()))
@@ -205,7 +205,7 @@ fn build_phase3_ctx() -> ExecutionContext {
     let reasoning = {
         let mut b = LayerBuilder::new("reasoning", Some(prov));
         for r in esl::compile(include_str!(
-            "../../../ontologies/justification/justification.esl"
+            "../../ontologies/justification/justification.esl"
         ))
         .expect("reasoning.esl compiles")
         {
@@ -214,7 +214,7 @@ fn build_phase3_ctx() -> ExecutionContext {
         Arc::new(b.build(LayerStorage::in_memory()))
     };
     let statistics = esl_against(
-        include_str!("../../../ontologies/statistics/statistics.esl"),
+        include_str!("../../ontologies/statistics/statistics.esl"),
         &reasoning,
         "statistics",
     );
@@ -222,59 +222,55 @@ fn build_phase3_ctx() -> ExecutionContext {
     // never carried the ontology declaring it. Nothing noticed because the layers
     // were built without structural validation.
     let reference = esl_against(
-        include_str!("../../../ontologies/reference/reference.esl"),
+        include_str!("../../ontologies/reference/reference.esl"),
         &statistics,
         "reference",
     );
     let bench_core = esl_against(
-        include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl"),
+        include_str!("../../experiments/benchmark/base-ontologies/bench-core.esl"),
         &reference,
         "bench-core",
     );
     let harness = esl_against(
-        include_str!("../../../experiments/benchmark/harness-ontology.esl"),
+        include_str!("../../experiments/benchmark/harness-ontology.esl"),
         &bench_core,
         "harness",
     );
     let onco = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/chain/01-onco.esl"),
+        include_str!("../../experiments/publications/wrn-helicase/chain/01-onco.esl"),
         &harness,
         "onco",
     );
     // Literature layer: references + imported-claim warrants (reference:Citation),
     // composed as premises by the seed-control rule [16] etc.
     let literature = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/chain/02-literature.esl"),
+        include_str!("../../experiments/publications/wrn-helicase/chain/02-literature.esl"),
         &onco,
         "wrn-literature",
     );
     // D54 two-phase load: plans (emitters) before conclusions (consumers).
     let recompute_plans = esl_against(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl"
+            "../../experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl"
         ),
         &literature,
         "wrn-recompute-plans",
     );
     let recompute = esl_against_pending(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/chain/04-phase1-recompute-conclusions.esl"
+            "../../experiments/publications/wrn-helicase/chain/04-phase1-recompute-conclusions.esl"
         ),
         &recompute_plans,
         "wrn-recompute-conclusions",
         STATS_RECOMPUTED,
     );
     let phase1 = esl_against(
-        include_str!(
-            "../../../experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl"
-        ),
+        include_str!("../../experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl"),
         &recompute,
         "wrn-phase1",
     );
     let phase2 = esl_against(
-        include_str!(
-            "../../../experiments/publications/wrn-helicase/chain/07-phase2-validation.esl"
-        ),
+        include_str!("../../experiments/publications/wrn-helicase/chain/07-phase2-validation.esl"),
         &phase1,
         "wrn-phase2",
     );
@@ -291,14 +287,14 @@ fn build_phase3_ctx() -> ExecutionContext {
     let program_inputs = {
         let mut b = LayerBuilder::new("wrn-program-inputs", Some(phase2.clone()));
         for src in [
-            include_str!("../../../experiments/publications/wrn-helicase/programs/invivo/xenograft-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/invivo/km12-competition-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/foci-ed6-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-foci-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-intensity-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/if-ed5-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/mechanism/patm-foci-input.json"),
-            include_str!("../../../experiments/publications/wrn-helicase/programs/specificity/paralog-ed9a-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/invivo/xenograft-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/invivo/km12-competition-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/foci-ed6-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-foci-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-intensity-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/if-ed5-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/patm-foci-input.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/specificity/paralog-ed9a-input.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
                 b.add_resource(r).unwrap();
@@ -308,14 +304,14 @@ fn build_phase3_ctx() -> ExecutionContext {
     };
     let provenance = esl_against(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/chain/08a-program-provenance.esl"
+            "../../experiments/publications/wrn-helicase/chain/08a-program-provenance.esl"
         ),
         &program_inputs,
         "wrn-08a",
     );
     let phase3 = esl_against_pending(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/chain/08-phase3-invivo-mechanism.esl"
+            "../../experiments/publications/wrn-helicase/chain/08-phase3-invivo-mechanism.esl"
         ),
         &provenance,
         "wrn-phase3",

@@ -21,7 +21,7 @@
 //! — `eigenius_lean::LeanInstitution::arc()` in `cli/src/main.rs`,
 //! handed to `start_server`, which registers each entry itself. This
 //! module is the seam a host that is not the CLI would use, and it is
-//! kept in step with `eigenius-reasoning` and `eigenius-statistics`,
+//! kept in step with `eigenius-statistics`,
 //! whose identically-shaped `startup::register` functions are equally
 //! uncalled. Either way, the chain-scan
 //! `register_in_process_institutions` pass (kernel-side, Phase 20a.1)

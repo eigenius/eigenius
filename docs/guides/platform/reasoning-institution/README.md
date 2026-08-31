@@ -118,7 +118,7 @@ All four must pass for `Verdict::Holds`. Any failure produces `Verdict::Fails` c
 
 ## Walking a worked example — drug-screening end-to-end
 
-The capstone fixture at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl) walks the cycle that closes between the verdict and the raw measurement readings the proof transitively depends on. Read forward, the chain is:
+The capstone fixture at [`kernel/tests/fixtures/drug_screening.esl`](../../../../kernel/tests/fixtures/drug_screening.esl) walks the cycle that closes between the verdict and the raw measurement readings the proof transitively depends on. Read forward, the chain is:
 
 ```text
 HasLowIC50, StrongInhibitor                     [PopulationLevel-marked predicates in Prop]
@@ -297,4 +297,4 @@ A failed gate gives you one string on the `Verdict`, under `urn:eigenius:institu
 - [**D48 Indexed inductive families**](../../../design/d48-indexed-inductive-families.md) — the type theory that makes `justification:Certificate : justification:Term -> Prop -> Type 0` expressible.
 - [`crates/eigenius-reasoning/`](../../../../crates/eigenius-reasoning/) — institution implementation.
 - [`ontologies/justification/justification.esl`](../../../../ontologies/justification/justification.esl) — ontology source.
-- [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl) — the worked example this tutorial walks.
+- [`kernel/tests/fixtures/drug_screening.esl`](../../../../kernel/tests/fixtures/drug_screening.esl) — the worked example this tutorial walks.

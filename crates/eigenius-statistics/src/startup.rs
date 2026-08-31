@@ -14,7 +14,7 @@
 
 //! Startup hook for the kernel binary: register the
 //! [`StatisticsInstitution`](crate::StatisticsInstitution) into the
-//! per-process in-process registry. Mirrors `eigenius_reasoning::startup`.
+//! per-process in-process registry.
 
 use std::sync::Arc;
 

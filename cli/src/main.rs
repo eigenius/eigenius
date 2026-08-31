@@ -2616,12 +2616,11 @@ async fn cmd_serve(
     // rebuilding the institution index, so AutoOnLoad QueryClasses
     // declared on the bootstrapped chain dispatch into the matching
     // Rust impl as a direct function call (per D28 §2.3 / §10.2 for
-    // Lean, D39 §4.3 / D14 for Reasoning, D52 §6 for Statistics).
+    // Lean, D52 §6 for Statistics).
     let in_process_institutions: Vec<
         std::sync::Arc<dyn eigenius_kernel::institution::runtime::Institution>,
     > = vec![
         eigenius_lean::LeanInstitution::arc(),
-        eigenius_reasoning::ReasoningInstitution::arc(),
         eigenius_statistics::StatisticsInstitution::arc(),
     ];
 

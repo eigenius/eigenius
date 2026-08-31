@@ -46,7 +46,7 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 
 fn build_universal_rule_chain() -> ExecutionContext {
-    let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+    let core_json = include_str!("../../ontologies/core/core-ontology.json");
     let core_resources = eigon_json::parse_document(core_json).unwrap();
     let mut core_builder = LayerBuilder::new("core", None);
     for r in core_resources {
@@ -54,36 +54,33 @@ fn build_universal_rule_chain() -> ExecutionContext {
     }
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
-    let reflection_json = include_str!("../../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../ontologies/reflection/reflection-ontology.json");
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
         reflection_builder.add_resource(r).unwrap();
     }
-    let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
+    let eigentt_json = include_str!("../../ontologies/eigentt/eigentt-type-fragment.json");
     let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
     for r in eigentt_resources {
         reflection_builder.add_resource(r).unwrap();
     }
-    let institution_json =
-        include_str!("../../../ontologies/institution/institution-ontology.json");
+    let institution_json = include_str!("../../ontologies/institution/institution-ontology.json");
     let institution_resources = eigon_json::parse_document(institution_json).unwrap();
     for r in institution_resources {
         reflection_builder.add_resource(r).unwrap();
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
+    let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
     let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
     // `prov` (P5). These fixtures carry `prov:` properties and trace classes; without this
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources = esl::compile_against_layer(
-        include_str!("../../../ontologies/prov/prov.esl"),
-        &reflection,
-    )
-    .expect("prov.esl compiles");
+    let prov_resources =
+        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+            .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();

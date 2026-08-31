@@ -2,7 +2,7 @@
 
 The [kinase walkthrough (chapter 6)](06-kinase-walkthrough.md) traces the platform's first composition shape: five Julia institutions coordinating over `formulas:FormulaTerm`, bridged by declared comorphisms, AutoOnLoad gates firing as data flows through the typed pipeline. This chapter traces the second composition shape: the [D52 measurement-statistics institution](../platform/statistics-institution/README.md) and the [D39 reasoning institution](../platform/reasoning-institution/README.md), bridged by the [D49 chain-witness index](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) over a shared `eigentt:TypeExpr` proposition slot. The two shapes use the same chain primitives — typed resources, AutoOnLoad cascades, deterministic verifiers — but with a different bridge mechanism. Reading both walkthroughs side by side surfaces the choice space: comorphism-mediated translation when one runtime's output needs to be reshaped for another's consumption, witness-index admission when one institution's verdict is being cited as evidence rather than re-processed.
 
-The fixture this chapter traces lives at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl). The end-to-end test that exercises it is [`crates/eigenius-reasoning/tests/drug_screening.rs`](../../../crates/eigenius-reasoning/tests/drug_screening.rs).
+The fixture this chapter traces lives at [`kernel/tests/fixtures/drug_screening.esl`](../../../kernel/tests/fixtures/drug_screening.esl). The end-to-end test that exercises it is [`kernel/tests/drug_screening.rs`](../../../kernel/tests/drug_screening.rs).
 
 ## 7.1. The scenario
 

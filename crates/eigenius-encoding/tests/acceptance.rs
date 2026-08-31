@@ -31,14 +31,11 @@ use std::sync::Arc;
 
 use eigenius_encoding::snapshot::open_head_and_backend;
 use eigenius_kernel::commit::{BackendPersister, LayerPersister};
-use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::storage::PersistentBackend;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 fn repo(rel: &str) -> String {
     format!("{}/../../{rel}", env!("CARGO_MANIFEST_DIR"))
@@ -67,32 +64,20 @@ fn load_layer(
     layer
 }
 
-/// The D39 gate verdict on `sentence_iri`, validated against the chain at `head`.
-fn gate_verdict(head: &Arc<Layer>, sentence: &Resource) -> (String, Option<String>) {
-    let ctx = ExecutionContext::new(
-        Arc::clone(head),
-        "acceptance",
-        ExecutionMode::ReadOnly,
-        LayerStorage::in_memory(),
-    );
-    let institution = ReasoningInstitution::new();
-    match do_validate_justification(&institution, sentence, &ctx) {
-        Ok(outcome) => {
-            let ctor = outcome
-                .output
-                .get(&Iri::parse(eigenius_kernel::ontology::well_known::CTOR_NAME).unwrap())
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let diag = outcome
-                .output
-                .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            (ctor, diag)
-        }
-        Err(e) => ("Err".to_string(), Some(format!("{e:?}"))),
-    }
+/// Every validation error the chain at `head` reports about `sentence`.
+///
+/// Empty means the D39 gate passes. Was a `ValidateJustification` dispatch returning a
+/// `Verdict` whose ctor was compared against `"Holds"`; P2 moved the certificate check to
+/// commit and P7 dissolves the institution, so the gate is read off validation. The
+/// diagnostic the caller asserts on is the joined error text.
+fn gate_errors(head: &Arc<Layer>, sentence: &Resource) -> Vec<String> {
+    let iri = sentence.id().cloned().expect("a chain sentence has an @id");
+    eigenius_kernel::validation::Validator::new(Arc::clone(head))
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == iri))
+        .map(|e| e.message)
+        .collect()
 }
 
 #[test]
@@ -159,11 +144,12 @@ fn intact_inference_holds_and_edited_is_refused() {
     let sentence = intact
         .resolve(&Iri::parse("urn:eigenius:demo:v2:inferred:sentence").unwrap())
         .expect("the inferred sentence is on the branch");
-    let (ctor, diag) = gate_verdict(&intact, &sentence);
-    eprintln!("intact verdict: {ctor} {diag:?}");
-    assert_eq!(
-        ctor, "Holds",
-        "the INTACT inference must Hold — RequiresActivity is justified by derivation: {diag:?}"
+    let errors = gate_errors(&intact, &sentence);
+    eprintln!("intact errors: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "the INTACT inference must pass — RequiresActivity is justified by derivation; got:\n{}",
+        errors.join("\n")
     );
 
     // 3. EDITED: the negated measurement — same inference file, no witness for its antecedent.
@@ -187,16 +173,14 @@ fn intact_inference_holds_and_edited_is_refused() {
     let sentence = edited
         .resolve(&Iri::parse("urn:eigenius:demo:v2:inferred:sentence").unwrap())
         .expect("the inferred sentence resource still builds");
-    let (ctor, diag) = gate_verdict(&edited, &sentence);
-    eprintln!("edited verdict: {ctor} {diag:?}");
-    assert_ne!(
-        ctor, "Holds",
-        "the EDITED inference must NOT hold — its antecedent's witness never existed"
-    );
-    let diag = diag.unwrap_or_default();
-    eprintln!("edited diagnostic (surfaced): {diag}");
+    let errors = gate_errors(&edited, &sentence);
+    eprintln!("edited errors: {errors:?}");
     assert!(
-        !diag.is_empty(),
-        "the refusal carries a diagnostic — the run.sh:222 gap, surfaced here"
+        !errors.is_empty(),
+        "the EDITED inference must NOT pass — its antecedent's witness never existed"
     );
+    // The refusal carries a diagnostic — the run.sh:222 gap, surfaced here.
+    let diag = errors.join("\n");
+    eprintln!("edited diagnostic (surfaced): {diag}");
+    assert!(!diag.trim().is_empty(), "the refusal names a reason");
 }

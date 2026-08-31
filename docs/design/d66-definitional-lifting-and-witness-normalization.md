@@ -475,7 +475,7 @@ no longer indistinguishable from an absent witness (§4.2).
 Verified:
 - `cargo test --workspace` — 170 suites, **2747 passed, 0 failed**; clippy clean under `-D warnings`.
   Slice 1 is a no-op on everything currently on chain, which is the point.
-- `crates/eigenius-reasoning/tests/witness_hash_agreement.rs` — the emit and check sides agree on the
+- `kernel/tests/witness_hash_agreement.rs` — the emit and check sides agree on the
   **definite description** `Fst(the(Σx. …))` that every parsed sentence contains, on its negated form
   `⟨parse⟩ → False`, and across binder renaming. The negated and un-negated forms hash **differently**,
   which is what makes the demo's one-word edit detectable. A fourth test asserts the comparison is not
@@ -734,7 +734,7 @@ The rule being eliminated quantifies over a kind (`forall (m : Set)`, over
 `HasActivity : Set -> Set -> Prop`), so its domain really is `Set` and eliminating the quantifier
 needs a domain binder strictly above `Set`. Raising `spec_poly`'s binder to `T : Type 1`, with the
 certificate unchanged, restores `Holds`; both ends are pinned in
-`crates/eigenius-reasoning/tests/spec_poly_universe.rs`. Whether the reasoning ontology takes that
+`kernel/tests/spec_poly_universe.rs`. Whether the reasoning ontology takes that
 level-1 bump or universe-polymorphic binders is open — `spec_poly`'s signature is published in
 `docs/spec/ai-computed-provenance-1.0.md`. D66 §2.2 reuses this instantiation and inherits the
 answer.

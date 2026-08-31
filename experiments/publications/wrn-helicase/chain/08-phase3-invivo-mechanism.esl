@@ -25,7 +25,6 @@
 namespace core          = "urn:eigenius:core";
 namespace formats       = "urn:eigenius:core:formats";
 namespace reflection    = "urn:eigenius:reflection";
-namespace reasoning     = "urn:eigenius:reasoning";
 namespace eigentt       = "urn:eigenius:eigentt";
 namespace bench         = "urn:eigenius:benchmark";
 namespace onco          = "urn:eigenius:benchmark:onco";

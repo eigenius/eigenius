@@ -221,7 +221,7 @@ impl<'a> InProcessPipeline<'a> {
     /// Like [`DocumentPipeline::encode`], but also returns the doc-glossary layer the sentences
     /// were parsed over (`base` + the glossary) — in-memory by default, the committed `doc-<id>`
     /// branch head under [`Self::with_storage`]. An in-process downstream stage — claim grading
-    /// in `eigenius-reasoning` — commits onto *this* layer, so a claim whose proposition
+    /// in the kernel — commits onto *this* layer, so a claim whose proposition
     /// references a doc-glossary-only concept (a grounding-miss minted class) still resolves in
     /// the chain. The trait's [`DocumentPipeline::encode`] drops it; a served realization returns
     /// a committed branch instead, which is why the layer is exposed here (inherent), not on the

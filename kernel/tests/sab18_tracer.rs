@@ -1,28 +1,23 @@
-// TEMPORARY tracer test for SAB 16 (D51 gap-5/gap-6 shakedown).
+// TEMPORARY tracer test for SAB 18 (DILI RF) — same model as SAB 16 v3.
 //
 // Builds core → reflection → reasoning → bench-core → harness → mol →
-// SAB-16 chain, then runs the ValidateJustification handler on the
-// hand-authored `ImplementsRequiredFilter(solution)` justification:Conclusion and
-// asserts Holds. The chain justifies the program's construction via five
-// Declared methodological conformances composed through an acceptance rule
-// (the corrected, program-as-object-code model). Move into the harness
-// crate when D51 gap 7 lands.
+// SAB-18 chain, runs ValidateJustification on the
+// `ImplementsDILIPredictor(solution)` justification:Conclusion (five Declared
+// methodological conformances composed through an acceptance rule), asserts
+// Holds, then checks the decision↔code-block coverage. Move into the
+// harness crate when D51 gap 7 lands.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::esl;
-use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Value;
 
-fn esl_against(
-    source: &str,
-    parent: &Arc<eigenius_kernel::layer::Layer>,
-    name: &str,
-) -> Arc<eigenius_kernel::layer::Layer> {
+fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile:\n{}",
@@ -40,9 +35,9 @@ fn esl_against(
 }
 
 #[test]
-fn sab16_compound_filter_validates_to_holds() {
+fn sab18_dili_rf_validates_to_holds_and_covers() {
     // core
-    let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+    let core_json = include_str!("../../ontologies/core/core-ontology.json");
     let mut core_builder = LayerBuilder::new("core", None);
     for r in eigon_json::parse_document(core_json).unwrap() {
         core_builder.add_resource(r).unwrap();
@@ -52,9 +47,9 @@ fn sab16_compound_filter_validates_to_holds() {
     // reflection (+ eigentt + institution)
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for src in [
-        include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        include_str!("../../../ontologies/institution/institution-ontology.json"),
+        include_str!("../../ontologies/reflection/reflection-ontology.json"),
+        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+        include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(src).unwrap() {
             reflection_builder.add_resource(r).unwrap();
@@ -62,17 +57,15 @@ fn sab16_compound_filter_validates_to_holds() {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    // reasoning (compiled standalone, as drug_screening.rs does)
-    let reasoning_src = include_str!("../../../ontologies/justification/justification.esl");
+    // reasoning
+    let reasoning_src = include_str!("../../ontologies/justification/justification.esl");
     // `prov` (P5). These fixtures carry `prov:` properties and trace classes; without this
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources = esl::compile_against_layer(
-        include_str!("../../../ontologies/prov/prov.esl"),
-        &reflection,
-    )
-    .expect("prov.esl compiles");
+    let prov_resources =
+        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+            .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -85,42 +78,38 @@ fn sab16_compound_filter_validates_to_holds() {
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
-    // bench-core → harness (bench:TaskOutput) → mol → SAB-16 tracer chain
+    // bench-core → harness → mol → SAB-18 chain
     let bench_core = esl_against(
-        include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl"),
+        include_str!("../../experiments/benchmark/base-ontologies/bench-core.esl"),
         &reasoning,
         "bench-core",
     );
     let harness = esl_against(
-        include_str!("../../../experiments/benchmark/harness-ontology.esl"),
+        include_str!("../../experiments/benchmark/harness-ontology.esl"),
         &bench_core,
         "harness",
     );
     let mol = esl_against(
-        include_str!("../../../experiments/benchmark/base-ontologies/mol.esl"),
+        include_str!("../../experiments/benchmark/base-ontologies/mol.esl"),
         &harness,
         "mol",
     );
     let chain = esl_against(
-        include_str!(
-            "../../../experiments/benchmark/tasks/sab/16-compound-filter/tracer-chain.esl"
-        ),
+        include_str!("../../experiments/benchmark/tasks/sab/18-dili-rf/tracer-chain.esl"),
         &mol,
-        "sab16-chain",
+        "sab18-chain",
     );
-
-    // Force the witness index (admits IsDeclaredAs on the acceptance rule
-    // + the five methodological conformances).
 
     let ctx = ExecutionContext::new(
         chain,
-        "sab16-chain",
+        "sab18-chain",
         ExecutionMode::ReadOnly,
         LayerStorage::in_memory(),
     );
 
+    // ── reasoning validates to Holds ──
     let sentence_iri =
-        Iri::parse("urn:eigenius:bench:sab16:concl_solution_implements").expect("sentence IRI");
+        Iri::parse("urn:eigenius:bench:sab18:concl_solution_implements").expect("sentence IRI");
     ctx.resolve(&sentence_iri)
         .unwrap_or_else(|| panic!("sentence `{sentence_iri}` should be on the chain"));
 
@@ -137,17 +126,12 @@ fn sab16_compound_filter_validates_to_holds() {
             "
 ",
         );
-
     assert!(diagnostic.is_empty(), "expected Holds; got: {diagnostic}");
 
-    // ── Coverage check: the decision ↔ code-block overlay ───────────
-    // Every methodological decision is realised by some CodeBlock (no
-    // unimplemented method), and every block's label has a matching region
-    // marker in the program payload (no dangling overlay).
-    let solution = ctx
-        .resolve(&Iri::parse("urn:eigenius:bench:sab16:solution").unwrap())
-        .expect("solution TaskOutput on chain");
-    let payload = solution
+    // ── coverage check: decision ↔ code-block overlay ──
+    let payload = ctx
+        .resolve(&Iri::parse("urn:eigenius:bench:sab18:solution").unwrap())
+        .expect("solution TaskOutput on chain")
         .get(&Iri::parse("urn:eigenius:benchmark:payload").unwrap())
         .and_then(Value::as_str)
         .expect("solution carries a payload")
@@ -183,22 +167,21 @@ fn sab16_compound_filter_validates_to_holds() {
             other => panic!("CodeBlock `{label}` realizes is not an array: {other:?}"),
         }
     }
-    assert_eq!(block_count, 3, "expected 3 code blocks");
+    assert_eq!(block_count, 5, "expected 5 code blocks");
 
     let decisions: BTreeSet<String> = [
         "conf_featurization",
-        "conf_alert_catalogs",
-        "conf_reduction",
-        "conf_threshold",
-        "conf_composition",
+        "conf_label_mapping",
+        "conf_configs",
+        "conf_model_selection",
+        "conf_output_format",
     ]
     .iter()
-    .map(|d| format!("urn:eigenius:bench:sab16:{d}"))
+    .map(|d| format!("urn:eigenius:bench:sab18:{d}"))
     .collect();
 
     assert_eq!(
         realized, decisions,
-        "code blocks must realise exactly the five methodological decisions \
-         (every decision implemented, none unwarranted)"
+        "code blocks must realise exactly the five methodological decisions"
     );
 }

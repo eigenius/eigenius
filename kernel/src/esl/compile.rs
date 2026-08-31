@@ -6210,68 +6210,39 @@ mod tests {
             );
         }
 
-        // Phase 4 added two resource classes (justification:Conclusion +
-        // VerifiedPropositionView) + their property declarations.
-        // Phase 7 added the two query-request classes
-        // (EntailmentRequest + ConsistencyRequest). TaskOutput is
-        // intentionally not here — D39 §4.4 justifies it entirely by
-        // the discipline-thesis benchmark work (D50/D51), so it lives
-        // with the benchmark harness, not in the foundational
-        // Reasoning institution ontology.
+        // The two resource classes. TaskOutput is intentionally not here — D39 §4.4
+        // justifies it entirely by the discipline-thesis benchmark work (D50/D51), so it
+        // lives with the benchmark harness.
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
             "urn:eigenius:justification:Conclusion",
             "urn:eigenius:justification:VerifiedPropositionView",
-            "urn:eigenius:justification:EntailmentRequest",
-            "urn:eigenius:justification:ConsistencyRequest",
         ] {
             assert!(
                 resources
                     .iter()
                     .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)
                         && r.is_a().iter().any(|c| c == &class_iri)),
-                "reasoning.esl missing class declaration for {expected}"
+                "justification.esl missing class declaration for {expected}"
             );
         }
 
-        // Phase 5a — the Reasoning institution resource + three
-        // QueryClass resources. Each carries its declared `is_a`
-        // pointing at the institution-ontology base class.
-        let institution_class = Iri::parse("urn:eigenius:institution:Institution").unwrap();
-        let qc_class = Iri::parse("urn:eigenius:institution:QueryClass").unwrap();
-        assert!(
-            resources.iter().any(|r| r
-                .id()
-                .map(|i| i.as_str() == "urn:eigenius:reasoning:reasoning_institution")
-                .unwrap_or(false)
-                && r.is_a().iter().any(|c| c == &institution_class)),
-            "reasoning.esl missing the reasoning_institution resource"
-        );
-        for expected in &[
-            "urn:eigenius:reasoning:qc_validate_justification",
-            "urn:eigenius:reasoning:qc_entailment_query",
-            "urn:eigenius:reasoning:qc_consistency_check",
-        ] {
-            assert!(
-                resources
-                    .iter()
-                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)
-                        && r.is_a().iter().any(|c| c == &qc_class)),
-                "reasoning.esl missing QueryClass resource for {expected}"
-            );
+        // **`urn:eigenius:reasoning` names nothing.** P7 deleted the institution resource,
+        // its ExportFormat, all four QueryClasses, and the EntailmentRequest /
+        // ConsistencyRequest input classes — ValidateJustification was absorbed into commit
+        // by P2, EntailmentQuery's question is a witness-index lookup, ConsistencyCheck
+        // returned Undecidable for every non-empty input, and ProjectJustification's algebra
+        // moved to `kernel/src/justification/` at P6.0. With no handler left the institution
+        // hosted nothing. This asserts the namespace stays vacated.
+        for r in &resources {
+            if let Some(id) = r.id() {
+                assert!(
+                    !id.as_str().starts_with("urn:eigenius:reasoning"),
+                    "`{}` — the reasoning namespace was retired at P7 and must stay empty",
+                    id.as_str()
+                );
+            }
         }
-
-        // Phase 6 refactor — the ef_justification ExportFormat the
-        // validate handler dispatches through.
-        let ef_class = Iri::parse("urn:eigenius:institution:ExportFormat").unwrap();
-        assert!(
-            resources.iter().any(|r| r
-                .id()
-                .map(|i| i.as_str() == "urn:eigenius:reasoning:ef_justification")
-                .unwrap_or(false)
-                && r.is_a().iter().any(|c| c == &ef_class)),
-            "reasoning.esl missing the ef_justification ExportFormat resource"
-        );
     }
 
     #[test]

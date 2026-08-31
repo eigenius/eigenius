@@ -46,7 +46,7 @@ use eigenius_kernel::ontology::eigon_json;
 /// named fixture.
 fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
     let core_resources =
-        eigon_json::parse_document(include_str!("../../../ontologies/core/core-ontology.json"))
+        eigon_json::parse_document(include_str!("../../ontologies/core/core-ontology.json"))
             .unwrap();
     let mut core_builder = LayerBuilder::new("core", None);
     for r in core_resources {
@@ -56,9 +56,9 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
 
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for source in [
-        include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        include_str!("../../../ontologies/institution/institution-ontology.json"),
+        include_str!("../../ontologies/reflection/reflection-ontology.json"),
+        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+        include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(source).unwrap() {
             reflection_builder.add_resource(r).unwrap();
@@ -73,18 +73,16 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
     // stop loading for two months. It asserts it now, below.
     //
     // Sits above `reflection` and below `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources = esl::compile_against_layer(
-        include_str!("../../../ontologies/prov/prov.esl"),
-        &reflection,
-    )
-    .expect("prov.esl compiles");
+    let prov_resources =
+        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+            .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
     }
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
-    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
+    let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
     for r in esl::compile(reasoning_source).expect("justification.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();

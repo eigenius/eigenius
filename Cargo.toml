@@ -20,7 +20,6 @@ members = [
     "crates/eigenius-lean-worker",
     "crates/eigenius-r-worker",
     "crates/eigenius-r",
-    "crates/eigenius-reasoning",
     "crates/eigenius-statistics",
     "storage/tikv",
     "storage/rocksdb",

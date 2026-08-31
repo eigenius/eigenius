@@ -493,7 +493,7 @@ What the phase found that the plan did not predict, in the order it mattered:
   that is still what checks the numbers.
 
 - **The `Sum` strengthening cost zero, as predicted, and is now tested at commit.**
-  `crates/eigenius-reasoning/tests/sum_requires_both_branches.rs` — a `Sum` over two grounded
+  `kernel/tests/sum_requires_both_branches.rs` — a `Sum` over two grounded
   branches Holds; one whose fallback cites an ungroundable IRI is refused with a missing-`IsDeclaredAs`
   diagnostic naming the branch.
 
@@ -916,7 +916,7 @@ contains.
 
 Today the tag is a free `core:string` written as a `urn:`-prefixed value in practice —
 `SpecStr(DeclaredEvidence(rule_strong), "urn:eigenius:demo:screen:EIG_0291")` in
-`crates/eigenius-reasoning/tests/fixtures/universal_rule.esl:107`. `json_mentions` matches any
+`kernel/tests/fixtures/universal_rule.esl:107`. `json_mentions` matches any
 `urn:`-prefixed string at any depth, so **the tag becomes a mention edge inside the justification
 slot and is not a premise citation.** A predicate-on-the-triple filter cannot exclude it: the tag and
 the premise IRIs share a slot, so slot identity does not separate them. Only decoding does.
@@ -1106,13 +1106,45 @@ them — so the two halves of the move are pinned from both sides.
 boundary and the layer count is unchanged. `EXPECTED` updated in the same commit; the reseed
 batches with P7's remaining bootstrap edits.
 
-### P7 step 3 — the crate deletion *(in progress)*
+### P7 step 3 — the crate is deleted *(done `2026-08-31`)*
 
-The 13 test files left in `crates/eigenius-reasoning/tests/` reference `eigenius_reasoning` **zero
-times** — step 1 rewrote them onto the kernel's check — so they relocate verbatim. The external
-surface is three items across five files: `ReasoningInstitution` (registered by `cli/src/main.rs`
-and `crates/eigenius-statistics/src/startup.rs`), `validate::do_validate_justification` (called by
-three test files, converted the same way step 1 converted eleven), and `startup`.
+**BOOTSTRAP EDIT** — the `justification` manifest moves; `EXPECTED` updated in the same commit.
+
+`crates/eigenius-reasoning` is gone: 1,079 lines across 8 files (`consistency.rs`, `entailment.rs`,
+`extract.rs`, `institution.rs`, `lib.rs`, `project.rs`, `startup.rs`, `validate.rs`). Every caller
+of the three functions the plan expected to survive — `extract_justification`, `justification_exp`,
+`do_project_justification` — was inside the crate itself, so nothing needed rehoming.
+
+The 13 remaining test files referenced `eigenius_reasoning` **zero times** — step 1 had already
+rewritten them onto the kernel's check — so they moved to `kernel/tests/` verbatim with their
+fixtures, `../../../` corrected to `../../`. 43 tests, all passing in the new home.
+
+Three external files still called `do_validate_justification`, all resolving an
+ALREADY-COMMITTED sentence, which makes the conversion smaller than step 1's: validate the chain,
+filter to the sentence's IRI. `crates/eigenius-statistics/tests/{d39_composition,
+wrn_phase1_recompute}.rs` and `crates/eigenius-encoding/tests/acceptance.rs`. Two registration
+sites dropped the institution: `cli/src/main.rs` and `crates/eigenius-statistics/src/startup.rs`.
+`crates/eigenius-schemaorg` carried the dependency with no Rust reference to it at all.
+
+**`urn:eigenius:reasoning` now names nothing**, and two tests hold it that way:
+`the_reasoning_namespace_resolves_to_nothing` (bootstrap-side, eight IRIs) and a loop in
+`reasoning_ontology_esl_compiles` asserting no compiled resource carries the prefix. Deleted from
+`justification.esl`: the institution resource, `ef_justification`, all four QueryClasses, and the
+`EntailmentRequest` / `ConsistencyRequest` input classes with their two properties. Five namespace
+declarations went dead with them (`institution`, `reasoning`, `dispatch`, `runtimes`, `proc`), plus
+15 more dead `namespace reasoning` lines across fixtures, experiments and the demo — every one
+unused, verified before removal.
+
+**One residual, left declared.** `justification:Projection` and `justification:ProjectionRequest`
+survive with **no producer and no consumer anywhere in the tree**. The plan's disposition for
+`qc_project_justification` was explicit — *"delete the QueryClass and its dispatch wrapper;
+`project.rs`'s algebra stays"* — and said nothing about the result and request shapes. The algebra
+is live in `kernel/src/justification/` (`support`, `is_fully_verified`, `leaves_of`,
+`survives_without`, `cited_iris`) as ordinary functions; these two classes were the institution's
+way of reporting it. By the same posture the plan applies to `qc_consistency_check` — *"a reserved
+IRI for an unbuilt decision procedure is the follow-up-issue pattern the project's posture
+rejects"* — they should go too, but that is a wider call than this step's mandate and it is
+recorded here rather than taken silently.
 
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's

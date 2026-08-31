@@ -14,7 +14,6 @@ clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 
 [dev-dependencies]
-eigenius-reasoning = { path = "../eigenius-reasoning" }
 
 [[bin]]
 name = "schemaorg-import"

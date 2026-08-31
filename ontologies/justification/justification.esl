@@ -37,12 +37,7 @@ namespace core          = "urn:eigenius:core";
 namespace formats       = "urn:eigenius:core:formats";
 namespace eigentt       = "urn:eigenius:eigentt";
 namespace reflection    = "urn:eigenius:reflection";
-namespace institution   = "urn:eigenius:institution";
-namespace reasoning     = "urn:eigenius:reasoning";
 namespace witness       = "urn:eigenius:witness";
-namespace dispatch      = "urn:eigenius:institution:dispatch_roles";
-namespace runtimes      = "urn:eigenius:institution:runtimes";
-namespace proc          = "urn:eigenius:reasoning:proc";
 namespace justification = "urn:eigenius:justification";
 namespace prov       = "urn:eigenius:prov";
 
@@ -351,117 +346,21 @@ property justification:source_verified_resource : core:string {
     domain justification:VerifiedPropositionView;
 }
 
-// ── Query request classes (D39 §4.3 inputs) ──────────────────────────
+// ── What P7 deleted here ─────────────────────────────────────────────
 //
-// The OnDemand/Decidable QueryClasses take request resources rather
-// than dispatching against existing ReasoningSentences. Each class
-// declares the shape its handler reads.
-
-class justification:EntailmentRequest {
-    description = "Input to qc_entailment_query (D39 §4.3 OnDemand): ask whether the chain warrants the named candidate proposition. v1 of the handler performs a lookup-based search — it walks the layer chain for committed ReasoningSentences and returns Holds if any sentence's proposition matches the candidate. Undecidable otherwise (absence of evidence is not proof of impossibility). Bounded-depth proof search is follow-on work.";
-    requires justification:candidate_proposition;
-}
-
-property justification:candidate_proposition : core:inductive {
-    description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as justification:Conclusion.proposition.";
-    class_types eigentt:Term;
-    expected_type Prop;
-    domain justification:EntailmentRequest;
-}
-
-class justification:ConsistencyRequest {
-    description = "Input to qc_consistency_check (D39 §4.3 Decidable): ask whether the named set of ReasoningSentences is internally consistent. v1 returns Undecidable for any non-trivial input — the propositional-fragment decision procedure is follow-on work. The handler exists so the QueryClass IRI is dispatch-bound; reserved input shape so a richer handler can be plugged in without surface churn.";
-    requires justification:sentence_set;
-}
-
-property justification:sentence_set : core:resource_array {
-    description = "The ReasoningSentences whose joint consistency is being queried. v1 of the handler does not inspect this beyond a non-empty check.";
-    class_types justification:Conclusion;
-    domain justification:ConsistencyRequest;
-}
-
-// ── Reasoning institution (D39 §4.3 / D14) ───────────────────────────
+// The Reasoning institution and its surface used to sit between the classes above and the
+// projections below: `reasoning:reasoning_institution`, the `ef_justification` ExportFormat,
+// the `qc_validate_justification` / `qc_entailment_query` / `qc_consistency_check`
+// QueryClasses, and the `justification:EntailmentRequest` / `ConsistencyRequest` input
+// classes with their two properties.
 //
-// The institution resource itself — `is_a institution:Institution`.
-// `runtime = in_process` because the validator runs through the
-// kernel's NbE checker directly (no IPC, no orchestrator round-trip).
-// Procedure IRIs (proc:*) are opaque runtime handles bound by
-// `crates/eigenius-reasoning/` at registration time, mirroring how the
-// Lean institution binds `urn:eigenius:lean:proc:proof_check`.
+// ValidateJustification was the only one that did anything at commit, and P2 absorbed it into
+// uniform validation — checking a certificate is type checking, which the kernel does not
+// delegate. EntailmentQuery's question (*has a sentence claiming `P` been committed?*) is a
+// witness-index lookup. ConsistencyCheck returned `Undecidable` for every non-empty input.
+// With the handlers gone the institution hosted nothing, so it went too, and
+// `urn:eigenius:reasoning` now names nothing.
 
-resource reasoning:reasoning_institution : institution:Institution {
-    institution:institution_iri = "urn:eigenius:reasoning:reasoning_institution";
-    institution:institution_name = "Reasoning";
-    institution:runtime = runtimes:in_process;
-    core:description = "Justification Logic institution (D39). Type-checks justification:Certificate certificates against (justification, proposition) pairs at justification:Conclusion commit time via the kernel's NbE checker; queries entailment and consistency on demand. The validator is the kernel — no external runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory implementation.";
-}
-
-// ── Query classes (D39 §4.3) ─────────────────────────────────────────
-//
-// Three dispatch roles, one per class:
-//
-// - ValidateJustification (AutoOnLoad): fires on every justification:Conclusion
-//   commit; decodes proposition + certificate, type-checks at Prop, then
-//   checks `certificate : justification:Certificate justification proposition`. Returns
-//   Verdict::Holds or Verdict::Fails (with subterm-pinned diagnostic).
-//   Fails verdicts reject the commit per D14 §6.
-//
-// - EntailmentQuery (OnDemand): given Γ + candidate proposition A,
-//   bounded-depth search for a justification:Term whose certificate
-//   type-checks against `justification:Certificate t A` over Γ.
-//
-// - ConsistencyCheck (Decidable): propositional-fragment consistency
-//   over a committed-sentence set; reports Undecidable for richer
-//   fragments.
-
-// ── ExportFormats (D14 §5) ───────────────────────────────────────────
-//
-// The Reasoning institution exposes its data to the kernel's term
-// language via `extract_typed` through declared ExportFormats. The
-// one ExportFormat needed in v1 is for `justification` — a D32 §3.7
-// chain inductive value that the validate handler needs to lift into
-// a kernel `Val` to construct `justification:Certificate(j, p)` for type-checking.
-//
-// proposition + certificate don't need ExportFormats: they're D47-
-// encoded EigenTT terms and the kernel's `decode_type` is the right
-// surface for them (D47 has a spec; the codec is a kernel utility,
-// not an institution boundary).
-
-resource reasoning:ef_justification : institution:ExportFormat {
-    core:short_name = "ef_justification";
-    core:description = "Lifts a justification:Conclusion's `justification` property (a D32 §3.7-shaped justification:Term chain value) into a `Val::InductiveVal` typed at `justification:Term`. Used by the ValidateJustification handler to construct the expected certificate type `justification:Certificate(j, p)`; available as a standalone extract route for any future cross-institution consumer.";
-    institution:from_class = justification:Conclusion;
-    institution:payload_type = justification:Term;
-    institution:institution_ref = reasoning:reasoning_institution;
-    institution:procedure = proc:extract_justification;
-}
-
-resource reasoning:qc_validate_justification : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every justification:Conclusion commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `justification:Certificate justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
-    institution:query_class = justification:Conclusion;
-    institution:result_class = institution:Verdict;
-    institution:dispatch_role = [dispatch:auto_on_load];
-    institution:query_handler = proc:validate_justification;
-    institution:institution_ref = reasoning:reasoning_institution;
-}
-
-resource reasoning:qc_entailment_query : institution:QueryClass {
-    core:description = "OnDemand: given a candidate Prop-typed proposition (carried on an EntailmentRequest), return whether the chain warrants it. v1 of the handler runs a lookup-based search across committed ReasoningSentences; bounded-depth proof search over justification:Term constructors is follow-on work. Holds when a matching sentence is found; Undecidable otherwise (absence of evidence is not proof of impossibility).";
-    institution:query_class = justification:EntailmentRequest;
-    institution:result_class = institution:Verdict;
-    institution:dispatch_role = [dispatch:on_demand];
-    institution:query_handler = proc:entailment_query;
-    institution:institution_ref = reasoning:reasoning_institution;
-}
-
-resource reasoning:qc_consistency_check : institution:QueryClass {
-    core:description = "Decidable: return whether a set of committed ReasoningSentences (carried on a ConsistencyRequest) is internally consistent. v1 returns Verdict::Undecidable for any non-trivial input — the propositional-fragment decision procedure is genuinely research-level and is follow-on work. The QueryClass is declared so the dispatch IRI is bound and the input shape is reserved.";
-    institution:query_class = justification:ConsistencyRequest;
-    institution:result_class = institution:Verdict;
-    institution:dispatch_role = [dispatch:decidable];
-    institution:query_handler = proc:consistency_check;
-    institution:institution_ref = reasoning:reasoning_institution;
-}
 
 // ════════════════════════════════════════════════════════════════════
 // Justification projections (D73 §1.2, eigenius#204)
@@ -578,14 +477,15 @@ property justification:survives_without : core:boolean {
     domain justification:Projection;
 }
 
-resource reasoning:qc_project_justification : institution:QueryClass {
-    core:description = "OnDemand: project a committed justification:Conclusion's justification:Term onto the axes of D73 §1.2 — is it fully verified, what does it rest on unproved, which measurements, and would it survive losing a named IRI. Returns a justification:Projection, not a Verdict: this reports what the term rests on, it does not judge it.";
-    institution:query_class = justification:ProjectionRequest;
-    institution:result_class = justification:Projection;
-    institution:dispatch_role = [dispatch:on_demand];
-    institution:query_handler = proc:project_justification;
-    institution:institution_ref = reasoning:reasoning_institution;
-}
+// The `qc_project_justification` QueryClass stood here. P7 deleted it with the institution
+// that hosted it — the ontology already said it was not an institutional act ("returns a
+// justification:Projection, not a Verdict: this reports what the term rests on, it does not
+// judge it"), and it had zero callers. The ALGEBRA it dispatched to is live and moved to the
+// kernel at P6.0: `kernel/src/justification/mod.rs` exposes `support`, `is_fully_verified`,
+// `leaves_of`, `survives_without` and `cited_iris` as ordinary functions over a retained term.
+//
+// `justification:Projection` and `justification:ProjectionRequest` above are left declared and
+// currently have no producer or consumer anywhere in the tree — see the build plan's P7 notes.
 
 // ── Reasoning → Lean comorphism — deferred to gh #73 ─────────────────
 //

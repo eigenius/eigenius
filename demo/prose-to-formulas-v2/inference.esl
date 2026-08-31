@@ -40,7 +40,6 @@ namespace core          = "urn:eigenius:core";
 namespace inferred      = "urn:eigenius:demo:v2:inferred";
 namespace onco_typed    = "urn:eigenius:demo:onco-typed";
 namespace ontology      = "urn:eigenius:ontology";
-namespace reasoning     = "urn:eigenius:reasoning";
 namespace umlscui       = "urn:eigenius:umlscui";
 namespace wn            = "urn:eigenius:wn";
 namespace justification = "urn:eigenius:justification";

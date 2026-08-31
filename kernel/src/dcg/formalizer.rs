@@ -16,7 +16,7 @@
 //!
 //! Formalizing a document ends in an ARTIFACT: the resource set an `enc:ReasoningStructure` roots.
 //! Building that set needs `emit_document` and `ParsedClaimGrader`, which live in
-//! `eigenius-encoding` and `eigenius-reasoning` — both of which DEPEND ON this crate. The kernel's
+//! `eigenius-encoding` — which DEPENDS ON this crate. The kernel's
 //! gRPC layer therefore cannot call them, and inverting the dependency is not on the table: the
 //! grader belongs above the kernel, not inside it.
 //!

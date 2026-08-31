@@ -18,7 +18,6 @@ tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 # The D39 gate, for the acceptance test that commits a claim cluster and checks it validates.
-eigenius-reasoning = { path = "../eigenius-reasoning" }
 
 [features]
 # The contextual sense reranker. RECORD needs it; REPLAY does not (a recorded

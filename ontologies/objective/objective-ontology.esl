@@ -19,7 +19,6 @@
 // Stacks above core + reasoning (it references justification:proposition's encoding).
 
 namespace core          = "urn:eigenius:core";
-namespace reasoning     = "urn:eigenius:reasoning";
 namespace reflection    = "urn:eigenius:reflection";
 namespace epistemic     = "urn:eigenius:reflection:epistemic";
 namespace eigentt       = "urn:eigenius:eigentt";

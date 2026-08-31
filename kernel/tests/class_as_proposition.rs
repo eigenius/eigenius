@@ -33,7 +33,7 @@ use eigenius_kernel::ontology::eigon_json;
 
 /// core + reflection/eigentt/institution + `reasoning.esl` + the fixture.
 fn build_chain() -> ExecutionContext {
-    let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+    let core_json = include_str!("../../ontologies/core/core-ontology.json");
     let mut core_builder = LayerBuilder::new("core", None);
     for r in eigon_json::parse_document(core_json).unwrap() {
         core_builder.add_resource(r).unwrap();
@@ -42,9 +42,9 @@ fn build_chain() -> ExecutionContext {
 
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for src in [
-        include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        include_str!("../../../ontologies/institution/institution-ontology.json"),
+        include_str!("../../ontologies/reflection/reflection-ontology.json"),
+        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+        include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(src).unwrap() {
             reflection_builder.add_resource(r).unwrap();
@@ -56,11 +56,9 @@ fn build_chain() -> ExecutionContext {
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources = esl::compile_against_layer(
-        include_str!("../../../ontologies/prov/prov.esl"),
-        &reflection,
-    )
-    .expect("prov.esl compiles");
+    let prov_resources =
+        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+            .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -69,7 +67,7 @@ fn build_chain() -> ExecutionContext {
 
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
     for r in esl::compile(include_str!(
-        "../../../ontologies/justification/justification.esl"
+        "../../ontologies/justification/justification.esl"
     ))
     .expect("reasoning.esl compiles")
     {

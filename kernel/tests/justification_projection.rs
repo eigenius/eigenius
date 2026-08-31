@@ -140,7 +140,7 @@ fn a_second_source_would_make_a_recompute_droppable() {
     // regardless of whether either branch has a certificate. What changed is that committing this
     // shape now requires certificates for BOTH branches, so the two alternatives `support` reports
     // are two alternatives that were actually grounded. See
-    // `crates/eigenius-reasoning/tests/sum_requires_both_branches.rs`.
+    // `kernel/tests/sum_requires_both_branches.rs`.
     let t = ctor(
         "App",
         vec![

@@ -169,7 +169,7 @@ Two sentences of controlled prose from the WRN paper — a measurement (*"MSI ca
 
 Under D66 there is **no lift step**: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon (`def`), so a parsed sentence and its domain formula are the same term by definitional equality. The result is `RequiresActivity(MSI, WRN, helicase)` justified twice — once because sentence 2 asserts it (its own parse witness, nothing Declared), once because it *follows* from sentence 1 plus the published rule specialized at the model with [`spec_poly`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate). The derived route carries strictly more assumptions and commits at `Declared`; the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's claim still commits, the derivation that cited sentence 1's parse has nothing left to stand on and is rejected.
 
-Two ways a claim gets justified here, both exercised by [`crates/eigenius-reasoning/tests/justification_routes.rs`](../../../crates/eigenius-reasoning/tests/justification_routes.rs):
+Two ways a claim gets justified here. The intact/edited pair is exercised end to end by [`crates/eigenius-encoding/tests/acceptance.rs`](../../../crates/eigenius-encoding/tests/acceptance.rs), which runs against a DB snapshot (`EIGENIUS_DB_SNAPSHOT`, `--ignored`). The `justification_routes.rs` test that used to be cited here went with `crates/eigenius-reasoning` at P7.
 
 | | What warrants it | Grade | Authoring cost |
 |---|---|---|---|

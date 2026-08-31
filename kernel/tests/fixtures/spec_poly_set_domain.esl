@@ -6,7 +6,6 @@
 
 namespace core          = "urn:eigenius:core";
 namespace reflection    = "urn:eigenius:reflection";
-namespace reasoning     = "urn:eigenius:reasoning";
 namespace poly          = "urn:eigenius:demo:poly";
 namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";

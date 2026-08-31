@@ -206,8 +206,8 @@ for doing it before the first real `Sum` commits.
 | `demo/prose-to-formulas-v2/inference.esl` | 2 | authored |
 | `notebooks/examples/stats-and-reasoning.json` | many | authored (cell sources) |
 | `crates/eigenius-statistics/tests/fixtures/d39_composition.esl` | 6 | fixture |
-| `crates/eigenius-reasoning/tests/fixtures/universal_rule.esl` | 2 | fixture |
-| `crates/eigenius-reasoning/tests/fixtures/spec_poly_set_domain.esl` | 2 | fixture |
+| `kernel/tests/fixtures/universal_rule.esl` | 2 | fixture |
+| `kernel/tests/fixtures/spec_poly_set_domain.esl` | 2 | fixture |
 
 **P4 removes the `SpecStr` term constructor while keeping the `spec_poly` rule**, so each of
 these needs its justification term rewritten (drop the wrapper) and its certificate's result

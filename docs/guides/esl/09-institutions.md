@@ -389,7 +389,7 @@ At commit, the `ValidateJustification` AutoOnLoad gate fires:
 
 Note what is NOT consulted: the `StatisticalAnalysisResult` the institution emitted. It records what ran, and a run record grounds nothing.
 
-The full fixture this snippet is drawn from lives at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl); the matching test exercises the AutoOnLoad pipeline end-to-end.
+The full fixture this snippet is drawn from lives at [`kernel/tests/fixtures/drug_screening.esl`](../../../kernel/tests/fixtures/drug_screening.esl); the matching test exercises the AutoOnLoad pipeline end-to-end.
 
 ### 9.10.5. Query classes (D39 §4.3)
 

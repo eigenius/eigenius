@@ -119,7 +119,7 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
             kinds = vec![Iri::parse(KIND_ASSERTION).expect("static kind IRI")];
         }
         let provenance = format!(
-            "eigenius-reasoning lander: DCG parse (D63) of {}, sentence {ordinal} «{sentence}»",
+            "eigenius-encoding lander: DCG parse (D63) of {}, sentence {ordinal} «{sentence}»",
             self.source_label.as_deref().unwrap_or(&self.doc_id)
         );
         let claim = match &self.emission_ns {
