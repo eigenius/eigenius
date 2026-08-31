@@ -217,13 +217,28 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    for `value_array` and admits only the five primitives. Either `element_type` becomes optional when
    the types are determined elsewhere, or `core:args` is not a `value_array`. R4 says where the types
    come from; it does not say how the property declares that.
-2. **`ResourceRef`, and it is the SAME question as item 1.** Whether a bare IRI in `core:args` is a
-   reference or a `core:string` literal is decided by the constructor's declared argument type (R4)
-   — and whether a bare IRI in a `core:resource` slot is a reference is decided by `data_type`. One
-   fix serves both: interpretation at a schema-aware accessor, and no variant claiming to be
-   canonical. 142 reconciling call sites and 28 "accept both" comments are what the current answer
-   costs. Out of scope here, and it should not be unwound during a reseed that already perturbs
-   equality-sensitive paths.
+2. **`ResourceRef` — DECIDED: retire it, as its own change, after the reseed.** Not open, and not
+   part of this note's retrofit. R5 is what makes the decision available: once a reference is an IRI
+   read through an accessor and no variant is canonical, the variant has no job left. It was only
+   ever justified by the promise in `LayerBuilder::build` that readers "can then assume one shape per
+   data_type" — which the wire format cannot keep, because CBOR writes `Text` and reads back
+   `String`.
+
+   Measured cost of retiring: **90 reader sites** match it across 34 files, **~660** construction
+   sites become `Value::String`, **140** calls to `as_iri_str` / `as_iri` / `as_iri_array` collapse
+   to `as_str` plus a parse, and both `values_equal`'s special case and `canonicalise_resource_refs`
+   are deleted. The 90 matches are not merely migration cost: the variant is not reliably produced,
+   so each is a place a reloaded chain can silently read nothing — the bug class that already shipped
+   once, as the empty topology graph `as_iri_str` exists to fix.
+
+   Sequenced after the reseed because it moves equality and join semantics while the reseed moves
+   hashing and the manifest, and two changes that can each silently produce wrong results should not
+   land together.
+
+   It is the same question as item 1: whether a bare IRI in `core:args` is a reference or a
+   `core:string` literal is decided by the constructor's argument type (R4); whether a bare IRI in a
+   `core:resource` slot is a reference is decided by `data_type`. One fix serves both.
+
 3. **The wire abbreviation.** Whether `ctor` / `args` may appear as short keys, expanded on read, the
    way a `ResourceRef` already serialises as a bare IRI string. A codec table entry, reversible, and
    explicitly NOT a design fork — an earlier draft made it one on a size argument that does not
