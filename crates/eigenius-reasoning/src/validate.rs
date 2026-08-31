@@ -229,7 +229,7 @@ fn verification_trace(sentence_iri: &Iri) -> Resource {
     );
     r.set(
         Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI"),
-        Value::String(sentence_iri.as_str().to_string()),
+        Value::iri(sentence_iri),
     );
     r.set(
         Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"),
@@ -237,7 +237,7 @@ fn verification_trace(sentence_iri: &Iri) -> Resource {
     );
     r.set(
         Iri::parse(wk::PROOF_TERM).expect("well-known IRI"),
-        Value::String(sentence_iri.as_str().to_string()),
+        Value::iri(sentence_iri),
     );
     r.set(
         Iri::parse(wk::TIMESTAMP).expect("well-known IRI"),
@@ -282,8 +282,11 @@ pub(crate) fn verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Res
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).expect("well-known IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::VERDICT).expect("well-known IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::VERDICT)
+                .expect("well-known IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(

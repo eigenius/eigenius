@@ -43,7 +43,7 @@ pub(crate) fn iri(s: &str) -> Iri {
 pub(crate) fn make_resource(id: &str, is_a: &[&str], props: &[(&str, Value)]) -> Resource {
     let mut r = Resource::new(iri(id));
     let is_a_iri = Iri::parse(wk::IS_A).expect("IS_A IRI");
-    let classes: Vec<Value> = is_a.iter().map(|c| Value::ResourceRef(iri(c))).collect();
+    let classes: Vec<Value> = is_a.iter().map(|c| Value::iri(&iri(c))).collect();
     r.set(is_a_iri, Value::Array(classes));
     for (k, v) in props {
         r.set(iri(k), v.clone());
@@ -170,7 +170,9 @@ pub(crate) fn make_var_resource(name: &str) -> Resource {
     let is_a_iri = Iri::parse(wk::IS_A).unwrap();
     r.set(
         is_a_iri,
-        Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:program:Var").as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:program:name"),
@@ -187,7 +189,9 @@ pub(crate) fn make_lambda_resource(param: &str, body: Resource) -> Resource {
     let is_a_iri = Iri::parse(wk::IS_A).unwrap();
     r.set(
         is_a_iri,
-        Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:program:Lambda").as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:program:parameter"),
@@ -237,12 +241,9 @@ pub(crate) fn build_witness_fixture(
         &[
             (
                 wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(iri(transformation_iri)),
+                Value::iri(&iri(transformation_iri)),
             ),
-            (
-                wk::MERGE_TARGET_CLASS,
-                Value::ResourceRef(iri("urn:test:Patient")),
-            ),
+            (wk::MERGE_TARGET_CLASS, Value::iri(&iri("urn:test:Patient"))),
         ],
     );
 
@@ -307,12 +308,9 @@ pub(crate) fn build_witness_fixture_offspan(
         &[
             (
                 wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(iri(transformation_iri)),
+                Value::iri(&iri(transformation_iri)),
             ),
-            (
-                wk::MERGE_TARGET_CLASS,
-                Value::ResourceRef(iri("urn:test:Patient")),
-            ),
+            (wk::MERGE_TARGET_CLASS, Value::iri(&iri("urn:test:Patient"))),
         ],
     );
 

@@ -339,7 +339,9 @@ mod tests {
         let mut r = Resource::new(Iri::parse("urn:eigenius:ingest:file:deadbeef").unwrap());
         r.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(PINNED_FILE_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(PINNED_FILE_CLASS).as_str().to_string(),
+            )]),
         );
         r.set(iri(PROP_REFERENCE), Value::String(reference.to_string()));
         r.set(
@@ -433,9 +435,11 @@ mod tests {
         let mut r = Resource::new(Iri::parse("urn:eigenius:pub:wrn:some_table").unwrap());
         r.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:pub:wrn:XenograftTable",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:pub:wrn:XenograftTable")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         let out = prepare_input(r.clone(), &none_opts()).unwrap();
         assert_eq!(out, r);

@@ -36,7 +36,7 @@ fn make_resource(id: &str, class_iri: &str, props: Vec<(&str, Value)>) -> Resour
     let mut r = Resource::new(iri(id));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+        Value::Array(vec![Value::iri(&iri(class_iri))]),
     );
     for (k, v) in props {
         r.set(iri(k), v);
@@ -72,10 +72,14 @@ fn populates_for_resources_in_same_layer() {
         index_iri.as_str(),
         wk::VALUE_INDEX_CLASS,
         vec![
-            (wk::TARGET_PROPERTY, Value::ResourceRef(iri(form))),
+            (wk::TARGET_PROPERTY, Value::iri(&iri(form))),
             (
                 wk::VALUE_NORMALIZER,
-                Value::ResourceRef(iri("urn:eigenius:core:normalizers:lowercase")),
+                Value::String(
+                    iri("urn:eigenius:core:normalizers:lowercase")
+                        .as_str()
+                        .to_string(),
+                ),
             ),
         ],
     ))
@@ -141,7 +145,7 @@ fn indexes_each_element_of_a_string_array() {
         index_iri.as_str(),
         wk::VALUE_INDEX_CLASS,
         // No normalizer slot → identity (verbatim).
-        vec![(wk::TARGET_PROPERTY, Value::ResourceRef(iri(form)))],
+        vec![(wk::TARGET_PROPERTY, Value::iri(&iri(form)))],
     ))
     .unwrap();
 
@@ -193,7 +197,7 @@ fn populates_from_inherited_value_index() {
         .add_resource(make_resource(
             index_iri.as_str(),
             wk::VALUE_INDEX_CLASS,
-            vec![(wk::TARGET_PROPERTY, Value::ResourceRef(iri(form)))],
+            vec![(wk::TARGET_PROPERTY, Value::iri(&iri(form)))],
         ))
         .unwrap();
     let parent = Arc::new(parent_b.build(storage.clone()));

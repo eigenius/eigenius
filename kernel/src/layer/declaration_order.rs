@@ -127,8 +127,18 @@ fn references(r: &Resource, out: &mut BTreeSet<Iri>) {
 
 fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
     match v {
-        Value::ResourceRef(iri) => {
-            out.insert(iri.clone());
+        // A reference is a string that parses as an IRI.
+        //
+        // This arm read `Value::ResourceRef` and ignored `Value::String`, which worked only
+        // while a build-time pass upgraded one to the other — an upgrade that never survived
+        // a storage round trip, so a reloaded chain contributed no edges here at all. The
+        // shape test is what `json_mentions` already uses one line below ("any `urn:`-prefixed
+        // string at any depth"), and having one answer is what lets `core:mentions` and
+        // `MutualInductives` agree about what a value names.
+        Value::String(s) => {
+            if let Ok(iri) = Iri::parse(s) {
+                out.insert(iri);
+            }
         }
         Value::Array(items) => items.iter().for_each(|i| value_refs(i, out)),
         Value::Embedded(inner) => references(inner.as_ref(), out),
@@ -136,11 +146,7 @@ fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
         // descent used to live here, and having one copy is what lets
         // `core:mentions` and `MutualInductives` agree about what a term names.
         Value::Json(j) => crate::layer::term_mentions::json_mentions(j, out),
-        Value::String(_)
-        | Value::Integer(_)
-        | Value::Float(_)
-        | Value::Boolean(_)
-        | Value::Vector { .. } => {}
+        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Vector { .. } => {}
     }
 }
 
@@ -225,7 +231,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(
             iri(wk::SHORT_NAME),
@@ -234,12 +240,7 @@ mod tests {
         r.set(iri(wk::DESCRIPTION), Value::String("t".into()));
         r.set(
             iri(wk::REQUIRES),
-            Value::Array(
-                requires
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
         r
     }
@@ -250,7 +251,9 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         r.set(
             iri(wk::SHORT_NAME),
@@ -304,11 +307,11 @@ mod tests {
         let mut p = Resource::new(iri("urn:t:zprop"));
         p.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         p.set(iri(wk::SHORT_NAME), Value::String("zprop".into()));
         p.set(iri(wk::DESCRIPTION), Value::String("t".into()));
-        p.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        p.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
 
         let order = declaration_order(&layer_of(vec![class("urn:t:aclass", &["urn:t:zprop"]), p]))
             .expect("acyclic");
@@ -366,12 +369,12 @@ mod tests {
         let mut a = class("urn:t:ca", &[]);
         a.set(
             iri(wk::PARENT_CLASSES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:t:cb"))]),
+            Value::Array(vec![Value::iri(&iri("urn:t:cb"))]),
         );
         let mut b = class("urn:t:cb", &[]);
         b.set(
             iri(wk::PARENT_CLASSES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:t:ca"))]),
+            Value::Array(vec![Value::iri(&iri("urn:t:ca"))]),
         );
 
         let err = declaration_order(&layer_of(vec![a, b])).expect_err("a cycle must be rejected");
@@ -388,7 +391,7 @@ mod tests {
         let mut inst = Resource::new(iri("urn:t:instance"));
         inst.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:t:a"))]),
+            Value::Array(vec![Value::iri(&iri("urn:t:a"))]),
         );
         let order = declaration_order(&layer_of(vec![class("urn:t:a", &[]), inst])).unwrap();
         assert_eq!(

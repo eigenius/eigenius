@@ -142,7 +142,6 @@ fn concepts_for_form(layer: &Arc<Layer>, form: &str) -> Vec<Iri> {
         return Vec::new();
     };
     let read_sem = |r: &Resource| match r.get(&sem_prop) {
-        Some(Value::ResourceRef(iri)) => Some(iri.clone()),
         Some(Value::String(s)) => Iri::parse(s).ok(),
         _ => None,
     };
@@ -268,7 +267,6 @@ fn instance_type_classes(r: &Resource) -> Vec<Iri> {
         Some(Value::Array(vs)) => vs
             .iter()
             .filter_map(|v| match v {
-                Value::ResourceRef(iri) => Some(iri.clone()),
                 Value::String(s) => Iri::parse(s).ok(),
                 _ => None,
             })
@@ -318,7 +316,7 @@ pub fn abbreviation_resources(
         let sty = Exp::EigonClass(type_classes[0].clone());
         let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
         let cat = Exp::InductiveCtor(cat_decl, "cat_np".into(), vec![sty, sg]);
-        (cat, Value::ResourceRef(concept.clone()))
+        (cat, Value::iri(&concept.clone()))
     } else {
         // Common-noun alias whose sem IS the class; number class from the long form's head noun.
         let head = binding
@@ -334,7 +332,7 @@ pub fn abbreviation_resources(
         let num = Exp::InductiveCtor(num_decl, num_name.into(), Vec::new());
         let concept_ty = Exp::EigonClass(concept.clone());
         let cat = Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![concept_ty, num]);
-        (cat, Value::ResourceRef(concept.clone()))
+        (cat, Value::iri(&concept.clone()))
     };
     let cat_val = encode_type(&cat).ok()?;
     let sem_type_val = encode_type(&denote_cat(&cat).ok()?).ok()?;
@@ -346,9 +344,9 @@ pub fn abbreviation_resources(
     let mut e = Resource::new(e_iri);
     e.set(
         p(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(p(
-            "urn:eigenius:lexicon:LexicalEntry",
-        ))]),
+        Value::Array(vec![Value::String(
+            p("urn:eigenius:lexicon:LexicalEntry").as_str().to_string(),
+        )]),
     );
     e.set(
         p("urn:eigenius:lexicon:form"),
@@ -384,13 +382,12 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
                 if let Ok(ci) = Iri::parse(&fresh) {
                     let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
                     let mut cls = Resource::new(ci);
-                    cls.set(
-                        p(wk::IS_A),
-                        Value::Array(vec![Value::ResourceRef(p(wk::CLASS))]),
-                    );
+                    cls.set(p(wk::IS_A), Value::Array(vec![Value::iri(&p(wk::CLASS))]));
                     cls.set(
                         p(wk::PARENT_CLASSES),
-                        Value::Array(vec![Value::ResourceRef(p("urn:eigenius:lexicon:Entity"))]),
+                        Value::Array(vec![Value::String(
+                            p("urn:eigenius:lexicon:Entity").as_str().to_string(),
+                        )]),
                     );
                     cls.set(
                         p(wk::DESCRIPTION),
@@ -464,10 +461,8 @@ fn common_noun_concept(layer: &Arc<Layer>, form: &str) -> Option<Iri> {
         if !is_cat_n {
             continue;
         }
-        match r.get(&sem_prop) {
-            Some(Value::ResourceRef(iri)) => return Some(iri.clone()),
-            Some(Value::String(s)) => return Iri::parse(s).ok(),
-            _ => {}
+        if let Some(Value::String(s)) = r.get(&sem_prop) {
+            return Iri::parse(s).ok();
         }
     }
     None
@@ -509,7 +504,7 @@ pub fn named_entity_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAu
         let mut ni = Resource::new(ni_iri.clone());
         ni.set(
             p(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(head_type.clone())]),
+            Value::Array(vec![Value::iri(&head_type.clone())]),
         );
         ni.set(
             p(wk::DESCRIPTION),

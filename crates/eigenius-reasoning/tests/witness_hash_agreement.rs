@@ -322,9 +322,9 @@ fn definition_resource(def_iri: &str, opaque: bool) -> Resource {
     let mut r = Resource::new(iri(def_iri));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:eigentt:Definition",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:eigentt:Definition").as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:eigentt:definition_type"),
@@ -796,7 +796,7 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
     let mut claim = Resource::new(iri("urn:eigenius:demo:esl:claim"));
     claim.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     // `core:Class` requires these two; the resource previously carried
     // `reflection:DeclaredResource`, which required only an attribution.
@@ -852,7 +852,7 @@ fn definition_body_cannot_escape_checking_by_riding_on_another_class() {
     let mut smuggler = Resource::new(iri("urn:eigenius:demo:esl:smuggler"));
     smuggler.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     smuggler.set(
         iri("urn:eigenius:prov:was_attributed_to"),

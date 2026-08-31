@@ -378,7 +378,7 @@ fn try_match_resource(
     // Bind the subject variable.
     let subject_name = &pattern.subject.name;
     if let Some(iri) = resource_iri {
-        let iri_val = Value::String(iri.as_str().to_string());
+        let iri_val = Value::iri(iri);
         if let Some(existing_val) = base.get(subject_name) {
             if !values_equal(existing_val, &iri_val) {
                 return Vec::new(); // conflict with existing binding
@@ -1000,7 +1000,7 @@ mod tests {
         // Value::String match would drop.
         root.set(
             iri("urn:eigenius:t:points_to"),
-            Value::ResourceRef(iri("urn:eigenius:t:target")),
+            Value::iri(&iri("urn:eigenius:t:target")),
         );
         b.add_resource(root).unwrap();
         let layer = Arc::new(b.build(storage));

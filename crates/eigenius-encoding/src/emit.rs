@@ -273,7 +273,7 @@ pub fn emit_resources(
         let mut scoped = res(&scoped_iri, &[&format!("{ENC}:ScopedUnit")]);
         scoped.set(
             iri(&format!("{ENC}:unit")),
-            Value::ResourceRef(iri(&unit_iri)),
+            Value::String(iri(&unit_iri).as_str().to_string()),
         );
         out.push(scoped);
 
@@ -302,7 +302,7 @@ pub fn emit_resources(
         };
         claim.set(
             iri(&format!("{ENC}:from_unit")),
-            Value::ResourceRef(iri(&scoped_iri)),
+            Value::String(iri(&scoped_iri).as_str().to_string()),
         );
         let claim_desc = match &s.selection {
             SentenceSelection::Pinned(pin) => format!(
@@ -323,7 +323,7 @@ pub fn emit_resources(
             iri(&format!("{CORE}:description")),
             Value::String(claim_desc),
         );
-        claim_iris.push(Value::ResourceRef(iri(&claim_iri)));
+        claim_iris.push(Value::String(iri(&claim_iri).as_str().to_string()));
         out.push(claim);
         out.push(trace);
 
@@ -339,11 +339,11 @@ pub fn emit_resources(
         );
         dp.set(
             iri(&format!("{ENC}:decision_unit")),
-            Value::ResourceRef(iri(&scoped_iri)),
+            Value::String(iri(&scoped_iri).as_str().to_string()),
         );
         dp.set(
             iri(&format!("{ENC}:selected_claim")),
-            Value::ResourceRef(iri(&claim_iri)),
+            Value::String(iri(&claim_iri).as_str().to_string()),
         );
         dp.set(
             iri(&format!("{ENC}:candidate_count")),
@@ -365,7 +365,7 @@ pub fn emit_resources(
             SentenceSelection::Ranked(sel) => {
                 dp.set(
                     iri(&format!("{ENC}:selected_by")),
-                    Value::ResourceRef(iri(&format!("{ENC}:authority_ranker"))),
+                    Value::String(iri(&format!("{ENC}:authority_ranker")).as_str().to_string()),
                 );
                 if !sel.runner_up_skeletons.is_empty() {
                     dp.set(
@@ -392,7 +392,7 @@ pub fn emit_resources(
             SentenceSelection::Sole => {
                 dp.set(
                     iri(&format!("{ENC}:selected_by")),
-                    Value::ResourceRef(iri(&format!("{ENC}:authority_sole"))),
+                    Value::String(iri(&format!("{ENC}:authority_sole")).as_str().to_string()),
                 );
                 dp.set(
                     iri(&format!("{PROV}:rationale")),
@@ -416,7 +416,7 @@ pub fn emit_resources(
             );
             ab.set(
                 iri(&format!("{ENC}:binding_unit")),
-                Value::ResourceRef(iri(&scoped_iri)),
+                Value::String(iri(&scoped_iri).as_str().to_string()),
             );
             ab.set(
                 iri(&format!("{ENC}:hole_var")),
@@ -430,7 +430,7 @@ pub fn emit_resources(
                 Candidate::Individual { iri: ante, .. } => {
                     ab.set(
                         iri(&format!("{ENC}:antecedent_resource")),
-                        Value::ResourceRef(ante.clone()),
+                        Value::iri(&ante.clone()),
                     );
                 }
                 Candidate::Kind { term, .. } => {
@@ -444,7 +444,7 @@ pub fn emit_resources(
                     if let Some(id) = resource.id() {
                         ab.set(
                             iri(&format!("{ENC}:antecedent_resource")),
-                            Value::ResourceRef(id.clone()),
+                            Value::iri(&id.clone()),
                         );
                     }
                 }
@@ -453,7 +453,7 @@ pub fn emit_resources(
                     let refs: Vec<Value> = members
                         .iter()
                         .filter_map(|r| r.id())
-                        .map(|id| Value::ResourceRef(id.clone()))
+                        .map(|id| Value::iri(&id.clone()))
                         .collect();
                     ab.set(
                         iri(&format!("{ENC}:antecedent_resources")),
@@ -464,7 +464,7 @@ pub fn emit_resources(
             if let Some(a) = s.binding_authority {
                 ab.set(
                     iri(&format!("{ENC}:bound_by")),
-                    Value::ResourceRef(iri(&format!("{ENC}:{a}"))),
+                    Value::String(iri(&format!("{ENC}:{a}")).as_str().to_string()),
                 );
             }
             if let Some(r) = &b.rationale {
@@ -515,11 +515,11 @@ pub fn emit_resources(
         let mut cut = res(&format!("{ns}:cut_{n}"), &[&format!("{ENC}:CutItem")]);
         cut.set(
             iri(&format!("{ENC}:cut_unit")),
-            Value::ResourceRef(iri(&unit_iri)),
+            Value::String(iri(&unit_iri).as_str().to_string()),
         );
         cut.set(
             iri(&format!("{ENC}:cut_kind")),
-            Value::ResourceRef(iri(&format!("{ENC}:{kind}"))),
+            Value::String(iri(&format!("{ENC}:{kind}")).as_str().to_string()),
         );
         cut.set(iri(&format!("{PROV}:rationale")), Value::String(rationale));
         out.push(cut);
@@ -536,7 +536,7 @@ pub fn emit_resources(
     structure.set(iri(&format!("{ENC}:claims")), Value::Array(claim_iris));
     structure.set(
         iri(&format!("{ENC}:document")),
-        Value::ResourceRef(iri(&doc_iri)),
+        Value::String(iri(&doc_iri).as_str().to_string()),
     );
     structure.set(
         iri(&format!("{ENC}:source_path")),
@@ -566,7 +566,7 @@ pub fn emit_resources(
     let mut run_trace = res(&run_trace_iri, &[&format!("{PROV}:ProgramTrace")]);
     run_trace.set(
         iri(&format!("{PROV}:resource")),
-        Value::ResourceRef(iri(&format!("{ns}:structure"))),
+        Value::String(iri(&format!("{ns}:structure")).as_str().to_string()),
     );
     run_trace.set(
         iri(&format!("{PROV}:was_generated_by")),
@@ -583,7 +583,7 @@ pub fn emit_resources(
 
     structure.set(
         iri(&format!("{PROV}:derivation")),
-        Value::ResourceRef(iri(&run_trace_iri)),
+        Value::String(iri(&run_trace_iri).as_str().to_string()),
     );
     out.push(structure);
 
@@ -614,7 +614,7 @@ fn discourse_unit(
     );
     unit.set(
         iri(&format!("{ENC}:unit_kind")),
-        Value::ResourceRef(iri(&format!("{ENC}:kind_prose"))),
+        Value::String(iri(&format!("{ENC}:kind_prose")).as_str().to_string()),
     );
     unit.set(
         iri(&format!("{ENC}:span_start")),
@@ -626,7 +626,7 @@ fn discourse_unit(
     );
     unit.set(
         iri(&format!("{ENC}:source_document")),
-        Value::ResourceRef(iri(doc_iri)),
+        Value::iri(&iri(doc_iri)),
     );
     unit
 }
@@ -644,7 +644,7 @@ fn res(id: &str, classes: &[&str]) -> Resource {
     let mut r = Resource::new(iri(id));
     r.set(
         iri(&format!("{CORE}:is_a")),
-        Value::Array(classes.iter().map(|c| Value::ResourceRef(iri(c))).collect()),
+        Value::Array(classes.iter().map(|c| Value::iri(&iri(c))).collect()),
     );
     r
 }

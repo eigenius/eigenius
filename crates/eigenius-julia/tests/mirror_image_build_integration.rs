@@ -72,7 +72,9 @@ impl DemoChain {
         );
         cls.set(
             iri("urn:eigenius:core:requires"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:name"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:name").as_str().to_string(),
+            )]),
         );
         resources.insert(class_iri, cls);
 
@@ -84,7 +86,7 @@ impl DemoChain {
         );
         prop.set(
             iri("urn:eigenius:core:data_type"),
-            Value::ResourceRef(iri("urn:eigenius:core:string")),
+            Value::iri(&iri("urn:eigenius:core:string")),
         );
         resources.insert(prop_iri, prop);
 
@@ -462,7 +464,9 @@ fn build_demo_resource(name: &str, id: Option<&str>) -> Resource {
     };
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Demo"))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:test:Demo").as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:test:name"),

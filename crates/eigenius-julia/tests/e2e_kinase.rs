@@ -132,7 +132,9 @@ fn build_compound_cbor(compound_id: &str, scaffold: &str, mw: f64) -> Vec<u8> {
     )));
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(COMPOUND_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(COMPOUND_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:demo:assay:compound_id"),
@@ -154,7 +156,9 @@ fn build_target_cbor(name: &str, family: &str) -> Vec<u8> {
     let mut r = Resource::new(iri(&format!("urn:eigenius:test:kinase:target:{name}")));
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(TARGET_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(TARGET_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:demo:assay:target_name"),

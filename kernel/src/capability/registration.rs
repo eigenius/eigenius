@@ -462,8 +462,11 @@ mod tests {
         let mut inst = Resource::new(inst_iri.clone());
         inst.set(
             Iri::parse(wk::IS_A).expect("IS_A IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:eigenius:institution:Institution").expect("IRI"),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:eigenius:institution:Institution")
+                    .expect("IRI")
+                    .as_str()
+                    .to_string(),
             )]),
         );
         inst.set(
@@ -476,7 +479,12 @@ mod tests {
         );
         inst.set(
             Iri::parse(wk::RUNTIME).expect("RUNTIME IRI"),
-            Value::ResourceRef(Iri::parse(wk::RUNTIME_IN_PROCESS).expect("RUNTIME_IN_PROCESS IRI")),
+            Value::String(
+                Iri::parse(wk::RUNTIME_IN_PROCESS)
+                    .expect("RUNTIME_IN_PROCESS IRI")
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let mut b = LayerBuilder::new("in_process_test", None);
         b.add_resource(inst).unwrap();
@@ -558,8 +566,11 @@ mod tests {
         let mut inst = Resource::new(Iri::parse(ext_iri).unwrap());
         inst.set(
             Iri::parse(wk::IS_A).expect("IS_A IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:eigenius:institution:Institution").unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:eigenius:institution:Institution")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         inst.set(
@@ -572,7 +583,12 @@ mod tests {
         );
         inst.set(
             Iri::parse(wk::RUNTIME).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RUNTIME_EXTERNAL).unwrap()),
+            Value::String(
+                Iri::parse(wk::RUNTIME_EXTERNAL)
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let mut b = LayerBuilder::new("external_only", None);
         b.add_resource(inst).unwrap();

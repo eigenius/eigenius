@@ -996,11 +996,21 @@ fn resolve_payload(term: &Resource, ctx: &ExecutionContext) -> Result<Resource, 
     })?;
     match value {
         Value::Embedded(boxed) => Ok((**boxed).clone()),
-        Value::ResourceRef(payload_iri) => ctx.resolve(payload_iri).map(|arc| (*arc).clone()).ok_or_else(|| {
-            InstitutionError::MissingDependency(format!(
-                "LeanProofPayload `{payload_iri}` referenced by `proof_payload` does not resolve in the layer chain"
-            ))
-        }),
+        Value::String(payload_iri) => {
+            let parsed = Iri::parse(payload_iri).map_err(|e| {
+                InstitutionError::ComputationFailed(format!(
+                    "`proof_payload` holds `{payload_iri}`, which is not an IRI: {e}"
+                ))
+            })?;
+            ctx.resolve(&parsed)
+                .map(|arc| (*arc).clone())
+                .ok_or_else(|| {
+                    InstitutionError::MissingDependency(format!(
+                        "LeanProofPayload `{payload_iri}` referenced by `proof_payload` does not \
+                     resolve in the layer chain"
+                    ))
+                })
+        }
         other => Err(InstitutionError::ComputationFailed(format!(
             "`proof_payload` has unexpected value shape: {other:?}"
         ))),
@@ -1030,8 +1040,11 @@ fn verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource {
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).expect("well-known IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::VERDICT).expect("well-known IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::VERDICT)
+                .expect("well-known IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(

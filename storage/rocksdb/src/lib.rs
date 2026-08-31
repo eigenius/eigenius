@@ -1377,7 +1377,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:demo:X"));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:ClassA").as_str().to_string(),
+            )]),
         );
         child_b.add_resource(r).unwrap();
         let child = child_b.build(eigenius_kernel::layer::LayerStorage::in_memory());
@@ -2371,7 +2373,7 @@ mod tests {
             let mut r = Resource::new(iri("urn:eigenius:test:lossy"));
             r.set(
                 iri("urn:eigenius:test:ref"),
-                Value::ResourceRef(iri("urn:eigenius:test:other")),
+                Value::iri(&iri("urn:eigenius:test:other")),
             );
             r.set(
                 iri("urn:eigenius:test:json_str"),

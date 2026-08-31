@@ -113,7 +113,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(iri(wk::SHORT_NAME), Value::String(short.into()));
         r

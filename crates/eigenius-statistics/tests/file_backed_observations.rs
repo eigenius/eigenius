@@ -161,9 +161,11 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
         let mut file = Resource::new(iri(FILE_IRI));
         file.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:ingest:PinnedExternalFile",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:ingest:PinnedExternalFile")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         file.set(
             iri("urn:eigenius:prov:was_generated_by"),

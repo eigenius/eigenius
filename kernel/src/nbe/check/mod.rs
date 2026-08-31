@@ -2222,9 +2222,9 @@ mod tests {
         let mut r = Resource::new(Iri::parse("urn:example:rex").unwrap());
         r.set(
             is_a_iri,
-            crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(dog_iri.as_str().to_string()),
-            ]),
+            crate::ontology::resource::Value::Array(vec![crate::ontology::resource::Value::iri(
+                &dog_iri,
+            )]),
         );
         let expr = Exp::EigonResource(Box::new(r));
         let t = check_infer(&mut ctx(), &expr).unwrap();
@@ -2439,8 +2439,11 @@ mod tests {
         prop.set(
             Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
             crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::ResourceRef(
-                    Iri::parse(crate::ontology::well_known::PROPERTY).unwrap(),
+                crate::ontology::resource::Value::String(
+                    Iri::parse(crate::ontology::well_known::PROPERTY)
+                        .unwrap()
+                        .as_str()
+                        .to_string(),
                 ),
             ]),
         );
@@ -2454,8 +2457,11 @@ mod tests {
         );
         prop.set(
             Iri::parse(crate::ontology::well_known::DATA_TYPE_PROP).unwrap(),
-            crate::ontology::resource::Value::ResourceRef(
-                Iri::parse(crate::ontology::well_known::STRING).unwrap(),
+            crate::ontology::resource::Value::String(
+                Iri::parse(crate::ontology::well_known::STRING)
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             ),
         );
         let mut top = LayerBuilder::new("nickname", Some(animals));
@@ -2593,8 +2599,11 @@ mod tests {
             let mut r = Resource::new(Iri::parse(class_iri).unwrap());
             r.set(
                 Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
-                RV::Array(vec![RV::ResourceRef(
-                    Iri::parse(crate::ontology::well_known::CLASS).unwrap(),
+                RV::Array(vec![RV::String(
+                    Iri::parse(crate::ontology::well_known::CLASS)
+                        .unwrap()
+                        .as_str()
+                        .to_string(),
                 )]),
             );
             r.set(
@@ -2607,7 +2616,7 @@ mod tests {
             );
             r.set(
                 Iri::parse(crate::ontology::well_known::REQUIRES).unwrap(),
-                RV::Array(vec![RV::ResourceRef(name_prop.clone())]),
+                RV::Array(vec![RV::String(name_prop.clone().as_str().to_string())]),
             );
             r
         };
@@ -2677,7 +2686,9 @@ mod tests {
         let mut prop = Resource::new(nickname.clone());
         prop.set(
             Iri::parse(wk::IS_A).unwrap(),
-            RV::Array(vec![RV::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            RV::Array(vec![RV::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop.set(
             Iri::parse(wk::SHORT_NAME).unwrap(),
@@ -2689,7 +2700,7 @@ mod tests {
         );
         prop.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            RV::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+            RV::String(Iri::parse(wk::STRING).unwrap().as_str().to_string()),
         );
         let mut top = LayerBuilder::new("nickname", Some(animals));
         top.add_resource(prop).unwrap();
@@ -2699,8 +2710,11 @@ mod tests {
         let mut rex = Resource::new(Iri::parse("urn:eigenius:example:rex").unwrap());
         rex.set(
             Iri::parse(wk::IS_A).unwrap(),
-            RV::Array(vec![RV::ResourceRef(
-                Iri::parse("urn:eigenius:example:Dog").unwrap(),
+            RV::Array(vec![RV::String(
+                Iri::parse("urn:eigenius:example:Dog")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         rex.set(
@@ -2774,8 +2788,8 @@ mod tests {
         r.set(
             Iri::parse(wk::IS_A).unwrap(),
             RV::Array(vec![
-                RV::ResourceRef(Iri::parse(wk::PROPERTY).unwrap()),
-                RV::ResourceRef(Iri::parse(wk::CLASS).unwrap()),
+                RV::String(Iri::parse(wk::PROPERTY).unwrap().as_str().to_string()),
+                RV::String(Iri::parse(wk::CLASS).unwrap().as_str().to_string()),
             ]),
         );
         r.set(
@@ -4090,7 +4104,7 @@ mod tests {
         );
         trace.set(
             Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
-            RVal::ResourceRef(Iri::parse(target_iri_str).unwrap()),
+            RVal::String(Iri::parse(target_iri_str).unwrap().as_str().to_string()),
         );
 
         let mut builder = LayerBuilder::new("phase9-witness-test", None);

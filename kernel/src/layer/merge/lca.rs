@@ -151,7 +151,11 @@ pub(crate) fn iter_iri_values(value: &crate::ontology::resource::Value) -> Vec<I
 pub(crate) fn collect_iri_refs_into(value: &crate::ontology::resource::Value, out: &mut Vec<Iri>) {
     use crate::ontology::resource::Value;
     match value {
-        Value::ResourceRef(iri) => out.push(iri.clone()),
+        Value::String(s) => {
+            if let Ok(iri) = Iri::parse(s) {
+                out.push(iri);
+            }
+        }
         Value::Array(items) => {
             for v in items {
                 collect_iri_refs_into(v, out);
@@ -162,8 +166,7 @@ pub(crate) fn collect_iri_refs_into(value: &crate::ontology::resource::Value, ou
                 collect_iri_refs_into(v, out);
             }
         }
-        Value::String(_)
-        | Value::Integer(_)
+        Value::Integer(_)
         | Value::Float(_)
         | Value::Boolean(_)
         | Value::Json(_)

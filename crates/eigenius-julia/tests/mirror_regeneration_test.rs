@@ -67,7 +67,12 @@ impl KinaseChain {
         let mut tweaked = prop.clone();
         tweaked.set(
             Iri::parse("urn:eigenius:core:data_type").unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:core:float").unwrap()),
+            Value::String(
+                Iri::parse("urn:eigenius:core:float")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         resources.insert(prop_iri, tweaked);
         Self { resources }

@@ -35,8 +35,6 @@ pub enum Value {
     Float(f64),
     /// Boolean true/false.
     Boolean(bool),
-    /// Reference to another resource by IRI.
-    ResourceRef(Iri),
     /// Embedded resource (no `@id`).
     Embedded(Box<Resource>),
     /// Ordered array of values (resource_array or value_array).
@@ -64,6 +62,17 @@ pub enum Value {
 }
 
 impl Value {
+    /// A value that REFERENCES a resource, from a parsed IRI.
+    ///
+    /// A reference is a string — the shape both codecs produce and both preserve. This
+    /// constructor exists so that intent is visible where a resource is built in Rust with an
+    /// `Iri` already in hand, which is the one thing the retired `Value::ResourceRef` variant
+    /// was genuinely good for. It differs from that variant in the way that matters: it makes
+    /// no claim a reader could depend on, because the result is an ordinary `Value::String`.
+    pub fn iri(i: &Iri) -> Value {
+        Value::String(i.as_str().to_string())
+    }
+
     /// Returns the value as a string, if it is one.
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -96,50 +105,26 @@ impl Value {
         }
     }
 
-    /// Returns the value as a resource reference IRI, if it is one.
-    pub fn as_resource_ref(&self) -> Option<&Iri> {
-        match self {
-            Value::ResourceRef(iri) => Some(iri),
-            _ => None,
-        }
-    }
-
-    /// Read the IRI text from any value that could represent an IRI:
-    /// `Value::ResourceRef(iri)` (the canonical post-
-    /// `canonicalise_resource_refs` shape) or `Value::String(s)` (the
-    /// freshly-parsed pre-canonicalisation shape). Returns `None` for
-    /// anything else.
+    /// The IRI text of a value that names a resource.
     ///
-    /// Use this — not `as_str` — from any reader that walks
-    /// resource-typed property values (`is_a`, `subclass_of`,
-    /// `requires`, `class_types`, etc.). `as_str` silently drops
-    /// `ResourceRef` values because they aren't strings, which
-    /// produced an entirely-empty topology graph for canonicalised
-    /// chains until this method was added.
+    /// Use this — not `as_str` — from any reader that walks a resource-typed property
+    /// (`is_a`, `subclass_of`, `requires`, `class_types`, …). It read `ResourceRef` as well
+    /// as `String` until that variant was retired; `as_str` silently dropped `ResourceRef`
+    /// values, which produced an entirely-empty topology graph for canonicalised chains and
+    /// is why this method exists at all.
     pub fn as_iri_str(&self) -> Option<&str> {
         match self {
-            Value::String(s) => Some(s),
-            Value::ResourceRef(iri) => Some(iri.as_str()),
+            Value::String(iri) => Some(iri.as_str()),
             _ => None,
         }
     }
 
-    /// Read the value as an IRI reference, accepting both
-    /// `ResourceRef` (the canonical post-`canonicalise_resource_refs`
-    /// shape) and `String` (the parse-time shape from
-    /// schema-agnostic Eigon-JSON parsing). Returns `None` when the
-    /// value is neither, or when a `String` value can't be parsed
-    /// as a valid IRI.
+    /// The value as a parsed IRI. `None` when it is not a string, or not a valid IRI.
     ///
-    /// Use this from any reader that needs an IRI off a
-    /// resource-typed property and may run against either
-    /// freshly-parsed or chain-canonicalised resources (RPC
-    /// payloads, in-flight intermediates, FIBER-synthesised
-    /// resources). Returns `Cow`-style — owned `Iri` for `String`
-    /// (it had to be parsed), borrowed slice for `ResourceRef`.
+    /// A reference is a string that parses; whether it is *meant* as a reference is the
+    /// property's `data_type`, which this method does not consult and its callers do.
     pub fn as_iri(&self) -> Option<Iri> {
         match self {
-            Value::ResourceRef(iri) => Some(iri.clone()),
             Value::String(s) => Iri::parse(s).ok(),
             _ => None,
         }
@@ -181,7 +166,6 @@ impl Value {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(iri) => Some(iri.clone()),
                     Value::String(s) => Iri::parse(s).ok(),
                     _ => None,
                 })
@@ -357,9 +341,7 @@ mod tests {
         assert_eq!(Value::Integer(42).as_integer(), Some(42));
         assert_eq!(Value::Float(2.72).as_float(), Some(2.72));
         assert_eq!(Value::Boolean(true).as_boolean(), Some(true));
-        assert!(Value::ResourceRef(iri("urn:a:b"))
-            .as_resource_ref()
-            .is_some());
+        assert!(Value::iri(&iri("urn:a:b")).as_iri().is_some());
         assert!(Value::String("hi".into()).as_integer().is_none());
     }
 
@@ -379,7 +361,6 @@ mod tests {
         assert!(v.as_integer().is_none());
         assert!(v.as_float().is_none());
         assert!(v.as_boolean().is_none());
-        assert!(v.as_resource_ref().is_none());
         assert!(v.as_embedded().is_none());
         assert!(v.as_array().is_none());
     }

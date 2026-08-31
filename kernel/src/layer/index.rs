@@ -233,7 +233,7 @@ pub fn is_indexable_predicate(layer: &Layer, predicate: &Iri) -> bool {
         None => return false,
     };
     // `as_iri_str` accepts both `Value::String` (pre-canonicalisation
-    // shape) and `Value::ResourceRef` (post-canonicalisation shape).
+    // shape) and `Value::ResourceRef` (retired).
     // Using `as_str` here was a pre-existing bug that broke the
     // index for every chain that round-tripped through
     // `canonicalise_resource_refs` — i.e., every production chain.
@@ -324,15 +324,10 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 }
             };
             match data_type {
-                wk::RESOURCE => match value {
-                    Value::String(s) => push_iri_value(&mut triples, s),
-                    Value::ResourceRef(iri) => triples.push(OwnedTriple {
-                        subject: subject_iri.clone(),
-                        predicate: predicate_iri.clone(),
-                        object: iri.clone(),
-                    }),
-                    _ => {}
-                },
+                // The slot is `data_type: resource`, so its string IS a reference — this
+                // reader has the schema and needs only to parse. It used to match
+                // `Value::ResourceRef` alongside, for a shape a stored chain never carried.
+                wk::RESOURCE => push_iri_value(&mut triples, value.as_iri_str().unwrap_or("")),
                 // D79 §2.2 — a term-valued property. Its `Value::Json` names
                 // declarations, and before this arm those references produced no
                 // triples at all, so nothing could ask what depends on a term.
@@ -347,14 +342,8 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 wk::RESOURCE_ARRAY => {
                     if let Value::Array(items) = value {
                         for item in items {
-                            match item {
-                                Value::String(s) => push_iri_value(&mut triples, s),
-                                Value::ResourceRef(iri) => triples.push(OwnedTriple {
-                                    subject: subject_iri.clone(),
-                                    predicate: predicate_iri.clone(),
-                                    object: iri.clone(),
-                                }),
-                                _ => {}
+                            if let Value::String(s) = item {
+                                push_iri_value(&mut triples, s);
                             }
                         }
                     }
@@ -1527,23 +1516,24 @@ mod mentions_tests {
         let mut prop = Resource::new(iri("urn:eigenius:test:tx"));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         prop.set(iri(wk::SHORT_NAME), Value::String("tx".into()));
-        prop.set(
-            iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::INDUCTIVE)),
-        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::INDUCTIVE)));
         prop.set(
             iri(wk::CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:eigentt:Term").as_str().to_string(),
+            )]),
         );
         b.add_resource(prop).unwrap();
 
         let mut colour = Resource::new(iri("urn:eigenius:test:Colour"));
         colour.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         colour.set(iri(wk::SHORT_NAME), Value::String("Colour".into()));
         colour.set(iri(wk::TYPE_PARAMS), Value::Array(vec![]));
@@ -1553,7 +1543,7 @@ mod mentions_tests {
         let mut topic = Resource::new(iri("urn:eigenius:test:Topic"));
         topic.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         b.add_resource(topic).unwrap();
 
@@ -1565,7 +1555,7 @@ mod mentions_tests {
         let mut holder = Resource::new(iri("urn:eigenius:test:holder"));
         holder.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         holder.set(iri("urn:eigenius:test:tx"), Value::Json(term));
         b.add_resource(holder).unwrap();

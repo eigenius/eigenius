@@ -4178,11 +4178,13 @@ fn describe_probe_value(
 ) -> String {
     use eigenius_kernel::ontology::resource::Value;
     match value {
-        Value::ResourceRef(iri) => match eigenius_kernel::dcg::resource_label(iri, head) {
-            Some(l) => format!("{iri} «{l}»"),
-            None => iri.to_string(),
+        Value::String(s) => match eigenius_kernel::ontology::iri::Iri::parse(s)
+            .ok()
+            .and_then(|i| eigenius_kernel::dcg::resource_label(&i, head).map(|l| (i, l)))
+        {
+            Some((i, l)) => format!("{i} «{l}»"),
+            None => format!("{s:?}"),
         },
-        Value::String(s) => format!("{s:?}"),
         other => format!("{other:?}"),
     }
 }
@@ -5381,7 +5383,9 @@ fn spike_named_entity_closes_unit4() {
         let mut ni = Resource::new(p(&format!("urn:eigenius:doc:ni_{key}")));
         ni.set(
             p(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(p("urn:eigenius:lexicon:Entity"))]),
+            Value::Array(vec![Value::String(
+                p("urn:eigenius:lexicon:Entity").as_str().to_string(),
+            )]),
         );
         ni.set(
             p(wk::DESCRIPTION),

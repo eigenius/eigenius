@@ -436,11 +436,10 @@ fn is_a_iris(resource: &Resource) -> Vec<String> {
 fn require_iri_property(resource: &Resource, property: &str, label: &str) -> Result<Iri, String> {
     let prop_iri = Iri::parse(property).expect("well-known IRI");
     match resource.get(&prop_iri) {
-        // `ResourceRef` is the canonical shape post-`canonicalise_resource_refs`;
+        // A reference is a `String` that parses as an IRI; `ResourceRef` and the pass that produced it are retired.
         // `String` is accepted as a fallback for resources read off the wire
         // before canonicalisation (in-flight gRPC payloads, FIBER-synthesised
         // intermediates) where the layer's data_type pass hasn't run.
-        Some(Value::ResourceRef(i)) => Ok(i.clone()),
         Some(Value::String(s)) => {
             Iri::parse(s).map_err(|e| format!("{label}: invalid IRI `{s}`: {e}"))
         }
@@ -470,7 +469,6 @@ fn optional_iri_property(
     let prop_iri = Iri::parse(property).expect("well-known IRI");
     match resource.get(&prop_iri) {
         None => Ok(None),
-        Some(Value::ResourceRef(i)) => Ok(Some(i.clone())),
         Some(Value::String(s)) => Iri::parse(s)
             .map(Some)
             .map_err(|e| format!("{label}: invalid IRI `{s}`: {e}")),
@@ -606,7 +604,6 @@ fn parse_query_class(resource: &Resource) -> Result<QueryClassEntry, String> {
             // Post-canonicalisation, IRI references in resource_array
             // values are `ResourceRef`; `String` is a parse-time
             // fallback for intermediate (uncommitted) shapes.
-            Value::ResourceRef(i) => dispatch_roles.push(parse_dispatch_role(i.as_str())?),
             Value::String(s) => dispatch_roles.push(parse_dispatch_role(s)?),
             other => {
                 return Err(format!(

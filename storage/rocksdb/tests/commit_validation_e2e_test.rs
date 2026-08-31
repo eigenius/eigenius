@@ -89,7 +89,7 @@ fn commit_domain_layer(
     let mut animal = Resource::new(iri("urn:eigenius:demo:Animal"));
     animal.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     animal.set(iri(wk::DESCRIPTION), Value::String("Animal class".into()));
     animal.set(iri(wk::SHORT_NAME), Value::String("Animal".into()));
@@ -98,7 +98,9 @@ fn commit_domain_layer(
     let mut rex = Resource::new(iri("urn:eigenius:demo:rex"));
     rex.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:Animal"))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:demo:Animal").as_str().to_string(),
+        )]),
     );
     rex.set(iri(wk::DESCRIPTION), Value::String("Rex the dog".into()));
     rex.set(iri(wk::SHORT_NAME), Value::String("rex".into()));
@@ -119,17 +121,17 @@ fn build_redef_builder(parent: Arc<Layer>) -> LayerBuilder {
     let mut species = Resource::new(iri("urn:eigenius:demo:species"));
     species.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
     );
     species.set(iri(wk::DESCRIPTION), Value::String("species".into()));
     species.set(iri(wk::SHORT_NAME), Value::String("species".into()));
-    species.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+    species.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
     b.add_resource(species).unwrap();
 
     let mut animal = Resource::new(iri("urn:eigenius:demo:Animal"));
     animal.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     animal.set(
         iri(wk::DESCRIPTION),
@@ -139,10 +141,10 @@ fn build_redef_builder(parent: Arc<Layer>) -> LayerBuilder {
     animal.set(
         iri(wk::REQUIRES),
         Value::Array(vec![
-            Value::ResourceRef(iri(wk::IS_A)),
-            Value::ResourceRef(iri(wk::DESCRIPTION)),
-            Value::ResourceRef(iri(wk::SHORT_NAME)),
-            Value::ResourceRef(iri("urn:eigenius:demo:species")),
+            Value::iri(&iri(wk::IS_A)),
+            Value::iri(&iri(wk::DESCRIPTION)),
+            Value::iri(&iri(wk::SHORT_NAME)),
+            Value::iri(&iri("urn:eigenius:demo:species")),
         ]),
     );
     b.add_resource(animal).unwrap();

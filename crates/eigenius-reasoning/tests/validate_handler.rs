@@ -101,8 +101,11 @@ fn synthetic_sentence(
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:Conclusion").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:justification:Conclusion")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     // The three parts are now one slot, so "a part is missing" becomes "the
@@ -283,8 +286,11 @@ fn entailment_request(candidate: Value) -> Resource {
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:EntailmentRequest").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:justification:EntailmentRequest")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(
@@ -300,8 +306,11 @@ fn consistency_request(sentence_set: Value) -> Resource {
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:ConsistencyRequest").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:justification:ConsistencyRequest")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(Iri::parse(iris::PROP_SENTENCE_SET).unwrap(), sentence_set);
@@ -349,8 +358,11 @@ fn entailment_query_missing_candidate_surfaces_computation_failed() {
     let mut request = Resource::new_embedded();
     request.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:EntailmentRequest").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:justification:EntailmentRequest")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     let proc_iri = Iri::parse(iris::PROC_ENTAILMENT_QUERY).unwrap();
@@ -386,8 +398,11 @@ fn consistency_check_returns_undecidable_on_nontrivial_set() {
     // decision procedure.
     let ctx = build_full_chain();
     let inst = ReasoningInstitution::new();
-    let request = consistency_request(Value::Array(vec![Value::ResourceRef(
-        Iri::parse("urn:eigenius:notebook:demo:some_sentence").unwrap(),
+    let request = consistency_request(Value::Array(vec![Value::String(
+        Iri::parse("urn:eigenius:notebook:demo:some_sentence")
+            .unwrap()
+            .as_str()
+            .to_string(),
     )]));
     let proc_iri = Iri::parse(iris::PROC_CONSISTENCY_CHECK).unwrap();
     let outcome = inst.query(&proc_iri, &request, &ctx).expect("dispatch");
@@ -406,8 +421,11 @@ fn consistency_check_missing_sentence_set_surfaces_computation_failed() {
     let mut request = Resource::new_embedded();
     request.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:ConsistencyRequest").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:justification:ConsistencyRequest")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     let proc_iri = Iri::parse(iris::PROC_CONSISTENCY_CHECK).unwrap();
@@ -456,8 +474,8 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     let mut target = Resource::new(target_iri.clone());
     target.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk_local::CLASS).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk_local::CLASS).unwrap().as_str().to_string(),
         )]),
     );
 
@@ -467,13 +485,16 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
     trace.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk_local::DECLARATION_TRACE).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk_local::DECLARATION_TRACE)
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     trace.set(
         Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
-        Value::ResourceRef(target_iri.clone()),
+        Value::iri(&target_iri.clone()),
     );
 
     let mut builder = LayerBuilder::new("phase10-axioms", Some(reasoning_layer));
@@ -563,8 +584,8 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
     let mut target = Resource::new(target_iri.clone());
     target.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk_local::CLASS).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk_local::CLASS).unwrap().as_str().to_string(),
         )]),
     );
     target.set(
@@ -576,13 +597,16 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
     trace.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk_local::DECLARATION_TRACE).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk_local::DECLARATION_TRACE)
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     trace.set(
         Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
-        Value::ResourceRef(target_iri.clone()),
+        Value::iri(&target_iri.clone()),
     );
 
     let mut builder = LayerBuilder::new("phase10-axioms-explicit", Some(reasoning_layer));
@@ -857,8 +881,11 @@ fn iri_sentence(iri_str: &str, proposition: Value, justification: Value, cert: V
     let mut r = Resource::new(Iri::parse(iri_str).unwrap());
     r.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:justification:Conclusion").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:justification:Conclusion")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(
@@ -1078,7 +1105,9 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     let mut artifact = Resource::new(target_iri.clone());
     artifact.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(Iri::parse(wk::CLASS).unwrap())]),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::CLASS).unwrap().as_str().to_string(),
+        )]),
     );
     artifact.set(
         Iri::parse(wk::DECLARED_BY).unwrap(),
@@ -1092,13 +1121,16 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     let mut trace = Resource::new(Iri::parse("urn:test:v205:transcribed-trace").unwrap());
     trace.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::EXTERNAL_EXECUTION_TRACE).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::EXTERNAL_EXECUTION_TRACE)
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     trace.set(
         Iri::parse(wk::REFLECTION_RESOURCE).unwrap(),
-        Value::ResourceRef(target_iri.clone()),
+        Value::iri(&target_iri.clone()),
     );
     trace.set(
         Iri::parse(wk::DECLARED_BY).unwrap(),

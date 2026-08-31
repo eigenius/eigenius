@@ -152,7 +152,7 @@ fn format_slot_reads_as_an_iri_after_build() {
     let slot = prop_def
         .get(&iri("urn:eigenius:core:format"))
         .expect("format slot");
-    // This asserted `matches!(slot, Value::ResourceRef(_))` — that a build-time pass had
+    // This asserted `matches!(slot, Value::String(_))` — that a build-time pass had
     // upgraded the parsed string. The pass is gone: it promised readers "one shape per
     // data_type" and could not keep it, because `ResourceRef` encodes to CBOR `Text` and
     // reads back as `String`. What a reader is entitled to is the IRI, through `as_iri`.

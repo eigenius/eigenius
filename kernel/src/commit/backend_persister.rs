@@ -350,7 +350,7 @@ mod already_validated_tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(class))]),
+            Value::Array(vec![Value::iri(&iri(class))]),
         );
         r
     }

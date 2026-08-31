@@ -79,7 +79,7 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 /// shapes (matching what `compile_type_expr` in the ESL compiler
 /// emits for `pi`, `Arrow`, and class-reference type expressions):
 ///
-/// - `Value::ResourceRef(iri)` — a class IRI (the leaf type).
+/// - `Value::iri(iri)` — a class IRI (the leaf type).
 ///   Resolves through the layer chain via `resolve_class_type`.
 /// - `Value::String(iri-str)` — same as ResourceRef, with the IRI
 ///   in string form (the pre-canonicalisation shape).
@@ -98,10 +98,6 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> {
     use crate::ontology::well_known as wk;
     match value {
-        Value::ResourceRef(iri) => {
-            let val = resolve_class_type(iri, layer)?;
-            Ok(crate::nbe::readback::readback_val(0, &val))
-        }
         Value::String(s) => {
             let iri = Iri::parse(s)
                 .map_err(|e| format!("decode_program_type: invalid type IRI '{s}': {e}"))?;
@@ -360,7 +356,6 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         // typed as `data_type: resource`, so the canonical shape is
         // `ResourceRef`; `String` survives for pre-canonicalisation
         // intermediates (RPC payloads, FIBER-synthesised programs).
-        Some(Value::ResourceRef(i)) => Exp::Var(i.as_str().to_string()),
         Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => return Err("Apply: missing 'function' property".to_string()),
@@ -368,7 +363,6 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 
     let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
     let arg_exp = match resource.get(&arg_prop) {
-        Some(Value::ResourceRef(i)) => Exp::Var(i.as_str().to_string()),
         Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => Exp::Unit, // No argument
@@ -919,7 +913,6 @@ fn parse_literal(resource: &Resource) -> Result<Exp, String> {
     let val_prop = Iri::parse("urn:eigenius:program:value").unwrap();
     match resource.get(&val_prop) {
         // Canonical IRI reference shape after `canonicalise_resource_refs`.
-        Some(Value::ResourceRef(i)) => Ok(Exp::Var(i.as_str().to_string())),
         Some(Value::String(s)) => {
             // Pre-canonicalisation: a string literal that *might* be
             // an IRI reference (heuristic on `urn:` / `http`).
@@ -1134,7 +1127,7 @@ mod tests {
         );
         script.set(
             prop("urn:eigenius:runtime:requires_environment"),
-            Value::ResourceRef(prop("urn:eigenius:test:env")),
+            Value::iri(&prop("urn:eigenius:test:env")),
         );
 
         let mut b = LayerBuilder::new("runtime", None);
@@ -1149,7 +1142,12 @@ mod tests {
         let mut comp_arg = Resource::new_embedded();
         comp_arg.set(
             Iri::parse(RUNTIME_SCRIPT_REF).unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:test:script").unwrap()),
+            Value::String(
+                Iri::parse("urn:eigenius:test:script")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let expanded = expand_runtime_script_argument(&comp_arg, &layer).expect("resolves");
         let get = |p: &str| {
@@ -1190,7 +1188,12 @@ mod tests {
         let mut comp_arg = Resource::new_embedded();
         comp_arg.set(
             Iri::parse(RUNTIME_SCRIPT_REF).unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:test:missing").unwrap()),
+            Value::String(
+                Iri::parse("urn:eigenius:test:missing")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let err = expand_runtime_script_argument(&comp_arg, &layer).unwrap_err();
         assert!(err.contains("not found on the chain"), "got: {err}");

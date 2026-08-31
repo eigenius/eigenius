@@ -493,7 +493,7 @@ fn value_mentions_iri(
 ) -> bool {
     use crate::ontology::resource::Value;
     match value {
-        Value::ResourceRef(r) => r == iri,
+        Value::String(r) => r.as_str() == iri.as_str(),
         Value::Array(items) => items
             .iter()
             .any(|v| value_mentions_iri(v, iri, layer, term_valued)),
@@ -547,7 +547,7 @@ fn substitute_iri_in_value(
 ) -> crate::ontology::resource::Value {
     use crate::ontology::resource::Value;
     match value {
-        Value::ResourceRef(r) if r == old_iri => Value::ResourceRef(new_iri.clone()),
+        Value::String(r) if r.as_str() == old_iri.as_str() => Value::iri(new_iri),
         Value::Array(items) => Value::Array(
             items
                 .iter()
@@ -1425,7 +1425,9 @@ pub fn commit_resolutions_as_merge_layer(
                     if class_iri == &spec.affected_class {
                         body.set(
                             parent_classes_iri.clone(),
-                            Value::Array(vec![Value::ResourceRef(spec.new_parent.clone())]),
+                            Value::Array(vec![Value::String(
+                                spec.new_parent.clone().as_str().to_string(),
+                            )]),
                         );
                     } else {
                         let mut parents: Vec<Iri> = body
@@ -1437,7 +1439,7 @@ pub fn commit_resolutions_as_merge_layer(
                         }
                         body.set(
                             parent_classes_iri.clone(),
-                            Value::Array(parents.into_iter().map(Value::ResourceRef).collect()),
+                            Value::Array(parents.into_iter().map(|i| Value::iri(&i)).collect()),
                         );
                     }
                     builder
@@ -1520,8 +1522,11 @@ fn build_merge_resolution_record(
     let mut record = Resource::new_embedded();
     record.set(
         Iri::parse(wk::IS_A).expect("IS_A IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::MERGE_RESOLUTION_RECORD).expect("MERGE_RESOLUTION_RECORD IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::MERGE_RESOLUTION_RECORD)
+                .expect("MERGE_RESOLUTION_RECORD IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     record.set(
@@ -1569,7 +1574,7 @@ fn build_merge_resolution_record(
         MergeResolution::Witness { comorphism, .. } => {
             record.set(
                 Iri::parse(wk::MERGE_RECORD_WITNESS).expect("MERGE_RECORD_WITNESS IRI"),
-                Value::ResourceRef(comorphism.clone()),
+                Value::iri(&comorphism.clone()),
             );
             if let Some(layer_id) = witness_source_layer {
                 record.set(
@@ -1592,11 +1597,11 @@ fn build_merge_resolution_record(
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RENAME_FROM_IRI)
                     .expect("MERGE_RECORD_RENAME_FROM_IRI IRI"),
-                Value::ResourceRef(old_iri.clone()),
+                Value::iri(&old_iri.clone()),
             );
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RENAME_TO_IRI).expect("MERGE_RECORD_RENAME_TO_IRI IRI"),
-                Value::ResourceRef(new_iri.clone()),
+                Value::iri(&new_iri.clone()),
             );
         }
         MergeResolution::SchemaQuotient { quotient, .. } => {
@@ -1621,12 +1626,12 @@ fn build_merge_resolution_record(
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)
                     .expect("MERGE_RECORD_RESTRUCTURE_NEW_PARENT IRI"),
-                Value::ResourceRef(spec.new_parent.clone()),
+                Value::iri(&spec.new_parent.clone()),
             );
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)
                     .expect("MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS IRI"),
-                Value::ResourceRef(spec.affected_class.clone()),
+                Value::iri(&spec.affected_class.clone()),
             );
         }
     }
@@ -1792,7 +1797,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+            &[(profile_for_iri, Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) =
             build_span_arc(Vec::new(), Vec::new(), vec![patient, profile]);
@@ -1836,7 +1841,7 @@ mod tests {
             .get(&iri(profile_for_iri))
             .expect("profile_for ref should still exist");
         match profile_for {
-            Value::ResourceRef(r) => {
+            Value::String(r) => {
                 assert_eq!(r.as_str(), renamed_iri, "ref should be rewritten");
             }
             other => panic!("expected ResourceRef, got {other:?}"),
@@ -1855,10 +1860,7 @@ mod tests {
 
         let patient = make_resource(patient_iri, &[wk::CLASS], &[]);
         let mut embedded = Resource::new_embedded();
-        embedded.set(
-            iri("urn:project:about"),
-            Value::ResourceRef(iri(patient_iri)),
-        );
+        embedded.set(iri("urn:project:about"), Value::iri(&iri(patient_iri)));
         let report = make_resource(
             report_iri,
             &[wk::CLASS],
@@ -1903,7 +1905,7 @@ mod tests {
             .get(&iri("urn:project:about"))
             .expect("nested about ref should still exist");
         match about {
-            Value::ResourceRef(r) => assert_eq!(r.as_str(), renamed_iri),
+            Value::String(r) => assert_eq!(r.as_str(), renamed_iri),
             other => panic!("expected ResourceRef, got {other:?}"),
         }
     }
@@ -2176,12 +2178,12 @@ mod tests {
         let prop_a = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let prop_b = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend) = build_span(Vec::new(), vec![prop_a], vec![prop_b]);
         let conflicts = classify_conflicts(&span, &backend).unwrap();
@@ -2393,7 +2395,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -2401,7 +2405,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Reptile").as_str().to_string(),
+                )]),
             )],
         );
         build_span(vec![mammal, reptile], vec![dog_a], vec![dog_b])
@@ -2712,7 +2718,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -2720,7 +2728,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Reptile").as_str().to_string(),
+                )]),
             )],
         );
         let (span, backend, storage) =
@@ -2893,10 +2903,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
@@ -3036,7 +3043,7 @@ mod tests {
             Some(conflict_id.0.as_str()),
         );
         match record.get(&iri(wk::MERGE_RECORD_WITNESS)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r, &handle.iri),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), handle.iri.as_str()),
             other => panic!("merge_record_witness should be a ResourceRef, got {other:?}"),
         }
         assert_eq!(
@@ -3259,11 +3266,11 @@ mod tests {
             Some("a"),
         );
         match record.get(&iri(wk::MERGE_RECORD_RENAME_FROM_IRI)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), patient_iri),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), patient_iri),
             other => panic!("rename_from_iri should be ResourceRef, got {other:?}"),
         }
         match record.get(&iri(wk::MERGE_RECORD_RENAME_TO_IRI)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), renamed_iri),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), renamed_iri),
             other => panic!("rename_to_iri should be ResourceRef, got {other:?}"),
         }
         let _ = conflict_id;
@@ -3334,7 +3341,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -3342,7 +3351,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Reptile").as_str().to_string(),
+                )]),
             )],
         );
         let (span, backend, storage) =
@@ -3378,11 +3389,11 @@ mod tests {
             Some("Restructure"),
         );
         match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), "urn:test:Animal"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), "urn:test:Animal"),
             other => panic!("restructure_new_parent should be ResourceRef, got {other:?}"),
         }
         match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), "urn:test:Dog"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), "urn:test:Dog"),
             other => panic!("restructure_affected_class should be ResourceRef, got {other:?}"),
         }
     }
@@ -3477,7 +3488,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+            &[(profile_for_iri, Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) =
             build_span_arc(Vec::new(), vec![patient_a, profile], vec![patient_b]);
@@ -3518,7 +3529,7 @@ mod tests {
             .resolve(&iri(profile_iri))
             .expect("Profile should resolve");
         match resolved_profile.get(&iri(profile_for_iri)) {
-            Some(Value::ResourceRef(r)) => {
+            Some(Value::String(r)) => {
                 assert_eq!(
                     r.as_str(),
                     renamed_iri,
@@ -3741,22 +3752,22 @@ mod tests {
         let prop_a = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let prop_b = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let other_prop_a = make_resource(
             "urn:test:height",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let other_prop_b = make_resource(
             "urn:test:height",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend, storage) = build_span_arc(
             Vec::new(),
@@ -3817,7 +3828,7 @@ mod rename_reaches_terms {
         make_resource(
             id,
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE_PROP, Value::ResourceRef(iri(data_type)))],
+            &[(wk::DATA_TYPE_PROP, Value::iri(&iri(data_type)))],
         )
     }
 

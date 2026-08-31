@@ -1291,7 +1291,6 @@ pub(crate) use crate::ontology::well_known::iri;
 /// frequently authored as a bare string in source ontologies).
 pub(crate) fn value_as_iri(value: &Value) -> Option<Iri> {
     match value {
-        Value::ResourceRef(i) => Some(i.clone()),
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }
@@ -2532,7 +2531,7 @@ mod tests {
         let mut patient = Resource::new(iri("urn:test:Patient"));
         patient.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         patient.set(iri(wk::SHORT_NAME), Value::String("Patient".to_string()));
         builder.add_resource(patient).unwrap();
@@ -2556,7 +2555,9 @@ mod tests {
             let mut lam = Resource::new_embedded();
             lam.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:program:Lambda").as_str().to_string(),
+                )]),
             );
             lam.set(
                 iri("urn:eigenius:program:parameter"),
@@ -2581,7 +2582,9 @@ mod tests {
         let mut r = Resource::new_embedded();
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:program:Var").as_str().to_string(),
+            )]),
         );
         r.set(
             iri("urn:eigenius:program:name"),
@@ -2594,7 +2597,9 @@ mod tests {
         let mut r = Resource::new_embedded();
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_ARG_TYPE).as_str().to_string(),
+            )]),
         );
         // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         r.set(
@@ -2603,7 +2608,7 @@ mod tests {
         );
         r.set(
             iri(wk::TYPE_ARGS),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         Value::Embedded(Box::new(r))
     }
@@ -2612,15 +2617,14 @@ mod tests {
         let mut r = Resource::new(iri(iri_str));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::MERGE_COMORPHISM))]),
+            Value::Array(vec![Value::String(
+                iri(wk::MERGE_COMORPHISM).as_str().to_string(),
+            )]),
         );
-        r.set(
-            iri(wk::MERGE_TARGET_CLASS),
-            Value::ResourceRef(iri(target_class)),
-        );
+        r.set(iri(wk::MERGE_TARGET_CLASS), Value::iri(&iri(target_class)));
         r.set(
             iri(wk::MERGE_TRANSFORMATION),
-            Value::ResourceRef(iri(transformation)),
+            Value::iri(&iri(transformation)),
         );
         r
     }
@@ -2630,8 +2634,8 @@ mod tests {
         let lambda = make_witness_lambda_chain(
             "urn:test:take_b_term",
             [
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
                 Some(make_option_of("urn:test:Patient")),
             ],
             make_var_b_body(),
@@ -2707,8 +2711,8 @@ mod tests {
         let lambda = make_witness_lambda_chain(
             "urn:test:wrong_param_term",
             [
-                Some(Value::ResourceRef(iri("urn:test:Visit"))),
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Visit"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
                 Some(make_option_of("urn:test:Patient")),
             ],
             make_var_b_body(),
@@ -2740,8 +2744,8 @@ mod tests {
         let lambda = make_witness_lambda_chain(
             "urn:test:wrong_opt_term",
             [
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
                 Some(make_option_of("urn:test:Visit")),
             ],
             make_var_b_body(),
@@ -2774,7 +2778,9 @@ mod tests {
         let mut single_lambda = Resource::new(iri("urn:test:single_term"));
         single_lambda.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:program:Lambda").as_str().to_string(),
+            )]),
         );
         single_lambda.set(
             iri("urn:eigenius:program:parameter"),
@@ -2817,7 +2823,7 @@ mod tests {
         target_class: &str,
         body: Resource,
     ) -> Resource {
-        let class_value = Value::ResourceRef(iri(target_class));
+        let class_value = Value::iri(&iri(target_class));
         let option_value = make_option_of(target_class);
         let param_types = [
             Some(class_value.clone()),
@@ -2839,7 +2845,9 @@ mod tests {
             let mut ar = Resource::new_embedded();
             ar.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::TYPE_BINDER_ARROW))]),
+                Value::Array(vec![Value::String(
+                    iri(wk::TYPE_BINDER_ARROW).as_str().to_string(),
+                )]),
             );
             ar.set(iri(wk::BINDER_NAME), Value::String(params[i].to_string()));
             ar.set(iri(wk::BINDER_KIND), kinds[i].clone());
@@ -2880,7 +2888,9 @@ mod tests {
         let mut bad_body = Resource::new_embedded();
         bad_body.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:program:Var").as_str().to_string(),
+            )]),
         );
         bad_body.set(
             iri("urn:eigenius:program:name"),
@@ -2942,7 +2952,9 @@ mod tests {
             let mut lam = Resource::new_embedded();
             lam.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:program:Lambda").as_str().to_string(),
+                )]),
             );
             lam.set(
                 iri("urn:eigenius:program:parameter"),
@@ -2960,7 +2972,7 @@ mod tests {
         let mut wrapper = Resource::new(iri(outer_iri));
         wrapper.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         wrapper.set(iri(wk::SHORT_NAME), Value::String("outer".to_string()));
         // Stash the embedded lambda on a benign property — even if
@@ -3136,11 +3148,13 @@ mod phase_d_parity {
         let mut prop = Resource::new(Iri::parse("urn:t:some_prop").unwrap());
         prop.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RESOURCE).unwrap()),
+            Value::iri(&Iri::parse(wk::RESOURCE).unwrap()),
         );
         let classes = prop.is_a();
         let refs: Vec<&Iri> = classes.iter().collect();
@@ -3222,7 +3236,9 @@ mod class_fields_memo {
             let mut r = Resource::new(Iri::parse(&format!("urn:t:inst{n}")).unwrap());
             r.set(
                 Iri::parse(wk::IS_A).unwrap(),
-                Value::Array(vec![Value::ResourceRef(Iri::parse(wk::CLASS).unwrap())]),
+                Value::Array(vec![Value::String(
+                    Iri::parse(wk::CLASS).unwrap().as_str().to_string(),
+                )]),
             );
             d.add_resource(r).unwrap();
         }

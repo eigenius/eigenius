@@ -665,7 +665,7 @@ pub(crate) fn eval_impl<T: Tracer>(
             let mut r = Resource::new_embedded();
             r.set(
                 Iri::parse("urn:eigenius:core:is_a").unwrap(),
-                Value::Array(vec![Value::String(class_iri.as_str().to_string())]),
+                Value::Array(vec![Value::iri(class_iri)]),
             );
             let mut field_nodes = Vec::with_capacity(fields.len());
             for (prop_iri, expr) in fields {

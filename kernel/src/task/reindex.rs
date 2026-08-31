@@ -178,7 +178,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         for (k, v) in props {
             r.set(iri(k), v);
@@ -201,7 +201,7 @@ mod tests {
             wk::PROPERTY,
             vec![
                 (wk::SHORT_NAME, Value::String("body".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::STRING))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::STRING))),
             ],
         ))
         .unwrap();
@@ -209,8 +209,8 @@ mod tests {
             target_index_iri,
             wk::VECTOR_INDEX_CLASS,
             vec![
-                (wk::TARGET_PROPERTY, Value::ResourceRef(iri("urn:ex:body"))),
-                (wk::VEC_MODEL, Value::ResourceRef(iri(model_iri))),
+                (wk::TARGET_PROPERTY, Value::iri(&iri("urn:ex:body"))),
+                (wk::VEC_MODEL, Value::iri(&iri(model_iri))),
                 (wk::VEC_DIM, Value::Integer(8)),
             ],
         ))

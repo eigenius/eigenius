@@ -169,7 +169,7 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
     // Tag each row with `is_a: <row class IRI>` (add to any existing classes).
     let is_a_iri = Iri::parse(wk::IS_A).unwrap();
     for row in rows.iter_mut() {
-        let row_class_val = Value::String(row_class_iri.as_str().to_string());
+        let row_class_val = Value::iri(&row_class_iri);
         match row.get(&is_a_iri).cloned() {
             Some(Value::Array(mut existing)) => {
                 existing.push(row_class_val);
@@ -197,7 +197,7 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
     );
     result_set.set(
         Iri::parse(RESULT_CLASS_PROP).unwrap(),
-        Value::String(row_class_iri.as_str().to_string()),
+        Value::iri(&row_class_iri),
     );
     result_set.set(Iri::parse(ROWS_PROP).unwrap(), Value::Array(embedded_rows));
     result_set.set(
@@ -275,7 +275,6 @@ fn value_datatype_from_rows(rows: &[Resource], prop_iri: &Iri) -> String {
                 Value::Integer(_) => wk::INTEGER.to_string(),
                 Value::Float(_) => wk::FLOAT.to_string(),
                 Value::Boolean(_) => wk::BOOLEAN.to_string(),
-                Value::ResourceRef(_) => wk::STRING.to_string(),
                 // Fallback for complex shapes — Any/untyped.
                 _ => "urn:eigenius:core:value".to_string(),
             };

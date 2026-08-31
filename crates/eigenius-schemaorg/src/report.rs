@@ -67,7 +67,9 @@ pub fn build_report(
     let mut r = Resource::new(iri(id));
     r.set(
         iri(IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(DERIVED_RESOURCE))]),
+        Value::Array(vec![Value::String(
+            iri(DERIVED_RESOURCE).as_str().to_string(),
+        )]),
     );
     r.set(
         iri(INPUT_CONTENT_HASH),

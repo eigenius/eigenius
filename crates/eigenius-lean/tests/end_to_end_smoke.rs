@@ -71,9 +71,11 @@ fn build_proof_term_layer(
     let mut payload = Resource::new(iri(payload_iri));
     payload.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     payload.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -89,13 +91,13 @@ fn build_proof_term_layer(
     let mut term = Resource::new(iri(term_iri));
     term.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     term.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(payload_iri)),
+        Value::iri(&iri(payload_iri)),
     );
     term.set(
         iri(lean_iris::PROP_TARGET_NAME),

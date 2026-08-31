@@ -363,8 +363,13 @@ pub fn convert_document(doc: &GraphDocument) -> ConvertReport {
 /// silently is what D72 exists to stop.
 fn declarer_ref(value: &str) -> Value {
     match Iri::parse(value) {
-        Ok(i) => Value::ResourceRef(i),
-        Err(_) => Value::ResourceRef(Iri::parse(UNATTRIBUTED).expect("well-known IRI")),
+        Ok(i) => Value::iri(&i),
+        Err(_) => Value::String(
+            Iri::parse(UNATTRIBUTED)
+                .expect("well-known IRI")
+                .as_str()
+                .to_string(),
+        ),
     }
 }
 
@@ -387,8 +392,11 @@ fn emit_declarers(by_iri: &mut BTreeMap<String, Resource>, declarers: &BTreeSet<
         let mut r = Resource::new(iri);
         r.set(
             Iri::parse(IS_A).expect("well-known IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(ORGANIZATION).expect("well-known IRI"),
+            Value::Array(vec![Value::String(
+                Iri::parse(ORGANIZATION)
+                    .expect("well-known IRI")
+                    .as_str()
+                    .to_string(),
             )]),
         );
         r.set(
@@ -525,8 +533,18 @@ fn ensure_synthetic_property_declarations(by_iri: &mut BTreeMap<String, Resource
         r.set(
             Iri::parse(IS_A).expect("well-known IRI"),
             Value::Array(vec![
-                Value::ResourceRef(Iri::parse(PROPERTY).expect("well-known IRI")),
-                Value::ResourceRef(Iri::parse(DECLARED_RESOURCE).expect("well-known IRI")),
+                Value::String(
+                    Iri::parse(PROPERTY)
+                        .expect("well-known IRI")
+                        .as_str()
+                        .to_string(),
+                ),
+                Value::String(
+                    Iri::parse(DECLARED_RESOURCE)
+                        .expect("well-known IRI")
+                        .as_str()
+                        .to_string(),
+                ),
             ]),
         );
         r.set(
@@ -536,7 +554,12 @@ fn ensure_synthetic_property_declarations(by_iri: &mut BTreeMap<String, Resource
         let data_type = synthetic_predicate_data_type(&iri_str);
         r.set(
             Iri::parse(DATA_TYPE).expect("well-known IRI"),
-            Value::ResourceRef(Iri::parse(data_type).expect("well-known IRI")),
+            Value::String(
+                Iri::parse(data_type)
+                    .expect("well-known IRI")
+                    .as_str()
+                    .to_string(),
+            ),
         );
         if let Some(short) = iri_str.strip_prefix(SYNTHETIC_PREFIX) {
             r.set(
@@ -587,19 +610,25 @@ fn node_to_resource(
         };
     let mut is_a_array: Vec<Value> = Vec::new();
     if let Some(target) = is_a_target {
-        is_a_array.push(Value::ResourceRef(
-            Iri::parse(target).expect("well-known IRI"),
+        is_a_array.push(Value::String(
+            Iri::parse(target)
+                .expect("well-known IRI")
+                .as_str()
+                .to_string(),
         ));
     }
-    is_a_array.push(Value::ResourceRef(
-        Iri::parse(DECLARED_RESOURCE).expect("well-known IRI"),
+    is_a_array.push(Value::String(
+        Iri::parse(DECLARED_RESOURCE)
+            .expect("well-known IRI")
+            .as_str()
+            .to_string(),
     ));
     r.set(is_a_iri, Value::Array(is_a_array));
 
     if let Some(target) = data_type_target {
         let dt_iri = Iri::parse(DATA_TYPE).expect("well-known IRI");
         let target_iri = Iri::parse(target).expect("well-known IRI");
-        r.set(dt_iri, Value::ResourceRef(target_iri));
+        r.set(dt_iri, Value::iri(&target_iri));
     }
 
     // Provenance + attribution. `source_irl` is only set when the
@@ -726,8 +755,11 @@ fn apply_edge(
         let mut r = Resource::new(sub_iri);
         r.set(
             Iri::parse(IS_A).expect("well-known IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(DECLARED_RESOURCE).expect("well-known IRI"),
+            Value::Array(vec![Value::String(
+                Iri::parse(DECLARED_RESOURCE)
+                    .expect("well-known IRI")
+                    .as_str()
+                    .to_string(),
             )]),
         );
         if let Some(src) = sub_source_irl {
@@ -762,11 +794,11 @@ fn apply_edge(
     let existing = subject_entry.get(&prop_iri).cloned();
     let new_value = match existing {
         Some(Value::Array(mut arr)) => {
-            arr.push(Value::ResourceRef(obj_iri));
+            arr.push(Value::iri(&obj_iri));
             Value::Array(arr)
         }
-        Some(other) => Value::Array(vec![other, Value::ResourceRef(obj_iri)]),
-        None => Value::Array(vec![Value::ResourceRef(obj_iri)]),
+        Some(other) => Value::Array(vec![other, Value::iri(&obj_iri)]),
+        None => Value::Array(vec![Value::iri(&obj_iri)]),
     };
     subject_entry.set(prop_iri, new_value);
 }
@@ -850,7 +882,7 @@ mod tests {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(i) => Some(i.as_str().to_string()),
+                    Value::String(i) => Some(i.as_str().to_string()),
                     _ => None,
                 })
                 .collect(),
@@ -867,7 +899,7 @@ mod tests {
         }
         // `declared_by` defaults to the sample doc's graph IRI.
         match cell.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), "http://example.org/g1"),
+            Some(Value::String(i)) => assert_eq!(i.as_str(), "http://example.org/g1"),
             other => panic!("expected declared_by string as ResourceRef, got {other:?}"),
         }
     }
@@ -877,7 +909,7 @@ mod tests {
         let report = convert_document(&sample_doc());
         let part_of = find(&report, "http://example.org/part_of");
         match part_of.get(&Iri::parse(DATA_TYPE).unwrap()) {
-            Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
+            Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
             other => panic!("expected data_type ResourceRef, got {other:?}"),
         }
     }
@@ -887,7 +919,7 @@ mod tests {
         let report = convert_document(&sample_doc());
         let has_label = find(&report, "http://example.org/has_label");
         match has_label.get(&Iri::parse(DATA_TYPE).unwrap()) {
-            Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), STRING_DATA_TYPE),
+            Some(Value::String(i)) => assert_eq!(i.as_str(), STRING_DATA_TYPE),
             other => panic!("expected data_type string, got {other:?}"),
         }
     }
@@ -912,7 +944,7 @@ mod tests {
         let iris: Vec<String> = array
             .iter()
             .filter_map(|v| match v {
-                Value::ResourceRef(i) => Some(i.as_str().to_string()),
+                Value::String(i) => Some(i.as_str().to_string()),
                 _ => None,
             })
             .collect();
@@ -942,7 +974,7 @@ mod tests {
             Value::Array(arr) => {
                 assert_eq!(arr.len(), 1);
                 match &arr[0] {
-                    Value::ResourceRef(i) => assert_eq!(i.as_str(), "http://example.org/Cell"),
+                    Value::String(i) => assert_eq!(i.as_str(), "http://example.org/Cell"),
                     other => panic!("expected ResourceRef, got {other:?}"),
                 }
             }
@@ -997,7 +1029,7 @@ mod tests {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(i) => Some(i.as_str().to_string()),
+                    Value::String(i) => Some(i.as_str().to_string()),
                     _ => None,
                 })
                 .collect(),
@@ -1012,7 +1044,7 @@ mod tests {
         match inv {
             Value::Array(arr) => {
                 assert_eq!(arr.len(), 1);
-                if let Value::ResourceRef(i) = &arr[0] {
+                if let Value::String(i) = &arr[0] {
                     assert_eq!(i.as_str(), "http://example.org/p2");
                 } else {
                     panic!("expected ResourceRef");
@@ -1028,7 +1060,7 @@ mod tests {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(i) => Some(i.as_str().to_string()),
+                    Value::String(i) => Some(i.as_str().to_string()),
                     _ => None,
                 })
                 .collect(),
@@ -1187,7 +1219,7 @@ mod tests {
         );
         let decl = find(&report, "urn:obo:hasAlternativeNamespace");
         match decl.get(&Iri::parse(DATA_TYPE).unwrap()) {
-            Some(Value::ResourceRef(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
+            Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
             other => panic!("expected data_type ResourceRef, got {other:?}"),
         }
         match decl.get(&Iri::parse(SHORT_NAME).unwrap()) {
@@ -1293,7 +1325,7 @@ mod tests {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(i) => Some(i.as_str().to_string()),
+                    Value::String(i) => Some(i.as_str().to_string()),
                     _ => None,
                 })
                 .collect(),
@@ -1305,7 +1337,7 @@ mod tests {
         match nucleus.get(&Iri::parse(DECLARED_BY).unwrap()) {
             // A `ResourceRef` since D72 §3.2 retyped `declared_by`; the declarer
             // resource itself is emitted into the same layer by `emit_declarers`.
-            Some(Value::ResourceRef(i)) => {
+            Some(Value::String(i)) => {
                 assert_eq!(i.as_str(), "http://purl.obolibrary.org/obo/go.owl");
             }
             other => panic!("expected declared_by ResourceRef, got {other:?}"),
@@ -1331,7 +1363,7 @@ mod tests {
         let report = convert_document_with(&doc, &opts);
         let nucleus = find(&report, "urn:obo:GO:0005634");
         match nucleus.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::ResourceRef(i)) => {
+            Some(Value::String(i)) => {
                 assert_eq!(i.as_str(), "urn:eigenius:agents:go-curators")
             }
             other => panic!("expected override declared_by as ResourceRef, got {other:?}"),
@@ -1363,7 +1395,7 @@ mod tests {
         let report = convert_document(&doc);
         let decl = find(&report, "urn:obo:adhocLink");
         match decl.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            Some(Value::ResourceRef(i)) => {
+            Some(Value::String(i)) => {
                 assert_eq!(i.as_str(), CONVERTER_DECLARED_BY);
             }
             other => panic!("expected converter declared_by, got {other:?}"),
@@ -1373,7 +1405,7 @@ mod tests {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(i) => Some(i.as_str().to_string()),
+                    Value::String(i) => Some(i.as_str().to_string()),
                     _ => None,
                 })
                 .collect(),

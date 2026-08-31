@@ -387,7 +387,7 @@ fn collect_orphaned_refs_in_value(
 ) {
     use crate::ontology::resource::Value;
     match value {
-        Value::ResourceRef(r) if r == target => {
+        Value::String(r) if r.as_str() == target.as_str() => {
             out.push(CascadeItem::OrphanedReference {
                 resource: resource_iri.clone(),
                 dropped_target: target.clone(),
@@ -486,7 +486,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+            &[(profile_for_iri, Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, _storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
@@ -531,7 +531,7 @@ mod tests {
 
         let patient = make_resource(patient_iri, &[wk::CLASS], &[]);
         let mut embedded = Resource::new_embedded();
-        embedded.set(iri(about_iri), Value::ResourceRef(iri(patient_iri)));
+        embedded.set(iri(about_iri), Value::iri(&iri(patient_iri)));
         let report = make_resource(
             report_iri,
             &[wk::CLASS],
@@ -641,10 +641,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, _storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
         let resolution = MergeResolution::Rename {
@@ -669,10 +666,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
@@ -716,10 +710,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 

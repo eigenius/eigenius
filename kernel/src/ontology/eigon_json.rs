@@ -288,7 +288,6 @@ fn serialize_value(value: &Value) -> serde_json::Value {
         Value::Integer(n) => serde_json::json!(*n),
         Value::Float(f) => serde_json::json!(*f),
         Value::Boolean(b) => serde_json::Value::Bool(*b),
-        Value::ResourceRef(iri) => serde_json::Value::String(iri.as_str().to_string()),
         Value::Embedded(resource) => serialize_resource(resource),
         Value::Array(arr) => serde_json::Value::Array(arr.iter().map(serialize_value).collect()),
         Value::Json(v) => v.clone(),

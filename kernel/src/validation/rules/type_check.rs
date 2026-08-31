@@ -67,37 +67,21 @@ impl Validator {
                 if self.class_types_inductive_target(prop_def).is_some() {
                     matches!(
                         value,
-                        Value::String(_)
-                            | Value::ResourceRef(_)
-                            | Value::Embedded(_)
-                            | Value::Json(_)
+                        Value::String(_) | Value::Embedded(_) | Value::Json(_)
                     )
                 } else {
-                    matches!(
-                        value,
-                        Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_)
-                    )
+                    matches!(value, Value::String(_) | Value::Embedded(_))
                 }
             }
             wk::RESOURCE_ARRAY => match value {
                 Value::Array(arr) => {
                     if self.class_types_inductive_target(prop_def).is_some() {
                         arr.iter().all(|v| {
-                            matches!(
-                                v,
-                                Value::String(_)
-                                    | Value::ResourceRef(_)
-                                    | Value::Embedded(_)
-                                    | Value::Json(_)
-                            )
+                            matches!(v, Value::String(_) | Value::Embedded(_) | Value::Json(_))
                         })
                     } else {
-                        arr.iter().all(|v| {
-                            matches!(
-                                v,
-                                Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_)
-                            )
-                        })
+                        arr.iter()
+                            .all(|v| matches!(v, Value::String(_) | Value::Embedded(_)))
                     }
                 }
                 _ => false,

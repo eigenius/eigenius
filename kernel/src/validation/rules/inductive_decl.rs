@@ -188,7 +188,9 @@ mod seal_tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                    Value::Array(vec![Value::String(
+                        iri(wk::INDUCTIVE_CTOR).as_str().to_string(),
+                    )]),
                 ),
                 (wk::CTOR_NAME, Value::String(ctor.into())),
                 (wk::ARG_TYPES, Value::Array(vec![])),
@@ -199,7 +201,9 @@ mod seal_tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+                    Value::Array(vec![Value::String(
+                        iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+                    )]),
                 ),
                 (wk::SHORT_NAME, Value::String("Colour".into())),
                 (wk::TYPE_PARAMS, Value::Array(vec![])),
@@ -277,10 +281,7 @@ mod seal_tests {
             make_resource(
                 "urn:eigenius:test:Animal",
                 vec![
-                    (
-                        wk::IS_A,
-                        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
-                    ),
+                    (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::CLASS))])),
                     (wk::DESCRIPTION, Value::String(desc.into())),
                 ],
             )
@@ -335,7 +336,9 @@ mod ctor_type_tests {
         let mut c = Resource::new_embedded();
         c.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_CTOR).as_str().to_string(),
+            )]),
         );
         c.set(iri(wk::CTOR_NAME), Value::String("mk".into()));
         c.set(iri(wk::ARG_TYPES), Value::Array(vec![]));
@@ -344,7 +347,9 @@ mod ctor_type_tests {
         let mut b = Resource::new(iri("urn:eigenius:test:Box"));
         b.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         b.set(iri(wk::SHORT_NAME), Value::String("Box".into()));
         b.set(iri(wk::TYPE_PARAMS), Value::Array(vec![]));

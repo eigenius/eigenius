@@ -157,8 +157,13 @@ fn collect_refs_from_resource(resource: &Resource, out: &mut BTreeSet<Iri>) {
 
 fn collect_refs_from_value(value: &Value, out: &mut BTreeSet<Iri>) {
     match value {
-        Value::ResourceRef(iri) => {
-            out.insert(iri.clone());
+        // A reference is a string that parses as an IRI — the same shape test `value_refs`
+        // uses, and for the same reason: the variant that used to mark one was produced only
+        // at build time and never survived storage.
+        Value::String(s) => {
+            if let Ok(iri) = Iri::parse(s) {
+                out.insert(iri);
+            }
         }
         Value::Array(items) => {
             for item in items {
@@ -170,8 +175,7 @@ fn collect_refs_from_value(value: &Value, out: &mut BTreeSet<Iri>) {
         }
         // String / Integer / Float / Boolean / Json / Vector never
         // carry typed-reference semantics here (see module docs).
-        Value::String(_)
-        | Value::Integer(_)
+        Value::Integer(_)
         | Value::Float(_)
         | Value::Boolean(_)
         | Value::Json(_)
@@ -254,7 +258,9 @@ mod tests {
         let mut child_resource = Resource::new(iri("urn:eigenius:demo:X"));
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:ClassA").as_str().to_string(),
+            )]),
         );
         b.add_resource(child_resource).unwrap();
         let resources = b.resources().clone();
@@ -297,8 +303,8 @@ mod tests {
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
             Value::Array(vec![
-                Value::ResourceRef(iri("urn:eigenius:core:ClassA")),
-                Value::ResourceRef(iri("urn:eigenius:demo:ClassB")),
+                Value::iri(&iri("urn:eigenius:core:ClassA")),
+                Value::iri(&iri("urn:eigenius:demo:ClassB")),
             ]),
         );
         b.add_resource(child_resource).unwrap();
@@ -325,7 +331,7 @@ mod tests {
         let mut bb = Resource::new(iri("urn:eigenius:demo:B"));
         bb.set(
             iri("urn:eigenius:demo:related_to"),
-            Value::ResourceRef(iri("urn:eigenius:demo:A")),
+            Value::iri(&iri("urn:eigenius:demo:A")),
         );
         // No external refs: the only ResourceRef is to demo:A (also
         // defined here); the only property IRI used is
@@ -335,7 +341,7 @@ mod tests {
         // IRI to be self-defined too. Drop the related_to property.
         a.set(
             iri("urn:eigenius:demo:A"),
-            Value::ResourceRef(iri("urn:eigenius:demo:A")),
+            Value::iri(&iri("urn:eigenius:demo:A")),
         );
         // Self-referential: A's properties are {demo:A → demo:A}.
         // Both are defined here. So no external refs.
@@ -385,7 +391,9 @@ mod tests {
         let mut child_resource = Resource::new(iri("urn:eigenius:demo:X"));
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:ClassA"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:demo:ClassA").as_str().to_string(),
+            )]),
         );
         b.add_resource(child_resource).unwrap();
         let resources = b.resources().clone();
@@ -434,7 +442,9 @@ mod tests {
         let mut child_resource = Resource::new(iri("urn:eigenius:demo:UsesB"));
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:ClassB"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:demo:ClassB").as_str().to_string(),
+            )]),
         );
         b.add_resource(child_resource).unwrap();
         let resources = b.resources().clone();

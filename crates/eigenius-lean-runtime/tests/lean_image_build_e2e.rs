@@ -259,7 +259,9 @@ fn make_lean_project_cbor(target_theorem_source: &str) -> Vec<u8> {
     let mut r = Resource::new(iri("urn:eigenius:test:lean_project_e2e"));
     r.set(
         iri(PROP_IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(LEAN_PROJECT_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(LEAN_PROJECT_IRI).as_str().to_string(),
+        )]),
     );
     r.set(iri(PROP_LAKEFILE), Value::String(lakefile));
     r.set(iri(PROP_LAKE_MANIFEST), Value::String(lake_manifest));
@@ -415,9 +417,11 @@ impl MirrorTestChain {
         );
         cls.set(
             iri("urn:eigenius:core:requires"),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:test:image_mirror:weight",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:image_mirror:weight")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         resources.insert(class_iri, cls);
 
@@ -429,7 +433,7 @@ impl MirrorTestChain {
         );
         prop.set(
             iri("urn:eigenius:core:data_type"),
-            Value::ResourceRef(iri("urn:eigenius:core:float")),
+            Value::iri(&iri("urn:eigenius:core:float")),
         );
         resources.insert(prop_iri, prop);
         Self { resources }

@@ -3648,8 +3648,11 @@ fn lexicon_backed_augmentation_grounds_verb_oov_to_axiom_with_verb_cat() {
     );
     assert_eq!(
         g.proposed.get(&sem_prop),
-        Some(&eigenius_kernel::ontology::resource::Value::ResourceRef(
-            Iri::parse("urn:eigenius:demo:v_supercoil").unwrap()
+        Some(&eigenius_kernel::ontology::resource::Value::String(
+            Iri::parse("urn:eigenius:demo:v_supercoil")
+                .unwrap()
+                .as_str()
+                .to_string()
         )),
         "minted verb entry's sem IS the axiom"
     );

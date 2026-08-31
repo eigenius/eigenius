@@ -778,9 +778,8 @@ mod tests {
         let name = "urn:test:name";
         let owner = "urn:test:owner";
 
-        let requires = |props: &[&str]| {
-            Value::Array(props.iter().map(|p| Value::ResourceRef(iri(p))).collect())
-        };
+        let requires =
+            |props: &[&str]| Value::Array(props.iter().map(|p| Value::iri(&iri(p))).collect());
 
         let (span, backend) = build_span(
             // LCA: C requires {name, owner}.
@@ -801,7 +800,7 @@ mod tests {
             vec![make_resource(
                 "urn:test:R",
                 &[wk::CLASS],
-                &[("urn:test:about", Value::ResourceRef(iri(class_c)))],
+                &[("urn:test:about", Value::iri(&iri(class_c)))],
             )],
         );
 
@@ -878,12 +877,12 @@ mod tests {
         let prop_a = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let prop_b = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend) = build_span(Vec::new(), vec![prop_a], vec![prop_b]);
         let conflicts = classify_conflicts(&span, &backend).unwrap();
@@ -985,7 +984,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -993,7 +994,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Canine"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Canine").as_str().to_string(),
+                )]),
             )],
         );
         let (span, backend) = build_span(Vec::new(), vec![dog_a], vec![dog_b]);
@@ -1021,7 +1024,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let mammal = make_resource(
@@ -1029,7 +1034,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Dog"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Dog").as_str().to_string(),
+                )]),
             )],
         );
         // Pre-existing ancestor declarations are required so the IRIs
@@ -1070,15 +1077,14 @@ mod tests {
         let inner = make_resource(
             "urn:test:inner",
             &[wk::CLASS],
-            &[(
-                wk::PARENT_CLASSES,
-                Value::ResourceRef(iri("urn:test:DeepParent")),
-            )],
+            &[(wk::PARENT_CLASSES, Value::iri(&iri("urn:test:DeepParent")))],
         );
         let value = Value::Array(vec![
-            Value::ResourceRef(iri("urn:test:DirectRef")),
+            Value::iri(&iri("urn:test:DirectRef")),
             // Nested array — recursion into Array.
-            Value::Array(vec![Value::ResourceRef(iri("urn:test:NestedRef"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:test:NestedRef").as_str().to_string(),
+            )]),
             // Embedded — recursion into the embedded resource's
             // property values yields BOTH `is_a` class refs AND
             // any IRI refs in its other properties.
@@ -1137,7 +1143,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:test:weight",
                 &[wk::PROPERTY],
-                &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+                &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
             ))
             .unwrap();
         let root = Arc::new(root_b.build(storage.clone()));
@@ -1156,7 +1162,7 @@ mod tests {
         a_b.add_resource(make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         ))
         .unwrap();
         let head_a = Arc::new(a_b.build(storage.clone()));
@@ -1167,7 +1173,7 @@ mod tests {
         b_b.add_resource(make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::BOOLEAN)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::BOOLEAN)))],
         ))
         .unwrap();
         let head_b = Arc::new(b_b.build(storage));

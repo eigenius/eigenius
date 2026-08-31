@@ -452,7 +452,6 @@ fn resolve_target_iri(trace: &Resource) -> Option<Iri> {
     let resource_iri = Iri::parse(wk::REFLECTION_RESOURCE).ok()?;
     let value = trace.get(&resource_iri)?;
     match value {
-        Value::ResourceRef(iri) => Some(iri.clone()),
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }
@@ -608,10 +607,7 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::String(wk::DECLARATION_TRACE.to_string())]),
         );
-        r.set(
-            iri(wk::REFLECTION_RESOURCE),
-            Value::ResourceRef(iri(target_iri)),
-        );
+        r.set(iri(wk::REFLECTION_RESOURCE), Value::iri(&iri(target_iri)));
         r
     }
 
@@ -1254,16 +1250,11 @@ mod tests {
         let mut r = Resource::new(iri(class_iri));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(
             iri(wk::REQUIRES),
-            Value::Array(
-                requires
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
         r
     }

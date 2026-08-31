@@ -204,7 +204,6 @@ fn value_to_cbor(value: &Value) -> ciborium::Value {
         Value::Integer(n) => ciborium::Value::Integer((*n).into()),
         Value::Float(f) => ciborium::Value::Float(*f),
         Value::Boolean(b) => ciborium::Value::Bool(*b),
-        Value::ResourceRef(iri) => ciborium::Value::Text(iri.as_str().to_string()),
         Value::Embedded(resource) => resource_to_cbor(resource),
         Value::Array(arr) => ciborium::Value::Array(arr.iter().map(value_to_cbor).collect()),
         Value::Json(v) => json_value_to_cbor(v),

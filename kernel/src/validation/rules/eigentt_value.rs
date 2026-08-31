@@ -374,16 +374,15 @@ mod tests {
         let mut prop = Resource::new(iri("urn:eigenius:test:tx"));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         prop.set(iri(wk::SHORT_NAME), Value::String("tx".into()));
-        prop.set(
-            iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::RESOURCE)),
-        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::RESOURCE)));
         prop.set(
             iri(wk::CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:eigentt:Term").as_str().to_string(),
+            )]),
         );
         // `test:tx` is a TYPE slot, which is what the cases below rely on:
         // `Set` passes, an ill-typed application does not, and nothing here

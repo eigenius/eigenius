@@ -233,8 +233,7 @@ fn notebook_demo_fixture_lands_holds() {
         let subject_match = r
             .get(&subject_prop)
             .map(|v| match v {
-                Value::String(s) => s == DEMO_PROOF_TERM_IRI,
-                Value::ResourceRef(iri) => iri.as_str() == term_iri.as_str(),
+                Value::String(iri) => iri.as_str() == term_iri.as_str(),
                 _ => false,
             })
             .unwrap_or(false);

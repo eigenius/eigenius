@@ -316,7 +316,7 @@ mod tests {
         // String-form IRI so the equi-join across patterns succeeds.
         a.set(
             Iri::parse("urn:chain:ref").unwrap(),
-            Value::ResourceRef(b_iri.clone()),
+            Value::iri(&b_iri.clone()),
         );
         lb.add_resource(a).unwrap();
 

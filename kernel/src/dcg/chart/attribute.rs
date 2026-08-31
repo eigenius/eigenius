@@ -527,14 +527,14 @@ fn value_text(v: &Value) -> Option<&str> {
     }
 }
 
-/// The `ResourceRef` IRIs a property value holds (a lone ref, or an array of them).
-fn value_refs(v: &Value) -> Vec<&Iri> {
+/// The reference IRIs a property value holds (a lone ref, or an array of them).
+fn value_refs(v: &Value) -> Vec<Iri> {
     match v {
-        Value::ResourceRef(i) => vec![i],
+        Value::String(s) => Iri::parse(s).ok().into_iter().collect(),
         Value::Array(xs) => xs
             .iter()
             .filter_map(|x| match x {
-                Value::ResourceRef(i) => Some(i),
+                Value::String(s) => Iri::parse(s).ok(),
                 _ => None,
             })
             .collect(),

@@ -92,7 +92,6 @@ impl ReservedKind {
     /// `String` after a persist round-trip (CBOR collapses `ResourceRef` → the content-hash string).
     fn from_value(v: &Value) -> Option<Self> {
         let iri = match v {
-            Value::ResourceRef(i) => i.as_str(),
             Value::String(s) => s.as_str(),
             _ => return None,
         };

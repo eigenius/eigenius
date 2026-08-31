@@ -4335,7 +4335,6 @@ pub(crate) async fn run_query(
     // Walk to the row class.
     let row_class_iri = match result_set.get(&Iri::parse(qdoc::RESULT_CLASS_PROP).unwrap()) {
         Some(RValue::String(s)) => s.clone(),
-        Some(RValue::ResourceRef(i)) => i.as_str().to_string(),
         _ => return Vec::new(),
     };
     let row_class = match by_iri.get(&row_class_iri) {
@@ -4352,7 +4351,6 @@ pub(crate) async fn run_query(
         for p in props {
             let prop_iri = match p {
                 RValue::String(s) => s.clone(),
-                RValue::ResourceRef(i) => i.as_str().to_string(),
                 _ => continue,
             };
             let Some(prop_res) = by_iri.get(&prop_iri) else {
@@ -4393,8 +4391,7 @@ pub(crate) async fn run_query(
 fn s_as_str(v: &eigenius_kernel::ontology::resource::Value) -> &str {
     use eigenius_kernel::ontology::resource::Value;
     match v {
-        Value::String(s) => s.as_str(),
-        Value::ResourceRef(i) => i.as_str(),
+        Value::String(i) => i.as_str(),
         _ => "",
     }
 }
@@ -4403,7 +4400,6 @@ fn value_to_json(v: &eigenius_kernel::ontology::resource::Value) -> Option<serde
     use eigenius_kernel::ontology::resource::Value;
     Some(match v {
         Value::String(s) => serde_json::Value::String(s.clone()),
-        Value::ResourceRef(i) => serde_json::Value::String(i.as_str().to_string()),
         Value::Integer(n) => serde_json::Value::Number((*n).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number)?,
         Value::Boolean(b) => serde_json::Value::Bool(*b),

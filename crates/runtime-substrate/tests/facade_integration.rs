@@ -135,8 +135,11 @@ fn pinned_file_input(reference: &str, content_hash: &str) -> Vec<u8> {
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse("urn:eigenius:core:is_a").unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:ingest:PinnedExternalFile").unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:ingest:PinnedExternalFile")
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(

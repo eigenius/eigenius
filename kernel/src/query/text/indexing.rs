@@ -174,7 +174,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         for (k, v) in props {
             r.set(iri(k), v);
@@ -204,10 +204,7 @@ mod tests {
             "urn:eigenius:test:ti",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (
-                    wk::TARGET_PROPERTY,
-                    Value::ResourceRef(iri(target_prop_iri)),
-                ),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(target_prop_iri))),
                 (wk::TEXT_ANALYZER, Value::String("en-stem-v1".into())),
             ],
         ))
@@ -276,10 +273,7 @@ mod tests {
                 "urn:eigenius:test:ti",
                 wk::TEXT_INDEX_CLASS,
                 vec![
-                    (
-                        wk::TARGET_PROPERTY,
-                        Value::ResourceRef(iri(target_prop_iri)),
-                    ),
+                    (wk::TARGET_PROPERTY, Value::iri(&iri(target_prop_iri))),
                     (wk::TEXT_ANALYZER, Value::String("en-no-stem".into())),
                 ],
             ))
@@ -327,10 +321,7 @@ mod tests {
             "urn:eigenius:test:ti",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (
-                    wk::TARGET_PROPERTY,
-                    Value::ResourceRef(iri(target_prop_iri)),
-                ),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(target_prop_iri))),
                 (wk::TEXT_ANALYZER, Value::String("en-no-stem".into())),
             ],
         ))
@@ -366,10 +357,7 @@ mod tests {
             "urn:eigenius:test:ti",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (
-                    wk::TARGET_PROPERTY,
-                    Value::ResourceRef(iri(target_prop_iri)),
-                ),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(target_prop_iri))),
                 (wk::TEXT_ANALYZER, Value::String("en-no-stem".into())),
             ],
         ))
@@ -404,10 +392,7 @@ mod tests {
             "urn:eigenius:test:ti",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (
-                    wk::TARGET_PROPERTY,
-                    Value::ResourceRef(iri(target_prop_iri)),
-                ),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(target_prop_iri))),
                 (
                     wk::TEXT_ANALYZER,
                     Value::String("nonexistent-analyzer".into()),
@@ -448,7 +433,7 @@ mod tests {
             "urn:eigenius:test:ti_a",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (wk::TARGET_PROPERTY, Value::ResourceRef(iri(prop_a))),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(prop_a))),
                 (wk::TEXT_ANALYZER, Value::String("en-no-stem".into())),
             ],
         ))
@@ -457,7 +442,7 @@ mod tests {
             "urn:eigenius:test:ti_b",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (wk::TARGET_PROPERTY, Value::ResourceRef(iri(prop_b))),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(prop_b))),
                 (wk::TEXT_ANALYZER, Value::String("en-stem-v1".into())),
             ],
         ))
@@ -529,10 +514,7 @@ mod tests {
             "urn:eigenius:test:ti",
             wk::TEXT_INDEX_CLASS,
             vec![
-                (
-                    wk::TARGET_PROPERTY,
-                    Value::ResourceRef(iri(target_prop_iri)),
-                ),
+                (wk::TARGET_PROPERTY, Value::iri(&iri(target_prop_iri))),
                 (wk::TEXT_ANALYZER, Value::String("en-stem-v1".into())),
             ],
         ))

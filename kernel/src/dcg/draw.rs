@@ -146,13 +146,17 @@ pub fn draw_resources(
         let mut r = Resource::new(iri(&id)?);
         r.set(
             iri(&format!("{CORE}:is_a"))?,
-            Value::Array(vec![Value::ResourceRef(iri(&format!(
-                "{ENC}:ProposalDraw"
-            ))?)]),
+            Value::Array(vec![Value::String(
+                iri(&format!("{ENC}:ProposalDraw"))?.as_str().to_string(),
+            )]),
         );
         r.set(
             iri(&format!("{ENC}:draw_seam"))?,
-            Value::ResourceRef(iri(&format!("{ENC}:{}", seam.local_name()))?),
+            Value::String(
+                iri(&format!("{ENC}:{}", seam.local_name()))?
+                    .as_str()
+                    .to_string(),
+            ),
         );
         r.set(
             iri(&format!("{ENC}:draw_key"))?,
@@ -300,7 +304,7 @@ mod tests {
         let rec_prop = Iri::parse("urn:eigenius:encoding:draw_record").unwrap();
         assert!(matches!(
             rs[0].get(&seam_prop),
-            Some(Value::ResourceRef(s)) if s.as_str().ends_with("seam_sense_rank")
+            Some(Value::String(s)) if s.as_str().ends_with("seam_sense_rank")
         ));
         let Some(Value::String(text)) = rs[0].get(&rec_prop) else {
             panic!("record is a string")

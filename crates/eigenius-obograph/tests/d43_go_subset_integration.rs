@@ -174,13 +174,21 @@ fn build_go_layer(report: &ConvertReport) -> PersistentLayer {
     let mut ti = Resource::new(Iri::parse("urn:obo:converter:go-test:ti_desc").unwrap());
     ti.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::TEXT_INDEX_CLASS).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::TEXT_INDEX_CLASS)
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     ti.set(
         Iri::parse(wk::TARGET_PROPERTY).unwrap(),
-        Value::ResourceRef(Iri::parse("urn:eigenius:core:description").unwrap()),
+        Value::String(
+            Iri::parse("urn:eigenius:core:description")
+                .unwrap()
+                .as_str()
+                .to_string(),
+        ),
     );
     ti.set(
         Iri::parse(wk::TEXT_ANALYZER).unwrap(),
@@ -255,7 +263,6 @@ fn matched_subject_iris(wrapped: &[Resource], slot: &str) -> Vec<String> {
             _ => None,
         })
         .filter_map(|v| match v {
-            Value::ResourceRef(i) => Some(i.as_str().to_string()),
             Value::String(s) => Some(s),
             _ => None,
         })

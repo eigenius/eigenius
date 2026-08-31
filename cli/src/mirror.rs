@@ -506,7 +506,6 @@ fn augment_seed_from_institution_file(file_path: &Path) -> Result<Vec<Iri>, Stri
         // RuntimeMethodSignature class.
         let is_a_match = match resource.get(&is_a_iri) {
             Some(Value::Array(items)) => items.iter().any(|v| match v {
-                Value::ResourceRef(i) => i.as_str() == signature_class_iri,
                 Value::String(s) => s == signature_class_iri,
                 _ => false,
             }),
@@ -548,7 +547,6 @@ fn iri_array_from_value(value: &eigenius_kernel::ontology::resource::Value) -> V
 fn single_iri_from_value(value: &eigenius_kernel::ontology::resource::Value) -> Option<Iri> {
     use eigenius_kernel::ontology::resource::Value;
     match value {
-        Value::ResourceRef(i) => Some(i.clone()),
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }

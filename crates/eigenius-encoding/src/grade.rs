@@ -212,25 +212,29 @@ impl ParsedClaimGrader {
 
         let claim_id = iri(claim_iri)?;
         let mut claim = Resource::new(claim_id.clone());
-        let mut classes = vec![Value::ResourceRef(iri(ENCODED_CLAIM_CLASS)?)];
-        classes.extend(kind_classes.iter().map(|k| Value::ResourceRef(k.clone())));
+        let mut classes = vec![Value::String(
+            iri(ENCODED_CLAIM_CLASS)?.as_str().to_string(),
+        )];
+        classes.extend(kind_classes.iter().map(|k| Value::iri(&k.clone())));
         claim.set(iri(wk::IS_A)?, Value::Array(classes));
         claim.set(iri(wk::CANONICAL_PROPOSITION)?, prop_value);
         // REQUIRED now that `enc:EncodedClaim` is a `reflection:DeclaredResource` (eigenius#201).
         claim.set(
             iri(REFLECTION_DECLARED_BY)?,
-            Value::ResourceRef(iri(declared_by)?),
+            Value::String(iri(declared_by)?.as_str().to_string()),
         );
 
         let mut trace = Resource::new(iri(trace_iri)?);
         trace.set(
             iri(wk::IS_A)?,
-            Value::Array(vec![Value::ResourceRef(iri(DECLARATION_TRACE_CLASS)?)]),
+            Value::Array(vec![Value::String(
+                iri(DECLARATION_TRACE_CLASS)?.as_str().to_string(),
+            )]),
         );
-        trace.set(iri(wk::REFLECTION_RESOURCE)?, Value::ResourceRef(claim_id));
+        trace.set(iri(wk::REFLECTION_RESOURCE)?, Value::iri(&claim_id));
         trace.set(
             iri(REFLECTION_DECLARED_BY)?,
-            Value::ResourceRef(iri(declared_by)?),
+            Value::String(iri(declared_by)?.as_str().to_string()),
         );
         trace.set(
             iri(REFLECTION_TIMESTAMP)?,

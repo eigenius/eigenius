@@ -228,7 +228,9 @@ mod tests {
             let mut r = Resource::new(iri(axiom_iri));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(AXIOM_CLASS_IRI))]),
+                Value::Array(vec![Value::String(
+                    iri(AXIOM_CLASS_IRI).as_str().to_string(),
+                )]),
             );
             let encoded = encode_type(&statement_exp).expect("encode statement");
             r.set(iri(AXIOM_STATEMENT_IRI), encoded);
@@ -354,7 +356,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:no_stmt_axiom"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(AXIOM_CLASS_IRI))]),
+            Value::Array(vec![Value::String(
+                iri(AXIOM_CLASS_IRI).as_str().to_string(),
+            )]),
         );
         top.add_resource(r).unwrap();
         let chain = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));

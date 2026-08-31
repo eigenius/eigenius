@@ -94,9 +94,11 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:obj:d57:gen_input"));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:ingest:PinnedExternalFile",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:ingest:PinnedExternalFile")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         r.set(iri(MATERIALIZED_PATH), Value::String(path.to_string()));
         ByteBuf::from(eigon_cbor::serialize_resource(&r))
@@ -145,9 +147,11 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:obj:d57:gen_input"));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:ingest:PinnedExternalFile",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:ingest:PinnedExternalFile")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         let inputs = vec![ByteBuf::from(eigon_cbor::serialize_resource(&r))];
         let err =

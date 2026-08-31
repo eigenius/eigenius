@@ -252,17 +252,25 @@ fn go_recall_with_candle_bge_small() {
     let mut vi = Resource::new(Iri::parse("urn:obo:converter:go-candle:vi_desc").unwrap());
     vi.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::VECTOR_INDEX_CLASS).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::VECTOR_INDEX_CLASS)
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     vi.set(
         Iri::parse(wk::TARGET_PROPERTY).unwrap(),
-        Value::ResourceRef(Iri::parse(DESCRIPTION_PROP).unwrap()),
+        Value::iri(&Iri::parse(DESCRIPTION_PROP).unwrap()),
     );
     vi.set(
         Iri::parse(wk::VEC_MODEL).unwrap(),
-        Value::ResourceRef(Iri::parse(BGE_SMALL_MODEL_IRI).unwrap()),
+        Value::String(
+            Iri::parse(BGE_SMALL_MODEL_IRI)
+                .unwrap()
+                .as_str()
+                .to_string(),
+        ),
     );
     vi.set(
         Iri::parse(wk::VEC_DIM).unwrap(),
@@ -270,11 +278,21 @@ fn go_recall_with_candle_bge_small() {
     );
     vi.set(
         Iri::parse(wk::VEC_DISTANCE).unwrap(),
-        Value::ResourceRef(Iri::parse("urn:eigenius:core:distances:cosine").unwrap()),
+        Value::String(
+            Iri::parse("urn:eigenius:core:distances:cosine")
+                .unwrap()
+                .as_str()
+                .to_string(),
+        ),
     );
     vi.set(
         Iri::parse(wk::VEC_STRATEGY).unwrap(),
-        Value::ResourceRef(Iri::parse("urn:eigenius:core:strategies:flat").unwrap()),
+        Value::String(
+            Iri::parse("urn:eigenius:core:strategies:flat")
+                .unwrap()
+                .as_str()
+                .to_string(),
+        ),
     );
     b.add_resource(vi).unwrap();
 
@@ -378,7 +396,6 @@ fn matched_subject_iris(wrapped: &[Resource], slot: &str) -> Vec<String> {
             _ => None,
         })
         .filter_map(|v| match v {
-            Value::ResourceRef(i) => Some(i.as_str().to_string()),
             Value::String(s) => Some(s),
             _ => None,
         })

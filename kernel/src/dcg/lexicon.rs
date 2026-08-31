@@ -87,7 +87,6 @@ pub fn resolve_sem(layer: &Arc<Layer>, target: &Iri) -> Exp {
 ///   point at; decoded through the D47 codec.
 pub fn resolve_sem_value(layer: &Arc<Layer>, sem_v: &Value) -> Result<Exp, String> {
     let target = match sem_v {
-        Value::ResourceRef(i) => i.clone(),
         Value::String(s) => Iri::parse(s).map_err(|e| format!("sem iri: {e}"))?,
         // An inline EigenTT term value (rare — references are the norm).
         other => return decode_type(other, layer).map_err(|e| format!("sem decode: {e:?}")),

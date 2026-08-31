@@ -216,9 +216,7 @@ fn factorial_data_lands_at_full_factorial_dispatch_position() {
     let sample_set_iri_str = claim
         .get(&Iri::parse(iris::PROP_SAMPLE_SET).unwrap())
         .and_then(|v| {
-            if let Value::ResourceRef(i) = v {
-                Some(i.as_str().to_string())
-            } else if let Value::String(s) = v {
+            if let Value::String(s) = v {
                 Some(s.clone())
             } else {
                 None

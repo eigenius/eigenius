@@ -325,12 +325,7 @@ fn class_resource(iri_str: &str, short: &str, requires: &[&str]) -> Resource {
     if !requires.is_empty() {
         r.set(
             iri("urn:eigenius:core:requires"),
-            Value::Array(
-                requires
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
     }
     r
@@ -344,7 +339,7 @@ fn primitive_property(iri_str: &str, short: &str, data_type: &str) -> Resource {
     );
     r.set(
         iri("urn:eigenius:core:data_type"),
-        Value::ResourceRef(iri(data_type)),
+        Value::iri(&iri(data_type)),
     );
     r
 }
@@ -398,7 +393,7 @@ fn string_constrained_property(
         );
     }
     if let Some(f) = format_iri {
-        r.set(iri("urn:eigenius:core:format"), Value::ResourceRef(iri(f)));
+        r.set(iri("urn:eigenius:core:format"), Value::iri(&iri(f)));
     }
     r
 }
@@ -411,11 +406,11 @@ fn classref_property(iri_str: &str, short: &str, class_iri: &str) -> Resource {
     );
     r.set(
         iri("urn:eigenius:core:data_type"),
-        Value::ResourceRef(iri("urn:eigenius:core:resource")),
+        Value::iri(&iri("urn:eigenius:core:resource")),
     );
     r.set(
         iri("urn:eigenius:core:class_types"),
-        Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+        Value::Array(vec![Value::iri(&iri(class_iri))]),
     );
     r
 }

@@ -187,7 +187,9 @@ fn build_bounded_by_cbor(value: f64, lower: f64, upper: f64) -> Vec<u8> {
     let mut r = Resource::new(iri("urn:eigenius:test:intervals:input"));
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(BOUNDED_BY_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(BOUNDED_BY_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r.set(iri(VALUE_PROP_IRI), Value::Float(value));
     r.set(iri(LOWER_PROP_IRI), Value::Float(lower));

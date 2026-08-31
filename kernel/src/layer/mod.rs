@@ -1991,7 +1991,9 @@ mod tests {
             let mut r = Resource::new(iri("urn:eigenius:demo:X"));
             r.set(
                 iri("urn:eigenius:core:is_a"),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:core:ClassA").as_str().to_string(),
+                )]),
             );
             b.add_resource(r).unwrap();
             b.build(storage.clone())

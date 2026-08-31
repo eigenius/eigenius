@@ -1673,10 +1673,7 @@ mod entailment {
     /// Unrelated by declaration is the point: entailment must decide on fields.
     fn cls(id: &str, requires: &[&str]) -> Resource {
         let mut r = Resource::new(i(id));
-        r.set(
-            i(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(i(wk::CLASS))]),
-        );
+        r.set(i(wk::IS_A), Value::Array(vec![Value::iri(&i(wk::CLASS))]));
         r.set(
             i(wk::SHORT_NAME),
             Value::String(id.rsplit(':').next().unwrap().into()),
@@ -1684,7 +1681,7 @@ mod entailment {
         r.set(i(wk::DESCRIPTION), Value::String("test class".into()));
         r.set(
             i(wk::REQUIRES),
-            Value::Array(requires.iter().map(|p| Value::ResourceRef(i(p))).collect()),
+            Value::Array(requires.iter().map(|p| Value::iri(&i(p))).collect()),
         );
         r
     }
@@ -1855,8 +1852,11 @@ mod list_decoder_agreement {
         let mut arg = Resource::new_embedded();
         arg.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(wk::INDUCTIVE_ARG_TYPE).unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::INDUCTIVE_ARG_TYPE)
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         arg.set(

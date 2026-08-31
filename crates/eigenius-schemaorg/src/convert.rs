@@ -149,7 +149,12 @@ fn map_schema_id(curie: &str) -> Option<(String, String)> {
 }
 
 fn rref(iri: &str) -> Value {
-    Value::ResourceRef(Iri::parse(iri).expect("well-known IRI"))
+    Value::String(
+        Iri::parse(iri)
+            .expect("well-known IRI")
+            .as_str()
+            .to_string(),
+    )
 }
 
 /// Map a schema.org DataType CURIE to (core scalar, optional core:format).
@@ -377,7 +382,7 @@ fn common_meta(r: &mut Resource, n: &Json, https: &str) {
     // A `ResourceRef`, not a `String`: `declared_by` is resource-typed (D72 §3.2), so
     // Rule 8 and Rule 22 require the declarer to resolve same-or-lower. `emit_declarer`
     // below puts that resource in this same layer.
-    r.set(iri(DECLARED_BY), Value::ResourceRef(iri(DECLARED_BY_VALUE)));
+    r.set(iri(DECLARED_BY), Value::iri(&iri(DECLARED_BY_VALUE)));
 }
 
 /// The schema.org project as a `prov:Organization`, emitted into this layer so
@@ -391,7 +396,7 @@ fn emit_declarer(report: &mut ConvertReport) {
     let mut r = Resource::new(iri(DECLARED_BY_VALUE));
     r.set(
         iri(IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(ORGANIZATION))]),
+        Value::Array(vec![Value::iri(&iri(ORGANIZATION))]),
     );
     r.set(
         iri(DESCRIPTION),

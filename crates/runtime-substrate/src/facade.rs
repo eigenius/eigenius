@@ -374,12 +374,11 @@ fn stamp_derived_epistemic_category(output: &mut Resource) {
         None => Vec::new(),
     };
     let already_present = entries.iter().any(|v| match v {
-        Value::ResourceRef(i) => i == &derived_iri,
         Value::String(s) => s == derived_iri.as_str(),
         _ => false,
     });
     if !already_present {
-        entries.push(Value::ResourceRef(derived_iri));
+        entries.push(Value::iri(&derived_iri));
     }
     output.set(is_a_iri, Value::Array(entries));
 }
@@ -458,7 +457,7 @@ fn synthesize_signature(
     if let Ok(env) = Iri::parse(env_iri) {
         sig.set(
             Iri::parse(PROP_REQUIRES_ENVIRONMENT).expect("static IRI"),
-            Value::ResourceRef(env),
+            Value::iri(&env),
         );
     }
     sig
@@ -573,7 +572,9 @@ mod tests {
         let mut r = Resource::new_embedded();
         r.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Demo"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:Demo").as_str().to_string(),
+            )]),
         );
         stamp_derived_epistemic_category(&mut r);
         let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
@@ -599,7 +600,7 @@ mod tests {
         let mut r = Resource::new_embedded();
         r.set(
             iri(PROP_IS_A),
-            Value::ResourceRef(iri("urn:eigenius:test:OldShape")),
+            Value::iri(&iri("urn:eigenius:test:OldShape")),
         );
         stamp_derived_epistemic_category(&mut r);
         let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();

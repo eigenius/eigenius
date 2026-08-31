@@ -433,7 +433,7 @@ mod tests {
         let mut core_class = Resource::new(iri(wk::CLASS));
         core_class.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         core_class.set(
             iri(wk::DESCRIPTION),
@@ -443,9 +443,9 @@ mod tests {
         core_class.set(
             iri(wk::REQUIRES),
             Value::Array(vec![
-                Value::ResourceRef(iri(wk::IS_A)),
-                Value::ResourceRef(iri(wk::DESCRIPTION)),
-                Value::ResourceRef(iri(wk::SHORT_NAME)),
+                Value::iri(&iri(wk::IS_A)),
+                Value::iri(&iri(wk::DESCRIPTION)),
+                Value::iri(&iri(wk::SHORT_NAME)),
             ]),
         );
         root_b.add_resource(core_class).unwrap();
@@ -454,17 +454,17 @@ mod tests {
         let mut core_property = Resource::new(iri(wk::PROPERTY));
         core_property.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         core_property.set(iri(wk::DESCRIPTION), Value::String("property class".into()));
         core_property.set(iri(wk::SHORT_NAME), Value::String("Property".into()));
         core_property.set(
             iri(wk::REQUIRES),
             Value::Array(vec![
-                Value::ResourceRef(iri(wk::IS_A)),
-                Value::ResourceRef(iri(wk::DESCRIPTION)),
-                Value::ResourceRef(iri(wk::SHORT_NAME)),
-                Value::ResourceRef(iri(wk::DATA_TYPE_PROP)),
+                Value::iri(&iri(wk::IS_A)),
+                Value::iri(&iri(wk::DESCRIPTION)),
+                Value::iri(&iri(wk::SHORT_NAME)),
+                Value::iri(&iri(wk::DATA_TYPE_PROP)),
             ]),
         );
         root_b.add_resource(core_property).unwrap();
@@ -473,17 +473,17 @@ mod tests {
         let mut is_a = Resource::new(iri(wk::IS_A));
         is_a.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         is_a.set(iri(wk::DESCRIPTION), Value::String("is_a".into()));
         is_a.set(iri(wk::SHORT_NAME), Value::String("is_a".into()));
         is_a.set(
             iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::RESOURCE_ARRAY)),
+            Value::iri(&iri(wk::RESOURCE_ARRAY)),
         );
         is_a.set(
             iri(wk::CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         root_b.add_resource(is_a).unwrap();
 
@@ -491,29 +491,29 @@ mod tests {
         let mut desc = Resource::new(iri(wk::DESCRIPTION));
         desc.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         desc.set(iri(wk::DESCRIPTION), Value::String("description".into()));
         desc.set(iri(wk::SHORT_NAME), Value::String("description".into()));
-        desc.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        desc.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         root_b.add_resource(desc).unwrap();
 
         // core:short_name
         let mut sn = Resource::new(iri(wk::SHORT_NAME));
         sn.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         sn.set(iri(wk::DESCRIPTION), Value::String("short_name".into()));
         sn.set(iri(wk::SHORT_NAME), Value::String("short_name".into()));
-        sn.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        sn.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         root_b.add_resource(sn).unwrap();
 
         // core:string data type
         let mut string_dt = Resource::new(iri(wk::STRING));
         string_dt.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         string_dt.set(iri(wk::DESCRIPTION), Value::String("string".into()));
         string_dt.set(iri(wk::SHORT_NAME), Value::String("string".into()));
@@ -523,7 +523,7 @@ mod tests {
         let mut ra_dt = Resource::new(iri(wk::RESOURCE_ARRAY));
         ra_dt.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         ra_dt.set(iri(wk::DESCRIPTION), Value::String("resource_array".into()));
         ra_dt.set(iri(wk::SHORT_NAME), Value::String("resource_array".into()));
@@ -534,7 +534,7 @@ mod tests {
         let mut res_dt = Resource::new(iri(wk::RESOURCE));
         res_dt.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         res_dt.set(iri(wk::DESCRIPTION), Value::String("resource".into()));
         res_dt.set(iri(wk::SHORT_NAME), Value::String("resource".into()));
@@ -544,13 +544,13 @@ mod tests {
         let mut dt_prop = Resource::new(iri(wk::DATA_TYPE_PROP));
         dt_prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         dt_prop.set(iri(wk::DESCRIPTION), Value::String("data_type".into()));
         dt_prop.set(iri(wk::SHORT_NAME), Value::String("data_type".into()));
         dt_prop.set(
             iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::RESOURCE_ARRAY)),
+            Value::iri(&iri(wk::RESOURCE_ARRAY)),
         );
         root_b.add_resource(dt_prop).unwrap();
 
@@ -560,13 +560,13 @@ mod tests {
         let mut sub_prop = Resource::new(iri(wk::PARENT_CLASSES));
         sub_prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         sub_prop.set(iri(wk::DESCRIPTION), Value::String("subclass_of".into()));
         sub_prop.set(iri(wk::SHORT_NAME), Value::String("subclass_of".into()));
         sub_prop.set(
             iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::RESOURCE_ARRAY)),
+            Value::iri(&iri(wk::RESOURCE_ARRAY)),
         );
         root_b.add_resource(sub_prop).unwrap();
 
@@ -574,13 +574,13 @@ mod tests {
         let mut req_prop = Resource::new(iri(wk::REQUIRES));
         req_prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         req_prop.set(iri(wk::DESCRIPTION), Value::String("requires".into()));
         req_prop.set(iri(wk::SHORT_NAME), Value::String("requires".into()));
         req_prop.set(
             iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::RESOURCE_ARRAY)),
+            Value::iri(&iri(wk::RESOURCE_ARRAY)),
         );
         root_b.add_resource(req_prop).unwrap();
 
@@ -603,7 +603,7 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:demo:Standalone"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(iri(wk::DESCRIPTION), Value::String("alone".into()));
         r.set(iri(wk::SHORT_NAME), Value::String("Standalone".into()));
@@ -621,14 +621,11 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(iri(wk::DESCRIPTION), Value::String("class".into()));
         r.set(iri(wk::SHORT_NAME), Value::String(short.into()));
-        let req_vals: Vec<Value> = requires
-            .into_iter()
-            .map(|s| Value::ResourceRef(iri(s)))
-            .collect();
+        let req_vals: Vec<Value> = requires.into_iter().map(|s| Value::iri(&iri(s))).collect();
         if !req_vals.is_empty() {
             r.set(iri(wk::REQUIRES), Value::Array(req_vals));
         }
@@ -641,7 +638,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         for (p, v) in props {
             r.set(iri(p), v);
@@ -727,20 +724,19 @@ mod tests {
             let mut prop = Resource::new(iri("urn:eigenius:demo:references"));
             prop.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             prop.set(
                 iri(wk::DESCRIPTION),
                 Value::String("user-defined IRI ref".into()),
             );
             prop.set(iri(wk::SHORT_NAME), Value::String("references".into()));
-            prop.set(
-                iri(wk::DATA_TYPE_PROP),
-                Value::ResourceRef(iri(wk::RESOURCE)),
-            );
+            prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::RESOURCE)));
             prop.set(
                 iri(wk::CLASS_TYPES),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:GoodKind"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:demo:GoodKind").as_str().to_string(),
+                )]),
             );
             b.add_resource(prop).unwrap();
 
@@ -760,7 +756,7 @@ mod tests {
                 wk::CLASS,
                 vec![(
                     "urn:eigenius:demo:references",
-                    Value::ResourceRef(iri("urn:eigenius:demo:Target")),
+                    Value::iri(&iri("urn:eigenius:demo:Target")),
                 )],
             );
             caller.set(iri(wk::DESCRIPTION), Value::String("caller".into()));
@@ -874,14 +870,18 @@ mod tests {
             let mut bcls = mk_class("urn:eigenius:demo:B", "B", vec![]);
             bcls.set(
                 iri(wk::PARENT_CLASSES),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:A"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:demo:A").as_str().to_string(),
+                )]),
             );
             b.add_resource(bcls).unwrap();
             // C subclass_of [B]
             let mut ccls = mk_class("urn:eigenius:demo:C", "C", vec![]);
             ccls.set(
                 iri(wk::PARENT_CLASSES),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:B"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:demo:B").as_str().to_string(),
+                )]),
             );
             b.add_resource(ccls).unwrap();
             // Instances at each level — none carry `description`.
@@ -982,7 +982,9 @@ mod tests {
             let mut inst = Resource::new(iri("urn:eigenius:demo:inst_foo"));
             inst.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:Foo"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:demo:Foo").as_str().to_string(),
+                )]),
             );
             inst.set(iri(wk::SHORT_NAME), Value::String("inst_foo".into()));
             b.add_resource(inst).unwrap();
@@ -1053,11 +1055,11 @@ mod tests {
             let mut tag_prop = Resource::new(iri("urn:eigenius:demo:tag"));
             tag_prop.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             tag_prop.set(iri(wk::DESCRIPTION), Value::String("tag".into()));
             tag_prop.set(iri(wk::SHORT_NAME), Value::String("tag".into()));
-            tag_prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+            tag_prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
             b.add_resource(tag_prop).unwrap();
 
             // demo:Tagged class — initially requires only base meta-ontology
@@ -1077,8 +1079,8 @@ mod tests {
             lower_c.set(
                 iri(wk::IS_A),
                 Value::Array(vec![
-                    Value::ResourceRef(iri(wk::CLASS)),
-                    Value::ResourceRef(iri("urn:eigenius:demo:Tagged")),
+                    Value::iri(&iri(wk::CLASS)),
+                    Value::iri(&iri("urn:eigenius:demo:Tagged")),
                 ]),
             );
             lower_c.set(iri(wk::DESCRIPTION), Value::String("lower c".into()));
@@ -1118,7 +1120,9 @@ mod tests {
         );
         upper_x.set(
             iri(wk::PARENT_CLASSES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:LowerC"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:demo:LowerC").as_str().to_string(),
+            )]),
         );
         upper_x.set(iri("urn:eigenius:demo:tag"), Value::String("good".into()));
         new_b.add_resource(upper_x).unwrap();
@@ -1190,18 +1194,15 @@ mod tests {
             let mut p = Resource::new(color.clone());
             p.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             p.set(iri(wk::DESCRIPTION), Value::String("color".into()));
             p.set(iri(wk::SHORT_NAME), Value::String("color".into()));
-            p.set(
-                iri(wk::DATA_TYPE_PROP),
-                Value::ResourceRef(iri(wk::RESOURCE)),
-            );
+            p.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::RESOURCE)));
             p.set(iri(wk::CLASS_TYPES), class_types);
             p
         };
-        let ref_shape = || Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]);
+        let ref_shape = || Value::Array(vec![Value::iri(&iri(wk::CLASS))]);
         let string_shape = || Value::Array(vec![Value::String(wk::CLASS.into())]);
 
         let mid = {
@@ -1236,9 +1237,9 @@ mod tests {
         // A real change → still a redefinition.
         let changed = {
             let mut b = LayerBuilder::new("changed", Some(Arc::clone(&mid)));
-            b.add_resource(color_prop(Value::Array(vec![Value::ResourceRef(iri(
-                wk::PROPERTY,
-            ))])))
+            b.add_resource(color_prop(Value::Array(vec![Value::String(
+                iri(wk::PROPERTY).as_str().to_string(),
+            )])))
             .unwrap();
             Arc::new(b.build(storage.clone()))
         };
@@ -1270,19 +1271,16 @@ mod tests {
             let mut color_prop = Resource::new(iri("urn:eigenius:demo:color"));
             color_prop.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             color_prop.set(iri(wk::DESCRIPTION), Value::String("color".into()));
             color_prop.set(iri(wk::SHORT_NAME), Value::String("color".into()));
-            color_prop.set(
-                iri(wk::DATA_TYPE_PROP),
-                Value::ResourceRef(iri(wk::RESOURCE)),
-            );
+            color_prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::RESOURCE)));
             color_prop.set(
                 iri(wk::ALLOWS_ONLY),
                 Value::Array(vec![
-                    Value::ResourceRef(iri("urn:eigenius:demo:red")),
-                    Value::ResourceRef(iri("urn:eigenius:demo:blue")),
+                    Value::iri(&iri("urn:eigenius:demo:red")),
+                    Value::iri(&iri("urn:eigenius:demo:blue")),
                 ]),
             );
             b.add_resource(color_prop).unwrap();
@@ -1293,7 +1291,7 @@ mod tests {
                 wk::CLASS, // simplest valid class membership
                 vec![(
                     "urn:eigenius:demo:color",
-                    Value::ResourceRef(iri("urn:eigenius:demo:blue")),
+                    Value::iri(&iri("urn:eigenius:demo:blue")),
                 )],
             );
             // Add required properties for Class instance.
@@ -1317,17 +1315,16 @@ mod tests {
             let mut color_prop = Resource::new(iri("urn:eigenius:demo:color"));
             color_prop.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             color_prop.set(iri(wk::DESCRIPTION), Value::String("color".into()));
             color_prop.set(iri(wk::SHORT_NAME), Value::String("color".into()));
-            color_prop.set(
-                iri(wk::DATA_TYPE_PROP),
-                Value::ResourceRef(iri(wk::RESOURCE)),
-            );
+            color_prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::RESOURCE)));
             color_prop.set(
                 iri(wk::ALLOWS_ONLY),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:red"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:demo:red").as_str().to_string(),
+                )]),
             );
             b.add_resource(color_prop).unwrap();
             Arc::new(b.build(storage.clone()))

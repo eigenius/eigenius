@@ -760,7 +760,7 @@ mod refine_semantics {
             let mut r = Resource::new(iri(id));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             r
         };
@@ -768,15 +768,11 @@ mod refine_semantics {
             let mut r = Resource::new(iri(id));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+                Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
             );
             r.set(
                 iri(wk::REQUIRES),
-                Value::Array(
-                    reqs.into_iter()
-                        .map(|p| Value::ResourceRef(iri(p)))
-                        .collect(),
-                ),
+                Value::Array(reqs.into_iter().map(|p| Value::iri(&iri(p))).collect()),
             );
             r
         };
@@ -910,7 +906,7 @@ mod refine_semantics {
             let mut r = Resource::new(iri(id));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
             r
         };
@@ -919,15 +915,11 @@ mod refine_semantics {
             let mut r = Resource::new(iri(id));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+                Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
             );
             r.set(
                 iri(wk::REQUIRES),
-                Value::Array(
-                    reqs.into_iter()
-                        .map(|p| Value::ResourceRef(iri(p)))
-                        .collect(),
-                ),
+                Value::Array(reqs.into_iter().map(|p| Value::iri(&iri(p))).collect()),
             );
             r
         };

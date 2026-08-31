@@ -1185,7 +1185,7 @@ impl Compiler {
         let body_r = self.compile_expr(body)?;
 
         // Build the parameter types: [C, C, Option<C>].
-        let class_value = Value::ResourceRef(target_class.clone());
+        let class_value = Value::iri(&target_class.clone());
         let option_arg = {
             let mut ar = Resource::new_embedded();
             set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
@@ -3571,14 +3571,8 @@ fn build_merge_comorphism_resource(
     use crate::ontology::well_known as wk;
     let mut r = Resource::new(comorphism_iri);
     set_is_a(&mut r, wk::MERGE_COMORPHISM);
-    r.set(
-        iri(wk::MERGE_TARGET_CLASS),
-        Value::ResourceRef(target_class),
-    );
-    r.set(
-        iri(wk::MERGE_TRANSFORMATION),
-        Value::ResourceRef(transformation),
-    );
+    r.set(iri(wk::MERGE_TARGET_CLASS), Value::iri(&target_class));
+    r.set(iri(wk::MERGE_TRANSFORMATION), Value::iri(&transformation));
     r
 }
 
@@ -3660,7 +3654,7 @@ fn stamp_attribution(resource: &mut Resource) {
         // resolves same-or-lower.
         resource.set(
             declared_by_iri,
-            Value::ResourceRef(iri(&session_declarer())),
+            Value::String(iri(&session_declarer()).as_str().to_string()),
         );
     }
 }

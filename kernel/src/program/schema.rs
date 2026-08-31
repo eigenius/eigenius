@@ -452,7 +452,7 @@ pub fn convert_json_to_resource(
     let mut resource = crate::ontology::resource::Resource::new_embedded();
     resource.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::String(class_iri.as_str().to_string())]),
+        Value::Array(vec![Value::iri(class_iri)]),
     );
 
     for (key, val) in obj {
@@ -480,7 +480,7 @@ fn convert_json_value(
         serde_json::Value::String(s) => {
             // Check if this is an enum value
             if let Some(iri) = table.enums.get(&(prop_iri.clone(), s.clone())) {
-                Ok(Value::String(iri.as_str().to_string()))
+                Ok(Value::iri(iri))
             } else {
                 Ok(Value::String(s.clone()))
             }

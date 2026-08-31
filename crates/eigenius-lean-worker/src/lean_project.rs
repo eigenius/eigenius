@@ -302,8 +302,11 @@ mod tests {
         let mut r = Resource::new(Iri::parse("urn:eigenius:test:project1").unwrap());
         r.set(
             Iri::parse("urn:eigenius:core:is_a").unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:eigenius:lean:LeanProject").unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:eigenius:lean:LeanProject")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         r.set(

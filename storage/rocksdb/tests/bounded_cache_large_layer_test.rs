@@ -44,8 +44,11 @@ fn layer_larger_than_cache_budget_persists_every_resource() {
         let mut r = Resource::new(Iri::parse(&format!("urn:eigenius:demo:r{i}")).unwrap());
         r.set(
             Iri::parse("urn:eigenius:core:is_a").unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:eigenius:core:Class").unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:eigenius:core:Class")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         r.set(

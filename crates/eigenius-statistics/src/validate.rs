@@ -3102,8 +3102,7 @@ fn parse_effect_size_absolute(j: &serde_json::Value) -> Option<(f64, String)> {
 fn read_iri_property(claim: &Resource, prop_iri: &str) -> Result<Option<String>, InstitutionError> {
     let iri = Iri::parse(prop_iri).expect("static IRI");
     match claim.get(&iri) {
-        Some(Value::String(s)) => Ok(Some(s.clone())),
-        Some(Value::ResourceRef(i)) => Ok(Some(i.as_str().to_string())),
+        Some(Value::String(i)) => Ok(Some(i.as_str().to_string())),
         Some(other) => Err(InstitutionError::ComputationFailed(format!(
             "StatisticalAnalysisPlan `{prop_iri}` is not a string/IRI: {other:?}"
         ))),
@@ -3225,8 +3224,11 @@ fn gate_verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource 
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).expect("well-known IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::VERDICT).expect("well-known IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::VERDICT)
+                .expect("well-known IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(

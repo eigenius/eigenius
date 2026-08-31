@@ -47,8 +47,8 @@ impl Validator {
         // Collect candidate IRIs to test against the allows_only set.
         // Single-value properties hold one IRI directly; resource_array
         // properties hold a `Value::Array` of IRI elements. `as_iri`
-        // accepts both canonical `ResourceRef` and pre-canonical
-        // `String` shapes.
+        // reads a reference through `as_iri`, there being one shape
+        // since `ResourceRef` was retired shapes.
         let refs_to_check: Vec<Iri> = match value {
             Value::Array(arr) => arr.iter().filter_map(|v| v.as_iri()).collect(),
             single => single.as_iri().map(|i| vec![i]).unwrap_or_default(),

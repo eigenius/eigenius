@@ -148,7 +148,6 @@ pub fn required_typed_properties(input_class: &Resource) -> Vec<Iri> {
     raw.iter()
         .filter_map(|v| match v {
             Value::String(s) => Iri::parse(s).ok(),
-            Value::ResourceRef(i) => Some(i.clone()),
             _ => None,
         })
         .filter(|iri| iri.as_str() != wk::IS_A && iri.as_str() != wk::SHORT_NAME)
@@ -170,8 +169,7 @@ pub fn embed_typed_resource_arg(
     };
     let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).expect("well-known IRI");
     let dt = match prop_def.get(&dt_iri) {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::ResourceRef(i)) => i.as_str().to_string(),
+        Some(Value::String(i)) => i.as_str().to_string(),
         _ => return Ok(value),
     };
     match dt.as_str() {
@@ -197,7 +195,6 @@ fn deref_resource_value(
 ) -> Result<Value, MarshalError> {
     match value {
         Value::Embedded(r) => Ok(Value::Embedded(r)),
-        Value::ResourceRef(iri) => deref_iri_to_embedded(&iri, param_iri, layer),
         Value::String(s) => match Iri::parse(&s) {
             Ok(iri) => deref_iri_to_embedded(&iri, param_iri, layer),
             Err(_) => Ok(Value::String(s)),

@@ -144,7 +144,7 @@ fn patient_class_resource() -> Resource {
     let mut r = Resource::new(iri(PATIENT_CLASS_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     r.set(iri(wk::SHORT_NAME), Value::String("Patient".to_string()));
     r.set(
@@ -164,7 +164,9 @@ fn patient_instance_resource() -> Resource {
     let mut r = Resource::new(iri(PATIENT_INSTANCE_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(PATIENT_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r
 }
@@ -187,9 +189,11 @@ fn mirror_resource(
     let mut r = Resource::new(iri(MIRROR_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:runtime:RuntimePackageMirror",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:runtime:RuntimePackageMirror")
+                .as_str()
+                .to_string(),
+        )]),
     );
     // `short_name` is required by `RuntimePackageMirror` and the
     // value matches what the real LeanMirrorGenerator emits: the
@@ -246,7 +250,9 @@ fn mirror_resource(
     );
     r.set(
         iri(lean_iris::PROP_MIRRORED_CLASSES),
-        Value::Array(vec![Value::ResourceRef(iri(PATIENT_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r
 }
@@ -256,9 +262,11 @@ fn proof_payload_resource(bytes: &[u8]) -> Resource {
     let mut r = Resource::new(iri(PAYLOAD_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     r.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -271,13 +279,13 @@ fn proof_term_resource(proposition: Value) -> Resource {
     let mut r = Resource::new(iri(TERM_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     r.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(PAYLOAD_IRI)),
+        Value::iri(&iri(PAYLOAD_IRI)),
     );
     r.set(
         iri(lean_iris::PROP_TARGET_NAME),

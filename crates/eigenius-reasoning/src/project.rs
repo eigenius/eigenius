@@ -50,7 +50,6 @@ pub fn do_project_justification(
     let subject = input
         .get(&Iri::parse(iris::PROP_SUBJECT_SENTENCE).expect("static IRI"))
         .and_then(|v| match v {
-            Value::ResourceRef(i) => Some(i.clone()),
             Value::String(s) => Iri::parse(s).ok(),
             _ => None,
         })
@@ -95,13 +94,13 @@ fn projection_resource(
     let mut r = Resource::new_embedded();
     r.set(
         iri(eigenius_kernel::ontology::well_known::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            iris::JUSTIFICATION_PROJECTION,
-        ))]),
+        Value::Array(vec![Value::String(
+            iri(iris::JUSTIFICATION_PROJECTION).as_str().to_string(),
+        )]),
     );
     r.set(
         iri(iris::PROP_SUBJECT_SENTENCE),
-        Value::ResourceRef(subject.clone()),
+        Value::iri(&subject.clone()),
     );
     r.set(
         iri(iris::PROP_SUPPORT_COUNT),

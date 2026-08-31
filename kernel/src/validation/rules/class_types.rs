@@ -102,7 +102,7 @@ impl Validator {
 
         let mut errors = Vec::new();
         let values_to_check = match value {
-            Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_) => vec![value],
+            Value::String(_) | Value::Embedded(_) => vec![value],
             Value::Array(arr) => arr.iter().collect(),
             _ => return vec![],
         };

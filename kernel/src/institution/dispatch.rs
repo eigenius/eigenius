@@ -340,16 +340,16 @@ pub fn build_verdict_resource(
     );
     r.set(
         Iri::parse(VERDICT_SUBJECT_PROP).expect("static IRI"),
-        Value::ResourceRef(subject_iri.clone()),
+        Value::iri(&subject_iri.clone()),
     );
     r.set(
         Iri::parse(VERDICT_QUERY_CLASS_PROP).expect("static IRI"),
-        Value::ResourceRef(dispatch.query_class_iri.clone()),
+        Value::iri(&dispatch.query_class_iri.clone()),
     );
     if let Some(inv) = runtime_invocation_iri {
         r.set(
             Iri::parse(RUNTIME_INVOCATION_PROP).expect("static IRI"),
-            Value::ResourceRef(inv.clone()),
+            Value::iri(&inv.clone()),
         );
     }
     if let Some(d) = dispatched_to {
@@ -471,21 +471,23 @@ pub fn build_runtime_invocation_resource(
     // Now stamp the IRIs only the kernel knows.
     r.set(
         Iri::parse("urn:eigenius:runtime:script").expect("static IRI"),
-        Value::ResourceRef(dispatch.signature_iri.clone()),
+        Value::iri(&dispatch.signature_iri.clone()),
     );
     if let Some(env) = &dispatch.environment_iri {
         r.set(
             Iri::parse("urn:eigenius:runtime:environment").expect("static IRI"),
-            Value::ResourceRef(env.clone()),
+            Value::iri(&env.clone()),
         );
     }
     r.set(
         Iri::parse("urn:eigenius:runtime:inputs").expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(subject_iri.clone())]),
+        Value::Array(vec![Value::String(
+            subject_iri.clone().as_str().to_string(),
+        )]),
     );
     r.set(
         Iri::parse("urn:eigenius:runtime:output").expect("static IRI"),
-        Value::ResourceRef(verdict_iri.clone()),
+        Value::iri(&verdict_iri.clone()),
     );
     Some(r)
 }
@@ -531,8 +533,7 @@ pub fn finalize_emitted_derivation(
     };
     let has_class = |classes: &[Value], iri: &str| {
         classes.iter().any(|v| match v {
-            Value::String(s) => s == iri,
-            Value::ResourceRef(i) => i.as_str() == iri,
+            Value::String(i) => i.as_str() == iri,
             _ => false,
         })
     };
@@ -545,12 +546,12 @@ pub fn finalize_emitted_derivation(
 
     derivation.set(
         Iri::parse(wk::FROM_SUBJECT).expect("static IRI"),
-        Value::ResourceRef(subject_iri.clone()),
+        Value::iri(&subject_iri.clone()),
     );
     if let Some(inv) = runtime_invocation_iri {
         derivation.set(
             Iri::parse(wk::RUNTIME_INVOCATION).expect("static IRI"),
-            Value::ResourceRef(inv.clone()),
+            Value::iri(&inv.clone()),
         );
     }
     Some(derivation)

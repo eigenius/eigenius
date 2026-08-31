@@ -684,7 +684,9 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                    Value::Array(vec![Value::String(
+                        iri(wk::INDUCTIVE_CTOR).as_str().to_string(),
+                    )]),
                 ),
                 (wk::CTOR_NAME, Value::String("zero".into())),
                 (wk::ARG_TYPES, Value::Array(vec![])),
@@ -697,7 +699,9 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+                    Value::Array(vec![Value::String(
+                        iri(wk::INDUCTIVE_ARG_TYPE).as_str().to_string(),
+                    )]),
                 ),
                 (wk::ARG_NAME, Value::String("pred".into())),
                 // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
@@ -714,7 +718,9 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                    Value::Array(vec![Value::String(
+                        iri(wk::INDUCTIVE_CTOR).as_str().to_string(),
+                    )]),
                 ),
                 (wk::CTOR_NAME, Value::String("succ".into())),
                 (
@@ -729,7 +735,9 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+                    Value::Array(vec![Value::String(
+                        iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+                    )]),
                 ),
                 (wk::SHORT_NAME, Value::String("Nat".into())),
                 (
@@ -746,15 +754,14 @@ mod tests {
         let nat_value_prop = make_resource(
             "urn:eigenius:test:nat_value",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("nat_value".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::INDUCTIVE))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Nat"))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:test:Nat").as_str().to_string(),
+                    )]),
                 ),
             ],
         );
@@ -893,17 +900,16 @@ mod tests {
         let prop = make_resource(
             "urn:eigenius:test:formula_value",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("formula_value".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::INDUCTIVE))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri(
-                        "urn:eigenius:formulas:FormulaTerm",
-                    ))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:formulas:FormulaTerm")
+                            .as_str()
+                            .to_string(),
+                    )]),
                 ),
             ],
         );
@@ -1144,9 +1150,9 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(
-                        "urn:eigenius:formulas:Operator",
-                    ))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:formulas:Operator").as_str().to_string(),
+                    )]),
                 ),
                 (wk::SHORT_NAME, Value::String("bad".into())),
                 ("urn:eigenius:formulas:operator_arity", arity),
@@ -1223,9 +1229,9 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(
-                        "urn:eigenius:formulas:Operator",
-                    ))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:formulas:Operator").as_str().to_string(),
+                    )]),
                 ),
                 (wk::SHORT_NAME, Value::String("no_arity".into())),
             ],
@@ -1301,15 +1307,14 @@ mod tests {
         let prop = make_resource(
             "urn:eigenius:test:proposition_value",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("proposition_value".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::INDUCTIVE))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:lean:LeanExpr"))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:lean:LeanExpr").as_str().to_string(),
+                    )]),
                 ),
             ],
         );
@@ -1450,15 +1455,14 @@ mod tests {
         let prop = make_resource(
             "urn:eigenius:test:proposition_value",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("proposition_value".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(data_type_iri))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(data_type_iri))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:lean:LeanExpr"))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:lean:LeanExpr").as_str().to_string(),
+                    )]),
                 ),
             ],
         );
@@ -1472,10 +1476,7 @@ mod tests {
         let holder_class = make_resource(
             "urn:eigenius:test:PropositionHolder",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::CLASS))])),
                 (wk::SHORT_NAME, Value::String("PropositionHolder".into())),
                 (
                     wk::DESCRIPTION,
@@ -1500,9 +1501,11 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(
-                        "urn:eigenius:test:PropositionHolder",
-                    ))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:test:PropositionHolder")
+                            .as_str()
+                            .to_string(),
+                    )]),
                 ),
                 (
                     "urn:eigenius:test:proposition_value",
@@ -1533,9 +1536,11 @@ mod tests {
             vec![
                 (
                     wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(
-                        "urn:eigenius:test:PropositionHolder",
-                    ))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:test:PropositionHolder")
+                            .as_str()
+                            .to_string(),
+                    )]),
                 ),
                 (
                     "urn:eigenius:test:proposition_value",
@@ -1604,26 +1609,19 @@ mod tests {
         // Declare a small Class so class_types resolves.
         let some_class = make_resource(
             "urn:eigenius:test:SomeClass",
-            vec![(
-                wk::IS_A,
-                Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
-            )],
+            vec![(wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::CLASS))]))],
         );
         let prop = make_resource(
             "urn:eigenius:test:class_array_prop",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("class_array_prop".into())),
-                (
-                    wk::DATA_TYPE_PROP,
-                    Value::ResourceRef(iri(wk::RESOURCE_ARRAY)),
-                ),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::RESOURCE_ARRAY))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:SomeClass"))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:test:SomeClass").as_str().to_string(),
+                    )]),
                 ),
             ],
         );
@@ -1707,15 +1705,14 @@ mod tests {
         let prop = make_resource(
             "urn:eigenius:test:eigentt_value",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("eigentt_value".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::INDUCTIVE))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:eigentt:Term"))]),
+                    Value::Array(vec![Value::String(
+                        iri("urn:eigenius:eigentt:Term").as_str().to_string(),
+                    )]),
                 ),
                 (
                     // A TYPE slot, so the decode failure this test is about is
@@ -1732,12 +1729,9 @@ mod tests {
         let wrong_class_target = make_resource(
             "urn:eigenius:test:wrong_class",
             vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
+                (wk::IS_A, Value::Array(vec![Value::iri(&iri(wk::PROPERTY))])),
                 (wk::SHORT_NAME, Value::String("wrong_class".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::STRING))),
+                (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::STRING))),
             ],
         );
 

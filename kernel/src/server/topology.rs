@@ -704,31 +704,35 @@ mod tests {
         let mut animal = Resource::new(iri("urn:eigenius:example:Animal"));
         animal.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         animal.set(iri(wk::SHORT_NAME), Value::String("Animal".to_string()));
 
         let mut name_prop = Resource::new(iri("urn:eigenius:example:name"));
         name_prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         name_prop.set(iri(wk::SHORT_NAME), Value::String("name".to_string()));
-        name_prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        name_prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
 
         let mut dog = Resource::new(iri("urn:eigenius:example:Dog"));
         dog.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         dog.set(iri(wk::SHORT_NAME), Value::String("Dog".to_string()));
         dog.set(
             iri(wk::PARENT_CLASSES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:example:Animal"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:example:Animal").as_str().to_string(),
+            )]),
         );
         dog.set(
             iri(wk::REQUIRES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:example:name"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:example:name").as_str().to_string(),
+            )]),
         );
 
         let mut root = LayerBuilder::new("root", None);

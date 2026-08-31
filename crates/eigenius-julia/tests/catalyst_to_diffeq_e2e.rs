@@ -265,7 +265,9 @@ fn build_catalyst_to_ode_input_cbor() -> Vec<u8> {
     let mut network = Resource::new_embedded();
     network.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(REACTION_NETWORK_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(REACTION_NETWORK_CLASS).as_str().to_string(),
+        )]),
     );
     network.set(
         iri("urn:eigenius:core:short_name"),
@@ -287,7 +289,9 @@ fn build_catalyst_to_ode_input_cbor() -> Vec<u8> {
     let mut req = Resource::new_embedded();
     req.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(CATALYST_TO_ODE_INPUT_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(CATALYST_TO_ODE_INPUT_CLASS).as_str().to_string(),
+        )]),
     );
     req.set(
         iri("urn:eigenius:core:short_name"),
@@ -325,7 +329,9 @@ fn build_ode_solution_cbor(problem: Resource) -> Vec<u8> {
     let mut sol = Resource::new_embedded();
     sol.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(ODE_SOLUTION_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(ODE_SOLUTION_CLASS).as_str().to_string(),
+        )]),
     );
     sol.set(
         iri("urn:eigenius:core:short_name"),

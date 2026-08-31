@@ -338,7 +338,9 @@ fn apply_fiber_clause(
         let mut query_res = Resource::new_embedded();
         query_res.set(
             is_a_iri.clone(),
-            Value::Array(vec![Value::ResourceRef(qc_entry.query_class.clone())]),
+            Value::Array(vec![Value::String(
+                qc_entry.query_class.clone().as_str().to_string(),
+            )]),
         );
 
         for param in &fc.params {
@@ -442,10 +444,7 @@ fn apply_fiber_clause(
         // resident IRI when INTO is set; the transient overlay IRI
         // otherwise).
         let mut new_binding = binding.clone();
-        new_binding.insert(
-            fc.binding.name.clone(),
-            Value::String(response_iri.as_str().to_string()),
-        );
+        new_binding.insert(fc.binding.name.clone(), Value::iri(&response_iri));
         extended.push(new_binding);
     }
 
@@ -701,8 +700,7 @@ fn embed_typed_resource_param(
     };
     let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
     let dt = match prop_def.get(&dt_iri) {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::ResourceRef(i)) => i.as_str().to_string(),
+        Some(Value::String(i)) => i.as_str().to_string(),
         _ => return Ok(value),
     };
     match dt.as_str() {
@@ -732,7 +730,6 @@ fn embed_typed_resource_param(
 fn deref_resource_value(value: Value, param_iri: &Iri, layer: &Layer) -> Result<Value, QueryError> {
     match value {
         Value::Embedded(r) => Ok(Value::Embedded(r)),
-        Value::ResourceRef(iri) => deref_iri_to_embedded(&iri, param_iri, layer),
         Value::String(s) => match Iri::parse(&s) {
             Ok(iri) => deref_iri_to_embedded(&iri, param_iri, layer),
             Err(_) => Ok(Value::String(s)),
@@ -770,7 +767,6 @@ fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri
             for v in arr {
                 let prop_iri = match v {
                     Value::String(s) => Iri::parse(s).ok(),
-                    Value::ResourceRef(i) => Some(i.clone()),
                     _ => None,
                 };
                 if let Some(iri) = prop_iri {
@@ -894,7 +890,9 @@ mod tests {
         let mut target_class = Resource::new(Iri::parse("urn:test:deref:Target").unwrap());
         target_class.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::CLASS).unwrap())]),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::CLASS).unwrap().as_str().to_string(),
+            )]),
         );
         target_class.set(
             Iri::parse(wk::SHORT_NAME).unwrap(),
@@ -906,8 +904,11 @@ mod tests {
         let mut inst = Resource::new(Iri::parse("urn:test:deref:target_instance").unwrap());
         inst.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:test:deref:Target").unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:test:deref:Target")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         inst.set(
@@ -920,11 +921,13 @@ mod tests {
         let mut prop_obj = Resource::new(Iri::parse("urn:test:deref:prop_obj").unwrap());
         prop_obj.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop_obj.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RESOURCE).unwrap()),
+            Value::iri(&Iri::parse(wk::RESOURCE).unwrap()),
         );
         b.add_resource(prop_obj).unwrap();
 
@@ -932,11 +935,13 @@ mod tests {
         let mut prop_arr = Resource::new(Iri::parse("urn:test:deref:prop_arr").unwrap());
         prop_arr.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop_arr.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RESOURCE_ARRAY).unwrap()),
+            Value::iri(&Iri::parse(wk::RESOURCE_ARRAY).unwrap()),
         );
         b.add_resource(prop_arr).unwrap();
 
@@ -944,11 +949,13 @@ mod tests {
         let mut prop_str = Resource::new(Iri::parse("urn:test:deref:prop_str").unwrap());
         prop_str.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop_str.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+            Value::iri(&Iri::parse(wk::STRING).unwrap()),
         );
         b.add_resource(prop_str).unwrap();
 
@@ -978,7 +985,12 @@ mod tests {
         // shape MATCH bindings produce post-canonicalisation.
         let layer = deref_layer_with_props();
         let prop = Iri::parse("urn:test:deref:prop_obj").unwrap();
-        let value = Value::ResourceRef(Iri::parse("urn:test:deref:target_instance").unwrap());
+        let value = Value::String(
+            Iri::parse("urn:test:deref:target_instance")
+                .unwrap()
+                .as_str()
+                .to_string(),
+        );
         let out = embed_typed_resource_param(&prop, value, &layer).expect("deref ok");
         assert!(matches!(out, Value::Embedded(_)));
     }
@@ -988,7 +1000,12 @@ mod tests {
         let layer = deref_layer_with_props();
         let prop = Iri::parse("urn:test:deref:prop_arr").unwrap();
         let value = Value::Array(vec![
-            Value::ResourceRef(Iri::parse("urn:test:deref:target_instance").unwrap()),
+            Value::String(
+                Iri::parse("urn:test:deref:target_instance")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
             Value::String("urn:test:deref:target_instance".into()),
         ]);
         let out = embed_typed_resource_param(&prop, value, &layer).expect("deref ok");

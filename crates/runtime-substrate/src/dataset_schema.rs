@@ -442,7 +442,7 @@ mod tests {
     }
 
     fn rref(v: &str) -> Value {
-        Value::ResourceRef(iri(v))
+        Value::iri(&iri(v))
     }
 
     /// Build the CERES wide-matrix schema from the worked example.

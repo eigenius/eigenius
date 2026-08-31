@@ -178,9 +178,11 @@ fn oci_runtime_converts_schemaorg_through_a_real_container() {
     let mut input = Resource::new(iri("urn:eigenius:obj:d57:gen_input"));
     input.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:ingest:PinnedExternalFile",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:ingest:PinnedExternalFile")
+                .as_str()
+                .to_string(),
+        )]),
     );
     input.set(
         iri("urn:eigenius:ingest:materialized_path"),

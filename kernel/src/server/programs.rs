@@ -217,7 +217,7 @@ impl EigeniusService {
         if let Some(out_id) = output.id() {
             trace_resource.set(
                 Iri::parse("urn:eigenius:prov:resource").unwrap(),
-                crate::ontology::resource::Value::String(out_id.as_str().to_string()),
+                crate::ontology::resource::Value::iri(out_id),
             );
         }
         // `prov:was_generated_by` is resource-typed, so the run needs an Activity
@@ -235,7 +235,7 @@ impl EigeniusService {
         if let Some(prog_id) = program.id() {
             trace_resource.set(
                 Iri::parse("urn:eigenius:prov:program").unwrap(),
-                crate::ontology::resource::Value::String(prog_id.as_str().to_string()),
+                crate::ontology::resource::Value::iri(prog_id),
             );
         }
         // Required: trace_tree — serialized tree-structured trace

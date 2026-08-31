@@ -110,8 +110,11 @@ pub async fn script_publish(
     let mut script = Resource::new(script_iri.clone());
     script.set(
         Iri::parse("urn:eigenius:core:is_a").expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:runtime:RuntimeScript").expect("static IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:runtime:RuntimeScript")
+                .expect("static IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     script.set(
@@ -128,7 +131,7 @@ pub async fn script_publish(
     );
     script.set(
         Iri::parse("urn:eigenius:runtime:requires_environment").expect("static IRI"),
-        Value::ResourceRef(env.clone()),
+        Value::iri(&env.clone()),
     );
     if let Some(ep) = entry_point {
         script.set(

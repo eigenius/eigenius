@@ -163,7 +163,7 @@ impl DispatchTrace {
         if let Some(digest) = self.image_digest {
             r.set(
                 parse_iri(PROP_IMAGE_DIGEST),
-                Value::String(digest.as_str().to_string()),
+                Value::String(digest.to_string()),
             );
         }
         r.set(parse_iri(PROP_STARTED_AT), Value::String(self.started_at));
