@@ -799,10 +799,11 @@ current in a way a code comment does not.
 
 ### 5.5 Untested — where a claim rests on nothing executable
 
-- The **committed shape** of a stamped `VerificationTrace` is untested: every test takes
-  `outcome.derivations[0]` *pre-stamp* (`crates/eigenius-reasoning/tests/validate_handler.rs:907`),
-  so nothing exercises the resource as it lands with `DerivedResource` +
-  `InstitutionEmittedDerivation` on it.
+- The **committed shape** of a stamped `VerificationTrace` is untested. Every test took
+  `outcome.derivations[0]` *pre-stamp*, so nothing exercised the resource as it lands with
+  `DerivedResource` + `InstitutionEmittedDerivation` on it. P7 deleted those three tests with
+  their file (`crates/eigenius-reasoning/tests/validate_handler.rs`); the property is now
+  unpinned in either form, and is re-pinned against the Lean institution under eigenius#160.
 - `dispatch_auto_on_load_for_layer` — the commit's actual path — has **no test** (§5.2).
 - `kernel/src/program/check_hooks.rs:93` dispatches witness synthesis on an inductive's **short name**, so any inductive
   anywhere named `IsVerifiedAs` enters the path. Not a defect found in the wild; a matching rule

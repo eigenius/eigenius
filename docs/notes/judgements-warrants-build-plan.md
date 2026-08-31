@@ -1055,6 +1055,33 @@ semantics the division above would move. P6.0 is that case: reference edges reje
 other branch is acyclic, which is a false rejection. The division moved — the kernel holds the
 algebra, the chain holds the declaration — and the boundary is now the one stated two bullets above.
 
+### P7 step 1 — the tests are rehomed *(done `2026-08-31`)*
+
+The crate's tests come off the institution before its code does, so the deletion has nothing left
+to break. Eleven files were rewritten to validate a committed layer instead of calling a handler;
+`tests/validate_handler.rs` (1178 lines, 21 tests) was deleted and its content dispositioned:
+
+| Was | Now |
+| --- | --- |
+| 5 end-to-end certificate/witness tests | `kernel/tests/certificate_admission.rs`, rewritten onto the commit path and renamed off `Verdict::Holds`/`Fails` |
+| 4 malformed-input tests asserting `InstitutionError`/`Verdict` shape | 3 kernel tests asserting the same property through Rule 21 |
+| 1 `ExternalExecutionTrace` category test (eigenius#205) | rehomed unchanged — it was already pure kernel |
+| 2 institution-dispatch, 3 entailment, 3 consistency | deleted; P7 deletes what they test |
+| 3 `VerificationTrace` tests | dropped, recorded on eigenius#160 — the only minter (`validate.rs:228`) goes with the crate |
+
+**Two gaps surfaced, both from the change of path.** The handler took a *detached* `Resource`, so
+nothing ever validated the fixtures it was given. Committing them does:
+
+- `build_chain_with_declared_axiom`'s target is a `core:Class` with no `core:short_name` and no
+  `core:description`, both required.
+- Its `prov:DeclarationTrace` carries neither `prov:timestamp` nor `prov:was_attributed_to`, both
+  required alongside `prov:resource` (`ontologies/prov/prov.esl:228`).
+
+Fixtures for a witness-admission test that are not themselves valid resources. Completed in place,
+and `the_fixture_chain_validates_clean` now asserts the chain is clean before any sentence lands on
+it — otherwise a filtered "no errors" result cannot distinguish a passing check from a broken
+fixture.
+
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's
 implementation, to the trusted computing base.
