@@ -940,32 +940,22 @@ unavoidable for realising some S4 theorems in LP.
 commit is rejected; and a test asserting that a claim whose proposition and premise reference the same
 class is **not** rejected.
 
-### P6.2 — the value form, and where it landed (`2026-08-30`)
+### P6 is complete. The value-shape work is NOT a phase (`2026-08-31`)
 
-P6.2 needs an inductive value to REFERENCE another rather than inline it. That could not be added to
-the format as it stood, because the format was two formats no document distinguished, so it was
-specified first as [D83](../design/d83-inductive-value-wire-format.md) and then largely superseded
-by [D84](../design/d84-an-inductive-value-is-a-resource.md).
+P6.0 and P6.1 landed. There is no P6.2 in this plan and never was — the name was invented for
+follow-on work sketched in an earlier session, and then treated as a plan item for two days.
 
-**Landed and green** (2977 tests): the `App` spine retired so `App` means application only and
-`D.c(a) b` round-trips; `core:cardinality` built, which D32 §3.7 specified and nothing implemented;
-`eigentt:Judgement` written at the type its slot declares, which let P5's exemption of it from
-Rule 16 be withdrawn — two tests fail without that withdrawal, an undeclared constructor and a
-wrong-arity `holds`, both of which reached the chain unexamined while it stood; and §3.2/§3.3, a
-chain-resident value with `core:ctor` / `core:args` that another value can name, with expansion
-identity and cycle detection in both the decoder and the validator.
+That work is the SHAPE OF INDUCTIVE VALUES, specified in
+[D85](../design/d85-the-shape-of-inductive-values.md). It is not sequenced here because it blocks
+nothing: it grew from wanting a reference form to deduplicate a repeated term in one WRN file, which
+is opportunistic cleanup. D85 §5 carries its own retrofit steps.
 
-**Superseded before it was finished.** D84's claim — an inductive value is a `Resource`, and
-`eigentt:Term` is an ordinary inductive — makes `CtorApp` and the slot threading unnecessary rather
-than merely improvable, because a value carrying `is_a` names itself. D83 §4.1's `Value` split was
-implemented and reverted: its variants are `Embedded` and `ResourceRef` rediscovered on a schema
-discriminant instead of a shape one.
-
-**Remaining**, per D84 §7: `encode_type` / `decode_type` become `Exp` ↔ `Value` bridges; then delete
-`CtorApp`, the threading, Rule 16's walker, `json_mentions`, and the JSON α-canonicaliser; then
-`Vector` leaves `Value`. Two questions are open and named in D84 §6 — whether Rule 0 should descend
-into embedded resources, and what `core:args` element typing becomes once elements self-describe.
-
+Two notes preceded D85 and are replaced by it —
+[D83](../design/d83-inductive-value-wire-format.md), which found a real defect in the wire format
+(two encodings that no document distinguished), and
+[D84](../design/d84-an-inductive-value-is-a-resource.md), which found the model underneath it. Their
+code was reverted in `5187cfc`; D85 §7 records why, and it is worth reading before starting: seven
+unverified claims about the implementation drove work that had to be undone.
 ---
 
 ## P7 — Relocate what the kernel owns; state the boundary operationally

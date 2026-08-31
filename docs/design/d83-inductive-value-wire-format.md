@@ -1,6 +1,8 @@
 # D83 — The wire format for inductive values
 
-**Status: proposed.** Written `2026-08-30`, during P6.2 of the judgements-and-warrants refactor
+**Status: REPLACED by [D85](d85-the-shape-of-inductive-values.md).** Kept for its history; nothing should be read out of it as current design.
+
+**Originally: proposed.** Written `2026-08-30`, during P6.2 of the judgements-and-warrants refactor
 ([`docs/notes/judgements-warrants-build-plan.md`](../notes/judgements-warrants-build-plan.md)).
 
 **Superseded in part by [D84](d84-an-inductive-value-is-a-resource.md)**, which makes an inductive

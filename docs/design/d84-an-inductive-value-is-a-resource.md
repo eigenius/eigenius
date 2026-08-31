@@ -1,6 +1,8 @@
 # D84 — An inductive value is a resource
 
-**Status: proposed.** Written `2026-08-30`, during P6.2 of the judgements-and-warrants refactor
+**Status: REPLACED by [D85](d85-the-shape-of-inductive-values.md).** Kept for its history. Its central claim — an inductive value is a resource — is carried into D85; §3.1 (`CtorApp` disappears) and §7 (one atomic cut-over) are wrong and D85 says why.
+
+**Originally: proposed.** Written `2026-08-30`, during P6.2 of the judgements-and-warrants refactor
 ([`docs/notes/judgements-warrants-build-plan.md`](../notes/judgements-warrants-build-plan.md)).
 
 **Supersedes** D83 §3.1, §3.4 and §4.2, and the encoding half of D47. **Withdraws** D83 §4.1.
