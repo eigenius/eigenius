@@ -162,14 +162,26 @@ topology graph for canonicalised chains". Recorded here; out of scope.
 
 Mostly deletion, which is the sign the shape is right.
 
+**Phase 1 is one cut-over, and almost everything is in it.** An earlier draft of this section split
+the deletions into a second phase. They are not separable: each of them reads `Value::Json`, and
+`CtorApp` is worse than that — leaving it one phase longer would force `encode_type` to CHOOSE
+between emitting a self-describing value and emitting a `CtorApp`, which is the two-shapes problem
+D83 §2.1 exists to prevent.
+
 | phase | work |
 |---|---|
-| 1 | `encode_type` / `decode_type` become `Exp` ↔ `Value` bridges. The only substantive new code, and smaller than what it replaces: `arg_string` becomes `as_str`, and the ctor arms read `&[Value]`. |
-| 2 | Delete `CtorApp` from `eigentt:Term`; delete the §4.2 threading; fold Rule 16 into Rule 24; delete `json_mentions`; move α-canonicalisation from JSON to `Exp`, where α-equivalence lives. |
-| 3 | `Vector` leaves `Value` — it inhabits no `core:DataType`, which is why serialising one panics. The query engine takes a domain that extends the data model. 17 sites, independent of 1–2. |
+| 1 | `encode_type` / `decode_type` become `Exp` ↔ `Value` bridges — the only substantive new code, and smaller than what it replaces (`arg_string` becomes `as_str`; the ctor arms read `&[Value]`). Inductive values become `Embedded` / `ResourceRef`. **In the same cut-over**, because each reads the shape being retired: delete `CtorApp` from `eigentt:Term` and the codec; delete §4.2's threading (compiler seeds, printer slot map); fold Rule 16's walker into Rule 24; replace `json_mentions` in the triple index's `wk::INDUCTIVE` arm with the `Embedded` descent `value_refs` already does; and take α-canonicalisation off JSON — `hash_proposition_value` and `WitnessKey::from_encoded` have three callers between them, two of which are tests. |
+| 2 | `Vector` leaves `Value` — it inhabits no `core:DataType`, which is why serialising one panics. The query engine takes a domain that extends the data model. 7 sites in `resource.rs`, 17 across the tree; genuinely independent of phase 1. |
 
-Phase 1 is a cut-over: every reader of an inductive value moves together. The compiler enumerates
-them — the §4.1 experiment broke exactly six exhaustive matches plus about eight substantive
-readers.
+The compiler enumerates the cut-over: the §4.1 experiment broke exactly six exhaustive matches plus
+about eight substantive readers.
+
+**`core:cardinality` loses its only user.** It was built for `CtorApp`'s argument list and nothing
+else in the tree declares a list-valued constructor argument, so deleting `CtorApp` leaves it a
+declared, tested capability with no production consumer. It is not wrong — D32 §3.7 specified it
+from the start and it was documentation-only until now — but it should be kept or dropped
+deliberately rather than by inertia. Kept, for now, on the grounds that a sequence-valued
+constructor argument is a real thing D32 promised and the ESL surface `[T]` plus six tests keep it
+honest.
 
 One reseed, at the end of phase 1, folded into the one already owed for P4, P5 and D83 §3.4.
