@@ -212,6 +212,11 @@ pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
 /// and nothing implemented it until `eigentt:Term.CtorApp` needed to carry the
 /// argument list of the constructor it names.
 pub const CARDINALITY: &str = "urn:eigenius:core:cardinality";
+/// Constructor of a chain-resident inductive VALUE (D83 §3.2). Paired with
+/// [`VALUE_ARGS`] on a resource whose `is_a` names one `core:InductiveType`.
+pub const VALUE_CTOR: &str = "urn:eigenius:core:ctor";
+/// Arguments of a chain-resident inductive value (D83 §3.2).
+pub const VALUE_ARGS: &str = "urn:eigenius:core:args";
 /// The one accepted [`CARDINALITY`] value.
 pub const CARDINALITY_LIST: &str = "list";
 pub const ARG_NAME: &str = "urn:eigenius:core:arg_name";

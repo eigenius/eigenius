@@ -204,6 +204,32 @@ impl Validator {
         res_id: &Option<Iri>,
         out: &mut Vec<ValidationError>,
     ) {
+        self.walk_inductive_value_seen(
+            value,
+            inductive_type,
+            path,
+            res_id,
+            &mut std::collections::BTreeSet::new(),
+            out,
+        );
+    }
+
+    /// [`Self::walk_inductive_value`], carrying the §3.3 references already expanded on this
+    /// path.
+    ///
+    /// A reference expands, so the walk follows it — and a cycle would otherwise make this
+    /// recurse until the stack runs out. The decoder detects cycles too (D83 §3.3), but it
+    /// runs later than commit: without the set here, a cyclic value would hang the validator
+    /// before the decoder ever saw it.
+    fn walk_inductive_value_seen(
+        &self,
+        value: &Value,
+        inductive_type: &Resource,
+        path: String,
+        res_id: &Option<Iri>,
+        seen: &mut std::collections::BTreeSet<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
         let json = match value {
             Value::Json(j) => j,
             other => {
@@ -373,13 +399,150 @@ impl Validator {
                         &type_name,
                         format!("{child_path}[{k}]"),
                         res_id,
+                        seen,
                         out,
                     );
                 }
                 continue;
             }
-            self.check_inductive_arg(arg_value, &type_name, child_path, res_id, out);
+            self.check_inductive_arg(arg_value, &type_name, child_path, res_id, seen, out);
         }
+    }
+
+    /// Rule 24: a chain-resident inductive VALUE (D83 §3.2).
+    ///
+    /// A value becomes chain-resident by acquiring an identity and declaring its type:
+    /// `is_a` names exactly one `core:InductiveType`, `core:ctor` names the constructor and
+    /// `core:args` carries the arguments. No wrapper class is involved — it is the same
+    /// relationship `Embedded` and `ResourceRef` already have for resources, lifted to
+    /// values.
+    ///
+    /// Exactly one, and no Class alongside it (D83 §6.2). A value has one type; the array
+    /// shape of `is_a` is inherited from resources generally, not a licence to give a value
+    /// two, and a walk cannot check one value against two schemas.
+    pub(in crate::validation) fn check_inductive_value_resource(
+        &self,
+        resource: &Resource,
+        res_id: &Option<Iri>,
+    ) -> Vec<ValidationError> {
+        let is_a = match resource.get(&iri(wk::IS_A)) {
+            Some(v) => v.as_iri_array(),
+            None => return vec![],
+        };
+        let inductives: Vec<&Iri> = is_a
+            .iter()
+            .filter(|i| {
+                self.layer
+                    .resolve(i)
+                    .is_some_and(|r| r.is_instance_of(&iri(wk::INDUCTIVE_TYPE)))
+            })
+            .collect();
+        if inductives.is_empty() {
+            return vec![];
+        }
+        let mismatch = |message: String| ValidationError {
+            resource_id: res_id.clone(),
+            property: None,
+            rule: ValidationRule::InductiveValueMismatch,
+            message,
+        };
+        if is_a.len() != 1 {
+            return vec![mismatch(format!(
+                "a resource whose `is_a` names an InductiveType is a VALUE of it (D83 §3.2)                  and has exactly one type; this one names {}",
+                is_a.len()
+            ))];
+        }
+        let decl = match self.layer.resolve(inductives[0]) {
+            Some(d) => d,
+            None => return vec![],
+        };
+        let json = match crate::program::eigentt_type_mirror::value_resource_to_json(resource) {
+            Some(j) => j,
+            None => {
+                return vec![mismatch(format!(
+                    "a value of InductiveType `{}` carries the constructor it applies in                      `core:ctor`; this resource has none",
+                    inductives[0]
+                ))]
+            }
+        };
+        let mut errors = Vec::new();
+        self.walk_inductive_value(
+            &Value::Json(json),
+            &decl,
+            format!("{}", inductives[0]),
+            res_id,
+            &mut errors,
+        );
+        errors
+    }
+
+    /// Check a §3.3 reference: the IRI must name a §3.2 value resource of the expected
+    /// inductive, and that resource's own value must be well-formed.
+    ///
+    /// A reference expands, so what it names is part of this value and is checked as such.
+    /// Leaving the target unchecked here would put the only unvalidated values on the chain
+    /// behind a level of indirection.
+    fn check_value_reference(
+        &self,
+        ref_iri: &str,
+        expected: &Resource,
+        path: &str,
+        res_id: &Option<Iri>,
+        seen: &mut std::collections::BTreeSet<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        let expected_iri = expected.id().map(Iri::as_str).unwrap_or("?");
+        let mut err = |message: String| {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::InductiveValueMismatch,
+                message,
+            });
+        };
+        let Ok(target_iri) = Iri::parse(ref_iri) else {
+            err(format!(
+                "{path}: an argument typed `{expected_iri}` is an inline value or the IRI of                  one; `{ref_iri}` is neither"
+            ));
+            return;
+        };
+        let Some(target) = self.layer.resolve(&target_iri) else {
+            err(format!(
+                "{path}: inductive value reference `{ref_iri}` is not in the chain"
+            ));
+            return;
+        };
+        // §3.2 — the value declares its own type, and it must be the one expected here.
+        if !target.is_instance_of(&iri(expected_iri)) {
+            err(format!(
+                "{path}: inductive value reference `{ref_iri}` is not an `{expected_iri}` —                  a value resource's `is_a` names the InductiveType it inhabits"
+            ));
+            return;
+        }
+        let Some(json) = crate::program::eigentt_type_mirror::value_resource_to_json(&target)
+        else {
+            err(format!(
+                "{path}: inductive value reference `{ref_iri}` names a resource with no                  `core:ctor`, so it is not a chain-resident inductive value"
+            ));
+            return;
+        };
+        if !seen.insert(target_iri.clone()) {
+            err(format!(
+                "{path}: inductive value reference `{ref_iri}` closes a cycle — a value's                  identity is its expansion, and this one does not terminate"
+            ));
+            return;
+        }
+        // The target is walked against the EXPECTED inductive, which is the declaration; the
+        // resource resolved from the IRI is the value.
+        self.walk_inductive_value_seen(
+            &Value::Json(json),
+            expected,
+            format!("{path} -> {ref_iri}"),
+            res_id,
+            seen,
+            out,
+        );
+        seen.remove(&target_iri);
     }
 
     /// Validate one argument value against the `type_name` declared on
@@ -394,6 +557,7 @@ impl Validator {
         type_name: &str,
         path: String,
         res_id: &Option<Iri>,
+        seen: &mut std::collections::BTreeSet<Iri>,
         out: &mut Vec<ValidationError>,
     ) {
         // A bare name is a type-PARAMETER reference. Parameter-aware checking — instantiating the
@@ -436,13 +600,23 @@ impl Validator {
                     Some(r) => r,
                     None => return, // Treat as unbound parameter; deferred.
                 };
-                // InductiveType: recurse.
+                // InductiveType: recurse, or resolve a §3.3 reference and walk the target.
                 if referent.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
-                    self.walk_inductive_value(
+                    // D83 §3.3 — an inductive-typed argument is an inline value (an object)
+                    // or the IRI of a §3.2 chain-resident value (a string). This is the row
+                    // D32 §3.7 left asymmetric: it gave CLASS-typed arguments both "a
+                    // `ResourceRef` … or an embedded resource map" and gave inductive-typed
+                    // arguments only the inline form.
+                    if let Some(ref_iri) = arg_value.as_str() {
+                        self.check_value_reference(ref_iri, &referent, &path, res_id, seen, out);
+                        return;
+                    }
+                    self.walk_inductive_value_seen(
                         &Value::Json(arg_value.clone()),
                         &referent,
                         path,
                         res_id,
+                        seen,
                         out,
                     );
                     return;

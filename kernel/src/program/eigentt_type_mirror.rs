@@ -417,6 +417,15 @@ pub enum DecodeError {
     /// An `App` was decoded with a head that doesn't admit applications
     /// (e.g., a fully-applied EigonClass that takes no arguments).
     AppOnNonParametric(String),
+    /// A §3.3 reference names a resource that is not in the chain (D83 §3.3).
+    ValueRefUnresolved(Iri),
+    /// A §3.3 reference names a resource that is not a §3.2 inductive value —
+    /// it carries no `core:ctor`, so there is nothing to expand.
+    ValueRefNotAValue(Iri),
+    /// A §3.3 reference is part of a cycle. Expansion of one does not terminate, and a
+    /// value's identity is its expansion, so this is a malformed value rather than a
+    /// sharing pattern that could be tolerated.
+    ValueRefCycle(Vec<Iri>),
     /// A `CtorApp` referenced a ctor name that doesn't exist on the
     /// resolved inductive type. (D48 / eigenius#71)
     CtorAppUnknownCtor {
@@ -454,6 +463,22 @@ impl std::fmt::Display for DecodeError {
                 "ConstRef IRI {iri} resolves to a resource of class {found_classes:?} \
                  (expected Class, DataType, InductiveType, or CodataType)"
             ),
+            DecodeError::ValueRefUnresolved(iri) => {
+                write!(f, "inductive value reference `{iri}` is not in the chain")
+            }
+            DecodeError::ValueRefNotAValue(iri) => write!(
+                f,
+                "inductive value reference `{iri}` names a resource with no `core:ctor`, \
+                 so it is not a chain-resident inductive value"
+            ),
+            DecodeError::ValueRefCycle(path) => write!(
+                f,
+                "inductive value references form a cycle: {}",
+                path.iter()
+                    .map(Iri::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            ),
             DecodeError::AppOnNonParametric(s) => {
                 write!(f, "App spine applied to non-parametric head: {s}")
             }
@@ -484,6 +509,13 @@ impl std::error::Error for DecodeError {}
 #[derive(Clone, Copy)]
 struct DecodeCtx<'a> {
     layer: &'a Layer,
+    /// The §3.2 value resources currently being expanded, innermost last (D83 §3.3).
+    ///
+    /// A reference is a sharing device, not a distinct term: it expands, so that a value
+    /// and its fully inlined twin decode to the same `Exp` and therefore hash the same.
+    /// Expansion of a CYCLE does not terminate, so the path is carried and a revisit is an
+    /// error rather than a hang.
+    expanding: &'a std::cell::RefCell<Vec<Iri>>,
 }
 
 /// Decode a chain-resident `eigentt:Term` value back to an
@@ -501,11 +533,22 @@ pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
             )));
         }
     };
-    let ctx = DecodeCtx { layer };
+    let expanding = std::cell::RefCell::new(Vec::new());
+    let ctx = DecodeCtx {
+        layer,
+        expanding: &expanding,
+    };
     decode_type_json(json, &ctx)
 }
 
 fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
+    // D83 §3.3 — a bare string in a value position is a REFERENCE to a §3.2 chain-resident
+    // value. The two forms are unambiguous by JSON type: an inline value is always an
+    // object, a reference always a string. Every other string this codec reads is taken
+    // positionally by `arg_string` and never reaches here, so nothing else claims the shape.
+    if let serde_json::Value::String(iri_str) = v {
+        return decode_value_ref(iri_str, ctx);
+    }
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::MalformedValue(format!("expected object, got {v:?}")))?;
@@ -855,6 +898,58 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
 }
 
 /// `urn:eigenius:eigentt:Definition` — the class decode unfolds (D66).
+/// Expand a §3.3 reference: resolve the IRI, rebuild the §3.2 resource's tagged dict, and
+/// decode it (D83 §3.3).
+///
+/// A reference is a SHARING device. It expands rather than producing a distinct node, so a
+/// referencing value and its fully inlined twin decode to the same `Exp` — and therefore
+/// hash the same, since `hash_stored_proposition` decodes before hashing. Anything else
+/// would make deduplication change witness keys and break live citations.
+///
+/// Expansion of a cycle does not terminate, which is why the path is carried and checked
+/// here. Cycle detection has to run BEFORE hashing, and this is where hashing is reached.
+fn decode_value_ref(iri_str: &str, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
+    let iri = Iri::parse(iri_str).map_err(|e| {
+        DecodeError::MalformedValue(format!("invalid value reference `{iri_str}`: {e}"))
+    })?;
+    if ctx.expanding.borrow().contains(&iri) {
+        let mut path = ctx.expanding.borrow().clone();
+        path.push(iri);
+        return Err(DecodeError::ValueRefCycle(path));
+    }
+    let resource = ctx
+        .layer
+        .resolve(&iri)
+        .ok_or_else(|| DecodeError::ValueRefUnresolved(iri.clone()))?;
+    let json = value_resource_to_json(&resource)
+        .ok_or_else(|| DecodeError::ValueRefNotAValue(iri.clone()))?;
+    ctx.expanding.borrow_mut().push(iri);
+    let decoded = decode_type_json(&json, ctx);
+    ctx.expanding.borrow_mut().pop();
+    decoded
+}
+
+/// Rebuild a §3.2 value resource's tagged dict from its `core:ctor` and `core:args`.
+///
+/// `None` when the resource carries no `core:ctor` — it is then some other kind of
+/// resource, and naming it from a value position is an error the caller reports.
+pub(crate) fn value_resource_to_json(
+    resource: &crate::ontology::resource::Resource,
+) -> Option<serde_json::Value> {
+    let ctor_name = resource
+        .get(&Iri::parse(crate::ontology::well_known::VALUE_CTOR).ok()?)
+        .and_then(Value::as_str)?;
+    let args: Vec<serde_json::Value> =
+        match resource.get(&Iri::parse(crate::ontology::well_known::VALUE_ARGS).ok()?) {
+            Some(Value::Array(a)) => a
+                .iter()
+                .map(crate::ontology::eigon_json::serialize_value)
+                .collect(),
+            _ => Vec::new(),
+        };
+    Some(serde_json::json!({ "ctor": ctor_name, "args": args }))
+}
+
 fn definition_class_iri() -> Iri {
     Iri::parse("urn:eigenius:eigentt:Definition").expect("valid IRI")
 }
@@ -1178,7 +1273,11 @@ pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, Decod
             "a judgement's logic IRI `{logic_str}` is invalid: {e}"
         ))
     })?;
-    let ctx = DecodeCtx { layer };
+    let expanding = std::cell::RefCell::new(Vec::new());
+    let ctx = DecodeCtx {
+        layer,
+        expanding: &expanding,
+    };
     Ok(Judgement {
         logic,
         term: decode_type_json(&args[1], &ctx)?,

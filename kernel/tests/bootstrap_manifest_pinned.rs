@@ -41,6 +41,14 @@
 //! deleted, `lexicon:grade` with them — 2,641,713 stamps on the converted chain, all
 //! `epistemic:declared`, on resources that carry no proposition and so have no warrant to grade.
 //!
+//! IT FIRED FOR THE VALUE-AS-RESOURCE FORM (`2026-08-30`), on ONE layer, `core`, for
+//! `core:ctor` and `core:args`. An inductive value becomes chain-resident by acquiring an
+//! `@id` and declaring its type, which is what lets one value REFERENCE another instead of
+//! inlining it (D83 §3.2/§3.3) — the asymmetry D32 §3.7 left, having given class-typed
+//! arguments both a reference and an embedded form while giving inductive-typed arguments
+//! only the inline one. Two ordinary properties rather than two reserved keys, because D1
+//! §2.1 says `@id` is the only reserved key and §3.1 that all property keys are full IRIs.
+//!
 //! IT FIRED FOR THE D83 WIRE FORMAT (`2026-08-30`), on ONE layer, `core`, which is where
 //! `eigentt:Term` is declared. `CtorApp` went from two arguments to three: the constructor's
 //! own argument list, previously carried by an enclosing `App` spine that decode folded back
@@ -128,7 +136,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:9526744214511cd33ec513ed97de9f7b27b6ca72b3eb0e554b3b39af470490f9
+const EXPECTED: &str = "core:d0358453835f52a6d63e8c6cfac7bd3bdbc62945339be1a0eb1cea51971c825e
 eigentt-type-fragment:caf2da6f1bdfc92540fcf72d43831f82d0b9c953f295f0f6e17de1fcb84abced
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
 reflection:80a5d9528b99ab2dc5a64e33f0bdf1c2cae4371fa26cce8375f625d59687ee6a

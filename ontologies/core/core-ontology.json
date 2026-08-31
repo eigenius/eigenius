@@ -990,6 +990,21 @@
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveArgType"]
   },
   {
+    "@id": "urn:eigenius:core:ctor",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The constructor a chain-resident inductive VALUE applies (D83 \u00a73.2). A value becomes chain-resident by acquiring an `@id` and declaring its type: `is_a` names exactly one `core:InductiveType` and no Class, `core:ctor` names the constructor, and `core:args` carries the arguments encoded per D32 \u00a73.7. This is the same relationship `Embedded` and `ResourceRef` already have for resources \u2014 an embedded resource is an object without an `@id`, a referenced one is the same object with one \u2014 lifted to inductive values, and it needs no wrapper class. Declared as an ordinary property rather than reserving a bare `ctor` key because D1 \u00a72.1 says `@id` is the only reserved key in Eigon-JSON and \u00a73.1 that all property keys are full IRIs; reserving one would falsify both. The bare `ctor` inside a VALUE is not a property key and never was \u2014 a value's internal structure is not a resource \u2014 which is why D32 \u00a73.7's tagged dict has always coexisted with D1 \u00a73.1.",
+    "urn:eigenius:core:short_name": "ctor",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
+  },
+  {
+    "@id": "urn:eigenius:core:args",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The arguments of a chain-resident inductive value (D83 \u00a73.2), each encoded per D32 \u00a73.7's argument table against the corresponding `arg_type` of the constructor named by `core:ctor`. `element_type` is `core:json` because the list is positionally HETEROGENEOUS \u2014 one element may be a string, the next an inline tagged dict, the next an IRI \u2014 and the type of each comes from the constructor, which the property system has no way to name. Rule 24 is what checks them, against that constructor's `arg_types`. An inductive-typed argument is either an inline value or, since D83 \u00a73.3, a bare string holding the IRI of another such resource \u2014 the two are unambiguous by JSON type, an inline value always being an object and a reference always a string. A referencing value and its fully inlined twin are the SAME value: they must compare equal and hash equal, so the reference is a sharing device and not a distinct term.",
+    "urn:eigenius:core:short_name": "args",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:json"
+  },
+  {
     "@id": "urn:eigenius:core:cardinality",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Cardinality of an InductiveArgType slot. Absent means exactly one value of the declared `type_name`; the single accepted value `\"list\"` means zero or more, encoded on the wire as a JSON array of the element encoding. D32 \u00a73.7 specified this row of the argument-encoding table from the start and nothing implemented it, so a constructor argument could not be a sequence: the only way to express one was `core:List(A)` via `type_args`, whose value encoding is a cons/nil tagged-dict chain rather than an array. D83 \u00a73.4 needs the array form for `eigentt:Term.CtorApp`, whose third argument is the argument list of the constructor it names \u2014 hand-authored, and matching the kernel's `Exp::InductiveCtor(iri, name, args)` where `args` is a `Vec`. A list slot's kernel telescope type is `core:List(<type_name>)`, so the declaration stays honest about what it holds; only the encoding is flat.",
