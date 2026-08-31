@@ -355,7 +355,7 @@ data lexicon:Cat : Type 1 {
 
 // ── The lexical-entry record ──────────────────────────────────────────
 class lexicon:LexicalEntry {
-    description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, a grounding sense, and an epistemic grade. The unit the D62 bootstrap loop (§8) produces.";
+    description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, and a grounding sense. The unit the D62 bootstrap loop (§8) produces.";
     requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type;
     recommends lexicon:sense, lexicon:in_lexicon;
 }

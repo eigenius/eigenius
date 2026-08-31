@@ -41,6 +41,14 @@
 //! deleted, `lexicon:grade` with them — 2,641,713 stamps on the converted chain, all
 //! `epistemic:declared`, on resources that carry no proposition and so have no warrant to grade.
 //!
+//! IT FIRED ON A PROSE FIX (`2026-08-30`), on ONE layer, `lexicon`, for a description string.
+//! `LexicalEntry` still advertised "and an epistemic grade" after the grade migration above deleted
+//! `lexicon:grade` — the property went, the sentence promising it did not. Nothing referenced the
+//! stale half, so no test caught it; it was found while checking an unrelated claim about which
+//! `LexicalEntry` slots hold inductive values (two: `lexicon:cat`, `lexicon:sem_type`). Worth the
+//! entry precisely because it is the cheap case: a class description is the first thing a reader
+//! consults about a class, and this one named a slot that does not exist.
+//!
 //! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
 //! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
 //! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
@@ -130,7 +138,7 @@ notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:33277845534074177e7c9015b0669c2fad20e35a8adc592f7df362914ecb152b
 logic:e23ffb70b63f80cea1a7287fa67f47d34f13270118e9c72f5904814470cec36a
-lexicon:c5787a8cda2584c786d9484b235f6631f613987e28564f5e3b43f7a754211882
+lexicon:8f25d4788973daf965d96c4e36469db3fa241b1fb0cb2c12c078300f10ef7b5a
 ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
 closed-class:33288e5e89e02bdf5ae493742599a9da95d9fd949eb665831be8353a93f7eaf4
 encoding:af1273fd9c4103623b79ce16a0ab33ea2269f980c7779fafc80d9a49c9b94f10

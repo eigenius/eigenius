@@ -90,6 +90,21 @@ args, with no currying required.
 
 **One shape: the tagged dict.** The `App`-spine is retired.
 
+### 3.0 One shape, two readers
+
+The shape is uniform. What reads it is not, and conflating the two is what made §1 hard to see.
+
+| reader | scope | produces |
+|---|---|---|
+| `walk_inductive_value` (Rule 16) | **any** `core:inductive` value, against its declared inductive | validation errors |
+| `decode_type` | the `eigentt:Term` family only | a kernel `Exp` |
+
+`decode_type` is not a general inductive decoder, and reading it as one is a mistake this note
+originally made. `formulas:FormulaTerm` values are never decoded to `Exp` at all — Rule 16 validates
+them structurally and the numerical institutions consume the JSON directly. That is why FormulaTerm
+has always used the tagged dict and nobody noticed the split: the split lives entirely inside the
+eigentt family, which is the only family with a second reader.
+
 ### 3.1 Inline
 
 ```json
@@ -174,6 +189,41 @@ evaluated over decoded terms.
 
 ---
 
+### 3.4 A value from another inductive, embedded in an eigentt term
+
+`eigentt:Term` is a universal term language, and a slot declared `eigentt:Term` routinely holds a
+value belonging to some other inductive. `eigentt:Judgement.holds` declares
+`term : eigentt:Term` and `type : eigentt:Term`, while the values stored there are
+`justification:Certificate` applications.
+
+So the inductive cannot always come from the slot, and §3.1's rule has one exception. The exception
+is already declared: `eigentt:Term` carries `CtorApp(decl_iri, ctor_name)` as its twentieth
+constructor — the escape hatch into other inductives. That is not an encoding hack bolted onto the
+codec; it is part of the type.
+
+**The escape hatch stays. The currying goes.**
+
+```
+CtorApp(D, c) + n × App        ⟶        CtorApp(D, c, [a₁, …, aₙ])
+```
+
+| ctor | args |
+|---|---|
+| `CtorApp` | `decl_iri : core:string`, `ctor_name : core:string`, `args : eigentt:Term` with `cardinality: list` |
+
+Same information — `D` is carried, as it must be — with the fold removed, so `App` means
+application and nothing else. `cardinality: list` is already in D32 §3.7's arg table.
+
+**The ctor keeps its name and gains a third argument.** An earlier draft minted `CtorVal` instead,
+on the reasoning that old values carry two args and new ones three, so reusing the name would leave
+arity as the only discriminator — the silent ambiguity §1 is about. That reasoning is void: the two
+never coexist (§4.4). `CtorApp` is what the thing is, and there is no second meaning to distinguish
+it from.
+
+**Threading and the escape hatch are not alternatives.** Threading (§4.2) removes the wrapper where
+the slot names the inductive; the escape hatch covers the case where it cannot, because the declared
+type is `eigentt:Term` and the value's type is something else. Each does a job the other cannot.
+
 ## 4. What changes
 
 ### 4.1 `Value` splits three ways
@@ -201,13 +251,24 @@ not gated on the property being inductive, so any genuinely opaque JSON holding 
 string becomes a spurious `core:mentions` edge. Latent only because nothing stores such data; the
 type does not prevent it.
 
-### 4.2 The codec stops folding
+### 4.2 The expected inductive is threaded through decode
 
-`encode_type` emits `{"ctor": name, "args": [...]}` for `Exp::InductiveCtor`. `decode_type` stops
-spine-folding: `{"ctor":"App", …}` becomes `Exp::App` and nothing else. `CtorApp` is retired as a
-wire ctor.
+`decode_type(value, layer)` gains the declared inductive: at the top of a slot it is the property's
+single `class_types` entry; below, it is the enclosing constructor's `arg_types[i]`. That is what
+D32 §3.7 always said — *"resolves the property's declared inductive type (via `class_types`)"* — and
+what Rule 16 already does. `decode_type` simply never received it.
 
-`App` then means one thing, and `D.c(a) b` becomes expressible.
+With it threaded, a slot whose `class_types` is a user inductive carries that inductive's ctors
+directly: `justification:judgement` becomes `{"ctor": "holds", "args": […]}` with no wrapper at all.
+
+**Cost, measured:** 65 call sites across 16 files. Most already hold the type they must pass; the
+one that does not is `hash_stored_proposition`, which reads a `canonical_proposition` off a resource
+and would need the property's `class_types` plumbed alongside it.
+
+**What threading does NOT reach** is §3.4's case, and that is why the escape hatch exists.
+
+Decode also stops spine-folding: `{"ctor": "App", …}` becomes `Exp::App` and nothing else. It does
+**not** accept the old spine alongside — see §4.4, there is nothing to be compatible with.
 
 ### 4.3 Rule 16 becomes the single structural validator
 
@@ -216,22 +277,41 @@ With one shape, `walk_inductive_value` reads every inductive value including `ei
 — but the two no longer disagree about the shape, and P5's exemption of `eigentt:Judgement` from
 Rule 16 can be withdrawn.
 
-### 4.4 Migration is a codec change, not a data migration
+Rule 16 needs §3.4's escape hatch too, for the same reason decode does. It resolves each argument
+against `arg_types[i]`, which for `CtorApp` says `eigentt:Term`; the elements are actually values of
+the inductive named by `decl_iri`. So `CtorApp` is one arm in Rule 16 as well — switch the expected
+inductive to `decl_iri`, resolve `ctor_name` on it, and check the arg list against THAT ctor's
+`arg_types`. Getting this wrong is how the escape hatch would go unvalidated, which is close to its
+state today: Rule 16 has no `CtorApp` arm at all and simply reports the spine as malformed.
 
-Every `App`-spine value on the chain is regenerated from source: ESL is recompiled on load, and the
-lexicon's millions of `core:inductive` values are rebuilt by the importers. **A reseed is already
-owed** for P4 and P5, so the format change rides it at no additional cost. That is the argument for
-doing it now rather than after: the window in which it is free is open and will close.
+### 4.4 There is no migration
 
----
+The reseed **drops the database**. Nothing carrying the old form survives it, so no compatibility
+window is needed and decode accepts exactly one shape.
+
+Verified rather than assumed: **no checked-in source carries the spine.** `grep` for a `CtorApp`
+wire ctor across every `.json` and `.esl` in the tree returns nothing. The one file with an `App`
+wire ctor, `notebooks/examples/lean-verification-demo.eigon.json`, is a `lean:LeanExpr` value —
+ctors `Const` / `App` / `Nil`, a different inductive that already uses the tagged dict and is
+untouched by this note.
+
+The spine therefore exists in exactly two places: the persisted database, which the reseed deletes,
+and memory, which does not outlive the process. Everything else is regenerated — ESL recompiles on
+load, and `LexicalEntry`'s two `core:inductive` slots — `lexicon:cat` and `lexicon:sem_type` — are
+rebuilt by the importers.
+
+A reseed is already owed for P4 and P5. Riding it costs nothing; deferring past it would mean either
+writing the compatibility path this section says is unnecessary, or migrating stored values. The
+window is open and will close.
 
 ## 5. What is retired
 
 | retired | replaced by |
 |---|---|
-| the `App`-spine encoding of constructor application | §3.1, the tagged dict |
-| the `CtorApp` wire ctor | the `ctor` field |
+| the `App`-spine encoding of constructor application | §3.1's tagged dict at a slot boundary; §3.4's 3-arg `CtorApp` inside an eigentt term |
+| `CtorApp`'s 2-arg form + currying | `CtorApp(D, c, args)` — same ctor, third argument, no fold |
 | spine folding in `decode_type` | nothing — `App` is a term ctor only |
+| `decode_type`'s context-free signature | the threaded declared inductive (§4.2) |
 | `Value::Json` as the carrier for inductive values | `Value::Inductive` (§4.1) |
 | Rule 21's exemption of `eigentt:Judgement` from Rule 16 | one shape, both rules read it |
 | the inline-only restriction on inductive arguments | §3.3, the reference form |
