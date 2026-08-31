@@ -23,7 +23,7 @@ use crate::nbe::check::{CheckError, CheckHooks};
 use crate::nbe::readback::readback_val;
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
-use crate::witness::WitnessCategory;
+use crate::ontology::well_known as wk;
 use std::sync::Arc;
 
 /// Stateless resolver wiring `program::ground` + the witness index into
@@ -45,12 +45,12 @@ impl CheckHooks for DefaultCheckHooks {
             Val::InductiveType { decl, indices, .. } => (decl, indices),
             _ => return Ok(None),
         };
-        let category = match chain_witness_category_for_short_name(&decl.name) {
+        let category = match wk::chain_witness_category_for_iri(decl.iri.as_str()) {
             Some(c) => c,
             None => return Ok(None),
         };
 
-        // The four ChainWitness predicates all have signature
+        // The three ChainWitness predicates all have signature
         // `core:string -> Prop -> Prop` (2 indices: iri, P). Mismatch
         // means the chain ontology drifted from the kernel's expectation.
         if indices.len() != 2 {
@@ -85,16 +85,5 @@ impl CheckHooks for DefaultCheckHooks {
 
         let witness_val = crate::layer::synthesize_chain_witness(layer, category, &iri, &prop_exp)?;
         Ok(Some(witness_val))
-    }
-}
-
-/// Map an inductive's short name to its `WitnessCategory` if it is a
-/// D49 chain-witness predicate; `None` otherwise.
-fn chain_witness_category_for_short_name(name: &str) -> Option<WitnessCategory> {
-    match name {
-        "IsDeclaredAs" => Some(WitnessCategory::Declared),
-        "IsObservedAs" => Some(WitnessCategory::Observed),
-        "IsVerifiedAs" => Some(WitnessCategory::Verified),
-        _ => None,
     }
 }

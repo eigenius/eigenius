@@ -3994,19 +3994,25 @@ mod tests {
     // ── Phase 9 — D49 ChainWitness synthesis hook ─────────────────────
 
     /// Build a `Val::InductiveType` whose decl mimics a ChainWitness
-    /// predicate (`IsDeclaredAs` short name, 2 indices: iri + P).
-    /// Production code resolves the real decl from the chain; this
-    /// stub is enough for unit-testing the hook's recognition logic.
-    fn chain_witness_typed_at(category_short_name: &str, iri_val: Val, prop_val: Val) -> Val {
+    /// predicate (2 indices: iri + P). Production code resolves the real decl from the
+    /// chain; this stub is enough for unit-testing the hook's recognition logic.
+    ///
+    /// `decl_iri` and `short_name` are supplied SEPARATELY and deliberately. The hook keys
+    /// on the IRI; the short name reaches only diagnostics. A helper deriving one from the
+    /// other could not express the case that matters — a foreign inductive carrying a
+    /// witness short name — which is what the hook used to accept.
+    fn chain_witness_typed_at(
+        decl_iri: &str,
+        short_name: &str,
+        iri_val: Val,
+        prop_val: Val,
+    ) -> Val {
         use crate::nbe::term::{Exp as TermExp, InductiveDecl};
         Val::InductiveType {
             decl: Arc::new(InductiveDecl {
                 uparams: Vec::new(),
-                iri: crate::ontology::iri::Iri::parse(&format!(
-                    "urn:eigenius:witness:{category_short_name}"
-                ))
-                .expect("test iri"),
-                name: category_short_name.to_string(),
+                iri: crate::ontology::iri::Iri::parse(decl_iri).expect("test iri"),
+                name: short_name.to_string(),
                 params: Vec::new(),
                 indices: Vec::new(),
                 sort: TermExp::sort(0),
@@ -4025,10 +4031,38 @@ mod tests {
         assert!(try_synthesize_chain_witness(&c, &Val::sort(0))
             .unwrap()
             .is_none());
-        // Even an InductiveType whose decl.name isn't a ChainWitness
-        // short name falls through.
-        let stub = chain_witness_typed_at("Vec", Val::LitString("A".into()), Val::sort(1));
+        // Even an InductiveType that is simply some other inductive falls through.
+        let stub = chain_witness_typed_at(
+            "urn:eigenius:core:Vec",
+            "Vec",
+            Val::LitString("A".into()),
+            Val::sort(1),
+        );
         assert!(try_synthesize_chain_witness(&c, &stub).unwrap().is_none());
+    }
+
+    #[test]
+    fn synthesis_hook_ignores_a_foreign_inductive_carrying_a_witness_short_name() {
+        // The hook used to match `decl.name` against four hardcoded strings, so ANY inductive
+        // anywhere named `IsVerifiedAs` entered the witness-synthesis path — a matching rule
+        // looser than the IRIs everything else uses (D81 §5.5). It now resolves `decl.iri`
+        // against the three well-known witness IRIs, so a same-named type in another namespace
+        // is an ordinary inductive.
+        //
+        // `Verified` is the grade this would have forged, which is why this is the name to test.
+        let c = ctx();
+        let impostor = chain_witness_typed_at(
+            "urn:example:someone-elses-ontology:IsVerifiedAs",
+            "IsVerifiedAs",
+            Val::LitString("urn:test:axiom".into()),
+            Val::sort(0),
+        );
+        assert!(
+            try_synthesize_chain_witness(&c, &impostor)
+                .unwrap()
+                .is_none(),
+            "a foreign inductive must not enter witness synthesis by short name alone"
+        );
     }
 
     #[test]
@@ -4039,6 +4073,7 @@ mod tests {
         // for the wrong reason).
         let c = ctx();
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::LitString("urn:test:axiom".into()),
             Val::sort(0),
@@ -4060,6 +4095,7 @@ mod tests {
         // before reaching the witness index.
         let c = ctx();
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::sort(0), // not a LitString
             Val::sort(0),
@@ -4120,6 +4156,7 @@ mod tests {
         // The eval'd index must match what the witness index was
         // populated with — prop_exp evaluates to Val::sort(0).
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::LitString(target_iri_str.to_string()),
             Val::sort(0),
@@ -4136,13 +4173,13 @@ mod tests {
     fn synthesis_hook_errors_when_no_witness_admitted() {
         // Layer with no witness index populated → synthesize_chain_witness
         // returns a "no admitted witness" diagnostic. The hook surfaces it
-        // as Err so the caller (the ctor type-check loop) can lift it into
-        // a ValidateJustification Verdict::Fails.
+        // as Err so the caller (the ctor type-check loop) reports it and the commit fails.
         use crate::layer::{LayerBuilder, LayerStorage};
         let layer =
             Arc::new(LayerBuilder::new("phase9-empty", None).build(LayerStorage::in_memory()));
         let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::LitString("urn:test:phase9:missing".into()),
             Val::sort(0),

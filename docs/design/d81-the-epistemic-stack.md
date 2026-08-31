@@ -768,7 +768,7 @@ Found by the adversarial pass while looking for defences, and the clearest clean
 
 | artifact | state |
 |---|---|
-| `chain_witness_category_for_iri` (`kernel/src/ontology/well_known.rs:578`) | **zero callers.** `kernel/src/program/check_hooks.rs:93` does the identical mapping by *short name* instead |
+| ~~`chain_witness_category_for_iri` (`kernel/src/ontology/well_known.rs:578`)~~ | **resolved at P7.** The hook now calls it; the short-name duplicate is deleted |
 | `Grade` / `GradedClaim.grade` (`crates/eigenius-reasoning/src/grade.rs`) | **write-only** — set at four sites, read at exactly one, in a test. "Not two enums needing reconciliation; one live enum and one dead field. The remedy is deletion, not a `From` impl" |
 | `runtimes:wasm` | declared, no implementation (§3.1.4) |
 | `default_asserts_proposition` and `default_asserts_proposition_hash` | **public API with zero consumers** — re-exported from `kernel/src/layer/mod.rs:48` and called from nowhere in the tree, tests included. The `Asserts(iri)` fallback they expose is reached only through the module-private path inside `emit_from_trace` |
@@ -805,9 +805,11 @@ current in a way a code comment does not.
   their file (`crates/eigenius-reasoning/tests/validate_handler.rs`); the property is now
   unpinned in either form, and is re-pinned against the Lean institution under eigenius#160.
 - `dispatch_auto_on_load_for_layer` — the commit's actual path — has **no test** (§5.2).
-- `kernel/src/program/check_hooks.rs:93` dispatches witness synthesis on an inductive's **short name**, so any inductive
-  anywhere named `IsVerifiedAs` enters the path. Not a defect found in the wild; a matching rule
-  looser than the IRIs everything else uses.
+- ~~`kernel/src/program/check_hooks.rs:93` dispatches witness synthesis on an inductive's **short
+  name**, so any inductive anywhere named `IsVerifiedAs` enters the path.~~ **Closed at P7.** The
+  hook keys on `decl.iri` through the `chain_witness_category_for_iri` that was already written
+  and unused, and `synthesis_hook_ignores_a_foreign_inductive_carrying_a_witness_short_name`
+  pins it — an inductive named `IsVerifiedAs` under a foreign IRI no longer enters the path.
 
 ### 5.6 What the analysis concludes
 
