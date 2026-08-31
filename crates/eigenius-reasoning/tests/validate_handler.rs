@@ -500,15 +500,19 @@ fn justified_by_declared_certificate(
     proposition_subtree: serde_json::Value,
 ) -> Value {
     Value::Json(json!({
-        "ctor": "CtorApp",
+        "ctor": "App",
         "args": [
-            "urn:eigenius:justification:Certificate",
-            "declared",
-            [
-                {"ctor": "LitString", "args": [iri_str]},
+            {"ctor": "App", "args": [
+                {"ctor": "App", "args": [
+                    {"ctor": "CtorApp", "args": [
+                        "urn:eigenius:justification:Certificate",
+                        "declared",
+                    ]},
+                    {"ctor": "LitString", "args": [iri_str]},
+                ]},
                 proposition_subtree,
-                {"ctor": "UnitVal", "args": []},
-            ],
+            ]},
+            {"ctor": "UnitVal", "args": []},
         ],
     }))
 }
@@ -778,14 +782,16 @@ fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
         "ctor": "Declared",
         "args": ["urn:foo"],
     }));
-    // Certificate with only ONE argument — `justification:Certificate.declared`
+    // Certificate with only ONE App-arg — `justification:Certificate.declared`
     // expects three (iri, P, witness).
     let certificate = Value::Json(json!({
-        "ctor": "CtorApp",
+        "ctor": "App",
         "args": [
-            "urn:eigenius:justification:Certificate",
-            "declared",
-            [{"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}],
+            {"ctor": "CtorApp", "args": [
+                "urn:eigenius:justification:Certificate",
+                "declared",
+            ]},
+            {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
         ],
     }));
 
@@ -816,9 +822,8 @@ fn judgement(proposition: Value, justification: Value, cert: Value) -> Value {
 /// term used to sit in a slot of its own as a plain `{"ctor", "args"}` dict; it
 /// now rides inside the judgement, which is an `eigentt:Term`-ranged value, so
 /// the D47 codec reads it and a foreign inductive's constructor is named by
-/// `CtorApp` — which since D83 §3.4 carries its own arguments, so this is a
-/// rename of the tag plus a lift of the args, not a fold. Callers below still
-/// write the plain shape because it is what an author reads.
+/// `CtorApp` with arguments folded through `App`. Callers below still write the
+/// plain shape because it is what an author reads.
 fn d47(v: &Value) -> Value {
     const JT: &str = "urn:eigenius:justification:Term";
     let Value::Json(j) = v else { return v.clone() };
@@ -831,18 +836,18 @@ fn d47(v: &Value) -> Value {
     ) else {
         return v.clone();
     };
-    let lifted: Vec<serde_json::Value> = args
-        .iter()
-        .map(|a| match a {
+    let mut acc = json!({"ctor": "CtorApp", "args": [JT, name]});
+    for a in args {
+        let arg = match &a {
             serde_json::Value::String(s) => json!({"ctor": "LitString", "args": [s]}),
             serde_json::Value::Object(_) => match d47(&Value::Json(a.clone())) {
                 Value::Json(x) => x,
                 _ => a.clone(),
             },
             other => other.clone(),
-        })
-        .collect();
-    let acc = json!({"ctor": "CtorApp", "args": [JT, name, lifted]});
+        };
+        acc = json!({"ctor": "App", "args": [acc, arg]});
+    }
     Value::Json(acc)
 }
 

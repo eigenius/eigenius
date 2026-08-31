@@ -282,7 +282,7 @@ pub fn serialize_resource(resource: &Resource) -> serde_json::Value {
 /// inline property values. Reaching this arm means a Vector ended up
 /// on a Resource that's being canonicalised or wire-serialised — that
 /// is structurally wrong and should be caught before this point.
-pub fn serialize_value(value: &Value) -> serde_json::Value {
+fn serialize_value(value: &Value) -> serde_json::Value {
     match value {
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Integer(n) => serde_json::json!(*n),

@@ -80,43 +80,11 @@ pub struct Namespaces {
     /// a `universe` declaration, printed source that mentions one does not recompile without it.
     /// Collecting them as they are printed keeps the preamble exact rather than hand-maintained.
     universes: BTreeSet<String>,
-    /// Property IRI → the inductive its `core:inductive` values inhabit (D83 §4.2).
-    ///
-    /// The value dialect omits the decl IRI, so the namespace to qualify a bare constructor
-    /// with has to come from somewhere. It was taken from the HOLDING PROPERTY's namespace,
-    /// on the premise that a property and the inductive its values inhabit are declared in
-    /// one ontology. `justification:judgement` holds an `eigentt:Judgement` and breaks that
-    /// premise: the guess yields `justification:holds`, which names nothing.
-    ///
-    /// Supplied by a caller that has a chain, via [`Namespaces::with_slots`]. Empty when
-    /// decompiling a bare JSON document, where the property's namespace is still the best
-    /// guess available — a document carries no types.
-    inductive_slots: BTreeMap<String, String>,
 }
 
 impl Namespaces {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// A print context that knows which inductive each `core:inductive` slot declares.
-    /// Build the map with [`crate::esl::compile::collect_ctors_from_layer`].
-    pub fn with_slots(inductive_slots: BTreeMap<String, String>) -> Self {
-        Self {
-            inductive_slots,
-            ..Self::default()
-        }
-    }
-
-    /// The namespace to qualify a value-dialect constructor with, for a value held by
-    /// `prop_iri`: the declared inductive's when known, the property's own otherwise.
-    fn ctor_namespace_for(&self, prop_iri: &str) -> String {
-        let owner = self
-            .inductive_slots
-            .get(prop_iri)
-            .map(String::as_str)
-            .unwrap_or(prop_iri);
-        owner.rsplit_once(':').map_or("", |(p, _)| p).to_string()
     }
 
     /// Split an IRI into `(alias, local)`, minting an alias for the prefix on first sight.
@@ -530,24 +498,7 @@ impl Printer<'_> {
                 // `split` on the DECL IRI yields the alias for the ontology it lives in; the ctor
                 // short name replaces the decl's own local part.
                 let (alias, _decl_local) = self.ns.split(&decl).map_err(|e| self.err(e, path))?;
-                let head = format!("{alias}:{name}");
-                // D83 §3.4 — the arguments are the third slot. They arrived through an enclosing
-                // `App` spine until D83, so this arm printed the bare head and the "App" arm
-                // supplied the call syntax; a nullary constructor still prints bare.
-                let ctor_args: Vec<&Value> = match args.get(2) {
-                    None => Vec::new(),
-                    Some(Value::Array(a)) => a.iter().collect(),
-                    Some(other) => {
-                        return Err(self.err(
-                            format!("`CtorApp` arguments must be an array, got {other}"),
-                            path,
-                        ))
-                    }
-                };
-                if ctor_args.is_empty() {
-                    return Ok(head);
-                }
-                self.render_call(head, &ctor_args, "CtorApp", path, ind)
+                Ok(format!("{alias}:{name}"))
             }
 
             // `Type n` is the ONLY undelimited multi-token form the printer emits, so it is the
@@ -668,7 +619,27 @@ impl Printer<'_> {
                 let (head, spine) = unfold_app(v);
                 let head_path = format!("{path}{}", "App[0].".repeat(spine.len()));
                 let h = self.go(head, Prec::Atom, &head_path, ind)?;
-                self.render_call(h, &spine, "App", path, ind)
+                let arg_col = ind + STEP;
+                let mut parts = Vec::with_capacity(spine.len());
+                for (i, a) in spine.iter().enumerate() {
+                    let col = if self.layout == Layout::Pretty {
+                        arg_col
+                    } else {
+                        ind
+                    };
+                    parts.push(self.go(a, Prec::Arrow, &format!("{path}App#{i}."), col)?);
+                }
+                Ok(if self.layout == Layout::Pretty {
+                    // One argument per line: the spine's shape is the whole point of breaking.
+                    format!(
+                        "{h}(\n{:arg_col$}{}\n{:ind$})",
+                        "",
+                        parts.join(&format!(",\n{:arg_col$}", "")),
+                        ""
+                    )
+                } else {
+                    format!("{h}({})", parts.join(", "))
+                })
             }
 
             other => Err(self.err(
@@ -676,42 +647,6 @@ impl Printer<'_> {
                 path,
             )),
         }
-    }
-}
-
-impl Printer<'_> {
-    /// Render `head(a₁, …, aₙ)` in the active layout. Shared by the `App` spine and by
-    /// `CtorApp`, which carries its arguments directly (D83 §3.4) — both print ESL's one
-    /// call syntax, and printing them from one place is what keeps them identical.
-    fn render_call(
-        &mut self,
-        head: String,
-        call_args: &[&Value],
-        tag: &str,
-        path: &str,
-        ind: usize,
-    ) -> Result<String, PrintError> {
-        let arg_col = ind + STEP;
-        let mut parts = Vec::with_capacity(call_args.len());
-        for (i, a) in call_args.iter().enumerate() {
-            let col = if self.layout == Layout::Pretty {
-                arg_col
-            } else {
-                ind
-            };
-            parts.push(self.go(a, Prec::Arrow, &format!("{path}{tag}#{i}."), col)?);
-        }
-        Ok(if self.layout == Layout::Pretty {
-            // One argument per line: the spine's shape is the whole point of breaking.
-            format!(
-                "{head}(\n{:arg_col$}{}\n{:ind$})",
-                "",
-                parts.join(&format!(",\n{:arg_col$}", "")),
-                ""
-            )
-        } else {
-            format!("{head}({})", parts.join(", "))
-        })
     }
 }
 
@@ -752,7 +687,7 @@ fn escape(s: &str) -> String {
 /// This is NOT D47. Compare the two encodings of the same idea:
 ///
 /// ```text
-/// D47 (type position):    {"ctor":"CtorApp","args":[<decl>,"app",[…]]}
+/// D47 (type position):    {"ctor":"App","args":[{"ctor":"CtorApp","args":[<decl>,"app"]}, …]}
 /// value dialect:          {"ctor":"Declared","args":["urn:eigenius:…"]}
 /// ```
 ///
@@ -801,18 +736,6 @@ pub fn print_value_term(
             // A bare string leaf is an IRI or tag carried as `core:string`.
             Value::String(s) => format!("\"{}\"", escape(s)),
             Value::Number(n) => n.to_string(),
-            Value::Bool(b) => b.to_string(),
-            // An argument declared `eigentt:Term` carries the D47 encoding and needs
-            // `type_expr(...)` to say so — without the wrapper the compiler reads the same
-            // text as an inductive value, a different encoding. D32 §3.7 always allowed it:
-            // an inductive-typed argument holds that inductive's values and `eigentt:Term`
-            // is an inductive. It became reachable when `eigentt:Judgement` values stopped
-            // being wrapped in a `CtorApp` (D83 §4.2), since `holds` takes a class reference
-            // and two terms and so has arguments of more than one kind.
-            //
-            // The test is [`is_d47_term`], the same classification `print_property_value`
-            // uses to make this choice one level up. It is syntactic, not ontological.
-            Value::Object(_) if is_d47_term(a) => format!("type_expr({})", print_type_expr(a, ns)?),
             _ => print_value_term(a, ns, ctor_namespace)?,
         });
     }
@@ -910,26 +833,11 @@ pub fn print_document(doc: &Value) -> Result<String, PrintError> {
 
 /// [`print_document`], laid out per `layout`.
 pub fn print_document_with(doc: &Value, layout: Layout) -> Result<String, PrintError> {
-    print_document_with_slots(doc, layout, BTreeMap::new())
-}
-
-/// [`print_document_with`], plus the property → declared-inductive map that tells the
-/// value dialect which namespace to qualify a bare constructor with (D83 §4.2).
-///
-/// Without it the property's own namespace is used, which is right only while a property
-/// and the inductive its values inhabit live in one ontology — `justification:judgement`
-/// holds an `eigentt:Judgement` and does not. Build the map with
-/// [`crate::esl::compile::collect_ctors_from_layer`].
-pub fn print_document_with_slots(
-    doc: &Value,
-    layout: Layout,
-    inductive_slots: BTreeMap<String, String>,
-) -> Result<String, PrintError> {
     let resources = match doc {
         Value::Array(a) => a.clone(),
         other => vec![other.clone()],
     };
-    let mut ns = Namespaces::with_slots(inductive_slots);
+    let mut ns = Namespaces::new();
     let mut bodies = Vec::with_capacity(resources.len());
     for (i, r) in resources.iter().enumerate() {
         bodies.push(print_resource(r, &mut ns, &format!("[{i}]"), layout)?);
@@ -1007,7 +915,7 @@ fn print_resource(
         let (p_ns, p_local) = ns.split(k).map_err(bad)?;
         // The inductive a property's values inhabit is declared in the same ontology as the
         // property itself, so the property IRI minus its local name names the ctor namespace.
-        let ctor_ns = ns.ctor_namespace_for(k);
+        let ctor_ns = k.rsplit_once(':').map_or("", |(p, _)| p).to_string();
         let rendered = print_property_value(v, ns, &ctor_ns, &format!("{path}.{k}"), layout)?;
         let _ = writeln!(out, "    {p_ns}:{p_local} = {rendered};");
     }
@@ -1144,28 +1052,18 @@ fn print_arg_type(v: &Value, ns: &mut Namespaces, path: &str) -> Result<String, 
         path: path.to_string(),
     })?;
     let head = print_kind(head, ns, path)?;
-    // D83 §3.4 — a `cardinality: list` slot prints `[T]`. Without this the round trip
-    // recompiles the declaration without its cardinality and silently narrows the slot
-    // to a single element.
-    let list = o.get(wk::CARDINALITY).and_then(Value::as_str) == Some(wk::CARDINALITY_LIST);
     let args = o
         .get(wk::TYPE_ARGS)
         .and_then(Value::as_array)
         .map_or(&[][..], |a| a);
+    if args.is_empty() {
+        return Ok(head);
+    }
     let rendered: Vec<String> = args
         .iter()
         .map(|a| print_arg_type(a, ns, path))
         .collect::<Result<_, _>>()?;
-    let applied = if rendered.is_empty() {
-        head
-    } else {
-        format!("{head}({})", rendered.join(", "))
-    };
-    Ok(if list {
-        format!("[{applied}]")
-    } else {
-        applied
-    })
+    Ok(format!("{head}({})", rendered.join(", ")))
 }
 
 /// A kind or type reference — the `eigentt:Term` head that `Compiler::lower_kind` produced.
@@ -1325,7 +1223,7 @@ fn print_property_value(
                     message: m,
                     path: path.to_string(),
                 })?;
-                let inner_ctor_ns = ns.ctor_namespace_for(k);
+                let inner_ctor_ns = k.rsplit_once(':').map_or("", |(p, _)| p).to_string();
                 let rendered =
                     print_property_value(v, ns, &inner_ctor_ns, &format!("{path}.{k}"), layout)?;
                 fields.push(format!("{p_ns}:{p_local} = {rendered};"));

@@ -2137,15 +2137,9 @@ impl<'a> Parser<'a> {
         Ok(CtorArg::Positional(self.parse_ctor_arg_type()?))
     }
 
-    /// A constructor argument type: `Name`, `Name(arg, ...)`, or `[Name]` for a list slot.
+    /// A constructor argument type: `Name` or `Name(arg, ...)`.
     fn parse_ctor_arg_type(&mut self) -> Result<CtorArgType, EslError> {
         let pos = self.current_pos();
-        // `[T]` — a `cardinality: list` slot (D83 §3.4). Unambiguous: a type reference
-        // cannot begin with a bracket.
-        let list = self.at(&TokenKind::LBracket);
-        if list {
-            self.advance();
-        }
         let name = self.parse_qualified_name()?;
         let params = if self.at(&TokenKind::LParen) {
             self.advance();
@@ -2169,15 +2163,7 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        if list {
-            self.expect(&TokenKind::RBracket)?;
-        }
-        Ok(CtorArgType {
-            name,
-            params,
-            list,
-            pos,
-        })
+        Ok(CtorArgType { name, params, pos })
     }
 
     // --- Expressions ---

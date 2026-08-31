@@ -866,29 +866,6 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
 /// - Primitive IRI: emitted as `Exp::EigonPrimitive`.
 /// - Any other class IRI: emitted as `Exp::EigonClass(iri)` to let
 ///   the type checker resolve it via the layer chain.
-///
-/// A `cardinality: list` slot contributes its ELEMENT type, not `core:List(<element>)`.
-///
-/// This mirrors how the property model expresses multiplicity: `core:ctors` is
-/// `data_type: core:resource_array` with `class_types: [core:InductiveCtor]` — the
-/// element type named on one axis, the multiplicity on another, and no `List(X)`
-/// anywhere. `type_name` + [`wk::CARDINALITY`] is the same split one level down.
-///
-/// Wrapping instead was tried and is not available. `eigentt:Term.CtorApp`'s argument
-/// list would become `core:List(eigentt:Term)` INSIDE `eigentt:Term`, which is a nested
-/// inductive occurrence; strict positivity rejects it (eigenius#21 — nested inductives
-/// need the specialize/unspecialize pass, which does not exist) and bootstrap fails.
-/// That rejection is not incidental to `CtorApp`: `eigentt:Term` mirrors `Exp`, whose
-/// `InductiveCtor(iri, name, args)` holds a `Vec<Exp>`, so the mirror is nested wherever
-/// it is honest about that field. The retired `App` spine hid this by encoding the vector
-/// as iterated application.
-///
-/// The cost is that the kernel telescope cannot distinguish a list slot from a single
-/// one — both read as the element type, since a Π-telescope has no cardinality axis.
-/// Rule 16 does distinguish them (`walk_inductive_value` checks a list slot element by
-/// element), so a wrong-shaped value is still rejected at commit. What is not available
-/// is kernel type-checking of a list-valued constructor argument, and the fix for that
-/// is nested-inductive support, not a different encoding here.
 fn decode_arg_type(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Exp, String> {
     let r = match value {
         Value::Embedded(r) => r.as_ref(),

@@ -526,16 +526,10 @@ pub enum CtorArg {
 /// - `Nat` — `name=Nat`, `params=[]`
 /// - `A` (a type parameter) — `name=A`, `params=[]`
 /// - `List(A)` — `name=List`, `params=[CtorArgType { name=A, params=[] }]`
-/// - `[Nat]` — `name=Nat`, `params=[]`, `list=true`
 #[derive(Debug, Clone)]
 pub struct CtorArgType {
     pub name: QualifiedName,
     pub params: Vec<CtorArgType>,
-    /// `[T]` — the slot holds zero or more `T`, encoded as a JSON array of the element
-    /// encoding (D83 §3.4). Lands in `core:cardinality`, and is a property of the SLOT
-    /// rather than of the type: `type_name` names the element, exactly as a property's
-    /// `class_types` does beside `data_type: core:value_array`.
-    pub list: bool,
     pub pos: Position,
 }
 

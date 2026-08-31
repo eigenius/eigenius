@@ -206,19 +206,6 @@ pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
 pub const ARG_TYPES: &str = "urn:eigenius:core:arg_types";
 pub const TYPE_NAME: &str = "urn:eigenius:core:type_name";
 pub const TYPE_ARGS: &str = "urn:eigenius:core:type_args";
-/// Cardinality of an `InductiveArgType` slot (D83 §3.4). Absent means exactly
-/// one; [`CARDINALITY_LIST`] means zero or more, encoded as a JSON array of the
-/// element encoding. D32 §3.7 documented this row of the argument-encoding table
-/// and nothing implemented it until `eigentt:Term.CtorApp` needed to carry the
-/// argument list of the constructor it names.
-pub const CARDINALITY: &str = "urn:eigenius:core:cardinality";
-/// Constructor of a chain-resident inductive VALUE (D83 §3.2). Paired with
-/// [`VALUE_ARGS`] on a resource whose `is_a` names one `core:InductiveType`.
-pub const VALUE_CTOR: &str = "urn:eigenius:core:ctor";
-/// Arguments of a chain-resident inductive value (D83 §3.2).
-pub const VALUE_ARGS: &str = "urn:eigenius:core:args";
-/// The one accepted [`CARDINALITY`] value.
-pub const CARDINALITY_LIST: &str = "list";
 pub const ARG_NAME: &str = "urn:eigenius:core:arg_name";
 pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
 pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";

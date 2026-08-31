@@ -233,27 +233,15 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::Fst(p) => Ok(ctor("Fst", vec![encode_type_json(p)?])),
         Exp::Snd(p) => Ok(ctor("Snd", vec![encode_type_json(p)?])),
         Exp::InductiveCtor(iri, ctor_name, args) => {
-            // D83 §3.4 — encode `D.c(a₁, …, aₙ)` as `CtorApp(D.iri, c, [a₁, …, aₙ])`.
-            //
-            // This was an `App` spine over a two-argument `CtorApp` until D83. The spine
-            // made `App` mean two things — application, and the encoding's currying device —
-            // and decode told them apart structurally, by folding an argument into the head
-            // whenever the spine bottomed out at a `CtorApp`. The fold always won, so a
-            // saturated constructor application applied to a further argument (`D.c(a) b`)
-            // could not round-trip: it came back as `D.c(a, b)`.
-            //
-            // gh #75: the stable identifier is the IRI, which the node carries directly
-            // (D76 Phase B) instead of inside a declaration.
-            let encoded: Result<Vec<serde_json::Value>, EncodeError> =
-                args.iter().map(encode_type_json).collect();
-            Ok(ctor(
-                "CtorApp",
-                vec![
-                    json!(iri.as_str()),
-                    json!(ctor_name),
-                    serde_json::Value::Array(encoded?),
-                ],
-            ))
+            // Encode `D.c(a1, ..., aN)` as
+            //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
+            // gh #75: the stable identifier is the IRI, which the node now carries
+            // directly (D76 Phase B) instead of inside a declaration.
+            let mut current = ctor("CtorApp", vec![json!(iri.as_str()), json!(ctor_name)]);
+            for arg in args {
+                current = ctor("App", vec![current, encode_type_json(arg)?]);
+            }
+            Ok(current)
         }
         // eigenius#71 — literal primitive values. The `LitString` /
         // `LitInt` / `LitFloat` ctors land on the chain as
@@ -417,15 +405,6 @@ pub enum DecodeError {
     /// An `App` was decoded with a head that doesn't admit applications
     /// (e.g., a fully-applied EigonClass that takes no arguments).
     AppOnNonParametric(String),
-    /// A §3.3 reference names a resource that is not in the chain (D83 §3.3).
-    ValueRefUnresolved(Iri),
-    /// A §3.3 reference names a resource that is not a §3.2 inductive value —
-    /// it carries no `core:ctor`, so there is nothing to expand.
-    ValueRefNotAValue(Iri),
-    /// A §3.3 reference is part of a cycle. Expansion of one does not terminate, and a
-    /// value's identity is its expansion, so this is a malformed value rather than a
-    /// sharing pattern that could be tolerated.
-    ValueRefCycle(Vec<Iri>),
     /// A `CtorApp` referenced a ctor name that doesn't exist on the
     /// resolved inductive type. (D48 / eigenius#71)
     CtorAppUnknownCtor {
@@ -463,22 +442,6 @@ impl std::fmt::Display for DecodeError {
                 "ConstRef IRI {iri} resolves to a resource of class {found_classes:?} \
                  (expected Class, DataType, InductiveType, or CodataType)"
             ),
-            DecodeError::ValueRefUnresolved(iri) => {
-                write!(f, "inductive value reference `{iri}` is not in the chain")
-            }
-            DecodeError::ValueRefNotAValue(iri) => write!(
-                f,
-                "inductive value reference `{iri}` names a resource with no `core:ctor`, \
-                 so it is not a chain-resident inductive value"
-            ),
-            DecodeError::ValueRefCycle(path) => write!(
-                f,
-                "inductive value references form a cycle: {}",
-                path.iter()
-                    .map(Iri::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" -> ")
-            ),
             DecodeError::AppOnNonParametric(s) => {
                 write!(f, "App spine applied to non-parametric head: {s}")
             }
@@ -509,13 +472,6 @@ impl std::error::Error for DecodeError {}
 #[derive(Clone, Copy)]
 struct DecodeCtx<'a> {
     layer: &'a Layer,
-    /// The §3.2 value resources currently being expanded, innermost last (D83 §3.3).
-    ///
-    /// A reference is a sharing device, not a distinct term: it expands, so that a value
-    /// and its fully inlined twin decode to the same `Exp` and therefore hash the same.
-    /// Expansion of a CYCLE does not terminate, so the path is carried and a revisit is an
-    /// error rather than a hang.
-    expanding: &'a std::cell::RefCell<Vec<Iri>>,
 }
 
 /// Decode a chain-resident `eigentt:Term` value back to an
@@ -533,22 +489,11 @@ pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
             )));
         }
     };
-    let expanding = std::cell::RefCell::new(Vec::new());
-    let ctx = DecodeCtx {
-        layer,
-        expanding: &expanding,
-    };
+    let ctx = DecodeCtx { layer };
     decode_type_json(json, &ctx)
 }
 
 fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
-    // D83 §3.3 — a bare string in a value position is a REFERENCE to a §3.2 chain-resident
-    // value. The two forms are unambiguous by JSON type: an inline value is always an
-    // object, a reference always a string. Every other string this codec reads is taken
-    // positionally by `arg_string` and never reaches here, so nothing else claims the shape.
-    if let serde_json::Value::String(iri_str) = v {
-        return decode_value_ref(iri_str, ctx);
-    }
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::MalformedValue(format!("expected object, got {v:?}")))?;
@@ -724,12 +669,18 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             if is_definition_head(&args[0], ctx) {
                 return peel_and_substitute(head, arg);
             }
-            // D83 §3.4 — `App` is application and nothing else. It folded an argument
-            // into the head's arg list when the head was an `Exp::InductiveCtor`, which is
-            // how the retired `CtorApp` spine was read; `CtorApp` now carries its own
-            // arguments, so an `App` over a constructor application is exactly what it
-            // says — that application applied to a further argument.
+            // Spine folding: if head is an InductiveType / CodataType /
+            // InductiveCtor, append arg to its args list. Otherwise
+            // produce a plain App.
             match head {
+                Exp::InductiveCtor(decl, name, mut existing) => {
+                    // D48 / eigenius#71: CtorApp via App-currying. The
+                    // bottom of the App spine is `CtorApp(D, c)`
+                    // (decoded to `Exp::InductiveCtor(decl, c, [])`);
+                    // each enclosing App appends an arg.
+                    existing.push(arg);
+                    Ok(Exp::InductiveCtor(decl, name, existing))
+                }
                 // EigonClass / EigonPrimitive are nullary type-formers;
                 // applying them via App is malformed input.
                 head @ (Exp::EigonClass(_) | Exp::EigonPrimitive(_)) => Err(
@@ -800,7 +751,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             Ok(Exp::Snd(Box::new(decode_type_json(&args[0], ctx)?)))
         }
         "CtorApp" => {
-            expect_arg_count("CtorApp", 3, args)?;
+            expect_arg_count("CtorApp", 2, args)?;
             let decl_iri_str = arg_string("CtorApp", 0, &args[0])?;
             let ctor_name = arg_string("CtorApp", 1, &args[1])?;
             let decl_iri = Iri::parse(&decl_iri_str).map_err(|e| {
@@ -810,23 +761,11 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                     &format!("invalid decl IRI `{decl_iri_str}`: {e}"),
                 )
             })?;
-            // D83 §3.4 — the arguments are the third slot, a JSON array. They were an
-            // enclosing `App` spine that the "App" arm folded back in; that made `App`
-            // ambiguous and cost `D.c(a) b`, which is now expressible.
-            let arg_array = match &args[2] {
-                serde_json::Value::Array(a) => a,
-                other => {
-                    return Err(wrong_shape(
-                        "CtorApp",
-                        2,
-                        &format!("arguments must be an array, got {other}"),
-                    ))
-                }
-            };
-            let ctor_args = arg_array
-                .iter()
-                .map(|a| decode_type_json(a, ctx))
-                .collect::<Result<Vec<_>, _>>()?;
+            // Resolve the decl IRI through the layer chain, then
+            // verify the named ctor exists on it. Multi-arg invocations
+            // are layered via App on the decode side (see the "App" arm
+            // above, which folds args into Exp::InductiveCtor's args
+            // vec); CtorApp produces the nullary base.
             //
             // **D76 Phase B — no resolution here.** This called
             // `resolve_inductive_decl_for_ctor`, which decoded the ENTIRE target
@@ -836,7 +775,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             // it recursed unboundedly. It also verified the constructor name — which
             // the type checker does anyway (`check_ctor_unknown_name`), and does with
             // the environment in hand rather than at decode time.
-            Ok(Exp::InductiveCtor(decl_iri, ctor_name, ctor_args))
+            Ok(Exp::InductiveCtor(decl_iri, ctor_name, Vec::new()))
         }
         // eigenius#71 — literal primitive values. The matching encode
         // arms emit `{"ctor": "LitString", "args": [<json-value>]}`
@@ -898,58 +837,6 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
 }
 
 /// `urn:eigenius:eigentt:Definition` — the class decode unfolds (D66).
-/// Expand a §3.3 reference: resolve the IRI, rebuild the §3.2 resource's tagged dict, and
-/// decode it (D83 §3.3).
-///
-/// A reference is a SHARING device. It expands rather than producing a distinct node, so a
-/// referencing value and its fully inlined twin decode to the same `Exp` — and therefore
-/// hash the same, since `hash_stored_proposition` decodes before hashing. Anything else
-/// would make deduplication change witness keys and break live citations.
-///
-/// Expansion of a cycle does not terminate, which is why the path is carried and checked
-/// here. Cycle detection has to run BEFORE hashing, and this is where hashing is reached.
-fn decode_value_ref(iri_str: &str, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
-    let iri = Iri::parse(iri_str).map_err(|e| {
-        DecodeError::MalformedValue(format!("invalid value reference `{iri_str}`: {e}"))
-    })?;
-    if ctx.expanding.borrow().contains(&iri) {
-        let mut path = ctx.expanding.borrow().clone();
-        path.push(iri);
-        return Err(DecodeError::ValueRefCycle(path));
-    }
-    let resource = ctx
-        .layer
-        .resolve(&iri)
-        .ok_or_else(|| DecodeError::ValueRefUnresolved(iri.clone()))?;
-    let json = value_resource_to_json(&resource)
-        .ok_or_else(|| DecodeError::ValueRefNotAValue(iri.clone()))?;
-    ctx.expanding.borrow_mut().push(iri);
-    let decoded = decode_type_json(&json, ctx);
-    ctx.expanding.borrow_mut().pop();
-    decoded
-}
-
-/// Rebuild a §3.2 value resource's tagged dict from its `core:ctor` and `core:args`.
-///
-/// `None` when the resource carries no `core:ctor` — it is then some other kind of
-/// resource, and naming it from a value position is an error the caller reports.
-pub(crate) fn value_resource_to_json(
-    resource: &crate::ontology::resource::Resource,
-) -> Option<serde_json::Value> {
-    let ctor_name = resource
-        .get(&Iri::parse(crate::ontology::well_known::VALUE_CTOR).ok()?)
-        .and_then(Value::as_str)?;
-    let args: Vec<serde_json::Value> =
-        match resource.get(&Iri::parse(crate::ontology::well_known::VALUE_ARGS).ok()?) {
-            Some(Value::Array(a)) => a
-                .iter()
-                .map(crate::ontology::eigon_json::serialize_value)
-                .collect(),
-            _ => Vec::new(),
-        };
-    Some(serde_json::json!({ "ctor": ctor_name, "args": args }))
-}
-
 fn definition_class_iri() -> Iri {
     Iri::parse("urn:eigenius:eigentt:Definition").expect("valid IRI")
 }
@@ -1164,25 +1051,17 @@ pub fn certificate_type(j: &Value, p: &Value) -> Result<Value, EncodeError> {
 /// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
 /// `eigentt:Logic` individual and two encoded terms.
 ///
-/// The inverse of [`decode_judgement`].
-///
-/// A `justification:judgement` slot is ranged at `eigentt:Judgement`, so the value is
-/// that inductive's own constructor written plainly — D32 §3.7's tagged dict, with no
-/// `CtorApp` wrapper naming a type the slot already declares (D83 §4.2).
-///
-/// `holds`'s first argument is typed `eigentt:Logic`, which is a CLASS, so it encodes as
-/// a bare IRI string per D32 §3.7's class row — not as a `ConstRef` term. The other two
-/// are `eigentt:Term`s and carry the eigentt encoding.
-///
-/// Until D83 this emitted `CtorApp(eigentt:Judgement, holds, …)`, an `eigentt:Term` value
-/// standing in a slot declared `eigentt:Judgement`. That is what made Rule 16 report
-/// "ctor `App` not declared on InductiveType `eigentt:Judgement`" for every judgement on
-/// every chain, and what P5 worked around by exempting the type from Rule 16 entirely.
+/// The inverse of [`decode_judgement`]. A constructor application encodes as
+/// `App`s folded over a `CtorApp` base, which is the D47 shape for any
+/// chain-declared inductive.
 pub fn encode_judgement(logic_iri: &str, term: &Value, typ: &Value) -> Result<Value, EncodeError> {
-    Ok(Value::Json(ctor(
-        "holds",
-        vec![json!(logic_iri), value_json(term)?, value_json(typ)?],
-    )))
+    let base = ctor(
+        "CtorApp",
+        vec![json!("urn:eigenius:eigentt:Judgement"), json!("holds")],
+    );
+    let l = ctor("App", vec![base, ctor("ConstRef", vec![json!(logic_iri)])]);
+    let t = ctor("App", vec![l, value_json(term)?]);
+    Ok(Value::Json(ctor("App", vec![t, value_json(typ)?])))
 }
 
 /// Unwrap a `Value::Json` payload, which is what every encoded term is.
@@ -1209,80 +1088,46 @@ pub struct Judgement {
 
 /// Decode a stored `eigentt:Judgement` value into its three fields.
 ///
-/// The value is `eigentt:Judgement`'s own constructor in D32 §3.7 form —
-/// `{"ctor": "holds", "args": [<logic>, <term>, <type>]}` — because the slot holding it
-/// declares that inductive (D83 §4.2). The two term arguments are `eigentt:Term`s and
-/// decode through [`decode_type`]; the logic is a class reference and is a bare IRI
-/// string, so it is read, not decoded.
+/// A judgement is `holds(logic, term, type)` — an ordinary constructor
+/// application, so it decodes through [`decode_type`] like any other term and
+/// this only names the parts.
 pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, DecodeError> {
-    let json = match value {
-        Value::Json(j) => j,
-        other => {
-            return Err(DecodeError::MalformedValue(format!(
-                "expected Value::Json for a judgement, got {other:?}"
-            )))
+    let exp = decode_type(value, layer)?;
+    match &exp {
+        Exp::InductiveCtor(_, name, args) if name.as_str() == "holds" && args.len() == 3 => {
+            let logic = match &args[0] {
+                // An `eigentt:Logic` inhabitant is a RESOURCE, so a reference
+                // to one decodes to `EigonResource` carrying the whole record —
+                // not to a `Const`. That is a consequence of Logic being a
+                // class with individuals rather than an inductive with nullary
+                // constructors, and it is the shape this has to read.
+                Exp::EigonResource(r) => match r.id() {
+                    Some(iri) => iri.clone(),
+                    None => {
+                        return Err(DecodeError::MalformedValue(
+                            "a judgement's logic names an embedded resource with no @id"
+                                .to_string(),
+                        ))
+                    }
+                },
+                Exp::Const(iri, _) | Exp::EigonClass(iri) => iri.clone(),
+                Exp::InductiveCtor(iri, _, _) => iri.clone(),
+                other => {
+                    return Err(DecodeError::MalformedValue(format!(
+                        "a judgement's logic must name an eigentt:Logic individual, got {other:?}"
+                    )))
+                }
+            };
+            Ok(Judgement {
+                logic,
+                term: args[1].clone(),
+                typ: args[2].clone(),
+            })
         }
-    };
-    let obj = json.as_object().ok_or_else(|| {
-        DecodeError::MalformedValue(format!("a judgement must be a JSON object, got {json}"))
-    })?;
-    match obj.get("ctor").and_then(serde_json::Value::as_str) {
-        Some("holds") => {}
-        Some(other) => {
-            return Err(DecodeError::MalformedValue(format!(
-                "expected a judgement `holds(logic, term, type)`, got ctor `{other}`"
-            )))
-        }
-        None => {
-            return Err(DecodeError::MalformedValue(
-                "a judgement is missing its string `ctor` field".to_string(),
-            ))
-        }
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a judgement `holds(logic, term, type)`, got {other:?}"
+        ))),
     }
-    let args = obj
-        .get("args")
-        .and_then(serde_json::Value::as_array)
-        .map_or(&[][..], |a| a);
-    if args.len() != 3 {
-        return Err(DecodeError::WrongArgCount {
-            ctor: "holds",
-            expected: 3,
-            actual: args.len(),
-        });
-    }
-    // `eigentt:Logic` is a class with individuals, not an inductive, so its inhabitant is
-    // a reference: a bare IRI string, or an embedded resource carrying an `@id`.
-    let logic_str = match &args[0] {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Object(o) => match o.get("@id").and_then(serde_json::Value::as_str) {
-            Some(id) => id.to_string(),
-            None => {
-                return Err(DecodeError::MalformedValue(
-                    "a judgement's logic names an embedded resource with no @id".to_string(),
-                ))
-            }
-        },
-        other => {
-            return Err(DecodeError::MalformedValue(format!(
-                "a judgement's logic must name an eigentt:Logic individual, got {other}"
-            )))
-        }
-    };
-    let logic = Iri::parse(&logic_str).map_err(|e| {
-        DecodeError::MalformedValue(format!(
-            "a judgement's logic IRI `{logic_str}` is invalid: {e}"
-        ))
-    })?;
-    let expanding = std::cell::RefCell::new(Vec::new());
-    let ctx = DecodeCtx {
-        layer,
-        expanding: &expanding,
-    };
-    Ok(Judgement {
-        logic,
-        term: decode_type_json(&args[1], &ctx)?,
-        typ: decode_type_json(&args[2], &ctx)?,
-    })
 }
 
 /// Project the two indices out of a `justification:Certificate(j, P)` type.
@@ -1834,7 +1679,7 @@ mod tests {
 
     #[test]
     fn encodes_nullary_inductive_ctor() {
-        // Nat.zero — encoded as CtorApp(urn:_:Nat, zero, []) with an empty argument list.
+        // Nat.zero — encoded as CtorApp(urn:_:Nat, zero) with no args.
         let nat_decl = Arc::new(InductiveDecl {
             uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
@@ -1851,20 +1696,13 @@ mod tests {
         let v = encode_type(&zero).unwrap();
         assert_eq!(
             v,
-            Value::Json(ctor_obj(
-                "CtorApp",
-                vec![json!("urn:_:Nat"), json!("zero"), json!([])]
-            ))
+            Value::Json(ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("zero")]))
         );
     }
 
     #[test]
-    fn encodes_unary_inductive_ctor_with_a_flat_argument_list() {
-        // Nat.succ(x) — encoded as CtorApp(urn:_:Nat, succ, [Var(x)]).
-        //
-        // This was `App(CtorApp(urn:_:Nat, succ), Var(x))` until D83 §3.4, an `App` spine
-        // that decode folded back into the head's argument list. The fold always won, so
-        // `Nat.succ(x) y` could not round-trip; `App` now means application only.
+    fn encodes_unary_inductive_ctor_via_app_currying() {
+        // Nat.succ(x) — encoded as App(CtorApp(urn:_:Nat, succ), Var(x))
         let nat_decl = Arc::new(InductiveDecl {
             uparams: Vec::new(),
             iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
@@ -1883,36 +1721,9 @@ mod tests {
             vec![Exp::Var("x".to_string())],
         );
         let v = encode_type(&succ_x).unwrap();
+        let ctor_app = ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("succ")]);
         let var_x = ctor_obj("Var", vec![json!("x")]);
-        assert_eq!(
-            v,
-            Value::Json(ctor_obj(
-                "CtorApp",
-                vec![
-                    json!("urn:_:Nat"),
-                    json!("succ"),
-                    serde_json::Value::Array(vec![var_x]),
-                ]
-            ))
-        );
-    }
-
-    /// The round trip the retired `App` spine could not make: a saturated constructor
-    /// application applied to a further argument. Decode folded the outer `App` into
-    /// `succ`'s argument list and returned `Nat.succ(x, y)` — a different term.
-    #[test]
-    fn a_constructor_application_applied_to_a_further_argument_round_trips() {
-        let nat = crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap();
-        let applied = Exp::App(
-            Box::new(Exp::InductiveCtor(
-                nat,
-                "succ".to_string(),
-                vec![Exp::Var("x".to_string())],
-            )),
-            Box::new(Exp::Var("y".to_string())),
-        );
-        let v = encode_type(&applied).unwrap();
-        assert_eq!(decode_type(&v, &empty_layer()).unwrap(), applied);
+        assert_eq!(v, Value::Json(ctor_obj("App", vec![ctor_app, var_x])));
     }
 
     #[test]
@@ -2003,21 +1814,18 @@ mod tests {
             panic!("expected Value::Json");
         };
 
-        // Walk the outer App to verify shape (D83 §3.4):
-        //   App(ConstRef(AssayShape), CtorApp(Nat, succ, [CtorApp(Nat, zero, [])]))
-        //
-        // The index application stays an `App` — `AssayShape` is a type former, not a
-        // constructor. Only the constructor spine collapsed.
+        // Walk the outer App to verify shape:
+        //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
         assert_eq!(j["ctor"], "App");
         assert_eq!(j["args"][0]["ctor"], "ConstRef");
         assert_eq!(j["args"][0]["args"][0], "urn:_:AssayShape");
-        assert_eq!(j["args"][1]["ctor"], "CtorApp");
-        assert_eq!(j["args"][1]["args"][0], "urn:_:Nat");
-        assert_eq!(j["args"][1]["args"][1], "succ");
-        assert_eq!(j["args"][1]["args"][2][0]["ctor"], "CtorApp");
-        assert_eq!(j["args"][1]["args"][2][0]["args"][0], "urn:_:Nat");
-        assert_eq!(j["args"][1]["args"][2][0]["args"][1], "zero");
-        assert_eq!(j["args"][1]["args"][2][0]["args"][2], serde_json::json!([]));
+        assert_eq!(j["args"][1]["ctor"], "App");
+        assert_eq!(j["args"][1]["args"][0]["ctor"], "CtorApp");
+        assert_eq!(j["args"][1]["args"][0]["args"][0], "urn:_:Nat");
+        assert_eq!(j["args"][1]["args"][0]["args"][1], "succ");
+        assert_eq!(j["args"][1]["args"][1]["ctor"], "CtorApp");
+        assert_eq!(j["args"][1]["args"][1]["args"][0], "urn:_:Nat");
+        assert_eq!(j["args"][1]["args"][1]["args"][1], "zero");
     }
 }
 

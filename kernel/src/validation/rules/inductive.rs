@@ -43,6 +43,9 @@ const OPERATOR_IRI: &str = "urn:eigenius:formulas:Operator";
 /// `ConstRef` resolution check (D47 §5) can short-circuit when
 /// the inductive being walked isn't `eigentt:Term`.
 const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:Term";
+///  values are D47-encoded as an App spine, not D32 tagged
+/// dicts, so this walk cannot read them either. Rule 21 owns both.
+const EIGENTT_JUDGEMENT_IRI: &str = "urn:eigenius:eigentt:Judgement";
 
 /// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
 /// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
@@ -168,17 +171,7 @@ impl Validator {
         // (`check_type_expr_well_typed`, eigentt_value.rs): decode + NbE
         // type-check. Skip the generic inductive walk here so the two don't
         // produce duplicate diagnostics — Rule 21 is the single eigentt owner.
-        //
-        // `eigentt:Judgement` was exempted alongside it by P5 and is NOT any more (D83
-        // §4.3). The exemption was a workaround for a shape disagreement, not a division
-        // of labour: a judgement was stored as `CtorApp(eigentt:Judgement, holds, …)`, an
-        // `eigentt:Term` value in a slot declaring `eigentt:Judgement`, so this walk read
-        // `App` as the constructor and reported "ctor `App` not declared" for every
-        // judgement on every chain. A judgement is now written as `holds(…)` — D32 §3.7's
-        // tagged dict against the inductive the slot declares — so this walk reads it
-        // correctly and Rule 21 keeps only the job the generic walk cannot do: decoding
-        // the two terms and NbE-checking one against the other.
-        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI {
+        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI || ind_iri.as_str() == EIGENTT_JUDGEMENT_IRI {
             return vec![];
         }
 
@@ -202,32 +195,6 @@ impl Validator {
         inductive_type: &Resource,
         path: String,
         res_id: &Option<Iri>,
-        out: &mut Vec<ValidationError>,
-    ) {
-        self.walk_inductive_value_seen(
-            value,
-            inductive_type,
-            path,
-            res_id,
-            &mut std::collections::BTreeSet::new(),
-            out,
-        );
-    }
-
-    /// [`Self::walk_inductive_value`], carrying the §3.3 references already expanded on this
-    /// path.
-    ///
-    /// A reference expands, so the walk follows it — and a cycle would otherwise make this
-    /// recurse until the stack runs out. The decoder detects cycles too (D83 §3.3), but it
-    /// runs later than commit: without the set here, a cyclic value would hang the validator
-    /// before the decoder ever saw it.
-    fn walk_inductive_value_seen(
-        &self,
-        value: &Value,
-        inductive_type: &Resource,
-        path: String,
-        res_id: &Option<Iri>,
-        seen: &mut std::collections::BTreeSet<Iri>,
         out: &mut Vec<ValidationError>,
     ) {
         let json = match value {
@@ -374,175 +341,8 @@ impl Validator {
                     continue;
                 }
             };
-            // D83 §3.4 — a `cardinality: list` slot holds a JSON array of the element
-            // encoding, not one element. Checking the array itself against `type_name`
-            // would report every list as a type mismatch.
-            if arg_type_decl
-                .get(&iri(wk::CARDINALITY))
-                .and_then(Value::as_str)
-                == Some(wk::CARDINALITY_LIST)
-            {
-                let Some(elems) = arg_value.as_array() else {
-                    out.push(ValidationError {
-                        resource_id: res_id.clone(),
-                        property: None,
-                        rule: ValidationRule::InductiveValueMismatch,
-                        message: format!(
-                            "{child_path}: `cardinality: list` slot expects a JSON array, got {arg_value}"
-                        ),
-                    });
-                    continue;
-                };
-                for (k, elem) in elems.iter().enumerate() {
-                    self.check_inductive_arg(
-                        elem,
-                        &type_name,
-                        format!("{child_path}[{k}]"),
-                        res_id,
-                        seen,
-                        out,
-                    );
-                }
-                continue;
-            }
-            self.check_inductive_arg(arg_value, &type_name, child_path, res_id, seen, out);
+            self.check_inductive_arg(arg_value, &type_name, child_path, res_id, out);
         }
-    }
-
-    /// Rule 24: a chain-resident inductive VALUE (D83 §3.2).
-    ///
-    /// A value becomes chain-resident by acquiring an identity and declaring its type:
-    /// `is_a` names exactly one `core:InductiveType`, `core:ctor` names the constructor and
-    /// `core:args` carries the arguments. No wrapper class is involved — it is the same
-    /// relationship `Embedded` and `ResourceRef` already have for resources, lifted to
-    /// values.
-    ///
-    /// Exactly one, and no Class alongside it (D83 §6.2). A value has one type; the array
-    /// shape of `is_a` is inherited from resources generally, not a licence to give a value
-    /// two, and a walk cannot check one value against two schemas.
-    pub(in crate::validation) fn check_inductive_value_resource(
-        &self,
-        resource: &Resource,
-        res_id: &Option<Iri>,
-    ) -> Vec<ValidationError> {
-        let is_a = match resource.get(&iri(wk::IS_A)) {
-            Some(v) => v.as_iri_array(),
-            None => return vec![],
-        };
-        let inductives: Vec<&Iri> = is_a
-            .iter()
-            .filter(|i| {
-                self.layer
-                    .resolve(i)
-                    .is_some_and(|r| r.is_instance_of(&iri(wk::INDUCTIVE_TYPE)))
-            })
-            .collect();
-        if inductives.is_empty() {
-            return vec![];
-        }
-        let mismatch = |message: String| ValidationError {
-            resource_id: res_id.clone(),
-            property: None,
-            rule: ValidationRule::InductiveValueMismatch,
-            message,
-        };
-        if is_a.len() != 1 {
-            return vec![mismatch(format!(
-                "a resource whose `is_a` names an InductiveType is a VALUE of it (D83 §3.2)                  and has exactly one type; this one names {}",
-                is_a.len()
-            ))];
-        }
-        let decl = match self.layer.resolve(inductives[0]) {
-            Some(d) => d,
-            None => return vec![],
-        };
-        let json = match crate::program::eigentt_type_mirror::value_resource_to_json(resource) {
-            Some(j) => j,
-            None => {
-                return vec![mismatch(format!(
-                    "a value of InductiveType `{}` carries the constructor it applies in                      `core:ctor`; this resource has none",
-                    inductives[0]
-                ))]
-            }
-        };
-        let mut errors = Vec::new();
-        self.walk_inductive_value(
-            &Value::Json(json),
-            &decl,
-            format!("{}", inductives[0]),
-            res_id,
-            &mut errors,
-        );
-        errors
-    }
-
-    /// Check a §3.3 reference: the IRI must name a §3.2 value resource of the expected
-    /// inductive, and that resource's own value must be well-formed.
-    ///
-    /// A reference expands, so what it names is part of this value and is checked as such.
-    /// Leaving the target unchecked here would put the only unvalidated values on the chain
-    /// behind a level of indirection.
-    fn check_value_reference(
-        &self,
-        ref_iri: &str,
-        expected: &Resource,
-        path: &str,
-        res_id: &Option<Iri>,
-        seen: &mut std::collections::BTreeSet<Iri>,
-        out: &mut Vec<ValidationError>,
-    ) {
-        let expected_iri = expected.id().map(Iri::as_str).unwrap_or("?");
-        let mut err = |message: String| {
-            out.push(ValidationError {
-                resource_id: res_id.clone(),
-                property: None,
-                rule: ValidationRule::InductiveValueMismatch,
-                message,
-            });
-        };
-        let Ok(target_iri) = Iri::parse(ref_iri) else {
-            err(format!(
-                "{path}: an argument typed `{expected_iri}` is an inline value or the IRI of                  one; `{ref_iri}` is neither"
-            ));
-            return;
-        };
-        let Some(target) = self.layer.resolve(&target_iri) else {
-            err(format!(
-                "{path}: inductive value reference `{ref_iri}` is not in the chain"
-            ));
-            return;
-        };
-        // §3.2 — the value declares its own type, and it must be the one expected here.
-        if !target.is_instance_of(&iri(expected_iri)) {
-            err(format!(
-                "{path}: inductive value reference `{ref_iri}` is not an `{expected_iri}` —                  a value resource's `is_a` names the InductiveType it inhabits"
-            ));
-            return;
-        }
-        let Some(json) = crate::program::eigentt_type_mirror::value_resource_to_json(&target)
-        else {
-            err(format!(
-                "{path}: inductive value reference `{ref_iri}` names a resource with no                  `core:ctor`, so it is not a chain-resident inductive value"
-            ));
-            return;
-        };
-        if !seen.insert(target_iri.clone()) {
-            err(format!(
-                "{path}: inductive value reference `{ref_iri}` closes a cycle — a value's                  identity is its expansion, and this one does not terminate"
-            ));
-            return;
-        }
-        // The target is walked against the EXPECTED inductive, which is the declaration; the
-        // resource resolved from the IRI is the value.
-        self.walk_inductive_value_seen(
-            &Value::Json(json),
-            expected,
-            format!("{path} -> {ref_iri}"),
-            res_id,
-            seen,
-            out,
-        );
-        seen.remove(&target_iri);
     }
 
     /// Validate one argument value against the `type_name` declared on
@@ -557,7 +357,6 @@ impl Validator {
         type_name: &str,
         path: String,
         res_id: &Option<Iri>,
-        seen: &mut std::collections::BTreeSet<Iri>,
         out: &mut Vec<ValidationError>,
     ) {
         // A bare name is a type-PARAMETER reference. Parameter-aware checking — instantiating the
@@ -600,23 +399,13 @@ impl Validator {
                     Some(r) => r,
                     None => return, // Treat as unbound parameter; deferred.
                 };
-                // InductiveType: recurse, or resolve a §3.3 reference and walk the target.
+                // InductiveType: recurse.
                 if referent.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
-                    // D83 §3.3 — an inductive-typed argument is an inline value (an object)
-                    // or the IRI of a §3.2 chain-resident value (a string). This is the row
-                    // D32 §3.7 left asymmetric: it gave CLASS-typed arguments both "a
-                    // `ResourceRef` … or an embedded resource map" and gave inductive-typed
-                    // arguments only the inline form.
-                    if let Some(ref_iri) = arg_value.as_str() {
-                        self.check_value_reference(ref_iri, &referent, &path, res_id, seen, out);
-                        return;
-                    }
-                    self.walk_inductive_value_seen(
+                    self.walk_inductive_value(
                         &Value::Json(arg_value.clone()),
                         &referent,
                         path,
                         res_id,
-                        seen,
                         out,
                     );
                     return;
@@ -987,158 +776,6 @@ mod tests {
                 }]
             }]
         })
-    }
-
-    /// A `Nat = zero | succ(Nat) | sum([Nat])` layer — the third constructor takes a
-    /// `cardinality: list` slot (D83 §3.4).
-    fn build_nat_with_list_ctor_layer() -> Arc<Layer> {
-        let core = build_core_layer();
-        let mut builder = LayerBuilder::new("test_nat_list", Some(core));
-
-        let zero_ctor = make_resource(
-            "urn:eigenius:test:NatL:zero",
-            vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
-                ),
-                (wk::CTOR_NAME, Value::String("zero".into())),
-                (wk::ARG_TYPES, Value::Array(vec![])),
-            ],
-        );
-        // ctor `sum(terms: [NatL])` — a list slot.
-        let sum_arg = make_resource(
-            "urn:eigenius:test:NatL:sum:terms",
-            vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
-                ),
-                (wk::ARG_NAME, Value::String("terms".into())),
-                (
-                    wk::TYPE_NAME,
-                    Value::Json(serde_json::json!({
-                        "ctor": "ConstRef", "args": ["urn:eigenius:test:NatL"],
-                    })),
-                ),
-                (
-                    wk::CARDINALITY,
-                    Value::String(wk::CARDINALITY_LIST.to_string()),
-                ),
-            ],
-        );
-        let sum_ctor = make_resource(
-            "urn:eigenius:test:NatL:sum",
-            vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
-                ),
-                (wk::CTOR_NAME, Value::String("sum".into())),
-                (
-                    wk::ARG_TYPES,
-                    Value::Array(vec![Value::Embedded(Box::new(sum_arg))]),
-                ),
-            ],
-        );
-        let nat = make_resource(
-            "urn:eigenius:test:NatL",
-            vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
-                ),
-                (wk::SHORT_NAME, Value::String("NatL".into())),
-                (
-                    wk::CTORS,
-                    Value::Array(vec![
-                        Value::Embedded(Box::new(zero_ctor)),
-                        Value::Embedded(Box::new(sum_ctor)),
-                    ]),
-                ),
-            ],
-        );
-        let prop = make_resource(
-            "urn:eigenius:test:natl_value",
-            vec![
-                (
-                    wk::IS_A,
-                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-                ),
-                (wk::SHORT_NAME, Value::String("natl_value".into())),
-                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
-                (
-                    wk::CLASS_TYPES,
-                    Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:NatL"))]),
-                ),
-            ],
-        );
-        builder.add_resource(nat).unwrap();
-        builder.add_resource(prop).unwrap();
-        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
-    }
-
-    fn natl_errors(value: serde_json::Value) -> Vec<String> {
-        let base = build_nat_with_list_ctor_layer();
-        let mut top = LayerBuilder::new("test_top", Some(base));
-        top.add_resource(make_resource(
-            "urn:eigenius:test:nl",
-            vec![("urn:eigenius:test:natl_value", Value::Json(value))],
-        ))
-        .unwrap();
-        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
-        Validator::new(Arc::clone(&layer))
-            .validate()
-            .into_iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .map(|e| e.message)
-            .collect()
-    }
-
-    /// D83 §3.4 — a list slot takes a JSON array, and every element is checked.
-    #[test]
-    fn a_list_slot_accepts_an_array_and_checks_each_element() {
-        let errors = natl_errors(serde_json::json!({
-            "ctor": "sum",
-            "args": [[{"ctor": "zero", "args": []}, {"ctor": "zero", "args": []}]],
-        }));
-        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
-    }
-
-    /// An empty list is a well-formed list — this is `CtorApp`'s nullary case, which
-    /// every nullary constructor application on the chain now carries.
-    #[test]
-    fn a_list_slot_accepts_the_empty_array() {
-        let errors = natl_errors(serde_json::json!({"ctor": "sum", "args": [[]]}));
-        assert!(errors.is_empty(), "expected no errors, got {errors:?}");
-    }
-
-    /// The element type is still enforced inside the list. Without the per-element walk
-    /// a list slot would be the one place an arbitrary value could be smuggled in.
-    #[test]
-    fn a_list_slot_rejects_a_bad_element() {
-        let errors = natl_errors(serde_json::json!({
-            "ctor": "sum",
-            "args": [[{"ctor": "zero", "args": []}, {"ctor": "nope", "args": []}]],
-        }));
-        assert!(
-            errors.iter().any(|m| m.contains("`nope` not declared")),
-            "expected the bad element to be named, got {errors:?}"
-        );
-    }
-
-    /// A single value where a list is declared is rejected rather than silently read as a
-    /// one-element list — the encoding says array, so a non-array is malformed.
-    #[test]
-    fn a_list_slot_rejects_a_bare_element() {
-        let errors = natl_errors(serde_json::json!({
-            "ctor": "sum",
-            "args": [{"ctor": "zero", "args": []}],
-        }));
-        assert!(
-            errors.iter().any(|m| m.contains("expects a JSON array")),
-            "expected an array-shape error, got {errors:?}"
-        );
     }
 
     #[test]

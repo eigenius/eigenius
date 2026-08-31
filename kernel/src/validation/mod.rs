@@ -531,12 +531,6 @@ impl Validator {
         // `kernel/src/justification/wellfounded.rs`.
         errors.extend(self.check_well_founded(resource, &res_id));
 
-        // Rule 24: a chain-resident inductive VALUE (D83 §3.2). A resource whose `is_a`
-        // names an InductiveType is a value of it, and carries `core:ctor` + `core:args`
-        // rather than the properties of a class. Without this, the only unvalidated values
-        // on a chain would be the ones a §3.3 reference does not happen to name.
-        errors.extend(self.check_inductive_value_resource(resource, &res_id));
-
         // Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
         // For Comorphism resources, verify that `export_format` and
         // `import_format` references resolve to ExportFormat /

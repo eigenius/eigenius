@@ -188,8 +188,6 @@ pub fn compile_file_with_context(
     compiler.institutions = institutions;
     compiler.ctors_by_iri = external_ctors.by_iri;
     compiler.ctors_by_short_name = external_ctors.by_short_name;
-    compiler.ctor_arg_types = external_ctors.arg_types;
-    compiler.inductive_slots = external_ctors.inductive_slots;
     compiler.macros = external_macros;
 
     // Register namespace aliases.
@@ -268,27 +266,10 @@ pub fn compile_file_with_context(
 /// both land in `by_short_name[name]`. The ESL surface's bare-name
 /// lookup turns that into an "ambiguous — qualify as one of [...]"
 /// error rather than picking one silently.
-/// `eigentt:Term` — the inductive whose values carry the D47 encoding rather than
-/// D32 §3.7's plain tagged dict. The one type the slot-boundary encoder defers on.
-const EIGENTT_TERM_IRI: &str = "urn:eigenius:eigentt:Term";
-
 #[derive(Debug, Default, Clone)]
 pub struct CtorSeed {
     pub by_iri: std::collections::BTreeSet<String>,
     pub by_short_name: BTreeMap<String, Vec<String>>,
-    /// Ctor IRI → the declared type head of each argument, in order (D83 §4.2).
-    ///
-    /// Needed to encode a value AT its declared inductive rather than as an
-    /// `eigentt:Term`: an argument typed `eigentt:Term` carries the D47 encoding, one
-    /// typed by a class carries a bare IRI string, one typed by another inductive
-    /// carries that inductive's tagged dict. Without the arg types every argument would
-    /// have to be encoded the same way, which is what forced the whole value through the
-    /// eigentt codec and put a `CtorApp` wrapper on it.
-    pub arg_types: BTreeMap<String, Vec<String>>,
-    /// Property IRI → the single `class_types` inductive of a `core:inductive` slot
-    /// (D83 §4.2). The declared type of a slot, so a value written into it can be
-    /// encoded as that inductive instead of as an `eigentt:Term` that names it.
-    pub inductive_slots: BTreeMap<String, String>,
 }
 
 /// Walk a layer chain and collect every chain-resident inductive's
@@ -305,10 +286,6 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
         Err(_) => return out,
     };
     let ctors_iri = match Iri::parse(wk::CTORS) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
-    let arg_types_iri = match Iri::parse(wk::ARG_TYPES) {
         Ok(i) => i,
         Err(_) => return out,
     };
@@ -337,18 +314,6 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
                 _ => continue,
             };
             let ctor_iri = format!("{parent_iri}:{}", ctor_value_short_name(ctor_resource));
-            if let Some(Value::Array(ats)) = ctor_resource.get(&arg_types_iri) {
-                let heads: Vec<String> = ats
-                    .iter()
-                    .map(|a| match a {
-                        Value::Embedded(r) => {
-                            crate::program::ground::arg_type_head(r).unwrap_or_default()
-                        }
-                        _ => String::new(),
-                    })
-                    .collect();
-                out.arg_types.entry(ctor_iri.clone()).or_insert(heads);
-            }
             if out.by_iri.insert(ctor_iri.clone()) {
                 // First time we see this exact ctor IRI; also index it
                 // by short name. Duplicate IRIs (same ctor visible via
@@ -359,40 +324,6 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
                     bucket.push(ctor_iri);
                 }
             }
-        }
-    }
-    // The declared inductive of every `core:inductive` slot (D83 §4.2).
-    let data_type_iri = match Iri::parse(wk::DATA_TYPE_PROP) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
-    let class_types_iri = match Iri::parse(wk::CLASS_TYPES) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
-    for resource in crate::layer::resolve_typed_resources(layer, &[wk::PROPERTY]) {
-        let Some(prop_iri) = resource.id().cloned() else {
-            continue;
-        };
-        let is_inductive = resource
-            .get(&data_type_iri)
-            .and_then(|v| v.as_str().map(str::to_string))
-            .or_else(|| match resource.get(&data_type_iri) {
-                Some(Value::ResourceRef(i)) => Some(i.as_str().to_string()),
-                _ => None,
-            });
-        if is_inductive.as_deref() != Some(wk::INDUCTIVE) {
-            continue;
-        }
-        let allowed = match resource.get(&class_types_iri) {
-            Some(v) => v.as_iri_array(),
-            None => continue,
-        };
-        // D83 §6.2 — exactly one. A slot with two would not name a type to encode at.
-        if allowed.len() == 1 {
-            out.inductive_slots
-                .entry(prop_iri.as_str().to_string())
-                .or_insert_with(|| allowed[0].as_str().to_string());
         }
     }
     out
@@ -486,11 +417,6 @@ struct Compiler {
     /// is compiled.
     ctors_by_iri: std::collections::BTreeSet<String>,
     ctors_by_short_name: BTreeMap<String, Vec<String>>,
-    /// Ctor IRI → declared arg-type heads, and property IRI → declared inductive.
-    /// Both seeded from the layer; together they let a value be encoded at the type its
-    /// slot declares rather than as an `eigentt:Term` naming that type (D83 §4.2).
-    ctor_arg_types: BTreeMap<String, Vec<String>>,
-    inductive_slots: BTreeMap<String, String>,
     /// D52 §12 — per-file smart-constructor macro table: full macro
     /// IRI → its declaration AST. Built in `collect_macro_table`
     /// before any value is compiled, so `Value::MacroCall` resolution
@@ -783,8 +709,6 @@ impl Compiler {
             declared_universes: std::collections::BTreeSet::new(),
             ctors_by_iri: std::collections::BTreeSet::new(),
             ctors_by_short_name: BTreeMap::new(),
-            ctor_arg_types: BTreeMap::new(),
-            inductive_slots: BTreeMap::new(),
             macros: BTreeMap::new(),
             institutions: None,
         }
@@ -1955,133 +1879,6 @@ impl Compiler {
     /// Ref with args) recurse here so the annotation survives at any
     /// depth. Leaves with no Lambda exposure (Sort, literals) delegate
     /// to `lower_type_expr_to_exp` + `encode_type`.
-    /// Encode a `type_expr(<Term>)` value AT the inductive its slot declares (D83 §4.2).
-    ///
-    /// A slot declared `eigentt:Term` takes the eigentt encoding and this is not called.
-    /// A slot declared some other inductive — `justification:judgement` is declared
-    /// `eigentt:Judgement` — takes that inductive's constructor written plainly, per D32
-    /// §3.7, with each argument encoded by its own declared type.
-    ///
-    /// The alternative was to encode the whole value through the eigentt codec, which
-    /// produced `CtorApp(eigentt:Judgement, "holds", …)`: an `eigentt:Term` value sitting
-    /// in a slot that declares `eigentt:Judgement`, restating inside the value the type
-    /// the slot already names. That redundancy is what §3.1 removes by recovering the
-    /// inductive from the slot, and it is what made Rule 16 read `App` as the constructor
-    /// and reject every judgement on every chain.
-    ///
-    /// Returns `None` when the term's head is not a constructor of `expected`, leaving
-    /// the caller to fall back to the eigentt encoding — the head may legitimately be
-    /// something else, and a hard error here would reject values this function simply has
-    /// no opinion about.
-    fn encode_at_declared_inductive(
-        &self,
-        typ: &ast::Term,
-        expected: &str,
-        scope: &std::collections::HashSet<&str>,
-    ) -> Result<Option<serde_json::Value>, EslError> {
-        // `alias … in body` is sugar; expand before looking at the head, exactly as the
-        // eigentt encoder does.
-        if let ast::Term::Alias { .. } = typ {
-            let expanded = expand_aliases(typ, &BTreeMap::new());
-            return self.encode_at_declared_inductive(&expanded, expected, scope);
-        }
-        let ast::Term::Ref { name, args, .. } = typ else {
-            return Ok(None);
-        };
-        let Some(ctor_iri) = self.resolve_ctor_iri(name)? else {
-            return Ok(None);
-        };
-        // The ctor must belong to the inductive the slot declares.
-        let Some((parent, ctor_local)) = ctor_iri.rsplit_once(':') else {
-            return Ok(None);
-        };
-        if parent != expected {
-            return Ok(None);
-        }
-        let arg_heads = self.ctor_arg_types.get(&ctor_iri);
-        let mut json_args = Vec::with_capacity(args.len());
-        for (i, a) in args.iter().enumerate() {
-            let head = arg_heads.and_then(|h| h.get(i)).map(String::as_str);
-            json_args.push(self.encode_ctor_arg(a, head, scope)?);
-        }
-        Ok(Some(serde_json::json!({
-            "ctor": ctor_local,
-            "args": json_args,
-        })))
-    }
-
-    /// One constructor argument, encoded by its declared type (D32 §3.7's argument table).
-    ///
-    /// A `core:string` / numeric / boolean argument is its JSON literal. A CLASS-typed
-    /// argument is a bare IRI string — `eigentt:Judgement.holds` takes an `eigentt:Logic`,
-    /// which is a class with individuals, so its inhabitant is a reference and not a term.
-    /// Everything else is an inductive, and takes the eigentt encoding when it is
-    /// `eigentt:Term` or that inductive's tagged dict when it is not.
-    fn encode_ctor_arg(
-        &self,
-        arg: &ast::Term,
-        declared: Option<&str>,
-        scope: &std::collections::HashSet<&str>,
-    ) -> Result<serde_json::Value, EslError> {
-        use crate::ontology::well_known as wk;
-        match declared {
-            // A class reference resolves to its IRI. Anything but a plain reference in a
-            // class-typed slot is a term where a reference belongs.
-            Some(d) if self.names_a_class_slot(d) => match arg {
-                ast::Term::Ref { name, args, .. } if args.is_empty() => {
-                    Ok(serde_json::Value::String(self.resolve(name)?))
-                }
-                // The IRI spelled out. ESL treats a resource reference as its IRI either
-                // way — `ast::Value::Ref` compiles to a `Value::String` — and the
-                // decompiler emits this form, having no layer to recover an alias from.
-                ast::Term::LitString { value, .. } => Ok(serde_json::Value::String(value.clone())),
-                other => Err(EslError::compiler(
-                    Some(other.pos().clone()),
-                    format!(
-                        "an argument declared `{d}` is a reference to one of its individuals, \
-                         so it must be written as a name, not as a term"
-                    ),
-                )),
-            },
-            Some(wk::STRING) | Some(wk::INTEGER) | Some(wk::FLOAT) | Some(wk::BOOLEAN) => match arg
-            {
-                ast::Term::LitString { value, .. } => Ok(serde_json::Value::String(value.clone())),
-                ast::Term::LitInt { value, .. } => Ok(serde_json::Value::Number((*value).into())),
-                ast::Term::LitFloat { value, .. } => Ok(serde_json::Number::from_f64(*value)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)),
-                ast::Term::LitBool { value, .. } => Ok(serde_json::Value::Bool(*value)),
-                other => self.encode_type_expr_to_json(other, scope),
-            },
-            // A nested inductive that is NOT `eigentt:Term` gets its own tagged dict.
-            Some(d) if d != EIGENTT_TERM_IRI => {
-                match self.encode_at_declared_inductive(arg, d, scope)? {
-                    Some(j) => Ok(j),
-                    None => self.encode_type_expr_to_json(arg, scope),
-                }
-            }
-            _ => self.encode_type_expr_to_json(arg, scope),
-        }
-    }
-
-    /// Whether `iri` names a CLASS slot rather than an inductive or a primitive.
-    ///
-    /// Read off the ctor seed: an inductive's ctors are indexed by `<inductive>:<ctor>`,
-    /// so a type with no ctors in the table and no primitive IRI is a class. That is
-    /// sufficient here because the only class-typed constructor arguments in the tree are
-    /// references to individuals.
-    fn names_a_class_slot(&self, iri: &str) -> bool {
-        use crate::ontology::well_known as wk;
-        if matches!(
-            iri,
-            wk::STRING | wk::INTEGER | wk::FLOAT | wk::BOOLEAN | wk::JSON
-        ) {
-            return false;
-        }
-        let prefix = format!("{iri}:");
-        !self.ctors_by_iri.iter().any(|c| c.starts_with(&prefix))
-    }
-
     fn encode_type_expr_to_json(
         &self,
         typ: &ast::Term,
@@ -2283,7 +2080,7 @@ impl Compiler {
                             .unwrap_or(ctor_iri_str);
                         json!({
                             "ctor": "CtorApp",
-                            "args": [parent_iri_str, name.name.clone(), []],
+                            "args": [parent_iri_str, name.name.clone()],
                         })
                     } else {
                         // Namespace-resolve, then check via
@@ -2297,7 +2094,7 @@ impl Compiler {
                                 .unwrap_or(ctor_iri_str);
                             json!({
                                 "ctor": "CtorApp",
-                                "args": [parent_iri_str, name.name.clone(), []],
+                                "args": [parent_iri_str, name.name.clone()],
                             })
                         } else {
                             // Primitive IRIs ride the ConstRef path
@@ -2307,20 +2104,9 @@ impl Compiler {
                         }
                     }
                 };
-                let arg_jsons = args
-                    .iter()
-                    .map(|arg| self.encode_type_expr_to_json(arg, scope))
-                    .collect::<Result<Vec<_>, _>>()?;
-                // D83 §3.4 — a constructor application carries its own arguments in its
-                // third slot. Only a non-constructor head App-curries, and there `App`
-                // means application: the two are no longer the same node.
-                let mut head_json = head_json;
-                if head_json.get("ctor").and_then(serde_json::Value::as_str) == Some("CtorApp") {
-                    head_json["args"][2] = serde_json::Value::Array(arg_jsons);
-                    return Ok(head_json);
-                }
                 let mut acc = head_json;
-                for arg_json in arg_jsons {
+                for arg in args {
+                    let arg_json = self.encode_type_expr_to_json(arg, scope)?;
                     acc = json!({
                         "ctor": "App",
                         "args": [acc, arg_json],
@@ -2576,15 +2362,6 @@ impl Compiler {
             .collect();
         ar.set(iri(wk::TYPE_ARGS), Value::Array(type_args?));
 
-        // D83 §3.4 — `[T]` is a list slot. Absent means exactly one, so nothing is
-        // emitted for the common case and existing declarations are byte-identical.
-        if arg.list {
-            ar.set(
-                iri(wk::CARDINALITY),
-                Value::String(wk::CARDINALITY_LIST.to_string()),
-            );
-        }
-
         Ok(Value::Embedded(Box::new(ar)))
     }
 
@@ -2811,8 +2588,7 @@ impl Compiler {
 
         for field in &res.body {
             let prop_iri = self.resolve_iri(&field.property)?;
-            let expected = self.inductive_slots.get(prop_iri.as_str()).cloned();
-            let value = self.compile_value(&field.value, expected.as_deref())?;
+            let value = self.compile_value(&field.value)?;
             r.set(prop_iri, value);
         }
 
@@ -2827,9 +2603,7 @@ impl Compiler {
         Ok(vec![r])
     }
 
-    /// Compile a property value. `expected` is the inductive the slot declares, when it
-    /// declares one — see [`Self::encode_at_declared_inductive`] for what it changes.
-    fn compile_value(&self, value: &ast::Value, expected: Option<&str>) -> Result<Value, EslError> {
+    fn compile_value(&self, value: &ast::Value) -> Result<Value, EslError> {
         match value {
             // `json( … )` — an opaque JSON value for a `core:json`-typed property. Passes through
             // verbatim; the kernel stores it as `Value::Json` (eigenius#222).
@@ -2843,18 +2617,15 @@ impl Compiler {
                 Ok(Value::String(s))
             }
             ast::Value::Array(items) => {
-                let compiled: Result<Vec<_>, _> = items
-                    .iter()
-                    .map(|v| self.compile_value(v, expected))
-                    .collect();
+                let compiled: Result<Vec<_>, _> =
+                    items.iter().map(|v| self.compile_value(v)).collect();
                 Ok(Value::Array(compiled?))
             }
             ast::Value::Block(fields) => {
                 let mut embedded = Resource::new_embedded();
                 for field in fields {
                     let prop_iri = self.resolve_iri(&field.property)?;
-                    let inner = self.inductive_slots.get(prop_iri.as_str()).cloned();
-                    let val = self.compile_value(&field.value, inner.as_deref())?;
+                    let val = self.compile_value(&field.value)?;
                     embedded.set(prop_iri, val);
                 }
                 Ok(Value::Embedded(Box::new(embedded)))
@@ -2883,13 +2654,6 @@ impl Compiler {
                 // the D47 codec. The generic `encode_type` rejects bare
                 // `Exp::Lam` (no annotation to recover post-lowering).
                 let scope = std::collections::HashSet::new();
-                // D83 §4.2 — a slot declaring an inductive other than `eigentt:Term`
-                // takes that inductive's own constructor, not an eigentt term naming it.
-                if let Some(e) = expected.filter(|e| *e != EIGENTT_TERM_IRI) {
-                    if let Some(json) = self.encode_at_declared_inductive(typ, e, &scope)? {
-                        return Ok(Value::Json(json));
-                    }
-                }
                 let json = self.encode_type_expr_to_json(typ, &scope)?;
                 Ok(Value::Json(json))
             }
@@ -2910,7 +2674,7 @@ impl Compiler {
                     return Ok(Value::Json(json));
                 }
                 let expanded = self.expand_macro_call(name, args, pos)?;
-                self.compile_value(&expanded, expected)
+                self.compile_value(&expanded)
             }
         }
     }
@@ -2994,17 +2758,12 @@ impl Compiler {
                 obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
                 Ok(serde_json::Value::Object(obj))
             }
-            // A `type_expr(...)` argument is legal, and the error that used to stand here
-            // rested on a false premise: D32 §3.7's argument table admits INDUCTIVE-typed
-            // arguments, and `eigentt:Term` is an inductive, so a term is exactly what such
-            // a slot holds. Its advice — "lift the type_expr to the property value
-            // directly" — is what produced the wrapped judgement encoding D83 §4.2 removes,
-            // since lifting it made the whole value an `eigentt:Term` and forced a `CtorApp`
-            // naming the inductive the slot already declared.
-            ast::Value::Term { typ, .. } => {
-                let scope = std::collections::HashSet::new();
-                self.encode_type_expr_to_json(typ, &scope)
-            }
+            ast::Value::Term { .. } => Err(EslError::compiler(
+                None,
+                "`type_expr(...)` cannot appear as an argument inside a chain inductive ctor — \
+                 D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
+                 type expressions. Lift the type_expr to the property value directly.",
+            )),
             // Same disambiguation as `compile_value`: try ctor
             // resolution first (qualified ctor refs reach this site
             // when an outer ctor's arg is `justification:App(...)`),

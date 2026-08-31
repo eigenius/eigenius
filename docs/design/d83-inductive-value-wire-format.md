@@ -267,26 +267,10 @@ hash canonicalises it.
 > was declared `core:json`, which is 'not validated by the ontology', so no rule checked it and the
 > mutual-inductive walker in `layer::declaration_order` had to descend into it by hand."*
 
-**Where the split happens: `canonicalise_resource_refs`, not the parser.** `eigon_json::parse_value`
-takes a property NAME and a JSON value and nothing else — it has no `Layer`, because `bootstrap`
-parses `core-ontology.json` with `parent: None` and that is the parse which CREATES `core:data_type`
-and `core:json`. Every distinction above is a schema distinction — `core:json` and `core:inductive`
-values are both objects with bare keys, a §3.3 reference and a `core:resource` reference are both
-bare strings — so none of them can be decided at parse time.
-
-They are decided one step later, by a pass that already does exactly this for the resource case.
-`LayerBuilder::build` calls `canonicalise_resource_refs`, which upgrades every parsed `Value::String`
-naming a `data_type: resource` property to a `Value::ResourceRef` so that *"downstream readers
-(validator, triple index, query evaluator) can then assume one shape per data_type."* It resolves
-each property's `data_type` against the layer being built and its parents, and consults the layer's
-own resources first — which is why bootstrap is unaffected, the core ontology's property
-declarations being visible to their own canonicalisation pass. `core:inductive` is one more arm.
-
-**The live consequence this section used to cite does not exist.** The claim was that
-`json_mentions_of_value` matches `Value::Json` unconditionally, so opaque JSON holding a
-`urn:`-shaped string becomes a spurious `core:mentions` edge. It has exactly one caller,
-`layer::index`, and that call already sits inside the `wk::INDUCTIVE` arm of a match on the
-property's `data_type`. The argument for the split is the doc comment above, not a live defect.
+There is a live consequence too. `json_mentions_of_value` matches `Value::Json` **unconditionally**,
+not gated on the property being inductive, so any genuinely opaque JSON holding a `urn:`-shaped
+string becomes a spurious `core:mentions` edge. Latent only because nothing stores such data; the
+type does not prevent it.
 
 ### 4.2 The expected inductive is threaded through decode
 
