@@ -111,3 +111,43 @@ fn a_value_may_not_name_the_inductive_itself() {
         errs.join("\n")
     );
 }
+
+/// **The derived names must be spellable in ESL**, and `.` is not.
+///
+/// A constructor class is `<inductive>-<Ctor>` and an argument property
+/// `<inductive>-<Ctor>-<arg>` (§6.1). The separator is forced, not chosen: ESL admits
+/// `[A-Za-z0-9_]` bare and `[A-Za-z0-9_-]` quoted, so a dotted name is unspellable either way and
+/// `esl::print` hard-errors rather than emit one — which would break printing of every chain
+/// carrying a derived class. `_` is in the charset but ambiguous, because constructor names in the
+/// tree contain underscores (`cat_np`, `conn_and`): inductive `A_B` + ctor `C` and inductive `A` +
+/// ctor `B_C` would collide on `A_B_C`.
+///
+/// `-` is unambiguous because no component may contain one — every inductive, constructor and
+/// argument name in the tree matches `[A-Za-z0-9_]+`.
+#[test]
+fn derived_names_are_esl_spellable() {
+    let doc_for = |id: &str| {
+        serde_json::json!([{
+            "@id": id,
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+            "urn:eigenius:core:short_name": "probe",
+            "urn:eigenius:core:description": "probe"
+        }])
+    };
+    let print = |id: &str| eigenius_kernel::esl::print::print_document(&doc_for(id));
+
+    assert!(
+        print("urn:eigenius:eigentt:Term-App").is_ok(),
+        "the hyphenated constructor-class name must print"
+    );
+    assert!(
+        print("urn:eigenius:eigentt:Term-App-fn").is_ok(),
+        "and so must the argument-property name"
+    );
+    let dotted = print("urn:eigenius:eigentt:Term.App");
+    assert!(
+        dotted.is_err(),
+        "a DOTTED name must not print — no ESL identifier can spell it, which is why `-` is the \
+         separator; got: {dotted:?}"
+    );
+}

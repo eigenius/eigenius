@@ -22,9 +22,9 @@ arguments, and is subject to the rules every resource is subject to:
 
 ```json
 {
-  "urn:eigenius:core:is_a":                ["urn:eigenius:eigentt:Term.App"],
-  "urn:eigenius:eigentt:Term.App.fn":     { … },
-  "urn:eigenius:eigentt:Term.App.arg":    { … }
+  "urn:eigenius:core:is_a":                ["urn:eigenius:eigentt:Term-App"],
+  "urn:eigenius:eigentt:Term-App-fn":     { … },
+  "urn:eigenius:eigentt:Term-App-arg":    { … }
 }
 ```
 
@@ -90,7 +90,7 @@ values inside terms, in exactly **one** slot: `justification:judgement`, carryin
 `justification:Term` (337) and `justification:Certificate` (123). Zero anywhere else — not in the
 bootstrap chain, not in `canonical_proposition`, not in `lexicon:cat`, not in `axiom_statement`.
 
-*Why an injection and not subsumption.* `eigentt:Term.App` declares both arguments `eigentt:Term`
+*Why an injection and not subsumption.* `eigentt:Term-App` declares both arguments `eigentt:Term`
 (core-ontology.json, `eigentt:Term`, 20 constructors). Without a constructor that makes a foreign
 value *be* a term, every one of those 460 sites violates the declaration. The ontology has
 `subclass_of` for classes and no analogue for inductives, so the injection is what the type system
@@ -279,13 +279,13 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    rather than being answered, which is why this beats both options the note originally offered.
 
    ```
-   class     eigentt:Term.App        subclass_of eigentt:Term
-                                    requires eigentt:Term.App.fn, eigentt:Term.App.arg
-   property  eigentt:Term.App.fn    data_type core:resource   class_types eigentt:Term
-                                    domain eigentt:Term.App
-   value     { "is_a": ["urn:eigenius:eigentt:Term.App"],
-               "urn:eigenius:eigentt:Term.App.fn":  { … },
-               "urn:eigenius:eigentt:Term.App.arg": { … } }
+   class     eigentt:Term-App        subclass_of eigentt:Term
+                                    requires eigentt:Term-App-fn, eigentt:Term-App-arg
+   property  eigentt:Term-App-fn    data_type core:resource   class_types eigentt:Term
+                                    domain eigentt:Term-App
+   value     { "is_a": ["urn:eigenius:eigentt:Term-App"],
+               "urn:eigenius:eigentt:Term-App-fn":  { … },
+               "urn:eigenius:eigentt:Term-App-arg": { … } }
    ```
 
    **Everything that had to be built is already built.** Arity is Rule 1 (required properties).
@@ -295,7 +295,7 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    a constructor class may be `subclass_of` its inductive, and
    [`is_instance_of_any`](../../kernel/src/validation/mod.rs#L629) already resolves `class_types`
    through `is_subclass_of` — a slot declaring `class_types eigentt:Term` accepts a value whose
-   `is_a` is `eigentt:Term.App` with no change. Argument ORDER lives in the declaration's ordered
+   `is_a` is `eigentt:Term-App` with no change. Argument ORDER lives in the declaration's ordered
    `core:arg_types`, so a value cannot get it wrong; positional indexing disappears from the value.
 
    **`core:ctor` goes too.** The constructor is what `is_a` names. Step 1 below was going to declare
@@ -402,7 +402,7 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    intent is declared rather than incidental.
 
    **What `is_a` admits, and why it is NOT widened.** A value names its **constructor's class** —
-   `is_a: [eigentt:Term.App]` — which is a `core:Class`, so `core:is_a` needs no change at all.
+   `is_a: [eigentt:Term-App]` — which is a `core:Class`, so `core:is_a` needs no change at all.
    Only `core:subclass_of` does, so the constructor class can name the inductive.
 
    Step 1 first widened `core:is_a` too, on the reading that a value names the inductive. It does
@@ -423,8 +423,25 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    holds a LIST, and that open-coded case folded back into it: three fields that reference a type
    share one walk instead of two plus a special case.
 
-   **Naming, and why nothing is shared.** A constructor class is `<inductive>.<Ctor>`; an argument
-   property is `<inductive>.<Ctor>.<arg>`, fully qualified. An earlier draft scoped properties per
+   **Naming: `-` is the separator, and it is forced.** A constructor class is
+   `<inductive>-<Ctor>`; an argument property is `<inductive>-<Ctor>-<arg>`, fully qualified.
+
+   *Not `.`, which an earlier draft used.* ESL admits `[A-Za-z0-9_]` in a bare identifier and
+   `[A-Za-z0-9_-]` in the quoted form `'…'` — **`.` is in neither**, so a dotted `eigentt:Term.App`
+   is unspellable in ESL however it is written, and
+   [`print.rs`](../../kernel/src/esl/print.rs#L96) hard-errors on such a local name rather than
+   emitting something unreadable. A derived class carrying a dot would break ESL printing of every
+   chain that contained one.
+
+   *Not `_` either.* It is in the bare charset, but it is ambiguous: constructor names in the tree
+   are full of underscores (`cat_np`, `conn_and`, `m_app`), so an inductive `A_B` with constructor
+   `C` and an inductive `A` with constructor `B_C` would both derive `A_B_C`. For a MECHANICAL
+   projection that is a collision waiting to happen.
+
+   `-` is unambiguous because **no component can contain one**: measured across every
+   JSON-declared inductive, constructor and argument name in the tree, all match `[A-Za-z0-9_]+`
+   exactly. Splitting on `-` therefore recovers the parts. And it is spellable — `eigentt:'Term-App'`
+   — through the quoted form, which exists for precisely this: a name outside the bare charset. An earlier draft scoped properties per
    inductive so that a name reused across constructors at the same type shared one declaration —
    17 of the 88 could have — and named them `eigentt:App.fn`. That is prettier and wrong for a
    DERIVED scheme: sharing requires a same-name-same-type analysis across constructors, and the two
@@ -466,7 +483,7 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    abbreviate here.
 
    What remains underneath is a **different and much broader question**: an inductive value now
-   carries full property IRIs (`urn:eigenius:eigentt:Term.App.fn`), and so does every other resource in
+   carries full property IRIs (`urn:eigenius:eigentt:Term-App-fn`), and so does every other resource in
    the system. Whether Eigon-JSON and Eigon-CBOR should abbreviate property IRIs is a codec question
    about ALL resources, not about inductive values, and it does not belong in this note. The size
    argument that made an earlier draft treat it as a design fork does not survive the storage layer
