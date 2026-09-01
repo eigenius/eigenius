@@ -120,7 +120,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:c3fed96d2117a4c8e029fb2a829bd2b9c6caaa282d82d1300e9e2b624ee6c728
+const EXPECTED: &str = "core:27cdb4ba18e9b5cd997165a56d3ec1c1490c3e65bb4a6460d6affc9e60b05a3c
 eigentt-type-fragment:caf2da6f1bdfc92540fcf72d43831f82d0b9c953f295f0f6e17de1fcb84abced
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
 reflection:80a5d9528b99ab2dc5a64e33f0bdf1c2cae4371fa26cce8375f625d59687ee6a

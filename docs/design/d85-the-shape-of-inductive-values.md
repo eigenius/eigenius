@@ -17,16 +17,24 @@ claims are what made D83 and D84 unusable, and the discipline is the point of th
 
 ## 1. What is decided
 
-An inductive **value** is a `Resource`. It states its own type, carries its constructor and its
+An inductive **value** is a `Resource`. It states its own type, names its constructor, carries its
 arguments, and is subject to the rules every resource is subject to:
 
 ```json
 {
-  "urn:eigenius:core:is_a":  ["urn:eigenius:eigentt:Term"],
-  "urn:eigenius:core:ctor":  "App",
-  "urn:eigenius:core:args":  [ … ]
+  "urn:eigenius:core:is_a":        ["urn:eigenius:eigentt:Term.App"],
+  "urn:eigenius:eigentt:App.fn":   { … },
+  "urn:eigenius:eigentt:App.arg":  { … }
 }
 ```
+
+**The constructor is what `is_a` names**, and each argument is a **declared property** on the
+constructor's class. There is no `core:ctor` and no `core:args` — §6.1 settles why, and the whole of
+it follows: arity is Rule 1, argument types are Rules 5 and 6, and a constructor class is
+`subclass_of` the inductive so a slot declaring `class_types eigentt:Term` accepts the value
+unchanged. An earlier draft of this section put the constructor in `core:ctor` and the arguments in a
+positional `core:args` array; that shape is gone, and the question of how `core:args` declared its
+element types is what removing it dissolved.
 
 Inline, it is `Value::Embedded`. Named, it is **the resource's IRI** — and the design deliberately
 does not say which variant carries that IRI, because nothing may depend on it. Reading a reference
@@ -235,7 +243,7 @@ variables in JSON, only because the mirror is JSON.
 |---|---|---|
 | [`encode_type` / `decode_type`](../../kernel/src/program/eigentt_type_mirror.rs#L75) | `serde_json::Value` tagged dicts | `Exp` ↔ `Value` bridges |
 | `eigentt:Term.CtorApp` | 2 args + an `App` spine | `Embed(value)`, 1 arg |
-| [Rule 16 walker](../../kernel/src/validation/rules/inductive.rs#L192) | walks JSON against the SLOT's inductive | deleted; Rule 23 + a one-level rule |
+| [Rule 16 walker](../../kernel/src/validation/rules/inductive.rs#L192) | walks JSON against the SLOT's inductive | deleted, and replaced by NOTHING — Rule 23 recurses, Rule 1 checks arity, Rules 5 and 6 check argument types (§6.1) |
 | `json_mentions` | JSON twin of `value_refs` | deleted |
 | `alpha_canonicalize_proposition_json` | α-equivalence on JSON | on `Exp` |
 | authored values in shipped ontologies | 114 tagged dicts in 5 slots | resource form |
@@ -254,7 +262,7 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 
 | # | step | green after |
 |---|---|---|
-| 1 | `core:is_a` admits `core:InductiveType`; generate the 96 constructor classes and ~83 argument properties (§6.1), **with the two-sided closedness check** — a class `subclass_of` an inductive must be declared in that inductive's own layer and must correspond to an entry in its `core:ctors`. Without it the rule silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
+| 1 | `core:subclass_of` admits `core:InductiveType`, so a constructor class can name its inductive; generate the 96 constructor classes and ~83 argument properties (§6.1), **with Rule 25**, the two-sided closedness check (§6.1) — a class `subclass_of` an inductive must be declared in that inductive's own layer AND correspond to an entry in its `core:ctors`. Without it §6.1 silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
 | 2 | Migrate the 114 authored values; they parse as `Embedded` natively and round-trip through CBOR unchanged. | yes |
 | 3 | `encode_type` emits value resources and `decode_type` reads them; `CtorApp` → `Embed`. The one irreducible step, and it is smaller than D84 §7's version because 1, 2, 4 and 5 are outside it. | yes |
 | 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
@@ -316,20 +324,23 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    satisfy every slot declaring `class_types eigentt:Term` — `is_instance_of_any` walks
    `subclass_of` — while no match arm covers it and no eliminator handles it.
 
-   **So the rule, two-sided:**
+   **So the rule — RULE 25, two-sided.** Rules 0–24 are in use (2 and 11 are historical gaps);
+   this is the next number, and it needs one because steps 2 onward and §5's table refer to it.
 
    1. A class whose `subclass_of` names a `core:InductiveType` may be declared **only in the layer
       that declares that inductive**. A lower layer cannot reference a higher one, so same-layer is
       the only locality that admits anything at all; the content of the rule is the refusal of every
       layer above.
    2. It must correspond to an entry in that inductive's `core:ctors`. This is the load-bearing
-      half: `core:ctors` stays the authority, and it is what exhaustiveness already reads, so the
-      class cannot introduce a constructor the eliminator does not know about even within the
-      declaring layer.
+      half: `core:ctors` stays the authority, and it is what exhaustiveness already reads
+      ([`program/expr.rs:742`](../../kernel/src/program/expr.rs#L742)), so the class cannot introduce
+      a constructor the eliminator does not know about even within the declaring layer.
 
    Both are commit-time checks on the shape of a declaration, in the same family as Rule 22's
    same-or-lower resolution. Without them §6.1 converts a closed type into an open one silently,
-   which is the one thing the inductive/class distinction exists to prevent.
+   which is the one thing the inductive/class distinction exists to prevent — and the distinction is
+   why an inductive is NOT declared `subclass_of core:Class`, which would have made every inductive
+   open by the same mechanism.
 
    **How the two shapes are admitted — and the answer that was tried first and withdrawn.**
    `core:is_a` and `core:subclass_of` now accept EITHER kind of type, a `core:Class` or a
@@ -350,13 +361,27 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    way this resolved, and `core:description` is now a `recommends` on `core:InductiveType` so the
    intent is declared rather than incidental.
 
+   **What `is_a` admits, and why it is NOT widened.** A value names its **constructor's class** —
+   `is_a: [eigentt:Term.App]` — which is a `core:Class`, so `core:is_a` needs no change at all.
+   Only `core:subclass_of` does, so the constructor class can name the inductive.
+
+   Step 1 first widened `core:is_a` too, on the reading that a value names the inductive. It does
+   not, and permitting it is worse than redundant: `is_a: [eigentt:Term]` says *some Term,
+   constructor unspecified*, which has no arity and no argument types, so Rule 1 and Rules 5 and 6
+   have nothing to check. That is the underspecified shape this design exists to make
+   inexpressible, and `a_value_may_not_name_the_inductive_itself` now pins its rejection. The
+   widening was withdrawn.
+
+   The distinction is worth stating once: `subclass_of` and `class_types` name a **type**, and a
+   type is a `core:Class` or a `core:InductiveType`; `is_a` names the **class an instance
+   inhabits**, and an instance of an inductive inhabits a constructor's class.
+
    **Two rejections, not one, and the second was invisible from the first.** `is_a: [eigentt:Term]`
-   failed Rule 8 (`ClassTypeMismatch`), because `is_a` admitted only `core:Class` and
-   `is_subclass_of` walks `subclass_of`, never `is_a`. `subclass_of: [eigentt:Term]` failed a
-   *different* rule — Rule 22's `ReferenceCheck` — which held ONE expected class, which is why
-   `class_types` had open-coded its Class-or-InductiveType case around it. `ReferenceCheck` now
-   holds a LIST, and that open-coded case folded back into it: three fields that reference "a
-   type" now share one walk instead of two plus a special case.
+   failed Rule 8 (`ClassTypeMismatch`) — correctly, as it turns out. `subclass_of: [eigentt:Term]`
+   failed a *different* rule — Rule 22's `ReferenceCheck` — which held ONE expected class, which is
+   why `class_types` had open-coded its Class-or-InductiveType case around it. `ReferenceCheck` now
+   holds a LIST, and that open-coded case folded back into it: three fields that reference a type
+   share one walk instead of two plus a special case.
 
    **Measured cost.** 96 constructor classes (59 JSON-declared, 37 ESL), of which 12 are nullary and
    carry no properties at all. 63 distinct argument properties on the JSON side — 88 argument slots
@@ -385,14 +410,21 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    hashing and the manifest, and two changes that can each silently produce wrong results should not
    land together.
 
-   It is the same question as item 1: whether a bare IRI in `core:args` is a reference or a
-   `core:string` literal is decided by the constructor's argument type (R4); whether a bare IRI in a
-   `core:resource` slot is a reference is decided by `data_type`. One fix serves both.
+   It was the same question as item 1 while item 1 still had a `core:args` to ask it of: whether a
+   bare IRI in an argument position is a reference or a `core:string` literal. Item 1's answer
+   removes the position — an argument is a declared property now, so its `data_type` decides,
+   exactly as for every other slot. One answer, reached by deleting the second question.
 
-3. **The wire abbreviation.** Whether `ctor` / `args` may appear as short keys, expanded on read, the
-   way a `ResourceRef` already serialises as a bare IRI string. A codec table entry, reversible, and
-   explicitly NOT a design fork — an earlier draft made it one on a size argument that does not
-   survive the storage layer setting `DBCompressionType::Lz4`.
+3. **The wire abbreviation — MOOT as posed, `2026-08-31`.** It asked whether `ctor` and `args` may
+   appear as short wire keys, expanded on read. Item 1 removed both, so there is nothing left to
+   abbreviate here.
+
+   What remains underneath is a **different and much broader question**: an inductive value now
+   carries full property IRIs (`urn:eigenius:eigentt:App.fn`), and so does every other resource in
+   the system. Whether Eigon-JSON and Eigon-CBOR should abbreviate property IRIs is a codec question
+   about ALL resources, not about inductive values, and it does not belong in this note. The size
+   argument that made an earlier draft treat it as a design fork does not survive the storage layer
+   setting `DBCompressionType::Lz4` either way.
 
 ---
 

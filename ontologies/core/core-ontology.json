@@ -131,10 +131,10 @@
   {
     "@id": "urn:eigenius:core:is_a",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Declares membership. A resource's is_a is an array of the types it is an instance of — either KIND of type: a core:Class, or a core:InductiveType, since an inductive value carries `is_a: [<the inductive it inhabits>]` (D85 §6.1). This mirrors core:class_types, which has accepted both kinds since D32 §3.5. It does NOT say an inductive is a class: the two have different declaration contracts (ctors versus requires/recommends), and an inductive is CLOSED where a class is open to subclassing by any later layer.",
+    "urn:eigenius:core:description": "Declares class membership. A resource's is_a is an array of the CLASSES it is an instance of. An inductive VALUE names its constructor's class here, not the inductive (D85 §6.1) — `is_a: [eigentt:Term.App]`, not `is_a: [eigentt:Term]` — and the constructor class is subclass_of the inductive, so a slot declaring `class_types eigentt:Term` accepts the value through ordinary subsumption. This is why is_a admits only core:Class where core:subclass_of and core:class_types admit an InductiveType too: a value naming an inductive with NO constructor has no arity and no argument types to check, and is exactly the underspecified shape the design rejects.",
     "urn:eigenius:core:short_name": "is_a",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"]
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"]
   },
   {
     "@id": "urn:eigenius:core:description",
