@@ -1157,33 +1157,16 @@ impl<'a> Parser<'a> {
         if self.at(&TokenKind::LBrace) {
             self.advance();
             let name = self.expect_ident()?;
-            let (kind, bound) = if self.at(&TokenKind::Colon) {
+            let kind = if self.at(&TokenKind::Colon) {
                 self.advance();
-                let kind = self.parse_qualified_name()?;
-                let bound = if self.at(&TokenKind::Less) {
-                    self.advance();
-                    Some(self.parse_qualified_name()?)
-                } else {
-                    None
-                };
-                (kind, bound)
-            } else if self.at(&TokenKind::Less) {
-                self.advance();
-                let bound = self.parse_qualified_name()?;
-                (
-                    QualifiedName {
-                        namespace: None,
-                        name: "Size".to_string(),
-                        pos: pos.clone(),
-                    },
-                    Some(bound),
-                )
+                self.parse_qualified_name()?
             } else {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
                     format!(
-                        "expected ':' or '<' after binder name in type expression, \
-                         found {:?}",
+                        "expected ':' after binder name in type expression, found {:?}. \
+                         The bounded form `{{j : K < b}}` and its sized shorthand `{{j < b}}` \
+                         were removed with sized types (eigenius#218)",
                         self.peek()
                     ),
                 ));
@@ -1194,7 +1177,6 @@ impl<'a> Parser<'a> {
             return Ok(Term::BinderArrow {
                 name,
                 kind,
-                bound,
                 body: Box::new(body),
                 pos,
             });

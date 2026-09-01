@@ -836,13 +836,12 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
         "Var" => Ok(arg0()
             .ok_or_else(|| "`Var` type_name takes a name".to_string())?
             .to_string()),
-        "SizeSort" => Ok("Size".to_string()),
         "ConstRef" => Ok(arg0()
             .ok_or_else(|| "`ConstRef` type_name takes an IRI".to_string())?
             .to_string()),
         other => Err(format!(
             "InductiveArgType `type_name` head `{other}` is not a type reference — expected \
-             `Var`, `ConstRef` or `SizeSort`"
+             `Var` or `ConstRef`"
         )),
     }
 }

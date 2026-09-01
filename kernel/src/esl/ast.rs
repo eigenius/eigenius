@@ -575,15 +575,15 @@ pub enum Term {
         codomain: Box<Term>,
         pos: Position,
     },
-    /// Size-binder arrow `{j < bound} -> body` (sized) or
-    /// `{j : Kind} -> body` (unbounded) or
-    /// `{j : Kind < bound} -> body`.
-    /// Compiles to `Exp::SizedPi` when bound is present and kind is
-    /// `Size`; to plain `Exp::Pi` otherwise.
+    /// Dependent binder arrow `{j : Kind} -> body`. Compiles to `Exp::Pi`.
+    ///
+    /// It also carried a `bound`, for `{j : Kind < b}` and its shorthand `{j < b}`, which
+    /// compiled to `Exp::SizedPi`. Both went with sized types (eigenius#218) — and the bound
+    /// was already unwritable before that: it emitted a `core:binder_bound` property that
+    /// `core-ontology.json` never declared, so Rule 22 rejected any resource carrying one.
     BinderArrow {
         name: String,
         kind: QualifiedName,
-        bound: Option<QualifiedName>,
         body: Box<Term>,
         pos: Position,
     },

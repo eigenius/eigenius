@@ -648,11 +648,6 @@
       },
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
-        "urn:eigenius:core:ctor_name": "SizeSort",
-        "urn:eigenius:core:arg_types": []
-      },
-      {
-        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
         "urn:eigenius:core:ctor_name": "Var",
         "urn:eigenius:core:arg_types": [
           {

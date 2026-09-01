@@ -122,3 +122,42 @@ Both are in git history, and this note records what they were and what removed t
   that is not about codata is re-pointed rather than dropped.
 - `cargo test --workspace`, `clippy -D warnings`, `fmt` clean; then reseed, alignment, WRN demo and
   the parse gate, as `2026-08-23`.
+
+---
+
+## 6. What the removal missed, and when it was finished *(`2026-09-01`)*
+
+§3's inventory was executed for the Rust term language and the codata ontology classes.
+`SizedPi`, `SizeInf`, `SizeSucc`, `CodataType`, `CtorArg::Size` and the D47 decoder's `SizeSort`
+arm all went. **The ESL surface did not**, though §3 listed it — *"the `Size` / `Inf` compiler
+built-ins"* — and neither did `eigentt:Term`'s `SizeSort` constructor, which §3's ontology line
+never mentioned because it covered only the codata classes.
+
+The result was a **producer without a reader**: the compiler still turned a bare `Size` into
+`{"ctor": "SizeSort", "args": []}` and the codec could no longer decode it. Nothing authored
+exercised the path — no ESL declares a `Size` kind, no chain carries a `SizeSort` value — which is
+why nine months of green tests said nothing. It surfaced only when D85 step 2 used `SizeSort` as a
+convenient nullary constructor in a test.
+
+The bounded binder was worse than dead. `{j : K < b}` and its shorthand `{j < b}` compiled to a
+`core:binder_bound` property that **`core-ontology.json` never declared**, so Rule 22 §c rejected
+any resource carrying one: the construct could be written and could not be committed. It is the
+same drift as `binder_name` / `core:binder_name` (eigenius#221) — the surface emitted one name and
+the ontology declared another.
+
+Removed:
+
+| | |
+|---|---|
+| `Size` / `Inf` compiler built-ins | `esl/compile.rs`, 9 sites |
+| the bounded binder `{j : K < b}` and `{j < b}` | `esl/parser.rs`, `ast::Term::BinderArrow::bound` |
+| `core:binder_bound` | `well_known.rs` — written by the compiler, read by nothing, declared nowhere |
+| the `SizeSort` → `"Size"` mapping | `program/ground.rs` |
+| the `SizeSort` constructor | `eigentt:Term` in `core-ontology.json` — a **bootstrap edit** |
+
+`{j : K} -> body` is UNAFFECTED: it is the general dependent binder, compiles to `Exp::Pi`, and
+only the `< bound` half was sized.
+
+**Lesson.** Removing a reader without its producer leaves a shape that can be written and not read,
+and no test fails because nothing writes it. The inventory listed the surface; the surface was the
+part that got skipped.

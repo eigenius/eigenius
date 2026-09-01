@@ -291,16 +291,11 @@ the migration then rewrites values a reader already accepts.
 
 ## 6. Open
 
-0. **`eigentt:Term` declares a constructor the D47 codec cannot decode.** The inductive declares
-   20 constructors including `SizeSort`; `decode_type_json` has no arm for it, so
-   `{"ctor": "SizeSort", "args": []}` fails with *"unknown eigentt:Term ctor"*. Found while
-   testing step 2, and **pre-existing** — the two shapes disagree about what the type has, in
-   whichever encoding. Nothing authored uses it (`SizeSort` appears in no chain value), which is
-   why it has gone unnoticed. Either the codec gains the arm or the declaration loses the
-   constructor; both are small, and which one is right depends on whether sized types are coming
-   back after eigenius#218 retired them.
-
-
+0. **~~`eigentt:Term` declares a constructor the D47 codec cannot decode.~~ FIXED `2026-09-01`.**
+   `SizeSort` was a remnant of an incomplete removal, not an open question. Recorded here first as
+   *"depends on whether sized types return after eigenius#218 retired them"*, which was wrong: #218
+   decided **remove both** on `2026-08-23` and the decision stands. What survived was the ESL
+   surface, and it is gone now — see the note appended to `218-retire-codata-and-sized-types.md`.
 
 1. **`core:args` element typing — DECIDED `2026-08-31`: there is no `core:args`.** A constructor
    gets a **class**; each argument becomes a **named property** on that class. The question dissolves

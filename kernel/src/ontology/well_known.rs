@@ -348,11 +348,6 @@ pub const VERDICT_UNDECIDABLE: &str = "Undecidable";
 /// Π/SizedPi binder rather than an anonymous positional type.
 pub const BINDER_NAME: &str = "urn:eigenius:core:binder_name";
 
-/// Upper bound for a bounded size binder (Phase 11b step 15h).
-/// Only meaningful alongside `binder_name` with kind `Size`; carries
-/// the rigid size variable or `Inf` the binder is strictly below.
-pub const BINDER_BOUND: &str = "urn:eigenius:core:binder_bound";
-
 // --- Term resource shapes for codata observation types (Phase 11b step 15h.3) ---
 
 /// is_a marker for a non-dependent arrow `A -> B` in a codata

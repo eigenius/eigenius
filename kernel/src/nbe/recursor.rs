@@ -158,8 +158,7 @@ pub fn derive_minor_type(
     // Wrap one IH binder per recursive argument, in original order
     // (rev iteration so the first recursive arg ends up outermost
     // among the IHs, matching iota_reduce's application order).
-    // Only `MinorArg::Value` entries can be recursive occurrences —
-    // size binders always have domain `SizeSort`.
+    // Only `MinorArg::Value` entries can be recursive occurrences.
     let recursive_indices: Vec<usize> = arg_specs
         .iter()
         .enumerate()

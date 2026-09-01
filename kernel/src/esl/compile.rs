@@ -134,17 +134,14 @@ fn var_value(name: &str) -> Value {
     Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
 }
 
-/// A bare (unqualified) kind name as a `Term` value.
+/// A bare (unqualified) kind name as a `Term` value: a reference to a type parameter in scope.
 ///
-/// `Size` is the one bare name that is not a parameter reference — it is the size sort, which
-/// `decode_param_kind_str` has always special-cased. Everything else unqualified is a reference
-/// to a type parameter in scope.
+/// `Size` used to be the one bare name that was not a parameter reference — it was the size
+/// sort, emitted as `SizeSort`. Sized types were removed by eigenius#218, and the decoder's
+/// `SizeSort` arm went with them, so the compiler was still producing a constructor nothing
+/// could read.
 fn bare_kind_value(name: &str) -> Value {
-    if name == "Size" || name.ends_with(":Size") {
-        Value::Json(serde_json::json!({"ctor": "SizeSort", "args": []}))
-    } else {
-        var_value(name)
-    }
+    var_value(name)
 }
 
 pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
@@ -564,7 +561,6 @@ fn expand_aliases(typ: &ast::Term, env: &BTreeMap<String, ast::Term>) -> ast::Te
         ast::Term::BinderArrow {
             name,
             kind,
-            bound,
             body,
             pos,
         } => {
@@ -573,7 +569,6 @@ fn expand_aliases(typ: &ast::Term, env: &BTreeMap<String, ast::Term>) -> ast::Te
             ast::Term::BinderArrow {
                 name: name.clone(),
                 kind: kind.clone(),
-                bound: bound.clone(),
                 body: Box::new(expand_aliases(body, &inner)),
                 pos: pos.clone(),
             }
@@ -976,9 +971,10 @@ impl Compiler {
     /// One function for all three telescope sites — `codata` params, `data` params, `data`
     /// indices. They were three copies of this match, and the copies had already drifted: the
     /// `codata` param site called `var_value` where the other two called `bare_kind_value`, so a
-    /// `Size`-kinded codata parameter lowered to `Var("Size")` — a reference to a binder that does
-    /// not exist — instead of `SizeSort`. Nothing caught it, because nothing type-checked a
-    /// declaration's telescope until `check_inductive_decl_telescopes`.
+    /// `Size`-kinded parameter lowered to `Var("Size")` — a reference to a binder that does not
+    /// exist — instead of the size sort. Nothing caught it, because nothing type-checked a
+    /// declaration's telescope until `check_inductive_decl_telescopes`. Both the drift and the
+    /// sized machinery it turned on are gone (eigenius#218); the lesson is why this is one match.
     ///
     /// A bare name is a reference to an earlier parameter when one is in scope, and otherwise the
     /// size sort or a namespace-resolved IRI. A sort keyword is `Sort(level)`, so `Sort u` works
@@ -994,11 +990,6 @@ impl Compiler {
             ast::IndexKind::Named(qn) => {
                 if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
                     var_value(&qn.name)
-                } else if qn.namespace.is_none() && qn.name == "Size" {
-                    // `Size` is the sort of size values, not a chain-resident class — the ESL
-                    // surface spells it as a bare name and the compiler is where it becomes a
-                    // sort. See `docs/notes/p2-n2-sized-types-wire-or-delete.md` §3.
-                    Value::Json(serde_json::json!({"ctor": "SizeSort", "args": []}))
                 } else {
                     const_ref_value(&self.resolve(qn)?)
                 }
@@ -1269,7 +1260,7 @@ impl Compiler {
             ast::Term::Ref { name, args, .. } => {
                 let resolved = if name.namespace.is_none() {
                     let n = name.name.as_str();
-                    if scope.contains(n) || n == "Inf" || n == "Size" {
+                    if scope.contains(n) {
                         n.to_string()
                     } else {
                         self.resolve(name)?
@@ -1320,39 +1311,17 @@ impl Compiler {
                     .to_string(),
             )),
             ast::Term::BinderArrow {
-                name,
-                kind,
-                bound,
-                body,
-                ..
+                name, kind, body, ..
             } => {
                 let mut ar = Resource::new_embedded();
                 set_is_a(&mut ar, wk::TYPE_BINDER_ARROW);
                 ar.set(iri(wk::BINDER_NAME), Value::String(name.clone()));
-                let kind_str = if kind.namespace.is_none() {
-                    let n = kind.name.as_str();
-                    if scope.contains(n) || n == "Inf" || n == "Size" {
-                        n.to_string()
-                    } else {
-                        self.resolve(kind)?
-                    }
+                let kind_str = if kind.namespace.is_none() && scope.contains(kind.name.as_str()) {
+                    kind.name.clone()
                 } else {
                     self.resolve(kind)?
                 };
                 ar.set(iri(wk::BINDER_KIND), Value::String(kind_str));
-                if let Some(b) = bound {
-                    let bound_str = if b.namespace.is_none() {
-                        let n = b.name.as_str();
-                        if scope.contains(n) || n == "Inf" || n == "Size" {
-                            n.to_string()
-                        } else {
-                            self.resolve(b)?
-                        }
-                    } else {
-                        self.resolve(b)?
-                    };
-                    ar.set(iri(wk::BINDER_BOUND), Value::String(bound_str));
-                }
                 // The body sees the binder `name` in scope.
                 let mut body_scope = scope.clone();
                 body_scope.insert(name.as_str());
@@ -1792,18 +1761,11 @@ impl Compiler {
                 Ok(body)
             }
             ast::Term::BinderArrow {
-                name,
-                kind,
-                bound: _,
-                body,
-                ..
+                name, kind, body, ..
             } => {
-                // Size-binder arrows are typically used in sized
-                // codata; axiom statements rarely involve sizes. v1
-                // lowers as a plain Pi for non-size kinds and a
-                // SizeSort-typed binder for size kinds. Bound
-                // (upper bound for sized) is currently ignored — sized
-                // axiom statements need a follow-on.
+                // A binder arrow lowers as a plain Pi. It also had a sized form, lowering to a
+                // SizeSort-typed binder with an ignored upper bound; that went with sized types
+                // (eigenius#218).
                 let kind_str = self.resolve(kind)?;
                 let iri_val = Iri::parse(&kind_str).map_err(|e| {
                     EslError::compiler(
@@ -2009,18 +1971,9 @@ impl Compiler {
                 }))
             }
             ast::Term::BinderArrow {
-                name,
-                kind,
-                bound: _,
-                body,
-                ..
+                name, kind, body, ..
             } => {
-                // Size-binder arrows are rare in type_expr — defer to
-                // the leaf path which handles SizeSort correctly.
                 let kind_str = self.resolve(kind)?;
-                if kind_str.ends_with(":Size") || kind_str == "Size" {
-                    return encode_leaf(self, typ);
-                }
                 let dom_json = json!({
                     "ctor": "ConstRef",
                     "args": [kind_str],
@@ -2340,12 +2293,13 @@ impl Compiler {
 
         // Resolution rules, in order:
         // 1. Declared type parameter → bare name (decoder emits `Var`)
-        // 2. Built-in size literal (`Inf`) / sort (`Size`) → bare name
-        //    (decoder emits `SizeInf` / `SizeSort` respectively)
-        // 3. Otherwise resolve through the namespace registry
+        // 2. Otherwise resolve through the namespace registry
+        //
+        // A third rule covered the built-in size literal `Inf` and sort `Size`; both went with
+        // sized types (eigenius#218).
         let type_name = if arg.name.namespace.is_none() {
             let n = arg.name.name.as_str();
-            if params.contains(n) || n == "Inf" || n == "Size" {
+            if params.contains(n) {
                 bare_kind_value(&arg.name.name)
             } else {
                 const_ref_value(&self.resolve(&arg.name)?)

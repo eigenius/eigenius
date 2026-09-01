@@ -160,11 +160,8 @@ enum CtorArg {
 /// returning the remaining binders as `CtorArg`s plus the residual
 /// (final) result-type expression.
 ///
-/// Accepts both `Exp::Pi` and `Exp::SizedPi` at non-parameter
-/// positions. Parameter positions are always `Exp::Pi` by
-/// construction — size parameters have type `SizeSort` but the
-/// binder itself is a plain Pi, so `params_to_skip` only ever
-/// applies to `Pi`.
+/// Every position is an `Exp::Pi`. It also accepted `Exp::SizedPi` at non-parameter positions
+/// until sized types were removed (eigenius#218).
 /// Validate (D48 Phase B) every ctor's terminal application against the
 /// declaration's index telescope.
 ///
@@ -272,10 +269,6 @@ pub(super) fn validate_indexed_ctor_conclusions(
 /// `validate_indexed_ctor_conclusions` so index expressions in a ctor
 /// conclusion may refer to both the params and the ctor's value args.
 ///
-/// Size binders (`CtorArg::Size`) bind a variable of type `SizeSort`
-/// without a TSO hypothesis — sufficient for type-checking index
-/// expressions that mention the size, though such expressions are
-/// uncommon in D48 v1.
 fn ctx_with_param_and_arg_binders(
     ctx: &CheckCtx,
     decl: &InductiveDecl,

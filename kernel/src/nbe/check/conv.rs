@@ -274,8 +274,7 @@ pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<b
 /// - `Some(true)` — definitely propositional (`Val::Id`, sort-Sort(0)
 ///   inductive/codata).
 /// - `Some(false)` — definitely not propositional (universes, primitives,
-///   `One`, `SizeSort`, anonymous codata, EigonClass / EigonPrimitive,
-///   inductive/codata at higher sorts).
+///   `One`, EigonClass / EigonPrimitive, inductive at higher sorts).
 /// - `None` — undecidable from shape alone; caller falls back to
 ///   inference. Reaches Pi, Sig, neutrals, lambdas/values reachable
 ///   through the catch-all.
