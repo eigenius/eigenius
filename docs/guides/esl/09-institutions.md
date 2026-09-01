@@ -18,7 +18,7 @@ Five resource shapes carry the institution surface (D14 §4). All of them are or
 | `QueryClass` | `query_class` (input), `result_class`, `dispatch_role` ⊆ `{OnDemand, AutoOnLoad, Decidable}`, `query_handler`, `institution_ref`. |
 | `Comorphism` | `export_format`, `transformation` (a EigenTT Component), `import_format`, `exact: bool`. |
 
-ESL doesn't *require* you to write these by hand — the `eigenius-wasm-sdk::institution` module's [`InstitutionDecl`](../../../sdk/wasm-sdk/src/institution.rs), `ExportFormatDecl`, `ImportFormatDecl`, `QueryClassDecl`, and `ComorphismDecl` builders construct them programmatically. But the resources they produce are ordinary Eigon, and an ESL author can read and reason about them through the layer.
+These are ordinary Eigon resources, so an ESL author can read and reason about them through the layer. (`eigenius-wasm-sdk::institution` used to offer `InstitutionDecl` / `ExportFormatDecl` / `ImportFormatDecl` / `QueryClassDecl` / `ComorphismDecl` builders that constructed them programmatically; the SDK went with the WASM extension path on `2026-07-08`.)
 
 The kernel's [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) is a derived index built by scanning the chain (D14 §3); ESL's compile-time classifier uses it. There is no separate `register()` call any more — committing the declarations to the chain *is* registration.
 
@@ -85,7 +85,7 @@ Lam(input,
 
 **At runtime:** same dispatch path, through an IO-tier engine. An `Undecidable` from check time becomes a runtime call with the same outcome semantics.
 
-**Synthetic input shape.** The kernel constructs a synthetic input resource of the QueryClass's declared `query_class`. Positional arguments are attached as the property `urn:eigenius:institution:decide_args` (an array). Institutions whose handlers expect named-property inputs (typical when the QC is also FIBER-callable) read the args off named properties; institutions whose handlers expect positional args read `decide_args`. The dock-assay demo's [`AssayInstitution::within_tolerance_verdict`](../../../examples/wasm-d14-assay/src/lib.rs) shows both shapes side by side.
+**Synthetic input shape.** The kernel constructs a synthetic input resource of the QueryClass's declared `query_class`. Positional arguments are attached as the property `urn:eigenius:institution:decide_args` (an array). Institutions whose handlers expect named-property inputs (typical when the QC is also FIBER-callable) read the args off named properties; institutions whose handlers expect positional args read `decide_args`. The dock-assay demo showed both shapes side by side in `examples/wasm-d14-assay`, deleted with the WASM path; [`kernel/tests/dock_assay_demo.rs`](../../../kernel/tests/dock_assay_demo.rs) is the surviving in-process version.
 
 **Default behaviour.** Institutions whose runtime returns `NotImplemented` for a procedure surface as a runtime evaluation error at dispatch time. There is no longer a "silent Undecidable" fallback (the D10 behaviour) — under D14, `Undecidable` is a *value the institution returns*, not a default the kernel substitutes when reasoning is unavailable.
 
@@ -222,7 +222,7 @@ let runtime_ctx = EvalCtx::effectful(Some(Arc::clone(&layer)), Arc::new(engine))
 
 For a check-time context — institution constraints fire, components do not dispatch — use `InstitutionEngine::for_check(layer, index, runtime)` instead.
 
-For the WASM-hosted variant, see [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs) — it constructs the same surface but with `WasmInstitution` instances auto-registered from a child layer carrying `runtime: wasm` + inline `wasm_binary` declarations.
+There was a WASM-hosted variant (`d14_dock_assay_demo_wasm.rs`) constructing the same surface with `WasmInstitution` instances auto-registered from a child layer carrying `runtime: wasm` + inline `wasm_binary` declarations. It went with the WASM extension path on `2026-07-08`; [`kernel/tests/dock_assay_demo.rs`](../../../kernel/tests/dock_assay_demo.rs) remains.
 
 See [`docs/design/life-science-requirements.md`](../../design/life-science-requirements.md) for the original motivating discussion.
 
@@ -250,12 +250,20 @@ Cross-link: [EigenQL chapter 8](../eigenql/09-institutions.md) covers the same t
 | [`kernel/src/esl/compile.rs`](../../../kernel/src/esl/compile.rs) | Compile-time classification of `Apply` expressions through `InstitutionIndex` |
 | [`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) | `NativeDecide` check arm — fires Decidable QueryClasses at type-check time |
 | [`kernel/src/nbe/eval/mod.rs`](../../../kernel/src/nbe/eval/mod.rs) | `decide_constraint` evaluation |
-| [`kernel/src/capability/registration.rs`](../../../kernel/src/capability/registration.rs) | `build_wasm_institution_runtime` — auto-registration from chain scan |
-| [`kernel/src/capability/wasm_institution_d14.rs`](../../../kernel/src/capability/wasm_institution_d14.rs) | `WasmInstitution` host bridge to the `eigenius-institution-d14` WIT world |
+| [`kernel/src/capability/registration.rs`](../../../kernel/src/capability/registration.rs) | chain scan → backends: `register_in_process_institutions` (Rust, registered at startup) and `register_external_institutions` (gRPC to the orchestrator) |
 
-## 9.10. The reasoning institution — D39 Justification Logic
+The WASM row this table used to carry — `wasm_institution_d14.rs`, the host bridge to the
+`eigenius-institution-d14` WIT world — named a file deleted with the WASM extension path on
+`2026-07-08`. `build_wasm_institution_runtime` does not exist either. [Chapters 9](../platform/09-wasm-components.md)
+and [10](../platform/10-wasm-institutions.md) of the platform guide are retained as a record of that path.
 
-The reasoning institution lets chain authors commit **reasoning sentences**: triples of (proposition in `Prop`, justification term, type-checked certificate) where the certificate is a `justification:Certificate(justification, proposition)` term the kernel verifies at commit time. It is the surface that turns Eigenius's four epistemic categories ([Declared / Observed / Derived / Verified](../../../docs/guides/README.md)) into composable evidence inside the type theory — distinct evidence chains for the same proposition produce judgmentally-equal certificates ([§7.1 proof irrelevance](07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)), and the audit trail from "this reasoning sentence Holds" to "these chain artifacts admitted these witnesses" cannot be broken because the [D49 chain-witness](../../design/d49-chainwitness-machinery.md) admission mechanism is the only path to the grounding constructors. Design: [D39](../../design/d39-justification-logic.md); implementation: [`crates/eigenius-reasoning/`](../../../crates/eigenius-reasoning/); ontology: [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl).
+## 9.10. The justification vocabulary — D39 Justification Logic
+
+Chain authors commit **conclusions**: a `justification:Conclusion` carrying one judgement, `holds(kernel, c, Certificate(j, P))`, read as *the kernel verified that certificate `c` grounds a claim to `P`*. It is the vocabulary that turns Eigenius's epistemic grounds into composable evidence inside the type theory — distinct evidence chains for the same proposition produce judgmentally-equal certificates ([§7.1 proof irrelevance](07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)), and the audit trail from a checked conclusion to the chain artifacts that admitted its witnesses cannot be broken, because the [D49 chain-witness](../../design/d49-chainwitness-machinery.md) admission mechanism is the only path to the grounding constructors.
+
+**This is not an institution, and it stopped being one.** A Reasoning institution used to own the check and dispatch it as an AutoOnLoad QueryClass. Checking a certificate is type checking, which the kernel does not delegate, so it moved into ordinary commit-time validation and the institution — having nothing else to host — was deleted along with its ExportFormat, its four QueryClasses, and the `urn:eigenius:reasoning` namespace entirely. What remains is vocabulary the kernel checks directly, which is what §9.11 means by a logic supplying vocabulary rather than authority.
+
+Design: [D39](../../design/d39-justification-logic.md), superseded by [D73](../../design/d73-justification-logic-witnesses-and-traces.md) and the paper; ontology: [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl); the check: [`kernel/src/validation/rules/eigentt_value.rs`](../../../kernel/src/validation/rules/eigentt_value.rs).
 
 ### 9.10.1. The five `justification:Term` constructors
 
@@ -391,26 +399,123 @@ Note what is NOT consulted: the `StatisticalAnalysisResult` the institution emit
 
 The full fixture this snippet is drawn from lives at [`kernel/tests/fixtures/drug_screening.esl`](../../../kernel/tests/fixtures/drug_screening.esl); the matching test exercises the AutoOnLoad pipeline end-to-end.
 
-### 9.10.5. Query classes (D39 §4.3)
+### 9.10.5. Where the check happens
 
-The institution registers three QueryClasses:
+**At commit, in ordinary validation — there is no QueryClass.** `justification:judgement` is an
+`eigentt:Judgement`-ranged slot, and **Rule 21** owns every such slot
+([`kernel/src/validation/rules/eigentt_value.rs`](../../../kernel/src/validation/rules/eigentt_value.rs)):
+decode the judgement, check its `type` is a type, then check its `term` against that type in check
+mode. Checking `holds(kernel, c, Certificate(j, P))` therefore checks that `c` inhabits
+`Certificate(j, P)` — the whole obligation, discharged by the rule that already existed for
+annotated terms. Committing a conclusion whose certificate does not type-check fails validation and
+the commit is rejected.
 
-| QueryClass | Dispatch role | Input | Behavior |
-|---|---|---|---|
-| `qc_validate_justification` | **AutoOnLoad** | A `justification:Conclusion` resource | Type-checks the certificate at commit; Holds → admit, Fails → reject with structured diagnostic. |
-| `qc_entailment_query` | **OnDemand** | An `EntailmentRequest` carrying a candidate proposition | v1 lookup-based: walks the layer chain for committed `justification:Conclusion`s whose proposition matches the candidate; Holds on hit, Undecidable on miss. Bounded-depth proof search is follow-on work. |
-| `qc_consistency_check` | **Decidable** | A `ConsistencyRequest` carrying a `sentence_set` | v1 returns Undecidable for any non-trivial input — the propositional-fragment decision procedure is follow-on work. The QueryClass IRI is dispatch-bound so a richer handler can plug in without surface churn. |
+Checking `c` drives the kernel's `synthesize_chain_witness`, which admits a grounding constructor's
+witness argument only when the layer's witness index holds a matching `(category, iri, proposition)`
+key. That is the soundness boundary: a conclusion cannot cite a resource for a proposition the chain
+never admitted. [`kernel/tests/certificate_admission.rs`](../../../kernel/tests/certificate_admission.rs)
+exercises chain → witness index → synthesis → admission, and the three cases where admission must fail.
 
-The AutoOnLoad gate is what makes reasoning sentences load-bearing: every commit fires it, and the chain only admits sentences whose certificates type-check. The OnDemand `qc_entailment_query` is what agents call when asking "does the chain warrant this proposition?" The Decidable `qc_consistency_check` is wired structurally for a future propositional-consistency decider.
+Three routes were deleted rather than rehomed, and the reasons are worth stating because each is a
+claim about what belongs in an institution:
+
+| was | why it went |
+|---|---|
+| `qc_validate_justification` (AutoOnLoad) | checking a certificate is type checking; the kernel does not delegate that |
+| `qc_entailment_query` (OnDemand) | its question — *has a sentence claiming `P` been committed?* — is a witness-index lookup |
+| `qc_consistency_check` (Decidable) | returned `Undecidable` for every non-empty input. A reserved IRI for an unbuilt decision procedure is a follow-up issue pretending to be a feature |
 
 ### 9.10.6. Cross-references
 
-- [`crates/eigenius-reasoning/`](../../../crates/eigenius-reasoning/) — institution implementation (the validator is the kernel's NbE checker; no external runtime).
-- [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl) — full ontology source: ChainWitness predicates, justification:Term, justification:Certificate, justification:Conclusion, QueryClass declarations.
+- [`kernel/src/validation/rules/eigentt_value.rs`](../../../kernel/src/validation/rules/eigentt_value.rs) — Rule 21, the check itself.
+- [`kernel/src/justification/`](../../../kernel/src/justification/) — the support algebra over a retained term: `support`, `is_fully_verified`, `leaves_of`, `survives_without`, `cited_iris`.
+- [`kernel/tests/certificate_admission.rs`](../../../kernel/tests/certificate_admission.rs) — the witness machinery end to end, including where admission must fail.
+- [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl) — full ontology source: justification:Term, justification:Certificate, justification:Conclusion. The `witness:Is*As` predicates it references are declared in [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json), because the kernel constructs their inhabitants and a type the kernel inhabits cannot be owned by a layer above it.
 - [D39 §3-§5](../../design/d39-justification-logic.md) — design rationale, the Justification Logic foundation, and the soundness story.
 - [D49](../../design/d49-chainwitness-machinery.md) — chain-witness machinery the grounding constructors consume.
-- [`platform/reasoning-institution/`](../platform/reasoning-institution/) — operational walkthrough: how to commit reasoning sentences, inspect verdicts, compose with the D52 statistics institution.
-- [Composition guide §1](../composition/01-introduction.md) — where the reasoning institution sits in the composition story.
+- [`platform/reasoning-institution/`](../platform/reasoning-institution/) — operational walkthrough: how to commit conclusions and compose with the D52 statistics institution. **Written against the institution that no longer exists**, so its verdict-inspection material is stale; the vocabulary and the worked chain are not.
+- [Composition guide §1](../composition/01-introduction.md) — where the justification vocabulary sits in the composition story.
+
+## 9.11. Hosting a logic — the operational protocol
+
+The question this section answers is **not** whether a participating logic satisfies the definition
+of an institution. That question is settled and uninteresting: the kernel itself is the degenerate
+proof-theoretic case — no represented models, proofs as the entire content — and an entailment
+system without models is a valid instantiation. The question that decides what a logic may do here
+is operational: **can the system hold and re-check a witness for the claims that logic establishes?**
+
+### 9.11.1. What a logic supplies, and what it may not
+
+A participating logic supplies four things:
+
+| supplies | example |
+|---|---|
+| **vocabulary** — classes, properties, inductives it declares on the chain | `lean:LeanProofTerm`, the D52 statistics claim schema |
+| **a decision procedure yielding a verdict** | Lean's proof check; a statistics plan run against committed observations |
+| **derivation resources** — what its run produced, as chain resources | a computed result, a trace |
+| **optionally, a judgement** — `holds(logic, t, P)`, a checked triple | Lean, if it supplies the proof term; **not** statistics |
+
+It supplies **none** of the following, and the separation is the point:
+
+- **It does not assign a warrant.** Warrant is computed from a justification term, and nothing
+  stores it. The grade classes and `reflection:epistemic_status` that used to are deleted, because a
+  stored grade let the thing being graded nominate its own grade.
+- **It does not define a witness kind.** The three `witness:Is*As` predicates are kernel base
+  vocabulary in [`core-ontology.json`](../../../ontologies/core/core-ontology.json) — the kernel
+  constructs their inhabitants, so no layer above it may declare or extend them. A protocol for
+  institutions to supply their own witness kinds is unnecessary: a logic supplies a judgement in a
+  logic the system checks, or its output is `Computed`.
+- **It does not establish `Verified`.** A boolean verdict does not reach that grade; a checked
+  judgement does. A logic that returns `Holds` but supplies no term produces output of `Computed`
+  shape, however confident the verdict.
+
+The last is worth stating concretely because it looks like a slight. The statistics institution
+defines a satisfaction relation and provides no proof language: its output, `p < α`, is evidence
+bearing on a claim rather than a derivation of it. That is not a deficiency to be fixed — a logic
+whose satisfaction relation maps sentences to a dataset, a population, or the physical world has no
+transportable witness object, so `Computed` is its ceiling by construction. The constraint is about
+the host's capabilities, and takes no position on what counts as a logic.
+
+**Veto is a separate power from grading, and a logic has it.** An institution may return `Fails`
+and block a commit on its own authority. It may not establish `Verified` on its own authority. The
+asymmetry is deliberate: an incorrect `Fails` loses data, which is recoverable; an incorrect `Holds`
+that promoted a grade would corrupt the chain silently.
+
+### 9.11.2. What admitting a new hosted checker costs
+
+Two formal arguments, corresponding to the two ways a false `P'` could become an accepted `P`:
+
+1. **Soundness of the external `⊢` against its `⊨`**, argued per hosted checker. For a
+   type-theoretic checker under inhabitation semantics this is discharged *by construction* — "the
+   checker accepts `t : P'`" and "`P'` holds" are the same statement. Where satisfaction is
+   Tarskian, it is a theorem needing explicit proof.
+2. **Satisfaction-preservation by its comorphism**, ensuring a `Verified` established externally
+   transfers correctly. Sharpened to **inhabitation-preservation**: `α(φ)` is inhabited iff `φ` is.
+   Non-executable, because the two inhabitants live in different type theories and the comorphism
+   maps the proposition rather than the proof term.
+
+Obligation 2 is where the real risk sits. The practical danger in admitting a Lean proof is not that
+Lean's kernel accepts falsehoods; it is that the translated `P'` fails to denote the `P` you meant.
+
+**And hosting is not a packaging decision.** It adds both obligations *and the checker's
+implementation* to the trusted computing base. The verification institution links `nanoda_lib`
+statically into the kernel, so admitting Lean expands the TCB by the whole of that implementation.
+
+The TCB is exactly: the kernel's native type checker, each hosted external proof checker, each
+formal comorphism, and the constant specification governing attributions. It excludes the automated
+prover that *found* a proof, any unverified institutional verdict, and class-membership heuristics.
+
+### 9.11.3. Why the justification vocabulary is not an institution
+
+§9.10 is the worked case. Justification logic supplies vocabulary the kernel checks directly, so it
+needs no hosted checker, no comorphism, and neither obligation above — and correspondingly it gets
+no authority the kernel does not already have. When it was housed as an institution, the one thing
+that institution did at commit was type-check a certificate, which the kernel does not delegate. It
+was deleted, and nothing was lost, because an institution is the mechanism for a logic the kernel
+*cannot* check itself.
+
+That is the test to apply to a proposed institution: **if the kernel can already check it, it is
+vocabulary, not an institution.**
 
 ---
 

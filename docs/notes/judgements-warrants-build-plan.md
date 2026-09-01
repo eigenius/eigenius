@@ -1155,6 +1155,39 @@ halves of that sentence were false by the time it was read, and it now names the
 
 `nothing_the_reasoning_institution_declared_still_resolves` pins all eighteen deleted IRIs.
 
+### P7 step 4 — the protocol is stated *(done `2026-08-31`)*
+
+New §9.11 in [`docs/guides/esl/09-institutions.md`](../guides/esl/09-institutions.md), the chapter
+someone adding an institution reads. The paper already states this rigorously (§§ around
+`judgements-and-warrants.tex` lines 339–351); what P7 owed was putting it where an implementer
+finds it, tied to what the code does.
+
+- **§9.11.1** — what a logic supplies (vocabulary, a decision procedure, derivation resources,
+  optionally a judgement) and the three things it does not: assign a warrant, define a witness kind,
+  establish `Verified`. Veto is separated from grading, with the asymmetry stated: an incorrect
+  `Fails` loses data, an incorrect `Holds` that promoted a grade would corrupt the chain silently.
+- **§9.11.2** — the two obligations, which one is discharged by construction under inhabitation
+  semantics and which is not, and that hosting adds the checker's implementation to the TCB
+  (`nanoda_lib`, linked statically, as the concrete case). The TCB is enumerated.
+- **§9.11.3** — the test that falls out: *if the kernel can already check it, it is vocabulary, not
+  an institution.* Justification logic is the worked case, which is why P7 could delete its
+  institution and lose nothing.
+
+**§9.10 was rewritten in the same pass**, because the chapter would otherwise have contradicted
+itself: it described the Reasoning institution as live, with `implementation:
+crates/eigenius-reasoning/`. It is now "The justification vocabulary", §9.10.5 says where the check
+actually happens (Rule 21, `eigentt_value.rs`, at commit) with a table of the three deleted routes
+and why each went, and the cross-references point at the kernel. §9.10.1–.4 needed no change — they
+describe the ontology, which survives.
+
+**Four stale references found by verifying claims before writing them**, all pre-dating P7 and all
+in this chapter: §9.9 listed `kernel/src/capability/wasm_institution_d14.rs` and a
+`build_wasm_institution_runtime` that do not exist, and three present-tense pointers named
+`sdk/wasm-sdk/`, `examples/wasm-d14-assay/` and `kernel/tests/d14_dock_assay_demo_wasm.rs`, all
+deleted with the WASM extension path on `2026-07-08`. Every link in the chapter now resolves. The
+remaining 25 doc files stay with the sized pass in
+[`judgements-warrants-doc-and-consumer-scope.md`](judgements-warrants-doc-and-consumer-scope.md).
+
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's
 implementation, to the trusted computing base.
