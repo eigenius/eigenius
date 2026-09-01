@@ -1188,6 +1188,24 @@ deleted with the WASM extension path on `2026-07-08`. Every link in the chapter 
 remaining 25 doc files stay with the sized pass in
 [`judgements-warrants-doc-and-consumer-scope.md`](judgements-warrants-doc-and-consumer-scope.md).
 
+### P7 step 5 — the reseed *(done `2026-08-31`)*
+
+`scripts/reseed-lexicon-db.sh --umls-all`, paying off all four batched bootstrap edits: `core`
+once (the witness declarations arriving), `justification` three times (the witness declarations
+leaving, the institution block, the projection shapes). Snapshot
+`../db-snapshot/wordnet-umls-2026-08-31` — 2.51 GiB, 63 files, 28 UMLS chain layers.
+
+`--umls-all` is not optional: the script refuses to pick a scope, because the tracked snapshots are
+all `--umls-all` and a bare invocation silently builds an 8-TUI store that DROPS whole concepts.
+
+**The check this unblocked.** `eigenius-wordnet`'s `db_backed_encoding` suite short-circuits on
+`ManifestDrift` when the store was seeded from a different bootstrap, so between the first P7
+bootstrap edit and this reseed it was reporting **5 passed in 2.85s without opening a store**.
+Against the new snapshot the same 5 tests take **2,186s (36.4 min)** and pass. The 71 ignored are
+opt-in diagnostics needing `--ignored`, unchanged. This is the first execution of P7's chain
+against a real store, and it is what the four green `cargo test --workspace` runs in steps 1–4
+could not tell us.
+
 **Exit:** `Verified` is reachable only through a checked judgement; the kernel owns every type it
 inhabits; and hosting a checker is documented as adding both obligations, and the checker's
 implementation, to the trusted computing base.
