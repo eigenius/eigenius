@@ -20,6 +20,7 @@
 
 pub(super) mod allows_only;
 pub(super) mod class_types;
+mod closed_inductive;
 pub(super) mod conditional;
 pub(super) mod domain;
 pub(super) mod eigentt_value;

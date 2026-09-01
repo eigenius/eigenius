@@ -118,9 +118,52 @@ fn is_inductive(r: &Resource) -> bool {
 /// finds **no inductive-to-inductive edges at all**. Reusing it would produce an
 /// empty graph for precisely the case [`OrderError::MutualInductives`] exists to
 /// catch, and would look like it worked.
+/// Is `iri` a constructor class or argument property that D85 §6.1 derived from an inductive
+/// in this layer, rather than something an author declared?
+///
+/// A constructor class names its inductive in `subclass_of`; an argument property names that
+/// class in `domain`. Both exist because `core:ctors` has an entry, so neither is an
+/// independent declaration — which matters when classifying a cycle, since a mutual inductive
+/// pair drags its derived classes in with it.
+fn is_derived_from_inductive(layer: &Layer, iri: &Iri, decls: &BTreeMap<Iri, bool>) -> bool {
+    let Some(r) = layer.get_resource(iri) else {
+        return false;
+    };
+    if let Some(v) = r.get(&crate::ontology::well_known::iri(wk::PARENT_CLASSES)) {
+        if v.as_iri_array().iter().any(|p| decls.get(p) == Some(&true)) {
+            return true;
+        }
+    }
+    if let Some(v) = r.get(&crate::ontology::well_known::iri(wk::DOMAIN)) {
+        return v.as_iri_array().iter().any(|owner| {
+            layer
+                .get_resource(owner)
+                .and_then(|c| {
+                    c.get(&crate::ontology::well_known::iri(wk::PARENT_CLASSES))
+                        .cloned()
+                })
+                .map(|p| p.as_iri_array().iter().any(|i| decls.get(i) == Some(&true)))
+                .unwrap_or(false)
+        });
+    }
+    false
+}
+
 fn references(r: &Resource, out: &mut BTreeSet<Iri>) {
     for (prop, value) in r.properties() {
         out.insert(prop.clone());
+        // `core:domain` is NOT a dependency edge. It says where a property APPLIES; it does not
+        // say the property needs that class declared first. Treating it as one makes every
+        // ordinary class/property pair circular — a class `requires` the property, the property's
+        // `domain` names the class back — which core has had all along (`core:Property requires
+        // core:data_type`, `core:data_type domain core:Property`) and which D85 §6.1's derived
+        // constructor classes make universal, since every inductive now yields such a pair.
+        //
+        // This is a constant, not a schema lookup: the walk stays usable before any schema is
+        // resolvable, which is the reason it is schema-blind in the first place.
+        if prop.as_str() == wk::DOMAIN {
+            continue;
+        }
         value_refs(value, out);
     }
 }
@@ -204,11 +247,23 @@ pub fn declaration_order(layer: &Layer) -> Result<Vec<Iri>, OrderError> {
                     .filter(|i| !placed.contains(*i))
                     .cloned()
                     .collect();
-                return Err(if stuck.iter().all(|i| decls[i]) {
-                    OrderError::MutualInductives(stuck)
-                } else {
-                    OrderError::Cycle(stuck)
-                });
+                // A derived constructor class or argument property (D85 §6.1) is not an
+                // independent declaration for this purpose — it is part of the inductive it
+                // was projected from, and it is stuck only because that inductive is. Judge
+                // the cycle by the declarations an author actually wrote, or a mutual pair
+                // would report a generic cycle instead of naming eigenius#20.
+                let authored: Vec<Iri> = stuck
+                    .iter()
+                    .filter(|i| !is_derived_from_inductive(layer, i, &decls))
+                    .cloned()
+                    .collect();
+                return Err(
+                    if !authored.is_empty() && authored.iter().all(|i| decls[i]) {
+                        OrderError::MutualInductives(authored)
+                    } else {
+                        OrderError::Cycle(stuck)
+                    },
+                );
             }
         }
     }
@@ -410,10 +465,23 @@ mod tests {
             class("urn:t:atarget", &[]),
         ]))
         .expect("acyclic");
+        // The layer also carries the constructor class and argument property `build` derives
+        // from `zind`'s `core:ctors` (D85 §6.1). They are ordered after the inductive they come
+        // from, which is right; what this test is about is the authored pair.
+        let authored: Vec<String> = names(&order)
+            .into_iter()
+            .filter(|n| !n.contains("-mk"))
+            .collect();
         assert_eq!(
-            names(&order),
+            authored,
             ["urn:t:atarget", "urn:t:zind"],
             "the D47-encoded reference must order the inductive after its target"
+        );
+        let all = names(&order);
+        let pos = |s: &str| all.iter().position(|n| n == s).expect(s);
+        assert!(
+            pos("urn:t:zind") < pos("urn:t:zind-mkzind"),
+            "a derived constructor class must be ordered after its inductive"
         );
     }
 }

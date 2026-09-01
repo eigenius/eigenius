@@ -2498,15 +2498,34 @@ mod tests {
                 assert_eq!(&loaded, original, "round-trip mismatch for {iri}");
             }
 
-            // And nothing extra appeared.
+            // And nothing extra appeared BUT the constructor classes `build` derives.
+            //
+            // D85 §6.1: an inductive's `core:ctors` is projected into a class per constructor
+            // and a property per argument, materialised at build time and hashed with the
+            // layer. They are ordinary persisted resources, which is the whole point — a
+            // build-time shape that storage normalised away is the mistake
+            // `canonicalise_resource_refs` made. So they are expected here; what must hold is
+            // that every AUTHORED resource is still present and unchanged, asserted above.
             let loaded_iris = ResourceBackend::list_layer_iris(&store, &id).unwrap();
-            assert_eq!(
-                loaded_iris,
-                originals
-                    .keys()
-                    .cloned()
-                    .collect::<std::collections::BTreeSet<_>>()
+            let authored: std::collections::BTreeSet<_> = originals.keys().cloned().collect();
+            assert!(
+                authored.is_subset(&loaded_iris),
+                "every authored core resource must be stored"
             );
+            for extra in loaded_iris.difference(&authored) {
+                let r = ResourceBackend::load_resource(&store, &id, extra)
+                    .unwrap_or_else(|| panic!("listed but not loadable: {extra}"));
+                let derived = r
+                    .get(&Iri::parse("urn:eigenius:core:subclass_of").unwrap())
+                    .is_some()
+                    || r.get(&Iri::parse("urn:eigenius:core:domain").unwrap())
+                        .is_some();
+                assert!(
+                    derived,
+                    "the only resources `build` may add are derived constructor classes and \
+                     their argument properties; `{extra}` is neither"
+                );
+            }
         }
 
         /// `build_chain` against the live `RocksStore` backend with a fresh

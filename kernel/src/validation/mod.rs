@@ -58,6 +58,9 @@ pub struct ValidationError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationRule {
     MissingRequired,
+    /// Rule 25 — a class named an inductive in `subclass_of` from outside that inductive's
+    /// own layer, or without corresponding to one of its `core:ctors` (D85 §6.1).
+    InductiveNotClosed,
     TypeMismatch,
     FormatViolation,
     PatternViolation,
@@ -568,6 +571,12 @@ impl Validator {
         // the resource rather than on a property value — the declaration is the resource.
         errors.extend(self.check_inductive_declaration(resource, &res_id));
         errors.extend(self.check_inductive_not_redefined(resource, &res_id));
+
+        // Rule 25 (D85 §6.1): an inductive stays CLOSED. A constructor class may name its
+        // inductive in `subclass_of` only from that inductive's own layer, and only for a
+        // constructor the inductive declares. Derived classes satisfy both by construction;
+        // this answers one written by hand.
+        errors.extend(self.check_inductive_closure(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*

@@ -38,53 +38,178 @@ fn errors_for(rs: Vec<Resource>) -> Vec<String> {
         .collect()
 }
 
-/// A constructor class names its inductive in `subclass_of`.
+/// The constructor class for `eigentt:Term.App` **exists, derived**, in the layer that declares
+/// the inductive — nobody authored it.
 ///
-/// Rejected before step 1 by Rule 22's reference check, which held ONE expected class —
-/// which is why `class_types` had open-coded its Class-or-InductiveType case around it.
-fn ctor_class() -> Resource {
-    let mut c = Resource::new(iri("urn:eigenius:eigentt:Term.App"));
-    c.set(
-        iri("urn:eigenius:core:is_a"),
-        arr("urn:eigenius:core:Class"),
-    );
-    c.set(
-        iri("urn:eigenius:core:short_name"),
-        Value::String("Term.App".into()),
-    );
-    c.set(
-        iri("urn:eigenius:core:description"),
-        Value::String("Application, as a constructor class over eigentt:Term.".into()),
-    );
-    c.set(
-        iri("urn:eigenius:core:subclass_of"),
-        arr("urn:eigenius:eigentt:Term"),
-    );
-    c
-}
-
+/// `core:ctors` is the single declaration; the class is a projection of it, materialised at
+/// layer build (D85 §6.1). Authoring one instead is what Rule 25 refuses, and
+/// `a_constructor_class_from_a_later_layer_is_refused` below pins that.
 #[test]
-fn a_constructor_class_may_subclass_its_inductive() {
-    let errs = errors_for(vec![ctor_class()]);
+fn the_constructor_class_is_derived_into_the_inductives_layer() {
+    let core = core_layer();
+    let cls = core
+        .get_resource(&iri("urn:eigenius:eigentt:Term-App"))
+        .expect("eigentt:Term-App is derived into core, where eigentt:Term is declared");
+    assert!(
+        cls.get(&iri("urn:eigenius:core:subclass_of"))
+            .map(|v| v.as_iri_array().contains(&iri("urn:eigenius:eigentt:Term")))
+            .unwrap_or(false),
+        "the derived class must name its inductive in subclass_of"
+    );
+    let errs: Vec<String> = eigenius_kernel::validation::Validator::new(Arc::clone(&core))
+        .validate()
+        .into_iter()
+        .filter(|e| {
+            e.resource_id
+                .as_ref()
+                .is_some_and(|i| i.as_str().contains("Term-App"))
+        })
+        .map(|e| e.message)
+        .collect();
     assert!(
         errs.is_empty(),
-        "a ctor class must validate; got:\n{}",
+        "the derived class must validate; got:\n{}",
         errs.join("\n")
     );
 }
 
+/// A test-local inductive, so these exercise step 1's derivation without reaching into step 3.
+///
+/// A resource-form value in an `eigentt:Term`-typed slot is still refused by the D47 codec
+/// ("expected Value::Json, got Embedded") — that codec is what step 3 changes. Step 1 delivers
+/// the STRUCTURE: the classes exist, arity is checked, argument types are checked.
+fn colour_inductive() -> Resource {
+    let mut ind = Resource::new(iri("urn:test:d85:Colour"));
+    ind.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:InductiveType"),
+    );
+    ind.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String("Colour".into()),
+    );
+    ind.set(
+        iri("urn:eigenius:core:description"),
+        Value::String("a test inductive".into()),
+    );
+
+    let mut red = Resource::new_embedded();
+    red.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:InductiveCtor"),
+    );
+    red.set(
+        iri("urn:eigenius:core:ctor_name"),
+        Value::String("Red".into()),
+    );
+
+    let mut named = Resource::new_embedded();
+    named.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:InductiveCtor"),
+    );
+    named.set(
+        iri("urn:eigenius:core:ctor_name"),
+        Value::String("Named".into()),
+    );
+    let mut arg = Resource::new_embedded();
+    arg.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:InductiveArgType"),
+    );
+    arg.set(
+        iri("urn:eigenius:core:arg_name"),
+        Value::String("name".into()),
+    );
+    arg.set(
+        iri("urn:eigenius:core:type_name"),
+        Value::Json(serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]})),
+    );
+    named.set(
+        iri("urn:eigenius:core:arg_types"),
+        Value::Array(vec![Value::Embedded(Box::new(arg))]),
+    );
+
+    ind.set(
+        iri("urn:eigenius:core:ctors"),
+        Value::Array(vec![
+            Value::Embedded(Box::new(red)),
+            Value::Embedded(Box::new(named)),
+        ]),
+    );
+    ind
+}
+
+/// A value names its constructor's class and supplies that constructor's arguments as the
+/// properties the class requires.
+///
+/// **Arity is Rule 1 and argument types are Rule 5** — neither is written anywhere. They fall
+/// out of the class and properties the derivation built from `core:ctors`.
 #[test]
-fn a_value_carries_its_constructors_class_in_is_a() {
-    let mut v = Resource::new(iri("urn:test:d85:an_app_value"));
+fn a_value_carries_its_constructors_class_and_arguments() {
+    let mut v = Resource::new(iri("urn:test:d85:a_named_colour"));
     v.set(
         iri("urn:eigenius:core:is_a"),
-        arr("urn:eigenius:eigentt:Term.App"),
+        arr("urn:test:d85:Colour-Named"),
     );
-    let errs = errors_for(vec![ctor_class(), v]);
+    v.set(
+        iri("urn:test:d85:Colour-Named-name"),
+        Value::String("mauve".into()),
+    );
+    let errs = errors_for(vec![colour_inductive(), v]);
     assert!(
         errs.is_empty(),
-        "a value naming its ctor class must validate; got:\n{}",
+        "a well-formed value must validate; got:\n{}",
         errs.join("\n")
+    );
+}
+
+/// A nullary constructor's class requires nothing, so a value of it carries only its `is_a`.
+#[test]
+fn a_nullary_constructors_value_needs_no_arguments() {
+    let mut v = Resource::new(iri("urn:test:d85:a_red"));
+    v.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:test:d85:Colour-Red"),
+    );
+    let errs = errors_for(vec![colour_inductive(), v]);
+    assert!(
+        errs.is_empty(),
+        "a nullary value must validate; got:\n{}",
+        errs.join("\n")
+    );
+}
+
+/// Omitting an argument is caught by Rule 1, with no rule of its own.
+#[test]
+fn a_value_missing_a_constructor_argument_is_refused() {
+    let mut v = Resource::new(iri("urn:test:d85:missing_an_arg"));
+    v.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:test:d85:Colour-Named"),
+    );
+    let errs = errors_for(vec![colour_inductive(), v]);
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("Colour-Named-name") && e.contains("missing")),
+        "the missing argument must be named; got:\n{}",
+        errs.join("\n")
+    );
+}
+
+/// And an argument of the wrong type is caught by Rule 5, likewise.
+#[test]
+fn a_value_with_a_mistyped_argument_is_refused() {
+    let mut v = Resource::new(iri("urn:test:d85:mistyped"));
+    v.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:test:d85:Colour-Named"),
+    );
+    v.set(iri("urn:test:d85:Colour-Named-name"), Value::Integer(7));
+    let errs = errors_for(vec![colour_inductive(), v]);
+    assert!(
+        !errs.is_empty(),
+        "an integer where the constructor declares core:string must be refused"
     );
 }
 
@@ -149,5 +274,135 @@ fn derived_names_are_esl_spellable() {
         dotted.is_err(),
         "a DOTTED name must not print — no ESL identifier can spell it, which is why `-` is the \
          separator; got: {dotted:?}"
+    );
+}
+
+// ── Rule 25 — an inductive stays closed ──────────────────────────────
+
+/// A constructor class written by hand in a LATER layer is refused.
+///
+/// This is the hole §6.1 opens and Rule 25 closes. Before §6.1, closedness was structural:
+/// `core:ctors` holds embedded resources with no `@id`, so there was nowhere to add a
+/// constructor. Giving constructors top-level classes makes them addable, and a value carrying
+/// `is_a: [eigentt:Term-Bogus]` would satisfy every slot declaring `class_types eigentt:Term` —
+/// subsumption walks `subclass_of` — while no match arm covers it and no eliminator handles it.
+#[test]
+fn a_constructor_class_from_a_later_layer_is_refused() {
+    let core = core_layer();
+    let mut bogus = Resource::new(iri("urn:eigenius:eigentt:Term-Bogus"));
+    bogus.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:Class"),
+    );
+    bogus.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String("Term-Bogus".into()),
+    );
+    bogus.set(
+        iri("urn:eigenius:core:description"),
+        Value::String("not a real ctor".into()),
+    );
+    bogus.set(
+        iri("urn:eigenius:core:subclass_of"),
+        arr("urn:eigenius:eigentt:Term"),
+    );
+
+    let mut b = LayerBuilder::new("later", Some(core));
+    b.add_resource(bogus).unwrap();
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let errs: Vec<String> = eigenius_kernel::validation::Validator::new(layer)
+        .validate()
+        .into_iter()
+        .map(|e| e.message)
+        .collect();
+    assert!(
+        errs.iter().any(|m| m.contains("declared in a LOWER layer")),
+        "a ctor class in a layer above its inductive must be refused; got:\n{}",
+        errs.join("\n")
+    );
+}
+
+/// And one written in the inductive's OWN layer, naming a constructor it does not declare.
+///
+/// Same-layer alone is not enough: `core:ctors` is the authority, and it is what exhaustiveness
+/// reads, so a class outside that set would be a constructor the eliminator does not know about
+/// even inside the declaring layer.
+#[test]
+fn a_constructor_class_naming_no_declared_ctor_is_refused() {
+    let mut b = LayerBuilder::new("own-layer", None);
+    // A minimal inductive declared in THIS layer, with one real constructor.
+    let mut ind = Resource::new(iri("urn:test:d85:Colour"));
+    ind.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:InductiveType"),
+    );
+    ind.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String("Colour".into()),
+    );
+    let mut ctor = Resource::new_embedded();
+    ctor.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:InductiveCtor"),
+    );
+    ctor.set(
+        iri("urn:eigenius:core:ctor_name"),
+        Value::String("Red".into()),
+    );
+    ind.set(
+        iri("urn:eigenius:core:ctors"),
+        Value::Array(vec![Value::Embedded(Box::new(ctor))]),
+    );
+    b.add_resource(ind).unwrap();
+
+    // Same layer, but names a constructor `core:ctors` does not declare.
+    let mut bogus = Resource::new(iri("urn:test:d85:Colour-Mauve"));
+    bogus.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:core:Class"),
+    );
+    bogus.set(
+        iri("urn:eigenius:core:short_name"),
+        Value::String("Colour-Mauve".into()),
+    );
+    bogus.set(
+        iri("urn:eigenius:core:description"),
+        Value::String("undeclared".into()),
+    );
+    bogus.set(
+        iri("urn:eigenius:core:subclass_of"),
+        arr("urn:test:d85:Colour"),
+    );
+    b.add_resource(bogus).unwrap();
+
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let errs: Vec<String> = eigenius_kernel::validation::Validator::new(layer)
+        .validate()
+        .into_iter()
+        .map(|e| e.message)
+        .collect();
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("must be one of its constructors") && m.contains("Red")),
+        "a ctor class naming no declared ctor must be refused, and the message must list what IS \
+         declared; got:\n{}",
+        errs.join("\n")
+    );
+}
+
+/// The derived classes themselves satisfy Rule 25 — which is the point of deriving them.
+#[test]
+fn the_derived_constructor_classes_satisfy_rule_25() {
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let errs: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| format!("{:?}", e.rule).contains("InductiveNotClosed"))
+        .map(|e| e.message)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "derived classes must satisfy Rule 25; got:\n{}",
+        errs.join("\n")
     );
 }

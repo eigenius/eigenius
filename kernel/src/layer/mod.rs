@@ -30,6 +30,7 @@
 mod bloom;
 mod cache;
 mod consolidate;
+mod ctor_classes;
 pub mod declaration_order;
 mod handle;
 mod index;
@@ -1056,7 +1057,19 @@ impl LayerBuilder {
     /// evicts a freshly-built resource before commit, the resource is lost;
     /// commit promptly. The bounded cache (14c) will need coordination with
     /// this lifecycle.
-    pub fn build(self, storage: LayerStorage) -> Layer {
+    pub fn build(mut self, storage: LayerStorage) -> Layer {
+        // D85 §6.1 — materialise a constructor class per `core:ctors` entry, plus a property
+        // per argument. DERIVED, not authored: `core:ctors` stays the single declaration, so
+        // the classes cannot drift from it and there is no authoring step through which an
+        // inductive could gain a constructor. Done HERE, before the content hash, so they are
+        // ordinary persisted resources rather than a build-time shape that storage normalises
+        // away — the mistake `canonicalise_resource_refs` made, described below.
+        for derived in ctor_classes::derive(&self.resources, &self.parents) {
+            if let Some(id) = derived.id().cloned() {
+                self.resources.insert(id, derived);
+            }
+        }
+
         // `canonicalise_resource_refs` was called here, upgrading every Eigon-JSON-parsed
         // `Value::String` on a `data_type: resource` property to `Value::ResourceRef` so that
         // "downstream readers can then assume one shape per data_type".

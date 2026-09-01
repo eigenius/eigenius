@@ -449,8 +449,9 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    `core:ctors` should be mechanical, so every property is qualified by its constructor and `domain`
    names exactly one class.
 
-   **Measured cost.** 96 constructor classes (59 JSON-declared, 37 ESL), of which 12 are nullary and
-   carry no properties at all, and 112 argument properties (88 JSON, 24 ESL). All 88 JSON-declared arguments **already carry `core:arg_name`**,
+   **Measured, once built.** Across the bootstrap chain's **44** inductives the derivation
+   materialises **179 constructor classes and 136 argument properties**. An earlier estimate of
+   96 / 112 counted only `ontologies/**`; the chain declares more. All 88 JSON-declared arguments **already carry `core:arg_name`**,
    though it is only a `recommends`. ESL's positional form emits none
    (`a_positional_ctor_arg_carries_no_arg_name`), so the compiler names them — the `arg_0` / `arg_1`
    fallback it already defines for the Julia mirror generator, emitting a dictionary of named
