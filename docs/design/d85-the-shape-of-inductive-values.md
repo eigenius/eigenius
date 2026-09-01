@@ -29,10 +29,14 @@ arguments, and is subject to the rules every resource is subject to:
 ```
 
 Inline, it is `Value::Embedded`. Named, it is **the resource's IRI** — and the design deliberately
-does not say which variant carries that IRI, because nothing may depend on it: the parser and CBOR
-both produce `Value::String`, `canonicalise_resource_refs` may have upgraded it to
-`Value::ResourceRef`, and `Value::as_iri` accepts either. Reading a reference goes through that
-accessor, never through a match.
+does not say which variant carries that IRI, because nothing may depend on it. Reading a reference
+goes through `Value::as_iri`, never through a match.
+
+> **Written when there were two candidates.** The parser and CBOR both produced `Value::String`,
+> while `canonicalise_resource_refs` could upgrade it to `Value::ResourceRef`, and `as_iri` accepted
+> either. **`Value::ResourceRef` was retired on `2026-08-31`** (§6.2), so a reference is now always a
+> `Value::String`. The rule is unchanged and the passages below that name the variant are the
+> argument that produced that retirement, kept for it.
 
 `Value` gains **no** variants. That is the point, and it is what makes the two forms above the same
 two forms every resource-valued slot already has.
@@ -46,8 +50,10 @@ and every place the code disagreed with them is listed in §4.
 
 ### R1 — A value states its own type
 
-`is_a` names the `core:InductiveType` the value inhabits. The holding property's `class_types` is a
-**constraint to check it against**, not the source of truth.
+`is_a` names the class the value inhabits. For an inductive value that is the **constructor's**
+class, which is `subclass_of` the inductive — see §6.1, decided after this rule was first written.
+The holding property's `class_types` is a **constraint to check it against**, not the source of
+truth, and it is satisfied through `subclass_of` by the machinery that already resolves it.
 
 *Why it is forced rather than chosen.* Rule 0 requires that every resource declare at least one
 `is_a` class ([`validation/rules/is_a.rs:36`](../../kernel/src/validation/rules/is_a.rs#L36)), and
@@ -112,6 +118,12 @@ question surfaced three times: as `core:args` element typing, as literal-versus-
 primitive arguments encoded as terms. A `core:string` argument is a `Value::String`, a class-typed
 argument is a reference, an inductive-typed argument is a value.
 
+§6.1 is what discharges this rule rather than restating it: each argument is a **declared property**
+carrying its own `data_type` and `class_types`, so "the types come from the constructor" is a fact
+about where the property is declared, and the three readings above are the three ordinary
+`data_type`s a property may have. Nothing needs to derive an argument's type at encode time — it is
+looked up the way every other property's type is.
+
 ### R5 — `Value`'s variants are shapes, not interpretations
 
 `Value` ([`ontology/resource.rs:29`](../../kernel/src/ontology/resource.rs#L29)) is the Eigon data
@@ -132,9 +144,11 @@ preserve them (`Text` decodes to `String`, a bare `Map` to `Embedded`,
 [`eigon_cbor.rs:379`, `:402`](../../kernel/src/ontology/eigon_cbor.rs#L379)). They are `Embedded`
 and `ResourceRef` rediscovered on the wrong discriminant.
 
-**This is why §1 declines to name a variant for the reference form.** `ResourceRef` is the existing
-instance of the same mistake, so building on it would import the defect this rule exists to avoid.
-A reference is an IRI, and which variant holds it is not part of the design.
+**This is why §1 declines to name a variant for the reference form.** `ResourceRef` **was** the
+existing instance of the same mistake, so building on it would have imported the defect this rule
+exists to avoid. A reference is an IRI, and which variant holds it is not part of the design — which
+is what made retiring the variant (§6.2, done) a consequence of the rule rather than a separate
+decision.
 
 *The debt itself*, recorded and not fixed here. `ResourceRef` is
 `String` plus a schema lookup, produced only by
@@ -190,9 +204,11 @@ function whose name promises the general traversal.
 already recurses into every embedded resource that declares `is_a` and applies the full rule set
 ([`validation/mod.rs:572`](../../kernel/src/validation/mod.rs#L572)), using `is_a` presence as the
 discriminator between a typed instance and an opaque carrier. So a value's arguments are validated
-as resources in their own right, and the rule for a value need only check one level.
+as resources in their own right. Under §6.1 there is no rule for a value **at all** — its arguments
+are declared properties, so Rule 1 checks arity and Rules 5 and 6 check each argument's type.
 `walk_inductive_value`'s parallel traversal
-([`rules/inductive.rs:192`](../../kernel/src/validation/rules/inductive.rs#L192)) is subsumed.
+([`rules/inductive.rs:192`](../../kernel/src/validation/rules/inductive.rs#L192)) is subsumed, and
+replaced by nothing.
 
 **One traversal, one equality, one canonicalisation.** Today each has a `serde_json` twin, because
 `Embedded(Box<Resource>)` keeps the recursion inside the data model and an inductive value in
@@ -201,9 +217,12 @@ as resources in their own right, and the rule for a value need only check one le
 `json_value_to_cbor`. Canonicalisation has no twin at all, which is why a term's interior is never
 canonicalised.
 
-**References for free.** A chain-resident value has an `@id`; naming it is a `ResourceRef`. No
-sentinel, no second reference kind, and `core:mentions` follows it because
-[`value_refs`](../../kernel/src/layer/declaration_order.rs#L128) already descends `Embedded`.
+**References for free.** A chain-resident value has an `@id`; naming it is that IRI. No sentinel,
+no second reference kind, and `core:mentions` follows it because
+[`value_refs`](../../kernel/src/layer/declaration_order.rs#L128) already descends `Embedded`. (This
+paragraph said "naming it is a `ResourceRef`" until that variant was retired on `2026-08-31` per
+§6.2 — R5 is what made the retirement available, and the paragraph reads the same without it, which
+was the point.)
 
 **α-canonicalisation moves to `Exp`,** where α-equivalence lives. It currently renames bound
 variables in JSON, only because the mirror is JSON.
@@ -235,7 +254,7 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 
 | # | step | green after |
 |---|---|---|
-| 1 | `core:is_a` admits `core:InductiveType`; declare `core:ctor` / `core:args`; add the one-level value rule. Nothing produces the shape yet, so this is additive. | yes |
+| 1 | `core:is_a` admits `core:InductiveType`; generate the 96 constructor classes and ~83 argument properties (§6.1). **No `core:ctor`, no `core:args`, and no new value rule** — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
 | 2 | Migrate the 114 authored values; they parse as `Embedded` natively and round-trip through CBOR unchanged. | yes |
 | 3 | `encode_type` emits value resources and `decode_type` reads them; `CtorApp` → `Embed`. The one irreducible step, and it is smaller than D84 §7's version because 1, 2, 4 and 5 are outside it. | yes |
 | 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
@@ -247,14 +266,48 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
 
 ## 6. Open
 
-1. **`core:args` element typing.** All 17 other `value_array` properties in the tree have a uniform
-   element type (12 `string`, 2 `integer`, 3 `float`). A positional argument list whose element types
-   come from the constructor is not a homogeneous array, and `core:element_type` is `then_requires`d
-   for `value_array` and admits only the five primitives. Either `element_type` becomes optional when
-   the types are determined elsewhere, or `core:args` is not a `value_array`. R4 says where the types
-   come from; it does not say how the property declares that.
-2. **`ResourceRef` — DECIDED: retire it, as its own change, after the reseed.** Not open, and not
-   part of this note's retrofit. R5 is what makes the decision available: once a reference is an IRI
+1. **`core:args` element typing — DECIDED `2026-08-31`: there is no `core:args`.** A constructor
+   gets a **class**; each argument becomes a **named property** on that class. The question dissolves
+   rather than being answered, which is why this beats both options the note originally offered.
+
+   ```
+   class     eigentt:Term.App   subclass_of eigentt:Term   requires eigentt:App.fn, eigentt:App.arg
+   property  eigentt:App.fn   : core:inductive  class_types eigentt:Term  domain eigentt:Term.App
+   value     { "is_a": ["urn:eigenius:eigentt:Term.App"], "…App.fn": …, "…App.arg": … }
+   ```
+
+   **Everything that had to be built is already built.** Arity is Rule 1 (required properties).
+   Argument types are Rules 5 and 6 (`data_type`, `class_types`) — so R4 is *implemented by the
+   ontology* rather than threaded through the encoder. Membership works because
+   [`core:InductiveType` is itself `is_a: [core:Class]`](../../ontologies/core/core-ontology.json), so
+   a constructor class may be `subclass_of` its inductive, and
+   [`is_instance_of_any`](../../kernel/src/validation/mod.rs#L629) already resolves `class_types`
+   through `is_subclass_of` — a slot declaring `class_types eigentt:Term` accepts a value whose
+   `is_a` is `eigentt:Term.App` with no change. Argument ORDER lives in the declaration's ordered
+   `core:arg_types`, so a value cannot get it wrong; positional indexing disappears from the value.
+
+   **`core:ctor` goes too.** The constructor is what `is_a` names. Step 1 below was going to declare
+   two properties; it declares neither.
+
+   *Why not the two options this item used to offer.* Making `core:element_type` optional weakens a
+   checkable invariant on all 18 `value_array` properties to accommodate one, and leaves an absent
+   `element_type` ambiguous between *heterogeneous by design* and *omitted by mistake*. Giving
+   `core:args` a data type of its own is correct as far as it goes, but data types are matched by IRI
+   in [`type_check.rs`](../../kernel/src/validation/rules/type_check.rs) under a
+   `_ => true, // Unknown data type, skip` arm, so a new one whose arm is forgotten accepts
+   everything silently.
+
+   **Measured cost.** 96 constructor classes (59 JSON-declared, 37 ESL), of which 12 are nullary and
+   carry no properties at all. 63 distinct argument properties on the JSON side — 88 argument slots
+   collapse by reuse — and roughly 20 more for ESL. Only **2** argument names are reused within one
+   inductive at different types and so need distinct property IRIs; 17 are reused at the same type
+   and one property serves each. All 88 JSON-declared arguments **already carry `core:arg_name`**,
+   though it is only a `recommends`. ESL's positional form emits none
+   (`a_positional_ctor_arg_carries_no_arg_name`), so the compiler names them — the `arg_0` / `arg_1`
+   fallback it already defines for the Julia mirror generator, emitting a dictionary of named
+   arguments where it now emits a positional list.
+2. **`ResourceRef` — DONE `2026-08-31`**, in two hash-neutral commits before the P7 reseed, as
+   planned below. R5 is what makes the decision available: once a reference is an IRI
    read through an accessor and no variant is canonical, the variant has no job left. It was only
    ever justified by the promise in `LayerBuilder::build` that readers "can then assume one shape per
    data_type" — which the wire format cannot keep, because CBOR writes `Text` and reads back
