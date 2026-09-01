@@ -22,9 +22,9 @@ arguments, and is subject to the rules every resource is subject to:
 
 ```json
 {
-  "urn:eigenius:core:is_a":        ["urn:eigenius:eigentt:Term.App"],
-  "urn:eigenius:eigentt:App.fn":   { … },
-  "urn:eigenius:eigentt:App.arg":  { … }
+  "urn:eigenius:core:is_a":                ["urn:eigenius:eigentt:Term.App"],
+  "urn:eigenius:eigentt:Term.App.fn":     { … },
+  "urn:eigenius:eigentt:Term.App.arg":    { … }
 }
 ```
 
@@ -263,7 +263,7 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 | # | step | green after |
 |---|---|---|
 | 1 | `core:subclass_of` admits `core:InductiveType`, so a constructor class can name its inductive; generate the 96 constructor classes and ~83 argument properties (§6.1), **with Rule 25**, the two-sided closedness check (§6.1) — a class `subclass_of` an inductive must be declared in that inductive's own layer AND correspond to an entry in its `core:ctors`. Without it §6.1 silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
-| 2 | Migrate the 114 authored values; they parse as `Embedded` natively and round-trip through CBOR unchanged. | yes |
+| 2 | Migrate the 114 authored values: each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it. They parse as `Embedded` natively and round-trip through CBOR unchanged. | yes |
 | 3 | `encode_type` emits value resources and `decode_type` reads them; `CtorApp` → `Embed`. The one irreducible step, and it is smaller than D84 §7's version because 1, 2, 4 and 5 are outside it. | yes |
 | 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
 | 5 | `Vector` leaves `Value` — the query engine takes a domain extending the data model, and serialising a transient becomes a type error rather than a panic. | yes |
@@ -279,9 +279,13 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    rather than being answered, which is why this beats both options the note originally offered.
 
    ```
-   class     eigentt:Term.App   subclass_of eigentt:Term   requires eigentt:App.fn, eigentt:App.arg
-   property  eigentt:App.fn   : core:inductive  class_types eigentt:Term  domain eigentt:Term.App
-   value     { "is_a": ["urn:eigenius:eigentt:Term.App"], "…App.fn": …, "…App.arg": … }
+   class     eigentt:Term.App        subclass_of eigentt:Term
+                                    requires eigentt:Term.App.fn, eigentt:Term.App.arg
+   property  eigentt:Term.App.fn    data_type core:resource   class_types eigentt:Term
+                                    domain eigentt:Term.App
+   value     { "is_a": ["urn:eigenius:eigentt:Term.App"],
+               "urn:eigenius:eigentt:Term.App.fn":  { … },
+               "urn:eigenius:eigentt:Term.App.arg": { … } }
    ```
 
    **Everything that had to be built is already built.** Arity is Rule 1 (required properties).
@@ -304,6 +308,42 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    in [`type_check.rs`](../../kernel/src/validation/rules/type_check.rs) under a
    `_ => true, // Unknown data type, skip` arm, so a new one whose arm is forgotten accepts
    everything silently.
+
+   **The classes are DERIVED, not authored.** `core:ctors` stays the single declaration; the
+   constructor classes and their argument properties are a projection of it, materialised into the
+   layer that declares the inductive. Nothing writes one by hand, in ESL or in JSON, so the two
+   declaration surfaces stay as they are and cannot disagree with each other.
+
+   This is what keeps closedness STRUCTURAL rather than merely checked. Deriving them means there
+   is no authoring step to police: a constructor class exists because `core:ctors` has an entry,
+   and there is no other way for one to come into being. Rule 25 below still holds — it is what
+   answers a class someone writes by hand anyway — but on the normal path nothing ever trips it.
+
+   Materialised at **layer build**, before the content hash, so they are ordinary persisted
+   resources rather than an in-memory convenience. That distinction is load-bearing and was learned
+   the hard way: `canonicalise_resource_refs` was a build-time rewrite that did NOT survive CBOR,
+   so a reloaded chain read a shape no reader could rely on (§6.2). These are resources in the
+   layer, hashed with it, and identical on reload.
+
+   **How an argument's type becomes a property's.** `core:type_name` holds a D47-encoded term, and
+   measured across the 88 JSON-declared arguments it takes exactly two shapes: **86 `ConstRef`** and
+   **2 `Var`**.
+
+   | `type_name` | property declares |
+   |---|---|
+   | `ConstRef(core:string / integer / float / boolean)` — 26 | that primitive as `data_type` |
+   | `ConstRef(X)` for any other X — 60 | `data_type: core:resource`, `class_types: [X]`. Subsumption then accepts a value whose `is_a` is one of X's constructor classes, which is the whole mechanism |
+   | `Var(A)` — 2 | `data_type: core:resource`, and **no `class_types`** |
+
+   The two `Var` cases are `core:List.cons.head` and `core:Option.some.value` — the element type of
+   a PARAMETRIC inductive. A property cannot carry `A`, and inventing a parametric-property
+   mechanism for two arguments would be absurd. It is also unnecessary, because R4 already says
+   where such a type comes from: for a parametric constructor the argument's type is the
+   constructor **applied to its type arguments**, which is a typing fact, not a schema fact. The
+   property declares what is structurally checkable — that the argument is a value — and the
+   instantiation is checked where instantiation is checked, by Rule 21 and the NbE checker. This is
+   the same split R5a draws between what a structural walk decides and what the type checker
+   decides, and R3 between a closed value and an open term.
 
    **A constructor class is not an ordinary subclass, and the difference is closedness.**
    An inductive type is CLOSED: its constructors are exactly the entries in `core:ctors`, which is
@@ -383,11 +423,17 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    holds a LIST, and that open-coded case folded back into it: three fields that reference a type
    share one walk instead of two plus a special case.
 
+   **Naming, and why nothing is shared.** A constructor class is `<inductive>.<Ctor>`; an argument
+   property is `<inductive>.<Ctor>.<arg>`, fully qualified. An earlier draft scoped properties per
+   inductive so that a name reused across constructors at the same type shared one declaration —
+   17 of the 88 could have — and named them `eigentt:App.fn`. That is prettier and wrong for a
+   DERIVED scheme: sharing requires a same-name-same-type analysis across constructors, and the two
+   cases where a name recurs at DIFFERENT types would have to be split out by hand. A projection of
+   `core:ctors` should be mechanical, so every property is qualified by its constructor and `domain`
+   names exactly one class.
+
    **Measured cost.** 96 constructor classes (59 JSON-declared, 37 ESL), of which 12 are nullary and
-   carry no properties at all. 63 distinct argument properties on the JSON side — 88 argument slots
-   collapse by reuse — and roughly 20 more for ESL. Only **2** argument names are reused within one
-   inductive at different types and so need distinct property IRIs; 17 are reused at the same type
-   and one property serves each. All 88 JSON-declared arguments **already carry `core:arg_name`**,
+   carry no properties at all, and 112 argument properties (88 JSON, 24 ESL). All 88 JSON-declared arguments **already carry `core:arg_name`**,
    though it is only a `recommends`. ESL's positional form emits none
    (`a_positional_ctor_arg_carries_no_arg_name`), so the compiler names them — the `arg_0` / `arg_1`
    fallback it already defines for the Julia mirror generator, emitting a dictionary of named
@@ -420,7 +466,7 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    abbreviate here.
 
    What remains underneath is a **different and much broader question**: an inductive value now
-   carries full property IRIs (`urn:eigenius:eigentt:App.fn`), and so does every other resource in
+   carries full property IRIs (`urn:eigenius:eigentt:Term.App.fn`), and so does every other resource in
    the system. Whether Eigon-JSON and Eigon-CBOR should abbreviate property IRIs is a codec question
    about ALL resources, not about inductive values, and it does not belong in this note. The size
    argument that made an earlier draft treat it as a design fork does not survive the storage layer
