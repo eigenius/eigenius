@@ -1277,28 +1277,11 @@ pub fn compute_position_hash(content_hash: &ContentHash, parents: &[Arc<Layer>])
     LayerId(id)
 }
 
-// ─── Canonical resource-reference shape ────────────────────────────────
-//
-// The Eigon-JSON parser is intentionally schema-agnostic: every
-// `"prop": "urn:..."` entry parses as `Value::String` because at parse
-// time the parser doesn't know the property's `data_type`. The
-// Eigon-CBOR codec and substrate-side resource builders use
-// `Value::ResourceRef` for the same role. The chain itself should
-// carry one canonical shape so downstream readers (validator,
-// triple index, query evaluator) don't need a tolerant
-// `String|ResourceRef` accept set everywhere.
-//
-// `canonicalise_resource_refs` runs once per `LayerBuilder::build`,
-// before the layer id is computed and the resources are pushed into
-// the cache. For every property whose declared `data_type` is
-// `resource` or `resource_array`, it rewrites `Value::String` IRIs
-// to `Value::ResourceRef`. Property definitions are looked up first
-// in the layer being built (so a layer that introduces both a
-// property and an instance of it canonicalises consistently — the
-// core ontology's `is_a` is the canonical example) and then in the
-// parent chain. Properties without a known `data_type` (custom
-// extensions, malformed declarations) are left untouched; the
-// validator surfaces the malformed shape via its standard rules.
+// A "Canonical resource-reference shape" section stood here, documenting the
+// `canonicalise_resource_refs` pass. Both are retired (D85 §6.2) — `LayerBuilder::build` above
+// records why the invariant it promised could not be kept. The parser stays schema-agnostic:
+// every `"prop": "urn:..."` parses as `Value::String`, and readers go through
+// `Value::as_iri` / `as_iri_str` / `as_iri_array` rather than matching a variant.
 
 #[cfg(test)]
 mod tests {

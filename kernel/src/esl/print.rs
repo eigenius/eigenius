@@ -1159,8 +1159,8 @@ fn print_property_value(
             }
         }
         // An array-valued property (`core:value_array` / `core:resource_array`): each element
-        // through the same rendering. Refs and strings are indistinguishable in Eigon-JSON
-        // (`ResourceRef` serializes as its IRI string), so elements print as STRING LITERALS —
+        // through the same rendering. Refs and strings are indistinguishable in Eigon-JSON —
+        // a reference IS an IRI string — so elements print as STRING LITERALS,
         // valid ESL that round-trips because the validator reinterprets a string IRI per the
         // property's data_type (the persist-round-trip invariant, Rule 3).
         Value::Array(a) => {

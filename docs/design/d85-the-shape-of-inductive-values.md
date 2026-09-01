@@ -254,7 +254,7 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 
 | # | step | green after |
 |---|---|---|
-| 1 | `core:is_a` admits `core:InductiveType`; generate the 96 constructor classes and ~83 argument properties (§6.1). **No `core:ctor`, no `core:args`, and no new value rule** — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
+| 1 | `core:is_a` admits `core:InductiveType`; generate the 96 constructor classes and ~83 argument properties (§6.1), **with the two-sided closedness check** — a class `subclass_of` an inductive must be declared in that inductive's own layer and must correspond to an entry in its `core:ctors`. Without it the rule silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
 | 2 | Migrate the 114 authored values; they parse as `Embedded` natively and round-trip through CBOR unchanged. | yes |
 | 3 | `encode_type` emits value resources and `decode_type` reads them; `CtorApp` → `Embed`. The one irreducible step, and it is smaller than D84 §7's version because 1, 2, 4 and 5 are outside it. | yes |
 | 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
@@ -296,6 +296,40 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    in [`type_check.rs`](../../kernel/src/validation/rules/type_check.rs) under a
    `_ => true, // Unknown data type, skip` arm, so a new one whose arm is forgotten accepts
    everything silently.
+
+   **A constructor class is not an ordinary subclass, and the difference is closedness.**
+   An inductive type is CLOSED: its constructors are exactly the entries in `core:ctors`, which is
+   what makes exhaustiveness checking sound (`non-exhaustive match: missing case for …`,
+   [`program/expr.rs:742`](../../kernel/src/program/expr.rs#L742)), makes the eliminator total, and
+   makes "no user-constructible inhabitant" true of the zero-ctor witness types. A `core:Class` with
+   `subclass_of` is OPEN: any later layer may add one. This rule borrows the Class mechanism, so it
+   must shut the openness off explicitly.
+
+   *What is given away, precisely.* Today `core:ctors` holds **embedded** `InductiveCtor` resources
+   — no `@id`, inside the inductive's own resource — so closedness is **structural**: there is
+   nowhere to add a constructor. Moving constructors to top-level classes is what creates the
+   opening, because they need IRIs to be named by `is_a` and `domain`, and a top-level resource is
+   addable by anyone. Nothing today would stop it: `subclass_of` is validated to reference a
+   `core:Class` ([`rules/is_a.rs:221`](../../kernel/src/validation/rules/is_a.rs#L221)) and
+   `core:InductiveType` *is* `is_a: [core:Class]`. A later layer could declare
+   `eigentt:Term.Bogus subclass_of eigentt:Term`, and a value `is_a: [eigentt:Term.Bogus]` would
+   satisfy every slot declaring `class_types eigentt:Term` — `is_instance_of_any` walks
+   `subclass_of` — while no match arm covers it and no eliminator handles it.
+
+   **So the rule, two-sided:**
+
+   1. A class whose `subclass_of` names a `core:InductiveType` may be declared **only in the layer
+      that declares that inductive**. A lower layer cannot reference a higher one, so same-layer is
+      the only locality that admits anything at all; the content of the rule is the refusal of every
+      layer above.
+   2. It must correspond to an entry in that inductive's `core:ctors`. This is the load-bearing
+      half: `core:ctors` stays the authority, and it is what exhaustiveness already reads, so the
+      class cannot introduce a constructor the eliminator does not know about even within the
+      declaring layer.
+
+   Both are commit-time checks on the shape of a declaration, in the same family as Rule 22's
+   same-or-lower resolution. Without them §6.1 converts a closed type into an open one silently,
+   which is the one thing the inductive/class distinction exists to prevent.
 
    **Measured cost.** 96 constructor classes (59 JSON-declared, 37 ESL), of which 12 are nullary and
    carry no properties at all. 63 distinct argument properties on the JSON side — 88 argument slots

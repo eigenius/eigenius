@@ -379,7 +379,7 @@ fn common_meta(r: &mut Resource, n: &Json, https: &str) {
         r.set(iri(DESCRIPTION), Value::String(comment.to_string()));
     }
     r.set(iri(SOURCE_IRL), Value::String(https.to_string()));
-    // A `ResourceRef`, not a `String`: `declared_by` is resource-typed (D72 §3.2), so
+    // `declared_by` is resource-typed (D72 §3.2), so its value is an IRI string and
     // Rule 8 and Rule 22 require the declarer to resolve same-or-lower. `emit_declarer`
     // below puts that resource in this same layer.
     r.set(iri(DECLARED_BY), Value::iri(&iri(DECLARED_BY_VALUE)));

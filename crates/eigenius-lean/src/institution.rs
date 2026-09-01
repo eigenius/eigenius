@@ -983,7 +983,7 @@ fn format_diag(kind: &str, message: &str) -> String {
 
 /// Resolve a LeanProofTerm's `proof_payload` reference into the
 /// concrete `LeanProofPayload` resource. Accepts both
-/// `Value::Embedded` (inline payload) and `Value::ResourceRef`
+/// `Value::Embedded` (inline payload) and an IRI reference
 /// (referenced separately) shapes — the kernel canonicaliser may have
 /// left either depending on whether the caller embedded the payload
 /// or registered it as a top-level resource.

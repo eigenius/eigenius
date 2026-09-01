@@ -3649,9 +3649,8 @@ fn declarer_from(configured: Option<&str>) -> String {
 fn stamp_attribution(resource: &mut Resource) {
     let declared_by_iri = iri(crate::ontology::well_known::DECLARED_BY);
     if resource.get(&declared_by_iri).is_none() {
-        // A `ResourceRef`: `prov:was_attributed_to` is resource-typed with
-        // `class_types prov:Agent`, so Rule 8 and Rule 22 require a declarer that
-        // resolves same-or-lower.
+        // `prov:was_attributed_to` is resource-typed with `class_types prov:Agent`, so
+        // Rule 8 and Rule 22 require a declarer that resolves same-or-lower.
         resource.set(
             declared_by_iri,
             Value::String(iri(&session_declarer()).as_str().to_string()),
@@ -4551,9 +4550,8 @@ mod tests {
         })
     }
 
-    /// Reads through both value shapes: the compiler writes a `ResourceRef`, and CBOR
-    /// persistence collapses that to a `String`, so a helper matching only one would
-    /// pass or fail for the wrong reason.
+    /// Reads the value through an accessor rather than matching a variant, so the helper
+    /// cannot pass or fail for the wrong reason.
     fn declared_by(r: &Resource) -> Option<String> {
         r.get(&iri(crate::ontology::well_known::DECLARED_BY))
             .and_then(|v| v.as_iri_str().map(|s| s.to_string()))

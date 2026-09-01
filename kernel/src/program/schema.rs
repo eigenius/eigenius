@@ -233,8 +233,7 @@ fn generate_property_schema(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // `data_type` canonicalises to `ResourceRef`; `as_iri` accepts
-    // both that and the pre-canonical `String` shape.
+    // `data_type` is `data_type: resource`, so an IRI string; `as_iri` reads it.
     let dt_iri_owned = prop_def
         .get(&Iri::parse(wk::DATA_TYPE_PROP).unwrap())
         .and_then(|v| v.as_iri());
@@ -527,9 +526,7 @@ pub fn validate_component_templates(
     let mut template_refs: BTreeSet<Iri> = BTreeSet::new();
 
     for (prop_iri, value) in component_arg.properties() {
-        // Check if this property has data_type: template. `data_type`
-        // canonicalises to `ResourceRef`; `as_iri` accepts both
-        // shapes for resilience against pre-canonical inputs.
+        // Check if this property has data_type: template — an IRI string, read via `as_iri`.
         if let Some(prop_def) = layer.resolve(prop_iri) {
             let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
             if let Some(dt) = prop_def.get(&dt_iri).and_then(|v| v.as_iri()) {
@@ -596,9 +593,7 @@ fn validate_output_schemas_walk(
         Iri::parse("urn:eigenius:program:components:completion:output_schema").unwrap();
 
     // Check if this node has a component_argument with output_schema.
-    // `output_schema` is `data_type: resource` (the class IRI), which
-    // canonicalises to `ResourceRef`; `as_iri` keeps the legacy
-    // `String` shape working too.
+    // `output_schema` is `data_type: resource` (the class IRI), read via `as_iri`.
     if let Some(Value::Embedded(comp_arg)) = resource.get(&comp_arg_prop) {
         if let Some(class_iri) = comp_arg.get(&output_schema_prop).and_then(|v| v.as_iri()) {
             if let Err(e) = schema_for_class(&class_iri, layer) {

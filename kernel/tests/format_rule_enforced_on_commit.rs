@@ -14,17 +14,19 @@
 
 //! Rule 4 (`core:format`) fires **through a real commit**.
 //!
-//! Issue #118. `core:format` is declared `data_type: core:resource`, so
-//! `canonicalise_resource_refs` — the first statement of
-//! `LayerBuilder::build`, ahead of `structural_validate` — rewrites the
-//! `format` slot on every property definition from `Value::String` to
-//! `Value::ResourceRef`. `check_format` matched `Some(Value::String(s))`
-//! alone, took the fall-through arm, and returned an empty diagnostic
-//! vector: a malformed date committed with no diagnostic.
+//! Issue #118, and the shape that caused it no longer exists. `core:format` is declared
+//! `data_type: core:resource`, and `canonicalise_resource_refs` — then the first statement of
+//! `LayerBuilder::build`, ahead of `structural_validate` — rewrote the `format` slot on every
+//! property definition from `Value::String` to `Value::ResourceRef`. `check_format` matched
+//! `Some(Value::String(s))` alone, took the fall-through arm, and returned an empty diagnostic
+//! vector: a malformed date committed with no diagnostic. The pass and the variant were retired
+//! on `2026-08-31` (D85 §6.2), so the slot is a `String` throughout — but the rule is still read
+//! through `as_iri_str`, and these tests still pin that a malformed value is caught at commit,
+//! which is the property #118 was actually about.
 //!
 //! The bug was shape-dependent, not universal. A definition rehydrated
-//! from RocksDB comes back as `Value::String` (the CBOR layer normalises
-//! `ResourceRef`), so the old match did fire for ancestor definitions on
+//! from RocksDB came back as `Value::String` (the CBOR layer normalised the variant
+//! away), so the old match did fire for ancestor definitions on
 //! a resumed store. It never fired for a definition in the layer being
 //! committed, or anywhere on an in-memory chain.
 //!
@@ -113,9 +115,8 @@ fn chain_with_a_date_property_on(
         iri("urn:eigenius:core:data_type"),
         Value::String("urn:eigenius:core:string".into()),
     );
-    // The slot under test. Written as a `Value::String`, exactly the
-    // shape Eigon-JSON parsing produces — `LayerBuilder::build` turns it
-    // into a `Value::ResourceRef` before the validator ever sees it.
+    // The slot under test. Written as a `Value::String`, exactly the shape Eigon-JSON
+    // parsing produces, and the shape it keeps all the way to the validator.
     prop.set(
         iri("urn:eigenius:core:format"),
         Value::String("urn:eigenius:core:formats:date".into()),
@@ -141,10 +142,12 @@ fn instance(local: &str, date: &str) -> Resource {
     r
 }
 
-/// The declaration layer must canonicalise `format` to a `ResourceRef` —
-/// this is the precondition that made Rule 4 unreachable. Asserted so a
-/// future change to `canonicalise_resource_refs` that stops rewriting the
-/// slot doesn't quietly turn the tests below into tautologies.
+/// The `format` slot must read as an IRI off a built layer.
+///
+/// This guarded against "a future change to `canonicalise_resource_refs` that stops rewriting
+/// the slot" quietly turning the tests below into tautologies. That change happened — the pass
+/// was deleted with `Value::ResourceRef` — and the assertion holds unchanged, because it was
+/// written against the accessor rather than the variant.
 #[test]
 fn format_slot_reads_as_an_iri_after_build() {
     let (ctx, _backend) = chain_with_a_date_property();
@@ -205,11 +208,10 @@ fn well_formed_date_commits() {
 
 /// Rule 4 must still fire when the property definition arrives from a
 /// chain rehydrated out of storage rather than from the layer just built.
-/// The in-memory backend hands the slot back in its `ResourceRef` shape;
-/// the RocksDB backend's CBOR layer normalises `ResourceRef` into
-/// `String` (pinned by `value_variants_round_trip_normalizations` in the
-/// rocksdb store). `as_iri_str` reads both, so the rule holds across
-/// backends.
+/// Both backends hand the slot back as an IRI string, read through `as_iri_str`. They did
+/// not always agree — the in-memory one returned `Value::ResourceRef` where RocksDB's CBOR
+/// layer normalised it to `String` — and that disagreement is what this test was written to
+/// catch, and what retiring the variant removed.
 #[test]
 fn format_rule_fires_against_a_reloaded_chain() {
     let (ctx, backend) = chain_with_a_date_property_on(true);

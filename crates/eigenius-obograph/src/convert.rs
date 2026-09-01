@@ -22,7 +22,7 @@
 //! every HTTP IRI it can recognise into a stable URN and records the
 //! original under `urn:eigenius:core:source_irl` for provenance. The
 //! rewrite is applied uniformly: node `@id`s, edge subject /
-//! predicate / object IRIs, every `ResourceRef` value. Same input
+//! predicate / object IRIs, every IRI-valued reference. Same input
 //! IRI always rewrites to the same URN, so cross-references stay
 //! coherent across the document.
 //!
@@ -354,7 +354,7 @@ pub fn convert_document(doc: &GraphDocument) -> ConvertReport {
     convert_document_with(doc, &ConvertOptions::default())
 }
 
-/// `declared_by` as a `ResourceRef` (D72 §3.2). The property is resource-typed, so
+/// `declared_by` as an IRI reference (D72 §3.2). The property is resource-typed, so
 /// Rule 8 and Rule 22 require the declarer to resolve same-or-lower; `emit_declarers`
 /// puts one resource per distinct value into the same layer.
 ///
@@ -711,7 +711,7 @@ fn node_to_resource(
 ///   the edge has a place to land.
 /// - any other predicate: the predicate is interpreted as a full
 ///   IRI of a Property node. The subject's property at that IRI
-///   gets the object IRI appended as a `Value::ResourceRef`.
+///   gets the object IRI appended as an IRI string.
 ///   Multi-edge support: repeated `(sub, pred)` pairs collapse to
 ///   an array of references.
 fn apply_edge(
@@ -900,7 +900,7 @@ mod tests {
         // `declared_by` defaults to the sample doc's graph IRI.
         match cell.get(&Iri::parse(DECLARED_BY).unwrap()) {
             Some(Value::String(i)) => assert_eq!(i.as_str(), "http://example.org/g1"),
-            other => panic!("expected declared_by string as ResourceRef, got {other:?}"),
+            other => panic!("expected declared_by as an IRI string, got {other:?}"),
         }
     }
 
@@ -910,7 +910,7 @@ mod tests {
         let part_of = find(&report, "http://example.org/part_of");
         match part_of.get(&Iri::parse(DATA_TYPE).unwrap()) {
             Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
-            other => panic!("expected data_type ResourceRef, got {other:?}"),
+            other => panic!("expected data_type as an IRI string, got {other:?}"),
         }
     }
 
@@ -975,7 +975,7 @@ mod tests {
                 assert_eq!(arr.len(), 1);
                 match &arr[0] {
                     Value::String(i) => assert_eq!(i.as_str(), "http://example.org/Cell"),
-                    other => panic!("expected ResourceRef, got {other:?}"),
+                    other => panic!("expected an IRI string, got {other:?}"),
                 }
             }
             other => panic!("expected Array, got {other:?}"),
@@ -1047,7 +1047,7 @@ mod tests {
                 if let Value::String(i) = &arr[0] {
                     assert_eq!(i.as_str(), "http://example.org/p2");
                 } else {
-                    panic!("expected ResourceRef");
+                    panic!("expected an IRI string");
                 }
             }
             _ => panic!("expected Array"),
@@ -1220,7 +1220,7 @@ mod tests {
         let decl = find(&report, "urn:obo:hasAlternativeNamespace");
         match decl.get(&Iri::parse(DATA_TYPE).unwrap()) {
             Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
-            other => panic!("expected data_type ResourceRef, got {other:?}"),
+            other => panic!("expected data_type as an IRI string, got {other:?}"),
         }
         match decl.get(&Iri::parse(SHORT_NAME).unwrap()) {
             Some(Value::String(s)) => assert_eq!(s, "hasAlternativeNamespace"),
@@ -1335,12 +1335,12 @@ mod tests {
 
         // declared_by defaults to the source graph IRI.
         match nucleus.get(&Iri::parse(DECLARED_BY).unwrap()) {
-            // A `ResourceRef` since D72 §3.2 retyped `declared_by`; the declarer
+            // An IRI reference since D72 §3.2 retyped `declared_by`; the declarer
             // resource itself is emitted into the same layer by `emit_declarers`.
             Some(Value::String(i)) => {
                 assert_eq!(i.as_str(), "http://purl.obolibrary.org/obo/go.owl");
             }
-            other => panic!("expected declared_by ResourceRef, got {other:?}"),
+            other => panic!("expected declared_by as an IRI string, got {other:?}"),
         }
     }
 
@@ -1366,7 +1366,7 @@ mod tests {
             Some(Value::String(i)) => {
                 assert_eq!(i.as_str(), "urn:eigenius:agents:go-curators")
             }
-            other => panic!("expected override declared_by as ResourceRef, got {other:?}"),
+            other => panic!("expected override declared_by as an IRI string, got {other:?}"),
         }
     }
 

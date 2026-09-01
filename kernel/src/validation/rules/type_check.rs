@@ -44,20 +44,16 @@ impl Validator {
             wk::FLOAT => matches!(value, Value::Float(_) | Value::Integer(_)),
             wk::BOOLEAN => matches!(value, Value::Boolean(_)),
             wk::RESOURCE => {
-                // A resource reference is canonically an IRI-valued text.
-                // `LayerBuilder::build` -> `canonicalise_resource_refs`
-                // upgrades a wire `Value::String` IRI to `Value::ResourceRef`
-                // in memory, but that distinction is deliberately NOT durable:
-                // the CBOR codec serialises both as `Text` and the content
-                // hash treats them as identical (`value_to_cbor`), so a
-                // committed layer reloaded from the backend carries
-                // `Value::String` for its resource-typed properties. Rule 3
-                // is the wire-level *shape* gate and must therefore be
-                // invariant under persist/reload: it accepts `String` (the
-                // canonical persisted/wire ref form), `ResourceRef` (the
-                // in-memory canonical form), and `Embedded` (an inlined
-                // Resource). Whether the IRI actually *resolves* is reference
-                // integrity's job (Rule 22), not this rule's.
+                // A resource reference is an IRI-valued text. Rule 3 is the wire-level
+                // *shape* gate and must be invariant under persist/reload, so it accepts
+                // `String` (a reference) and `Embedded` (an inlined Resource). Whether the
+                // IRI actually *resolves* is reference integrity's job (Rule 22), not this
+                // rule's.
+                //
+                // A `Value::ResourceRef` was accepted here too, until it was retired on
+                // `2026-08-31` (D85 §6.2). It was exactly the non-durable distinction this
+                // comment warned about: `LayerBuilder::build` produced it in memory, the CBOR
+                // codec serialised it as `Text`, and a reloaded layer carried `String`.
                 //
                 // When `class_types` declares an `InductiveType`, also
                 // accept `Value::Json` — the tagged-dict carrier for

@@ -70,7 +70,7 @@ pub struct MergeComorphismHandle {
 /// 2. Confirm the resource's `is_a` includes
 ///    `urn:eigenius:core:MergeComorphism`.
 /// 3. Extract the `merge_transformation` property value; reject if
-///    missing or if it isn't a `ResourceRef`.
+///    missing or if it isn't an IRI string.
 ///
 /// On success, returns a [`MergeComorphismHandle`] the application
 /// path consumes. On any structural failure, returns the matching
@@ -153,7 +153,7 @@ pub fn resolve_merge_comorphism(
         Some(c) => c,
         None => {
             let reason = if resource.get(&merge_target_class_iri).is_some() {
-                "merge_target_class must be a Class IRI (ResourceRef or String)"
+                "merge_target_class must be a Class IRI string"
             } else {
                 "merge_target_class property is required"
             };

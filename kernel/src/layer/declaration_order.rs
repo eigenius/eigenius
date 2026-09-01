@@ -225,8 +225,8 @@ mod tests {
         Iri::parse(s).unwrap()
     }
 
-    /// A class requiring the listed properties — `requires` is a `ResourceRef`
-    /// array, so these are ordinary references.
+    /// A class requiring the listed properties — `requires` is a `resource_array`,
+    /// so these are ordinary references.
     fn class(id: &str, requires: &[&str]) -> Resource {
         let mut r = Resource::new(iri(id));
         r.set(

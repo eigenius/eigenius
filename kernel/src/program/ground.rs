@@ -265,9 +265,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
     let resource: &crate::ontology::resource::Resource = &resource_arc;
 
     let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
-    // `data_type` is a `data_type: resource` property — canonical
-    // shape is `ResourceRef`, but `as_iri` also accepts the
-    // pre-canonical `String` shape from intermediate resources.
+    // `data_type` is a `data_type: resource` property, so an IRI string; `as_iri` reads it.
     let data_type_str = match resource.get(&dt_iri).and_then(|v| v.as_iri()) {
         Some(i) => i.as_str().to_string(),
         None => return Ok(Val::sort(1)), // Unknown data type
@@ -313,8 +311,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
 
         wk::VALUE_ARRAY => {
             // Array of values — wrap element type in a list type.
-            // `element_type` is `data_type: resource`, post-canonical
-            // shape is `ResourceRef`.
+            // `element_type` is `data_type: resource`, so an IRI string.
             let et_iri = Iri::parse(wk::ELEMENT_TYPE).unwrap();
             let elem_type = if let Some(et_iri_val) = resource.get(&et_iri).and_then(|v| v.as_iri())
             {

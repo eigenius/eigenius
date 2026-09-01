@@ -132,9 +132,7 @@ impl Validator {
         required: &mut BTreeSet<Iri>,
         recommended: &mut BTreeSet<Iri>,
     ) {
-        // Get when_property — `data_type: resource`, so the canonical
-        // shape is `ResourceRef`; `as_iri` also tolerates the
-        // pre-canonical `String` shape.
+        // Get when_property — `data_type: resource`, so an IRI string; `as_iri` reads it.
         let when_prop = match condition
             .get(&iri(wk::WHEN_PROPERTY))
             .and_then(|v| v.as_iri())

@@ -18,8 +18,8 @@
 //! proposition depends on every declaration its term names — a `ConstRef` inside an
 //! encoded proposition, an inductive named in a `ctor_type`, an axiom cited in a
 //! justification. Those dependencies are real and, before this module, unqueryable:
-//! encoded terms live in `Value::Json`, and `extract_indexable_triples` emits
-//! triples only for `Value::ResourceRef` under `resource` / `resource_array`
+//! encoded terms live in `Value::Json`, and `extract_indexable_triples` emitted
+//! triples only for IRI-shaped values under `resource` / `resource_array`
 //! predicates, so a term contributed **no triples at all**.
 //!
 //! **One extraction, two consumers.** This is the third place that needed to walk a

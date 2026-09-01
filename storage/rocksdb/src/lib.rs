@@ -2300,11 +2300,9 @@ mod tests {
         use eigenius_kernel::storage::{BatchOp, ChainInfo};
 
         /// All wire-typed `Value` variants survive `store_layer` →
-        /// `load_resource` through CBOR with structural equality. Variants
-        /// excluded here (`ResourceRef`, `Json`) are in-memory convenience
-        /// shapes that normalize to the wire-typed form on round-trip; their
-        /// behavior is pinned by `value_variants_round_trip_normalizations`
-        /// below.
+        /// `load_resource` through CBOR with structural equality. `Json` is excluded: it is an
+        /// in-memory convenience shape that normalizes to the wire-typed form on round-trip,
+        /// pinned by `value_variants_round_trip_normalizations` below.
         #[test]
         fn value_variants_round_trip() {
             let (store, _dir) = open_temp_store();
@@ -2358,14 +2356,16 @@ mod tests {
             assert_eq!(loaded, original);
         }
 
-        /// Pins the intentional CBOR normalizations: `ResourceRef` and `Json`
-        /// are in-memory convenience variants that the wire layer collapses
-        /// into wire-typed forms (`String` / `Integer` / `Bool` / etc.). The
-        /// String-vs-ResourceRef discrimination happens at validation time
-        /// based on the property's declared `data_type`. If this test starts
-        /// failing, the CBOR layer has changed its typing contract and that
-        /// needs a deliberate decision (and content-addressing implications),
-        /// not a silent drift.
+        /// Pins the intentional CBOR normalizations: `Json` is an in-memory convenience
+        /// variant the wire layer collapses into wire-typed forms (`String` / `Integer` /
+        /// `Bool` / etc.). If this test starts failing, the CBOR layer has changed its typing
+        /// contract and that needs a deliberate decision (and content-addressing
+        /// implications), not a silent drift.
+        ///
+        /// The reference case below is an IDENTITY now, and is kept as a pin: a reference is
+        /// an IRI string and must survive the round trip as one. It was a normalization while
+        /// `Value::ResourceRef` existed — and that this side of it could not be preserved is
+        /// the argument that retired the variant (D85 §6.2).
         #[test]
         fn value_variants_round_trip_normalizations() {
             let (store, _dir) = open_temp_store();
@@ -2394,8 +2394,8 @@ mod tests {
                 ResourceBackend::load_resource(&store, &layer_id, &iri("urn:eigenius:test:lossy"))
                     .expect("resource present");
 
-            // ResourceRef → String (same wire bytes; discrimination at
-            // validation time using the property's data_type).
+            // A reference survives as the IRI string it is; whether a string IS a reference
+            // is decided at validation time by the property's `data_type`.
             assert_eq!(
                 loaded.get(&iri("urn:eigenius:test:ref")),
                 Some(&Value::String("urn:eigenius:test:other".into()))

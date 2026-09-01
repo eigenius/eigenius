@@ -156,11 +156,9 @@ impl Value {
     }
 
     /// Extracts resource reference IRIs from an array value.
-    /// Handles both `ResourceRef` and `String` variants (since the JSON
-    /// parser stores all strings as `Value::String` — the distinction
-    /// between string literals and resource references is made by the
-    /// property's data_type, not at parse time).
-    /// Non-reference/non-string elements are silently skipped.
+    /// The distinction between a string literal and a resource reference is made by the
+    /// property's `data_type`, not at parse time, so this reads any IRI-parseable string.
+    /// Non-string elements are silently skipped.
     pub fn as_iri_array(&self) -> Vec<Iri> {
         match self {
             Value::Array(arr) => arr

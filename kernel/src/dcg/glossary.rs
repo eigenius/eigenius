@@ -254,11 +254,10 @@ fn cat_is_mass(cat: &Exp) -> bool {
 /// itself. For a UMLS named individual (`resource umlscui:C : umlssty:T`) this is its semantic-type
 /// class(es); for a class node (`is_a = [core:Class]`) it is empty.
 ///
-/// A reference target may be stored as a `ResourceRef` (bootstrap-loaded resources) OR as a `String`
-/// IRI (a resource minted in-process and round-tripped through the persistent backend, which serialises
-/// the ref as its IRI string) — both denote the same class, so accept either (as [`Resource::is_instance_of`]
-/// does). Only matching `ResourceRef` silently drops a persisted named individual's type, misclassifying
-/// it as a bare class (→ a common-noun alias instead of the proper-noun one).
+/// A reference target is an IRI string, read through an accessor as [`Resource::is_instance_of`]
+/// does. This was once two shapes, and matching only the in-memory one silently dropped a
+/// persisted named individual's type, misclassifying it as a bare class (→ a common-noun alias
+/// instead of the proper-noun one). That is the bug the accessor discipline prevents.
 fn instance_type_classes(r: &Resource) -> Vec<Iri> {
     let (Ok(is_a), Ok(class)) = (Iri::parse(wk::IS_A), Iri::parse(wk::CLASS)) else {
         return Vec::new();

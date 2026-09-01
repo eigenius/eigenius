@@ -81,8 +81,7 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 ///
 /// - `Value::iri(iri)` — a class IRI (the leaf type).
 ///   Resolves through the layer chain via `resolve_class_type`.
-/// - `Value::String(iri-str)` — same as ResourceRef, with the IRI
-///   in string form (the pre-canonicalisation shape).
+/// - `Value::String(iri-str)` — the same, with the IRI in string form.
 /// - `Value::Embedded(r)` with `is_a` of `TypeBinderArrow` — a
 ///   value-typed Pi binder `pi name : kind. body`. Recursively
 ///   decodes the kind + body.
@@ -352,10 +351,8 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let func_prop = Iri::parse("urn:eigenius:program:function").unwrap();
 
     let func_exp = match resource.get(&func_prop) {
-        // Resource references in function/argument positions are
-        // typed as `data_type: resource`, so the canonical shape is
-        // `ResourceRef`; `String` survives for pre-canonicalisation
-        // intermediates (RPC payloads, FIBER-synthesised programs).
+        // Resource references in function/argument positions are typed as
+        // `data_type: resource`, so they arrive as IRI strings.
         Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => return Err("Apply: missing 'function' property".to_string()),
@@ -621,9 +618,8 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
             .map_err(|e| format!("invalid `result_motive` payload: {e:?}"))?;
         build_inductive_rec(parsed_arms, scrutinee_exp, motive, layer)
     } else if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_iri_str()) {
-        // `program:result_type` is `data_type: resource`, so post-
-        // `canonicalise_resource_refs` the value is `ResourceRef`,
-        // not `String`. `as_iri_str` handles both shapes.
+        // `program:result_type` is `data_type: resource`, so its value is an IRI string.
+        // `as_iri_str` reads it without matching a variant.
         let result_type_iri = Iri::parse(rt_iri_str)
             .map_err(|e| format!("invalid `result_type` IRI '{rt_iri_str}': {e}"))?;
         let result_type_val = resolve_class_type(&result_type_iri, layer)?;
@@ -912,10 +908,8 @@ fn parse_reduce(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 fn parse_literal(resource: &Resource) -> Result<Exp, String> {
     let val_prop = Iri::parse("urn:eigenius:program:value").unwrap();
     match resource.get(&val_prop) {
-        // Canonical IRI reference shape after `canonicalise_resource_refs`.
         Some(Value::String(s)) => {
-            // Pre-canonicalisation: a string literal that *might* be
-            // an IRI reference (heuristic on `urn:` / `http`).
+            // A string literal that *might* be an IRI reference (heuristic on `urn:` / `http`).
             if Iri::parse(s).is_ok() && (s.starts_with("urn:") || s.starts_with("http")) {
                 return Ok(Exp::Var(s.clone())); // Resource reference
             }
@@ -940,9 +934,7 @@ fn get_string(resource: &Resource, prop: &str) -> Result<String, String> {
 
 fn get_iri(resource: &Resource, prop: &str) -> Result<Iri, String> {
     let prop_iri = Iri::parse(prop).unwrap();
-    // IRI-typed property values canonicalise to `ResourceRef`;
-    // `as_iri` accepts both that and the pre-canonical `String`
-    // shape from intermediate (uncommitted) resources.
+    // IRI-typed property values are IRI strings; `as_iri` reads one without matching a variant.
     resource
         .get(&prop_iri)
         .and_then(|v| v.as_iri())

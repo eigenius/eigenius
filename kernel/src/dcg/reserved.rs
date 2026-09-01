@@ -88,8 +88,7 @@ impl ReservedKind {
         })
     }
 
-    /// The kind named by a `construct_kind` value — a `ResourceRef` in memory, or the same IRI as a
-    /// `String` after a persist round-trip (CBOR collapses `ResourceRef` → the content-hash string).
+    /// The kind named by a `construct_kind` value — an IRI string.
     fn from_value(v: &Value) -> Option<Self> {
         let iri = match v {
             Value::String(s) => s.as_str(),

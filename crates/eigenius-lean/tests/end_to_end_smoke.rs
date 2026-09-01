@@ -150,9 +150,8 @@ fn lean_proof_term_with_well_typed_payload_lands_holds() {
     let (storage, layer) = build_proof_term_layer(bytes_str, "PUnit");
     let (index, runtime, ctx) = build_dispatch_setup(Arc::clone(&layer), storage);
 
-    // Pull the LeanProofTerm back off the committed layer so the
-    // AutoOnLoad dispatch sees the canonicalised shape (e.g. `is_a`
-    // entries as `ResourceRef`s, not raw `String`s).
+    // Pull the LeanProofTerm back off the committed layer so the AutoOnLoad dispatch sees the
+    // resource as it lands, not as it was authored.
     let term_iri = iri("urn:eigenius:test:lean:p1_term");
     let term = layer
         .resolve(&term_iri)

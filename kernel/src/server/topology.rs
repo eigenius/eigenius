@@ -264,9 +264,8 @@ fn resource_attrs(
     }
     let data_type_iri = Iri::parse(wk::DATA_TYPE_PROP).expect("DATA_TYPE_PROP IRI");
     if let Some(v) = resource.get(&data_type_iri) {
-        // `data_type` is a resource-typed property — its value is
-        // `Value::ResourceRef` after `canonicalise_resource_refs` runs,
-        // not `Value::String`. Use `as_iri_str` to cover both shapes.
+        // `data_type` is a resource-typed property. Read it through `as_iri_str` rather than
+        // matching a variant — see the test below for the bug that discipline exists to prevent.
         if let Some(s) = v.as_iri_str() {
             attrs.insert("data_type".to_string(), s.to_string());
         }
@@ -691,16 +690,20 @@ mod tests {
         );
     }
 
-    /// Production resources go through `canonicalise_resource_refs` at
-    /// `LayerBuilder::build` time, which rewrites `Value::String` IRIs
-    /// on resource-typed properties to `Value::ResourceRef`. The walker
-    /// originally used `Value::as_str` which returns `None` for
-    /// `ResourceRef`, silently dropping every type/hierarchy edge in
-    /// any chain that had been built (= every production chain). This
-    /// test pins the post-canonicalisation shape directly so we'd
-    /// catch a regression even without a full LayerBuilder round-trip.
+    /// The walker emits type and hierarchy edges for a chain built through `LayerBuilder`.
+    ///
+    /// **This pins a bug that shipped.** `LayerBuilder::build` used to run
+    /// `canonicalise_resource_refs`, rewriting `Value::String` IRIs on resource-typed properties
+    /// to `Value::ResourceRef`. The walker read them with `Value::as_str`, which returned `None`
+    /// for that variant, so it silently dropped every type/hierarchy edge in any chain that had
+    /// been built — which is every production chain. The topology graph came back empty.
+    ///
+    /// `Value::ResourceRef` was retired on `2026-08-31` (D85 §6.2) and this is the bug that
+    /// argued for it: a variant not reliably produced is a place a reloaded chain reads nothing.
+    /// The reading discipline it forced — go through `as_iri_str`, never match a variant —
+    /// survives the variant, which is why the test does.
     #[test]
-    fn walker_emits_edges_for_canonicalised_resource_refs() {
+    fn walker_emits_edges_for_resources_built_through_layer_builder() {
         let mut animal = Resource::new(iri("urn:eigenius:example:Animal"));
         animal.set(
             iri(wk::IS_A),
@@ -750,7 +753,7 @@ mod tests {
         });
         assert!(
             subclass.is_some(),
-            "expected SUBCLASS_OF Dog → Animal edge from ResourceRef-shaped data; edges = {:?}",
+            "expected SUBCLASS_OF Dog → Animal edge; edges = {:?}",
             topo.edges,
         );
 
@@ -761,7 +764,7 @@ mod tests {
         });
         assert!(
             requires.is_some(),
-            "expected REQUIRES Dog → name edge from ResourceRef-shaped data; edges = {:?}",
+            "expected REQUIRES Dog → name edge; edges = {:?}",
             topo.edges,
         );
 
@@ -774,7 +777,7 @@ mod tests {
         assert_eq!(
             name_node.attrs.get("data_type").map(String::as_str),
             Some(wk::STRING),
-            "expected data_type attr read off ResourceRef value; got: {:?}",
+            "expected data_type attr read through as_iri_str; got: {:?}",
             name_node.attrs,
         );
     }

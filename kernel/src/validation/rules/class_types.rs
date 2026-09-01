@@ -29,7 +29,7 @@ impl Validator {
     /// Rule 8: Class type checking.
     ///
     /// `class_types` may name either a `Class` (the historical case —
-    /// the value must be a ResourceRef/Embedded whose `is_a` matches)
+    /// the value must be an IRI reference, or an `Embedded` whose `is_a` matches)
     /// or an `InductiveType` (Option A unification — the value is a
     /// tagged-dict tree carried by `Value::Json`, and we dispatch to
     /// the inductive walker). Per the singleton constraint that
@@ -108,10 +108,8 @@ impl Validator {
         };
 
         for v in values_to_check {
-            // Embedded resources are checked directly against the
-            // allowed-class set; IRI references (in either canonical
-            // `ResourceRef` or pre-canonical `String` shape) are
-            // resolved through the chain first.
+            // Embedded resources are checked directly against the allowed-class set;
+            // IRI references are resolved through the chain first.
             if let Value::Embedded(embedded) = v {
                 if !self.is_instance_of_any(embedded, &allowed_refs) {
                     let actual = format_is_a_list(embedded.is_a());

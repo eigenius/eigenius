@@ -122,8 +122,7 @@ mod vec_defaults {
 // ---------------- Property-value extraction helpers ----------------
 
 /// Read an IRI-valued slot from a Resource. Returns `Some(iri)` iff
-/// the Resource has the property and the value resolves to an IRI
-/// (canonical `ResourceRef` form or the pre-canonical string form).
+/// the Resource has the property and the value resolves to an IRI.
 ///
 /// Uses `Layer::resolve` (not `get_resource`) so that Resources
 /// defined in ancestor layers are visible — the Index Resource

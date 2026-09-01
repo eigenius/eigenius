@@ -601,9 +601,7 @@ fn parse_query_class(resource: &Resource) -> Result<QueryClassEntry, String> {
     let mut dispatch_roles = Vec::with_capacity(role_values.len());
     for v in &role_values {
         match v {
-            // Post-canonicalisation, IRI references in resource_array
-            // values are `ResourceRef`; `String` is a parse-time
-            // fallback for intermediate (uncommitted) shapes.
+            // IRI references in a `resource_array` are strings.
             Value::String(s) => dispatch_roles.push(parse_dispatch_role(s)?),
             other => {
                 return Err(format!(

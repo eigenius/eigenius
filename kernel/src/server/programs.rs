@@ -624,10 +624,8 @@ impl EigeniusService {
                 let mut template_errors = Vec::new();
                 let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
                 let input_type_prop = Iri::parse("urn:eigenius:program:input_type").unwrap();
-                // `program:input_type` is `data_type: resource`; after
-                // canonicalisation the value is `ResourceRef`. Match
-                // both shapes via `as_iri_str` so template validation
-                // actually runs on production-shaped programs.
+                // `program:input_type` is `data_type: resource`, so an IRI string. Read it
+                // via `as_iri_str` rather than matching a variant.
                 if let (
                     Some(input_type_str),
                     Some(crate::ontology::resource::Value::Embedded(body)),

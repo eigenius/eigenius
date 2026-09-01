@@ -361,7 +361,7 @@ fn cascade_for_quotient(
 }
 
 /// Walk every property of `resource`, emitting an `OrphanedReference`
-/// item for each `ResourceRef(target)` hit. Recurses through nested
+/// item for each IRI-string reference to `target`. Recurses through nested
 /// `Embedded` resources and `Array` items, tracking the property
 /// path to the reference site.
 fn collect_orphaned_refs(

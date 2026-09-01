@@ -128,11 +128,8 @@ pub fn validate_external_institution_chain(
         let Some(iri) = resource.id().cloned() else {
             continue;
         };
-        // `runtime` is `data_type: resource` post-canonicalisation,
-        // so the value is a `ResourceRef`. `Value::as_iri` accepts
-        // both ResourceRef and (legacy/parse-time) String, so this
-        // also handles intermediates that haven't been through
-        // `canonicalise_resource_refs` yet.
+        // `runtime` is `data_type: resource`, so its value is an IRI string. `Value::as_iri`
+        // reads it without matching a variant.
         match resource.get(&runtime_prop).and_then(|v| v.as_iri()) {
             Some(i) if i.as_str() == wk::RUNTIME_EXTERNAL => {}
             _ => continue,

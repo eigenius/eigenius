@@ -30,19 +30,17 @@ impl Validator {
         prop_iri: &Iri,
         res_id: &Option<Iri>,
     ) -> Vec<ValidationError> {
-        // The `format` slot arrives in either IRI shape, so read it with
-        // `as_iri_str` — never `as_str`, and never a bare
-        // `Value::String` match. `core:format` is declared
-        // `data_type: core:resource`, so `canonicalise_resource_refs`
-        // (first statement of `LayerBuilder::build`, ahead of
-        // `structural_validate`) rewrites it to `Value::ResourceRef` on
-        // every freshly built layer, while the RocksDB CBOR encoding
-        // normalises it back to `Value::String` on reload. Matching
-        // `Value::String` alone meant this rule returned no diagnostic
-        // for any property definition resolved out of a freshly built
-        // layer — every in-memory chain, and the layer being committed —
-        // and fired only for definitions rehydrated from a persistent
-        // store (issue #118).
+        // Read the `format` slot with `as_iri_str` — never `as_str`, and never a bare
+        // `Value::String` match.
+        //
+        // This is issue #118, and the shape that caused it is gone: `canonicalise_resource_refs`
+        // rewrote `core:format` to `Value::ResourceRef` on every freshly built layer while the
+        // RocksDB CBOR encoding normalised it back to `Value::String` on reload, so matching
+        // `Value::String` alone returned no diagnostic for any definition resolved out of a
+        // freshly built layer — every in-memory chain, and the layer being committed — and
+        // fired only for definitions rehydrated from a store. Both the pass and the variant
+        // were retired on `2026-08-31` (D85 §6.2); the accessor discipline is what prevents
+        // the next instance of that bug, so it stays.
         let Some(format_str) = prop_def
             .get(&iri(wk::FORMAT_PROP))
             .and_then(|v| v.as_iri_str())

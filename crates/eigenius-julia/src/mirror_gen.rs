@@ -2551,10 +2551,8 @@ fn string_value(r: &Resource, prop_iri: &str) -> Option<String> {
     r.get(&iri).and_then(Value::as_str).map(str::to_string)
 }
 
-/// Read a property value as a single resource IRI. Tolerates the
-/// chain's two encodings of an IRI-typed value: `Value::ResourceRef`
-/// (the canonical form) and `Value::String` (the JSON parser stores
-/// IRIs as strings until the property's `data_type` is consulted).
+/// Read a property value as a single resource IRI — a string that parses as one. Whether a
+/// string IS a reference comes from the property's `data_type`, not the value's shape.
 fn resource_iri_value(r: &Resource, prop_iri: &str) -> Option<Iri> {
     let iri = Iri::parse(prop_iri).ok()?;
     let v = r.get(&iri)?;

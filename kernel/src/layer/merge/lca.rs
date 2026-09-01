@@ -126,7 +126,7 @@ pub(crate) fn ancestor_chain_iris(
 /// Yield every `Iri` referenced by a `Value`, recursing through
 /// every nested container shape Eigon admits:
 ///
-/// - `ResourceRef(iri)` — yield the IRI directly.
+/// - `String(s)` that parses as an IRI — yield it directly.
 /// - `Array(items)` — recurse into each item (handles arrays of
 ///   refs, arrays of arrays, arrays of embeddeds).
 /// - `Embedded(resource)` — recurse into each of the embedded

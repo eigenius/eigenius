@@ -8,7 +8,7 @@
 // each mapped onto an existing kernel constructor:
 //
 //   N    common noun  → a TYPE        (CN-as-type)        : EigonClass
-//   NP   named entity  → a WITNESS     (by reference)      : ResourceRef → Var
+//   NP   named entity  → a WITNESS     (by reference)      : resource ref → Var
 //   (S\NP)/NP  t. verb → a PREDICATE   (typed constant)    : EigonAxiom
 //   N/N  adjective     → a PREDICATE   (Σ-refinement on composition) : EigonAxiom
 //

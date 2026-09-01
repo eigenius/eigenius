@@ -407,7 +407,7 @@ pub fn emit_resources(
         out.push(dp);
 
         // Anaphora bindings (D67 §3) — one `enc:AnaphorBinding` per resolved hole: the accepted
-        // antecedent, machine-readable (a ResourceRef for individuals/claims, the D47 encoding
+        // antecedent, machine-readable (an IRI reference for individuals/claims, the D47 encoding
         // for kind terms), plus the proposing authority and the proposer's audit fields.
         for (k, b) in s.bindings.iter().enumerate() {
             let mut ab = res(

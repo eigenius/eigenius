@@ -171,10 +171,8 @@ fn parse_properties(
 /// that's the validator's job. Instead, it infers the Value variant
 /// from the JSON structure:
 ///
-/// - JSON string → try as IRI (ResourceRef) if it looks like one, otherwise String
-///   (but we can't distinguish reliably without the property definition,
-///   so all strings become Value::String; the validator will interpret them
-///   based on the property's data_type)
+/// - JSON string → `Value::String`. A reference and a string literal are the same shape;
+///   which one it is comes from the property's `data_type`, which the parser does not have
 /// - JSON number → Integer if no decimal, Float otherwise
 /// - JSON boolean → Boolean
 /// - JSON object → Embedded resource

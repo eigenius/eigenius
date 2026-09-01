@@ -144,7 +144,7 @@ pub enum MergeError {
     },
     /// A `MergeComorphism` resource is missing the required
     /// `merge_transformation` property, or the property's value isn't
-    /// a `ResourceRef` to a EigenTT term. Both shapes are required by
+    /// an IRI string naming a EigenTT term. Both are required by
     /// the core ontology's class declaration; surfacing this as a
     /// typed error keeps the failure mode legible.
     MalformedMergeComorphism {

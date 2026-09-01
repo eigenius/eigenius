@@ -156,7 +156,7 @@ pub fn required_typed_properties(input_class: &Resource) -> Vec<Iri> {
 
 /// Per-property marshaling: when the target property declares
 /// `data_type: core:resource`, dereference IRI-shaped values
-/// (`Value::String("urn:...")` or `Value::ResourceRef`) into
+/// (`Value::String("urn:...")`) into
 /// embedded resources so the institution's mirror decoder sees a
 /// fully-embedded map. Other property shapes pass through unchanged.
 pub fn embed_typed_resource_arg(

@@ -113,21 +113,21 @@ pub fn compute_supporting_layer(
 /// References are:
 /// - Every property IRI used as a key on any resource (the property
 ///   definition lives elsewhere in the chain).
-/// - Every IRI carried as a `Value::ResourceRef`, recursively through
+/// - Every IRI carried as an IRI-shaped string, recursively through
 ///   `Value::Array` and `Value::Embedded`. This covers `is_a` class
 ///   refs, `subclass_of` / `requires` / `recommends` / `domain` /
 ///   `class_types` / `data_type` / `format_constraints` /
 ///   inductive-ctor `arg_types` / comorphism `export_format` etc.
 ///   (D33 §4.2's full reference list).
 ///
-/// `Value::String` is *not* treated as a reference even when it looks
-/// like an IRI: the `canonicalise_resource_refs` pass (run before
-/// this computation in `LayerBuilder::build`) has already upgraded
-/// every `String` IRI that lives under a known `resource` /
-/// `resource_array` property to `Value::ResourceRef`. Strings that
-/// remain are properties with unknown `data_type` (custom extensions
-/// the validator hasn't typed) — we don't second-guess their
-/// semantics.
+/// **A `Value::String` that parses as an IRI IS treated as a reference.** This paragraph said
+/// the opposite until `2026-08-31`, and was true of the code it described: a
+/// `canonicalise_resource_refs` pass ran in `LayerBuilder::build` and upgraded every `String`
+/// IRI under a known `resource` / `resource_array` property to `Value::ResourceRef`, so a
+/// surviving `String` meant a property the validator had not typed. That pass and that variant
+/// are both retired (D85 §6.2) — the variant was produced only at build time and never survived
+/// storage, so nothing could rely on it — and this walk is schema-blind by design: it runs
+/// while the layer is being built, before any schema is resolvable.
 fn collect_external_references(
     resources: &BTreeMap<Iri, Resource>,
     defined_iris: &BTreeSet<Iri>,
@@ -333,7 +333,7 @@ mod tests {
             iri("urn:eigenius:demo:related_to"),
             Value::iri(&iri("urn:eigenius:demo:A")),
         );
-        // No external refs: the only ResourceRef is to demo:A (also
+        // No external refs: the only reference is to demo:A (also
         // defined here); the only property IRI used is
         // demo:related_to. But demo:related_to itself isn't in
         // defined_iris of this layer — so it IS an external ref. To
@@ -459,7 +459,7 @@ mod tests {
     }
 
     /// References to property IRIs (the map keys) count as external
-    /// even when no ResourceRef appears in the values. Verifies the
+    /// even when no IRI-valued reference appears in the values. Verifies the
     /// "property IRIs are references too" branch.
     #[test]
     fn property_iri_counts_as_reference() {
@@ -471,7 +471,7 @@ mod tests {
         let mut b = LayerBuilder::new("child", Some(Arc::clone(&root)));
         let mut r = Resource::new(iri("urn:eigenius:demo:Note"));
         // The property is core:description — defined in root, not
-        // here. Only String value, no ResourceRef. The property IRI
+        // here. Only a non-IRI string value. The property IRI
         // itself is the external reference.
         r.set(
             iri("urn:eigenius:core:description"),

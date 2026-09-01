@@ -86,7 +86,7 @@ pub struct ClaimSource<'a> {
     /// does (found 2026-08-03).
     ///
     /// Must be the **IRI of a `prov:Agent`** since D72 §3.2 retyped the property: it is
-    /// written as a `ResourceRef`, so Rule 8 and Rule 22 require it to resolve same-or-lower.
+    /// written as an IRI reference, so Rule 8 and Rule 22 require it to resolve same-or-lower.
     /// A program's name is not an answer to *who* — that belongs in `provenance`. Required by BOTH
     /// clusters since eigenius#201 made the parsed cluster Declared. `UNATTRIBUTED_AGENT` is the
     /// honest value when no agent is known.

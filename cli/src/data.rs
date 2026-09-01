@@ -264,7 +264,7 @@ pub async fn data_verify(endpoint: &str, iri: &str, json: bool) {
     }
 }
 
-/// Resolve a schema value (an embedded `DatasetSchema` or a `ResourceRef` to a
+/// Resolve a schema value (an embedded `DatasetSchema` or an IRI reference to a
 /// committed one) to a concrete resource.
 async fn resolve_schema_value(
     client: &mut EigeniusKernelClient<Channel>,

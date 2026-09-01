@@ -636,11 +636,9 @@ impl Validator {
 
     /// Extract the data_type IRI string from a property definition.
     pub(crate) fn get_data_type_str(&self, prop_def: &Resource) -> Option<String> {
-        // `data_type` is a `data_type: resource` property, so after
-        // `LayerBuilder::canonicalise_resource_refs` runs the value is
-        // a `Value::ResourceRef`. Accept the (legacy) `Value::String`
-        // shape too for resources read off the wire before
-        // canonicalisation (RPC payloads, FIBER intermediates).
+        // `data_type` is a `data_type: resource` property, so its value is an IRI string.
+        // Read it through `as_iri` rather than matching a variant — the reading discipline
+        // that outlived `Value::ResourceRef` (D85 §6.2).
         prop_def
             .get(&iri(wk::DATA_TYPE_PROP))
             .and_then(|v| v.as_iri())
@@ -776,7 +774,7 @@ impl Validator {
     ///    triple).
     /// 4. Each binder's `parameter_type` (when populated) matches
     ///    the witness contract:
-    ///    - binders 1 and 2: ResourceRef to `target_class`
+    ///    - binders 1 and 2: an IRI reference to `target_class`
     ///    - binder 3: embedded `InductiveArgType` with
     ///      `type_name = Option` and `type_args = [target_class]`
     ///
@@ -1241,9 +1239,8 @@ impl Validator {
                 continue;
             }
 
-            // Collect IRI references from the value, accepting both
-            // canonical `ResourceRef` and pre-canonical `String`
-            // shapes via `Value::as_iri` / `as_iri_array`.
+            // Collect IRI references from the value via `Value::as_iri` / `as_iri_array`,
+            // which parse rather than matching a variant.
             let ref_iris: Vec<Iri> = match value {
                 Value::Array(_) => value.as_iri_array(),
                 single => single.as_iri().map(|i| vec![i]).unwrap_or_default(),
@@ -1285,10 +1282,7 @@ impl Validator {
 /// import directly from `ontology::well_known`.
 pub(crate) use crate::ontology::well_known::iri;
 
-/// Helper: extract a single resource-IRI from a Value. Accepts both
-/// `Value::ResourceRef` (canonical) and `Value::String` (the JSON
-/// parser stores all strings as `Value::String` — `data_type` is
-/// frequently authored as a bare string in source ontologies).
+/// Helper: extract a single resource-IRI from a Value — any string that parses as one.
 pub(crate) fn value_as_iri(value: &Value) -> Option<Iri> {
     match value {
         Value::String(s) => Iri::parse(s).ok(),

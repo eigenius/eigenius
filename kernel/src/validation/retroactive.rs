@@ -212,7 +212,7 @@ pub(in crate::validation) fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Ir
     // stays sound: dependent enumeration is a union over changed IRIs.
     //
     // The comparison is on canonical Eigon-CBOR, not `PartialEq`: that encoding is
-    // what content-addressing already uses, and it collapses `ResourceRef` into a
+    // what content-addressing already uses, and it collapsed `ResourceRef` into a
     // plain string. An ancestor read back from storage therefore compares equal to
     // the freshly parsed resource it re-declares, which is exactly the case that has
     // to be cheap.
@@ -1180,7 +1180,7 @@ mod tests {
     /// O(chain) carrier scan to discover that nothing had changed.
     ///
     /// The second arm pins *why* the comparison is on canonical Eigon-CBOR rather
-    /// than `PartialEq`: persistence collapses `ResourceRef` into a plain string, so
+    /// than `PartialEq`: persistence collapsed `ResourceRef` into a plain string, so
     /// an ancestor read back from storage carries the string shape while the freshly
     /// parsed layer carries the ref shape. Those are the same definition, and the
     /// gate has to say so — otherwise every reload of a persisted ontology scans.
@@ -1231,7 +1231,7 @@ mod tests {
         };
         assert!(
             !redefines_ancestor(&persisted_shape, &color),
-            "ResourceRef/String is a persistence artifact, not a definition change"
+            "a persistence-shape difference is not a definition change"
         );
 
         // A real change → still a redefinition.

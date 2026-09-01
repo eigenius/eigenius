@@ -35,6 +35,32 @@ skills.
 
 ---
 
+## 0a. Sweep log
+
+### `ResourceRef` comment sweep *(done `2026-08-31`)*
+
+Retiring `Value::ResourceRef` left **150 stale references across 54 Rust files** — all comments
+and test assertion messages, since the code compiles and the variant does not exist. 31 remain,
+each rewritten to read as history: what the variant was, what it promised, and why the promise
+could not be kept. The rest are gone.
+
+Two things the sweep turned up rather than the grep:
+
+- **`validation/rules/allows_only.rs` carried a mangled sentence** — *"`as_iri` reads a reference
+  through `as_iri`, there being one shape since `ResourceRef` was retired shapes"* — damage from
+  the regex pass that did the retirement. Nothing catches a broken comment; only reading it does.
+- **`layer/supporting.rs`'s doc comment asserted the OPPOSITE of its code.** It said a
+  `Value::String` is *not* treated as a reference even when it looks like an IRI — true while
+  `canonicalise_resource_refs` upgraded real references — and the walk below it now does exactly
+  that shape test. A reader trusting the comment would have concluded the walk was broken.
+
+**One deliberately left.** `ontologies/lexicon/lexicon-ontology.esl:404` uses `ResourceRef` as
+prose for *a reference to a committed resource* (`named entity → ResourceRef`), not the variant.
+It is a `core:description` in a **bootstrap ontology**, so editing it moves the `lexicon` manifest
+and costs a full reseed for a wording change. Fold it into the next bootstrap edit.
+`experiments/lexicon/lexicon.esl` had the same prose in a `//` comment and was fixed, since
+comments do not reach the manifest.
+
 ## 1. Design documents
 
 ### 1.1 Retire — record only

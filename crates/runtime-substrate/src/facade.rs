@@ -366,9 +366,8 @@ fn stamp_derived_epistemic_category(output: &mut Resource) {
     let mut entries: Vec<Value> = match output.get(&is_a_iri) {
         Some(Value::Array(arr)) => arr.clone(),
         Some(other) => {
-            // Defensive: an unexpected shape (single ResourceRef or
-            // String). Promote into an array so the rule "is_a is a
-            // list" is preserved post-stamp.
+            // Defensive: an unexpected shape (a single value rather than an array).
+            // Promote into an array so the rule "is_a is a list" is preserved post-stamp.
             vec![other.clone()]
         }
         None => Vec::new(),
@@ -594,9 +593,8 @@ mod tests {
 
     #[test]
     fn stamp_promotes_non_array_is_a_to_array() {
-        // Defensive: some workers might emit a single ResourceRef
-        // rather than a list (older codec shapes). Stamp must still
-        // produce a valid is_a list.
+        // Defensive: some workers might emit a single value rather than a list (older codec
+        // shapes). Stamp must still produce a valid is_a list.
         let mut r = Resource::new_embedded();
         r.set(
             iri(PROP_IS_A),

@@ -532,9 +532,7 @@ fn augment_seed_from_institution_file(file_path: &Path) -> Result<Vec<Iri>, Stri
     Ok(classes)
 }
 
-/// Extract every IRI-shaped element from a `core:resource_array`
-/// property value. Tolerates the post-`canonicalise_resource_refs`
-/// `ResourceRef` shape and the pre-canonical `String` shape.
+/// Extract every IRI-shaped element from a `core:resource_array` property value.
 fn iri_array_from_value(value: &eigenius_kernel::ontology::resource::Value) -> Vec<Iri> {
     use eigenius_kernel::ontology::resource::Value;
     match value {

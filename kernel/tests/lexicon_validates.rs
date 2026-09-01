@@ -19,7 +19,7 @@
 //!    the inductive `lexicon:Cat`, the four archetype entries, the worked
 //!    composition `s_gene_depends`) compiles against core→reflection(+eigentt)
 //!    and the `Validator` reports 0 errors. The four categorial archetypes
-//!    (common noun → `EigonClass`, named entity → `ResourceRef`, transitive
+//!    (common noun → `EigonClass`, named entity → a resource reference, transitive
 //!    verb / adjective → `EigonAxiom`) each map onto a kernel constructor.
 //!
 //! 2. `felicity_filter_*` — the Semantic Felicity Condition, demonstrated where
@@ -216,8 +216,8 @@ fn check_composition(src: &str) -> Result<(), String> {
     check(&mut ctx, &term, &typ_val).map_err(|e| e.to_string())
 }
 
-// Freshly-Constructed typed values (not chain ResourceRefs) so the check
-// isolates the *type* match: a bare ResourceRef in a program body lowers to an
+// Freshly-Constructed typed values (not chain references) so the check isolates the
+// *type* match: a bare resource reference in a program body lowers to an
 // unbound Var in the checker (chain entities are not free variables — a real
 // D62 finding: named-entity references need explicit binding/resolution).
 const COMPOSE_OK: &str = r#"

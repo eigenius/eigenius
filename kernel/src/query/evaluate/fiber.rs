@@ -722,8 +722,8 @@ fn embed_typed_resource_param(
     }
 }
 
-/// Dereference a single IRI-shaped value (`Value::ResourceRef` or
-/// IRI-parseable `Value::String`) against the layer. Embedded values
+/// Dereference a single IRI-shaped value (an IRI-parseable `Value::String`)
+/// against the layer. Embedded values
 /// pass through; non-IRI strings (and other primitives) pass through
 /// — the worker's mirror decoder will surface a `MethodError` if the
 /// shape is wrong, with the same diagnostic clarity as it does today.
@@ -980,9 +980,9 @@ mod tests {
     }
 
     #[test]
-    fn embed_typed_resource_param_dereferences_resource_ref() {
-        // Same as above but the input is the canonical `ResourceRef`
-        // shape MATCH bindings produce post-canonicalisation.
+    fn embed_typed_resource_param_dereferences_an_iri_reference() {
+        // Same as above but the input is an IRI-string reference, the shape MATCH bindings
+        // produce off a resource-valued property.
         let layer = deref_layer_with_props();
         let prop = Iri::parse("urn:test:deref:prop_obj").unwrap();
         let value = Value::String(

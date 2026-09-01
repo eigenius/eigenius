@@ -300,7 +300,7 @@ pub struct RenameApplication {
 ///     contributions. A collision means the rename would silently
 ///     merge into another resource at the new IRI; reject it.
 ///  3. Walk the renamed branch's contributions, rewriting every
-///     occurrence of `old_iri` (in `@id`, `ResourceRef`, nested
+///     occurrence of `old_iri` (in `@id`, IRI-string references, nested
 ///     `Embedded` resources, and `Array` items) to `new_iri`.
 ///
 /// Returns a [`RenameApplication`] carrying the transformed
@@ -469,7 +469,7 @@ fn is_term_valued(prop: &Iri, layer: &crate::layer::Layer) -> bool {
 }
 
 /// Whether a `Resource`'s body (excluding its own `@id`) contains any
-/// reference to `iri`. Walks `ResourceRef`, `Embedded`, and `Array`
+/// reference to `iri`. Walks IRI strings, `Embedded`, and `Array`
 /// recursively — same traversal shape as `iter_iri_values` but with
 /// an early-exit predicate — and, for a term-valued property, the encoded
 /// term as well.
@@ -515,7 +515,7 @@ fn json_mentions_iri(j: &serde_json::Value, iri: &Iri) -> bool {
 }
 
 /// Produce a copy of `resource` with every reference to `old_iri`
-/// (in `@id`, `ResourceRef`, nested `Embedded`, and `Array` items)
+/// (in `@id`, IRI strings, nested `Embedded`, and `Array` items)
 /// rewritten to `new_iri`.
 fn substitute_iri_in_resource(
     resource: &Resource,
@@ -1844,7 +1844,7 @@ mod tests {
             Value::String(r) => {
                 assert_eq!(r.as_str(), renamed_iri, "ref should be rewritten");
             }
-            other => panic!("expected ResourceRef, got {other:?}"),
+            other => panic!("expected an IRI string, got {other:?}"),
         }
     }
 
@@ -1853,7 +1853,7 @@ mod tests {
         // The target IRI is referenced inside an Array containing an
         // Embedded resource whose body references it. The walker
         // must descend through both shapes to find and rewrite the
-        // inner ResourceRef.
+        // inner reference.
         let patient_iri = "urn:project:Patient";
         let renamed_iri = "urn:project:billing:Patient";
         let report_iri = "urn:project:report";
@@ -1906,7 +1906,7 @@ mod tests {
             .expect("nested about ref should still exist");
         match about {
             Value::String(r) => assert_eq!(r.as_str(), renamed_iri),
-            other => panic!("expected ResourceRef, got {other:?}"),
+            other => panic!("expected an IRI string, got {other:?}"),
         }
     }
 
@@ -3044,7 +3044,7 @@ mod tests {
         );
         match record.get(&iri(wk::MERGE_RECORD_WITNESS)) {
             Some(Value::String(r)) => assert_eq!(r.as_str(), handle.iri.as_str()),
-            other => panic!("merge_record_witness should be a ResourceRef, got {other:?}"),
+            other => panic!("merge_record_witness should be an IRI string, got {other:?}"),
         }
         assert_eq!(
             record
@@ -3267,11 +3267,11 @@ mod tests {
         );
         match record.get(&iri(wk::MERGE_RECORD_RENAME_FROM_IRI)) {
             Some(Value::String(r)) => assert_eq!(r.as_str(), patient_iri),
-            other => panic!("rename_from_iri should be ResourceRef, got {other:?}"),
+            other => panic!("rename_from_iri should be an IRI string, got {other:?}"),
         }
         match record.get(&iri(wk::MERGE_RECORD_RENAME_TO_IRI)) {
             Some(Value::String(r)) => assert_eq!(r.as_str(), renamed_iri),
-            other => panic!("rename_to_iri should be ResourceRef, got {other:?}"),
+            other => panic!("rename_to_iri should be an IRI string, got {other:?}"),
         }
         let _ = conflict_id;
     }
@@ -3390,11 +3390,11 @@ mod tests {
         );
         match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)) {
             Some(Value::String(r)) => assert_eq!(r.as_str(), "urn:test:Animal"),
-            other => panic!("restructure_new_parent should be ResourceRef, got {other:?}"),
+            other => panic!("restructure_new_parent should be an IRI string, got {other:?}"),
         }
         match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)) {
             Some(Value::String(r)) => assert_eq!(r.as_str(), "urn:test:Dog"),
-            other => panic!("restructure_affected_class should be ResourceRef, got {other:?}"),
+            other => panic!("restructure_affected_class should be an IRI string, got {other:?}"),
         }
     }
 
@@ -3536,7 +3536,7 @@ mod tests {
                     "Profile.profile_for should point at the renamed IRI"
                 );
             }
-            other => panic!("expected ResourceRef to renamed IRI, got {other:?}"),
+            other => panic!("expected an IRI string naming the renamed IRI, got {other:?}"),
         }
     }
 

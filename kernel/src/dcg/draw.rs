@@ -208,7 +208,7 @@ pub fn draws_from_layer(layer: &Layer, seam: DrawSeam) -> Result<String, String>
         // Filter to this seam. A chain can carry draws from several runs and several seams; the
         // caller asked for one seam's replay set.
         //
-        // `as_iri_str`, NOT a `ResourceRef` match: CBOR persistence collapses `ResourceRef` into
+        // `as_iri_str`, never a variant match: CBOR persistence collapsed `ResourceRef` into
         // `String`, so a draw read back off a committed branch carries the string shape while one
         // built in memory carries the ref. Matching only the ref made every persisted draw
         // invisible — `draws_from_layer` returned `[]`, the run silently re-asked the model, and
