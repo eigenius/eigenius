@@ -38,14 +38,14 @@ Both are workflow-shaped rather than algorithm-shaped problems. The witness *mac
 
 ## 2. Status today
 
-**Merge layer construction** ([kernel/src/layer/merge.rs:2440](../../kernel/src/layer/merge.rs#L2440) — `commit_resolutions_as_merge_layer`):
+**Merge layer construction** ([kernel/src/layer/merge.rs:2440](../../kernel/src/layer/merge/mod.rs#L2440) — `commit_resolutions_as_merge_layer`):
 
 - Builds a multi-parent layer with both branch tips as parents.
 - Commits the resolved bodies (witness-merged, renamed, kept, restructured) as the layer's contributions.
 - Tombstones any IRIs that the resolution drops.
 - Names the layer with a caller-supplied string. **That string is the only chain-resident hint about what happened.**
 
-**Witness lookup** ([kernel/src/layer/merge.rs:1118-1126](../../kernel/src/layer/merge.rs#L1118-L1126) — `resolve_merge_comorphism`):
+**Witness lookup** ([kernel/src/layer/merge.rs:1118-1126](../../kernel/src/layer/merge/mod.rs#L1118-L1126) — `resolve_merge_comorphism`):
 
 > "Search both branches' contributions before falling back to the ancestor's chain. v1 doesn't require the comorphism to live strictly under the ancestor — D20 §6.1 leaves the chain location open as long as the resource is reachable from the merge span."
 
@@ -111,7 +111,7 @@ A new `urn:eigenius:core:MergeResolutionRecord` Class, committed by `commit_reso
 
 ### 3.2 Compiler / builder integration
 
-`commit_resolutions_as_merge_layer` ([kernel/src/layer/merge.rs:2440](../../kernel/src/layer/merge.rs#L2440)) gets two new builder steps run alongside each existing per-strategy arm:
+`commit_resolutions_as_merge_layer` ([kernel/src/layer/merge.rs:2440](../../kernel/src/layer/merge/mod.rs#L2440)) gets two new builder steps run alongside each existing per-strategy arm:
 
 1. After each resolution's body emission (the existing `builder.add_resource(merged)` / `builder.add_resource(body)` calls), construct the appropriate `MergeResolutionRecord` resource from the resolution's shape + the span's source-layer information.
 2. Compute its content-hash IRI.
@@ -169,7 +169,7 @@ The History panel's existing detail panel (read pin → layer's resource list) a
 
 ### 4.1 The structural change
 
-`resolve_merge_comorphism`'s search path ([kernel/src/layer/merge.rs:1118-1126](../../kernel/src/layer/merge.rs#L1118-L1126)) currently falls through:
+`resolve_merge_comorphism`'s search path ([kernel/src/layer/merge.rs:1118-1126](../../kernel/src/layer/merge/mod.rs#L1118-L1126)) currently falls through:
 
 1. `span.sources_a` — IRIs branch A contributed since the LCA.
 2. `span.sources_b` — IRIs branch B contributed since the LCA.

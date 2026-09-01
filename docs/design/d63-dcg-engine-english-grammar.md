@@ -799,7 +799,7 @@ the witness).
   type-raise variants arrive with Slice 6 (added then — *minor deviation from the original plan*: I did
   **not** pre-declare unused variants, to keep `clippy -D warnings` clean; a one-line enum addition at
   Slice 6, not a refactor).
-- **The ENF gate lives in the shared [`apply`](../../kernel/src/dcg/parser.rs)** — the single combination
+- **The ENF gate lives in the shared [`apply`](../../kernel/src/dcg/rules/combinators.rs)** — the single combination
   point both `cky_parse` and the lookup CKY loop call. Before `>` / `>B`, it rejects when the **left**
   operand's provenance is `ForwardComp`.
 - **`apply` stays `Option<Item>`** — *deviation from the "likely `Vec`" plan, justified by the audit:*

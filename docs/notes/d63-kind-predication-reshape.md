@@ -14,10 +14,10 @@ A bare mass/kind subject parses today to an **open** parse carrying a `HoleKind:
 "instability affects HeLa"   →  OPEN:  $quant$0_00(Instability, λx. affects(hela, x))
 ```
 
-The hole `Q : Π(A:Set). (A→Prop) → Prop` ([`quant_hole_type`, lookup.rs:2703](../../kernel/src/dcg/lookup.rs#L2703))
+The hole `Q : Π(A:Set). (A→Prop) → Prop` ([`quant_hole_type`, lookup.rs:2703](../../kernel/src/dcg/))
 is a *deferred quantifier*, and its documented discharge is a two-part **output obligation** — "bind a
 quantifier **and** cite the literature `Reference` that warrants the generalization"
-([`HoleKind`, lookup.rs:2845-2850](../../kernel/src/dcg/lookup.rs#L2845-L2850)).
+([`HoleKind`, lookup.rs:2845-2850](../../kernel/src/dcg/parse/felicity.rs)).
 
 This conflates two orthogonal axes:
 
@@ -90,7 +90,7 @@ predicate's type. One operator reuses the entire `Entity → … → Prop` relat
 ## 3. The grammar change — one unified shift for mass and plural
 
 The bare mass **and** plural shifts (formerly deferred-quant NPs carrying the `Quantification` hole) are
-one committed, type-raised rule, [`LexicalIndex::kind_raised_nps`](../../kernel/src/dcg/lookup.rs) (core-en's
+one committed, type-raised rule, [`LexicalIndex::kind_raised_nps`](../../kernel/src/dcg/rules/registry.rs) (core-en's
 `bnp` is likewise one rule over `pl-or-mass` — §7.4):
 
 | input | today | reshaped |
@@ -103,7 +103,7 @@ one committed, type-raised rule, [`LexicalIndex::kind_raised_nps`](../../kernel/
   subject- (`fwd`) and object- (`bwd`) raised CATEGORY, substitutes the noun's **base class** for the
   determiner's type variable, and attaches the kind sem `λV. V(kind_of(t))` — it does **not** call
   `apply`. Building directly is **load-bearing for refined (compound) nouns**: routing `cat_n(Σx:C.R, …)`
-  through `apply` hits the GQ witness-projection (`DetRefine`, [parser.rs:448](../../kernel/src/dcg/parser.rs#L448)),
+  through `apply` hits the GQ witness-projection (`DetRefine`, [parser.rs:448](../../kernel/src/dcg/rules/combinators.rs#L448)),
   which wraps the sem as `λv. det(t)(λz. v(Fst z))` and yields the ill-typed `Fst(kind_of(Σ))` — a kind
   nominalizes the *whole* type, it does not project witnesses. Indexing the raised category by the base
   `C` (`C ≤ Entity`, in the subsumption lattice) lets it fill a verb slot; nominalizing `kind_of(Σx:C.R)`
@@ -152,7 +152,7 @@ generic is not special.
 ## 5. What this dissolves, and what it keeps
 
 **Dissolves** (for the generic reading): `HoleKind::Quantification`
-([lookup.rs:2850](../../kernel/src/dcg/lookup.rs#L2850)), `deferred_quant_subj_sem` /
+([lookup.rs:2850](../../kernel/src/dcg/)), `deferred_quant_subj_sem` /
 `deferred_quant_obj_sem` / `quant_hole_type` / the `$quanthole$` sentinel, and the D62 two-part "output
 obligation" (`bind quantifier + cite`). The citation half becomes a grade; the quantifier half becomes a
 committed `kind_of` (no choice was ever needed for the kind reading).

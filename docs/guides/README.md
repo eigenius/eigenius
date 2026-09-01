@@ -101,7 +101,7 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D19 Inductive types](../design/d19-inductive-types.md) — type theory underpinning ESL `data` declarations and chain-resident inductives
 - [D14 Institution Realisation](../design/d14-institution-realisation.md) — institution mechanism dispatched in three guides (ESL, EigenQL, platform); supersedes D10. §9.3 covers comorphism chain reinsertion.
 - [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 14 + 15
-- [D26 Runtime Substrate](../design/d26-runtime-substrate.md), [D29 Mirror Generator](../design/d29-runtime-mirror-generator.md), [D31 Institution Lifecycle](../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate hosting layer and lifecycle, complementary to platform chapter 11
+- [D26 Runtime Substrate](../design/d26-runtime-substrate.md), [D29 Mirror Generator](../design/d29-eigon-julia-mirror-spec.md), [D31 Institution Lifecycle](../design/d31-external-institution-lifecycle.md) — the substrate hosting layer and lifecycle, complementary to platform chapter 11
 - [D27 Julia Institutions](../design/d27-julia-institutions.md) — the v1 Julia institution suite, complementary to the per-institution tutorials under [`platform/julia-institutions/`](platform/julia-institutions/)
 - [D32 Chain-mirrored EigenTT inductives](../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec, complementary to the formula guide
 

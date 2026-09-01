@@ -318,7 +318,7 @@ All implementation referenced in this guide:
 - [`kernel/src/institution/dispatch.rs`](../../../kernel/src/institution/dispatch.rs) — `AutoOnLoad` dispatch
 - [`kernel/src/institution/error.rs`](../../../kernel/src/institution/error.rs) — `InstitutionError`
 - [`kernel/src/capability/registration.rs`](../../../kernel/src/capability/registration.rs) — auto-registration from chain scan
-- [`kernel/src/capability/wasm_institution_d14.rs`](../../../kernel/src/capability/wasm_institution_d14.rs) — host bridge to the `eigenius-institution-d14` WIT world
+- `kernel/src/capability/wasm_institution_d14.rs` *(deleted `2026-07-08` with the WASM path)* — host bridge to the `eigenius-institution-d14` WIT world
 
 **Core / institution ontology:**
 - [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json) — shipped definitions of `Class`, `Property`, `InductiveType`, `Verdict`, etc.

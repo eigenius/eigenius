@@ -2,7 +2,7 @@
 
 A consolidated bibliography for the Eigenius platform. Four lists, organized by what each reference *does* for the project — what we cite, what we depend on, what came before us, and what we share contemporary ground with.
 
-The lists are generated from the `.bib` files in [`docs/references/`](../../references/) by [`scripts/bib-to-md.py`](../../../scripts/bib-to-md.py); within each list, entries are sorted alphabetically by citation key. The same citation keys are used in the LaTeX papers under [`docs/papers/`](../../papers/), so anything you find here can be cited verbatim with `\cite{key}`.
+The lists are generated from the `.bib` files in [`docs/references/`](../../references/) by [`scripts/bib-to-md.py`](../../../scripts/bib-to-md.py); within each list, entries are sorted alphabetically by citation key. The same citation keys are used in the LaTeX papers under `docs/papers/` *(deleted in `0a104d3`)*, so anything you find here can be cited verbatim with `\cite{key}`.
 
 ## How to read this guide
 

@@ -12,7 +12,7 @@ sub-problems a rigid ontology stalls on: **lexical voids** (a multi-word express
 The committed lexicon (WordNet + UMLS + NCBI) is **closed-world** (fixed entries); biomedical prose is
 **open-world**: multi-word expressions with no contiguous entry (`RecQ DNA helicase` ≈ UMLS `C0084304`, but
 not as a string), gene *families* used metonymically (`RecQ` for WRN/BLM/RECQL), and productive morphology
-(`RECQ-like`). The parser stalls at OOV atoms (`has_token` = false, [lookup.rs:570](../../kernel/src/dcg/lookup.rs)).
+(`RECQ-like`). The parser stalls at OOV atoms (`has_token` = false, [lookup.rs:570](../../kernel/src/dcg/)).
 Today the pipeline's **Stage A** ([glossary.rs](../../kernel/src/dcg/glossary.rs)) closes only *intra-document*
 abbreviations (Schwartz-Hearst + an LLM proposer). `recq` — the last OOV on the WRN page — is the symptom
 that Stage A must generalize.
@@ -77,7 +77,7 @@ Close a gap by the cheapest, most faithful means first (this ordering *is* the "
 mint" discipline):
 
 1. **Compositional** — decompose the OOV span into known atoms + one unknown atom; resolve the **atom** and
-   let the **grammar** compose the phrase (`compound_kind`, [parser.rs:630](../../kernel/src/dcg/parser.rs)).
+   let the **grammar** compose the phrase (`compound_kind`, [parser.rs:630](../../kernel/src/dcg/rules/combinators.rs)).
    For `RecQ DNA helicase` the one unknown atom is `recq`; the form-index **grounds it** to `C0084304`
    (§6a), after which the noun-noun compound rule (`compound_kind`) composes the phrase — and the same
    grounding unblocks `RECQ-like` (feeds [d63-compound-morphology.md](d63-compound-morphology.md) §3b `-like`)
@@ -128,7 +128,7 @@ AugmentOptions = DocumentOnly | LexiconBacked(LexiconProfile) | LlmBacked   // +
 
 - **`AugmentOptions`** = which sources generate entries: **DocumentOnly** (Schwartz-Hearst, deterministic),
   **LexiconBacked** scoped by a `LexiconProfile` (`resolve_lexicon_profile`,
-  [lookup.rs:324](../../kernel/src/dcg/lookup.rs), resolves a profile to its ordered scope), **LlmBacked**
+  [lookup.rs:324](../../kernel/src/dcg/), resolves a profile to its ordered scope), **LlmBacked**
   (retrieval + synthesis).
 - **`seed`** = the "initial augmentation made available" — and it *is* an input doc-layer chained on (aligning
   with `encode_with_layer`); the output `added` *is* the new layer's entries. So
@@ -310,7 +310,7 @@ the family's *member structure* — a separate enrichment, not the grounding pat
 
 - **Metonymy caveat (the "RecQ binds DNA" case).** A Σ-type/π₁ *coercion* (a `FamilyMember(F) = Σ(p:Protein).
   BelongsTo(p,F)` reading coerced by `π₁` to `Protein`) is *not* in our checker today — coercion is
-  subclass-lattice inclusion (Luo 2012, [check.rs:670](../../kernel/src/nbe/check.rs)), not Σ-projection —
+  subclass-lattice inclusion (Luo 2012, [check.rs:670](../../kernel/src/nbe/check/mod.rs)), not Σ-projection —
   **and** it is partly moot: verbs are typed generically at `Entity`, so `bind(kind_of(RecQ_Family),
   kind_of(DNA))` type-checks today with no coercion. π₁ metonymy is future machinery gated on a decision to
   sharpen verb argument typing to specific classes.

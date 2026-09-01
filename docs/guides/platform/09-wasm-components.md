@@ -8,6 +8,10 @@
 > [11. Runtime substrate](11-runtime-substrate.md)). Background:
 > [D12](../../design/d12-wasm-extensibility.md).
 >
+> **The file and directory links in the body no longer resolve** — `wit/`, `sdk/wasm-sdk/`,
+> `examples/wasm-*` and `crates/wasm-runtime/` were deleted with the mechanism. They are left
+> as they were, because they record what existed; nothing below is a live path.
+>
 > **How to read the rest of this chapter.** The body below is preserved
 > unedited from before the removal and is written throughout in the present
 > tense. Every present-tense statement in it describes the system as it stood

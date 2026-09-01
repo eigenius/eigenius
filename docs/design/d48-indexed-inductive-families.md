@@ -347,7 +347,7 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** can declare `Vec A : Nat → Set` and the ctors `nil`/`cons` type-check at declaration time.
 
-**Status on landing:** complete. `validate_indexed_ctor_conclusions` + `ctx_with_param_and_arg_binders` in [kernel/src/nbe/check.rs](../../kernel/src/nbe/check.rs) wired into `check_type`'s `Exp::Inductive` arm; eval splits `params ++ indices` for indexed decls (kept stub-Arc pattern intact for non-indexed). 6 tests covering well-formed `SimpleVec`, arg-count mismatch, index-type mismatch, non-indexed backward-compat.
+**Status on landing:** complete. `validate_indexed_ctor_conclusions` + `ctx_with_param_and_arg_binders` in [kernel/src/nbe/check.rs](../../kernel/src/nbe/check/mod.rs) wired into `check_type`'s `Exp::Inductive` arm; eval splits `params ++ indices` for indexed decls (kept stub-Arc pattern intact for non-indexed). 6 tests covering well-formed `SimpleVec`, arg-count mismatch, index-type mismatch, non-indexed backward-compat.
 
 ### 5.3 Phase C — First-order unifier (~1.5 weeks)
 
@@ -380,7 +380,7 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 ### 5.6 Phase F — Pattern matching with dependent motive (~1 week)
 
-- Extend `check_match` in [nbe/check.rs](../../kernel/src/nbe/check.rs) to do motive inference (§4.7 step 3) and per-arm substitution (step 4b–4d).
+- Extend `check_match` in [nbe/check.rs](../../kernel/src/nbe/check/mod.rs) to do motive inference (§4.7 step 3) and per-arm substitution (step 4b–4d).
 - Detect when motive inference fails; emit a clear "needs explicit `returning T` annotation" error.
 - Tests: bare `match` over `Vec` (no annotation), `match` with explicit annotation, `match` over `Eq A x y` doing dependent rewrite.
 
@@ -395,11 +395,11 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** end-to-end `match` programs over indexed types compute correctly.
 
-**Status on landing:** complete. Iota reduction works on indexed inductives without modification — indices were already encoded in the ctor's typ (handled by Phase B's eval split) and minor sequencing is index-agnostic. 2 end-to-end tests in [nbe/eval.rs](../../kernel/src/nbe/eval.rs) (`SimpleVec` nil + cons under `InductiveRec`).
+**Status on landing:** complete. Iota reduction works on indexed inductives without modification — indices were already encoded in the ctor's typ (handled by Phase B's eval split) and minor sequencing is index-agnostic. 2 end-to-end tests in [nbe/eval.rs](../../kernel/src/nbe/eval/mod.rs) (`SimpleVec` nil + cons under `InductiveRec`).
 
 ### 5.8 Phase H — Singleton-elim Case B completion (~2 days)
 
-- Extend `ctor_args_all_propositional` in [nbe/check.rs:large_elim_admitted](../../kernel/src/nbe/check.rs) to also admit args that appear in the conclusion's indices. This closes D46 §7 Case B's second clause that the current implementation explicitly skips.
+- Extend `ctor_args_all_propositional` in [nbe/check.rs:large_elim_admitted](../../kernel/src/nbe/check/mod.rs) to also admit args that appear in the conclusion's indices. This closes D46 §7 Case B's second clause that the current implementation explicitly skips.
 - Reposition `Id`'s special handling — with indices, `Id A x y` becomes a standard indexed inductive whose `refl(a)` ctor's `a` arg appears in both indices. Large elim works via the standard rule.
 - Add the previously-impossible large-elim test (Case B with non-Prop arg that appears in conclusion).
 

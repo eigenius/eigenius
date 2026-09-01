@@ -113,7 +113,7 @@ statistics + reasoning composition, see
 - [**D13 Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec
 - [**D12 WASM extensibility**](../../design/d12-wasm-extensibility.md) — capability levels and host imports
 - [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10), the protocol contract for chapters 10 and 11
-- [**D26 Runtime substrate**](../../design/d26-runtime-substrate.md), [**D29 Mirror generator**](../../design/d29-runtime-mirror-generator.md), [**D31 Institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate specs
+- [**D26 Runtime substrate**](../../design/d26-runtime-substrate.md), [**D29 Mirror generator**](../../design/d29-eigon-julia-mirror-spec.md), [**D31 Institution lifecycle**](../../design/d31-external-institution-lifecycle.md) — the substrate specs
 - [**D32 Chain-mirrored EigenTT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec
 - [**D6 Execution architecture**](../../design/d6-execution-architecture.md) — kernel ↔ orchestrator boundary
 - [**D46 Prop universe**](../../design/d46-prop-universe-and-proof-irrelevance.md), [**D47 Chain-mirrored EigenTT type fragment**](../../design/d47-chain-mirrored-eigentt-type-fragment.md), [**D48 Indexed inductive families**](../../design/d48-indexed-inductive-families.md) — the type-theory foundation the reasoning stack rests on

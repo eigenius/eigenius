@@ -3,7 +3,7 @@
 The three QueryClass dispatch roles — `AutoOnLoad`, `OnDemand`, and
 `Decidable` — are introduced individually in
 [ESL §9](../esl/09-institutions.md) and
-[EigenQL §8](../eigenql/08-institutions.md). This chapter covers how they
+[EigenQL §8](../eigenql/09-institutions.md). This chapter covers how they
 *interact*: what a coordinated dispatch flow looks like when multiple gates
 fire across multiple institutions in response to a single chain commit, and
 how a downstream OnDemand or Decidable call can read what an earlier
@@ -18,7 +18,7 @@ Each `QueryClass` declares a `dispatch_role` set drawn from
 `{AutoOnLoad, OnDemand, Decidable}` (D14 §6.1–§6.2). A single QueryClass can
 carry multiple roles; the most common shapes are summarised in the
 classification tables in [ESL §9.8](../esl/09-institutions.md#98-the-classification-table-cross-language)
-and [EigenQL §8.9](../eigenql/08-institutions.md#89-the-classification-table).
+and [EigenQL §8.9](../eigenql/09-institutions.md#9-9-the-classification-table).
 A one-line summary:
 
 | Role | Trigger | Returns | Caller |

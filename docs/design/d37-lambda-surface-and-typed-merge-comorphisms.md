@@ -66,7 +66,7 @@ The kernel side of the witness story is fully wired.
 
 **Resource shapes (core ontology).** `urn:eigenius:core:MergeComorphism` (with required `merge_transformation` property) and `urn:eigenius:program:Lambda` (with `parameter` + `body` properties) are declared. The `parameter` is a string; the `body` is an embedded expression resource. Lambda's optional `type` slot is not yet declared — D37 adds it.
 
-**Resolver.** `resolve_merge_comorphism` in [kernel/src/layer/merge.rs](../../kernel/src/layer/merge.rs) walks the merge span looking for the comorphism IRI, validates `is_a` includes `MergeComorphism`, extracts `merge_transformation`, returns a typed `MergeComorphismHandle`.
+**Resolver.** `resolve_merge_comorphism` in [kernel/src/layer/merge.rs](../../kernel/src/layer/merge/mod.rs) walks the merge span looking for the comorphism IRI, validates `is_a` includes `MergeComorphism`, extracts `merge_transformation`, returns a typed `MergeComorphismHandle`.
 
 **Apply path.** `apply_witness_resolution` (same file) evaluates the transformation term against `(body_a, body_b, ancestor_body)` using the existing program evaluator, round-trips the resulting `ResourceVal` back into a `Resource`, and returns it for merge-layer construction. Currently the type-check is lazy (against the conflict class A inferred from the span); D37 makes it possible to validate at commit time instead.
 

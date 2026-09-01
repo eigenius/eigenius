@@ -118,7 +118,7 @@ Both AutoOnLoad gates produce `Holds` Verdicts that commit back to the chain alo
 Cells 12–18 close the [D14 §9.3](../../design/d14-institution-realisation.md) chain-reinsertion contract directly through both surfaces:
 
 - **ESL program** (cells 13–15): a wrapper invokes the `symbolics_to_jump` comorphism via the qualified-name function-call form (`comorphisms:symbolics_to_jump(input)`); the produced `OptimisationProblem` lands at a deterministic content-hash IRI `urn:eigenius:comorphism-output:symbolics_to_jump:<hex>`. See [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
-- **EigenQL `FIBER ... INTO`** (cells 16–18): the operational backing of the same translation, dispatched interactively via FIBER, with the user pinning the result at a caller-named IRI. See [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri).
+- **EigenQL `FIBER ... INTO`** (cells 16–18): the operational backing of the same translation, dispatched interactively via FIBER, with the user pinning the result at a caller-named IRI. See [EigenQL §7.6](../eigenql/08-fiber-clauses.md#8-6-into--pinning-the-response-iri).
 
 Both paths use the same `commit_with_validation` machinery — comorphism-translated resources, however dispatched, are first-class chain residents.
 

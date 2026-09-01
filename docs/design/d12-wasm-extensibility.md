@@ -3,7 +3,9 @@
 *Design document for the Eigenius project — April 2026*
 
 > **Status: REMOVED (2026-07-08).** WASM extensibility was removed from
-> the project. WASM was one of three institution/component backends
+> the project. **The `spikes/napi-rs-async/` links below no longer resolve** — that tree went
+> with it. They record what existed; neither is a live path.
+> WASM was one of three institution/component backends
 > (`RuntimeKind::Wasm | External | InProcess`) and carried the `wasmtime`
 > dependency, but no production ontology declared `runtime: wasm` — only
 > tests/demos exercised it. The institution framework and its other two

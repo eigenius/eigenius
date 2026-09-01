@@ -54,7 +54,7 @@ exercise FormulaTerm in their own institution's vocabulary:
   declared with.
 - [**D27 — Julia institutions**](../../design/d27-julia-institutions.md)
   — the v1 Julia institution suite that consumes FormulaTerm.
-- [**D29 — Mirror Generator**](../../design/d29-runtime-mirror-generator.md)
+- [**D29 — Mirror Generator**](../../design/d29-eigon-julia-mirror-spec.md)
   — closure walker; emits the per-ctor decoder/encoder code that walks
   FormulaTerm values.
 
@@ -65,7 +65,7 @@ exercise FormulaTerm in their own institution's vocabulary:
   Expressions](../esl/05-expressions.md).
 - [**EigenQL user guide**](../eigenql/README.md) — surface syntax for
   queries; FIBER param coercion across FormulaTerm-speaking
-  institutions in [§7](../eigenql/07-fiber-clauses.md).
+  institutions in [§7](../eigenql/08-fiber-clauses.md).
 - [**Platform §11 — Runtime substrate**](../platform/11-runtime-substrate.md)
   — hosting layer for the institutions that consume FormulaTerm.
 

@@ -46,7 +46,7 @@ with Eigon ground types). The constructs this note uses:
   `felicity_readback` step in the parser is exactly this pass run on each candidate sem.
 
 Grammaticality is not a separate grammar oracle: a full-span `S` parse is **felicitous iff its assembled
-sem type-checks to `Prop`** against the ontology layer ([`lookup.rs`](../../kernel/src/dcg/lookup.rs) step 4,
+sem type-checks to `Prop`** against the ontology layer ([`lookup.rs`](../../kernel/src/dcg/) step 4,
 `nbe::check::check`). The type theory *is* the acceptance test.
 
 ### 0.2 The lexicon — categories as an inductive type, entries as resources
@@ -59,7 +59,7 @@ CCG categories are **not** a hard-coded Rust enum; they are values of an inducti
 `lexicon:LexicalEntry` resource carrying a category and a sem; the lexicon is *data* (the WordNet + UMLS
 imports), and the engine consumes it.
 
-Parsing **seeds** the chart from that data ([`lookup.rs`](../../kernel/src/dcg/lookup.rs)): tokenize, then
+Parsing **seeds** the chart from that data ([`lookup.rs`](../../kernel/src/dcg/)): tokenize, then
 for every span (bounded by the longest multiword form) reduce the surface to lemmas via the Morphy
 lemmatizer and look them up in the [`LexicalIndex`]. **Multiword entries** (`cell line`, `act on`) seed a
 multi-token span *alongside* the single-token items for their parts — the MWE-vs-compositional ambiguity is
@@ -85,7 +85,7 @@ commit gate) — the parser proposes, the institution disposes.
 
 ### 0.4 The packing machinery (already implemented)
 
-The chart is a **packed shared forest** ([`packed.rs`](../../kernel/src/dcg/packed.rs)): a `Forest` of
+The chart is a **packed shared forest** ([`packed.rs`](../../kernel/src/dcg/chart/packed.rs)): a `Forest` of
 `PNode`s whose derivations are `Edge`s — `Leaf` / `Combine(left,right)` / `Unary(child,kind)` /
 `Binary(left,right,rule)`. Two items **share a node iff they share a signature**
 `Sig = (cat_shape, Combinator)`: the category shape with type-indices erased, plus the **Eisner
@@ -127,7 +127,7 @@ non-leaf cells). **This is the structural residual the NF targets.**
 
 ## 2. Where it comes from in the parser
 
-The refined noun is built in [`parser.rs`](../../kernel/src/dcg/parser.rs) by four rules, one per
+The refined noun is built in [`parser.rs`](../../kernel/src/dcg/rules/combinators.rs) by four rules, one per
 `RefineKind` (`parser.rs:264`; assembly `parser.rs:586–643`):
 
 | `RefineKind` | trigger | restrictor added to `Σx:C. _` |
@@ -152,7 +152,7 @@ Two facts explain the multiplicity, and both point at the fix:
   interleaving is S5's 3 skeletons.**
 
 **Why packing does not already fix it.** The forest packs by `Sig = (cat_shape, Combinator)`
-([`packed.rs:33`](../../kernel/src/dcg/packed.rs)); `cat_shape` erases the Σ-type and all four refine rules
+([`packed.rs:33`](../../kernel/src/dcg/chart/packed.rs)); `cat_shape` erases the Σ-type and all four refine rules
 emit `Combinator::Compound`, so every refined noun shares one shape `cat_n(Σ_)` and packs into one node.
 But the distinct Σ-**content** sems are enumerated at *extraction* (kbest over the packed node) and each is
 felicity-checked — that is the classify-candidate blow-up. **So the lever is a combine-time constraint that
@@ -317,7 +317,7 @@ survey (§2a), is narrower than "intersective adjectives":
 
 **A mechanizable test — and we have the reference implementation in-repo.** Chatzikyriakidis & Luo's Coq
 code ships as an appendix of their book, in the repo at
-[`references/publications/TT Appendices/…Coq Codes.pdf`](../../references/publications/TT%20Appendices/)
+[`references/publications/TT Appendices/…Coq Codes.pdf`](../../references/publications/TT Appendices/)
 (App. A7). It encodes exactly our setting — `CN := Set`, subtyping by `Coercion Surgeon >-> Human`,
 adjectival refinement as Coq **record = Σ-type** — and gives the discriminator as *concrete code*, which
 maps onto the restrictor shapes our importers already emit:
@@ -406,7 +406,7 @@ The two levers are orthogonal and multiply (S5: 3 structural × 16 sense = 48):
 - **D3 — mechanism: build-then-subsume. ✅ IMPLEMENTED (`2026-07-09`).** Eisner's exact restricted-grammar
   fallback — refuse to keep a reading semantically equivalent to one already built — chosen over a hard
   combine-time block (risks dropping a genuine reading) or a `Cost` penalty (doesn't kill the enumeration).
-  `LexicalIndex::subsume_duplicates` in [`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs) drops a
+  `LexicalIndex::subsume_duplicates` in [`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/) drops a
   closed reading whose sem **structurally equals** one already kept, wired into both the packed and unpacked
   forest collection before the sort/cap. `reduced_felicitous`/`classify_felicitous` already normalize every
   sem to its NbE normal form, so equal *meaning* is equal *structure* — sound (never drops a distinct

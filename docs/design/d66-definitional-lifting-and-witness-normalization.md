@@ -1,7 +1,7 @@
 # D66 — Definitional lifting: transparent definitions, explicit context, and symmetric witness normalization
 
 *Status: design — **decision-complete** (§6 D1–D10 all ✅); ready to implement (§5 slices). No code yet. Motivated by the shape-rule
-amortisation investigation ([`docs/notes/2026-08-09-shape-rule-amortisation.md`](../notes/2026-08-09-shape-rule-amortisation.md),
+amortisation investigation (`docs/notes/2026-08-09-shape-rule-amortisation.md`, since deleted,
 issues #111/#112): every lift from a parsed sentence to domain vocabulary is currently a **Declared**
 bridge, one per parse shape — measured at ≥61 bridges for 62 sentences. The cause is not the bridge
 generator; it is that domain predicates are declared as **opaque axioms**, so nothing but an assertion

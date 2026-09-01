@@ -22,7 +22,7 @@ it is hardcoded to the single suffix `based` + the verb lemma `base`. Two gaps:
 1. **No alignment structure** — the compound rule and the (deferred) phrasal rule (Step 2b) have no shared
    object forcing them to the same proposition; each is written independently.
 2. **`-like` is mis-handled today.** `like` is a WordNet adjective (synset `01409581` "like, similar",
-   Derived), so the Slice-1 hyphen-head rule ([`adjective_bases`](../../kernel/src/dcg/lookup.rs)
+   Derived), so the Slice-1 hyphen-head rule ([`adjective_bases`](../../kernel/src/dcg/parse/seed.rs)
    `lookup.rs:3040`) fires on `RecQ-like`, seeds `like` with an **identity** sem, and **drops `RecQ`** →
    `Σg:Gene. like(g)` (contentless). Every `X-<suffix>` whose suffix is also a free adjective over-generates
    this way. The Slice-1 exclusion list `SLICE2_TAILS` (`lookup.rs:3045`) contains only `"based"`.
@@ -109,7 +109,7 @@ This note owns the **shared `DenominalElement` spec** (§2/§3) and the **alignm
 
 - **Compound half `X-E`** — [d63-compound-morphology.md](d63-compound-morphology.md) §3b: generalize the
   `-based` recognizer to the full suffix set + the `-like` over-generation fix
-  ([`lookup.rs`](../../kernel/src/dcg/lookup.rs): `denominal_suffix_item` `:1007`, `SLICE2_TAILS` `:3045`).
+  ([`lookup.rs`](../../kernel/src/dcg/): `denominal_suffix_item` `:1007`, `SLICE2_TAILS` `:3045`).
   Self-contained; ships without any passive work.
 - **Phrasal half `E link X`** — [d63-passive-voice-handling.md](d63-passive-voice-handling.md): the
   passive-participle promotion + agent suppression + `rel(theme, ground)` roles (importer/grammar), plus the

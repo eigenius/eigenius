@@ -85,6 +85,28 @@ and `lexicon` both moved. `EXPECTED` is updated; the reseed rides D85's.
 **`ontologies/lexicon/lexicon-ontology.esl`'s "ResourceRef" prose went in the same edit** — held
 back from the earlier sweep precisely because it would have cost a reseed alone, and free here.
 
+### Broken-link sweep *(done `2026-08-31`)*
+
+**137 broken relative links → 0**, plus `scripts/check-doc-links.py` so the next one is caught.
+None of it came from the judgements/warrants work; it accumulated from refactors nobody swept
+after.
+
+| cause | refs | fix |
+|---|---|---|
+| `dcg/lookup.rs` split across 8 files (#106) | 17 | 7 repointed at the file holding the function the link NAMES; 10 at the module |
+| module splits — `merge.rs`→`merge/`, `check.rs`, `eval.rs`, `evaluate.rs`, `parser.rs`→`rules/combinators.rs`, `packed.rs`→`chart/packed.rs` | 23 | exact successors |
+| renumbered guide chapters — eigenql `07`→`08`, `08`→`09` | 14 | retargeted, section anchors recomputed (`#76-into…` → `#8-6-into…`) |
+| renamed design docs — D29, D31 | 13 | exact successors |
+| two notes that were **never written** | 7 | unlinked; the appendix now says so rather than promising them |
+| deleted with no successor — `docs/papers/`, a deleted note, two notebook runtime files | 8 | unlinked, each annotated with what happened |
+| WASM tree, deleted `2026-07-08` | 44 | **kept.** All four documents carry a REMOVED header saying the body is preserved unedited as a record; each now also says the file links no longer resolve. Editing them would contradict the header |
+| misc — `proto/eigenius_kernel.proto`, a `../` depth bug, a link into a Claude agent-memory dir outside the repo | 11 | retargeted or removed |
+
+**One mistake worth recording.** Retargeting `d46`/`d47` by string replace also hit
+`platform/justification-logic/README.md`, which sits one directory deeper and needed `../../../`,
+not `../../`. The sweep created two broken links while fixing others; the recount caught it. A
+path substitution is only safe when every source file is at the same depth.
+
 ## 1. Design documents
 
 ### 1.1 Retire — record only

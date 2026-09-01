@@ -308,7 +308,7 @@ institutions needed the same code.
 
 ## 2.4a. A second shared payload landed: `eigentt:Term` propositions (D47)
 
-`FormulaTerm` covers the numerical institutions. The reasoning + statistics stack (D52 + D39) sits on a *different* shared payload: chain-mirrored EigenTT type expressions, declared at `eigentt:Term` per [D47](../../../design/d47-chain-mirrored-eigentt-type-fragment.md). Same general mechanism — a chain-resident inductive type that multiple institutions consume directly — but a different semantic domain (typed propositions and dependent types, not numerical expressions) and a different bridge mechanism (the [D49 chain-witness index](../platform/justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses), not a comorphism extract-transform-reify pipeline).
+`FormulaTerm` covers the numerical institutions. The reasoning + statistics stack (D52 + D39) sits on a *different* shared payload: chain-mirrored EigenTT type expressions, declared at `eigentt:Term` per [D47](../../design/d47-chain-mirrored-eigentt-type-fragment.md). Same general mechanism — a chain-resident inductive type that multiple institutions consume directly — but a different semantic domain (typed propositions and dependent types, not numerical expressions) and a different bridge mechanism (the [D49 chain-witness index](../platform/justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses), not a comorphism extract-transform-reify pipeline).
 
 The shape:
 
@@ -326,7 +326,7 @@ data eigentt:Term : Type 0 {
 }
 ```
 
-A chain-resident value of `eigentt:Term` IS a typed proposition (when it lives in `Prop` per [D46](../../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
+A chain-resident value of `eigentt:Term` IS a typed proposition (when it lives in `Prop` per [D46](../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
 
 ```esl
 reflection:canonical_proposition = type_expr(
@@ -427,7 +427,7 @@ structure makes natural:
   view of a Q3 plan" → "the routing institution's view of the same plan"
   collapse to identity the way the Symbolics → IntervalArithmetic comorphism
   does. The
-  [enterprise supply-chain scenario note](../../notes/enterprise-supply-chain-scenario.md)
+  enterprise supply-chain scenario note
   explores this shape in a non-science domain.
 
 The one-interpreter-per-consumer property documented in [§2.4](#2-4-what-the-shared-payload-buys-interpreters-not-translators)

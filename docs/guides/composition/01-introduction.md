@@ -97,7 +97,7 @@ If any are unfamiliar, the cross-link is the right entry point.
 | Term | Where to learn it |
 |---|---|
 | `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism` (the five chain shapes) | [ESL §9.1](../esl/09-institutions.md#91-what-an-institution-declares) |
-| `AutoOnLoad` / `OnDemand` / `Decidable` (the three dispatch roles) | [ESL §9.2](../esl/09-institutions.md#92-classification-at-compile-time), [EigenQL §8.2](../eigenql/08-institutions.md#82-the-classification-at-parse-time) |
+| `AutoOnLoad` / `OnDemand` / `Decidable` (the three dispatch roles) | [ESL §9.2](../esl/09-institutions.md#92-classification-at-compile-time), [EigenQL §8.2](../eigenql/09-institutions.md#9-2-the-classification-at-parse-time) |
 | `Verdict` (`Holds` / `Fails` / `Undecidable`) | [ESL §9.3](../esl/09-institutions.md#93-invoking-a-decidable-queryclass) |
 | `formula(...)` ESL sublanguage and `formulas:FormulaTerm` | [Formula language guide](../formula/README.md) |
 | `type_expr(...)` ESL sublanguage and `eigentt:Term` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
@@ -105,7 +105,7 @@ If any are unfamiliar, the cross-link is the right entry point.
 | `ChainWitness.Is*As` predicates and the witness index (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
 | `StatisticalAnalysisPlan` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
 | `justification:Certificate` / `justification:Term` / `justification:Conclusion` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic), [justification logic tutorial](../platform/justification-logic/README.md) |
-| `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri) |
+| `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/08-fiber-clauses.md#8-6-into--pinning-the-response-iri) |
 | Comorphism program-invoke (`comorphisms:foo(input)` in ESL) | [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs) |
 | Runtime substrate (`mirror create → env build → env create → institution install`) | [Platform §11](../platform/11-runtime-substrate.md) |
 
@@ -131,7 +131,7 @@ elsewhere:
   least the [intervals tutorial](../platform/julia-institutions/intervals-institution-tutorial.md)
   before continuing.
 - **The conceptual pitch.** The
-  [SHACL-comparison note](../../notes/note-for-a-shacl-user.md) frames the
+  SHACL-comparison note frames the
   broad story for someone coming from the W3C semantic-web stack. This guide
   is the structured reference once that framing has landed.
 
