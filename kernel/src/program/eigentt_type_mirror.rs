@@ -27,7 +27,7 @@
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Value;
+use crate::ontology::resource::{Resource, Value};
 use serde_json::json;
 
 /// Encoding errors raised when an `Exp` cannot be expressed in the
@@ -481,16 +481,124 @@ struct DecodeCtx<'a> {
 /// `Exp::Const` — the wire's currying convention (D47 §3.1) and the term's are the
 /// same shape since D76 Phase B, so no folding happens here any more.
 pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
-    let json = match value {
-        Value::Json(j) => j,
+    let ctx = DecodeCtx { layer };
+    match value {
+        Value::Json(j) => decode_type_json(j, &ctx),
+        // D85 §1 — a value RESOURCE: `is_a` names its constructor's class and its arguments are
+        // the properties that class requires. Read by translating to the tagged-dict form and
+        // decoding that, so every constructor's decoding stays in one place and the two shapes
+        // cannot drift apart while both are accepted. Step 3 migrates the authored values and
+        // makes `encode_type` emit this form; until then reading both is what lets the migration
+        // happen against a reader that already accepts its output.
+        Value::Embedded(r) => decode_type_json(&value_resource_to_tagged(r, layer)?, &ctx),
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected Value::Json or a value resource, got {other:?}"
+        ))),
+    }
+}
+
+/// Translate a value resource (D85 §1) into the `{"ctor": …, "args": […]}` form.
+///
+/// The constructor is what `is_a` names — a class the layer derived from the inductive's
+/// `core:ctors` — and the argument ORDER comes from that constructor's declared `arg_types`,
+/// not from the value, which is why a value cannot get the order wrong.
+fn value_resource_to_tagged(r: &Resource, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
+    use crate::ontology::well_known as wk;
+    let bad = |m: String| DecodeError::MalformedValue(m);
+
+    let class_iri = r.is_a().first().cloned().ok_or_else(|| {
+        bad("a value resource must name its constructor's class in `is_a`".to_string())
+    })?;
+    let class = layer.resolve(&class_iri).ok_or_else(|| {
+        bad(format!(
+            "`is_a` names `{class_iri}`, which does not resolve"
+        ))
+    })?;
+
+    // The inductive is what the class subclasses; the ctor name is the rest of the IRI.
+    let inductive_iri = class
+        .get(&wk::iri(wk::PARENT_CLASSES))
+        .and_then(|v| v.as_iri_array().first().cloned())
+        .ok_or_else(|| {
+            bad(format!(
+                "`{class_iri}` is not a constructor class — no `subclass_of`"
+            ))
+        })?;
+    let ctor_name = class_iri
+        .as_str()
+        .strip_prefix(&format!("{inductive_iri}-"))
+        .ok_or_else(|| {
+            bad(format!(
+                "`{class_iri}` is not named `{inductive_iri}-<ctor>`"
+            ))
+        })?
+        .to_string();
+
+    let inductive = layer
+        .resolve(&inductive_iri)
+        .ok_or_else(|| bad(format!("`{inductive_iri}` does not resolve")))?;
+    let ctor = match inductive.get(&wk::iri(wk::CTORS)) {
+        Some(Value::Array(cs)) => cs.iter().find_map(|c| match c {
+            Value::Embedded(d)
+                if d.get(&wk::iri(wk::CTOR_NAME)).and_then(|v| v.as_str())
+                    == Some(ctor_name.as_str()) =>
+            {
+                Some(d.clone())
+            }
+            _ => None,
+        }),
+        _ => None,
+    }
+    .ok_or_else(|| bad(format!("`{inductive_iri}` declares no ctor `{ctor_name}`")))?;
+
+    let mut args = Vec::new();
+    if let Some(Value::Array(arg_types)) = ctor.get(&wk::iri(wk::ARG_TYPES)) {
+        for (i, at) in arg_types.iter().enumerate() {
+            let arg_name = match at {
+                Value::Embedded(a) => a
+                    .get(&wk::iri(wk::ARG_NAME))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("arg_{i}")),
+                _ => format!("arg_{i}"),
+            };
+            let prop = Iri::parse(&format!("{class_iri}-{arg_name}"))
+                .map_err(|e| bad(format!("bad derived property IRI: {e}")))?;
+            let v = r.get(&prop).ok_or_else(|| {
+                bad(format!(
+                    "value of `{ctor_name}` is missing argument `{arg_name}`"
+                ))
+            })?;
+            args.push(arg_value_to_json(v, layer)?);
+        }
+    }
+    Ok(serde_json::json!({ "ctor": ctor_name, "args": args }))
+}
+
+/// One argument of a value resource, as the tagged-dict form expects it.
+///
+/// A nested inductive value recurses; a primitive passes through; a `Value::Json` is a
+/// tagged dict already, which is how a partly-migrated tree reads.
+fn arg_value_to_json(v: &Value, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
+    Ok(match v {
+        Value::Embedded(r) => value_resource_to_tagged(r, layer)?,
+        Value::Json(j) => j.clone(),
+        Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::Integer(i) => serde_json::Value::from(*i),
+        Value::Float(f) => serde_json::Value::from(*f),
+        Value::Boolean(b) => serde_json::Value::Bool(*b),
+        Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(|x| arg_value_to_json(x, layer))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
         other => {
             return Err(DecodeError::MalformedValue(format!(
-                "expected Value::Json, got {other:?}"
-            )));
+                "argument value has no tagged-dict form: {other:?}"
+            )))
         }
-    };
-    let ctx = DecodeCtx { layer };
-    decode_type_json(json, &ctx)
+    })
 }
 
 fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {

@@ -291,6 +291,17 @@ the migration then rewrites values a reader already accepts.
 
 ## 6. Open
 
+0. **`eigentt:Term` declares a constructor the D47 codec cannot decode.** The inductive declares
+   20 constructors including `SizeSort`; `decode_type_json` has no arm for it, so
+   `{"ctor": "SizeSort", "args": []}` fails with *"unknown eigentt:Term ctor"*. Found while
+   testing step 2, and **pre-existing** — the two shapes disagree about what the type has, in
+   whichever encoding. Nothing authored uses it (`SizeSort` appears in no chain value), which is
+   why it has gone unnoticed. Either the codec gains the arm or the declaration loses the
+   constructor; both are small, and which one is right depends on whether sized types are coming
+   back after eigenius#218 retired them.
+
+
+
 1. **`core:args` element typing — DECIDED `2026-08-31`: there is no `core:args`.** A constructor
    gets a **class**; each argument becomes a **named property** on that class. The question dissolves
    rather than being answered, which is why this beats both options the note originally offered.

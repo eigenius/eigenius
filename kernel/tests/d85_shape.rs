@@ -440,3 +440,73 @@ fn an_inductive_typed_argument_is_declared_core_inductive() {
         "and must name the inductive in class_types"
     );
 }
+
+// ── Step 2 — `decode_type` reads a value resource ────────────────────
+
+/// A resource-form value validates in an `eigentt:Term`-ranged slot.
+///
+/// Before step 2 this failed with "expected Value::Json, got Embedded": Rule 21 routes every
+/// `eigentt:Term`- or `Judgement`-ranged slot through the D47 codec, and the codec read the
+/// tagged dict only. `decode_type` now reads both, by translating the resource form to the
+/// tagged form and decoding that — so every constructor's decoding stays in one place and the
+/// two shapes cannot drift while both are accepted.
+///
+/// `encode_type` still emits the dict. Expand before migrate: nothing is rewritten yet, so
+/// nothing can break.
+#[test]
+fn a_value_resource_decodes_in_a_term_ranged_slot() {
+    let leaf = || {
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            arr("urn:eigenius:eigentt:Term-UnitVal"),
+        );
+        Value::Embedded(Box::new(r))
+    };
+    let mut v = Resource::new(iri("urn:test:d85:app_of_two_leaves"));
+    v.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:eigentt:Term-App"),
+    );
+    v.set(iri("urn:eigenius:eigentt:Term-App-head"), leaf());
+    v.set(iri("urn:eigenius:eigentt:Term-App-arg"), leaf());
+    let errs = errors_for(vec![v]);
+    // What step 2 delivers is that the value DECODES. Whether an arbitrary term also
+    // type-checks is Rule 21's second phase and a property of the term, not of its shape —
+    // `App` of two units is ill-typed in either encoding.
+    assert!(
+        !errs.iter().any(|e| e.contains("failed to decode")),
+        "a value resource must decode in an eigentt:Term-ranged slot; got:\n{}",
+        errs.join("\n")
+    );
+}
+
+/// And the two shapes decode to the SAME `Exp` — which is what makes the migration safe.
+#[test]
+fn both_shapes_decode_to_the_same_exp() {
+    let core = core_layer();
+    let tagged = Value::Json(serde_json::json!({
+        "ctor": "ConstRef", "args": ["urn:eigenius:core:string"]
+    }));
+    let mut res = Resource::new_embedded();
+    res.set(
+        iri("urn:eigenius:core:is_a"),
+        arr("urn:eigenius:eigentt:Term-ConstRef"),
+    );
+    res.set(
+        iri("urn:eigenius:eigentt:Term-ConstRef-iri"),
+        Value::String("urn:eigenius:core:string".into()),
+    );
+
+    let from_json = eigenius_kernel::program::eigentt_type_mirror::decode_type(&tagged, &core)
+        .expect("the tagged dict decodes");
+    let from_resource = eigenius_kernel::program::eigentt_type_mirror::decode_type(
+        &Value::Embedded(Box::new(res)),
+        &core,
+    )
+    .expect("the value resource decodes");
+    assert_eq!(
+        from_json, from_resource,
+        "the two shapes must decode to the same Exp, or migrating a value changes its meaning"
+    );
+}
