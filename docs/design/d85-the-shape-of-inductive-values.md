@@ -271,11 +271,30 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 |---|---|---|
 | 1 | `core:subclass_of` admits `core:InductiveType`, so a constructor class can name its inductive; derive the constructor classes and argument properties (§6.1), **with Rule 25**, the two-sided closedness check (§6.1) — a class `subclass_of` an inductive must be declared in that inductive's own layer AND correspond to an entry in its `core:ctors`. Without it §6.1 silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
 | 2 | `decode_type` READS a value resource as well as a tagged dict; `encode_type` still emits the dict. Expand before migrate: nothing is rewritten, so nothing can break, and the codec stops being the reason the new shape is refused. | yes |
-| 3 | Migrate the 123 authored values — each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it — then `encode_type` emits the resource form and `CtorApp` → `Embed`. | yes |
+| 3 | Migrate the 123 authored values AND switch the emitters in ONE change — each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it, while `encode_type` and the ESL compiler start emitting that form; then `CtorApp` → `Embed`. **The two halves are not separable** — see below. | yes |
 | 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
 | 5 | `Vector` leaves `Value` — the query engine takes a domain extending the data model, and serialising a transient becomes a type error rather than a panic. | yes |
 
 One reseed, after step 3, folded into the one already owed for P4 and P5.
+
+**Step 3's two halves are one change, measured `2026-09-01`.** Migrating the values while the
+compiler still emits tagged dicts leaves the two shapes side by side, and
+`every_shipped_inductive_round_trips_through_esl` catches it directly: it prints a shipped
+declaration to ESL and recompiles, so the authored resource form meets a recompiled tagged dict and
+the byte comparison fails. Flipping the emitter first fails the same test from the other side. The
+migration was written, verified (123 values, 185 constructor applications, nesting to depth 3, zero
+arity or naming problems) and then reverted for exactly this reason; the reader-side work it
+depended on is step 2 and stayed.
+
+**And the emitter needs argument NAMES, which the compiler cannot look up.** `encode_type` and the
+ESL compiler's four declaration emitters — `const_ref_value`, `var_value`, `bare_kind_value`,
+`sort_kind_result_value` — must name each argument to write `<Ind>-<Ctor>-<arg>`, and
+`esl::compile()` is context-free: it has no layer, so it cannot read the inductive's `arg_types`.
+The names therefore have to live in the D47 codec's static table, beside the ctor arities it
+already hard-codes. That is consistent — the codec is the authority for the wire form — but it
+creates a coupling the tree does not have today: **the ontology's `core:arg_name` values and the
+codec's table must agree, or a compiled value names properties the derivation never produced.**
+That coupling needs a test before step 3 lands, and it is a decision rather than a detail.
 
 **Steps 2 and 3 were the other way round until `2026-09-01`, and that order cannot land green.**
 Migrating a value first means writing the resource form into a slot whose validation still reads

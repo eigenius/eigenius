@@ -87,6 +87,27 @@ fn target_kind(target: &Iri, own: &BTreeMap<Iri, Resource>, parents: &[Arc<Layer
     }
 }
 
+/// The IRI a `ConstRef` value resource names, or `None` if it is not a `ConstRef`.
+///
+/// The resource form of `ConstRef(X)` is `is_a: [<Term>-ConstRef]` with the target on
+/// `<Term>-ConstRef-<arg>`. Read structurally — the constructor is the class `is_a` names, and
+/// the single argument is the one property besides `is_a` — so this does not hard-code which
+/// inductive or which argument name, and works for any term language with a `ConstRef`.
+fn const_ref_target(r: &Resource) -> Option<Iri> {
+    let is_ctor_ref = r
+        .is_a()
+        .first()
+        .is_some_and(|c| c.as_str().ends_with("-ConstRef"));
+    if !is_ctor_ref {
+        return None;
+    }
+    let is_a = iri(wk::IS_A);
+    r.properties()
+        .iter()
+        .find(|(k, _)| **k != is_a)
+        .and_then(|(_, v)| v.as_iri())
+}
+
 /// What an argument's `core:type_name` says the property should declare.
 ///
 /// Measured over the 88 JSON-declared arguments in the tree, `type_name` takes exactly two
@@ -104,19 +125,24 @@ fn arg_property_type(
     parents: &[Arc<Layer>],
 ) -> (String, Option<String>) {
     let fallback = || (wk::RESOURCE.to_string(), None);
-    let Some(Value::Json(j)) = type_name else {
-        return fallback();
+    // Both shapes, because step 3 migrates these very values: a `type_name` may still be a
+    // tagged dict or may already be the value resource. Only `ConstRef` is read either way —
+    // `Var` and everything else take the fallback.
+    let target = match type_name {
+        Some(Value::Json(j)) => {
+            if j.get("ctor").and_then(serde_json::Value::as_str) != Some("ConstRef") {
+                return fallback();
+            }
+            j.get("args")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|a| a.first())
+                .and_then(serde_json::Value::as_str)
+                .and_then(|s| Iri::parse(s).ok())
+        }
+        Some(Value::Embedded(r)) => const_ref_target(r),
+        _ => return fallback(),
     };
-    if j.get("ctor").and_then(serde_json::Value::as_str) != Some("ConstRef") {
-        return fallback(); // `Var`, or any shape this mapping does not read
-    }
-    let Some(target) = j
-        .get("args")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|a| a.first())
-        .and_then(serde_json::Value::as_str)
-        .and_then(|s| Iri::parse(s).ok())
-    else {
+    let Some(target) = target else {
         return fallback();
     };
     match target_kind(&target, own, parents) {

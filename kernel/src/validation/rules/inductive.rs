@@ -199,6 +199,13 @@ impl Validator {
     ) {
         let json = match value {
             Value::Json(j) => j,
+            // A value RESOURCE (D85 §1) is validated as a resource in its own right: Rule 23
+            // recurses into every embedded resource declaring `is_a` and applies the full rule
+            // set, so its constructor class is checked by Rule 8, its arity by Rule 1 and each
+            // argument by Rules 5 and 6. Walking it here as well would duplicate all of that
+            // against a shape this walker does not read. This walker is deleted outright at
+            // D85 §5 step 4; deferring is the smallest thing that lets step 3 land green.
+            Value::Embedded(_) => return,
             other => {
                 out.push(ValidationError {
                     resource_id: res_id.clone(),

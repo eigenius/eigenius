@@ -408,7 +408,7 @@ pub(crate) fn resolve_inductive_type(
 
     let params_telescope = decode_params(class_iri, resource, layer)?;
     let indices_telescope = decode_indices(class_iri, resource, layer)?;
-    let sort = decode_result_sort(class_iri, resource)?;
+    let sort = decode_result_sort(class_iri, resource, layer)?;
     let uparams = decode_universe_params(class_iri, resource)?;
 
     let ctors = decode_ctors(class_iri, resource, &params_telescope, layer)?;
@@ -543,6 +543,7 @@ fn decode_universe_params(
 fn decode_result_sort(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
 ) -> Result<Exp, String> {
     // eigenius#188: `result_sort` is a `core:Level` value, not a string. The old grammar —
     // `"Prop"` / `"Set"` / `"Type:N"`, parsed by hand here — could not express a level VARIABLE,
@@ -550,9 +551,15 @@ fn decode_result_sort(
     // through the same codec as every other level means one representation and one validator.
     let sort_iri = Iri::parse(wk::RESULT_SORT).unwrap();
     match resource.get(&sort_iri) {
-        Some(Value::Json(j)) => crate::program::eigentt_type_mirror::decode_level_json(j)
-            .map(Exp::Sort)
-            .map_err(|e| format!("inductive type '{class_iri}' has malformed `result_sort`: {e}")),
+        // Either shape — step 3 migrates the authored ones from the tagged dict to the value
+        // resource, and both decode through the same codec.
+        Some(v @ (Value::Json(_) | Value::Embedded(_))) => {
+            crate::program::eigentt_type_mirror::decode_level(v, layer)
+                .map(Exp::Sort)
+                .map_err(|e| {
+                    format!("inductive type '{class_iri}' has malformed `result_sort`: {e}")
+                })
+        }
         Some(other) => Err(format!(
             "inductive type '{class_iri}' has a `result_sort` that is not a core:Level value: \
              {other:?}"
@@ -819,19 +826,51 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
     let value = r
         .get(&Iri::parse(wk::TYPE_NAME).unwrap())
         .ok_or_else(|| "InductiveArgType missing `type_name`".to_string())?;
-    let head = match value {
-        Value::Json(j) => j,
+    // Both shapes: `type_name` may be a tagged dict or the value resource D85 §1 specifies,
+    // and step 3 migrates the authored ones from the first to the second. In the resource form
+    // the constructor is the class `is_a` names — read off its `-<Ctor>` suffix — and the single
+    // argument is the one property besides `is_a`, so nothing here hard-codes an argument name.
+    let (ctor, arg0_owned): (String, Option<String>) = match value {
+        Value::Json(head) => (
+            head.get("ctor")
+                .and_then(|c| c.as_str())
+                .ok_or_else(|| "InductiveArgType `type_name` has no ctor".to_string())?
+                .to_string(),
+            head.get("args")
+                .and_then(|a| a.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        ),
+        Value::Embedded(r) => {
+            let class = r
+                .is_a()
+                .first()
+                .ok_or_else(|| {
+                    "InductiveArgType `type_name` value resource names no class".to_string()
+                })?
+                .as_str()
+                .to_string();
+            let ctor = class
+                .rsplit_once('-')
+                .map(|(_, c)| c.to_string())
+                .ok_or_else(|| format!("`{class}` is not a constructor class"))?;
+            let is_a_iri = Iri::parse(wk::IS_A).unwrap();
+            let arg = r
+                .properties()
+                .iter()
+                .find(|(k, _)| **k != is_a_iri)
+                .and_then(|(_, v)| v.as_str().map(str::to_string));
+            (ctor, arg)
+        }
         other => {
             return Err(format!(
                 "InductiveArgType `type_name` must be an eigentt:Term value, got {other:?}"
             ))
         }
     };
-    let ctor = head
-        .get("ctor")
-        .and_then(|c| c.as_str())
-        .ok_or_else(|| "InductiveArgType `type_name` has no ctor".to_string())?;
-    let arg0 = || -> Option<&str> { head.get("args")?.as_array()?.first()?.as_str() };
+    let ctor = ctor.as_str();
+    let arg0 = || -> Option<&str> { arg0_owned.as_deref() };
     match ctor {
         "Var" => Ok(arg0()
             .ok_or_else(|| "`Var` type_name takes a name".to_string())?

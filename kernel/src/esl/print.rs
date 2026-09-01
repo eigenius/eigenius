@@ -827,12 +827,151 @@ pub fn is_d47_term(term: &Value) -> bool {
 ///
 /// Namespace aliases are pooled across every resource, so the file carries one preamble rather
 /// than a per-resource one.
+/// Argument order per constructor class, read from the inductive declarations in `doc`.
+///
+/// Keyed by the constructor class IRI (`<inductive>-<Ctor>`), valued by the argument names in
+/// DECLARATION order — which is where order lives under D85 §6.1, since a value resource names
+/// its arguments and a JSON object does not preserve their order.
+fn ctor_arg_order(doc: &Value) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    fn walk(v: &Value, out: &mut BTreeMap<String, Vec<String>>) {
+        match v {
+            Value::Object(o) => {
+                let is_inductive = o
+                    .get(wk::IS_A)
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| a.iter().any(|c| c.as_str() == Some(wk::INDUCTIVE_TYPE)));
+                if let (true, Some(id)) = (is_inductive, o.get("@id").and_then(Value::as_str)) {
+                    for c in o
+                        .get(wk::CTORS)
+                        .and_then(Value::as_array)
+                        .unwrap_or(&vec![])
+                    {
+                        let Some(co) = c.as_object() else { continue };
+                        let Some(name) = co.get(wk::CTOR_NAME).and_then(Value::as_str) else {
+                            continue;
+                        };
+                        let args = co
+                            .get(wk::ARG_TYPES)
+                            .and_then(Value::as_array)
+                            .map(|a| {
+                                a.iter()
+                                    .enumerate()
+                                    .map(|(i, x)| {
+                                        x.get(wk::ARG_NAME)
+                                            .and_then(Value::as_str)
+                                            .map(str::to_string)
+                                            .unwrap_or_else(|| format!("arg_{i}"))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        out.insert(format!("{id}-{name}"), args);
+                    }
+                }
+                for x in o.values() {
+                    walk(x, out);
+                }
+            }
+            Value::Array(a) => {
+                for x in a {
+                    walk(x, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(doc, &mut out);
+    out
+}
+
+/// Rewrite every D85 §1 value RESOURCE in `doc` back to the `{"ctor", "args"}` form.
+///
+/// One pass at the entry, so the rest of the printer reads one shape. The alternative was
+/// teaching sixteen call sites to fetch arguments by name; this keeps the printer's inversion of
+/// the compiler in one piece.
+///
+/// Order comes from `table` when the declaring inductive is in this document. When it is not,
+/// only a constructor of arity ≤ 1 can be rendered, and that covers every cross-document case in
+/// the tree — `Term-ConstRef`, `Term-Sort` and `Level-Zero`, all nullary or unary. A
+/// multi-argument constructor from another document is refused rather than guessed at.
+fn untag_value_resources(
+    v: &Value,
+    table: &BTreeMap<String, Vec<String>>,
+) -> Result<Value, String> {
+    match v {
+        Value::Array(a) => Ok(Value::Array(
+            a.iter()
+                .map(|x| untag_value_resources(x, table))
+                .collect::<Result<_, _>>()?,
+        )),
+        Value::Object(o) => {
+            // A value resource: `is_a` names one class whose local name is `<Ind>-<Ctor>`, and
+            // every other key is that class IRI plus `-<arg>`.
+            let class = o
+                .get(wk::IS_A)
+                .and_then(Value::as_array)
+                .filter(|a| a.len() == 1)
+                .and_then(|a| a[0].as_str())
+                .filter(|c| c.rsplit(':').next().is_some_and(|l| l.contains('-')));
+            let is_value = class.is_some_and(|c| {
+                o.keys()
+                    .all(|k| k == wk::IS_A || k.starts_with(&format!("{c}-")))
+            });
+            if let (Some(class), true) = (class, is_value) {
+                let prefix = format!("{class}-");
+                let mut named: BTreeMap<&str, &Value> = BTreeMap::new();
+                for (k, val) in o {
+                    if let Some(n) = k.strip_prefix(&prefix) {
+                        named.insert(n, val);
+                    }
+                }
+                let order: Vec<String> = match table.get(class) {
+                    Some(names) => names.clone(),
+                    None if named.len() <= 1 => named.keys().map(|s| s.to_string()).collect(),
+                    None => {
+                        return Err(format!(
+                            "`{class}` has {} arguments and its inductive is not declared in this \
+                             document, so their order cannot be recovered",
+                            named.len()
+                        ))
+                    }
+                };
+                let ctor = class.rsplit('-').next().unwrap_or(class);
+                let args = order
+                    .iter()
+                    .map(|n| match named.get(n.as_str()) {
+                        Some(x) => untag_value_resources(x, table),
+                        None => Err(format!("`{class}` value is missing argument `{n}`")),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(serde_json::json!({ "ctor": ctor, "args": args }));
+            }
+            let mut out = serde_json::Map::new();
+            for (k, val) in o {
+                out.insert(k.clone(), untag_value_resources(val, table)?);
+            }
+            Ok(Value::Object(out))
+        }
+        other => Ok(other.clone()),
+    }
+}
+
 pub fn print_document(doc: &Value) -> Result<String, PrintError> {
     print_document_with(doc, Layout::Flat)
 }
 
 /// [`print_document`], laid out per `layout`.
 pub fn print_document_with(doc: &Value, layout: Layout) -> Result<String, PrintError> {
+    // D85 §1 — an inductive VALUE is a resource. Rewrite every one back to the `{"ctor","args"}`
+    // form before printing, so the rest of this module reads one shape (see
+    // `untag_value_resources`).
+    let table = ctor_arg_order(doc);
+    let untagged = untag_value_resources(doc, &table).map_err(|message| PrintError {
+        message,
+        path: "<document>".to_string(),
+    })?;
+    let doc = &untagged;
     let resources = match doc {
         Value::Array(a) => a.clone(),
         other => vec![other.clone()],

@@ -288,6 +288,22 @@ pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Val
 /// then fails to resume with `ManifestDrift`, and the reseed that answers it rewrites the chain
 /// from source with this encoder. So no term in the old form can ever reach this function — the
 /// arm was a compatibility layer for a state that cannot occur.
+/// Decode a `core:Level` value, in either shape.
+///
+/// The sibling of [`decode_type`] for levels: a tagged dict decodes directly, a value resource
+/// (D85 §1) is translated to the tagged form first. Needs the layer for the same reason
+/// `decode_type` does — the constructor is a class the layer derived, and the ARGUMENT ORDER
+/// comes from that constructor's declaration rather than from the value.
+pub fn decode_level(value: &Value, layer: &Layer) -> Result<crate::nbe::level::Level, DecodeError> {
+    match value {
+        Value::Json(j) => decode_level_json(j),
+        Value::Embedded(r) => decode_level_json(&value_resource_to_tagged(r, layer)?),
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a core:Level value, got {other:?}"
+        ))),
+    }
+}
+
 pub(crate) fn decode_level_json(
     v: &serde_json::Value,
 ) -> Result<crate::nbe::level::Level, DecodeError> {
