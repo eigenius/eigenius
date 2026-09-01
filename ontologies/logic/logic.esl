@@ -18,7 +18,9 @@ namespace logic = "urn:eigenius:logic";
 // Negation is the idiom `P -> logic:False`; e.g. the determiner `no` denotes
 // `λA. λV. ∀x:A. (V(x) -> logic:False)`. (Mirrors the `stats:False` idiom; this
 // is its namespace-neutral home — statistics may migrate to it later.)
-data logic:False : Prop { }
+data logic:False : Prop {
+    description = "Bottom — the empty proposition. ZERO constructors, so no proof of it can be built, which is what makes it usable as the target of a negation: `not P` is the idiom `P -> logic:False`. The determiner `no` denotes `λA. λV. ∀x:A. (V(x) -> logic:False)`. Namespace-neutral home for an idiom the statistics ontology also uses.";
+}
 
 // Conjunction — the product of two propositions. The DCG generalized-conjunction
 // combinator (D63 §8.4 Phase 3) builds `logic:And(P, Q)` as the meaning of a
@@ -36,11 +38,15 @@ data logic:False : Prop { }
 // `Q`-proof). What makes `P`,`Q` parameters rather than indices is the `(P, Q)` in
 // the *data header*, not the constructor shape.
 data logic:And (P : Prop, Q : Prop) : Prop {
+    description = "Conjunction — the product of two propositions. One constructor, `conj`, taking a proof of each side, so a proof of the conjunction carries both. The DCG's generalized-conjunction combinator builds `logic:And(P, Q)` as the meaning of a coordinated `S`, and pointwise-lifts it for `VP` and `TV` coordination (D63 §8.4). `P` and `Q` are PARAMETERS, not indices: they are fixed across the constructor rather than varying per inhabitant.";
+
     conj : forall (P : Prop, Q : Prop) => P -> Q -> logic:And(P, Q)
 }
 
 // Disjunction — the sum of two propositions (`or`). Parameters, as for `And`.
 data logic:Or (P : Prop, Q : Prop) : Prop {
+    description = "Disjunction — the sum of two propositions, the meaning of coordinating `or`. Two constructors, `inl` and `inr`, one per branch: proving a disjunction means proving one side and recording WHICH, so the term keeps information a truth value would discard. `P` and `Q` are parameters rather than indices, as for `logic:And`.";
+
     inl : forall (P : Prop, Q : Prop) => P -> logic:Or(P, Q),
     inr : forall (P : Prop, Q : Prop) => Q -> logic:Or(P, Q)
 }

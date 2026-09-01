@@ -352,6 +352,11 @@ mod ctor_type_tests {
             )]),
         );
         b.set(iri(wk::SHORT_NAME), Value::String("Box".into()));
+        // Required since `core:InductiveType subclass_of core:Class` (D85 §6.1).
+        b.set(
+            iri(wk::DESCRIPTION),
+            Value::String("test fixture for ctor_type well-formedness".into()),
+        );
         b.set(iri(wk::TYPE_PARAMS), Value::Array(vec![]));
         b.set(
             iri(wk::CTORS),

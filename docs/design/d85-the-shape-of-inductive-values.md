@@ -331,6 +331,33 @@ One reseed, after step 3, folded into the one already owed for P4 and P5.
    same-or-lower resolution. Without them §6.1 converts a closed type into an open one silently,
    which is the one thing the inductive/class distinction exists to prevent.
 
+   **How the two shapes are admitted — and the answer that was tried first and withdrawn.**
+   `core:is_a` and `core:subclass_of` now accept EITHER kind of type, a `core:Class` or a
+   `core:InductiveType`, which is what `core:class_types` has done since D32 §3.5. An inductive
+   is **not** declared `subclass_of core:Class`.
+
+   *The first attempt was to declare exactly that*, on the reading that one subsumption statement
+   serves both shapes. It does, and it type-checked — but a class owes `core:description`, so
+   every inductive would owe one too, and **122** declared inductives had none: 28 in the shipped
+   ontologies and 94 across experiment chains, demo files and test fixtures, 45 of them domain
+   biology in one WRN chain. That cost is the argument against the claim rather than an obstacle
+   to it. **An inductive is not a class.** Their contracts differ — an inductive owes `ctors`, a
+   class owes `requires` / `recommends` — and, decisively for §6.1, a class is OPEN to subclassing
+   by any later layer where an inductive is closed. Making one a subclass of the other asserts a
+   containment the design spends the rest of this section denying.
+
+   The 28 ontology descriptions were kept: a declared type with no description is a gap whichever
+   way this resolved, and `core:description` is now a `recommends` on `core:InductiveType` so the
+   intent is declared rather than incidental.
+
+   **Two rejections, not one, and the second was invisible from the first.** `is_a: [eigentt:Term]`
+   failed Rule 8 (`ClassTypeMismatch`), because `is_a` admitted only `core:Class` and
+   `is_subclass_of` walks `subclass_of`, never `is_a`. `subclass_of: [eigentt:Term]` failed a
+   *different* rule — Rule 22's `ReferenceCheck` — which held ONE expected class, which is why
+   `class_types` had open-coded its Class-or-InductiveType case around it. `ReferenceCheck` now
+   holds a LIST, and that open-coded case folded back into it: three fields that reference "a
+   type" now share one walk instead of two plus a special case.
+
    **Measured cost.** 96 constructor classes (59 JSON-declared, 37 ESL), of which 12 are nullary and
    carry no properties at all. 63 distinct argument properties on the JSON side — 88 argument slots
    collapse by reuse — and roughly 20 more for ESL. Only **2** argument names are reused within one

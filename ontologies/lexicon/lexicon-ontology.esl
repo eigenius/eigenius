@@ -75,6 +75,8 @@ class lexicon:Entity {
 // declaratives denote a `Prop`; questions / imperatives denote distinct things
 // (deferred to D63 Slice 5, where ⟦·⟧ fails closed rather than denoting `Prop`).
 data lexicon:Mood {
+    description = "Clause mood — a SYNTACTIC feature of `cat_s`, and the one place where the categorial denotation branches: ⟦S[dcl,_]⟧ = Prop, while the interrogative and imperative moods denote their own shapes. Unlike Num/Fin/Prep/Mode it is therefore not erased by ⟦·⟧.";
+
     dcl,   // declarative — "a gene affects a cell line" (⟦S[dcl,_]⟧ = Prop)
     q,     // interrogative — "does a gene affect a cell line?" (Slice 5)
     imp,   // imperative — "affect the cell line" (Slice 5)
@@ -83,6 +85,8 @@ data lexicon:Mood {
 // Num — grammatical number. A *syntactic* feature (erased by ⟦·⟧): it routes
 // determiner/noun agreement at composition via the feature-meet, nothing more.
 data lexicon:Num {
+    description = "Grammatical number — a SYNTACTIC feature, erased by ⟦·⟧. It routes determiner/noun agreement at composition through the feature-meet and does nothing else. `num_any` is the underspecified top that meets both `sg` and `pl`; WordNet imports carry it, because a lexical entry taken from a sense inventory has no number of its own.";
+
     sg,       // singular — "gene", "every gene"
     pl,       // plural — "genes", "all genes"
     num_any,  // underspecified ⊤: meets sg AND pl. WordNet imports carry this;
@@ -108,6 +112,8 @@ data lexicon:Num {
 // predicate form). Syntactic (erased by ⟦·⟧); used for subcategorization (which
 // form a slot demands) — ≈ CCG's `S[…]` feature.
 data lexicon:Fin {
+    description = "Clause and predicate form — finiteness, non-finite shape, and the adjectival predicate form. SYNTACTIC, erased by ⟦·⟧: it exists so a slot can subcategorize for the form it demands (`does` takes `bse`, `to` takes `inf`), which is CCG's `S[…]` feature.";
+
     fin,      // finite — "affects", "affected" (tensed; heads a clause)
     bse,      // base / bare infinitive — "affect" (after "does", "to")
     inf,      // to-infinitive — "to affect"
@@ -144,6 +150,8 @@ data lexicon:Fin {
 // because distribution is *deferred* to a later combination (the group meets its
 // predicate downstream), so the connective must travel with the phrase.
 data lexicon:Conn {
+    description = "The connective of a coordinated NP group. SYNTACTIC, erased by ⟦·⟧ — a group denotes `List C` whichever connective built it — but load-bearing for how a predicate combines OVER the group: `conn_and` distributes ∧ and licenses the collective and reciprocal readings, `conn_or` distributes ∨. Keeping it on the group rather than in the denotation is what lets one `List C` serve every reading.";
+
     conn_and,     // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
     conn_or,      // "X or Y"  — disjunctive group (distributive ∨)
     conn_but_not, // "X but not Y" (D62 §2 #8) — contrastive ellipsis: distributes ASYMMETRICALLY,
@@ -173,6 +181,8 @@ data lexicon:Conn {
 // concrete ctors are the closed English oblique prepositions the importer's
 // `governed_preposition` extracts.
 data lexicon:Prep {
+    description = "The governing preposition of an oblique ARGUMENT PP. SYNTACTIC, erased by ⟦·⟧ exactly as Num and Fin are: it routes which preposition a `cat_pp_arg`-seeking functor accepts, through the feature-meet. This is what makes *dependent to* ungrammatical while *dependent on* composes — a precision the grammar could not express while a PP was untyped.";
+
     prep_to,      // "dependent to"? no — "addicted to", "proportional to"
     prep_on,      // "dependent on", "based on"
     prep_in,      // "interested in", "results in"
@@ -230,6 +240,8 @@ data lexicon:Prep {
 // Bare `x` (OpenCCG's "permutative") is deliberately ABSENT: it is a rule-class in
 // Baldridge's prose, not a node in Figure 5.1, so it has no place in the lattice.
 data lexicon:Mode {
+    description = "The SLASH MODALITY of multimodal CCG (Baldridge 2002 ch. 5). SYNTACTIC and erased by ⟦·⟧: it does not change what a slash MEANS, only which combinatory rules may apply to it. The modes form a hierarchy rooted at `m_app` (application only — a governed particle or preposition), so a stricter slash admits strictly fewer rules and over-generation is a declaration rather than a special case in the parser.";
+
     m_app,         // ⋆ — application only; the hierarchy ROOT. A governed particle/preposition
                    // slash, a coordinator's slashes, punctuation. Composition CANNOT consume it.
     m_harm,        // ⋄ — harmonic (order-preserving) composition. Baldridge's determiner: `np/⋄n`.
@@ -249,6 +261,8 @@ data lexicon:Mode {
 // ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧→⟦A⟧ ; ⟦cat_forall(_,λT.R)⟧ = ΠT:Set. ⟦R⟧.
 // The slash modality is denotation-transparent: ⟦fwd(m,A,B)⟧ ignores `m`.
 data lexicon:Cat : Type 1 {
+    description = "The categorial type, as an inductive rather than a string: `Atom | A/B | A\\B`, at Type 1 because `cat_n` and `cat_np` store a `Set`. Making it an inductive buys three things: a category cannot be malformed, because the kernel checks it; the composition rules pattern-match on it instead of parsing; and the homomorphism ⟦·⟧ : Cat → EigenTT type is an ordinary recursor (`denote_cat`) — ⟦cat_s(m,_)⟧ = ⟦m⟧, ⟦cat_n(_,_)⟧ = Set, ⟦cat_np(T,_)⟧ = T, ⟦A/B⟧ = ⟦A\\B⟧ = ⟦B⟧→⟦A⟧.";
+
     // S[mood,fin] — a sentence/clause. Mood is semantic (drives ⟦·⟧); fin records
     // the verb form the clause is built on.
     cat_s  : lexicon:Mood -> lexicon:Fin -> lexicon:Cat,

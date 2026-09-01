@@ -96,36 +96,17 @@ impl Validator {
         }
 
         if is_property {
-            // class_types accepts BOTH Class and InductiveType IRIs
-            // (D32 §3.5): `data_type: core:resource(_array)` properties
-            // reference Classes; `data_type: core:inductive` properties
-            // reference InductiveTypes. Walk the array and accept
-            // either kind.
-            if let Some(value) = resource.get(&iri(wk::CLASS_TYPES)) {
-                for target in value.as_iri_array() {
-                    match self.layer.resolve(&target) {
-                        Some(t)
-                            if t.is_instance_of(&iri(wk::CLASS))
-                                || t.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) => {}
-                        Some(_) => errors.push(ValidationError {
-                            resource_id: res_id.clone(),
-                            property: Some(iri(wk::CLASS_TYPES)),
-                            rule: ValidationRule::UnresolvedClassReference,
-                            message: format!(
-                                "class_types: '{target}' resolves to a resource that is not an instance of core:Class or core:InductiveType"
-                            ),
-                        }),
-                        None => errors.push(ValidationError {
-                            resource_id: res_id.clone(),
-                            property: Some(iri(wk::CLASS_TYPES)),
-                            rule: ValidationRule::UnresolvedClassReference,
-                            message: format!(
-                                "class_types: '{target}' does not resolve to any resource in the layer chain"
-                            ),
-                        }),
-                    }
-                }
-            }
+            // `class_types` accepts BOTH kinds of type (D32 §3.5): a
+            // `data_type: core:resource(_array)` property references Classes, a
+            // `data_type: core:inductive` property references InductiveTypes. This was
+            // open-coded here because `ReferenceCheck` held ONE expected class; it holds a
+            // list now, so the walk is the same one every other reference field uses.
+            self.check_array_refs(
+                resource,
+                ReferenceCheck::CLASS_TYPES_TYPE,
+                res_id,
+                &mut errors,
+            );
             // `data_type` is a single resource ref (not an array).
             if let Some(value) = resource.get(&iri(wk::DATA_TYPE_PROP)) {
                 if let Some(target) = value_as_iri(value) {
@@ -163,9 +144,12 @@ impl Validator {
         res_id: &Option<Iri>,
         errors: &mut Vec<ValidationError>,
     ) {
-        let expected_class = iri(check.expected_class_iri);
         match self.layer.resolve(target) {
-            Some(target_resource) if target_resource.is_instance_of(&expected_class) => {}
+            Some(target_resource)
+                if check
+                    .expected_class_iris
+                    .iter()
+                    .any(|c| target_resource.is_instance_of(&iri(c))) => {}
             Some(_) => errors.push(ValidationError {
                 resource_id: res_id.clone(),
                 property: Some(iri(check.field_iri)),
@@ -198,9 +182,15 @@ struct ReferenceCheck<'a> {
     field_iri: &'a str,
     /// Human label for the field used in error messages (e.g. `requires`).
     field_label: &'a str,
-    /// Class IRI the referenced resource must be an instance of
-    /// (e.g. `core:Property`).
-    expected_class_iri: &'a str,
+    /// The KINDS of resource the reference may resolve to (e.g. `core:Property`).
+    ///
+    /// A list, not one IRI, because a reference to "a type" admits either kind: a
+    /// `core:Class` or a `core:InductiveType`. `core:class_types` has accepted both since
+    /// D32 §3.5 and had to open-code it around a single-class version of this struct;
+    /// `core:is_a` and `core:subclass_of` accept both since D85 §6.1, when an inductive
+    /// VALUE started carrying `is_a: [<the inductive>]` and a constructor class started
+    /// naming its inductive in `subclass_of`.
+    expected_class_iris: &'a [&'a str],
     /// Human label for the expected class (e.g. `core:Property`).
     expected_class_label: &'a str,
 }
@@ -209,29 +199,31 @@ impl ReferenceCheck<'static> {
     const REQUIRES_PROPERTY: Self = Self {
         field_iri: wk::REQUIRES,
         field_label: "requires",
-        expected_class_iri: wk::PROPERTY,
+        expected_class_iris: &[wk::PROPERTY],
         expected_class_label: "core:Property",
     };
     const RECOMMENDS_PROPERTY: Self = Self {
         field_iri: wk::RECOMMENDS,
         field_label: "recommends",
-        expected_class_iri: wk::PROPERTY,
+        expected_class_iris: &[wk::PROPERTY],
         expected_class_label: "core:Property",
     };
     const SUBCLASS_OF_CLASS: Self = Self {
         field_iri: wk::PARENT_CLASSES,
         field_label: "subclass_of",
-        expected_class_iri: wk::CLASS,
-        expected_class_label: "core:Class",
+        expected_class_iris: &[wk::CLASS, wk::INDUCTIVE_TYPE],
+        expected_class_label: "core:Class or core:InductiveType",
     };
-    // class_types accepts both Class and InductiveType references
-    // (D32 §3.5); the check is open-coded in
-    // `check_class_definition_references` because `ReferenceCheck` is
-    // single-class-only.
+    const CLASS_TYPES_TYPE: Self = Self {
+        field_iri: wk::CLASS_TYPES,
+        field_label: "class_types",
+        expected_class_iris: &[wk::CLASS, wk::INDUCTIVE_TYPE],
+        expected_class_label: "core:Class or core:InductiveType",
+    };
     const DATA_TYPE: Self = Self {
         field_iri: wk::DATA_TYPE_PROP,
         field_label: "data_type",
-        expected_class_iri: wk::DATA_TYPE,
+        expected_class_iris: &[wk::DATA_TYPE],
         expected_class_label: "core:DataType",
     };
 }

@@ -68,11 +68,15 @@ namespace proc        = "urn:eigenius:measurements:proc";
 // procedure (D52 §5.4 dispatch table).
 
 data stats:Randomization {
+    description = "How treatment was assigned to units — one of D52 §4.2's five orthogonal design axes. `CompleteRandom` is unrestricted assignment; `Restricted` covers any scheme that constrains it. The verifier dispatches on this axis's position in the SampleSet product to choose a recomputation procedure, so the axis is a fact about the experiment, not a label on it.";
+
     CompleteRandom,
     Restricted,
 }
 
 data stats:Blocking {
+    description = "How units were grouped to absorb a nuisance factor — a D52 §4.2 design axis. `PairedBlocking` is split out from `RCB(k)` deliberately, so the paired-versus-randomised-complete-block distinction is a CONSTRUCTOR IDENTITY the verifier can dispatch on rather than an integer it has to interpret; `RCB` carries block_size ≥ 3 for that reason.";
+
     Unblocked,
     // D52 §12 #3 — paired blocking split out from RCB(k) so the
     // paired-vs-RCBD distinction is a ctor identity rather than an
@@ -110,6 +114,8 @@ data stats:Blocking {
 }
 
 data stats:FactorDesign {
+    description = "The factorial structure of the treatments — a D52 §4.2 design axis. `FullFactorial(k)` names the number of factors; `FractionalFactorial(k, p, generators)` additionally names the fraction and the defining generators, because a fractional design's aliasing structure cannot be recovered from k and p alone.";
+
     // Zero-factor — single-sample estimation (no treatment groups).
     // Required for the IC50-style one-sample threshold claim.
     NoFactor,
@@ -119,6 +125,8 @@ data stats:FactorDesign {
 }
 
 data stats:Replication {
+    description = "What was replicated, and at which level — a D52 §4.2 design axis, and the one that decides what a p-value is ABOUT. `BiologicalReplication` supports a population-level claim; `TechnicalWithinRun` does not, however many replicates there are. `NestedReplication(biological_n, technical_per_biological)` carries both counts, because collapsing them is what produces pseudoreplication.";
+
     // Independent biological samples. Variance reflects biological
     // heterogeneity; population-level propositions admissible.
     BiologicalReplication,
@@ -133,6 +141,8 @@ data stats:Replication {
 }
 
 data stats:RepeatedMeasuresAxis {
+    description = "Whether the same units were measured more than once — a D52 §4.2 design axis. `Longitudinal(n_timepoints)` carries the count; `CrossSectional` asserts each unit was measured once, which is what licenses treating observations as independent.";
+
     CrossSectional,
     Longitudinal(core:integer),                                    // n_timepoints
 }
@@ -140,6 +150,8 @@ data stats:RepeatedMeasuresAxis {
 // ── Universal-claim sum types (D52 §3 / §7) ──────────────────────────
 
 data stats:EffectSize {
+    description = "The magnitude a claim asserts, in the form the claim states it. `Absolute(magnitude, units)` keeps the units, so a threshold is comparable to a measurement; `Relative(fold-change)` is a ratio; the standardized forms are unit-free. Keeping the form rather than normalising to one number is what lets a recomputation check the claim as written.";
+
     Absolute(core:float, core:string),                             // magnitude, units
     Relative(core:float),                                           // fold-change / ratio
     // D52 §12 #4 — standardized effect sizes carry inputs so the
@@ -162,11 +174,15 @@ data stats:EffectSize {
 }
 
 data stats:Directionality {
+    description = "Whether the test was two-sided, and if one-sided, WHY. `OneSidedWitnessed(iri)` requires an impossibility witness — a chain resource arguing the other direction cannot occur (D52 §7.1). A bare one-sided alternative is not expressible: halving a p-value is the easiest way to manufacture significance, so the ontology makes the justification a required argument rather than a convention.";
+
     TwoSided,
     OneSidedWitnessed(core:string),                                // impossibility_witness IRI (D52 §7.1)
 }
 
 data stats:VarianceAssumption {
+    description = "What the analysis assumed about variance. `Pooled` assumes equality across groups; `WelchUnequal` does not; `NonParametric` and `RankBased` assume no parametric form. The assumption is recorded because it is not recoverable from the data, and a recomputation that picked a different one would be answering a different question.";
+
     Pooled,
     WelchUnequal,
     NonParametric,
@@ -174,6 +190,8 @@ data stats:VarianceAssumption {
 }
 
 data stats:AutocorrelationStructure {
+    description = "The covariance structure assumed over repeated measures. `AR1` assumes correlation decaying with lag; `CompoundSymmetry` assumes it constant; `Unstructured` assumes nothing and estimates every entry. Only meaningful alongside a `Longitudinal` repeated-measures axis.";
+
     AR1,
     CompoundSymmetry,
     Unstructured,
@@ -206,6 +224,8 @@ data stats:AutocorrelationStructure {
 //                        many effects are expected to be non-null.
 
 data stats:MultipleComparisonCorrection {
+    description = "How the analysis controlled error across a family of tests. `Bonferroni` and `Holm` control the family-wise error rate, `BenjaminiHochberg` the false-discovery rate — different guarantees, not different strengths of the same one. `NoCorrection` is recorded rather than assumed, so a single-test claim and an uncorrected multiple-test claim are distinguishable.";
+
     NoCorrection,
     Bonferroni,
     Holm,
@@ -213,6 +233,8 @@ data stats:MultipleComparisonCorrection {
 }
 
 data stats:OutlierExclusion {
+    description = "Which observations were dropped, and by what rule. `Identity` drops none. The others each carry their own parameters — a residual threshold, a maximum count and alpha, a manual list — because an exclusion rule that cannot be replayed makes the analysis unreproducible, and a manual exclusion is the one an author must name observation by observation.";
+
     Identity,
     PassingBablokResidual(core:float),                             // threshold_sigma
     ESD(core:integer, core:float),                                 // max_outliers, alpha_esd
@@ -250,7 +272,9 @@ data stats:OutlierExclusion {
 //      Case-A singleton-elim shape per D46 §7.2 — the kernel admits
 //      large elimination from absurd inhabitants vacuously.
 
-data stats:False : Prop { }
+data stats:False : Prop {
+    description = "Bottom in the measurements namespace — the zero-constructor Prop that makes `P -> stats:False` express negation, used for the two-sided alternative hypothesis. Case-A singleton-elim shape per D46 §7.2: the kernel admits large elimination from an absurd inhabitant vacuously. Mirrors `logic:False`, which is the namespace-neutral home for the same idiom.";
+}
 
 axiom stats:mean_of      : core:string -> core:float
 axiom stats:variance_of  : core:string -> core:float
@@ -350,6 +374,8 @@ property stats:treatment_level : core:string {
 // pseudo-replicates and stratify variance components correctly.
 
 data stats:BiologicalUnits {
+    description = "The biological units the sample set is over, as an array of IRIs. A single-constructor wrapper: it exists so the unit list is a TYPED position in the SampleSet product rather than a bare array, which is what lets the verifier find it without knowing the product's shape.";
+
     // List of biological-unit IRIs. Authors typically draw them from
     // a domain ontology (`urn:eigenius:demo:bp:patient_01`,
     // `urn:eigenius:demo:lab:cell_line_HEK293_v3`, etc.). Empty list
@@ -359,6 +385,8 @@ data stats:BiologicalUnits {
 }
 
 data stats:AssayColumns {
+    description = "The assay's column names, as an array. A single-constructor wrapper, for the same reason as `stats:BiologicalUnits`: a typed position in the SampleSet product.";
+
     // List of `(assay_id, column_id)` pairs — encoded as a flat
     // value_array `[assay_0, col_0, assay_1, col_1, ...]`. The
     // assay_id partitions columns across multi-modal assay layers
@@ -368,6 +396,8 @@ data stats:AssayColumns {
 }
 
 data stats:SampleMap {
+    description = "The mapping from assay columns to biological units, as an array of `stats:SampleMapEntry`. This is the sample topology — what makes pseudoreplication detectable, because it says which measurements share a unit.";
+
     // The bipartite graph linking primary biological units to assay
     // columns. Each entry is a `SampleMapEntry` ctor application;
     // the array preserves authoring order so per-observation
@@ -376,6 +406,8 @@ data stats:SampleMap {
 }
 
 data stats:SampleMapEntry {
+    description = "One column's place in the sample topology: which assay layer it belongs to (`assay_id`, which partitions columns across multi-modal assays), which biological unit it measures (`primary`), and its specimen identifier (`col_name`). Two columns naming the same primary are technical replicates, and that is a fact about the entry rather than an inference from the data.";
+
     // A single (assay, primary, column) triple. Many-to-one is
     // expressed by repeating the `primary` IRI across multiple
     // entries with different `col_name`s; cross-modal missingness
@@ -396,6 +428,8 @@ data stats:SampleMapEntry {
 // (`BiologicalUnits`, `AssayColumns`, `SampleMap`).
 
 data stats:SampleSet {
+    description = "The nine-field product of the five design axes plus the sample topology and observations. Authors do not construct it directly — the smart constructors land at canonical positions, and the verifier dispatches on those positions to pick a recomputation procedure (D52 §5.4). The constructor is `Bundle` rather than `Set` because `Set` is a reserved sort keyword in ESL.";
+
     // Nine-field product. Authors don't call this directly — the
     // smart constructors below land here at canonical positions.
     // The constructor is named `Bundle` rather than `Set` because

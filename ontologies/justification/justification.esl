@@ -86,6 +86,7 @@ namespace prov       = "urn:eigenius:prov";
 // right: eliminating a quantifier narrows the proposition, it adds no ground.
 
 data justification:Term {
+    description = "The interlingua of justification logic: what a claim RESTS ON, as an algebra rather than a grade. Five constructors — three categorical groundings (Declared, Observed, Verified, each naming a chain resource by IRI) and the paper's two composition operators, Application and Sum. It is retained whole rather than collapsed to a scalar at commit, because a scalar records what the grounds came to and not what they were, so nothing is left to recompute over; every epistemic question is a query over the retained term (D73 §1.2). There is no Derived ground: a computed claim rests on App(Declared(plan), Observed(inputs)), not on the fact that a run happened. Adding a constructor is a versioned change.";
     Declared(core:string),
     Observed(core:string),
     Verified(core:string),
@@ -112,6 +113,8 @@ data justification:Term {
 // change, and nothing checks `justification:Certificate(j, p)` against a fixed sort.
 
 data justification:Certificate : justification:Term -> Prop -> Type 2 {
+    description = "An indexed inductive predicate over (term, proposition): an inhabitant of Certificate(j, P) is a CHECKED WITNESS that the justification term j grounds a claim to P. It does not assert P — a certificate records grounds, and no rule turns Certificate(j, P) into P. Seven constructors: three groundings, each consuming a witness:Is*As the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` / `sum_r`, which require BOTH branches to be justified (departing from LP's axiom, because `support` reads Sum disjunctively and an unchecked branch would answer a counterfactual with a ground nobody established); and `spec_poly`, which narrows a universal proposition to an instance and leaves the term index untouched, since eliminating a quantifier introduces no ground. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because spec_poly binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
+
     declared :
         forall (iri : core:string, P : Prop) =>
         witness:IsDeclaredAs(iri, P) ->

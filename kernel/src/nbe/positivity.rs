@@ -1213,8 +1213,8 @@ mod mutual_positivity_gap {
         let esl = r#"
 namespace core = "urn:eigenius:core";
 namespace t    = "urn:test";
-data t:A { mkA(t:B) }
-data t:B { mkB(t:A) }
+data t:A { description = "half of a mutually-recursive pair"; mkA(t:B) }
+data t:B { description = "the other half"; mkB(t:A) }
 "#;
         let toks = crate::esl::lexer::tokenize(esl).expect("lexes");
         let file = crate::esl::parser::parse(&toks).expect("parses");

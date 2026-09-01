@@ -131,10 +131,10 @@
   {
     "@id": "urn:eigenius:core:is_a",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Declares class membership. A resource's is_a is an array of classes it is an instance of.",
+    "urn:eigenius:core:description": "Declares membership. A resource's is_a is an array of the types it is an instance of — either KIND of type: a core:Class, or a core:InductiveType, since an inductive value carries `is_a: [<the inductive it inhabits>]` (D85 §6.1). This mirrors core:class_types, which has accepted both kinds since D32 §3.5. It does NOT say an inductive is a class: the two have different declaration contracts (ctors versus requires/recommends), and an inductive is CLOSED where a class is open to subclassing by any later layer.",
     "urn:eigenius:core:short_name": "is_a",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"]
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"]
   },
   {
     "@id": "urn:eigenius:core:description",
@@ -154,10 +154,10 @@
   {
     "@id": "urn:eigenius:core:subclass_of",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Parent classes in the inheritance hierarchy. A subclass inherits requires and recommends from all ancestors.",
+    "urn:eigenius:core:description": "Parent types in the inheritance hierarchy. A subclass inherits requires and recommends from all ancestors. The parent may be either KIND of type — a core:Class, or a core:InductiveType, which is how a constructor class names the inductive it belongs to (D85 §6.1). Naming an inductive here does NOT make that inductive open: an inductive's constructors are exactly its core:ctors, and a class may only be subclassed onto one within that inductive's own declaring layer and only for a constructor the inductive already declares.",
     "urn:eigenius:core:short_name": "subclass_of",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
-    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:domain": ["urn:eigenius:core:Class"]
   },
   {
@@ -493,13 +493,14 @@
   {
     "@id": "urn:eigenius:core:InductiveType",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "An inductive type defined by its constructors (D19, Phase 11b): built up from a finite set of constructors. The dual notion, CodataType — taken apart by its observations — was removed in eigenius#218; see docs/notes/218-retire-codata-and-sized-types.md.",
+    "urn:eigenius:core:description": "An inductive type defined by its constructors (D19, Phase 11b): built up from a finite set of constructors. The dual notion, CodataType — taken apart by its observations — was removed in eigenius#218; see docs/notes/218-retire-codata-and-sized-types.md. AN INDUCTIVE IS NOT A CLASS, and is deliberately not declared `subclass_of core:Class` (D85 §6.1). The contracts differ — an inductive owes `ctors`, a class owes `requires`/`recommends` — and, decisively, an inductive is CLOSED where a class is open to subclassing by any later layer. `core:is_a` and `core:subclass_of` therefore accept EITHER kind of type, as `core:class_types` has since D32 §3.5, rather than one being made a subclass of the other.",
     "urn:eigenius:core:short_name": "InductiveType",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:short_name",
       "urn:eigenius:core:ctors"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
       "urn:eigenius:core:type_params",
       "urn:eigenius:core:universe_params"
     ]
