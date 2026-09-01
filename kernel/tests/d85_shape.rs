@@ -406,3 +406,37 @@ fn the_derived_constructor_classes_satisfy_rule_25() {
         errs.join("\n")
     );
 }
+
+/// An INDUCTIVE-typed argument is declared `core:inductive`, not `core:resource`.
+///
+/// This follows the ontology's own convention — `core:type_name` and `core:param_kind` both hold
+/// an `eigentt:Term` value and both declare `data_type: core:inductive` with the inductive in
+/// `class_types`. A `core:resource` slot with an inductive in `class_types` takes a different
+/// path: Rule 8 dispatches it to the JSON walker, which rejects the resource form outright.
+///
+/// **The value half of this waits for step 3.** A resource-form value in a `eigentt:Term`-ranged
+/// slot is still refused by Rule 21, which routes such slots through the D47 codec — and that
+/// codec reads `Value::Json` only. Rule 21 exempts exactly two properties by name
+/// (`is_declaration_internal`: `core:type_name` and `core:param_kind`), which is why 98 of the
+/// 123 authored values sit in slots that would accept the new shape today and the rest do not.
+/// Step 3 is what makes `decode_type` read a value resource; until then this test pins the
+/// DECLARATION the derivation produces, which is what step 1 owes.
+#[test]
+fn an_inductive_typed_argument_is_declared_core_inductive() {
+    let core = core_layer();
+    let head = core
+        .get_resource(&iri("urn:eigenius:eigentt:Term-App-head"))
+        .expect("derived");
+    assert_eq!(
+        head.get(&iri("urn:eigenius:core:data_type"))
+            .and_then(|v| v.as_str()),
+        Some("urn:eigenius:core:inductive"),
+        "an eigentt:Term-typed argument must be declared core:inductive, not core:resource"
+    );
+    assert!(
+        head.get(&iri("urn:eigenius:core:class_types"))
+            .map(|v| v.as_iri_array().contains(&iri("urn:eigenius:eigentt:Term")))
+            .unwrap_or(false),
+        "and must name the inductive in class_types"
+    );
+}

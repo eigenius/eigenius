@@ -55,24 +55,36 @@ fn is_a(class: &str) -> Value {
     Value::Array(vec![Value::String(class.to_string())])
 }
 
-/// Is `target` a `core:DataType` rather than a type?
+/// What KIND of thing a `ConstRef` target is, which decides the property's `data_type`.
 ///
-/// The discriminator is what the target IS, not a list of names: a `ConstRef` naming a DataType
-/// (`core:string`, but also `core:value_array`, which the statistics inductives use) becomes the
-/// property's `data_type` directly, while a `ConstRef` naming a Class or an InductiveType means
-/// the argument holds a VALUE of that type, so the property is `core:resource` with the target in
-/// `class_types`. Enumerating the primitives instead missed `core:value_array` and produced a
-/// property declaring `class_types: [core:value_array]` — a DataType where a class belongs.
-fn is_data_type(target: &Iri, own: &BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) -> bool {
-    let data_type_class = iri(wk::DATA_TYPE);
+/// The discriminator is what the target IS, not a list of names. Enumerating the primitives
+/// missed `core:value_array` — equally a DataType, used by the statistics inductives — and
+/// produced a property declaring `class_types: [core:value_array]`, a DataType where a class
+/// belongs.
+///
+/// The Inductive/Class split matters just as much, and follows the ontology's own convention:
+/// `core:type_name` and `core:param_kind` both hold a value of `eigentt:Term` and both declare
+/// `data_type: core:inductive` with `class_types: [eigentt:Term]`. A `core:resource` slot with
+/// an inductive in `class_types` takes a different validation path — Rule 8 dispatches it to the
+/// JSON walker — so an argument typed by an inductive must say `core:inductive` or the resource
+/// form D85 §1 specifies is rejected in the very slots that exist to hold it.
+enum TargetKind {
+    DataType,
+    Inductive,
+    Class,
+}
+
+fn target_kind(target: &Iri, own: &BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) -> TargetKind {
     let found = own
         .get(target)
         .cloned()
         .map(Arc::new)
         .or_else(|| parents.iter().find_map(|p| p.resolve(target)));
-    found
-        .map(|r| r.is_a().contains(&data_type_class))
-        .unwrap_or(false)
+    match found {
+        Some(r) if r.is_a().contains(&iri(wk::DATA_TYPE)) => TargetKind::DataType,
+        Some(r) if r.is_a().contains(&iri(wk::INDUCTIVE_TYPE)) => TargetKind::Inductive,
+        _ => TargetKind::Class,
+    }
 }
 
 /// What an argument's `core:type_name` says the property should declare.
@@ -107,10 +119,10 @@ fn arg_property_type(
     else {
         return fallback();
     };
-    if is_data_type(&target, own, parents) {
-        (target.as_str().to_string(), None)
-    } else {
-        (wk::RESOURCE.to_string(), Some(target.as_str().to_string()))
+    match target_kind(&target, own, parents) {
+        TargetKind::DataType => (target.as_str().to_string(), None),
+        TargetKind::Inductive => (wk::INDUCTIVE.to_string(), Some(target.as_str().to_string())),
+        TargetKind::Class => (wk::RESOURCE.to_string(), Some(target.as_str().to_string())),
     }
 }
 

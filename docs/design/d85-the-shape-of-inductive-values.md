@@ -249,9 +249,16 @@ variables in JSON, only because the mirror is JSON.
 | authored values in shipped ontologies | 114 tagged dicts in 5 slots | resource form |
 | `Value::Vector` | in the persisted value type; [panics if serialised](../../kernel/src/ontology/eigon_cbor.rs#L217) | out of `Value` (§6) |
 
-The 114 authored values sit in `core:type_name` (89), `formulas:operator_signature` (20),
-`core:param_kind` (3), `eigentt:expected_type` (1) and `core:result_sort` (1) — a small, uniform set
-migrable by script.
+The **123** authored values sit in `core:type_name` (89), `formulas:operator_signature` (20),
+`core:param_kind` (9), `core:result_sort` (4) and `eigentt:expected_type` (1) — a small, uniform set
+migrable by script. It was 114 when this note was written; the three `witness:Is*As` predicates P7
+moved into core carry 6 more `param_kind` values and 3 more `result_sort`.
+
+**They do not all validate the same way**, which is what decides the step order above. Rule 21
+fires only on slots ranged on `eigentt:Term` or `eigentt:Judgement`, and exempts `core:type_name`
+and `core:param_kind` by name; `core:result_sort` is ranged on `core:Level` and
+`formulas:operator_signature` on `formulas:FormulaTerm`, so neither reaches it either. Exactly one
+authored slot — `eigentt:expected_type` — is Term-ranged and unexempt.
 
 ---
 
@@ -262,13 +269,23 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 
 | # | step | green after |
 |---|---|---|
-| 1 | `core:subclass_of` admits `core:InductiveType`, so a constructor class can name its inductive; generate the 96 constructor classes and ~83 argument properties (§6.1), **with Rule 25**, the two-sided closedness check (§6.1) — a class `subclass_of` an inductive must be declared in that inductive's own layer AND correspond to an entry in its `core:ctors`. Without it §6.1 silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
-| 2 | Migrate the 114 authored values: each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it. They parse as `Embedded` natively and round-trip through CBOR unchanged. | yes |
-| 3 | `encode_type` emits value resources and `decode_type` reads them; `CtorApp` → `Embed`. The one irreducible step, and it is smaller than D84 §7's version because 1, 2, 4 and 5 are outside it. | yes |
+| 1 | `core:subclass_of` admits `core:InductiveType`, so a constructor class can name its inductive; derive the constructor classes and argument properties (§6.1), **with Rule 25**, the two-sided closedness check (§6.1) — a class `subclass_of` an inductive must be declared in that inductive's own layer AND correspond to an entry in its `core:ctors`. Without it §6.1 silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
+| 2 | `decode_type` READS a value resource as well as a tagged dict; `encode_type` still emits the dict. Expand before migrate: nothing is rewritten, so nothing can break, and the codec stops being the reason the new shape is refused. | yes |
+| 3 | Migrate the 123 authored values — each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it — then `encode_type` emits the resource form and `CtorApp` → `Embed`. | yes |
 | 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
 | 5 | `Vector` leaves `Value` — the query engine takes a domain extending the data model, and serialising a transient becomes a type error rather than a panic. | yes |
 
 One reseed, after step 3, folded into the one already owed for P4 and P5.
+
+**Steps 2 and 3 were the other way round until `2026-09-01`, and that order cannot land green.**
+Migrating a value first means writing the resource form into a slot whose validation still reads
+`Value::Json`: Rule 21 routes every `eigentt:Term`- or `eigentt:Judgement`-ranged slot through the
+D47 codec, and the codec rejects `Value::Embedded` outright. It would have looked survivable,
+because Rule 21 exempts exactly two properties by name — `is_declaration_internal` covers
+`core:type_name` and `core:param_kind` — and those two hold **98 of the 123** authored values, so a
+migration that started there would have passed and the remaining 25 would have failed at the end.
+Expand first, migrate second: the codec learns to read both shapes while nothing has changed, and
+the migration then rewrites values a reader already accepts.
 
 ---
 
