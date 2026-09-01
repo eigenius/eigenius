@@ -180,7 +180,7 @@ fn every_demo_term_round_trips_through_esl() {
 
 /// eigenius#142 — a boolean literal survives ESL source → D47 term → printed ESL → D47 term.
 ///
-/// The `LitBool` ctor was added to `eigentt:TypeExpr` for `program:Literal` booleans; without the
+/// The `LitBool` ctor was added to `eigentt:Term` for `program:Literal` booleans; without the
 /// matching `true` / `false` surface in `parse_type_expr` the printer would emit source that does
 /// not reparse, which is exactly what `print_then_compile` catches.
 #[test]

@@ -27,7 +27,7 @@
 //! - Consumer: an author writes the same proposition inside a
 //!   `reflection:canonical_proposition = type_expr(...)` slot on a
 //!   `reflection:DeclaredResource` bridge. The ESL compiler walks the
-//!   `TypeExpr::Ref { name = stats:lt, args = [...] }` tree, resolves
+//!   `Term::Ref { name = stats:lt, args = [...] }` tree, resolves
 //!   each axiom reference against the chain layer, and emits a D47
 //!   JSON tree via the kernel's shared D47 codec.
 //!

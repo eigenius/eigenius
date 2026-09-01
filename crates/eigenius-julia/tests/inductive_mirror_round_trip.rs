@@ -91,7 +91,7 @@ impl NatChain {
             )]),
         );
         succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
-        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
             Value::Json(serde_json::json!({

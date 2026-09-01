@@ -244,7 +244,7 @@ set: *"e.g. statistics-institution's `canonical_proposition`, computed_statistic
 `canonical_proposition` is a proposition crossing the boundary with no kernel check.
 
 Rule 16 (`validation/rules/eigentt_value.rs`) does the real work — decode, `check_infer`, require
-`Sort(0)` — but it keys off the property's **declared range** (`class_types ∋ eigentt:TypeExpr`) and
+`Sort(0)` — but it keys off the property's **declared range** (`class_types ∋ eigentt:Term`) and
 runs at layer-validation time, not at the boundary. The coverage is real but incidental: it holds
 where the ontology happens to declare that range. A declared property with a different range can
 carry a proposition that no type-level check ever sees.
@@ -349,7 +349,7 @@ implementation and never by the kernel's type system:
 | validator | yes | field presence + per-property declaration checks |
 | kernel | no | `resolve_class_type` builds a Σ-chain that no membership decision consults |
 
-Exactly two rules invoke the type checker — Rule 16 (decoded `eigentt:TypeExpr` values) and Rule 23
+Exactly two rules invoke the type checker — Rule 16 (decoded `eigentt:Term` values) and Rule 23
 (inductive declarations). `is_a.rs` calls neither `check_infer` nor `resolve_class_type`. So the
 Σ-chain exists for `Construct`, `PropAccess`, and D18 ontology-as-types *inside EigenTT terms*, while
 every membership decision on the chain is made by the other implementation.

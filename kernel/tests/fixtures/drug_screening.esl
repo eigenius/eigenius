@@ -335,8 +335,8 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    // outer j1
                    Declared("urn:eigenius:demo:screen:rule_strong"),
                    // outer j2 — qualified `justification:App` because the bare
-                   // `App` ctor name collides with `eigentt:TypeExpr.App`
-                   // and the type_expr parser resolves to TypeExpr otherwise.
+                   // `App` ctor name collides with `eigentt:Term.App`
+                   // and the type_expr parser resolves to Term otherwise.
                    justification:App(
                        Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
                        justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))

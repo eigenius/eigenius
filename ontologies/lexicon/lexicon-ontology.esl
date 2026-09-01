@@ -401,7 +401,7 @@ property lexicon:cat : core:inductive {
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem : core:resource {
-    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), a committed resource (named entity → ResourceRef), or a `lexicon:SemTerm` holding an inline EigenTT λ-term (a function word → its λ-semantics, e.g. a determiner). `sem` is uniformly a reference; resolve_sem dispatches on what is referenced.";
+    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), a committed resource (named entity → a resource reference), or a `lexicon:SemTerm` holding an inline EigenTT λ-term (a function word → its λ-semantics, e.g. a determiner). `sem` is uniformly a reference; resolve_sem dispatches on what is referenced.";
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem_type : core:inductive {

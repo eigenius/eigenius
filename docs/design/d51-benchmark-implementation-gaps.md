@@ -56,7 +56,7 @@ The rest of this memo covers each gap in turn: what needs to be built, where it 
 - `kernel/src/nbe/val.rs` — `Val::ChainWitness(WitnessKey)` opaque variant, key-based definitional equality.
 - `kernel/src/nbe/check/mod.rs` — witness synthesis hook (`try_synthesize_chain_witness`) over the four `Is*As` predicates at `JustifiedBy.*` constructor check time; elidable witness slots.
 - `kernel/src/ontology/well_known.rs` — `CANONICAL_PROPOSITION` and `ASSERTS` IRI constants plus the three trace-class constants.
-- ~~`kernel/src/validation/rules/canonical_proposition.rs` — Rule 20 validates `reflection:canonical_proposition` through the D47 codec at commit; 3 tests.~~ **Superseded (2026-08-20):** that file no longer exists. Rule 21 (`rules/eigentt_value.rs`, `check_type_expr_well_typed`) absorbed the decode step and generalised it — every `eigentt:TypeExpr` slot must decode *and* type-check against the chain, not just `canonical_proposition`.
+- ~~`kernel/src/validation/rules/canonical_proposition.rs` — Rule 20 validates `reflection:canonical_proposition` through the D47 codec at commit; 3 tests.~~ **Superseded (2026-08-20):** that file no longer exists. Rule 21 (`rules/eigentt_value.rs`, `check_type_expr_well_typed`) absorbed the decode step and generalised it — every `eigentt:Term` slot must decode *and* type-check against the chain, not just `canonical_proposition`.
 
 The only deferred sub-item is the `VerificationTrace` emit branch (the `IsVerifiedAs` *producer*), which D51 itself assigns to gap 2's end-to-end wiring; the `WitnessCategory::Verified` slot, the lookup hook, and the coercion are already present, so gap 1's non-Lean scope is complete.
 

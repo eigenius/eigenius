@@ -35,13 +35,13 @@ needs no layering change and no ontology edit.
 
 | resource | kind | depends on |
 |---|---|---|
-| `eigentt:TypeExpr` | `core:InductiveType` | — |
+| `eigentt:Term` | `core:InductiveType` | — |
 | `eigentt:Axiom` | `core:Class` | — |
-| `eigentt:axiom_statement` | property | `class_types [eigentt:TypeExpr]` |
+| `eigentt:axiom_statement` | property | `class_types [eigentt:Term]` |
 | `eigentt:axiom_justification` | property | — |
 | `eigentt:Definition` | `core:Class` | — |
-| `eigentt:definition_type` | property | `class_types [eigentt:TypeExpr]` |
-| `eigentt:definition_body` | property | `class_types [eigentt:TypeExpr]` |
+| `eigentt:definition_type` | property | `class_types [eigentt:Term]` |
+| `eigentt:definition_body` | property | `class_types [eigentt:Term]` |
 | `eigentt:definition_opaque` | property | — |
 
 So the layer bundles **the term language** with **resources that carry terms**. `Axiom` and
@@ -69,7 +69,7 @@ accident of when D47 was written, not by design.
 
 ## 4. The bootstrap-cycle question, answered
 
-The objection worth taking seriously: `eigentt:TypeExpr` is itself declared **as a
+The objection worth taking seriously: `eigentt:Term` is itself declared **as a
 `core:InductiveType`**, its constructor arguments described by `core:type_name`. Retype `type_name`
 to carry `TypeExpr` values — which is the reason to move it — and TypeExpr's own declaration
 describes itself in its own language. Does that cycle?
@@ -136,18 +136,18 @@ diagnostic rather than silent admission, and correct the comment to say what is 
 
 ### The ontology
 
-- **Move the declaration, keep the IRI.** `urn:eigenius:eigentt:TypeExpr` declared in
+- **Move the declaration, keep the IRI.** `urn:eigenius:eigentt:Term` declared in
   `core-ontology.json` is legal — the namespace prefix is a naming convention, not a layer
   assertion. That leaves **all 22 chain references and 59 Rust references untouched**. Renaming to
   `core:TypeExpr` would change 81 references and break a widely-referenced IRI for cosmetics.
 - **`TypeExpr` references nothing outside `core` except itself.** Checked: its only non-`core:*`
-  reference is `urn:eigenius:eigentt:TypeExpr`, its own self-reference. `Sort` already points at
+  reference is `urn:eigenius:eigentt:Term`, its own self-reference. `Sort` already points at
   `core:Level`, the literals at `core:string` / `core:integer` / `core:float` / `core:boolean`. So
   the move introduces no upward reference — it is a relocation, not a rewiring.
 - **Order it after `core:Level`** inside `core-ontology.json`. D47 §211 already establishes that
   core declarations are order-sensitive.
 - `Axiom` / `Definition` and their four properties stay where they are. They are the higher stratum
-  (§2), and their `class_types [eigentt:TypeExpr]` keeps resolving — a higher layer referencing a
+  (§2), and their `class_types [eigentt:Term]` keeps resolving — a higher layer referencing a
   lower one.
 - Retype `param_kind` and `type_name` to `data_type core:resource` / `class_types [TypeExpr]`, the
   pattern `reflection:canonical_proposition` and now `core:result_sort` both use.
@@ -257,7 +257,7 @@ believe. Same discipline as the round-trip tests.
 
 `param_kind` and `type_name` values are **open terms** — they name the declaration's own
 parameters. `core:Option`'s `some(value : A)` encodes as `Var("A")`, and `A` is bound by `Option`'s
-parameter list. Rule 21 (`check_type_expr_well_typed`) type-checks every `eigentt:TypeExpr`-valued
+parameter list. Rule 21 (`check_type_expr_well_typed`) type-checks every `eigentt:Term`-valued
 property as a **closed** term, so the retype made it report `unbound variable in type context: A`
 for a value that is well-formed where it lives. Every other TypeExpr-valued property —
 `canonical_proposition`, `axiom_statement`, `definition_type` — carries a closed term. These two do

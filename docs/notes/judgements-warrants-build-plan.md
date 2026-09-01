@@ -30,7 +30,7 @@ are over `ontologies/`, `demo/`, `experiments/`.
 | area | surface |
 |---|---|
 | grade classes (`{Declared,Observed,Derived,Verified}Resource`) | **26 Rust source files**, **9 ontologies** |
-| `eigentt:TypeExpr` | **21 Rust source files**, **52 ontology sites** |
+| `eigentt:Term` | **21 Rust source files**, **52 ontology sites** |
 | `urn:eigenius:reasoning` namespace | **~650 occurrences in 103 files** (131 full IRIs, 521 short-form) |
 | `*Evidence` grounding-constructor names | **480 occurrences in 56 files** |
 | witness machinery | `witness/mod.rs` 397 lines (≈145 of them tests), `layer/witness_index.rs` 521, `program/check_hooks.rs` 101 |
@@ -309,7 +309,7 @@ Every later phase is sized by this one.
 
 **Bootstrap edit → reseed.** Three renames, batched into one reseed because each touches bootstrap.
 
-- Rename `eigentt:TypeExpr` to `eigentt:Term` across `ontologies/` (51 sites) and Rust (21 files).
+- Rename `eigentt:Term` to `eigentt:Term` across `ontologies/` (51 sites) and Rust (21 files).
   The 20 constructors are unchanged; the class was named for the type-level fragment it originally
   carried and has held lambdas, pairs, projections and literals for some time.
 - Declare `eigentt:Judgement` as an inductive with one constructor
@@ -1380,7 +1380,7 @@ are sized in the companion scope note.
   Downstream, `expected-hits` read 60 against the baseline's 62.
 
   **Not attributable to P1-P3.** The whole of P1+P2 changes exactly one line under
-  `kernel/src/dcg/` — a doc comment renaming `eigentt:TypeExpr` to `eigentt:Term` in
+  `kernel/src/dcg/` — a doc comment renaming `eigentt:Term` to `eigentt:Term` in
   `lexicon.rs`. The rank keys are sentence text, word surfaces and `wn:` / `umls:` sense IDs; the
   refactor touches none of them.
 

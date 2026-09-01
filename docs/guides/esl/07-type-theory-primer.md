@@ -111,7 +111,7 @@ Pattern-matching shapes that fit neither case are rejected with `cannot eliminat
 
 ### Wire shape for indexed declarations
 
-The compiler emits the constructor's full Π-telescope (parameters + indices + arguments + conclusion) as a chain-resident `eigentt:TypeExpr` value on the constructor resource's `core:ctor_type` property (declared `core:inductive` since eigenius#229, so the validator type-checks it rather than treating it as opaque JSON); the kernel reads it back at type-check time via the [D47 decoder](../../design/d47-chain-mirrored-eigentt-type-fragment.md). This is why indexed inductives can express dependencies the surface grammar doesn't directly cover — the dependency is encoded in the type expression, which is data the kernel decodes from the layer rather than implicit elaboration. See [§4.5 "Indexed"](04-declarations.md#indexed-d48-indexed-families) for the ESL surface and the wire-shape pointer.
+The compiler emits the constructor's full Π-telescope (parameters + indices + arguments + conclusion) as a chain-resident `eigentt:Term` value on the constructor resource's `core:ctor_type` property (declared `core:inductive` since eigenius#229, so the validator type-checks it rather than treating it as opaque JSON); the kernel reads it back at type-check time via the [D47 decoder](../../design/d47-chain-mirrored-eigentt-type-fragment.md). This is why indexed inductives can express dependencies the surface grammar doesn't directly cover — the dependency is encoded in the type expression, which is data the kernel decodes from the layer rather than implicit elaboration. See [§4.5 "Indexed"](04-declarations.md#indexed-d48-indexed-families) for the ESL surface and the wire-shape pointer.
 
 ### Pattern unification
 

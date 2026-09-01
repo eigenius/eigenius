@@ -339,7 +339,7 @@ fn ill_typed_axiom_application_decodes_but_check_infer_rejects() {
 #[test]
 fn commit_gate_rejects_ill_typed_proposition() {
     // End-to-end witness of the generalized commit rule (Rule 21): an ill-typed
-    // proposition stored in an `eigentt:TypeExpr` field is rejected by the
+    // proposition stored in an `eigentt:Term` field is rejected by the
     // Validator itself — not just by a hand-invoked check_infer. This is the
     // decode-only gap, now closed for every type_expr slot.
     let lexicon = build_lexicon();
@@ -575,7 +575,7 @@ fn gate_admits_well_formed_entries() {
 }
 
 // Drafts an LLM proposer might emit: each is per-field well-formed (so the
-// commit gate / Rule 21, which checks each eigentt:TypeExpr slot in isolation,
+// commit gate / Rule 21, which checks each eigentt:Term slot in isolation,
 // admits them) but FELICITY-inconsistent across fields — caught only by
 // `gate_entry`. The gate is therefore doing real work the storage gate cannot.
 const DRAFTS: &str = r#"

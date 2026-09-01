@@ -248,7 +248,7 @@ reseed rather than paying a standalone one.
 - **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
   ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
 
-- **N4 LANDED `2026-08-23`.** `eigentt:TypeExpr` moved into `core-ontology.json` (IRI unchanged),
+- **N4 LANDED `2026-08-23`.** `eigentt:Term` moved into `core-ontology.json` (IRI unchanged),
   `SizeSort` ctor added, `param_kind` and `type_name` retyped, 85 values migrated by script with the
   equivalence guard, manifest re-pinned on **five** layers (the four predicted, plus `reasoning`),
   full gate green (185 test binaries, clippy, fmt). **The reseed is the only thing left.**

@@ -178,7 +178,7 @@ collision — but the DCG pipeline's `SentenceEncoding`, `SentenceOutcome`, `Sen
 and `SentenceSelection` are all the *lexicon* sense, and after the rename the bare word denotes
 two unrelated things one namespace apart.
 
-Likewise `lexicon:term` (`:499`) is `core:inductive` with `class_types eigentt:TypeExpr`. After
+Likewise `lexicon:term` (`:499`) is `core:inductive` with `class_types eigentt:Term`. After
 P1 renames `eigentt:TypeExpr → eigentt:Term` and P1.3 renames `reasoning:justification →
 justification:term`, the tree carries three `term`s: `eigentt:Term` (a term of the theory),
 `lexicon:term` (a lexical entry's λ-semantics) and `justification:term` (the justification slot).

@@ -94,7 +94,7 @@ D47's `ConstRef(iri)` ctor unifies the three: a single chain ctor that carries a
 ## 3. The `core:EigenTTType` inductive
 
 > **As built (verified 2026-08-21, eigenius#142).** The inductive shipped under a different
-> IRI and is larger than this section specifies. It is `urn:eigenius:eigentt:TypeExpr`,
+> IRI and is larger than this section specifies. It is `urn:eigenius:eigentt:Term`,
 > declared in `ontologies/eigentt/eigentt-type-fragment.json`, not
 > `urn:eigenius:core:EigenTTType` in `core-ontology.json`. It carries **19** ctors, not the
 > 9 tabulated below: the 9 here (`Sort`, `Var`, `ConstRef`, `App`, `Pi`, `Sig`, `Lam`,
@@ -402,13 +402,13 @@ Property-based tests (`proptest`) cover the closed type-level subset.
 > validator rule *was* added — **Rule 21**,
 > `kernel/src/validation/rules/eigentt_value.rs`, `check_type_expr_well_typed` — and it does
 > both halves this section defers. It keys off the declared range
-> (`class_types ∋ eigentt:TypeExpr`) rather than off a property name, decodes the tree with
+> (`class_types ∋ eigentt:Term`) rather than off a property name, decodes the tree with
 > the D47 codec (`decode_type`), and then type-checks the decoded `Exp` against the chain
 > with `nbe::check::check_infer`. Type-checking at commit is therefore *not* the consumer's
 > responsibility, contrary to the paragraph below; Rule 21 consolidated what had been three
 > overlapping checks, including the old Rule 20 canonical-proposition decode check and
 > `check_inductive_value`'s bespoke `ConstRef`/`CtorApp` walk, which now skips
-> `eigentt:TypeExpr`. The diagnostics are `TypeExprMalformed` and `TypeExprIllTyped`;
+> `eigentt:Term`. The diagnostics are `TypeExprMalformed` and `TypeExprIllTyped`;
 > `ConstRefUnresolved` and `ConstRefArityMismatch` were never built, and the codec's decode
 > errors — `ConstRefWrongClass` among them — surface through `TypeExprMalformed` instead.
 >

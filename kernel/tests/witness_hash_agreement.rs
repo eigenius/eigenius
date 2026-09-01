@@ -775,7 +775,7 @@ fn an_esl_authored_def_passes_commit_validation() {
 /// A **proposition that uses a definition** passes commit validation.
 ///
 /// This is the question behind "does a transparent definition need an `axiom_env` entry?" Rule 21
-/// requires every `eigentt:TypeExpr`-valued property to decode *and* type-check. If a definition's
+/// requires every `eigentt:Term`-valued property to decode *and* type-check. If a definition's
 /// IRI reached `check_infer` as a bare constant it would have no registered type and fail — so this
 /// passing is the evidence that decode unfolds it first and the checker never sees the name.
 #[test]

@@ -388,7 +388,7 @@ tests, not the byte-identical gate.
 ### Phase 4 — Sem reflection (the hard core; deferred / optional)
 
 - Formalize the sem *transformations* as typed EigenTT programs over reflected terms (D47
-  `eigentt:TypeExpr` `Exp↔Json` codec), eliminating the last code hooks — the full grammar
+  `eigentt:Term` `Exp↔Json` codec), eliminating the last code hooks — the full grammar
   (syntax + semantics) becomes typed data.
 - Only if Phases 1–3 prove the model and the payoff justifies the effort. High risk / high effort.
 

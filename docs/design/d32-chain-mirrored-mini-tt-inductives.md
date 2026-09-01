@@ -272,7 +272,7 @@ The ctors:
 | `LitFloat` | `value: float` | `Exp::EigonResource(Float-typed Resource)` (effectively) | Numeric literal. Future ctors `LitInt`, `LitRational` extend the numeric ladder; v1 ships float only. |
 | `OpRef` | `iri: iri` | `Exp::Var` resolving to a chain-committed operator | Reference to an entry in the operator catalog (§5). The reason institutions agree on `add`, `sin`, etc. without baking them into the term language. |
 | `App` | `head: FormulaTerm`, `arg: FormulaTerm` | `Exp::App(head, arg)` | Application. Multi-arg operators land via curried application: `add(x, 2)` is `App(App(OpRef("add"), Var("x")), LitFloat(2.0))`. |
-| `Lam` | `name: string`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Lam(Patt::Var(name), body)` with type carried alongside | Typed binder. The `ty` slot is a `FormulaTerm` rather than a separate `TypeExpr` because operator catalog entries (Real, Int, Real → Real) are themselves FormulaTerms — see §5. |
+| `Lam` | `name: string`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Lam(Patt::Var(name), body)` with type carried alongside | Typed binder. The `ty` slot is a `FormulaTerm` rather than a separate `Term` because operator catalog entries (Real, Int, Real → Real) are themselves FormulaTerms — see §5. |
 | `Pi` | `name: string`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Pi(Patt::Var(name), ty, body)` | Dependent function type. Used to declare operator signatures (`Pi(_, Real, Real)` is `Real → Real`). |
 
 ### 4.2 Naming convention follows EigenTT

@@ -181,7 +181,7 @@ fn integer_literal_claim_is_rejected_by_the_commit() {
 }
 
 /// `Prop` itself decodes and type-checks — it is a legitimate value for the
-/// `eigentt:TypeExpr`-ranged slots that hold types. It asserts nothing, so it
+/// `eigentt:Term`-ranged slots that hold types. It asserts nothing, so it
 /// is not a claim.
 #[test]
 fn a_type_in_the_proposition_slot_is_rejected_by_the_commit() {

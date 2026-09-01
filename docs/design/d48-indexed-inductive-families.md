@@ -150,7 +150,7 @@ Strict positivity (D19 §5) checks that the inductive being declared appears onl
 
 ### 2.6 Chain mirror (D47)
 
-D47's `eigentt:TypeExpr` represents types as the expression-level fragment of `Exp`. Indexed-inductive application `Vec A n` was already representable via App-currying:
+D47's `eigentt:Term` represents types as the expression-level fragment of `Exp`. Indexed-inductive application `Vec A n` was already representable via App-currying:
 
 ```
 Exp::InductiveType(vec_decl, [Exp::EigonClass(A_iri), Exp::Var("n")])
@@ -159,7 +159,7 @@ Exp::InductiveType(vec_decl, [Exp::EigonClass(A_iri), Exp::Var("n")])
 What changes: the `params` slot's interpretation. With indices, the *parameter prefix* + *index suffix* would need to be distinguished. Two options:
 
 - **Keep currying** — App spine fold produces `InductiveType(decl, all_args)`; the kernel split into params/indices uses `decl.params.len()` and `decl.indices.len()`. Same chain shape, smarter decoder.
-- **Split the value shape** — give `eigentt:TypeExpr.InductiveTypeApp` a `params: List MiniTTType, indices: List MiniTTType` shape. More semantically transparent on the chain, slightly more chain churn.
+- **Split the value shape** — give `eigentt:Term.InductiveTypeApp` a `params: List MiniTTType, indices: List MiniTTType` shape. More semantically transparent on the chain, slightly more chain churn.
 
 Option 1 wins on minimal D47 disruption. The decoder change is small (already walks App spines; just produces a different `Val::InductiveType` shape).
 
@@ -417,7 +417,7 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Status on landing:** complete (type-level), plus the term-level extension landed under [eigenius#71](https://github.com/eigenius/eigenius/issues/71). The codec round-trips:
 - *Type-level indices* (e.g. `IxClassFamily SomeClass OtherClass`) via the existing App-curried `Exp::InductiveType` ↔ `ConstRef + App` flow.
-- *Term-level indices* (e.g. `AssayShape (succ zero)`) via new `eigentt:TypeExpr` ctors: `UnitVal`, `Pair`, `CtorApp`, plus forward-declared `LitInt`/`LitString`/`LitFloat` (decoder errors until EigenTT's `Exp` adds literal variants).
+- *Term-level indices* (e.g. `AssayShape (succ zero)`) via new `eigentt:Term` ctors: `UnitVal`, `Pair`, `CtorApp`, plus forward-declared `LitInt`/`LitString`/`LitFloat` (decoder errors until EigenTT's `Exp` adds literal variants).
 - Commit-time validator extension `check_eigentt_ctor_app` verifies `CtorApp`'s decl IRI resolves to an `InductiveType` and the named ctor exists.
 
 9 new tests, including the **`AssayShape (succ zero)` end-to-end round-trip** that unblocks life-science case 3.

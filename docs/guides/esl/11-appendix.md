@@ -7,28 +7,28 @@
 ### 11.1.1. Top-level
 
 ```ebnf
-File         ::= (NamespaceDecl | Declaration)*    (* freely interleaved *)
+File         ::= (NamespaceDecl | Declaration)*           (* freely interleaved *)
 NamespaceDecl::= 'namespace' Identifier '=' StringLit ';'
 
 Declaration  ::= ClassDecl | PropertyDecl | ResourceDecl
               |  DataDecl  | ProgramDecl
-              |  DefDecl                                   (* D66 — §11.1.3 *)
-              |  AxiomDecl                                 (* eigenius#72 *)
-              |  MacroDecl                                 (* D52 §12 *)
-              |  MergeComorphismDecl                       (* D37 §3.3 *)
-              |  TextIndexDecl | VectorIndexDecl           (* parse only — see below *)
+              |  DefDecl                                 (* D66 — §11.1.3 *)
+              |  AxiomDecl                               (* eigenius#72 *)
+              |  MacroDecl                               (* D52 §12 *)
+              |  MergeComorphismDecl                     (* D37 §3.3 *)
+              |  TextIndexDecl | VectorIndexDecl         (* parse only — see below *)
 
-AxiomDecl    ::= 'axiom' QualifiedName ':' TypeExpr AxiomNote* ';'?
-AxiomNote    ::= ('desc' | 'note') ':' StringLit    (* core:description / axiom_justification *)
+AxiomDecl    ::= 'axiom' QualifiedName ':' Term AxiomNote* ';'?
+AxiomNote    ::= ('desc' | 'note') ':' StringLit                                    (* core:description / axiom_justification *)
 MacroDecl    ::= 'macro' QualifiedName '(' (MacroParam (',' MacroParam)* ','?)? ')'
-                 ':' TypeExpr '=>' Value ';'?
-MacroParam   ::= Identifier ':' TypeExpr
+                 ':' Term '=>' Value ';'?
+MacroParam   ::= Identifier ':' Term
 MergeComorphismDecl
              ::= 'merge_comorphism' QualifiedName 'for' QualifiedName
                  '{' (MergeInline | MergeReference) '}'
 MergeInline  ::= '(' Identifier (',' Identifier)* ')' '=>' Expr
 MergeReference::= 'transformation' '=' QualifiedName ';'?
-TextIndexDecl  ::= 'text_index'   QualifiedName '{' ResourceField* '}'
+TextIndexDecl::= 'text_index'   QualifiedName '{' ResourceField* '}'
 VectorIndexDecl::= 'vector_index' QualifiedName '{' ResourceField* '}'
 ```
 
@@ -41,14 +41,14 @@ The file loop dispatches on each token in turn, so `namespace` aliases and decla
 ### 11.1.2. Class, property, resource
 
 ```ebnf
-ClassDecl     ::= 'class' QualifiedName (':' QualifiedName (',' QualifiedName)*)?
+ClassDecl    ::= 'class' QualifiedName (':' QualifiedName (',' QualifiedName)*)?
                   '{' ClassItem* '}'
-ClassItem     ::= 'description' '=' StringLit ';'
+ClassItem    ::= 'description' '=' StringLit ';'
               |  'requires'    QualifiedName (',' QualifiedName)* ';'
               |  'recommends'  QualifiedName (',' QualifiedName)* ';'
 
-PropertyDecl  ::= 'property' QualifiedName ':' QualifiedName '{' PropertyItem* '}'
-PropertyItem  ::= 'description' '=' StringLit ';'
+PropertyDecl ::= 'property' QualifiedName ':' QualifiedName '{' PropertyItem* '}'
+PropertyItem ::= 'description' '=' StringLit ';'
               |  'min_value'   '=' Number     ';'
               |  'max_value'   '=' Number     ';'
               |  'min_length'  '=' Integer    ';'
@@ -56,27 +56,27 @@ PropertyItem  ::= 'description' '=' StringLit ';'
               |  'pattern'     '=' StringLit  ';'
               |  'format'      '=' QualifiedName ';'
               |  'element_type' '=' QualifiedName ';'
-              |  'allows_only' QualifiedName (',' QualifiedName)* ';'   (* no '=' *)
-              |  'domain'      QualifiedName (',' QualifiedName)* ';'   (* no '=' *)
-              |  'class_types' QualifiedName (',' QualifiedName)* ';'   (* no '=' *)
+              |  'allows_only' QualifiedName (',' QualifiedName)* ';'             (* no '=' *)
+              |  'domain'      QualifiedName (',' QualifiedName)* ';'             (* no '=' *)
+              |  'class_types' QualifiedName (',' QualifiedName)* ';'             (* no '=' *)
 
-ResourceDecl  ::= 'resource' QualifiedName ':' QualifiedName (',' QualifiedName)*
+ResourceDecl ::= 'resource' QualifiedName ':' QualifiedName (',' QualifiedName)*
                   '{' ResourceField* '}'
-ResourceField ::= QualifiedName '=' Value ';'
+ResourceField::= QualifiedName '=' Value ';'
 
 Identifier   ::= [a-zA-Z_] [a-zA-Z0-9_]*
-              |  "'" [a-zA-Z0-9_-]+ "'"                     (* quoted; `#` excluded *)
+              |  "'" [a-zA-Z0-9_-]+ "'"  (* quoted; `#` excluded *)
 
-Value         ::= StringLit | Integer | Float | Boolean
-              |  '-' (Integer | Float)                      (* literals only *)
-              |  QualifiedName                              (* IRI ref *)
-              |  '[' Value (',' Value)* ','? ']'            (* array *)
-              |  '{' ResourceField* '}'                     (* embedded resource *)
-              |  Identifier '(' (Value (',' Value)* ','?)? ')'   (* inductive ctor *)
-              |  QualifiedName '(' (Value (',' Value)* ','?)? ')' (* macro call, D52 *)
-              |  'json' '(' JsonValue ')'                   (* core:json — eigenius#222 *)
-              |  'formula' '(' FormulaExpr ')'              (* Pratt-parsed arithmetic *)
-              |  'type_expr' '(' TypeExpr ')'               (* D47-encoded type *)
+Value        ::= StringLit | Integer | Float | Boolean
+              |  '-' (Integer | Float)                             (* literals only *)
+              |  QualifiedName                                     (* IRI ref *)
+              |  '[' Value (',' Value)* ','? ']'                   (* array *)
+              |  '{' ResourceField* '}'                            (* embedded resource *)
+              |  Identifier '(' (Value (',' Value)* ','?)? ')'     (* inductive ctor *)
+              |  QualifiedName '(' (Value (',' Value)* ','?)? ')'  (* macro call, D52 *)
+              |  'json' '(' JsonValue ')'                          (* core:json — eigenius#222 *)
+              |  'formula' '(' FormulaExpr ')'                     (* Pratt-parsed arithmetic *)
+              |  'type_expr' '(' Term ')'                          (* D47-encoded type *)
 ```
 
 JsonValue    ::= StringLit | Integer | Float | Boolean | 'null'
@@ -102,43 +102,43 @@ DataDecl     ::= 'data' QualifiedName ParamList?
                  '{' DataDescription? (Ctor (',' Ctor)* ','?)? '}'
                                                      (* zero ctors is legal *)
 
-DataDescription ::= 'description' '=' StringLit ';'  (* core:description *)
+DataDescription::= 'description' '=' StringLit ';'      (* core:description *)
 ParamList    ::= '(' DataParam (',' DataParam)* ')'
-DataParam    ::= Identifier ':' (QualifiedName | Sort)   (* "A : core:Set", "P : Prop" *)
-IndexTelescope::= (TypeExpr '->')* Sort              (* "Nat -> Set" *)
+DataParam    ::= Identifier ':' (QualifiedName | Sort)  (* "A : core:Set", "P : Prop" *)
+IndexTelescope::= (Term '->')* Sort                     (* "Nat -> Set" *)
 Sort         ::= 'Prop' | 'Set' | 'Type' Integer
 
-Ctor         ::= Identifier                          (* nullary, e.g. "zero" *)
+Ctor         ::= Identifier                                (* nullary, e.g. "zero" *)
               |  Identifier '(' CtorArg (',' CtorArg)* ')'
-              |  Identifier ':' TypeExpr             (* typed form *)
+              |  Identifier ':' Term                       (* typed form *)
 
-CtorArg      ::= CtorArgType                         (* positional / anonymous *)
-              |  Identifier ':' CtorArgType           (* named: core:arg_name *)
+CtorArg      ::= CtorArgType                 (* positional / anonymous *)
+              |  Identifier ':' CtorArgType  (* named: core:arg_name *)
 
-CtorArgType  ::= QualifiedName                       (* "Nat" *)
+CtorArgType  ::= QualifiedName                                         (* "Nat" *)
               |  QualifiedName '(' CtorArgType (',' CtorArgType)* ')'  (* "List(A)" *)
 
 
-TypeExpr     ::= QualifiedName                                           (* "Nat" *)
-              |  QualifiedName '(' TypeExpr (',' TypeExpr)* ')'          (* "List(A)" *)
-              |  TypeExpr '->' TypeExpr                                  (* "A -> B" *)
-              |  ('pi' | 'forall') TypedParams '=>' TypeExpr             (* Π — "forall (x : T) => B" *)
-              |  'exists' TypedParams '=>' TypeExpr                      (* Σ — "exists (x : T) => B" *)
-              |  'fun' TypedParams '=>' TypeExpr                         (* λ in type position — match motive *)
-              |  'Prop' | 'Set' | 'Type' Integer                         (* sorts, D46 §2 *)
-              |  '(' ')'                                                 (* unit VALUE, Exp::Unit *)
-              |  '(' TypeExpr ':' TypeExpr ')'                           (* annotation — mode switch *)
-              |  'alias' AliasBinding (',' AliasBinding)* 'in' TypeExpr  (* compile-time substitution *)
-              |  StringLit | Integer | Float | 'true' | 'false'          (* Exp::LitString / LitInt / LitFloat / LitBool *)
+Term         ::= QualifiedName                                       (* "Nat" *)
+              |  QualifiedName '(' Term (',' Term)* ')'              (* "List(A)" *)
+              |  Term '->' Term                                      (* "A -> B" *)
+              |  ('pi' | 'forall') TypedParams '=>' Term             (* Π — "forall (x : T) => B" *)
+              |  'exists' TypedParams '=>' Term                      (* Σ — "exists (x : T) => B" *)
+              |  'fun' TypedParams '=>' Term                         (* λ in type position — match motive *)
+              |  'Prop' | 'Set' | 'Type' Integer                     (* sorts, D46 §2 *)
+              |  '(' ')'                                             (* unit VALUE, Exp::Unit *)
+              |  '(' Term ':' Term ')'                               (* annotation — mode switch *)
+              |  'alias' AliasBinding (',' AliasBinding)* 'in' Term  (* compile-time substitution *)
+              |  StringLit | Integer | Float | 'true' | 'false'      (* Exp::LitString / LitInt / LitFloat / LitBool *)
 
 TypedParams  ::= TypedParam (',' TypedParam)*
-              |  '(' TypedParam (',' TypedParam)* ')'   (* outer parens optional *)
-TypedParam   ::= Identifier ':' TypeExpr
-AliasBinding ::= Identifier '=' TypeExpr                (* later bindings see earlier ones *)
+              |  '(' TypedParam (',' TypedParam)* ')'  (* outer parens optional *)
+TypedParam   ::= Identifier ':' Term
+AliasBinding ::= Identifier '=' Term                   (* later bindings see earlier ones *)
 
 DefDecl      ::= 'def' QualifiedName
                  ('(' TypedParam (',' TypedParam)* ')')?
-                 ':' TypeExpr '=' TypeExpr
+                 ':' Term '=' Term
                  ('desc' ':' StringLit)? ';'?           (* D66 transparent definition, §4.4c *)
 ```
 
@@ -149,7 +149,7 @@ DefDecl      ::= 'def' QualifiedName
 ```ebnf
 ProgramDecl  ::= 'program' QualifiedName ':' QualifiedName '->' QualifiedName
                  '{' ProgramAttribute* Expr '}'
-ProgramAttribute ::= 'description' '=' StringLit ';'
+ProgramAttribute::= 'description' '=' StringLit ';'
 
 Expr         ::= LetExpr | LambdaExpr | TypedLambdaExpr | CaseExpr | MatchExpr
               |  ConstructExpr | ApplyExpr | ProjectExpr
@@ -157,14 +157,14 @@ Expr         ::= LetExpr | LambdaExpr | TypedLambdaExpr | CaseExpr | MatchExpr
               |  PairExpr | LiteralExpr | VarExpr
 
 LetExpr      ::= 'let' Identifier ':' QualifiedName '=' Expr ';' Expr
-LambdaExpr   ::= ('\' | 'λ') Identifier '->' Expr          (* untyped *)
+LambdaExpr   ::= ('\' | 'λ') Identifier '->' Expr                     (* untyped *)
 TypedLambdaExpr
              ::= 'lambda' TypedParam (',' TypedParam)* '=>' Expr   (* D37 §3.1 *)
 CaseExpr     ::= 'case' Expr '{' (Identifier '->' Expr ';')* '}'
-MatchExpr    ::= 'match' Expr ('returning' TypeExpr)? '{' MatchArm (';' MatchArm)* ';'? '}'
+MatchExpr    ::= 'match' Expr ('returning' Term)? '{' MatchArm (';' MatchArm)* ';'? '}'
 MatchArm     ::= Identifier ('(' Identifier (',' Identifier)* ')')? '->' Expr
-MapExpr      ::= 'map' '(' Expr ',' Expr ')'               (* recognised by name + arity 2 *)
-ReduceExpr   ::= 'reduce' '(' Expr ',' Expr ',' Expr ')'   (* by name + arity 3 *)
+MapExpr      ::= 'map' '(' Expr ',' Expr ')'                                            (* recognised by name + arity 2 *)
+ReduceExpr   ::= 'reduce' '(' Expr ',' Expr ',' Expr ')'                                (* by name + arity 3 *)
 
 ConstructExpr::= 'Construct' QualifiedName '{' (QualifiedName '=' Expr (',' QualifiedName '=' Expr)*)? '}'
 
@@ -176,14 +176,14 @@ LiteralExpr  ::= StringLit | Integer | Float | Boolean
 VarExpr      ::= Identifier
 
 QualifiedName::= Identifier ':' Identifier
-              |  Identifier                          (* bare; resolved by context *)
+              |  Identifier                (* bare; resolved by context *)
 ```
 
 **D14 addition**: `ApplyExpr` with a `QualifiedName` whose IRI classifies through the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs) as a `Decidable` `QueryClass` dispatches as `Exp::NativeDecide` (returning a `Verdict`) — see [§9.3](09-institutions.md). An IRI classifying as a `Comorphism` is also callable from expression position: it lowers to `program:ComorphismInvokeApply`, decoded to `Exp::InstitutionInvoke` (D14 §9.3) — see [§9.5](09-institutions.md#95-invoking-comorphisms-from-esl-programs). Exactly one source argument and no configuration block.
 
 **Application does not curry.** A term takes a projection chain and then at most one argument list: `f(a)(b)` is not a production, and the callee must reduce to a plain or projected name. `map` and `reduce` are recognised at the application site by name *together with* argument count (two and three); any other arity falls through to ordinary application.
 
-**`returning` takes a full `TypeExpr`**, not just a qualified name — including a `fun (i : T) => body` motive for an indexed inductive (eigenius#72 Layer 3). When omitted, the kernel synthesises the motive from the checking-mode expected type.
+**`returning` takes a full `Term`**, not just a qualified name — including a `fun (i : T) => body` motive for an indexed inductive (eigenius#72 Layer 3). When omitted, the kernel synthesises the motive from the checking-mode expected type.
 
 ## 11.2. Keyword reference
 

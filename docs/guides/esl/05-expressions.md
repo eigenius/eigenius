@@ -293,7 +293,7 @@ This is the entry point for the platform's typed numerical surface. The full ref
 <a id="5-14a-type_expr-eigentt-type-expressions"></a>
 ## 5.14a. `type_expr(...)` — EigenTT type expressions as chain values (D47)
 
-The surface counterpart of `formula(...)` for the [D47 chain-mirrored EigenTT type fragment](../../design/d47-chain-mirrored-eigentt-type-fragment.md). A `type_expr(...)` block lets you embed an EigenTT type expression (a proposition in `Prop`, a function type, an inductive-ctor application, etc.) directly in any value position; the compiler parses it with the same `parse_type_expr` grammar `axiom` and `data` ctor types use, lowers it to a kernel `Exp`, and runs the D47 encoder to produce a chain-resident `eigentt:TypeExpr` value:
+The surface counterpart of `formula(...)` for the [D47 chain-mirrored EigenTT type fragment](../../design/d47-chain-mirrored-eigentt-type-fragment.md). A `type_expr(...)` block lets you embed an EigenTT type expression (a proposition in `Prop`, a function type, an inductive-ctor application, etc.) directly in any value position; the compiler parses it with the same `parse_type_expr` grammar `axiom` and `data` ctor types use, lowers it to a kernel `Exp`, and runs the D47 encoder to produce a chain-resident `eigentt:Term` value:
 
 ```esl
 namespace screen     = "urn:eigenius:demo:screen";
@@ -330,7 +330,7 @@ The `type_expr(HasLowIC50(...))` expression compiles to a `Value::Json` carrying
 }
 ```
 
-…which the chain validator type-checks against `eigentt:TypeExpr`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDeclaredAs` / `IsObservedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
+…which the chain validator type-checks against `eigentt:Term`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDeclaredAs` / `IsObservedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
 
 ### What grammar the inner expression accepts
 
@@ -363,7 +363,7 @@ A Σ in `Prop` position *is* the existential, and `eigentt:fst` recovers the wit
 axiom demo:t : eigentt:fst(exists x : core:string => core:string);
 ```
 
-`eigentt:fst(p)` / `eigentt:snd(p)` are written as one-argument applications because `TypeExpr` has no postfix form. They are **not axioms**: the compiler intercepts those two IRIs and emits `Exp::Fst` / `Exp::Snd` term nodes, so `fst(pair)` reduces — an axiom would be opaque and never compute. A one-argument call to anything else stays an ordinary `App`. On the wire they are the `Fst` / `Snd` ctors of [`eigentt:TypeExpr`](../../../ontologies/eigentt/eigentt-type-fragment.json), added alongside the `Pair` ctor D48 shipped.
+`eigentt:fst(p)` / `eigentt:snd(p)` are written as one-argument applications because `Term` has no postfix form. They are **not axioms**: the compiler intercepts those two IRIs and emits `Exp::Fst` / `Exp::Snd` term nodes, so `fst(pair)` reduces — an axiom would be opaque and never compute. A one-argument call to anything else stays an ordinary `App`. On the wire they are the `Fst` / `Snd` ctors of [`eigentt:Term`](../../../ontologies/eigentt/eigentt-type-fragment.json), added alongside the `Pair` ctor D48 shipped.
 
 `()` is the unit *value* (`Exp::Unit`), the sole inhabitant of `One`. Hand-written certificates normally omit it — the kernel synthesises the witness slot in e.g. `declared(bridge, P)` — so it exists mainly so that [`eigenius decompile`](../platform/04-cli-reference.md#decompile-file---verify---pretty) can print back what the kernel encoded and have it reparse.
 
@@ -382,13 +382,13 @@ What forces the pair: the DCG parser renders every definite description as `the(
 
 Authors *could* hand-write the tagged-dict JSON tree directly as a `Value::Json` literal, but in practice three-nested `App(ConstRef, LitString, …)` shapes get verbose quickly and the syntactic noise drowns out the proposition. `type_expr(...)` is to the D47 type fragment what `formula(...)` is to the D32 formula language: a Pratt-parsed inline sublanguage that compiles to the same wire shape the verifier consumes, with the syntactic shape an author actually reads.
 
-The two sublanguages target different chain types — `formula(...)` produces `formulas:FormulaTerm`, `type_expr(...)` produces `eigentt:TypeExpr` — and they don't overlap: numerical institutions speak FormulaTerm, propositional / reasoning institutions speak `eigentt:TypeExpr`. An ESL expression position can host either, depending on what the property's `class_types` constraint demands.
+The two sublanguages target different chain types — `formula(...)` produces `formulas:FormulaTerm`, `type_expr(...)` produces `eigentt:Term` — and they don't overlap: numerical institutions speak FormulaTerm, propositional / reasoning institutions speak `eigentt:Term`. An ESL expression position can host either, depending on what the property's `class_types` constraint demands.
 
 ### Compile target
 
 `type_expr(...)` lowers in two steps:
 
-1. The parser produces a `Value::TypeExpr { typ, pos }` AST node carrying the inner `ast::TypeExpr` tree;
+1. The parser produces a `Value::Term { typ, pos }` AST node carrying the inner `ast::Term` tree;
 2. The compiler's `encode_type_expr_to_json` walks that tree, calls `lower_type_expr_to_exp` to produce a kernel `Exp`, then `eigentt_type_mirror::encode_type` to produce the tagged-dict JSON shape, and rewraps as `Value::Json`.
 
 The resulting value lands in the resource's property slot just like any other property literal — there's no special chain-storage treatment.

@@ -170,7 +170,7 @@ note: "Folklore; built into the kernel's Prop universe per D46 §5."
 
 The declaration commits a Resource of class `eigentt:Axiom` with:
 
-- `eigentt:axiom_statement` — the type expression, D47-encoded as a chain-resident `eigentt:TypeExpr` value via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs) (see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape);
+- `eigentt:axiom_statement` — the type expression, D47-encoded as a chain-resident `eigentt:Term` value via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs) (see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape);
 - `eigentt:axiom_justification` (optional) — the `note:` string.
 
 At env-build time the kernel's `build_axiom_env` walks every layer in the active chain, decodes each axiom's `axiom_statement` against the universe ladder, and registers the axiom's IRI as an opaque constant in the type-checking environment. From that point the axiom is citable from any program in the chain.
@@ -406,7 +406,7 @@ Indexed inductives in `Prop` also enable the [singleton-elimination rule](07-typ
 
 Indices land on `core:indices` (array of `InductiveParam` resources, parallel to `type_params`), result sort on `core:result_sort` (a `core:Level` value — `{"ctor": "Zero"}` for `Prop`, `Succ(Zero)` for `Set`, and `Param`/`Max`/`IMax` for the polymorphic cases; it carried a *string* `Prop` / `Set` / `Type:N` until eigenius#188, a grammar that could not express a level variable), and each typed ctor on `core:ctor_type` (the full Π-telescope D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs); see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape). Non-indexed declarations omit all three fields, preserving the pre-Layer-2 wire shape.
 
-You don't author the `eigentt:TypeExpr` value directly — the compiler produces it from the `forall (n : core:Nat) => ...` source you write — but understanding that it exists as a first-class chain value explains why indexed inductives can express dependencies in the first place: the constructor's type telescope is *data* the kernel reads back out of the layer at type-check time, not implicit elaboration.
+You don't author the `eigentt:Term` value directly — the compiler produces it from the `forall (n : core:Nat) => ...` source you write — but understanding that it exists as a first-class chain value explains why indexed inductives can express dependencies in the first place: the constructor's type telescope is *data* the kernel reads back out of the layer at type-check time, not implicit elaboration.
 
 Source: [`parse_data_index_telescope`](../../../kernel/src/esl/parser.rs), [`compile_data`](../../../kernel/src/esl/compile.rs), [`decode_indices` and `decode_result_sort`](../../../kernel/src/program/ground.rs).
 
@@ -582,7 +582,7 @@ and the compiler expands it to the full `Bundle(...)` ctor with `CompleteRandom(
 
 ### Restrictions (v1)
 
-- **Body must be a `Value`** (resource-property value AST), not a `TypeExpr` or a program `Expr`. The use case is producing ctor values; programs have their own decl form ([§4.7](#4-7-program)).
+- **Body must be a `Value`** (resource-property value AST), not a `Term` or a program `Expr`. The use case is producing ctor values; programs have their own decl form ([§4.7](#4-7-program)).
 - **No recursion.** Macro expansion is one-shot per call site; recursive calls have no termination guarantee and the smart-constructor use case doesn't need them. Cycles are caught by the compiler with a structured diagnostic.
 - **Positional only, no defaults.** Each call site supplies arguments in declared order; ESL doesn't have keyword arguments or default values. Authors who want to abbreviate further can declare a thinner macro that delegates to the wider one.
 

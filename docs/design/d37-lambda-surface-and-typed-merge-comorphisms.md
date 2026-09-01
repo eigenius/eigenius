@@ -195,7 +195,7 @@ Compiles to N nested single-parameter `Pi` AST nodes the same way `lambda` compi
 
 ### 4.1 `lambda` literal
 
-ESL's existing `Expr::Lambda` AST node ([kernel/src/esl/ast.rs](../../kernel/src/esl/ast.rs)) — currently parsed from the untyped `\x -> e` surface — is **extended** rather than replaced: a new `param_type: Option<TypeExpr>` slot becomes `None` for untyped lambdas inside `program` bodies (where types are inferred from context) and `Some(T)` for the new typed surface (`lambda x : T => body`). The existing untyped form continues to work unchanged. A parallel `TypeExpr::Pi` variant is added for the `pi` type expression in §3.5 — `TypeExpr` previously had `Ref`, `Arrow`, and a size-binder-specific `BinderArrow`; the new `Pi` variant is the general value-typed binder. Both deltas are additive; every existing match-site picks up a wildcard arm.
+ESL's existing `Expr::Lambda` AST node ([kernel/src/esl/ast.rs](../../kernel/src/esl/ast.rs)) — currently parsed from the untyped `\x -> e` surface — is **extended** rather than replaced: a new `param_type: Option<Term>` slot becomes `None` for untyped lambdas inside `program` bodies (where types are inferred from context) and `Some(T)` for the new typed surface (`lambda x : T => body`). The existing untyped form continues to work unchanged. A parallel `Term::Pi` variant is added for the `pi` type expression in §3.5 — `Term` previously had `Ref`, `Arrow`, and a size-binder-specific `BinderArrow`; the new `Pi` variant is the general value-typed binder. Both deltas are additive; every existing match-site picks up a wildcard arm.
 
 A `lambda x_1 : T_1, …, x_N : T_N => body` lowers to a right-associated nested chain of `urn:eigenius:program:Lambda` resources:
 
@@ -357,7 +357,7 @@ Realised effort: ~2 days. Slightly under the 3–4 day estimate because two piec
 
 ### PR 2: ESL syntax + commit-time validators
 
-- AST nodes: extend `Expr::Lambda` with an optional `param_type`; add `TypeExpr::Pi` variant; new `MergeComorphismDecl` declaration node.
+- AST nodes: extend `Expr::Lambda` with an optional `param_type`; add `Term::Pi` variant; new `MergeComorphismDecl` declaration node.
 - Parser rules per §3.4.
 - Compiler lowering per §4 (including the inline `merge_comorphism` body sugar that emits the synthesised standalone lambda at a content-hash IRI).
 - **Commit-time validators (folded in from PR 1):**

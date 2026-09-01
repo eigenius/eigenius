@@ -546,13 +546,13 @@ ontology cannot express, and each is the sole definition of that relation.
 
 | list | where | what it decides |
 |---|---|---|
-| `PROPOSITION_SLOTS` | `kernel/src/ontology/well_known.rs:545` | which of the 28 `eigentt:TypeExpr`-ranged properties must inhabit `Prop`, not merely type-check — **6 of them** |
+| `PROPOSITION_SLOTS` | `kernel/src/ontology/well_known.rs:545` | which of the 28 `eigentt:Term`-ranged properties must inhabit `Prop`, not merely type-check — **6 of them** |
 | `trace_category` | `kernel/src/layer/witness_index.rs:179` | which trace class grounds which grade — the 5→4 map |
 | the self-attesting arms | `kernel/src/layer/witness_index.rs:74-88` | which classes ground a witness *without* a trace — exactly `reasoning:ReasoningSentence` and `reflection:InstitutionEmittedDerivation` |
 
 **The first is documented as a deliberate compensation for what the range cannot say:**
 
-> *"`eigentt:TypeExpr` is the range of every D47-encoded EigenTT tree, and most of those trees are
+> *"`eigentt:Term` is the range of every D47-encoded EigenTT tree, and most of those trees are
 > legitimately not propositions … The range alone therefore cannot carry the obligation; membership
 > here is what distinguishes a slot that asserts something from a slot that merely holds a term."*
 

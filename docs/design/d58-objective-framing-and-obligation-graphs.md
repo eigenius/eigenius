@@ -206,7 +206,7 @@ over the reasoning stack rather than a parallel epistemics.
 | `objective:thesis` | Objective | resource → Milestone | the root goal |
 | `objective:version` / `objective:supersedes` | Objective | integer / IRI | frame revision (H3) |
 | `objective:branch` | Objective | string | branch-per-objective (H7) |
-| `objective:proposition` | Milestone, Axiom | `resource` → `eigentt:TypeExpr` | the target `Prop` (≠ `canonical_proposition`; target vs assertion) |
+| `objective:proposition` | Milestone, Axiom | `resource` → `eigentt:Term` | the target `Prop` (≠ `canonical_proposition`; target vs assertion) |
 | `objective:acceptance_grade` | Milestone | `resource` → `reflection:EpistemicStatus` | target grade — **reuses the reflection enum**, `allows_only` the four `epistemic:*` (H2) |
 | `objective:witness_kind` | Milestone | `resource` → `objective:WitnessKind` | `wk_layer_commit\|wk_query\|wk_generator_output\|wk_citation` (H2) |
 | `objective:falsifier` | Milestone | string | what would refute it (H2, *Checkable*) |

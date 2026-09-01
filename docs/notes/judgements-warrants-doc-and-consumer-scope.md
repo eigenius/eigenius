@@ -61,6 +61,30 @@ and costs a full reseed for a wording change. Fold it into the next bootstrap ed
 `experiments/lexicon/lexicon.esl` had the same prose in a `//` comment and was fixed, since
 comments do not reach the manifest.
 
+### `TypeExpr` → `Term` doc rename *(done `2026-08-31`)*
+
+P1 renamed the class and P2 renamed `ast::TypeExpr`; the docs lagged by **159 hits across 39
+files**. The class, the AST node and the ESL grammar's nonterminal are all `Term` now.
+
+**Three things keep the old name deliberately**, and each is a record rather than a claim:
+`kernel/src/esl/ast.rs:558` (*"the name `TypeExpr` outlived the class it mirrored"* — the drift
+lesson), and the two dated manifest-drift entries in `bootstrap_manifest_pinned.rs` describing what
+moved on `2026-08-23`. Notes under `docs/notes/` that record measurements keep it too: a table
+reading *"`TypeExpr`, 52 ontology sites"* is a measurement of a name, and renaming it makes the
+measurement false.
+
+**The rename hit the record of the rename.** `2026-08-29-p1-record.md`'s heading became
+`## P1.1 — eigentt:Term → eigentt:Term`, and three other files were flattened the same way
+(`p0-measurements`, this note, the build plan). Reverted and repaired. A blanket rename over a
+corpus that documents renames produces tautologies, and only reading the diff finds them.
+
+**Not purely a doc item, which is why it landed here.** Two `core:description` strings in
+`core-ontology.json` carried the old name in prose, so the rename is a **bootstrap edit**: `core`
+and `lexicon` both moved. `EXPECTED` is updated; the reseed rides D85's.
+
+**`ontologies/lexicon/lexicon-ontology.esl`'s "ResourceRef" prose went in the same edit** — held
+back from the earlier sweep precisely because it would have cost a reseed alone, and free here.
+
 ## 1. Design documents
 
 ### 1.1 Retire — record only

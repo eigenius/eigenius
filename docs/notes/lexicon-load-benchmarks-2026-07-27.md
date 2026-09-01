@@ -127,7 +127,7 @@ felicity gate, which never ran in this measurement.)* These are loads through th
 and that path does not call `dcg::lexicon::gate_entry`: the gate's call sites are the importer
 binaries, one CLI subcommand and tests, all behind an opt-in `--validate` flag the reseed script does
 not pass. What entries do pay is **Rule 21, twice per entry**. Rule 21 decodes and `check_infer`s
-every value whose declared range is `eigentt:TypeExpr`, and a `lexicon:LexicalEntry` carries two such
+every value whose declared range is `eigentt:Term`, and a `lexicon:LexicalEntry` carries two such
 properties — `lexicon:cat` and `lexicon:sem_type`. So each entry costs two EigenTT decode-plus-
 type-check passes where a class costs none. Classes pay only reference resolution. This is where
 reseed wall-clock goes.

@@ -452,7 +452,7 @@ index is load-bearing; the original §5.1 sketch had it. The Slice-1 `cat_n(Num)
 build below.
 
 **How a polymorphic category is stored — `cat_forall` (decided).** The variable `T` cannot live as a
-*free* `Exp::Var` in the stored category: `lexicon:cat` is `class_types eigentt:TypeExpr`, so the
+*free* `Exp::Var` in the stored category: `lexicon:cat` is `class_types eigentt:Term`, so the
 commit-time felicity check (validation Rule 21) `check_infer`s the value, and an unbound variable is
 rejected. The category must be **closed**. We add a category-level binder constructor to `lexicon:Cat`:
 `cat_forall : (Set -> lexicon:Cat) -> lexicon:Cat` — the **dependent forward slash over a common-noun
@@ -484,7 +484,7 @@ instantiation** inside `apply` (peel the binder → bind `T` → `subst_cat`), n
      λ-semantics needed a **bidirectional annotation** — added `Exp::Ann(e, T)` through the kernel
      (term / eval-erase / `check_infer` mode-switch / D47 codec / positivity & guardedness traversals)
      plus the ESL surface `(e : T)`, so `check_infer(Ann(λ…, T))` succeeds. The λ-sem lives in a
-     `lexicon:SemTerm` term-holder (`lexicon:term : eigentt:TypeExpr`), referenced by `sem` — `sem`
+     `lexicon:SemTerm` term-holder (`lexicon:term : eigentt:Term`), referenced by `sem` — `sem`
      stays uniformly a reference (the 200k WordNet entries reference classes/axioms/instances; a
      function word references a term), and `resolve_sem` dispatches on the referent.
    - **ESL lexer fix (foundational).** `(e : T)` collided with the qualified-name separator `ns:name`:
@@ -647,7 +647,7 @@ below); the three readings are then *operations over the group*, each producing 
   `cat_group` arm so the group fills the slot under ordinary backward application (no new combination rule);
   the `conn_and` slot restricts it to `and`-groups (`collective_rejects_an_or_group`). This required making
   the kernel's canonical built-in `core:List` referenceable from ESL type expressions: the
-  `eigentt:TypeExpr` decoder (`resolve_const_ref`) now short-circuits the `core:List` IRI to the built-in
+  `eigentt:Term` decoder (`resolve_const_ref`) now short-circuits the `core:List` IRI to the built-in
   `list_decl()` — exactly as it already does the primitive datatypes — so a `core:List(Entity) → Prop`
   axiom commits and gates. Covered by `collective_np_coordination_parses` / `collective_rejects_an_or_group`.
 

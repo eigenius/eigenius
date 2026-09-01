@@ -758,7 +758,7 @@ question — it is not a question. They are not in the epistemic system at all.
 
 ---
 
-### 5b.9 `eigentt:TypeExpr` is untyped, and `PROPOSITION_SLOTS` is the patch
+### 5b.9 `eigentt:Term` is untyped, and `PROPOSITION_SLOTS` is the patch
 
 Rule 21's third step is a hardcoded special case:
 
@@ -768,7 +768,7 @@ if wk::PROPOSITION_SLOTS.contains(&prop_iri.as_str())
 ```
 
 **The oddness is the symptom; the cause is that a property's range cannot say what type its
-EigenTT value must have.** `class_types ∋ eigentt:TypeExpr` says only *"an EigenTT tree"* — and that
+EigenTT value must have.** `class_types ∋ eigentt:Term` says only *"an EigenTT tree"* — and that
 range covers propositions, types and terms alike, so the one thing the kernel is best at computing
 is exactly the thing the ontology cannot express. It is then patched back in Rust, **for one case
 out of five**.
@@ -812,7 +812,7 @@ architecturally tidy. D81 §5.6's own handoff — *"three dead artifacts to dele
 assertions to correct, three untested claims to pin, and one design question"* — is strand one, and
 is the part backed by measurement.
 
-- **S4b — typed ranges for `eigentt:TypeExpr` properties** (§5b.9). Precedes S4a: declare the
+- **S4b — typed ranges for `eigentt:Term` properties** (§5b.9). Precedes S4a: declare the
   expected type per property, switch Rule 21 to `check`, retire `PROPOSITION_SLOTS`. Closes four
   silently-unchecked obligations and makes S4a a dependent instance rather than new machinery.
 - **S4a — give the kernel lane a real proof term** (§5b.6), then key `Verified` to it. **First**:

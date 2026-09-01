@@ -83,11 +83,11 @@ The kinase notebook covers cross-numerical-institution composition: five Julia i
 | Composition shape | Bridge mechanism | Worked example |
 |---|---|---|
 | **Numerical → numerical** | Declared comorphisms over `formulas:FormulaTerm` (extract → transformation → reify pipeline). | Kinase notebook — Symbolics → JuMP, Catalyst → DiffEq, Symbolics → IntervalArithmetic. |
-| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:TypeExpr` propositions. | D52 `StatisticalAnalysisPlan` validation emits a result with `canonical_proposition`; a D39 `justification:Conclusion` grounds on `App(Declared(plan_yields), Observed(sample_set))`, whose halves the witness index admits. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
+| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:Term` propositions. | D52 `StatisticalAnalysisPlan` validation emits a result with `canonical_proposition`; a D39 `justification:Conclusion` grounds on `App(Declared(plan_yields), Observed(sample_set))`, whose halves the witness index admits. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
 
 The two shapes are structurally different: comorphisms are *active* translations (one institution's runtime is invoked, output is reified back into the chain), while the witness-index path is *passive* — D39 doesn't call D52, it just reads the chain artifact D52 emitted. Both are first-class composition mechanisms; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index).
 
-Chapter 2 covers both shared payload languages — `formulas:FormulaTerm` for the comorphism shape, `eigentt:TypeExpr` for the witness-index shape. Chapter 4 covers how AutoOnLoad gates from the two institutions cascade through a single commit. Chapter 7 walks the full statistics + reasoning pipeline end-to-end.
+Chapter 2 covers both shared payload languages — `formulas:FormulaTerm` for the comorphism shape, `eigentt:Term` for the witness-index shape. Chapter 4 covers how AutoOnLoad gates from the two institutions cascade through a single commit. Chapter 7 walks the full statistics + reasoning pipeline end-to-end.
 
 ## 1.4. Surface vocabulary you should already have
 
@@ -100,7 +100,7 @@ If any are unfamiliar, the cross-link is the right entry point.
 | `AutoOnLoad` / `OnDemand` / `Decidable` (the three dispatch roles) | [ESL §9.2](../esl/09-institutions.md#92-classification-at-compile-time), [EigenQL §8.2](../eigenql/08-institutions.md#82-the-classification-at-parse-time) |
 | `Verdict` (`Holds` / `Fails` / `Undecidable`) | [ESL §9.3](../esl/09-institutions.md#93-invoking-a-decidable-queryclass) |
 | `formula(...)` ESL sublanguage and `formulas:FormulaTerm` | [Formula language guide](../formula/README.md) |
-| `type_expr(...)` ESL sublanguage and `eigentt:TypeExpr` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
+| `type_expr(...)` ESL sublanguage and `eigentt:Term` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
 | `Prop` universe and proof irrelevance (D46) | [ESL §7.1](../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) |
 | `ChainWitness.Is*As` predicates and the witness index (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
 | `StatisticalAnalysisPlan` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
