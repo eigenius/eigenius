@@ -75,7 +75,7 @@ the input's observation; the run record is provenance and cites nothing.
 **Nothing stores a grade.** There is no `DeclaredResource` / `ObservedResource` /
 `DerivedResource` / `VerifiedResource` class and no `epistemic_status` — a stored
 grade let the thing being graded nominate its own grade. Warrant is COMPUTED from
-the justification term (`crates/eigenius-reasoning/src/project.rs`: `support`,
+the justification term (`kernel/src/justification/`: `support`,
 `leaves_of`, `is_fully_verified`, `survives_without`), and it is a Rust-API answer,
 not an EigenQL one. Provenance IS an EigenQL query — `prov:was_attributed_to`,
 `prov:was_generated_by`, `prov:used`, `prov:had_primary_source` are all

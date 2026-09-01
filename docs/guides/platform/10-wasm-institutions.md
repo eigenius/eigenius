@@ -4,7 +4,7 @@
 > institution *framework* (D14) is intact — institutions are still declared
 > as ontology resources and implemented as runtimes — but the WASM backend
 > is gone. Implement institutions as in-process Rust (`runtime: in_process`,
-> e.g. `eigenius-reasoning`, `eigenius-lean`) or as external institutions via
+> e.g. `eigenius-lean`, `eigenius-statistics`) or as external institutions via
 > the runtime substrate (`runtime: external`, D31). This chapter is retained
 > as historical record only. Background:
 > [D12](../../design/d12-wasm-extensibility.md).

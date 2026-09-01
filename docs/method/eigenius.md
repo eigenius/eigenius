@@ -166,7 +166,7 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
 - **Verified reasoning** — the `justification` ontology (`ontologies/justification/`) + the
   justification-logic institution
   ([D39](https://github.com/eigenius/eigenius/blob/main/docs/design/d39-justification-logic.md),
-  guide [reasoning-institution/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/reasoning-institution)):
+  guide [justification-logic/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/justification-logic)):
   a `justification:Conclusion` carries ONE judgement — `holds(kernel, c,
   Certificate(j, P))` — and the certificate type-checks against
   `justification:Certificate(term, proposition)` via the three grounds

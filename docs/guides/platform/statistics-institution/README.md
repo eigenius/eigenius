@@ -2,7 +2,7 @@
 
 Slow-walk worked example of D52, the platform's measurement-statistics institution. Walks the full chain from raw replicate readings on the chain to a typed Holds/Fails verdict mechanically derived from those readings.
 
-Read this if you want to know what a `StatisticalAnalysisPlan` commit does, how the seven dispatch positions split across the experimental-design space, what each opinionated stance (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard) actually enforces, or how the institution's emitted result carries the proposition a D39 conclusion is grounded in, for the [D39 reasoning institution](../reasoning-institution/README.md).
+Read this if you want to know what a `StatisticalAnalysisPlan` commit does, how the seven dispatch positions split across the experimental-design space, what each opinionated stance (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard) actually enforces, or how the institution's emitted result carries the proposition a D39 conclusion is grounded in, for the [D39 justification logic tutorial](../justification-logic/README.md).
 
 Design spec: [**D52 Measurement Statistics Institution**](../../../design/d52-measurement-statistics-institution.md). Implementation: [`crates/eigenius-statistics/`](../../../../crates/eigenius-statistics/). Ontology: [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 
@@ -164,7 +164,7 @@ claim_eig0291_lowic50                      [StatisticalAnalysisPlan]
 Verdict("Fails", AlphaNotCrossed: computed p = 0.218..., threshold alpha = 0.05)
 ```
 
-The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Claim` can be written against exactly it; downstream [D39 conclusions](../reasoning-institution/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
+The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Claim` can be written against exactly it; downstream [D39 conclusions](../justification-logic/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
 
 Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_analysis_plan` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
 
@@ -255,7 +255,7 @@ D52 lands the verifier across the seven dispatch positions in phases. The Phase 
 
 Wired cells run on the [`crates/eigenius-statistics/`](../../../../crates/eigenius-statistics/) implementation; unwired cells reject up front with a structured diagnostic naming the unimplemented combination and the GitHub issue tracking it.
 
-## Composition with the reasoning institution
+## Composition with justification logic
 
 The statistics institution's per-effect result carries the proposition a D39 conclusion is ultimately grounded in — though not by citing the result, which records a run and grounds nothing. The composition pattern:
 
@@ -267,9 +267,9 @@ raw IC50 readings + prov:ObservationTrace   → witness index admits IsObservedA
   → an author commits a justification:Claim: Asserts(s) -> HasLowIC50(...)
       + prov:DeclarationTrace          → admits IsDeclaredAs(plan_yields, ...)
   → D39 justification:Conclusion cites App(Declared(plan_yields), Observed(sample_set))
-  → D39 validate_justification AutoOnLoad fires
+  → Rule 21 checks its judgement at commit (no institution, no verdict — P7)
   → the inner app consumes the IsDeclaredAs and IsObservedAs witnesses
-  → Verdict::Holds for the reasoning conclusion (e.g., StrongInhibitor(EIG_0291))
+  → the conclusion is admitted (e.g., StrongInhibitor(EIG_0291))
 ```
 
 The declaration is not ceremony. A computed claim rests on the plan denoting a
@@ -297,7 +297,7 @@ Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-s
 ## Cross-references
 
 - [**D52 design spec**](../../../design/d52-measurement-statistics-institution.md) — full design rationale, the universal-claim schema's intersection-of-standards table, the five-axis design space, the opinionated-stances appendix, and the §9 phase plan with the per-phase completeness matrix.
-- [**Reasoning institution tutorial**](../reasoning-institution/README.md) — the D39 institution whose conclusions ground on `App(Declared(plan), Observed(inputs))` over D52's recomputed propositions.
+- [**Reasoning institution tutorial**](../justification-logic/README.md) — the D39 institution whose conclusions ground on `App(Declared(plan), Observed(inputs))` over D52's recomputed propositions.
 - [**ESL §4.5a Multi-class data declarations**](../../esl/04-declarations.md#4-5a-multi-class-data-declarations-marker-classes-d52-12) — the `data : Prop, stats:PopulationLevel` syntax used for §7.4 scope markers.
 - [**ESL §4.9 macro declarations**](../../esl/04-declarations.md#4-9-macro-compile-time-smart-constructors-d52-12) — the compile-time AST substitution mechanism the seven smart constructors use.
 - [**ESL §5.14a type_expr(...)**](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the chain-mirrored EigenTT type fragment used for the proposition slots.

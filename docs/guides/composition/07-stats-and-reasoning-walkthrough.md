@@ -1,6 +1,6 @@
 # 7. Statistics + reasoning walkthrough
 
-The [kinase walkthrough (chapter 6)](06-kinase-walkthrough.md) traces the platform's first composition shape: five Julia institutions coordinating over `formulas:FormulaTerm`, bridged by declared comorphisms, AutoOnLoad gates firing as data flows through the typed pipeline. This chapter traces the second composition shape: the [D52 measurement-statistics institution](../platform/statistics-institution/README.md) and the [D39 reasoning institution](../platform/reasoning-institution/README.md), bridged by the [D49 chain-witness index](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) over a shared `eigentt:TypeExpr` proposition slot. The two shapes use the same chain primitives — typed resources, AutoOnLoad cascades, deterministic verifiers — but with a different bridge mechanism. Reading both walkthroughs side by side surfaces the choice space: comorphism-mediated translation when one runtime's output needs to be reshaped for another's consumption, witness-index admission when one institution's verdict is being cited as evidence rather than re-processed.
+The [kinase walkthrough (chapter 6)](06-kinase-walkthrough.md) traces the platform's first composition shape: five Julia institutions coordinating over `formulas:FormulaTerm`, bridged by declared comorphisms, AutoOnLoad gates firing as data flows through the typed pipeline. This chapter traces the second composition shape: the [D52 measurement-statistics institution](../platform/statistics-institution/README.md) and the [D39 justification logic tutorial](../platform/justification-logic/README.md), bridged by the [D49 chain-witness index](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) over a shared `eigentt:TypeExpr` proposition slot. The two shapes use the same chain primitives — typed resources, AutoOnLoad cascades, deterministic verifiers — but with a different bridge mechanism. Reading both walkthroughs side by side surfaces the choice space: comorphism-mediated translation when one runtime's output needs to be reshaped for another's consumption, witness-index admission when one institution's verdict is being cited as evidence rather than re-processed.
 
 The fixture this chapter traces lives at [`kernel/tests/fixtures/drug_screening.esl`](../../../kernel/tests/fixtures/drug_screening.esl). The end-to-end test that exercises it is [`kernel/tests/drug_screening.rs`](../../../kernel/tests/drug_screening.rs).
 
@@ -192,7 +192,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
 
 **One slot, not three.** The proposition and the justification term are not separate fields; they appear inside the judgement's TYPE. They used to be three fields checked by three separate paths with nothing requiring them to be about the same claim, so a certificate for one proposition could sit beside a different proposition and both check clean.
 
-The commit triggers D39's `validate_justification` AutoOnLoad gate. The gate's check:
+The commit triggers Rule 21, which owns every `eigentt:Term`-ranged slot and so owns this one. (This was D39's `validate_justification` AutoOnLoad gate until P2 moved the check into commit-time validation and P7 deleted the institution.) The check:
 
 1. **Decode** the judgement's three fields — the logic, the certificate term, and its type.
 2. **Check the type is a type**, then **check the certificate against it**. That is the contract `eigentt:Judgement` states, and it means no slot relies on inference.
@@ -201,7 +201,7 @@ The commit triggers D39's `validate_justification` AutoOnLoad gate. The gate's c
    - `Certificate(App(Declared("…plan_yields_lowic50"), Observed("…m_eig0291_sampleset")), HasLowIC50)` — matched by the inner `app(...)`, which in turn consumes `IsDeclaredAs` for the plan's reproducibility declaration and `IsObservedAs` for the sample set.
 
    All three witnesses admit, the certificate type-checks ✓.
-4. **Emit the verdict.** `Verdict::Holds`. The conclusion is admitted; the chain has attested that this certificate grounds a claim to `StrongInhibitor(EIG_0291)` — not that the proposition is true. A certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
+4. **Nothing is emitted.** The conclusion is admitted; the chain has attested that this certificate grounds a claim to `StrongInhibitor(EIG_0291)` — not that the proposition is true. A certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
 
 **Note what the certificate does NOT cite: the `StatisticalAnalysisResult`.** The statistics institution emitted one, and it records what the run produced — which grounds nothing. A computed claim rests on the plan being DECLARED to denote a function of its input, and on that input being OBSERVED. Neither half comes from the run.
 

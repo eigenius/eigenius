@@ -21,7 +21,7 @@ The most-used reference chapters are:
 - **[`julia-institutions/`](julia-institutions/)** — slow-walk tutorials for each of the v1 Julia institutions
 - **[`lean-institution/`](lean-institution/)** — the platform's first verification institution: Lean 4 in-process via `nanoda_lib`
 - **[`statistics-institution/`](statistics-institution/)** — D52 measurement-statistics institution: recompute statistical claims from raw replicate data, opinionated stances (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard)
-- **[`reasoning-institution/`](reasoning-institution/)** — D39 justification-logic institution: type-check `justification:Certificate` certificates against (justification, proposition) pairs, composing chain artifacts as evidence through the D49 witness-index mechanism
+- **[`justification-logic/`](justification-logic/)** — D39 justification-logic institution: type-check `justification:Certificate` certificates against (justification, proposition) pairs, composing chain artifacts as evidence through the D49 witness-index mechanism
 
 ## Chapters
 
@@ -101,7 +101,7 @@ justification:Conclusion resources at commit. Grounding constructors consume
 chain witnesses admitted by the D49 witness index, composing chain
 artifacts (axioms, observations, statistics verdicts, formal proofs)
 into auditable reasoning chains. See
-[`reasoning-institution/`](reasoning-institution/). For the full
+[`justification-logic/`](justification-logic/). For the full
 statistics + reasoning composition, see
 [composition guide chapter 7](../composition/07-stats-and-reasoning-walkthrough.md).
 
@@ -118,7 +118,7 @@ statistics + reasoning composition, see
 - [**D6 Execution architecture**](../../design/d6-execution-architecture.md) — kernel ↔ orchestrator boundary
 - [**D46 Prop universe**](../../design/d46-prop-universe-and-proof-irrelevance.md), [**D47 Chain-mirrored EigenTT type fragment**](../../design/d47-chain-mirrored-eigentt-type-fragment.md), [**D48 Indexed inductive families**](../../design/d48-indexed-inductive-families.md) — the type-theory foundation the reasoning stack rests on
 - [**D49 Chain-witness machinery**](../../design/d49-chainwitness-machinery.md) — the per-layer witness index that bridges D52 and D39
-- [**D39 Justification logic as institution**](../../design/d39-justification-logic.md) — the reasoning institution's design spec
+- [**D39 Justification logic**](../../design/d39-justification-logic.md) — design spec for the justification vocabulary. Its title says "as institution"; P7 removed that framing, and the kernel checks a conclusion at commit
 - [**D52 Measurement-statistics institution**](../../design/d52-measurement-statistics-institution.md) — the statistics institution's design spec
 
 The full design-document set lives in [`docs/design/`](../../design/).

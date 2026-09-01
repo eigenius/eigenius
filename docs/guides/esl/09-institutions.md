@@ -433,7 +433,7 @@ claim about what belongs in an institution:
 - [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl) — full ontology source: justification:Term, justification:Certificate, justification:Conclusion. The `witness:Is*As` predicates it references are declared in [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json), because the kernel constructs their inhabitants and a type the kernel inhabits cannot be owned by a layer above it.
 - [D39 §3-§5](../../design/d39-justification-logic.md) — design rationale, the Justification Logic foundation, and the soundness story.
 - [D49](../../design/d49-chainwitness-machinery.md) — chain-witness machinery the grounding constructors consume.
-- [`platform/reasoning-institution/`](../platform/reasoning-institution/) — operational walkthrough: how to commit conclusions and compose with the D52 statistics institution. **Written against the institution that no longer exists**, so its verdict-inspection material is stale; the vocabulary and the worked chain are not.
+- [`platform/justification-logic/`](../platform/justification-logic/) — operational walkthrough: how to commit conclusions and compose with the D52 statistics institution. **Written against the institution that no longer exists**, so its verdict-inspection material is stale; the vocabulary and the worked chain are not.
 - [Composition guide §1](../composition/01-introduction.md) — where the justification vocabulary sits in the composition story.
 
 ## 9.11. Hosting a logic — the operational protocol
