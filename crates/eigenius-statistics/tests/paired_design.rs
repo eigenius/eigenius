@@ -67,7 +67,7 @@ fn build_paired_chain() -> ExecutionContext {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
-    let stats_resources = esl::compile_against_layer(stats_source, &reflection)
+    let stats_resources = esl::compile(stats_source, &reflection)
         .expect("statistics.esl compiles against reflection layer");
     let mut stats_builder = LayerBuilder::new("statistics", Some(reflection));
     for r in stats_resources {
@@ -76,16 +76,15 @@ fn build_paired_chain() -> ExecutionContext {
     let stats_layer = Arc::new(stats_builder.build(LayerStorage::in_memory()));
 
     let fixture_source = include_str!("fixtures/paired_design.esl");
-    let fixture_resources = esl::compile_against_layer(fixture_source, &stats_layer)
-        .unwrap_or_else(|errs| {
-            panic!(
-                "paired_design.esl failed to compile: {}",
-                errs.into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        });
+    let fixture_resources = esl::compile(fixture_source, &stats_layer).unwrap_or_else(|errs| {
+        panic!(
+            "paired_design.esl failed to compile: {}",
+            errs.into_iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
     let mut fixture_builder = LayerBuilder::new("paired-fixture", Some(stats_layer));
     for r in fixture_resources {
         fixture_builder.add_resource(r).unwrap();

@@ -54,7 +54,7 @@ fn bench_core_and_mol_round_trip() {
 
     // bench-core, compiled against reflection
     let bench_core_src = include_str!("../../experiments/benchmark/base-ontologies/bench-core.esl");
-    let bench_core_resources = esl::compile_against_layer(bench_core_src, &reflection)
+    let bench_core_resources = esl::compile(bench_core_src, &reflection)
         .unwrap_or_else(|errs| fail("bench-core.esl compile", errs));
     assert!(
         !bench_core_resources.is_empty(),
@@ -68,7 +68,7 @@ fn bench_core_and_mol_round_trip() {
 
     // harness-ontology (bench:TaskOutput), compiled against bench-core
     let harness_src = include_str!("../../experiments/benchmark/harness-ontology.esl");
-    let harness_resources = esl::compile_against_layer(harness_src, &bench_core)
+    let harness_resources = esl::compile(harness_src, &bench_core)
         .unwrap_or_else(|errs| fail("harness-ontology.esl compile", errs));
     assert!(
         !harness_resources.is_empty(),
@@ -82,8 +82,8 @@ fn bench_core_and_mol_round_trip() {
 
     // mol, compiled against harness (linear chain: bench-core → harness → mol)
     let mol_src = include_str!("../../experiments/benchmark/base-ontologies/mol.esl");
-    let mol_resources = esl::compile_against_layer(mol_src, &harness)
-        .unwrap_or_else(|errs| fail("mol.esl compile", errs));
+    let mol_resources =
+        esl::compile(mol_src, &harness).unwrap_or_else(|errs| fail("mol.esl compile", errs));
     assert!(!mol_resources.is_empty(), "mol produced no resources");
     let mut mol_builder = LayerBuilder::new("mol", Some(harness));
     for r in mol_resources {

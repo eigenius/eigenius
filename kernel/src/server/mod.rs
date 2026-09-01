@@ -624,16 +624,14 @@ impl EigeniusService {
             let source = std::str::from_utf8(data)
                 .map_err(|e| Status::invalid_argument(format!("invalid UTF-8: {e}")))?;
             let index = Arc::clone(&*self.institution_index.read().await);
-            let result = match branch {
-                Some(branch_name) => {
-                    let ctx_arc = self.get_branch_context(branch_name).await?;
-                    let ctx = ctx_arc.read().await;
-                    let layer = Arc::clone(ctx.head());
-                    drop(ctx);
-                    crate::esl::compile_full(source, index, &layer)
-                }
-                None => crate::esl::compile_with_institutions(source, index),
-            };
+            // No branch named means `"main"`, which `get_branch_context` always has. There was
+            // a layerless arm here; compiling against no chain cannot resolve a
+            // chain-resident ctor, and every caller had a chain to give (see `esl::compile`).
+            let ctx_arc = self.get_branch_context(branch.unwrap_or("main")).await?;
+            let ctx = ctx_arc.read().await;
+            let layer = Arc::clone(ctx.head());
+            drop(ctx);
+            let result = crate::esl::compile_full(source, index, &layer);
             result.map_err(|errors| {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
                 Status::invalid_argument(format!("ESL compile error: {}", msgs.join("; ")))

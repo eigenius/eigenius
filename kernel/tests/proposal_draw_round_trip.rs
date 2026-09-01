@@ -46,7 +46,7 @@ fn json_layer(name: &str, parent: Option<Arc<Layer>>, sources: &[&str]) -> Arc<L
 }
 
 fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, &parent)
+    let resources = esl::compile(src, &parent)
         .unwrap_or_else(|errs| panic!("{name} failed to compile: {errs:#?}"));
     let mut b = LayerBuilder::new(name, Some(parent));
     for r in &resources {

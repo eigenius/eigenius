@@ -50,7 +50,7 @@ fn load_layer(
     name: &str,
     src: &str,
 ) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, head)
+    let resources = esl::compile(src, head)
         .unwrap_or_else(|e| panic!("{name} compiles against the chain: {e:?}"));
     let mut b = LayerBuilder::new(name, Some(Arc::clone(head)));
     for r in resources {

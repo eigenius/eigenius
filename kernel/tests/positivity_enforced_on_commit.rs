@@ -40,7 +40,7 @@ use std::sync::Arc;
 fn validate_esl(source: &str) -> Vec<(ValidationRule, String)> {
     let storage = LayerStorage::in_memory();
     let ctx = bootstrap_with_storage(storage.clone()).expect("bootstrap builds");
-    let resources = eigenius_kernel::esl::compile_against_layer(source, ctx.head())
+    let resources = eigenius_kernel::esl::compile(source, ctx.head())
         .unwrap_or_else(|e| panic!("ESL must compile; positivity is a VALIDATION defect: {e:?}"));
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(ctx.head())));
     for r in resources {

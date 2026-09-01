@@ -31,7 +31,7 @@ fn iri(s: &str) -> Iri {
 fn layer_with(src: &str, name: &str) -> Arc<Layer> {
     let ctx = bootstrap().expect("bootstrap seeds");
     let head = Arc::clone(ctx.head());
-    let resources = esl::compile_against_layer(src, &head)
+    let resources = esl::compile(src, &head)
         .unwrap_or_else(|errs| panic!("{name} failed to compile: {errs:?}"));
     let mut b = LayerBuilder::new(name, Some(head));
     for r in resources {
@@ -43,7 +43,7 @@ fn layer_with(src: &str, name: &str) -> Arc<Layer> {
 /// Stack two sources as two layers, so the cycle is genuinely cross-layer.
 fn two_layers(first: &str, second: &str) -> Arc<Layer> {
     let lower = layer_with(first, "probe-lower");
-    let resources = esl::compile_against_layer(second, &lower)
+    let resources = esl::compile(second, &lower)
         .unwrap_or_else(|errs| panic!("probe-upper failed to compile: {errs:?}"));
     let mut b = LayerBuilder::new("probe-upper", Some(lower));
     for r in resources {

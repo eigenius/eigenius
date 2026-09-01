@@ -29,37 +29,27 @@ pub mod print;
 
 use crate::ontology::resource::Resource;
 
-/// Compile an ESL source string to Eigon-JSON resources.
-pub fn compile(source: &str) -> Result<Vec<Resource>, Vec<error::EslError>> {
-    let tokens = lexer::tokenize(source).map_err(|e| vec![e])?;
-    let file = parser::parse(&tokens).map_err(|e| vec![e])?;
-    compile::compile_file(&file)
-}
-
-/// Compile an ESL source string with access to an
-/// [`InstitutionIndex`]. When provided, function-call IRIs in program
-/// bodies that classify as Decidable QueryClasses or declared
-/// Comorphisms are routed to the corresponding kernel capability via
-/// specialized program resources.
+/// Compile an ESL source string against a chain layer.
 ///
-/// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
-pub fn compile_with_institutions(
-    source: &str,
-    institutions: std::sync::Arc<crate::institution::registry::InstitutionIndex>,
-) -> Result<Vec<Resource>, Vec<error::EslError>> {
-    let tokens = lexer::tokenize(source).map_err(|e| vec![e])?;
-    let file = parser::parse(&tokens).map_err(|e| vec![e])?;
-    compile::compile_file_with_institutions(&file, Some(institutions))
-}
-
-/// Compile an ESL source string against a chain layer, seeding the
-/// compiler's ctor table with every chain-resident inductive's
-/// constructors. Required for D39 justification:Conclusion commits whose
-/// `type_expr(...)` certificates reference chain-resident ctors like
-/// `app` / `declared` / `observed` from `justification:Certificate` —
-/// the bare-name ctor disambiguator needs to see those entries to
-/// emit the right `Exp::InductiveCtor` instead of a plain reference.
-pub fn compile_against_layer(
+/// **The layer is required, and that is the point.** Compiling seeds the compiler's ctor and
+/// macro tables from every chain-resident inductive, which is what lets the bare-name ctor
+/// disambiguator emit an `Exp::InductiveCtor` rather than a plain reference — and, under D85
+/// §6.1, what lets a value name its constructor's arguments, since those names live in the
+/// inductive's `core:arg_types` and nowhere else.
+///
+/// There were two layerless entry points until `2026-09-01`, `compile` and
+/// `compile_with_institutions`. They existed for callers that turned out to have a chain
+/// anyway: `bootstrap`'s parentless branch was unreachable (the first ESL ontology sits at
+/// index 4, so every ESL layer has a parent), the CLI's file loaders were called from commands
+/// holding an `ExecutionContext`, and the server's no-branch arm had `"main"`, which is always
+/// present. Keeping them would have forced the argument names into a second table inside the
+/// D47 codec, to be kept in step with the ontology by hand — the same shape as the
+/// `binder_name` / `core:binder_name` drift (eigenius#221) and the declared-but-undecodable
+/// `SizeSort` (eigenius#218).
+///
+/// A source that genuinely references nothing chain-resident passes an empty root layer, and
+/// that is visible at the call site rather than hidden behind an overload.
+pub fn compile(
     source: &str,
     layer: &crate::layer::Layer,
 ) -> Result<Vec<Resource>, Vec<error::EslError>> {

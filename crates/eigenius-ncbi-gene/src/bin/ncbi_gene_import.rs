@@ -141,7 +141,7 @@ fn validate(doc: &str) -> Result<(usize, Vec<String>), String> {
     let layer = build_layer(
         "ncbi-gene",
         Arc::clone(ctx.head()),
-        esl::compile_against_layer(doc, ctx.head()).map_err(|e| format!("compile: {e:?}"))?,
+        esl::compile(doc, ctx.head()).map_err(|e| format!("compile: {e:?}"))?,
         LayerStorage::in_memory(),
     )?;
 

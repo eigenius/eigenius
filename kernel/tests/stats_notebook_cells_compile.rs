@@ -56,7 +56,7 @@ fn every_esl_cell_of_the_stats_notebook_compiles() {
         let id = cell["id"].as_str().unwrap_or("?");
         let source = cell["source"].as_str().expect("esl cell has a source");
 
-        let resources = esl::compile_against_layer(source, &head).unwrap_or_else(|errs| {
+        let resources = esl::compile(source, &head).unwrap_or_else(|errs| {
             panic!(
                 "notebook ESL cell `{id}` failed to compile:\n{}",
                 errs.into_iter()

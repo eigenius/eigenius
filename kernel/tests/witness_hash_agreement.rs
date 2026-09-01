@@ -70,7 +70,12 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
 
     // `prov` — the provenance axis, above reflection.
     let mut prov = LayerBuilder::new("prov", Some(refl_layer));
-    for r in esl::compile(include_str!("../../ontologies/prov/prov.esl")).unwrap() {
+    for r in esl::compile(
+        include_str!("../../ontologies/prov/prov.esl"),
+        &eigenius_kernel::layer::Layer::empty(),
+    )
+    .unwrap()
+    {
         prov.add_resource(r).unwrap();
     }
     let refl = Arc::new(prov.build(LayerStorage::in_memory()));
@@ -81,7 +86,9 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
         include_str!("../../ontologies/lexicon/lexicon-ontology.esl"),
         include_str!("../../ontologies/ontology/ontology.esl"),
     ] {
-        for r in esl::compile(src).expect("ontology ESL compiles") {
+        for r in esl::compile(src, &eigenius_kernel::layer::Layer::empty())
+            .expect("ontology ESL compiles")
+        {
             vocab.add_resource(r).unwrap();
         }
     }
@@ -95,6 +102,7 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
         class cls:activity { }
         class cls:model { }
     "#,
+        &eigenius_kernel::layer::Layer::empty(),
     )
     .unwrap()
     {
@@ -580,7 +588,8 @@ fn esl_def_compiles_and_unfolds_at_a_use_site() {
             ont:prep_of(ont:kind_of(g), ont:kind_of(a))
             desc: "the a-activity of g";
     "#;
-    let resources = esl::compile(src).expect("`def` compiles");
+    let resources =
+        esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("`def` compiles");
     let def = resources
         .iter()
         .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:demo:esl:Activity"))
@@ -641,11 +650,11 @@ fn a_definition_round_trips_through_the_printer() {
         def d:Activity(g : Set, a : Set) : Prop =
             ont:prep_of(ont:kind_of(g), ont:kind_of(a));
     "#;
-    let original = esl::compile(src).expect("compiles");
+    let original = esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles");
     // The printer takes an Eigon-JSON document, the same path `eigenius decompile` uses.
     let doc = eigenius_kernel::ontology::eigon_json::serialize_document(&original);
     let printed = eigenius_kernel::esl::print::print_document(&doc).expect("prints");
-    let reparsed = esl::compile(&printed)
+    let reparsed = esl::compile(&printed, &eigenius_kernel::layer::Layer::empty())
         .unwrap_or_else(|e| panic!("printed ESL does not recompile: {e:?}\n---\n{printed}"));
 
     let find = |rs: &[Resource]| {
@@ -683,7 +692,8 @@ fn nested_definitions_unfold_all_the_way_at_decode() {
         "namespace ont",
         "namespace lexicon = \"urn:eigenius:lexicon\";\n        namespace ont",
     );
-    let resources = esl::compile(&src).expect("nested defs compile");
+    let resources =
+        esl::compile(&src, &eigenius_kernel::layer::Layer::empty()).expect("nested defs compile");
     let mut b = LayerBuilder::new("nested", Some(chain_with_parse_vocabulary()));
     for r in resources {
         b.add_resource(r).unwrap();
@@ -758,7 +768,7 @@ fn an_esl_authored_def_passes_commit_validation() {
     "#;
     let base = chain_with_parse_vocabulary();
     let validator = Validator::new(Arc::clone(&base));
-    for r in esl::compile(src).expect("compiles") {
+    for r in esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles") {
         let errs: Vec<String> = validator
             .validate_resource(&r)
             .into_iter()
@@ -787,7 +797,7 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
             ont:prep_of(ont:kind_of(g), ont:kind_of(a));
     "#;
     let mut b = LayerBuilder::new("defs", Some(chain_with_parse_vocabulary()));
-    for r in esl::compile(src).expect("compiles") {
+    for r in esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles") {
         b.add_resource(r).unwrap();
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
@@ -957,7 +967,8 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
     let base = chain_with_parse_vocabulary();
     let build = |src: &str| {
         let mut b = LayerBuilder::new("case", Some(Arc::clone(&base)));
-        let rs = esl::compile(src).unwrap_or_else(|e| panic!("compiles: {e:?}"));
+        let rs = esl::compile(src, &eigenius_kernel::layer::Layer::empty())
+            .unwrap_or_else(|e| panic!("compiles: {e:?}"));
         for r in rs.clone() {
             b.add_resource(r).unwrap();
         }

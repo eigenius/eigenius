@@ -29,7 +29,8 @@ use serde_json::Value;
 
 /// Compile ESL source and return its resources as Eigon-JSON, keyed by `@id`.
 fn compile_to_json(src: &str) -> std::collections::BTreeMap<String, Value> {
-    let resources = esl::compile(src).unwrap_or_else(|e| panic!("source must compile: {e:?}"));
+    let resources = esl::compile(src, &eigenius_kernel::layer::Layer::empty())
+        .unwrap_or_else(|e| panic!("source must compile: {e:?}"));
     resources
         .iter()
         .filter_map(|r| {
@@ -243,7 +244,7 @@ fn every_shipped_inductive_round_trips_through_esl() {
                     continue;
                 }
             };
-            match esl::compile(&printed) {
+            match esl::compile(&printed, &eigenius_kernel::layer::Layer::empty()) {
                 Ok(rs) => {
                     let after = rs
                         .iter()
@@ -335,7 +336,7 @@ fn every_shipped_ontology_document_round_trips() {
         );
         match esl::print::print_document(&doc) {
             Err(e) => failures.push(format!("{name}: does not decompile: {}", e.message)),
-            Ok(src) => match esl::compile(&src) {
+            Ok(src) => match esl::compile(&src, &eigenius_kernel::layer::Layer::empty()) {
                 Ok(_) => ok += 1,
                 Err(e) => failures.push(format!(
                     "{name}: decompiled text does not recompile: {:?}",
@@ -365,7 +366,8 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace ex = "urn:eigenius:ex";
         resource ex:'obo-foundry' : core:Class { core:short_name = "obo"; }
     "#;
-    let rs = esl::compile(hyphen).expect("a hyphenated local name compiles when quoted");
+    let rs = esl::compile(hyphen, &eigenius_kernel::layer::Layer::empty())
+        .expect("a hyphenated local name compiles when quoted");
     assert!(
         rs.iter().any(|r| r
             .id()
@@ -380,6 +382,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace ex = "urn:eigenius:ex";
         resource ex:'14e82c39' : core:Class { core:short_name = "h"; }
         "#,
+        &eigenius_kernel::layer::Layer::empty(),
     )
     .expect("a leading digit compiles when quoted");
 
@@ -390,6 +393,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace program = "urn:eigenius:program";
         resource 'program':Foo : core:Class { core:short_name = "Foo"; }
         "#,
+        &eigenius_kernel::layer::Layer::empty(),
     )
     .expect("a keyword namespace compiles when quoted");
 
@@ -404,6 +408,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace ex = "urn:eigenius:ex";
         resource ex:'HB#0_1' : core:Class { core:short_name = "x"; }
         "#,
+        &eigenius_kernel::layer::Layer::empty(),
     )
     .expect_err("`#` must not be spellable, quoted or otherwise");
     let msg = err[0].to_string();
@@ -426,7 +431,7 @@ fn the_printer_quotes_only_what_needs_it() {
         resource ex:'obo-foundry' : core:Class { core:short_name = "obo"; }
         resource ex:ordinary : core:Class { core:short_name = "ord"; }
     "#;
-    let rs = esl::compile(src).expect("compiles");
+    let rs = esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles");
     let doc = Value::Array(rs.iter().map(eigon_json::serialize_resource).collect());
     let printed = esl::print::print_document(&doc).expect("decompiles");
 
@@ -438,5 +443,6 @@ fn the_printer_quotes_only_what_needs_it() {
         !printed.contains("'ordinary'"),
         "an ordinary name must NOT be quoted:\n{printed}"
     );
-    esl::compile(&printed).expect("and the printed text recompiles");
+    esl::compile(&printed, &eigenius_kernel::layer::Layer::empty())
+        .expect("and the printed text recompiles");
 }

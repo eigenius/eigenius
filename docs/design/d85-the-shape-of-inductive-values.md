@@ -286,15 +286,24 @@ migration was written, verified (123 values, 185 constructor applications, nesti
 arity or naming problems) and then reverted for exactly this reason; the reader-side work it
 depended on is step 2 and stayed.
 
-**And the emitter needs argument NAMES, which the compiler cannot look up.** `encode_type` and the
-ESL compiler's four declaration emitters — `const_ref_value`, `var_value`, `bare_kind_value`,
-`sort_kind_result_value` — must name each argument to write `<Ind>-<Ctor>-<arg>`, and
-`esl::compile()` is context-free: it has no layer, so it cannot read the inductive's `arg_types`.
-The names therefore have to live in the D47 codec's static table, beside the ctor arities it
-already hard-codes. That is consistent — the codec is the authority for the wire form — but it
-creates a coupling the tree does not have today: **the ontology's `core:arg_name` values and the
-codec's table must agree, or a compiled value names properties the derivation never produced.**
-That coupling needs a test before step 3 lands, and it is a decision rather than a detail.
+**The emitter needs argument NAMES — RESOLVED `2026-09-01` by requiring the layer.** `encode_type`
+and the ESL compiler's four declaration emitters — `const_ref_value`, `var_value`,
+`bare_kind_value`, `sort_kind_result_value` — must name each argument to write
+`<Ind>-<Ctor>-<arg>`, and the names live in the inductive's `core:arg_types`.
+
+This was first recorded as forcing a second table inside the D47 codec, because `esl::compile()`
+was context-free. That was wrong about the callers. Every layerless entry point existed for a
+caller that had a chain anyway: `bootstrap`'s parentless branch was UNREACHABLE (the ontology list
+starts with four JSON documents, so the first ESL entry sits at index 4 and always has a parent),
+the CLI's two file loaders were called from commands that had already built an `ExecutionContext`
+and simply did not pass it, and the server's no-branch arm had `"main"`, which is always present.
+
+`esl::compile` now takes the layer, and the two layerless entry points are gone — four
+compile functions collapse to two, since the (layer present/absent) axis was the one that should
+not have existed. A duplicate table would have been the third instance in this tree of a name
+declared in one place and consumed from another: `binder_name` / `core:binder_name`
+(eigenius#221), and `SizeSort` declared by `eigentt:Term` while the codec had no arm for it
+(eigenius#218).
 
 **Steps 2 and 3 were the other way round until `2026-09-01`, and that order cannot land green.**
 Migrating a value first means writing the resource form into a slot whose validation still reads

@@ -73,14 +73,15 @@ fn build_universal_rule_chain() -> ExecutionContext {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
-    let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
+    let reasoning_resources =
+        esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
+            .expect("reasoning.esl compiles");
     // `prov` (P5). These fixtures carry `prov:` properties and trace classes; without this
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources =
-        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
-            .expect("prov.esl compiles");
+    let prov_resources = esl::compile(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+        .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -94,16 +95,15 @@ fn build_universal_rule_chain() -> ExecutionContext {
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
     let fixture_source = include_str!("fixtures/universal_rule.esl");
-    let fixture_resources =
-        esl::compile_against_layer(fixture_source, &reasoning).unwrap_or_else(|errs| {
-            panic!(
-                "universal_rule.esl failed to compile: {}",
-                errs.into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        });
+    let fixture_resources = esl::compile(fixture_source, &reasoning).unwrap_or_else(|errs| {
+        panic!(
+            "universal_rule.esl failed to compile: {}",
+            errs.into_iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
     let mut fixture_builder = LayerBuilder::new("universal-rule-demo", Some(reasoning));
     for r in fixture_resources {
         fixture_builder.add_resource(r).unwrap();

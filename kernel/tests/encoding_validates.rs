@@ -42,7 +42,7 @@ fn json_layer(name: &str, parent: Option<Arc<Layer>>, sources: &[&str]) -> Arc<L
 }
 
 fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, &parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(src, &parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile (not Expressible):\n{}",
             errs.into_iter()

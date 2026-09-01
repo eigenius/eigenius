@@ -1448,7 +1448,9 @@ mod universe_polymorphism {
             data p:Box(A : Sort u) : Sort u { mk(A), }
         "#;
         let mut d = crate::layer::LayerBuilder::new("p", Some(core));
-        for r in crate::esl::compile(src).expect("polymorphic ESL compiles") {
+        for r in crate::esl::compile(src, &crate::layer::Layer::empty())
+            .expect("polymorphic ESL compiles")
+        {
             d.add_resource(r).unwrap();
         }
         std::sync::Arc::new(d.build(crate::layer::LayerStorage::in_memory()))

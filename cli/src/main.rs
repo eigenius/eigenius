@@ -1428,7 +1428,7 @@ fn cmd_load(
     };
 
     // Read and parse file (auto-detects ESL vs JSON)
-    let resources = load_resources_from_file(file);
+    let resources = load_resources_from_file(file, ctx.head());
     let count = resources.len();
 
     // Add resources to context
@@ -1650,7 +1650,7 @@ fn cmd_program_validate(program_file: &str, ontology: Option<&str>, json_output:
 }
 
 fn load_file_into_context(ctx: &mut ExecutionContext, backend: &dyn PersistentBackend, file: &str) {
-    let resources = load_resources_from_file(file);
+    let resources = load_resources_from_file(file, ctx.head());
     for resource in resources {
         if let Err(e) = ctx.add_resource(resource) {
             eprintln!("Error loading '{file}': {e}");
@@ -1674,7 +1674,7 @@ fn cmd_validate(file: &str, json_output: bool) {
     };
 
     // Read and parse file (auto-detects ESL vs JSON)
-    let resources = load_resources_from_file(file);
+    let resources = load_resources_from_file(file, ctx.head());
     let count = resources.len();
 
     // Build a temporary layer for validation
@@ -1758,13 +1758,12 @@ fn cmd_compile(file: &str, json_output: bool) {
         eprintln!("Bootstrap failed: {e}");
         std::process::exit(1);
     });
-    let resources = eigenius_kernel::esl::compile_against_layer(&source, ctx.head())
-        .unwrap_or_else(|errors| {
-            for e in &errors {
-                eprintln!("{file}: {e}");
-            }
-            std::process::exit(1);
-        });
+    let resources = eigenius_kernel::esl::compile(&source, ctx.head()).unwrap_or_else(|errors| {
+        for e in &errors {
+            eprintln!("{file}: {e}");
+        }
+        std::process::exit(1);
+    });
 
     // Output as Eigon-JSON array
     let json_values: Vec<serde_json::Value> = resources
@@ -1812,8 +1811,8 @@ fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
             eprintln!("Bootstrap failed: {e}");
             std::process::exit(1);
         });
-        let resources = eigenius_kernel::esl::compile_against_layer(&source, ctx.head())
-            .unwrap_or_else(|errors| {
+        let resources =
+            eigenius_kernel::esl::compile(&source, ctx.head()).unwrap_or_else(|errors| {
                 eprintln!("{file}: decompiled source does not compile:");
                 for e in &errors {
                     eprintln!("  {e}");
@@ -2357,7 +2356,7 @@ fn load_resources_against_layer(
         std::process::exit(1);
     });
     if file.ends_with(".esl") {
-        eigenius_kernel::esl::compile_against_layer(&data, layer).unwrap_or_else(|errors| {
+        eigenius_kernel::esl::compile(&data, layer).unwrap_or_else(|errors| {
             for e in &errors {
                 eprintln!("{file}: {e}");
             }
@@ -2371,15 +2370,37 @@ fn load_resources_against_layer(
     }
 }
 
+/// The in-memory bootstrap chain, built once, for compiling ESL CLIENT-SIDE.
+///
+/// `esl::compile` requires a layer: the compiler seeds its ctor and macro tables from the
+/// chain, and under D85 §6.1 an emitted value names its constructor's arguments, whose names
+/// live in the inductive's `core:arg_types`. A `remote_*` command has no local store, but it
+/// does have the same core the server booted from, so it compiles against that rather than
+/// against nothing.
+fn client_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        let ctx = eigenius_kernel::bootstrap::bootstrap().unwrap_or_else(|e| {
+            eprintln!("Bootstrap failed while compiling ESL: {e:?}");
+            std::process::exit(1);
+        });
+        std::sync::Arc::clone(ctx.head())
+    })
+}
+
 /// Load resources from a file, auto-detecting ESL (.esl) vs Eigon-JSON.
-fn load_resources_from_file(file: &str) -> Vec<eigenius_kernel::ontology::resource::Resource> {
+fn load_resources_from_file(
+    file: &str,
+    layer: &eigenius_kernel::layer::Layer,
+) -> Vec<eigenius_kernel::ontology::resource::Resource> {
     let data = std::fs::read_to_string(file).unwrap_or_else(|e| {
         eprintln!("Failed to read file: {e}");
         std::process::exit(1);
     });
 
     if file.ends_with(".esl") {
-        eigenius_kernel::esl::compile(&data).unwrap_or_else(|errors| {
+        eigenius_kernel::esl::compile(&data, layer).unwrap_or_else(|errors| {
             for e in &errors {
                 eprintln!("{file}: {e}");
             }
@@ -2402,7 +2423,7 @@ fn cmd_reflect(file: &str, json_output: bool) {
         }
     };
 
-    let resources = load_resources_from_file(file);
+    let resources = load_resources_from_file(file, ctx.head());
     let count = resources.len();
 
     if resources.is_empty() {
@@ -2729,13 +2750,13 @@ fn build_embedder_startup(
 // --- Remote mode (gRPC client) ---
 
 /// Read a file, compiling ESL to Eigon-JSON if needed. Returns JSON bytes.
-fn read_as_json(file: &str) -> Vec<u8> {
+fn read_as_json(file: &str, layer: &eigenius_kernel::layer::Layer) -> Vec<u8> {
     if file.ends_with(".esl") {
         let source = std::fs::read_to_string(file).unwrap_or_else(|e| {
             eprintln!("Failed to read {file}: {e}");
             std::process::exit(1);
         });
-        let resources = eigenius_kernel::esl::compile(&source).unwrap_or_else(|errors| {
+        let resources = eigenius_kernel::esl::compile(&source, layer).unwrap_or_else(|errors| {
             for e in &errors {
                 eprintln!("{file}: {e}");
             }
@@ -2898,8 +2919,8 @@ async fn remote_run(
     let mut client = connect_client(endpoint).await;
 
     // Compile ESL files client-side since program and input may have different formats
-    let program_data = read_as_json(program_file);
-    let input_data = read_as_json(input_file);
+    let program_data = read_as_json(program_file, client_chain());
+    let input_data = read_as_json(input_file, client_chain());
 
     let request = eigenius_kernel::server::proto::RunProgramRequest {
         program: program_data,
@@ -3050,7 +3071,7 @@ async fn remote_load(
 async fn remote_reflect(endpoint: &str, file: &str, json_output: bool) {
     let mut client = connect_client(endpoint).await;
 
-    let data = read_as_json(file);
+    let data = read_as_json(file, client_chain());
 
     let request = eigenius_kernel::server::proto::ReflectRequest {
         trace: data,
@@ -4517,7 +4538,7 @@ async fn remote_capability_test(
 
     let is_institution = institutions.iter().any(|i| i.iri == iri);
 
-    let input_json = read_as_json(input_file);
+    let input_json = read_as_json(input_file, client_chain());
 
     if is_institution {
         // There is no per-institution dispatch RPC. Per-RPC

@@ -72,7 +72,9 @@ fn build_composition_chain() -> ExecutionContext {
     // Reasoning layer — provides justification:Certificate + justification:Term
     // inductives the certificate type-checks against.
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
-    let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
+    let reasoning_resources =
+        esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
+            .expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {
         reasoning_builder.add_resource(r).unwrap();
@@ -83,7 +85,7 @@ fn build_composition_chain() -> ExecutionContext {
     // enums, and the PopulationLevel scope marker class the
     // composition fixture references.
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
-    let stats_resources = esl::compile_against_layer(stats_source, &reasoning)
+    let stats_resources = esl::compile(stats_source, &reasoning)
         .expect("statistics.esl compiles against reasoning layer");
     let mut stats_builder = LayerBuilder::new("statistics", Some(reasoning));
     for r in stats_resources {
@@ -97,16 +99,15 @@ fn build_composition_chain() -> ExecutionContext {
     // proposition is what the computed ground actually consumes, as used
     // by the composition fixture's justification:Conclusion.
     let ic50_source = include_str!("fixtures/ic50_measurement.esl");
-    let ic50_resources =
-        esl::compile_against_layer(ic50_source, &stats_layer).unwrap_or_else(|errs| {
-            panic!(
-                "ic50_measurement.esl failed to compile: {}",
-                errs.into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        });
+    let ic50_resources = esl::compile(ic50_source, &stats_layer).unwrap_or_else(|errs| {
+        panic!(
+            "ic50_measurement.esl failed to compile: {}",
+            errs.into_iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
     let mut ic50_builder = LayerBuilder::new("ic50-fixture", Some(stats_layer));
     for r in ic50_resources {
         ic50_builder.add_resource(r).unwrap();
@@ -117,8 +118,8 @@ fn build_composition_chain() -> ExecutionContext {
     // + its DeclarationTrace + the justification:Conclusion that derives
     // StrongInhibitor(EIG_0291) via App(Declared(rule), App(Declared(plan), Observed(s))).
     let composition_source = include_str!("fixtures/d39_composition.esl");
-    let composition_resources = esl::compile_against_layer(composition_source, &ic50_layer)
-        .unwrap_or_else(|errs| {
+    let composition_resources =
+        esl::compile(composition_source, &ic50_layer).unwrap_or_else(|errs| {
             panic!(
                 "d39_composition.esl failed to compile: {}",
                 errs.into_iter()

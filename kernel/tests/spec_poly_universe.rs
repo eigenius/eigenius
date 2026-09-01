@@ -61,9 +61,8 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources =
-        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
-            .expect("prov.esl compiles");
+    let prov_resources = esl::compile(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+        .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -71,21 +70,22 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
-    for r in esl::compile(reasoning_source).expect("reasoning.esl compiles") {
+    for r in esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
+        .expect("reasoning.esl compiles")
+    {
         reasoning_builder.add_resource(r).unwrap();
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
-    let fixture_resources =
-        esl::compile_against_layer(fixture_source, &reasoning).unwrap_or_else(|errs| {
-            panic!(
-                "fixture failed to compile: {}",
-                errs.into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        });
+    let fixture_resources = esl::compile(fixture_source, &reasoning).unwrap_or_else(|errs| {
+        panic!(
+            "fixture failed to compile: {}",
+            errs.into_iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
     let mut fixture_builder = LayerBuilder::new("spec-poly-demo", Some(reasoning));
     for r in fixture_resources {
         fixture_builder.add_resource(r).unwrap();

@@ -107,7 +107,7 @@ fn print_then_compile(term: &Value, prop_ns: &str, layer: &Layer) -> Result<Valu
     // Against a layer, not bare: constructor short names resolve through the chain's ctor table
     // (`collect_ctors_from_layer`), which is where `justification:Certificate`'s ctors live. This is
     // also how decompiled ESL is meant to be reloaded.
-    let resources = esl::compile_against_layer(&src, layer).map_err(|errs| {
+    let resources = esl::compile(&src, layer).map_err(|errs| {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         format!("recompile: {}\n--- source ---\n{src}", msgs.join("; "))
     })?;
@@ -134,8 +134,8 @@ fn every_demo_term_round_trips_through_esl() {
         let Ok(text) = std::fs::read_to_string(path) else {
             panic!("corpus file missing: {path} (run from the kernel crate root)");
         };
-        let resources = esl::compile_against_layer(&text, layer)
-            .unwrap_or_else(|e| panic!("{path} does not compile: {e:?}"));
+        let resources =
+            esl::compile(&text, layer).unwrap_or_else(|e| panic!("{path} does not compile: {e:?}"));
         let doc = Value::Array(
             resources
                 .iter()
@@ -193,7 +193,7 @@ fn boolean_literal_round_trips_through_esl() {
             "namespace rt = \"urn:eigenius:roundtrip\";\n\n\
              resource rt:probe : rt:Probe {{\n    rt:term = type_expr({literal});\n}}\n"
         );
-        let resources = esl::compile_against_layer(&src, layer)
+        let resources = esl::compile(&src, layer)
             .unwrap_or_else(|e| panic!("{literal} does not compile: {e:?}"));
         let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
             .expect("well-formed IRI");
@@ -268,7 +268,7 @@ fn pretty_layout_changes_only_whitespace() {
 
     for path in CORPUS {
         let text = std::fs::read_to_string(path).expect("corpus file");
-        let resources = esl::compile_against_layer(&text, layer).expect("corpus compiles");
+        let resources = esl::compile(&text, layer).expect("corpus compiles");
         let doc = Value::Array(
             resources
                 .iter()
@@ -391,7 +391,7 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
          rt:term = type_expr(\n{body}\n    );\n}}\n",
         ns.preamble()
     );
-    let resources = esl::compile_against_layer(&src, layer).map_err(|errs| {
+    let resources = esl::compile(&src, layer).map_err(|errs| {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         format!("{}\n--- source ---\n{src}", msgs.join("; "))
     })?;

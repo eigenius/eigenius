@@ -435,9 +435,12 @@ fn comorphism_translates_dock_to_assay() {
         }
     ";
 
-    let user_resources =
-        eigenius_kernel::esl::compile_with_institutions(source, Arc::clone(&index))
-            .expect("ESL compile");
+    let user_resources = eigenius_kernel::esl::compile_full(
+        source,
+        Arc::clone(&index),
+        &eigenius_kernel::layer::Layer::empty(),
+    )
+    .expect("ESL compile");
     let mut user_builder = LayerBuilder::new("dock-assay-demo-program", Some(Arc::clone(&layer)));
     for r in user_resources {
         user_builder.add_resource(r).expect("add user resource");

@@ -70,8 +70,8 @@ resource lexicon:e_hela : lexicon:LexicalEntry {
 "#;
 
 fn layer_over(name: &str, parent: Arc<Layer>, src: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, &parent)
-        .unwrap_or_else(|e| panic!("{name} must compile: {e:?}"));
+    let resources =
+        esl::compile(src, &parent).unwrap_or_else(|e| panic!("{name} must compile: {e:?}"));
     let mut b = LayerBuilder::new(name, Some(parent));
     for r in resources {
         b.add_resource(r)

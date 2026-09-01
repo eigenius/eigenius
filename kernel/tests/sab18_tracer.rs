@@ -18,7 +18,7 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Value;
 
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(source, parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile:\n{}",
             errs.into_iter()
@@ -63,9 +63,8 @@ fn sab18_dili_rf_validates_to_holds_and_covers() {
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
     // `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources =
-        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
-            .expect("prov.esl compiles");
+    let prov_resources = esl::compile(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+        .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -73,7 +72,9 @@ fn sab18_dili_rf_validates_to_holds_and_covers() {
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
-    for r in esl::compile(reasoning_src).expect("reasoning.esl compiles") {
+    for r in esl::compile(reasoning_src, &eigenius_kernel::layer::Layer::empty())
+        .expect("reasoning.esl compiles")
+    {
         reasoning_builder.add_resource(r).unwrap();
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));

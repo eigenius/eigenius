@@ -68,7 +68,7 @@ fn stand_up(spec: &SeedSpec) -> Arc<Layer> {
     let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
     let (doc, _rep) = render_document(&chosen, &ranks, &MassNouns::new());
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources = esl::compile_against_layer(&doc, ctx.head()).expect("wn compiles");
+    let resources = esl::compile(&doc, ctx.head()).expect("wn compiles");
     let mut b = LayerBuilder::new("wn", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add wn resource");

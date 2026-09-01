@@ -135,7 +135,7 @@ resource lexicon:counterparts_np : lexicon:LexicalEntry {
 
 fn parser() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources = esl::compile_against_layer(FIXTURE, ctx.head()).expect("fixture compiles");
+    let resources = esl::compile(FIXTURE, ctx.head()).expect("fixture compiles");
     let mut b = LayerBuilder::new("cmp-than", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add fixture resource");

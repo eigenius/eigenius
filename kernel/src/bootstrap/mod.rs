@@ -154,14 +154,26 @@ fn load_esl_layer(
     parent: Option<Arc<Layer>>,
     storage: crate::layer::LayerStorage,
 ) -> Result<Arc<Layer>, BootstrapError> {
-    // Compile AGAINST the parent layer when present, so the source can resolve
-    // constructors declared lower in the chain (e.g. `closed-class.esl` uses the
-    // `lexicon:Cat` ctor `cat_forall` from the schema). Parentless layers (the
-    // root) fall back to context-free compile.
-    let compiled = match &parent {
-        Some(p) => crate::esl::compile_against_layer(esl_source, p),
-        None => crate::esl::compile(esl_source),
+    // Compile AGAINST the parent layer, so the source resolves constructors declared lower in
+    // the chain (e.g. `closed-class.esl` uses the `lexicon:Cat` ctor `cat_forall` from the
+    // schema). There was a context-free fallback here for a parentless layer; it was
+    // unreachable, because the ontology list below starts with four JSON documents and the
+    // first ESL entry sits at index 4, so an ESL layer always has a parent. A root ESL layer
+    // is now a hard error rather than a silent compile with no chain.
+    let Some(parent_layer) = parent.as_ref() else {
+        return Err(BootstrapError::CoreOntologyInvalid(vec![
+            crate::validation::ValidationError {
+                resource_id: None,
+                property: None,
+                rule: crate::validation::ValidationRule::TypeMismatch,
+                message: format!(
+                    "bootstrap layer `{name}` is ESL with no parent — an ESL ontology must \
+                     compile against a chain"
+                ),
+            },
+        ]));
     };
+    let compiled = crate::esl::compile(esl_source, parent_layer);
     let resources = compiled.map_err(|errs| {
         BootstrapError::CoreOntologyInvalid(
             errs.into_iter()

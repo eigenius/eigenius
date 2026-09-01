@@ -3634,14 +3634,15 @@ mod tests {
             "universe u; data p:D : Sort u { mk : p:D }",
             "universe u; data p:E : Type u + 1 { mk : p:E }",
         ] {
-            crate::esl::compile(&format!("{head}\n{body}"))
+            crate::esl::compile(&format!("{head}\n{body}"), &crate::layer::Layer::empty())
                 .unwrap_or_else(|e| panic!("`{body}` must compile: {e:?}"));
         }
 
         // Undeclared — rejected, with the name and a fix in the message.
-        let e = crate::esl::compile(&format!(
-            "{head}\nuniverse u; axiom p:c : forall (T : Sort v) => T -> T;"
-        ))
+        let e = crate::esl::compile(
+            &format!("{head}\nuniverse u; axiom p:c : forall (T : Sort v) => T -> T;"),
+            &crate::layer::Layer::empty(),
+        )
         .expect_err("`Sort v` with only `u` declared must be rejected");
         let msg = e[0].to_string();
         assert!(msg.contains("`v` is not declared"), "{msg}");
@@ -3651,9 +3652,10 @@ mod tests {
         );
 
         // And with NO universe declaration at all — the auto-bound case.
-        crate::esl::compile(&format!(
-            "{head}\naxiom p:d : forall (T : Sort u) => T -> T;"
-        ))
+        crate::esl::compile(
+            &format!("{head}\naxiom p:d : forall (T : Sort u) => T -> T;"),
+            &crate::layer::Layer::empty(),
+        )
         .expect_err("an undeclared level must not auto-bind");
     }
 
@@ -3674,7 +3676,7 @@ mod tests {
             "universe u u;",           // twice in one declaration
             "universe u; universe u;", // twice across declarations
         ] {
-            let e = crate::esl::compile(&format!("{head}\n{dup}"))
+            let e = crate::esl::compile(&format!("{head}\n{dup}"), &crate::layer::Layer::empty())
                 .expect_err("a duplicate level variable must be rejected");
             let msg = e[0].to_string();
             assert!(
@@ -3684,10 +3686,16 @@ mod tests {
         }
 
         // The non-duplicate forms still compile — the check must not reject distinct names.
-        crate::esl::compile(&format!("{head}\nuniverse u v;"))
-            .expect("distinct level variables in one declaration are fine");
-        crate::esl::compile(&format!("{head}\nuniverse u; universe v;"))
-            .expect("distinct level variables across declarations are fine");
+        crate::esl::compile(
+            &format!("{head}\nuniverse u v;"),
+            &crate::layer::Layer::empty(),
+        )
+        .expect("distinct level variables in one declaration are fine");
+        crate::esl::compile(
+            &format!("{head}\nuniverse u; universe v;"),
+            &crate::layer::Layer::empty(),
+        )
+        .expect("distinct level variables across declarations are fine");
     }
 
     /// **eigenius#188 — a declaration's own sort can be POLYMORPHIC.**
@@ -3733,7 +3741,7 @@ mod tests {
                    universe u v;
                    data p:D : {sort_src} {{ mk : p:D }}"#
             );
-            let rs = crate::esl::compile(&src)
+            let rs = crate::esl::compile(&src, &crate::layer::Layer::empty())
                 .unwrap_or_else(|e| panic!("`data p:D : {sort_src}` must compile: {e:?}"));
             let got = rs[0]
                 .get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
@@ -3781,7 +3789,7 @@ mod tests {
     }
 
     fn compile_esl(input: &str) -> Vec<Resource> {
-        esl::compile(input).unwrap()
+        esl::compile(input, &crate::layer::Layer::empty()).unwrap()
     }
 
     #[test]
@@ -4434,6 +4442,7 @@ mod tests {
                 description = "Bad";
             }
         "#,
+            &crate::layer::Layer::empty(),
         );
         assert!(result.is_err());
     }
@@ -5420,6 +5429,7 @@ mod tests {
                 mk,
             }
             "#,
+            &crate::layer::Layer::empty(),
         );
         result.expect("two inductives may share a ctor short name");
     }
@@ -5439,6 +5449,7 @@ mod tests {
             axiom ex:use : ex:Foo -> Prop;
             axiom ex:use_with_arg : ex:use(mk);
             "#,
+            &crate::layer::Layer::empty(),
         );
         let err = result.expect_err("ambiguous bare `mk` use must error");
         let msg = err
@@ -5479,6 +5490,7 @@ mod tests {
                 );
             }
             "#,
+            &crate::layer::Layer::empty(),
         )
         .expect("qualified ctor in value slot must resolve as a ctor, not a macro");
         // The resource should commit (no error); we don't introspect
@@ -5520,6 +5532,7 @@ mod tests {
                 );
             }
             "#,
+            &crate::layer::Layer::empty(),
         )
         .expect("both forms compile");
 
@@ -5575,6 +5588,7 @@ mod tests {
                 );
             }
             "#,
+            &crate::layer::Layer::empty(),
         )
         .expect("scope-shadowing form compiles");
 
@@ -5780,6 +5794,7 @@ mod tests {
                 (only_one) => only_one
             }
             "#,
+            &crate::layer::Layer::empty(),
         );
         let err = result.expect_err("wrong arity must be rejected");
         let msg = err[0].message.clone();
@@ -5960,6 +5975,7 @@ mod tests {
                 core:text_analyzer = "en-stem-v1";
             }
             "#,
+            &crate::layer::Layer::empty(),
         )
         .expect_err("text_index compilation should fail with M1 stub");
         let combined = errs
@@ -5986,6 +6002,7 @@ mod tests {
                 core:vec_dim = 1536;
             }
             "#,
+            &crate::layer::Layer::empty(),
         )
         .expect_err("vector_index compilation should fail with M1 stub");
         let combined = errs
@@ -6127,7 +6144,8 @@ mod tests {
         // Any future edit to the file or to the ESL surface that breaks this
         // round-trip needs to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
-        let resources = esl::compile(source).expect("justification.esl must compile");
+        let resources = esl::compile(source, &crate::layer::Layer::empty())
+            .expect("justification.esl must compile");
 
         // Expect: 1 justification:Term + 1 justification:Certificate.
         // The three `witness:Is*As` predicates were here until P7 and are NOT
@@ -6296,7 +6314,8 @@ mod tests {
             Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let source = include_str!("../../../ontologies/justification/justification.esl");
-        let user_resources = esl::compile(source).expect("reasoning.esl must compile");
+        let user_resources = esl::compile(source, &crate::layer::Layer::empty())
+            .expect("reasoning.esl must compile");
         let mut user_builder = LayerBuilder::new("justification", Some(reflection));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -6434,7 +6453,8 @@ mod tests {
         // resources. Any future edit that breaks this needs to be
         // deliberate.
         let source = include_str!("../../../ontologies/statistics/statistics.esl");
-        let resources = esl::compile(source).expect("statistics.esl must compile");
+        let resources = esl::compile(source, &crate::layer::Layer::empty())
+            .expect("statistics.esl must compile");
 
         // Expect at least:
         //  - 5 axis enums (Randomization, Blocking, FactorDesign,
@@ -6557,6 +6577,7 @@ mod tests {
                 eg:body = eg:undefined_macro("anything");
             }
             "#,
+            &crate::layer::Layer::empty(),
         );
         let err = result.expect_err("undeclared macro should error");
         assert!(
@@ -6584,6 +6605,7 @@ mod tests {
                 eg:body = eg:two_args("only_one");
             }
             "#,
+            &crate::layer::Layer::empty(),
         );
         let err = result.expect_err("arity mismatch should error");
         assert!(
@@ -6599,7 +6621,7 @@ mod sigma_surface_tests {
     use crate::esl;
 
     fn axiom_statement(src: &str) -> serde_json::Value {
-        let rs = esl::compile(src).expect("compiles");
+        let rs = esl::compile(src, &crate::layer::Layer::empty()).expect("compiles");
         let a = rs
             .iter()
             .find(|r| r.id().is_some_and(|i| i.as_str().ends_with(":t")))
@@ -6680,7 +6702,7 @@ mod qualified_ctor_tests {
     use super::*;
 
     fn compile(src: &str) -> Result<Vec<crate::ontology::resource::Resource>, Vec<EslError>> {
-        crate::esl::compile(src)
+        crate::esl::compile(src, &crate::layer::Layer::empty())
     }
 
     fn errors(src: &str) -> String {

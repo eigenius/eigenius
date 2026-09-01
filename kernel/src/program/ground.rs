@@ -1123,7 +1123,8 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
+        let user_resources = crate::esl::compile(esl_source, &crate::layer::Layer::empty())
+            .expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -1521,7 +1522,8 @@ mod tests {
             class t:PlainClass { }
         "#;
         let mut b = LayerBuilder::new("t", Some(core));
-        for r in crate::esl::compile(src).expect("test ESL compiles") {
+        for r in crate::esl::compile(src, &crate::layer::Layer::empty()).expect("test ESL compiles")
+        {
             b.add_resource(r).unwrap();
         }
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));

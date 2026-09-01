@@ -308,7 +308,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("chain-load");
-        let resources = eigenius_kernel::esl::compile_against_layer(&src, &head).map_err(|e| {
+        let resources = eigenius_kernel::esl::compile(&src, &head).map_err(|e| {
             format!(
                 "{} does not compile against the chain: {e:?}",
                 path.display()

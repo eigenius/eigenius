@@ -798,6 +798,16 @@ impl Layer {
 
     /// Iterate over resources defined directly in this layer.
     /// Yields owned `(Iri, Arc<Resource>)` pairs in IRI order.
+    /// An empty root layer — no resources, no parent.
+    ///
+    /// For a caller that must supply a layer but genuinely has nothing to resolve against: a
+    /// self-contained ESL source in a test, say. `esl::compile` requires a layer precisely so
+    /// that "this compiles against no chain" is a statement at the call site rather than a
+    /// second entry point, and this is how that statement is written.
+    pub fn empty() -> Layer {
+        LayerBuilder::new("empty", None).build(LayerStorage::in_memory())
+    }
+
     pub fn iter_resources(&self) -> impl Iterator<Item = (Iri, Arc<Resource>)> + '_ {
         self.defined_iris
             .iter()

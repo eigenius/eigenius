@@ -118,7 +118,7 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
     };
 
     let stats_layer = {
-        let rs = esl::compile_against_layer(
+        let rs = esl::compile(
             include_str!("../../../ontologies/statistics/statistics.esl"),
             &reflection,
         )
@@ -143,7 +143,7 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
     };
 
     let fixture = {
-        let rs = esl::compile_against_layer(FIXTURE, &ingest).unwrap_or_else(|errs| {
+        let rs = esl::compile(FIXTURE, &ingest).unwrap_or_else(|errs| {
             panic!(
                 "fixture failed to compile: {}",
                 errs.into_iter()

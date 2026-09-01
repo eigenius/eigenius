@@ -54,7 +54,9 @@ program ex:reproject : ex:Thing -> ex:Thing {
 /// the ontology declarations. Both come back as `serde_json::Value`
 /// blobs ready for the gRPC `Load` / `RunProgram` calls.
 fn compile_test_artifacts() -> (serde_json::Value, serde_json::Value) {
-    let resources = eigenius_kernel::esl::compile(ESL_SOURCE).expect("ESL compile");
+    let resources =
+        eigenius_kernel::esl::compile(ESL_SOURCE, &eigenius_kernel::layer::Layer::empty())
+            .expect("ESL compile");
     let program_iri = "urn:eigenius:example:reproject";
     let mut program: Option<serde_json::Value> = None;
     let mut others: Vec<serde_json::Value> = Vec::new();

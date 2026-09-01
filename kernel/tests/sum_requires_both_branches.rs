@@ -73,9 +73,8 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
     // stop loading for two months. It asserts it now, below.
     //
     // Sits above `reflection` and below `justification`, matching `BOOTSTRAP_CHAIN`.
-    let prov_resources =
-        esl::compile_against_layer(include_str!("../../ontologies/prov/prov.esl"), &reflection)
-            .expect("prov.esl compiles");
+    let prov_resources = esl::compile(include_str!("../../ontologies/prov/prov.esl"), &reflection)
+        .expect("prov.esl compiles");
     let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
     for r in prov_resources {
         prov_builder.add_resource(r).unwrap();
@@ -84,12 +83,14 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
 
     let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
-    for r in esl::compile(reasoning_source).expect("justification.esl compiles") {
+    for r in esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
+        .expect("justification.esl compiles")
+    {
         reasoning_builder.add_resource(r).unwrap();
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
-    let fixture_resources = esl::compile_against_layer(fixture_source, &reasoning)
+    let fixture_resources = esl::compile(fixture_source, &reasoning)
         .unwrap_or_else(|errs| panic!("{label} failed to compile: {errs:?}"));
     let mut fixture_builder = LayerBuilder::new(label, Some(reasoning));
     for r in fixture_resources {

@@ -3516,7 +3516,7 @@ fn resolve_document_discourse_close_out() {
                 include_str!("../../../ontologies/encoding/claim-kind-alignment.esl"),
             ),
         ] {
-            let resources = eigenius_kernel::esl::compile_against_layer(src, &head)
+            let resources = eigenius_kernel::esl::compile(src, &head)
                 .unwrap_or_else(|e| panic!("{name} compiles against the chain: {e:?}"));
             let mut b = eigenius_kernel::layer::LayerBuilder::new(name, Some(Arc::clone(&head)));
             for r in resources {

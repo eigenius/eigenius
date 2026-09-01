@@ -74,7 +74,7 @@ fn build_stats_layer() -> Arc<eigenius_kernel::layer::Layer> {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
-    let stats_resources = esl::compile_against_layer(stats_source, &reflection)
+    let stats_resources = esl::compile(stats_source, &reflection)
         .expect("statistics.esl compiles against reflection layer");
     let mut stats_builder = LayerBuilder::new("statistics", Some(reflection));
     for r in stats_resources {
@@ -144,7 +144,7 @@ resource probe:bridge_proposition : justification:Claim {
     );
 }
 "#;
-    let resources = esl::compile_against_layer(bridge_source, stats_layer)
+    let resources = esl::compile(bridge_source, stats_layer)
         .unwrap_or_else(|errs| panic!("probe ESL failed to compile: {errs:?}"));
     let mut layer_builder = LayerBuilder::new("probe-layer", Some(Arc::clone(stats_layer)));
     for r in resources {

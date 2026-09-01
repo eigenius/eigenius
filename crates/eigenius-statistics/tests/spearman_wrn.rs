@@ -61,8 +61,7 @@ fn build_chain() -> ExecutionContext {
     };
     let stats_layer: Arc<Layer> = {
         let src = include_str!("../../../ontologies/statistics/statistics.esl");
-        let resources =
-            esl::compile_against_layer(src, &reflection).expect("statistics.esl compiles");
+        let resources = esl::compile(src, &reflection).expect("statistics.esl compiles");
         let mut b = LayerBuilder::new("statistics", Some(reflection));
         for r in resources {
             b.add_resource(r).unwrap();
@@ -71,7 +70,7 @@ fn build_chain() -> ExecutionContext {
     };
     let fixture_layer = {
         let src = include_str!("fixtures/spearman_wrn.esl");
-        let resources = esl::compile_against_layer(src, &stats_layer).unwrap_or_else(|errs| {
+        let resources = esl::compile(src, &stats_layer).unwrap_or_else(|errs| {
             panic!(
                 "spearman_wrn.esl failed to compile: {}",
                 errs.into_iter()

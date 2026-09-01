@@ -55,7 +55,7 @@ use eigenius_statistics::institution::iris;
 use eigenius_statistics::StatisticsInstitution;
 
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(source, parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile:\n{}",
             errs.into_iter()
@@ -209,16 +209,22 @@ fn wrn_warrants_kernel_recomputed() {
     // names an agent, a trace or an attribution.
     let prov = {
         let mut b = LayerBuilder::new("prov", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/prov/prov.esl")).unwrap() {
+        for r in esl::compile(
+            include_str!("../../../ontologies/prov/prov.esl"),
+            &eigenius_kernel::layer::Layer::empty(),
+        )
+        .unwrap()
+        {
             b.add_resource(r).unwrap();
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
     let reasoning = {
         let mut b = LayerBuilder::new("reasoning", Some(prov));
-        for r in esl::compile(include_str!(
-            "../../../ontologies/justification/justification.esl"
-        ))
+        for r in esl::compile(
+            include_str!("../../../ontologies/justification/justification.esl"),
+            &eigenius_kernel::layer::Layer::empty(),
+        )
         .expect("reasoning.esl compiles")
         {
             b.add_resource(r).unwrap();

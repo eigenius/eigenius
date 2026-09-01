@@ -43,15 +43,21 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
 
     // `prov` — the provenance axis, above reflection.
     let mut prov = LayerBuilder::new("prov", Some(refl_layer));
-    for r in esl::compile(include_str!("../../ontologies/prov/prov.esl")).unwrap() {
+    for r in esl::compile(
+        include_str!("../../ontologies/prov/prov.esl"),
+        &eigenius_kernel::layer::Layer::empty(),
+    )
+    .unwrap()
+    {
         prov.add_resource(r).unwrap();
     }
     let refl = Arc::new(prov.build(LayerStorage::in_memory()));
 
     let mut rsn = LayerBuilder::new("reasoning", Some(refl));
-    for r in esl::compile(include_str!(
-        "../../ontologies/justification/justification.esl"
-    ))
+    for r in esl::compile(
+        include_str!("../../ontologies/justification/justification.esl"),
+        &eigenius_kernel::layer::Layer::empty(),
+    )
     .unwrap()
     {
         rsn.add_resource(r).unwrap();
@@ -86,7 +92,7 @@ fn justifiedby_can_be_written_as_a_type() {
         )
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
-    for r in esl::compile_against_layer(src, &base).expect("probe ESL compiles") {
+    for r in esl::compile(src, &base).expect("probe ESL compiles") {
         b.add_resource(r).unwrap();
     }
     let probe = Arc::new(b.build(LayerStorage::in_memory()));
@@ -114,7 +120,7 @@ fn justifiedby_index_zero_rejects_a_non_justification_term() {
         axiom probe:bad : justification:Certificate("not-a-justification-term", probe:P)
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
-    for r in esl::compile_against_layer(src, &base).expect("probe ESL compiles") {
+    for r in esl::compile(src, &base).expect("probe ESL compiles") {
         b.add_resource(r).unwrap();
     }
     let probe = Arc::new(b.build(LayerStorage::in_memory()));

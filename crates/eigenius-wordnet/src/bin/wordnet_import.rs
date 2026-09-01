@@ -316,7 +316,7 @@ fn validate(doc: &str) -> Result<(usize, Vec<String>), String> {
     let wn_layer = build_layer(
         "wn",
         Arc::clone(ctx.head()),
-        esl::compile_against_layer(doc, ctx.head()).map_err(|e| format!("wn compile: {e:?}"))?,
+        esl::compile(doc, ctx.head()).map_err(|e| format!("wn compile: {e:?}"))?,
         LayerStorage::in_memory(),
     )?;
 

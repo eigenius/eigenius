@@ -1079,7 +1079,8 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
+        let user_resources = crate::esl::compile(esl_source, &crate::layer::Layer::empty())
+            .expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -1546,6 +1547,7 @@ mod tests {
                 f(a, b, c)
             }
             "#,
+            &crate::layer::Layer::empty(),
         );
         let errs = result.unwrap_err();
         let msg = &errs[0].message;
@@ -2122,7 +2124,8 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_with_institutions(source, idx.clone()).expect("compile");
+            crate::esl::compile_full(source, idx.clone(), &crate::layer::Layer::empty())
+                .expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -2175,7 +2178,8 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_with_institutions(source, idx.clone()).expect("compile");
+            crate::esl::compile_full(source, idx.clone(), &crate::layer::Layer::empty())
+                .expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -2220,7 +2224,7 @@ mod tests {
                 cap:cap_comorphism(input, input)
             }
         "#;
-        let result = crate::esl::compile_with_institutions(source, idx);
+        let result = crate::esl::compile_full(source, idx, &crate::layer::Layer::empty());
         let errors = result.unwrap_err();
         assert!(
             errors.iter().any(|e| e.to_string().contains("comorphism"))
@@ -2247,7 +2251,8 @@ mod tests {
                 cap:cap_comorphism(input)
             }
         "#;
-        let user_resources = crate::esl::compile(source).expect("compile");
+        let user_resources =
+            crate::esl::compile(source, &crate::layer::Layer::empty()).expect("compile");
         // Find the program and check its body is plain Apply (not
         // ComorphismInvokeApply).
         let prog_res = user_resources

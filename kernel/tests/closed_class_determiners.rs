@@ -44,8 +44,7 @@ const DEMO: &str = include_str!("../../experiments/lexicon/lexicon.esl");
 /// top — so the index sees the committed determiners *and* the demo content.
 fn index_over_bootstrap() -> (Arc<Layer>, Parser) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources =
-        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add demo resource");
@@ -75,14 +74,13 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
 }
 "#;
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(LINKING_FIXTURE, &demo_layer).expect("linking fixture compiles");
+    let fix = esl::compile(LINKING_FIXTURE, &demo_layer).expect("linking fixture compiles");
     let mut b2 = LayerBuilder::new("linking", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add linking");
@@ -132,13 +130,13 @@ resource lexicon:zob_sg : lexicon:LexicalEntry {
 /// Bootstrap + demo + the two-sense `zob` fixture, with an index carrying `sense_cap`.
 fn zob_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile_against_layer(ZOB_FIXTURE, &demo_layer).expect("zob fixture compiles");
+    let fix = esl::compile(ZOB_FIXTURE, &demo_layer).expect("zob fixture compiles");
     let mut b2 = LayerBuilder::new("zob", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zob");
@@ -176,14 +174,13 @@ resource lexicon:zworp_pl : lexicon:LexicalEntry {
 
 fn zworp_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(ZWORP_FIXTURE, &demo_layer).expect("zworp fixture compiles");
+    let fix = esl::compile(ZWORP_FIXTURE, &demo_layer).expect("zworp fixture compiles");
     let mut b2 = LayerBuilder::new("zworp", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zworp");
@@ -275,7 +272,7 @@ impl SenseRanker for BurySense {
 /// top-16 is positions 0–15) — so cap-widening WITHIN the reranked order can never re-admit it.
 fn zib_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
@@ -304,7 +301,7 @@ fn zib_layer() -> Arc<Layer> {
              }}\n"
         ));
     }
-    let fix = esl::compile_against_layer(&fixture, &demo_layer).expect("zib fixture compiles");
+    let fix = esl::compile(&fixture, &demo_layer).expect("zib fixture compiles");
     let mut b2 = LayerBuilder::new("zib", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zib");
@@ -371,13 +368,13 @@ resource lexicon:zarg_cell : lexicon:LexicalEntry {
 /// Bootstrap + demo + the two-sense `zarg` fixture committed as a layer chain.
 fn zarg_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile_against_layer(ZARG_FIXTURE, &demo_layer).expect("zarg fixture compiles");
+    let fix = esl::compile(ZARG_FIXTURE, &demo_layer).expect("zarg fixture compiles");
     let mut b2 = LayerBuilder::new("zarg", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zarg");
@@ -589,14 +586,13 @@ resource lexicon:e_like : lexicon:LexicalEntry {
 
 fn denominal_index() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile_against_layer(DENOMINAL_FIXTURE, &demo_layer)
-        .expect("denominal fixture compiles");
+    let fix = esl::compile(DENOMINAL_FIXTURE, &demo_layer).expect("denominal fixture compiles");
     let mut b2 = LayerBuilder::new("denominal", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add denominal relation");
@@ -941,14 +937,13 @@ resource lexicon:e_bit : lexicon:LexicalEntry {
 
 fn widget_index() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(WIDGET_FIXTURE, &demo_layer).expect("widget fixture compiles");
+    let fix = esl::compile(WIDGET_FIXTURE, &demo_layer).expect("widget fixture compiles");
     let mut b2 = LayerBuilder::new("widget", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add widget");
@@ -1014,7 +1009,7 @@ resource lexicon:beside_prep : lexicon:LexicalEntry {
 
 fn parser_with_pied_prep() -> Parser {
     let (demo, _) = index_over_bootstrap();
-    let res = esl::compile_against_layer(PIED_PREP_FIXTURE, &demo).expect("fixture compiles");
+    let res = esl::compile(PIED_PREP_FIXTURE, &demo).expect("fixture compiles");
     let mut b = LayerBuilder::new("pied-prep", Some(Arc::clone(&demo)));
     for r in res {
         b.add_resource(r).expect("add fixture resource");
@@ -2643,8 +2638,7 @@ resource lexicon:yonder_ne : lexicon:LexicalEntry {
 
 fn index_with_pooled_fixture() -> (Arc<Layer>, Parser) {
     let (base, _) = index_with_demonstratives();
-    let resources =
-        esl::compile_against_layer(POOLED_FIXTURE, &base).expect("pooled fixture compiles");
+    let resources = esl::compile(POOLED_FIXTURE, &base).expect("pooled fixture compiles");
     let mut b = LayerBuilder::new("pooled-fixture", Some(base));
     for r in resources {
         b.add_resource(r).expect("add pooled resource");
@@ -2669,8 +2663,7 @@ class lexicon:TestOther {
 
 fn index_with_claim_kinds() -> (Arc<Layer>, Parser) {
     let (base, _) = index_with_demonstratives();
-    let resources =
-        esl::compile_against_layer(CLAIM_KIND_FIXTURE, &base).expect("claim-kind fixture compiles");
+    let resources = esl::compile(CLAIM_KIND_FIXTURE, &base).expect("claim-kind fixture compiles");
     let mut b = LayerBuilder::new("claim-kind-fixture", Some(base));
     for r in resources {
         b.add_resource(r).expect("add claim-kind resource");
@@ -2833,8 +2826,8 @@ fn a_plural_reference_resolves_distributively_to_a_claim_set() {
 
 fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
     let (base, _) = index_over_bootstrap();
-    let resources = esl::compile_against_layer(DEMONSTRATIVE_FIXTURE, &base)
-        .expect("demonstrative fixture compiles");
+    let resources =
+        esl::compile(DEMONSTRATIVE_FIXTURE, &base).expect("demonstrative fixture compiles");
     let mut b = LayerBuilder::new("dem-fixture", Some(base));
     for r in resources {
         b.add_resource(r).expect("add fixture resource");
@@ -3422,14 +3415,13 @@ fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
     // One shared storage across the chain so the bootstrap's `form_text_index` (discovered via the
     // per-storage triple index) is visible to the recq layer — as in production's single backend.
     let storage = ctx.head().storage().clone();
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(storage.clone()));
-    let fix = esl::compile_against_layer(RECQ_FORM_INDEX_FIXTURE, &demo_layer)
-        .expect("recq fixture compiles");
+    let fix = esl::compile(RECQ_FORM_INDEX_FIXTURE, &demo_layer).expect("recq fixture compiles");
     let mut b2 = LayerBuilder::new("recq", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add recq fixture");
@@ -3481,14 +3473,13 @@ fn probe_recq_form_index_active_and_populated() {
     // layer built on the same storage. This mirrors production, where a chain lives on a single
     // backend; a per-layer `LayerStorage::in_memory()` would hide the inherited index.
     let storage = ctx.head().storage().clone();
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(storage.clone()));
-    let fix = esl::compile_against_layer(RECQ_FORM_INDEX_FIXTURE, &demo_layer)
-        .expect("recq fixture compiles");
+    let fix = esl::compile(RECQ_FORM_INDEX_FIXTURE, &demo_layer).expect("recq fixture compiles");
     let mut b2 = LayerBuilder::new("recq", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add recq fixture");
@@ -3554,13 +3545,13 @@ resource demo:e_supercoil : lexicon:LexicalEntry {
 fn description_grounding_base() -> Arc<eigenius_kernel::layer::Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let storage = ctx.head().storage().clone();
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(storage.clone()));
-    let fix = esl::compile_against_layer(DESCRIPTION_GROUNDING_FIXTURE, &demo_layer)
+    let fix = esl::compile(DESCRIPTION_GROUNDING_FIXTURE, &demo_layer)
         .expect("description fixture compiles");
     let mut b2 = LayerBuilder::new("fixture", Some(Arc::clone(&demo_layer)));
     for r in fix {
@@ -3776,14 +3767,13 @@ resource lexicon:e_contributes : lexicon:LexicalEntry {
 
 fn contrib_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(CONTRIB_FIXTURE, &demo_layer).expect("contrib fixture compiles");
+    let fix = esl::compile(CONTRIB_FIXTURE, &demo_layer).expect("contrib fixture compiles");
     let mut b2 = LayerBuilder::new("contrib", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add contrib");
@@ -5396,8 +5386,7 @@ fn nary_coordination_has_a_single_left_branching_parse() {
 /// index itself (its laziness / coverage) rather than on a parse.
 fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources =
-        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add demo resource");
@@ -5410,8 +5399,7 @@ fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
 /// Same, on ISOLATED storage (so no `ValueIndex` is active and the index takes the eager path).
 fn eager_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources =
-        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add demo resource");
@@ -5480,7 +5468,7 @@ fn lazy_index_is_lazy_and_matches_eager() {
 
 // ── D63 Phase 1 — abbreviation-injection lever (document-preprocessing) ─────────
 fn layer_on(parent: &Arc<Layer>, name: &str, src: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, parent).expect("fixture compiles");
+    let resources = esl::compile(src, parent).expect("fixture compiles");
     let mut b = LayerBuilder::new(name, Some(Arc::clone(parent)));
     for r in resources {
         b.add_resource(r).expect("add fixture resource");

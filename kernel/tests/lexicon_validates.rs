@@ -93,7 +93,7 @@ fn base_chain() -> Arc<Layer> {
 /// Compile a `.esl` file against `parent`, panicking with the errors if it is
 /// not Expressible, and return the resulting layer.
 fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, &parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(src, &parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile (not Expressible):\n{}",
             errs.into_iter()
@@ -198,8 +198,7 @@ fn lexicon_layer_is_expressible() {
 /// returned error is the `check` stage — the felicity filter — refusing it.
 fn check_composition(src: &str) -> Result<(), String> {
     let lexicon = build_lexicon();
-    let resources =
-        esl::compile_against_layer(src, &lexicon).map_err(|errs| format!("compile: {errs:?}"))?;
+    let resources = esl::compile(src, &lexicon).map_err(|errs| format!("compile: {errs:?}"))?;
     let mut b = LayerBuilder::new("composition", Some(lexicon));
     for r in &resources {
         b.add_resource(r.clone())
@@ -310,7 +309,7 @@ fn ill_typed_axiom_application_decodes_but_check_infer_rejects() {
 
     // Storage path: the swapped proposition COMPILES and commits cleanly —
     // encoding does not type-check (Finding 1).
-    let resources = esl::compile_against_layer(SWAPPED_SENTENCE, &lexicon)
+    let resources = esl::compile(SWAPPED_SENTENCE, &lexicon)
         .expect("swapped sentence compiles (storage encodes, does not type-check)");
     let mut b = LayerBuilder::new("swapped", Some(lexicon.clone()));
     for r in &resources {
@@ -343,7 +342,7 @@ fn commit_gate_rejects_ill_typed_proposition() {
     // Validator itself — not just by a hand-invoked check_infer. This is the
     // decode-only gap, now closed for every type_expr slot.
     let lexicon = build_lexicon();
-    let resources = esl::compile_against_layer(SWAPPED_SENTENCE, &lexicon)
+    let resources = esl::compile(SWAPPED_SENTENCE, &lexicon)
         .expect("swapped sentence compiles (storage encodes, does not type-check)");
     let mut b = LayerBuilder::new("swapped", Some(lexicon.clone()));
     for r in &resources {
@@ -602,7 +601,7 @@ resource lexicon:e_bad_sem : lexicon:LexicalEntry {
 
 fn drafts_layer() -> Arc<Layer> {
     let lexicon = build_lexicon();
-    let resources = esl::compile_against_layer(DRAFTS, &lexicon)
+    let resources = esl::compile(DRAFTS, &lexicon)
         .expect("drafts compile (per-field well-formed; cross-field felicity is the gate's job)");
     let mut b = LayerBuilder::new("drafts", Some(lexicon));
     for r in &resources {
@@ -1045,8 +1044,7 @@ resource lexicon:f_np_gene_pl : lexicon:LexicalEntry {
 #[test]
 fn cat_subsumes_meets_features() {
     let lexicon = build_lexicon();
-    let resources =
-        esl::compile_against_layer(FEAT, &lexicon).expect("feature-bearing entries compile");
+    let resources = esl::compile(FEAT, &lexicon).expect("feature-bearing entries compile");
     let mut b = LayerBuilder::new("feat", Some(lexicon));
     for r in &resources {
         b.add_resource(r.clone()).expect("add feature entry");
@@ -1120,7 +1118,7 @@ resource lexicon:e_dual_ent : lexicon:LexicalEntry {
 #[test]
 fn gate_admits_multi_class_resource_at_each_class() {
     let lexicon = build_lexicon();
-    let resources = esl::compile_against_layer(DUAL, &lexicon).expect("dual entries compile");
+    let resources = esl::compile(DUAL, &lexicon).expect("dual entries compile");
     let mut b = LayerBuilder::new("dual", Some(lexicon));
     for r in &resources {
         b.add_resource(r.clone()).expect("add dual entry");
@@ -1185,8 +1183,7 @@ fn det_sem_exp() -> Exp {
 
 fn det_layer() -> Arc<Layer> {
     let lexicon = build_lexicon();
-    let resources =
-        esl::compile_against_layer(DET_SEMANTICS, &lexicon).expect("determiner snippet compiles");
+    let resources = esl::compile(DET_SEMANTICS, &lexicon).expect("determiner snippet compiles");
     let mut b = LayerBuilder::new("det", Some(lexicon));
     for r in &resources {
         b.add_resource(r.clone()).expect("add determiner resource");
@@ -1274,8 +1271,7 @@ resource lexicon:e_det_shape : lexicon:LexicalEntry {
 
 fn det_shape_layer() -> Arc<Layer> {
     let lexicon = build_lexicon();
-    let resources =
-        esl::compile_against_layer(DET_SHAPE, &lexicon).expect("determiner-shape snippet compiles");
+    let resources = esl::compile(DET_SHAPE, &lexicon).expect("determiner-shape snippet compiles");
     let mut b = LayerBuilder::new("det-shape", Some(lexicon));
     for r in &resources {
         b.add_resource(r.clone()).expect("add det-shape resource");
@@ -1418,8 +1414,8 @@ resource lexicon:e_det_result : lexicon:LexicalEntry {
 
 fn det_poly_layer() -> Arc<Layer> {
     let lexicon = build_lexicon();
-    let resources = esl::compile_against_layer(DET_CAT_FORALL, &lexicon)
-        .expect("cat_forall determiner snippet compiles");
+    let resources =
+        esl::compile(DET_CAT_FORALL, &lexicon).expect("cat_forall determiner snippet compiles");
     let mut b = LayerBuilder::new("det-poly", Some(lexicon));
     for r in &resources {
         b.add_resource(r.clone()).expect("add det-poly resource");
