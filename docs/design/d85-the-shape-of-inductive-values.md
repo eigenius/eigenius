@@ -1,6 +1,9 @@
 # D85 — The shape of inductive types and their values
 
-**Status: proposed.** Written `2026-08-31`.
+**Status: implemented.** Written `2026-08-31`; §5's six retrofit steps landed `2026-09-01`
+through `2026-09-02`. §6 records what is still open — the six-visitor traversal consolidation
+(R5a), and `ResourceRef`'s 142 reconciliation call sites, both of which this note enabled rather
+than performed.
 
 **Replaces [D83](d83-inductive-value-wire-format.md) and
 [D84](d84-an-inductive-value-is-a-resource.md) entirely.** Both were written across one day while
