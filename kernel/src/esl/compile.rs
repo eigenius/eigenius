@@ -4129,7 +4129,6 @@ mod tests {
             Value::Float(f) => serde_json::Value::from(*f),
             Value::Boolean(b) => serde_json::Value::Bool(*b),
             Value::Array(items) => serde_json::Value::Array(items.iter().map(tagged_of).collect()),
-            other => panic!("expected a term value, got {other:?}"),
         }
     }
 

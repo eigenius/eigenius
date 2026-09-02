@@ -185,11 +185,7 @@ fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
         }
         Value::Array(items) => items.iter().for_each(|i| value_refs(i, out)),
         Value::Embedded(inner) => references(inner.as_ref(), out),
-        Value::Integer(_)
-        | Value::Float(_)
-        | Value::Boolean(_)
-        | Value::Json(_)
-        | Value::Vector { .. } => {}
+        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Json(_) => {}
     }
 }
 

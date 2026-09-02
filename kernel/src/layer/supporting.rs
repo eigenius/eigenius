@@ -173,13 +173,9 @@ fn collect_refs_from_value(value: &Value, out: &mut BTreeSet<Iri>) {
         Value::Embedded(inner) => {
             collect_refs_from_resource(inner.as_ref(), out);
         }
-        // String / Integer / Float / Boolean / Json / Vector never
-        // carry typed-reference semantics here (see module docs).
-        Value::Integer(_)
-        | Value::Float(_)
-        | Value::Boolean(_)
-        | Value::Json(_)
-        | Value::Vector { .. } => {}
+        // String / Integer / Float / Boolean / Json never carry
+        // typed-reference semantics here (see module docs).
+        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Json(_) => {}
     }
 }
 
