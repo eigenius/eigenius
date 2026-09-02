@@ -1079,7 +1079,7 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let user_resources = crate::esl::compile(esl_source, &crate::layer::Layer::empty())
+        let user_resources = crate::esl::compile(esl_source, crate::testing::term_chain())
             .expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
@@ -1360,13 +1360,17 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:two_elem_list : core:string -> ex:NatList {
-                cons(zero, cons(succ(zero), nil))
+                lcons(zero, lcons(succ(zero), lnil))
             }
             "#,
         );
@@ -1378,7 +1382,7 @@ mod tests {
             other => panic!("expected outer InductiveCtor, got {other:?}"),
         };
         assert_eq!(outer_decl.local_name(), "NatList");
-        assert_eq!(outer_name, "cons");
+        assert_eq!(outer_name, "lcons");
         assert_eq!(outer_args.len(), 2, "cons should have 2 args");
         // First arg: zero (Nat)
         match &outer_args[0] {
@@ -1393,7 +1397,7 @@ mod tests {
         match &outer_args[1] {
             Exp::InductiveCtor(d, n, a) => {
                 assert_eq!(d.local_name(), "NatList");
-                assert_eq!(n, "cons");
+                assert_eq!(n, "lcons");
                 assert_eq!(a.len(), 2);
             }
             other => panic!("expected nested cons, got {other:?}"),
@@ -1429,7 +1433,7 @@ mod tests {
             other => panic!("expected InductiveVal, got {other:?}"),
         };
         assert_eq!(decl.local_name(), "NatList");
-        assert_eq!(ctor, "cons");
+        assert_eq!(ctor, "lcons");
         assert_eq!(args.len(), 2);
     }
 
@@ -1447,13 +1451,17 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:bad : core:string -> ex:NatList {
-                cons(zero)
+                lcons(zero)
             }
             "#,
         );
@@ -1547,7 +1555,7 @@ mod tests {
                 f(a, b, c)
             }
             "#,
-            &crate::layer::Layer::empty(),
+            crate::testing::term_chain(),
         );
         let errs = result.unwrap_err();
         let msg = &errs[0].message;
@@ -1721,15 +1729,19 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:head_or_zero : core:string -> ex:Nat {
-                match cons(succ(zero), nil) returning ex:Nat {
-                    nil -> zero;
-                    cons(x, _) -> x;
+                match lcons(succ(zero), lnil) returning ex:Nat {
+                    lnil -> zero;
+                    lcons(x, _) -> x;
                 }
             }
             "#,
@@ -1809,15 +1821,19 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:bad : core:string -> ex:Nat {
-                match nil returning ex:Nat {
-                    nil -> zero;
-                    cons(x) -> x;
+                match lnil returning ex:Nat {
+                    lnil -> zero;
+                    lcons(x) -> x;
                 }
             }
             "#,
@@ -2124,7 +2140,7 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_full(source, idx.clone(), &crate::layer::Layer::empty())
+            crate::esl::compile_full(source, idx.clone(), crate::testing::term_chain())
                 .expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
@@ -2178,7 +2194,7 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_full(source, idx.clone(), &crate::layer::Layer::empty())
+            crate::esl::compile_full(source, idx.clone(), crate::testing::term_chain())
                 .expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
@@ -2224,7 +2240,7 @@ mod tests {
                 cap:cap_comorphism(input, input)
             }
         "#;
-        let result = crate::esl::compile_full(source, idx, &crate::layer::Layer::empty());
+        let result = crate::esl::compile_full(source, idx, crate::testing::term_chain());
         let errors = result.unwrap_err();
         assert!(
             errors.iter().any(|e| e.to_string().contains("comorphism"))
@@ -2252,7 +2268,7 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile(source, &crate::layer::Layer::empty()).expect("compile");
+            crate::esl::compile(source, crate::testing::term_chain()).expect("compile");
         // Find the program and check its body is plain Apply (not
         // ComorphismInvokeApply).
         let prog_res = user_resources

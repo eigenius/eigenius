@@ -7221,14 +7221,21 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
 
     // Every bootstrap layer (the term-bearing ontologies, all small), plus the
     // largest lexicon layer (the bulk population).
+    // `defined_iris().len()`, not `iter_resources().count()`. The latter is
+    // `defined_iris.iter().filter_map(|i| self.get_resource(i))` — one RocksDB fetch and a
+    // full deserialisation per resource, 9.4M of them, to produce a number the IRI set
+    // already knows. Measured `2026-09-01`: that single traversal ran over 12 minutes against
+    // the wordnet+UMLS snapshot, against 55s for the entire resume, and the test performed it
+    // three times before validating anything. The counts agree by construction — `get_resource`
+    // returns `None` for any IRI outside `defined_iris` and is consulted for no other.
     let biggest = chain
         .iter()
-        .max_by_key(|l| l.iter_resources().count())
+        .max_by_key(|l| l.defined_iris().len())
         .map(|l| l.id().clone());
     let sample: Vec<&Arc<Layer>> = chain
         .iter()
         .filter(|l| {
-            let n = l.iter_resources().count();
+            let n = l.defined_iris().len();
             n > 0 && (n < 5_000 || Some(l.id().clone()) == biggest)
         })
         .collect();
@@ -7237,7 +7244,7 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
     let mut worst_entries = 0usize;
     let mut biggest_sample: Option<(usize, usize)> = None;
     for layer in sample {
-        let resources = layer.iter_resources().count();
+        let resources = layer.defined_iris().len();
         let validator = eigenius_kernel::validation::Validator::new(Arc::clone(layer));
 
         // `Validator::validate`'s body, inlined so the scope is OURS and nothing

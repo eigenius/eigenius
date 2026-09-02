@@ -1218,7 +1218,13 @@ data t:B { description = "the other half"; mkB(t:A) }
 "#;
         let toks = crate::esl::lexer::tokenize(esl).expect("lexes");
         let file = crate::esl::parser::parse(&toks).expect("parses");
-        let rs = crate::esl::compile::compile_file(&file).expect("compiles");
+        let rs = crate::esl::compile::compile_file_with_context(
+            &file,
+            None,
+            crate::esl::compile::collect_ctors_from_layer(crate::testing::term_chain()),
+            Default::default(),
+        )
+        .expect("compiles");
         assert_eq!(rs.len(), 2, "two inductive declarations");
 
         let core = crate::bootstrap::bootstrap().expect("bootstrap");
@@ -1448,7 +1454,7 @@ mod universe_polymorphism {
             data p:Box(A : Sort u) : Sort u { mk(A), }
         "#;
         let mut d = crate::layer::LayerBuilder::new("p", Some(core));
-        for r in crate::esl::compile(src, &crate::layer::Layer::empty())
+        for r in crate::esl::compile(src, crate::testing::term_chain())
             .expect("polymorphic ESL compiles")
         {
             d.add_resource(r).unwrap();

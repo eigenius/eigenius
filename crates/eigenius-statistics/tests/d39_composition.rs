@@ -72,9 +72,10 @@ fn build_composition_chain() -> ExecutionContext {
     // Reasoning layer — provides justification:Certificate + justification:Term
     // inductives the certificate type-checks against.
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
+    // Compiled against `reflection`, the layer it sits on: D85 §6.1 values name their
+    // constructors' arguments, and `eigentt:Term` declares those names down the chain.
     let reasoning_resources =
-        esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
-            .expect("reasoning.esl compiles");
+        esl::compile(reasoning_source, &reflection).expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {
         reasoning_builder.add_resource(r).unwrap();

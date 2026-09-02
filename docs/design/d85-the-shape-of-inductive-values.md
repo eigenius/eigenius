@@ -305,6 +305,47 @@ declared in one place and consumed from another: `binder_name` / `core:binder_na
 (eigenius#221), and `SizeSort` declared by `eigentt:Term` while the codec had no arm for it
 (eigenius#218).
 
+**An unknown constructor is an error, not an `arg_N` — decided `2026-09-01`.** `arg_0` / `arg_1`
+is what the derivation names an argument that declared none, so it is a real name and the table
+carries it. Reaching for the same spelling when the table has no entry for the constructor at all
+is a different act: it invents property IRIs that `ctor_classes::derive` never declares, and the
+value travels to validation before anyone sees it. That is how `Term-ConstRef-arg_0` reached a
+certificate fixture — the test compiled against `Layer::empty()`, and eleven `is not defined as a
+core:Property` diagnostics arrived three layers downstream of the missing chain. `ctor_value`
+refuses instead, naming the constructor and the layer, and the error lands at the source position.
+
+Cost, measured: 34 test call sites passed `Layer::empty()` to a compile whose ESL emits `Term`
+values. 24 in `esl::compile`'s own tests and 10 across other modules now use a two-link
+`core` + `eigentt-type-fragment` chain (`kernel/src/testing.rs`); the integration tests compile
+against the layer each was already building on. Two consequences the empty layer had been hiding:
+`core:List` and `core:Option`'s constructors are in scope for every layer above core, so `nil`,
+`cons`, `some` and `none` are ambiguous unqualified — and the qualifier that resolves it does not
+reach program bodies (eigenius#231).
+
+**Step 3b turns OFF Rule 24's recursion guard unless it is ported in the same commit — found
+`2026-09-01`.** `validation/mod.rs:1133` reads
+
+```rust
+if let (Some(id), Value::Json(json)) = (res_id, body_value) {
+    if json_mentions_const_ref(json, id.as_str()) { … }
+```
+
+`definition_body` is `Value::Json` today (`encode_lam_chain`), so the guard runs. When 3b flips
+the encoder, the body becomes `Value::Embedded`, the `if let` stops matching, and the guard
+stops running — no error, no failing test, because a guard that never fires looks exactly like a
+guard with nothing to catch. It is the one reader here whose twin must be WRITTEN before its
+tagged half is deleted, not after: the other three (`term_mentions`, the α-canonicaliser,
+`encode_type`) fail loudly. The check has to run on the encoded form and before decode, for the
+reason recorded at that line, so porting means walking a value resource for
+`is_a = eigentt:Term-ConstRef` — the same predicate, one shape over.
+
+**The docs still teach the tagged shape — 107 occurrences across 21 files, counted
+`2026-09-01`.** Mostly `FormulaTerm` (`App` 27, `Var` 17, `OpRef` 14, `LitFloat` 10) in the
+formula guides and the Julia institution tutorials, which walk a reader through authoring a
+value by hand. They are stale, not broken: readers accept both shapes until step 4. Rewriting
+them belongs WITH step 4, when the tagged shape stops being read — doing it now would rewrite
+the same examples twice, and would claim a retirement that has not happened.
+
 **Steps 2 and 3 were the other way round until `2026-09-01`, and that order cannot land green.**
 Migrating a value first means writing the resource form into a slot whose validation still reads
 `Value::Json`: Rule 21 routes every `eigentt:Term`- or `eigentt:Judgement`-ranged slot through the

@@ -69,10 +69,8 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
     }
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
-    for r in esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
-        .expect("reasoning.esl compiles")
-    {
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
+    for r in esl::compile(reasoning_source, &prov).expect("reasoning.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));

@@ -115,52 +115,144 @@ fn sort_kind_params(k: &ast::SortKind, out: &mut Vec<String>) {
 }
 
 fn sort_kind_result_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
     k: &ast::SortKind,
     declared: &std::collections::BTreeSet<String>,
     pos: &crate::esl::error::Position,
 ) -> Result<Value, EslError> {
-    Ok(Value::Json(
-        crate::program::eigentt_type_mirror::encode_level_json(&sort_kind_level(k, declared, pos)?),
-    ))
+    let json =
+        crate::program::eigentt_type_mirror::encode_level_json(&sort_kind_level(k, declared, pos)?);
+    level_value(arg_names, &json, pos)
 }
 
-/// A resolved IRI as a `ConstRef` value, for sites that already hold the string.
-fn const_ref_value(iri: &str) -> Value {
-    Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [iri]}))
+/// Build one inductive value in the D85 §6.1 resource form.
+///
+/// `is_a` names the CONSTRUCTOR'S class — `<inductive>-<Ctor>` — and each argument is a
+/// property `<inductive>-<Ctor>-<arg>` on it. There is no `ctor` slot and no positional
+/// `args` array: arity is the declaration's, and the argument names come from the
+/// constructor's `core:arg_types`.
+///
+/// The names arrive in `arg_names`, seeded from the layer (`CtorSeed::arg_names`) and from
+/// the inductives declared in the file being compiled. That table is why `esl::compile` takes
+/// a layer: the names are the inductive's to define, and a second copy here would be a second
+/// authority to keep in step.
+fn ctor_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
+    inductive: &str,
+    ctor: &str,
+    args: &[Value],
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    let class = format!("{inductive}-{ctor}");
+    // The table is the ONLY authority for these names. Guessing `arg_N` when it misses
+    // would emit property IRIs that `layer::ctor_classes::derive` never declares, and the
+    // value would travel as far as validation before anyone noticed — which is how
+    // `Term-ConstRef-arg_0` reached a certificate fixture. A miss means the constructor is
+    // not declared in this file and not in the layer, so say that here.
+    let Some(names) = arg_names.get(&class) else {
+        return Err(EslError::compiler(
+            Some(pos.clone()),
+            format!(
+                "constructor `{ctor}` of `{inductive}` is not declared in this file or in the \
+                 layer chain, so its argument names are unknown — compile against a layer that \
+                 carries `{inductive}`"
+            ),
+        ));
+    };
+    if names.len() != args.len() {
+        return Err(EslError::compiler(
+            Some(pos.clone()),
+            format!(
+                "constructor `{ctor}` of `{inductive}` takes {} argument(s), got {}",
+                names.len(),
+                args.len()
+            ),
+        ));
+    }
+    let mut r = Resource::new_embedded();
+    r.set(
+        iri(crate::ontology::well_known::IS_A),
+        Value::Array(vec![Value::String(class.clone())]),
+    );
+    for (n, a) in names.iter().zip(args) {
+        r.set(iri(&format!("{class}-{n}")), a.clone());
+    }
+    Ok(Value::Embedded(Box::new(r)))
+}
+
+/// A `core:Level` value, from the tagged-dict encoding `encode_level_json` produces.
+///
+/// Levels are their own inductive, so the class is `<Level>-<Ctor>`, exactly as for
+/// `eigentt:Term`. Only the argument SHAPES differ: a level's arguments are nested levels,
+/// strings (a universe parameter's name) or integers.
+fn level_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
+    j: &serde_json::Value,
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    const LEVEL_IRI: &str = "urn:eigenius:core:Level";
+    let Some(ctor) = j.get("ctor").and_then(serde_json::Value::as_str) else {
+        return Ok(Value::Json(j.clone()));
+    };
+    let args: Result<Vec<Value>, EslError> = j
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .map(|a| {
+            if a.is_object() {
+                level_value(arg_names, a, pos)
+            } else if let Some(s) = a.as_str() {
+                Ok(Value::String(s.to_string()))
+            } else if let Some(n) = a.as_i64() {
+                Ok(Value::Integer(n))
+            } else {
+                Ok(Value::Json(a.clone()))
+            }
+        })
+        .collect();
+    ctor_value(arg_names, LEVEL_IRI, ctor, &args?, pos)
+}
+
+/// The `eigentt:Term` IRI, which the declaration emitters build values of.
+const TERM_IRI: &str = "urn:eigenius:eigentt:Term";
+
+/// One `eigentt:Term` value.
+fn term_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
+    ctor: &str,
+    args: &[Value],
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    ctor_value(arg_names, TERM_IRI, ctor, args, pos)
+}
+
+/// A type parameter's kind written as a bare name is a `Var` over that parameter.
+fn bare_kind_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
+    name: &str,
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    var_value(arg_names, name, pos)
+}
+
+/// A resolved IRI as a `ConstRef` value.
+fn const_ref_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
+    i: &str,
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    term_value(arg_names, "ConstRef", &[Value::String(i.to_string())], pos)
 }
 
 /// A bare type-parameter name as a `Var` value.
-fn var_value(name: &str) -> Value {
-    Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
-}
-
-/// A bare (unqualified) kind name as a `Term` value: a reference to a type parameter in scope.
-///
-/// `Size` used to be the one bare name that was not a parameter reference — it was the size
-/// sort, emitted as `SizeSort`. Sized types were removed by eigenius#218, and the decoder's
-/// `SizeSort` arm went with them, so the compiler was still producing a constructor nothing
-/// could read.
-fn bare_kind_value(name: &str) -> Value {
-    var_value(name)
-}
-
-pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
-    compile_file_with_institutions(file, None)
-}
-
-/// Compile an ESL AST with access to an [`InstitutionIndex`]. When
-/// provided, function-call-shaped references whose function IRI
-/// classifies as a registered Decidable QueryClass or a declared
-/// Comorphism are emitted as specialized program resources (decoded
-/// by `program::expr` into the corresponding kernel AST node). When
-/// absent, all function calls emit plain `Apply` resources.
-///
-/// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
-pub fn compile_file_with_institutions(
-    file: &ast::File,
-    institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
-) -> Result<Vec<Resource>, Vec<EslError>> {
-    compile_file_with_context(file, institutions, CtorSeed::default(), BTreeMap::new())
+fn var_value(
+    arg_names: &BTreeMap<String, Vec<String>>,
+    name: &str,
+    pos: &crate::esl::error::Position,
+) -> Result<Value, EslError> {
+    term_value(arg_names, "Var", &[Value::String(name.to_string())], pos)
 }
 
 /// Compile an ESL AST with institution context plus external ctor
@@ -183,8 +275,8 @@ pub fn compile_file_with_context(
 ) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
-    compiler.ctors_by_iri = external_ctors.by_iri;
     compiler.ctors_by_short_name = external_ctors.by_short_name;
+    compiler.ctor_arg_names = external_ctors.arg_names;
     compiler.macros = external_macros;
 
     // Register namespace aliases.
@@ -265,8 +357,15 @@ pub fn compile_file_with_context(
 /// error rather than picking one silently.
 #[derive(Debug, Default, Clone)]
 pub struct CtorSeed {
-    pub by_iri: std::collections::BTreeSet<String>,
     pub by_short_name: BTreeMap<String, Vec<String>>,
+    /// Argument names per constructor, in DECLARATION order, keyed by the constructor class IRI
+    /// (`<inductive>-<Ctor>`, D85 §6.1).
+    ///
+    /// The compiler needs these to emit a value resource: an argument is a property named
+    /// `<inductive>-<Ctor>-<arg>`, and the names live in the inductive's `core:arg_types` and
+    /// nowhere else. Reading them from the chain rather than a table of its own is why
+    /// `esl::compile` takes a layer.
+    pub arg_names: BTreeMap<String, Vec<String>>,
 }
 
 /// Walk a layer chain and collect every chain-resident inductive's
@@ -278,6 +377,8 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
     use crate::ontology::iri::Iri;
     use crate::ontology::well_known as wk;
     let mut out = CtorSeed::default();
+    // Dedup for the walk itself: one ctor can be visible from two layers of the chain.
+    let mut seen_iris = std::collections::BTreeSet::new();
     let ctor_name_iri = match Iri::parse(wk::CTOR_NAME) {
         Ok(i) => i,
         Err(_) => return out,
@@ -311,11 +412,37 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
                 _ => continue,
             };
             let ctor_iri = format!("{parent_iri}:{}", ctor_value_short_name(ctor_resource));
-            if out.by_iri.insert(ctor_iri.clone()) {
+            // The value-resource class for this ctor, and its arguments in declaration order.
+            let arg_types_iri = Iri::parse(wk::ARG_TYPES).ok();
+            let args: Vec<String> = arg_types_iri
+                .and_then(|i| ctor_resource.get(&i).cloned())
+                .and_then(|v| match v {
+                    Value::Array(a) => Some(a),
+                    _ => None,
+                })
+                .map(|a| {
+                    a.iter()
+                        .enumerate()
+                        .map(|(i, at)| match at {
+                            Value::Embedded(r) => Iri::parse(wk::ARG_NAME)
+                                .ok()
+                                .and_then(|k| {
+                                    r.get(&k).and_then(|v| v.as_str().map(str::to_string))
+                                })
+                                .unwrap_or_else(|| format!("arg_{i}")),
+                            _ => format!("arg_{i}"),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.arg_names
+                .entry(format!("{parent_iri}-{name}"))
+                .or_insert(args);
+            if seen_iris.insert(ctor_iri.clone()) {
                 // First time we see this exact ctor IRI; also index it
                 // by short name. Duplicate IRIs (same ctor visible via
                 // a merged-view walk that hits two layers carrying it)
-                // are deduplicated by `by_iri.insert` returning false.
+                // are deduplicated by `seen_iris.insert` returning false.
                 let bucket = out.by_short_name.entry(name).or_default();
                 if !bucket.contains(&ctor_iri) {
                     bucket.push(ctor_iri);
@@ -397,11 +524,7 @@ struct Compiler {
     /// Per-file constructor index. Two views over the same set of
     /// chain-resident + in-file ctors:
     ///
-    /// - `ctors_by_iri`: the canonical "is this IRI a constructor?" set.
-    ///   IRI is the stable identifier (gh #75 extended to the ESL
-    ///   surface). Qualified references (`justification:App(...)`) resolve
-    ///   the namespace prefix to an IRI and check membership here.
-    /// - `ctors_by_short_name`: short name → list of qualifying ctor
+    /// `ctors_by_short_name`: short name → list of qualifying ctor
     ///   IRIs, for bare-name lookup with ambiguity detection. Two
     ///   inductives that share a ctor short name (e.g.
     ///   `eigentt:Term.App` and `justification:Term.App`)
@@ -409,11 +532,12 @@ struct Compiler {
     ///   "ambiguous — qualify as one of [...]" error instead of
     ///   silently picking the chain-order-first one.
     ///
-    /// Both are built in `collect_ctor_table` (in-file decls) plus
+    /// Built in `collect_ctor_table` (in-file decls) plus
     /// `collect_ctors_from_layer` (chain seed) before any declaration
     /// is compiled.
-    ctors_by_iri: std::collections::BTreeSet<String>,
     ctors_by_short_name: BTreeMap<String, Vec<String>>,
+    /// Argument names per constructor class, in declaration order — see [`CtorSeed::arg_names`].
+    ctor_arg_names: BTreeMap<String, Vec<String>>,
     /// D52 §12 — per-file smart-constructor macro table: full macro
     /// IRI → its declaration AST. Built in `collect_macro_table`
     /// before any value is compiled, so `Value::MacroCall` resolution
@@ -702,8 +826,8 @@ impl Compiler {
         Self {
             namespaces: BTreeMap::new(),
             declared_universes: std::collections::BTreeSet::new(),
-            ctors_by_iri: std::collections::BTreeSet::new(),
             ctors_by_short_name: BTreeMap::new(),
+            ctor_arg_names: BTreeMap::new(),
             macros: BTreeMap::new(),
             institutions: None,
         }
@@ -719,12 +843,17 @@ impl Compiler {
     /// at the same full IRI is a hard error (would mean the same
     /// inductive declared two ctors with one name, which is malformed).
     fn collect_ctor_table(&mut self, file: &ast::File) -> Result<(), EslError> {
+        // Scoped to THIS FILE. A ctor IRI that the chain also carries is not a compile
+        // error: a layer redeclaring a parent's inductive is layer shadowing, which D79
+        // §2.3 owns (`inductive_decl`) — and that rule exempts byte-identical shadowing,
+        // which a chain-wide check here would reject.
+        let mut declared_here = std::collections::BTreeSet::new();
         for decl in &file.declarations {
             if let ast::Declaration::Data(d) = decl {
                 let parent_iri = self.resolve(&d.name)?;
                 for ctor in &d.ctors {
                     let ctor_iri = format!("{parent_iri}:{}", ctor.name());
-                    if !self.ctors_by_iri.insert(ctor_iri.clone()) {
+                    if !declared_here.insert(ctor_iri.clone()) {
                         return Err(EslError::compiler(
                             Some(ctor.pos().clone()),
                             format!(
@@ -739,6 +868,26 @@ impl Compiler {
                         .or_default();
                     if !bucket.contains(&ctor_iri) {
                         bucket.push(ctor_iri);
+                    }
+
+                    // D85 §6.1 — a value of this constructor names its arguments as
+                    // properties on the constructor's class, so the compiler needs the
+                    // argument names of inductives declared IN THIS FILE, not only those
+                    // reachable through the chain. The naming rule has to match
+                    // `layer::ctor_classes::derive` exactly, or a value authored against the
+                    // derived classes will not recompile: `core:arg_name` when the ESL
+                    // spelled `name : Type`, positional `arg_N` otherwise.
+                    if let ast::CtorDecl::Positional { args, .. } = ctor {
+                        let names = args
+                            .iter()
+                            .enumerate()
+                            .map(|(i, a)| match a {
+                                ast::CtorArg::Named { name, .. } => name.clone(),
+                                ast::CtorArg::Positional(_) => format!("arg_{i}"),
+                            })
+                            .collect();
+                        self.ctor_arg_names
+                            .insert(format!("{parent_iri}-{}", ctor.name()), names);
                     }
                 }
             }
@@ -780,7 +929,7 @@ impl Compiler {
     /// - Surface form (what the author writes): `<ns>:<CtorName>`,
     ///   e.g. `justification:Declared`. This resolves to
     ///   `<ns_uri>:<CtorName>` via the standard namespace table.
-    /// - Canonical chain IRI (what `ctors_by_iri` stores):
+    /// - Canonical chain IRI (what the ctor buckets store):
     ///   `<parent_inductive_iri>:<CtorName>`, e.g.
     ///   `urn:eigenius:justification:Term:Declared`.
     ///
@@ -989,17 +1138,25 @@ impl Compiler {
         Ok(match kind {
             ast::IndexKind::Named(qn) => {
                 if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
-                    var_value(&qn.name)
+                    var_value(&self.ctor_arg_names, &qn.name, pos)?
                 } else {
-                    const_ref_value(&self.resolve(qn)?)
+                    const_ref_value(&self.ctor_arg_names, &self.resolve(qn)?, pos)?
                 }
             }
-            ast::IndexKind::Sort(sk) => Value::Json(serde_json::json!({
-                "ctor": "Sort",
-                "args": [crate::program::eigentt_type_mirror::encode_level_json(
-                    &sort_kind_level(sk, &self.declared_universes, pos)?
-                )],
-            })),
+            // `Sort(level)` — an `eigentt:Term`, whose one argument is a `core:Level`.
+            // Both sides are D85 §1 value resources; `result_sort` differs in carrying the
+            // bare level, with no `Sort` wrapper.
+            ast::IndexKind::Sort(sk) => {
+                let level = crate::program::eigentt_type_mirror::encode_level_json(
+                    &sort_kind_level(sk, &self.declared_universes, pos)?,
+                );
+                term_value(
+                    &self.ctor_arg_names,
+                    "Sort",
+                    &[level_value(&self.ctor_arg_names, &level, pos)?],
+                    pos,
+                )?
+            }
         })
     }
 
@@ -1180,7 +1337,10 @@ impl Compiler {
         let option_arg = {
             let mut ar = Resource::new_embedded();
             set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-            ar.set(iri(wk::TYPE_NAME), const_ref_value(wk::OPTION));
+            ar.set(
+                iri(wk::TYPE_NAME),
+                const_ref_value(&self.ctor_arg_names, wk::OPTION, pos)?,
+            );
             ar.set(iri(wk::TYPE_ARGS), Value::Array(vec![class_value.clone()]));
             Value::Embedded(Box::new(ar))
         };
@@ -1257,7 +1417,12 @@ impl Compiler {
                  `type_expr(...)`"
                     .to_string(),
             )),
-            ast::Term::Ref { name, args, .. } => {
+            ast::Term::Ref {
+                name,
+                args,
+                pos: ref_pos,
+                ..
+            } => {
                 let resolved = if name.namespace.is_none() {
                     let n = name.name.as_str();
                     if scope.contains(n) {
@@ -1276,7 +1441,10 @@ impl Compiler {
                 } else {
                     let mut ar = Resource::new_embedded();
                     set_is_a(&mut ar, wk::INDUCTIVE_ARG_TYPE);
-                    ar.set(iri(wk::TYPE_NAME), const_ref_value(&resolved));
+                    ar.set(
+                        iri(wk::TYPE_NAME),
+                        const_ref_value(&self.ctor_arg_names, &resolved, ref_pos)?,
+                    );
                     let arg_values: Result<Vec<Value>, EslError> = args
                         .iter()
                         .map(|a| self.compile_type_expr(a, scope))
@@ -2163,7 +2331,12 @@ impl Compiler {
         if let Some(sort) = &decl.result_sort {
             r.set(
                 iri(wk::RESULT_SORT),
-                sort_kind_result_value(sort, &self.declared_universes, &decl.name.pos)?,
+                sort_kind_result_value(
+                    &self.ctor_arg_names,
+                    sort,
+                    &self.declared_universes,
+                    &decl.name.pos,
+                )?,
             );
         }
 
@@ -2300,12 +2473,20 @@ impl Compiler {
         let type_name = if arg.name.namespace.is_none() {
             let n = arg.name.name.as_str();
             if params.contains(n) {
-                bare_kind_value(&arg.name.name)
+                bare_kind_value(&self.ctor_arg_names, &arg.name.name, &arg.name.pos)?
             } else {
-                const_ref_value(&self.resolve(&arg.name)?)
+                const_ref_value(
+                    &self.ctor_arg_names,
+                    &self.resolve(&arg.name)?,
+                    &arg.name.pos,
+                )?
             }
         } else {
-            const_ref_value(&self.resolve(&arg.name)?)
+            const_ref_value(
+                &self.ctor_arg_names,
+                &self.resolve(&arg.name)?,
+                &arg.name.pos,
+            )?
         };
         ar.set(iri(wk::TYPE_NAME), type_name);
 
@@ -3614,6 +3795,8 @@ fn stamp_attribution(resource: &mut Resource) {
 
 #[cfg(test)]
 mod tests {
+    use crate::testing::term_chain;
+
     /// **eigenius#188 — a level variable must be declared with `universe`.**
     ///
     /// Lean's `autoBound` mints an undeclared level parameter on first use. That is the wrong
@@ -3634,14 +3817,14 @@ mod tests {
             "universe u; data p:D : Sort u { mk : p:D }",
             "universe u; data p:E : Type u + 1 { mk : p:E }",
         ] {
-            crate::esl::compile(&format!("{head}\n{body}"), &crate::layer::Layer::empty())
+            crate::esl::compile(&format!("{head}\n{body}"), term_chain())
                 .unwrap_or_else(|e| panic!("`{body}` must compile: {e:?}"));
         }
 
         // Undeclared — rejected, with the name and a fix in the message.
         let e = crate::esl::compile(
             &format!("{head}\nuniverse u; axiom p:c : forall (T : Sort v) => T -> T;"),
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect_err("`Sort v` with only `u` declared must be rejected");
         let msg = e[0].to_string();
@@ -3654,7 +3837,7 @@ mod tests {
         // And with NO universe declaration at all — the auto-bound case.
         crate::esl::compile(
             &format!("{head}\naxiom p:d : forall (T : Sort u) => T -> T;"),
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect_err("an undeclared level must not auto-bind");
     }
@@ -3676,7 +3859,7 @@ mod tests {
             "universe u u;",           // twice in one declaration
             "universe u; universe u;", // twice across declarations
         ] {
-            let e = crate::esl::compile(&format!("{head}\n{dup}"), &crate::layer::Layer::empty())
+            let e = crate::esl::compile(&format!("{head}\n{dup}"), term_chain())
                 .expect_err("a duplicate level variable must be rejected");
             let msg = e[0].to_string();
             assert!(
@@ -3686,16 +3869,10 @@ mod tests {
         }
 
         // The non-duplicate forms still compile — the check must not reject distinct names.
-        crate::esl::compile(
-            &format!("{head}\nuniverse u v;"),
-            &crate::layer::Layer::empty(),
-        )
-        .expect("distinct level variables in one declaration are fine");
-        crate::esl::compile(
-            &format!("{head}\nuniverse u; universe v;"),
-            &crate::layer::Layer::empty(),
-        )
-        .expect("distinct level variables across declarations are fine");
+        crate::esl::compile(&format!("{head}\nuniverse u v;"), term_chain())
+            .expect("distinct level variables in one declaration are fine");
+        crate::esl::compile(&format!("{head}\nuniverse u; universe v;"), term_chain())
+            .expect("distinct level variables across declarations are fine");
     }
 
     /// **eigenius#188 — a declaration's own sort can be POLYMORPHIC.**
@@ -3710,28 +3887,22 @@ mod tests {
     /// carries a `result_sort`, and a lower layer cannot reference a higher one.
     #[test]
     fn a_declaration_sort_may_be_polymorphic() {
+        const LEVEL: &str = "urn:eigenius:core:Level";
+        let param = |n: &str| expected_ctor(LEVEL, "Param", &[("name", Value::String(n.into()))]);
         let cases = [
-            (
-                "Set",
-                serde_json::json!({"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}),
-            ),
-            (
-                "Sort u",
-                serde_json::json!({"ctor": "Param", "args": ["u"]}),
-            ),
+            ("Set", level_json(1)),
+            ("Sort u", param("u")),
             (
                 "Sort (max u v)",
-                serde_json::json!({"ctor": "Max", "args": [
-                    {"ctor": "Param", "args": ["u"]},
-                    {"ctor": "Param", "args": ["v"]},
-                ]}),
+                expected_ctor(LEVEL, "Max", &[("left", param("u")), ("right", param("v"))]),
             ),
             (
                 "Sort (imax u v)",
-                serde_json::json!({"ctor": "IMax", "args": [
-                    {"ctor": "Param", "args": ["u"]},
-                    {"ctor": "Param", "args": ["v"]},
-                ]}),
+                expected_ctor(
+                    LEVEL,
+                    "IMax",
+                    &[("left", param("u")), ("right", param("v"))],
+                ),
             ),
         ];
         for (sort_src, expected) in cases {
@@ -3741,15 +3912,12 @@ mod tests {
                    universe u v;
                    data p:D : {sort_src} {{ mk : p:D }}"#
             );
-            let rs = crate::esl::compile(&src, &crate::layer::Layer::empty())
+            let rs = crate::esl::compile(&src, term_chain())
                 .unwrap_or_else(|e| panic!("`data p:D : {sort_src}` must compile: {e:?}"));
             let got = rs[0]
                 .get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
                 .expect("result_sort present");
-            let Value::Json(j) = got else {
-                panic!("result_sort must be a Level value, got {got:?}")
-            };
-            assert_eq!(j, &expected, "`{sort_src}` lowers to the wrong level");
+            assert_eq!(got, &expected, "`{sort_src}` lowers to the wrong level");
         }
     }
 
@@ -3757,15 +3925,19 @@ mod tests {
     /// against `"Prop"` / `"Set"` / `"Type:N"` (eigenius#188 retyped it to a `core:Level`).
     fn result_sort_nat(r: &Resource) -> Option<usize> {
         let v = r.get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())?;
-        let Value::Json(j) = v else { return None };
+        // `result_sort` holds a `core:Level`: `Succ` applied `n` times to `Zero`. In the D85
+        // §6.1 form the constructor is the `is_a` and the argument is a named property.
         let mut n = 0usize;
-        let mut cur = j;
+        let mut cur = v.clone();
         loop {
-            match cur.get("ctor")?.as_str()? {
-                "Zero" => return Some(n),
-                "Succ" => {
+            let Value::Embedded(e) = &cur else {
+                return None;
+            };
+            match e.is_a().first()?.as_str() {
+                "urn:eigenius:core:Level-Zero" => return Some(n),
+                "urn:eigenius:core:Level-Succ" => {
                     n += 1;
-                    cur = cur.get("args")?.as_array()?.first()?;
+                    cur = e.get(&iri("urn:eigenius:core:Level-Succ-base"))?.clone();
                 }
                 _ => return None,
             }
@@ -3779,17 +3951,59 @@ mod tests {
     /// The `eigentt:Term` value a reference to `iri` encodes to. `core:type_name` and
     /// `core:param_kind` carried a bare IRI STRING until eigenius#188 retyped both to
     /// `eigentt:Term`; these two helpers keep the assertions readable.
+    /// `Sort(l)` at level `n` — an `eigentt:Term` whose one argument is a `core:Level`.
+    fn sort_json(n: u32) -> Value {
+        expected_ctor(
+            "urn:eigenius:eigentt:Term",
+            "Sort",
+            &[("level", level_json(n))],
+        )
+    }
+
+    /// The `core:Level` for a numeral: `Zero`, or `Succ` applied `n` times.
+    fn level_json(n: u32) -> Value {
+        let mut v = expected_ctor("urn:eigenius:core:Level", "Zero", &[]);
+        for _ in 0..n {
+            v = expected_ctor("urn:eigenius:core:Level", "Succ", &[("base", v)]);
+        }
+        v
+    }
+
+    /// The D85 §6.1 value these tests expect: `is_a` names the constructor's class and each
+    /// argument is a property on it. Spelled out here rather than reusing the compiler's
+    /// `ctor_value`, so an assertion pins the shape instead of restating the code under test.
+    fn expected_ctor(inductive: &str, ctor: &str, args: &[(&str, Value)]) -> Value {
+        let class = format!("{inductive}-{ctor}");
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri(crate::ontology::well_known::IS_A),
+            Value::Array(vec![Value::String(class.clone())]),
+        );
+        for (name, v) in args {
+            r.set(iri(&format!("{class}-{name}")), v.clone());
+        }
+        Value::Embedded(Box::new(r))
+    }
+
     fn const_ref_json(target: &str) -> Value {
-        Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [target]}))
+        expected_ctor(
+            "urn:eigenius:eigentt:Term",
+            "ConstRef",
+            &[("iri", Value::String(target.to_string()))],
+        )
     }
 
     /// The `eigentt:Term` value a reference to the type parameter `name` encodes to.
     fn var_json(name: &str) -> Value {
-        Value::Json(serde_json::json!({"ctor": "Var", "args": [name]}))
+        expected_ctor(
+            "urn:eigenius:eigentt:Term",
+            "Var",
+            &[("name", Value::String(name.to_string()))],
+        )
     }
 
     fn compile_esl(input: &str) -> Vec<Resource> {
-        esl::compile(input, &crate::layer::Layer::empty()).unwrap()
+        esl::compile(input, term_chain()).unwrap()
     }
 
     #[test]
@@ -4442,7 +4656,7 @@ mod tests {
                 description = "Bad";
             }
         "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         );
         assert!(result.is_err());
     }
@@ -4931,10 +5145,7 @@ mod tests {
         );
         assert_eq!(
             p.get(&iri("urn:eigenius:core:param_kind")),
-            Some(&Value::Json(serde_json::json!({
-                "ctor": "Sort",
-                "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}],
-            })))
+            Some(&sort_json(1))
         );
 
         // cons ctor: first arg is bare "A", second is parametric List(A).
@@ -5349,13 +5560,6 @@ mod tests {
                 other => panic!("expected embedded index, got {other:?}"),
             })
             .collect();
-        let sort_json = |n: usize| {
-            let mut lvl = serde_json::json!({"ctor": "Zero", "args": []});
-            for _ in 0..n {
-                lvl = serde_json::json!({"ctor": "Succ", "args": [lvl]});
-            }
-            Value::Json(serde_json::json!({"ctor": "Sort", "args": [lvl]}))
-        };
         assert_eq!(kinds, vec![sort_json(0), sort_json(1), sort_json(3)]);
 
         assert_eq!(result_sort_nat(r), Some(4));
@@ -5429,7 +5633,7 @@ mod tests {
                 mk,
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         );
         result.expect("two inductives may share a ctor short name");
     }
@@ -5449,7 +5653,7 @@ mod tests {
             axiom ex:use : ex:Foo -> Prop;
             axiom ex:use_with_arg : ex:use(mk);
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         );
         let err = result.expect_err("ambiguous bare `mk` use must error");
         let msg = err
@@ -5490,7 +5694,7 @@ mod tests {
                 );
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect("qualified ctor in value slot must resolve as a ctor, not a macro");
         // The resource should commit (no error); we don't introspect
@@ -5532,7 +5736,7 @@ mod tests {
                 );
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect("both forms compile");
 
@@ -5588,7 +5792,7 @@ mod tests {
                 );
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect("scope-shadowing form compiles");
 
@@ -5794,7 +5998,7 @@ mod tests {
                 (only_one) => only_one
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         );
         let err = result.expect_err("wrong arity must be rejected");
         let msg = err[0].message.clone();
@@ -5909,25 +6113,15 @@ mod tests {
         // branching on whether the ancestor disagrees with A. Uses
         // `Match` over the `Option` inductive's two constructors.
         //
-        // The ESL compile pass (Phase 11b) requires constructors
-        // referenced in `match` arms to be declared via a `data`
-        // block in the *same file*. `Option` is committed in the
-        // core ontology rather than re-declared per file, so the
-        // worked example needs a local `data` shadowing for the
-        // compile-time ctor lookup to find `some` / `none`.
-        // Lifting that restriction (so chain-committed inductives'
-        // constructors are reachable from `match`) is tracked as a
-        // separate ESL extension; until then the worked example
-        // declares Option locally to exercise the lowering path.
+        // `some` / `none` resolve to `core:Option`'s constructors through the chain the
+        // compile runs against. The example used to redeclare `Option` locally because a
+        // match arm could only see constructors from a `data` block in the same file; with
+        // a layer under the compile that shadow is not needed, and it would now make `some`
+        // ambiguous between the two declarations.
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:project";
-
-            data ex:Option(A : Set) {
-                none,
-                some(A),
-            }
 
             merge_comorphism ex:patient_ancestor_aware for ex:Patient {
                 (a, b, opt) => match opt {
@@ -5975,7 +6169,7 @@ mod tests {
                 core:text_analyzer = "en-stem-v1";
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect_err("text_index compilation should fail with M1 stub");
         let combined = errs
@@ -6002,7 +6196,7 @@ mod tests {
                 core:vec_dim = 1536;
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         )
         .expect_err("vector_index compilation should fail with M1 stub");
         let combined = errs
@@ -6144,8 +6338,7 @@ mod tests {
         // Any future edit to the file or to the ESL surface that breaks this
         // round-trip needs to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
-        let resources = esl::compile(source, &crate::layer::Layer::empty())
-            .expect("justification.esl must compile");
+        let resources = esl::compile(source, term_chain()).expect("justification.esl must compile");
 
         // Expect: 1 justification:Term + 1 justification:Certificate.
         // The three `witness:Is*As` predicates were here until P7 and are NOT
@@ -6314,8 +6507,8 @@ mod tests {
             Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
 
         let source = include_str!("../../../ontologies/justification/justification.esl");
-        let user_resources = esl::compile(source, &crate::layer::Layer::empty())
-            .expect("reasoning.esl must compile");
+        let user_resources =
+            esl::compile(source, term_chain()).expect("reasoning.esl must compile");
         let mut user_builder = LayerBuilder::new("justification", Some(reflection));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -6453,8 +6646,7 @@ mod tests {
         // resources. Any future edit that breaks this needs to be
         // deliberate.
         let source = include_str!("../../../ontologies/statistics/statistics.esl");
-        let resources = esl::compile(source, &crate::layer::Layer::empty())
-            .expect("statistics.esl must compile");
+        let resources = esl::compile(source, term_chain()).expect("statistics.esl must compile");
 
         // Expect at least:
         //  - 5 axis enums (Randomization, Blocking, FactorDesign,
@@ -6577,7 +6769,7 @@ mod tests {
                 eg:body = eg:undefined_macro("anything");
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         );
         let err = result.expect_err("undeclared macro should error");
         assert!(
@@ -6605,7 +6797,7 @@ mod tests {
                 eg:body = eg:two_args("only_one");
             }
             "#,
-            &crate::layer::Layer::empty(),
+            term_chain(),
         );
         let err = result.expect_err("arity mismatch should error");
         assert!(
@@ -6619,9 +6811,10 @@ mod tests {
 #[cfg(test)]
 mod sigma_surface_tests {
     use crate::esl;
+    use crate::testing::term_chain;
 
     fn axiom_statement(src: &str) -> serde_json::Value {
-        let rs = esl::compile(src, &crate::layer::Layer::empty()).expect("compiles");
+        let rs = esl::compile(src, term_chain()).expect("compiles");
         let a = rs
             .iter()
             .find(|r| r.id().is_some_and(|i| i.as_str().ends_with(":t")))
@@ -6700,9 +6893,10 @@ mod qualified_ctor_tests {
     //! IRI-keyed"), which P4 removed; the feature survives the correction because it
     //! never depended on that premise, only on the pair.
     use super::*;
+    use crate::testing::term_chain;
 
     fn compile(src: &str) -> Result<Vec<crate::ontology::resource::Resource>, Vec<EslError>> {
-        crate::esl::compile(src, &crate::layer::Layer::empty())
+        crate::esl::compile(src, term_chain())
     }
 
     fn errors(src: &str) -> String {
@@ -6721,6 +6915,31 @@ namespace ex = "urn:eigenius:example";
 data ex:Colour { red, mk }
 data ex:Shape  { square, mk }
 "#;
+
+    /// **Gap probe.** `ex:Type:ctor` (eigenius#24) resolves in a `def` body but not in a
+    /// `program` body: the program path turns the reference into a `Var` named after the
+    /// spelled-out qualifier instead of a constructor. Pinned here so the gap is a fact in
+    /// the suite rather than a note; flip both assertions when the program path learns it.
+    #[test]
+    fn the_inductive_qualifier_reaches_def_bodies_but_not_program_bodies() {
+        const DECL: &str = r#"
+namespace core = "urn:eigenius:core";
+namespace ex = "urn:eigenius:example";
+data ex:Pair { mk, nil }
+"#;
+        let in_def = compile(&format!("{DECL}\ndef ex:v : ex:Pair = ex:Pair:nil;\n"));
+        assert!(in_def.is_ok(), "def body resolves it: {:?}", in_def.err());
+
+        let rs = compile(&format!(
+            "{DECL}\nprogram ex:p : core:string -> ex:Pair {{ ex:Pair:nil }}\n"
+        ))
+        .expect("program body compiles (it just compiles it WRONG)");
+        let body = format!("{rs:?}");
+        assert!(
+            body.contains("ex:Pair:nil"),
+            "the qualifier survives verbatim as a name instead of resolving to the ctor"
+        );
+    }
 
     /// The case the ambiguity error existed for.
     #[test]

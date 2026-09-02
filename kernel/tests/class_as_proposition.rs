@@ -64,10 +64,10 @@ fn build_chain() -> ExecutionContext {
     }
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
     for r in esl::compile(
         include_str!("../../ontologies/justification/justification.esl"),
-        &eigenius_kernel::layer::Layer::empty(),
+        &prov,
     )
     .expect("reasoning.esl compiles")
     {

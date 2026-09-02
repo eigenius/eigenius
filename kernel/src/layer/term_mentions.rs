@@ -76,13 +76,36 @@ pub fn json_mentions(j: &serde_json::Value, out: &mut BTreeSet<Iri>) {
     }
 }
 
-/// Every IRI a property value's D47-encoded content names. Arrays are descended;
-/// `Value::Embedded` is not, since an embedded resource is validated and indexed as
-/// a resource in its own right.
+/// Every IRI a term-valued property names, in either shape.
+///
+/// `Value::Embedded` IS descended. It was not until `2026-09-01`, on the reasoning that "an
+/// embedded resource is validated and indexed as a resource in its own right" — true of
+/// validation, false of the index: `extract_indexable_triples` iterates `layer.iter_resources()`,
+/// which walks `defined_iris`, and a value resource has no `@id`. Nothing else would reach it.
+///
+/// This matters from D85 §6.1 onward, where a term stops being a `Value::Json` blob and becomes
+/// a resource whose `is_a` names its constructor's class. Skipping `Embedded` would have emitted
+/// zero mentions for every migrated value — the same silent hole this module was written to end,
+/// arrived at from the other side.
+///
+/// The mention set is a superset of the old one: a value resource names its constructor class in
+/// `is_a`, which the tagged form spelled as the bare string `"ConstRef"` and no consumer could
+/// resolve. The class is a real dependency — Rule 25 requires it to be declared — so counting it
+/// is the correct answer, not an over-approximation to apologise for.
 pub fn json_mentions_of_value(v: &Value, out: &mut BTreeSet<Iri>) {
     match v {
         Value::Json(j) => json_mentions(j, out),
         Value::Array(items) => items.iter().for_each(|i| json_mentions_of_value(i, out)),
+        // Same rule as inside a term: any string that parses as a `urn:` IRI counts.
+        Value::String(s) if s.starts_with("urn:") => {
+            if let Ok(iri) = Iri::parse(s) {
+                out.insert(iri);
+            }
+        }
+        Value::Embedded(r) => r
+            .properties()
+            .values()
+            .for_each(|v| json_mentions_of_value(v, out)),
         _ => {}
     }
 }
@@ -131,6 +154,35 @@ mod tests {
             &mut out,
         );
         assert_eq!(out.len(), 3, "every ConstRef in the spine: {out:?}");
+    }
+
+    /// D85 §6.1 — the shape the tagged dict became. The index reaches a value resource ONLY
+    /// through this walker, so a missing arm here is a missing dependency edge, silently.
+    #[test]
+    fn a_value_resource_mentions_what_it_names() {
+        use crate::ontology::resource::Resource;
+        let mut inner = Resource::new_embedded();
+        inner.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:eigentt:Term-ConstRef".into(),
+            )]),
+        );
+        inner.set(
+            Iri::parse("urn:eigenius:eigentt:Term-ConstRef-iri").unwrap(),
+            Value::String("urn:eigenius:core:Level".into()),
+        );
+        let mut out = BTreeSet::new();
+        json_mentions_of_value(&Value::Embedded(Box::new(inner)), &mut out);
+        let got: Vec<&str> = out.iter().map(Iri::as_str).collect();
+        assert_eq!(
+            got,
+            vec![
+                "urn:eigenius:core:Level",
+                "urn:eigenius:eigentt:Term-ConstRef"
+            ],
+            "the referenced constant AND the constructor class both count"
+        );
     }
 
     #[test]

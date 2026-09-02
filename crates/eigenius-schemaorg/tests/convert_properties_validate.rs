@@ -89,10 +89,12 @@ fn convert_property_set_is_expressible() {
         "prov",
     );
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(prov));
+        // Compiled against the layer it sits on — see D85 §6.1: the values it emits name
+        // their constructors' arguments, and those names come from the chain.
+        let mut b = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
         for r in esl::compile(
             include_str!("../../../ontologies/justification/justification.esl"),
-            &eigenius_kernel::layer::Layer::empty(),
+            &prov,
         )
         .expect("reasoning.esl compiles")
         {

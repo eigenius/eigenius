@@ -12,7 +12,10 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+            }
           }
         ]
       },
@@ -23,7 +26,10 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "value",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:float"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:float"
+            }
           }
         ]
       },
@@ -34,7 +40,10 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "iri",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+            }
           }
         ]
       },
@@ -45,12 +54,18 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "head",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "arg",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+            }
           }
         ]
       },
@@ -61,17 +76,26 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "ty",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+            }
           }
         ]
       },
@@ -82,17 +106,26 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "ty",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:formulas:FormulaTerm"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+            }
           }
         ]
       }
@@ -158,8 +191,8 @@
     "urn:eigenius:core:description": "The type of real-valued FormulaTerm expressions. Encoded as a nullary operator whose signature is itself — `Real : Real`. Same idiom EigenTT uses internally for `Set : Set` (size-stratified at the kernel layer; flat at v1 of the chain).",
     "urn:eigenius:formulas:operator_arity": 0,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "OpRef",
-      "args": ["urn:eigenius:formulas:types:Real"]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+      "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
     }
   },
   {
@@ -169,8 +202,8 @@
     "urn:eigenius:core:description": "The type of integer-valued FormulaTerm expressions. Reserved for future numeric ladder expansion.",
     "urn:eigenius:formulas:operator_arity": 0,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "OpRef",
-      "args": ["urn:eigenius:formulas:types:Int"]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+      "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Int"
     }
   },
   {
@@ -180,8 +213,8 @@
     "urn:eigenius:core:description": "The type of boolean-valued FormulaTerm expressions. Result type for comparison operators (eq, lt, le).",
     "urn:eigenius:formulas:operator_arity": 0,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "OpRef",
-      "args": ["urn:eigenius:formulas:types:Bool"]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+      "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Bool"
     }
   },
 
@@ -194,19 +227,24 @@
     "urn:eigenius:formulas:operator_associativity": "n_ary",
     "urn:eigenius:formulas:operator_commutativity": true,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         }
-      ]
+      }
     }
   },
   {
@@ -218,19 +256,24 @@
     "urn:eigenius:formulas:operator_associativity": "left",
     "urn:eigenius:formulas:operator_commutativity": false,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         }
-      ]
+      }
     }
   },
   {
@@ -242,19 +285,24 @@
     "urn:eigenius:formulas:operator_associativity": "n_ary",
     "urn:eigenius:formulas:operator_commutativity": true,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         }
-      ]
+      }
     }
   },
   {
@@ -266,19 +314,24 @@
     "urn:eigenius:formulas:operator_associativity": "left",
     "urn:eigenius:formulas:operator_commutativity": false,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         }
-      ]
+      }
     }
   },
   {
@@ -290,19 +343,24 @@
     "urn:eigenius:formulas:operator_associativity": "right",
     "urn:eigenius:formulas:operator_commutativity": false,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         }
-      ]
+      }
     }
   },
 
@@ -313,12 +371,16 @@
     "urn:eigenius:core:description": "Unary negation: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -328,12 +390,16 @@
     "urn:eigenius:core:description": "Exponential: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -343,12 +409,16 @@
     "urn:eigenius:core:description": "Natural logarithm: `Real -> Real`. Domain restrictions belong to the consuming institution.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -358,12 +428,16 @@
     "urn:eigenius:core:description": "Sine: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -373,12 +447,16 @@
     "urn:eigenius:core:description": "Cosine: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -388,12 +466,16 @@
     "urn:eigenius:core:description": "Tangent: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -403,12 +485,16 @@
     "urn:eigenius:core:description": "Square root: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
   {
@@ -418,12 +504,16 @@
     "urn:eigenius:core:description": "Absolute value: `Real -> Real`.",
     "urn:eigenius:formulas:operator_arity": 1,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
     }
   },
 
@@ -435,19 +525,24 @@
     "urn:eigenius:formulas:operator_arity": 2,
     "urn:eigenius:formulas:operator_commutativity": true,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Bool"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Bool"
         }
-      ]
+      }
     }
   },
   {
@@ -458,19 +553,24 @@
     "urn:eigenius:formulas:operator_arity": 2,
     "urn:eigenius:formulas:operator_commutativity": false,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Bool"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Bool"
         }
-      ]
+      }
     }
   },
   {
@@ -481,19 +581,24 @@
     "urn:eigenius:formulas:operator_arity": 2,
     "urn:eigenius:formulas:operator_commutativity": false,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "_",
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Bool"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+        "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Bool"
         }
-      ]
+      }
     }
   },
 
@@ -504,26 +609,32 @@
     "urn:eigenius:core:description": "Differentiation evaluated at a point: `(Real -> Real) -> Real -> Real`. Symbolics interprets symbolically (returning the derivative as a closed form); IntervalArithmetic interprets via interval-Newton; numerical institutions evaluate by finite differences with declared step.",
     "urn:eigenius:formulas:operator_arity": 2,
     "urn:eigenius:formulas:operator_signature": {
-      "ctor": "Pi",
-      "args": [
-        "f",
-        {
-          "ctor": "Pi",
-          "args": [
-            "_",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+      "urn:eigenius:formulas:FormulaTerm-Pi-name": "f",
+      "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "_",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         },
-        {
-          "ctor": "Pi",
-          "args": [
-            "x",
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-          ]
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
         }
-      ]
+      },
+      "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-Pi"],
+        "urn:eigenius:formulas:FormulaTerm-Pi-name": "x",
+        "urn:eigenius:formulas:FormulaTerm-Pi-ty": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        },
+        "urn:eigenius:formulas:FormulaTerm-Pi-body": {
+          "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-OpRef"],
+          "urn:eigenius:formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+        }
+      }
     }
   }
 ]

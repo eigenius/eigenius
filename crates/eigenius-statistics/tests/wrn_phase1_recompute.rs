@@ -208,10 +208,12 @@ fn wrn_warrants_kernel_recomputed() {
     // `prov` — the provenance axis, above reflection and below everything that
     // names an agent, a trace or an attribution.
     let prov = {
-        let mut b = LayerBuilder::new("prov", Some(reflection));
+        // Compiled against the layer it sits on: its values name their constructors'
+        // arguments (D85 §6.1), and those names live in `eigentt:Term`'s declaration below.
+        let mut b = LayerBuilder::new("prov", Some(Arc::clone(&reflection)));
         for r in esl::compile(
             include_str!("../../../ontologies/prov/prov.esl"),
-            &eigenius_kernel::layer::Layer::empty(),
+            &reflection,
         )
         .unwrap()
         {
@@ -220,10 +222,10 @@ fn wrn_warrants_kernel_recomputed() {
         Arc::new(b.build(LayerStorage::in_memory()))
     };
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(prov));
+        let mut b = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
         for r in esl::compile(
             include_str!("../../../ontologies/justification/justification.esl"),
-            &eigenius_kernel::layer::Layer::empty(),
+            &prov,
         )
         .expect("reasoning.esl compiles")
         {

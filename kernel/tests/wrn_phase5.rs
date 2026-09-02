@@ -172,22 +172,18 @@ fn build_ctx() -> ExecutionContext {
     // `prov` — the provenance axis, above reflection and below everything that
     // names an agent, a trace or an attribution.
     let prov = {
-        let mut b = LayerBuilder::new("prov", Some(reflection));
-        for r in esl::compile(
-            include_str!("../../ontologies/prov/prov.esl"),
-            &eigenius_kernel::layer::Layer::empty(),
-        )
-        .unwrap()
+        let mut b = LayerBuilder::new("prov", Some(Arc::clone(&reflection)));
+        for r in esl::compile(include_str!("../../ontologies/prov/prov.esl"), &reflection).unwrap()
         {
             b.add_resource(r).unwrap();
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(prov));
+        let mut b = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
         for r in esl::compile(
             include_str!("../../ontologies/justification/justification.esl"),
-            &eigenius_kernel::layer::Layer::empty(),
+            &prov,
         )
         .expect("reasoning.esl compiles")
         {

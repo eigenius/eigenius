@@ -106,10 +106,6 @@ fn build_full_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
-    let reasoning_resources =
-        esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
-            .expect("reasoning.esl compiles");
     // `prov` (P5). These fixtures carry `prov:` properties and trace classes; without this
     // layer none of them resolve, and the chain reports a dozen `UnresolvedClassReference`s
     // that no assertion here was looking at. Sits above `reflection` and below
@@ -121,6 +117,13 @@ fn build_full_chain() -> ExecutionContext {
         prov_builder.add_resource(r).unwrap();
     }
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
+
+    // Compiled against `prov`, the layer it is about to sit on — not against an empty one.
+    // Its values name their constructors' arguments (D85 §6.1), and those names live in
+    // `eigentt:Term`'s declaration down the chain.
+    let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
+    let reasoning_resources =
+        esl::compile(reasoning_source, &prov).expect("reasoning.esl compiles");
 
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
     for r in reasoning_resources {

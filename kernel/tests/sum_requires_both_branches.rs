@@ -82,10 +82,8 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
     let reasoning_source = include_str!("../../ontologies/justification/justification.esl");
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
-    for r in esl::compile(reasoning_source, &eigenius_kernel::layer::Layer::empty())
-        .expect("justification.esl compiles")
-    {
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
+    for r in esl::compile(reasoning_source, &prov).expect("justification.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));

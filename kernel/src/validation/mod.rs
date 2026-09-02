@@ -3014,7 +3014,7 @@ mod tests {
                 (a, b, opt) => b
             }
             "#,
-            &crate::layer::Layer::empty(),
+            crate::testing::term_chain(),
         )
         .unwrap();
         let layer = build_d37_layer(resources);

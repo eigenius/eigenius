@@ -68,8 +68,7 @@ pub fn compile(
 /// to ctors / macros declared in parent layers (like
 /// `stats:SingleSampleEstimate` smart constructors or
 /// `justification:Certificate.app` ctors) need to resolve against the
-/// chain. Falls back to `compile_with_institutions` if no layer is
-/// available; `compile_against_layer` if no institution index is.
+/// chain. Use [`compile`] when there is no institution index.
 ///
 /// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
 pub fn compile_full(

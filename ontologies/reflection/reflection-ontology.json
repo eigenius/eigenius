@@ -588,13 +588,10 @@
       "urn:eigenius:eigentt:Term"
     ],
     "urn:eigenius:eigentt:expected_type": {
-      "ctor": "Sort",
-      "args": [
-        {
-          "ctor": "Zero",
-          "args": []
-        }
-      ]
+      "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-Sort"],
+      "urn:eigenius:eigentt:Term-Sort-level": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:Level-Zero"]
+      }
     }
   }
 ]

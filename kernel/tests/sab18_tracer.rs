@@ -71,10 +71,8 @@ fn sab18_dili_rf_validates_to_holds_and_covers() {
     }
     let prov = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
-    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(prov));
-    for r in esl::compile(reasoning_src, &eigenius_kernel::layer::Layer::empty())
-        .expect("reasoning.esl compiles")
-    {
+    let mut reasoning_builder = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
+    for r in esl::compile(reasoning_src, &prov).expect("reasoning.esl compiles") {
         reasoning_builder.add_resource(r).unwrap();
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));

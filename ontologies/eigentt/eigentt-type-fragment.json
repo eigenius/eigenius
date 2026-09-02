@@ -92,17 +92,26 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "logic",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:Logic"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Logic"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "term",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:Term"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term"
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "type",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:eigentt:Term"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term"
+            }
           }
         ]
       }

@@ -69,26 +69,19 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
     let refl_layer = Arc::new(refl.build(LayerStorage::in_memory()));
 
     // `prov` — the provenance axis, above reflection.
-    let mut prov = LayerBuilder::new("prov", Some(refl_layer));
-    for r in esl::compile(
-        include_str!("../../ontologies/prov/prov.esl"),
-        &eigenius_kernel::layer::Layer::empty(),
-    )
-    .unwrap()
-    {
+    let mut prov = LayerBuilder::new("prov", Some(Arc::clone(&refl_layer)));
+    for r in esl::compile(include_str!("../../ontologies/prov/prov.esl"), &refl_layer).unwrap() {
         prov.add_resource(r).unwrap();
     }
     let refl = Arc::new(prov.build(LayerStorage::in_memory()));
 
-    let mut vocab = LayerBuilder::new("parse-vocabulary", Some(refl));
+    let mut vocab = LayerBuilder::new("parse-vocabulary", Some(Arc::clone(&refl)));
     for src in [
         include_str!("../../ontologies/logic/logic.esl"),
         include_str!("../../ontologies/lexicon/lexicon-ontology.esl"),
         include_str!("../../ontologies/ontology/ontology.esl"),
     ] {
-        for r in esl::compile(src, &eigenius_kernel::layer::Layer::empty())
-            .expect("ontology ESL compiles")
-        {
+        for r in esl::compile(src, &refl).expect("ontology ESL compiles") {
             vocab.add_resource(r).unwrap();
         }
     }
@@ -967,8 +960,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
     let base = chain_with_parse_vocabulary();
     let build = |src: &str| {
         let mut b = LayerBuilder::new("case", Some(Arc::clone(&base)));
-        let rs = esl::compile(src, &eigenius_kernel::layer::Layer::empty())
-            .unwrap_or_else(|e| panic!("compiles: {e:?}"));
+        let rs = esl::compile(src, &base).unwrap_or_else(|e| panic!("compiles: {e:?}"));
         for r in rs.clone() {
             b.add_resource(r).unwrap();
         }
