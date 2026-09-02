@@ -625,18 +625,6 @@ pub unsafe extern "C" fn r_eigon_set_str(bid: SEXP, prop: SEXP, val: SEXP) -> SE
     unsafe { rapi::Rf_ScalarInteger(rc) }
 }
 
-/// `r_eigon_set_proposition(bid, pred_iri, args)` → status. Sets the
-/// inherited `reflection:canonical_proposition` slot to a D47-encoded
-/// predicate application `pred(arg₁, …, argₙ)` over string-literal
-/// arguments — the same term shape the statistics institution emits, so a
-/// wrapped-R `DerivedResource` composes with the reasoning institution
-/// identically (D54 / D55 §12). The term is built in Rust (R never sees the
-/// JSON encoding): `App(…App(ConstRef(pred_iri), LitString(arg₁))…,
-/// LitString(argₙ))`. `args` is an R character vector (empty → bare
-/// `ConstRef(pred_iri)`, a nullary predicate).
-///
-/// # Safety
-/// Called by R via `.Call`; `pred_iri` a character scalar, `args` a
 const TERM_IRI: &str = "urn:eigenius:eigentt:Term";
 
 /// `eigentt:Term`'s constructor argument names, read from the bootstrap chain once.
@@ -652,6 +640,18 @@ fn codec_names() -> &'static eigenius_kernel::program::eigentt_type_mirror::Code
     })
 }
 
+/// `r_eigon_set_proposition(bid, pred_iri, args)` → status. Sets the
+/// inherited `reflection:canonical_proposition` slot to a D47-encoded
+/// predicate application `pred(arg₁, …, argₙ)` over string-literal
+/// arguments — the same term shape the statistics institution emits, so a
+/// wrapped-R `DerivedResource` composes with the reasoning institution
+/// identically (D54 / D55 §12). The term is built in Rust (R never sees the
+/// JSON encoding): `App(…App(ConstRef(pred_iri), LitString(arg₁))…,
+/// LitString(argₙ))`. `args` is an R character vector (empty → bare
+/// `ConstRef(pred_iri)`, a nullary predicate).
+///
+/// # Safety
+/// Called by R via `.Call`; `pred_iri` a character scalar, `args` a
 /// character vector.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn r_eigon_set_proposition(bid: SEXP, pred_iri: SEXP, args: SEXP) -> SEXP {
