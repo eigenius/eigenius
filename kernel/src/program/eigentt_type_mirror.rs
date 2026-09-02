@@ -148,6 +148,30 @@ impl CodecNames {
         Self { by_class }
     }
 
+    /// Build a value of `inductive`'s constructor `ctor` from already-encoded arguments.
+    ///
+    /// The public face of the layout authority: a producer outside this module — the Lean
+    /// chain mirror, say — says which constructor it means and hands over the arguments, and
+    /// the names and arity come from the declaration this table read.
+    pub fn value(
+        &self,
+        inductive: &str,
+        ctor: &str,
+        args: Vec<Value>,
+    ) -> Result<Value, EncodeError> {
+        let (inductive, names) = self.lookup_in(inductive, ctor)?;
+        if names.len() != args.len() {
+            return Err(EncodeError::Undeclared(format!(
+                "`{ctor}` of `{inductive}` takes {} argument(s), got {}",
+                names.len(),
+                args.len()
+            )));
+        }
+        Ok(crate::layer::ctor_classes::value_resource(
+            inductive, ctor, names, &args,
+        ))
+    }
+
     fn lookup_in(&self, inductive: &str, ctor: &str) -> Result<(&str, &[String]), EncodeError> {
         let class = crate::layer::ctor_classes::class_iri(inductive, ctor);
         match self.by_class.get(&class) {
@@ -595,24 +619,16 @@ pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
     }
 }
 
-/// Translate a value resource (D85 §1) into the `{"ctor": …, "args": […]}` form.
+/// The constructor a value states, and its arguments in DECLARATION order.
 ///
-/// The constructor is what `is_a` names — a class the layer derived from the inductive's
-/// `core:ctors` — and the argument ORDER comes from that constructor's declared `arg_types`,
-/// not from the value, which is why a value cannot get the order wrong.
-/// The CONSTRUCTOR view of a value resource: `{ctor, args}`, arguments in declaration order.
-///
-/// This is the read every consumer of an inductive value wants — "which constructor, and what
-/// are its arguments" — answered from the value's own `is_a` and the inductive's declaration.
-pub fn ctor_view(r: &Resource, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
-    project(r, layer, false)
-}
-
-/// The shared walk. `term_form` selects the projection each NESTED value takes too — a
-/// constructor view all the way down, or the term language all the way down. Mixing them is
-/// what produced `unknown Replication ctor CtorApp`: a `Bundle` read as a constructor whose
-/// arguments had been folded into spines.
-fn project(r: &Resource, layer: &Layer, term_form: bool) -> Result<serde_json::Value, DecodeError> {
+/// The one read of an inductive value: `is_a` names the constructor's class, the class names
+/// its inductive, and the inductive's `core:ctors` gives the argument names and their order.
+/// Everything that consumes a value goes through here — the decoder, the printer, the
+/// institutions — so there is one description of how a value is taken apart.
+pub fn ctor_and_args<'a>(
+    r: &'a Resource,
+    layer: &Layer,
+) -> Result<(String, Vec<&'a Value>), DecodeError> {
     use crate::ontology::well_known as wk;
     let bad = |m: String| DecodeError::MalformedValue(m);
 
@@ -625,7 +641,6 @@ fn project(r: &Resource, layer: &Layer, term_form: bool) -> Result<serde_json::V
         ))
     })?;
 
-    // The inductive is what the class subclasses; the ctor name is the rest of the IRI.
     let inductive_iri = class
         .get(&wk::iri(wk::PARENT_CLASSES))
         .and_then(|v| v.as_iri_array().first().cloned())
@@ -679,10 +694,18 @@ fn project(r: &Resource, layer: &Layer, term_form: bool) -> Result<serde_json::V
                     "value of `{ctor_name}` is missing argument `{arg_name}`"
                 ))
             })?;
-            args.push(arg_value_to_json(v, layer, term_form)?);
+            args.push(v);
         }
     }
-    Ok(serde_json::json!({ "ctor": ctor_name, "args": args }))
+    Ok((ctor_name, args))
+}
+
+/// The constructor view as JSON: `{ctor, args}`, for consumers written against that shape.
+pub fn ctor_view(r: &Resource, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
+    let (ctor_name, args) = ctor_and_args(r, layer)?;
+    let args: Result<Vec<serde_json::Value>, DecodeError> =
+        args.iter().map(|a| arg_value_to_json(a, layer)).collect();
+    Ok(serde_json::json!({ "ctor": ctor_name, "args": args? }))
 }
 
 /// The TERM-LANGUAGE projection of a value resource, for [`decode_type_json`].
@@ -699,7 +722,15 @@ pub fn value_resource_to_tagged(
     r: &Resource,
     layer: &Layer,
 ) -> Result<serde_json::Value, DecodeError> {
-    let view = project(r, layer, true)?;
+    let (ctor_name, args) = ctor_and_args(r, layer)?;
+    let args: Result<Vec<serde_json::Value>, DecodeError> = args
+        .iter()
+        .map(|a| match a {
+            Value::Embedded(inner) => value_resource_to_tagged(inner, layer),
+            other => arg_value_to_json(other, layer),
+        })
+        .collect();
+    let view = serde_json::json!({ "ctor": ctor_name, "args": args? });
     Ok(fold_spine(r, view))
 }
 
@@ -734,20 +765,9 @@ fn fold_spine(r: &Resource, view: serde_json::Value) -> serde_json::Value {
 ///
 /// A nested inductive value recurses; a primitive passes through; a `Value::Json` is a
 /// tagged dict already, which is how a partly-migrated tree reads.
-fn arg_value_to_json(
-    v: &Value,
-    layer: &Layer,
-    term_form: bool,
-) -> Result<serde_json::Value, DecodeError> {
+fn arg_value_to_json(v: &Value, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
     Ok(match v {
-        Value::Embedded(r) => {
-            let inner = project(r, layer, term_form)?;
-            if term_form {
-                fold_spine(r, inner)
-            } else {
-                inner
-            }
-        }
+        Value::Embedded(r) => ctor_view(r, layer)?,
         Value::Json(j) => j.clone(),
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Integer(i) => serde_json::Value::from(*i),
@@ -756,7 +776,7 @@ fn arg_value_to_json(
         Value::Array(items) => serde_json::Value::Array(
             items
                 .iter()
-                .map(|x| arg_value_to_json(x, layer, term_form))
+                .map(|x| arg_value_to_json(x, layer))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         other => {

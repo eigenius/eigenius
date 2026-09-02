@@ -68,6 +68,19 @@ const TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term";
 
 const OUTPUT_REL: &str = "notebooks/examples/lean-verification-demo.eigon.json";
 
+/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 fn main() {
     let workspace = workspace_root();
     let proof_bytes_path =
@@ -106,7 +119,7 @@ fn main() {
     eprintln!("Bootstrap head layer ID: {bootstrap_head_id}");
 
     eprintln!("Decoding proposition for theorem `{TARGET_THEOREM}`");
-    let proposition = bytes_to_lean_expr(&proof_bytes, TARGET_THEOREM)
+    let proposition = bytes_to_lean_expr(&proof_bytes, TARGET_THEOREM, chain())
         .expect("chain-mirror translator must decode the capstone proposition");
 
     let resources = vec![

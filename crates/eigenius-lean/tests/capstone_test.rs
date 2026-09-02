@@ -308,7 +308,7 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     // commit pipeline would do (D28 §6.3); we replicate it here so
     // the proposition reflects the proof's actual type rather than
     // a hand-fabricated tree.
-    let proposition = bytes_to_lean_expr(CAPSTONE_PROOF_BYTES, TARGET_THEOREM)
+    let proposition = bytes_to_lean_expr(CAPSTONE_PROOF_BYTES, TARGET_THEOREM, chain())
         .expect("chain-mirror translator must decode the capstone proposition");
     let mut term = Resource::new(iri(TERM_IRI));
     term.set(
@@ -341,6 +341,19 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
 }
 
 // ─── The capstone assertion ────────────────────────────────────────
+
+/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
 
 #[test]
 #[ignore = "heavy: parses ~9 kLoC of lean4export output via nanoda"]
