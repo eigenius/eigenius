@@ -571,12 +571,42 @@ pub fn emit_resources(
         iri(&format!("{PROV}:resource")),
         Value::String(iri(&format!("{ns}:structure")).as_str().to_string()),
     );
-    run_trace.set(
-        iri(&format!("{PROV}:was_generated_by")),
+    // `prov:was_generated_by` is `data_type: core:resource` at `class_types: [prov:Activity]`,
+    // so the trace NAMES the activity that produced it. It does not describe one.
+    //
+    // P5 (2/n) moved this slot from `reflection:source` and carried the payload across
+    // unchanged — but `reflection:source` took a string and this takes a reference, so every
+    // artifact the emitter produced from then on failed Rule 22 at load with
+    // `UnresolvedClassReference` and NOTHING landed. The description is not wrong, it was
+    // simply in the reference's place; it belongs to the activity, which is minted here.
+    //
+    // Document-local rather than a bootstrap declaration like the kernel's
+    // `prov:activity:kernel_run_program`: that one is a permanent facility, while this is ONE
+    // encoding run over one document's bytes, and minting it in the artifact keeps the
+    // artifact self-contained — it loads against any chain, and moves no manifest.
+    let activity_iri = format!("{ns}:encoding_run");
+    let mut activity = res(&activity_iri, &[&format!("{PROV}:Activity")]);
+    activity.set(
+        iri(&format!("{CORE}:short_name")),
+        Value::String("encoding_run".to_string()),
+    );
+    activity.set(
+        iri(&format!("{CORE}:description")),
         Value::String(format!(
             "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
              (source sha256 {source_sha256})"
         )),
+    );
+    // `prov:used` is `core:resource_array` — the resources an activity consumed, plural.
+    activity.set(
+        iri(&format!("{PROV}:used")),
+        Value::Array(vec![Value::String(iri(&doc_iri).as_str().to_string())]),
+    );
+    out.push(activity);
+
+    run_trace.set(
+        iri(&format!("{PROV}:was_generated_by")),
+        Value::String(iri(&activity_iri).as_str().to_string()),
     );
     run_trace.set(
         iri(&format!("{PROV}:timestamp")),
@@ -703,6 +733,70 @@ mod tests {
             ),
         )
         .expect("emits")
+    }
+
+    /// **Every artifact this emitter produces must LOAD.**
+    ///
+    /// It did not, from `2026-08-30` until this test was written. P5 (2/n) moved the run
+    /// trace's provenance from `reflection:source` — a string slot — to
+    /// `prov:was_generated_by`, which is `data_type: core:resource` at
+    /// `class_types: [prov:Activity]`, and carried the description string across unchanged. So
+    /// Rule 22 refused the whole layer with `UnresolvedClassReference` and every claim, unit and
+    /// binding in the artifact was rejected along with it. Three sentences would parse and
+    /// encode perfectly, the banner would say "3 claims", and nothing would reach the chain.
+    ///
+    /// Nothing caught it because the only test that loads an artifact through the kernel is
+    /// `artifact_completeness`, which is `#[ignore]`d behind a DB snapshot. This one needs no
+    /// snapshot: the defect is in the artifact's PROVENANCE resources, which do not depend on
+    /// the lexicon at all, so the bootstrap chain is enough to validate against.
+    #[test]
+    fn the_emitted_artifact_validates_against_the_bootstrap_chain() {
+        use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+
+        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        let names =
+            eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(ctx.head());
+        // NO sentences and no cuts. A document that encoded nothing still emits its
+        // provenance spine — reference, activity, run trace, structure — and that spine is
+        // where the defect was. Adding a claim would need a Prop-typed sem built from chain
+        // vocabulary, which is what the DB-backed `artifact_completeness` test is for; here it
+        // would only add a way for this test to fail for an unrelated reason.
+        let resources = emit_resources(
+            &DocumentMeta {
+                ns: "urn:eigenius:test:doc",
+                source_path: "test.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-08-11T00:00:00Z",
+                declared_by: crate::UNATTRIBUTED_AGENT,
+                source_ref: None,
+            },
+            &[],
+            &[],
+            &[],
+            &names,
+        )
+        .expect("emits");
+
+        let mut b = LayerBuilder::new("artifact", Some(std::sync::Arc::clone(ctx.head())));
+        for r in resources {
+            b.add_resource(r).expect("adds");
+        }
+        let layer = std::sync::Arc::new(b.build(LayerStorage::in_memory()));
+        let errors = eigenius_kernel::validation::Validator::new(layer).validate();
+        assert!(
+            errors.is_empty(),
+            "the artifact must load: {}",
+            errors
+                .iter()
+                .map(|e| format!(
+                    "{:?} {} — {}",
+                    e.rule,
+                    e.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                    e.message
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
 
     #[test]

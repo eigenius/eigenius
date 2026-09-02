@@ -1701,6 +1701,19 @@ async function executeFormalizeCell(
       contentType: "application/x-esl",
       autoCommit: true,
     });
+    // A validation failure is a FIELD, not a thrown error: the kernel answers
+    // `Ok(LoadResponse { success: false, errors, layer_id: "" })`. Reading `layerId`
+    // without checking `success` reports "landed as layer " — the empty id rendering as
+    // nothing — while the whole layer was refused and the artifact reached no chain.
+    if (!resp.success) {
+      const messages = resp.errors.map((e) => formatValidationError(e));
+      return {
+        kind: "error",
+        message: messages.length === 0
+          ? "the artifact failed to land (no errors reported)"
+          : `the artifact failed to land:\n${messages.join("\n")}`,
+      };
+    }
     landed = {
       layerId: resp.layerId,
       resourceCount: Number(resp.resourceCount ?? 0),
@@ -2210,7 +2223,7 @@ interface ValidationErrorLike {
   column?: number;
 }
 
-function formatValidationError(err: ValidationErrorLike): string {
+export function formatValidationError(err: ValidationErrorLike): string {
   const prefix = err.rule ? `[${err.rule}] ` : "";
   const position = err.line ? ` (${err.line}:${err.column ?? 0})` : "";
   return `${prefix}${err.message}${position}`;
