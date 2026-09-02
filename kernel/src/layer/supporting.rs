@@ -37,7 +37,7 @@
 
 use crate::layer::{Layer, LayerId};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::{Resource, Value};
+use crate::ontology::resource::Resource;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -149,33 +149,14 @@ fn collect_refs_from_resource(resource: &Resource, out: &mut BTreeSet<Iri>) {
     for (prop, value) in resource.properties() {
         // The property IRI itself is a reference: its definition lives
         // somewhere in the chain (typically the core ontology or a
-        // domain layer above it).
+        // domain layer above it). The same holds for a property key
+        // inside an embedded value, which is why both sites are taken.
         out.insert(prop.clone());
-        collect_refs_from_value(value, out);
-    }
-}
-
-fn collect_refs_from_value(value: &Value, out: &mut BTreeSet<Iri>) {
-    match value {
-        // A reference is a string that parses as an IRI — the same shape test `value_refs`
-        // uses, and for the same reason: the variant that used to mark one was produced only
-        // at build time and never survived storage.
-        Value::String(s) => {
+        crate::ontology::value_refs::for_each_ref(value, &mut |_site, s, _path| {
             if let Ok(iri) = Iri::parse(s) {
                 out.insert(iri);
             }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_refs_from_value(item, out);
-            }
-        }
-        Value::Embedded(inner) => {
-            collect_refs_from_resource(inner.as_ref(), out);
-        }
-        // String / Integer / Float / Boolean / Json never carry
-        // typed-reference semantics here (see module docs).
-        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Json(_) => {}
+        });
     }
 }
 
@@ -184,6 +165,7 @@ mod tests {
     use super::*;
     use crate::layer::LayerBuilder;
     use crate::layer::LayerStorage;
+    use crate::ontology::resource::Value;
 
     fn iri(s: &str) -> Iri {
         Iri::parse(s).unwrap()

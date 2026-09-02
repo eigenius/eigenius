@@ -527,19 +527,22 @@ fn value_text(v: &Value) -> Option<&str> {
     }
 }
 
-/// The reference IRIs a property value holds (a lone ref, or an array of them).
+/// The reference IRIs a property value holds.
+///
+/// This used to stop at `Embedded` — invisible, because its one caller passes `core:is_a`, a
+/// flat array of IRI strings. It was still wrong by D85 R5a's table, and the kind of wrong that
+/// surfaces when someone reuses a function whose name promises the general traversal. It now
+/// goes through the one walk, which descends.
 fn value_refs(v: &Value) -> Vec<Iri> {
-    match v {
-        Value::String(s) => Iri::parse(s).ok().into_iter().collect(),
-        Value::Array(xs) => xs
-            .iter()
-            .filter_map(|x| match x {
-                Value::String(s) => Iri::parse(s).ok(),
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+    let mut out = Vec::new();
+    crate::ontology::value_refs::for_each_ref(v, &mut |site, s, _path| {
+        if site == crate::ontology::value_refs::RefSite::Value {
+            if let Ok(iri) = Iri::parse(s) {
+                out.push(iri);
+            }
+        }
+    });
+    out
 }
 
 #[cfg(test)]

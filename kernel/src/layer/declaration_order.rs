@@ -39,7 +39,7 @@
 
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::{Resource, Value};
+use crate::ontology::resource::Resource;
 use crate::ontology::well_known as wk;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -150,43 +150,28 @@ fn is_derived_from_inductive(layer: &Layer, iri: &Iri, decls: &BTreeMap<Iri, boo
 }
 
 fn references(r: &Resource, out: &mut BTreeSet<Iri>) {
-    for (prop, value) in r.properties() {
-        out.insert(prop.clone());
-        // `core:domain` is NOT a dependency edge. It says where a property APPLIES; it does not
-        // say the property needs that class declared first. Treating it as one makes every
-        // ordinary class/property pair circular — a class `requires` the property, the property's
-        // `domain` names the class back — which core has had all along (`core:Property requires
-        // core:data_type`, `core:data_type domain core:Property`) and which D85 §6.1's derived
-        // constructor classes make universal, since every inductive now yields such a pair.
-        //
-        // This is a constant, not a schema lookup: the walk stays usable before any schema is
-        // resolvable, which is the reason it is schema-blind in the first place.
-        if prop.as_str() == wk::DOMAIN {
-            continue;
-        }
-        value_refs(value, out);
-    }
-}
-
-fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
-    match v {
-        // A reference is a string that parses as an IRI.
-        //
-        // This arm read `Value::ResourceRef` and ignored `Value::String`, which worked only
-        // while a build-time pass upgraded one to the other — an upgrade that never survived
-        // a storage round trip, so a reloaded chain contributed no edges here at all. The
-        // shape test is what `json_mentions_of_value` already uses one line below ("any `urn:`-prefixed
-        // string at any depth"), and having one answer is what lets `core:mentions` and
-        // `MutualInductives` agree about what a value names.
-        Value::String(s) => {
+    // `core:domain` is NOT a dependency edge. It says where a property APPLIES; it does not say
+    // the property needs that class declared first. Treating it as one makes every ordinary
+    // class/property pair circular — a class `requires` the property, the property's `domain`
+    // names the class back — which core has had all along (`core:Property requires
+    // core:data_type`, `core:data_type domain core:Property`) and which D85 §6.1's derived
+    // constructor classes make universal, since every inductive now yields such a pair.
+    //
+    // This is a constant, not a schema lookup: the walk stays usable before any schema is
+    // resolvable, which is the reason it is schema-blind in the first place.
+    //
+    // Both SITES count here: a property key is a reference, because its definition lives
+    // somewhere in the chain and has to be declared first. That is what the walk reports and
+    // this does not filter.
+    crate::ontology::value_refs::for_each_resource_ref_where(
+        r,
+        &|prop| prop.as_str() != wk::DOMAIN,
+        &mut |_site, s, _path| {
             if let Ok(iri) = Iri::parse(s) {
                 out.insert(iri);
             }
-        }
-        Value::Array(items) => items.iter().for_each(|i| value_refs(i, out)),
-        Value::Embedded(inner) => references(inner.as_ref(), out),
-        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Json(_) => {}
-    }
+        },
+    );
 }
 
 /// D76 §6.2 — the order a layer's declarations must be processed in.
@@ -270,6 +255,7 @@ pub fn declaration_order(layer: &Layer) -> Result<Vec<Iri>, OrderError> {
 mod tests {
     use super::*;
     use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::ontology::resource::Value;
     use std::sync::Arc;
 
     fn iri(s: &str) -> Iri {

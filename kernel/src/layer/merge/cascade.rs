@@ -364,6 +364,10 @@ fn cascade_for_quotient(
 /// item for each IRI-string reference to `target`. Recurses through nested
 /// `Embedded` resources and `Array` items, tracking the property
 /// path to the reference site.
+///
+/// The path is why this reads the walk's `path` argument rather than only its leaves: the item
+/// this produces names WHERE the dangling reference sits, and a caller reading
+/// `PropertyPath([justification:judgement, eigentt:Judgement-holds-term])` can find it.
 fn collect_orphaned_refs(
     resource: &Resource,
     resource_iri: &Iri,
@@ -371,42 +375,21 @@ fn collect_orphaned_refs(
     path: &mut Vec<Iri>,
     out: &mut Vec<CascadeItem>,
 ) {
+    use crate::ontology::value_refs::{for_each_ref, RefSite};
     for (prop, value) in resource.properties() {
         path.push(prop.clone());
-        collect_orphaned_refs_in_value(value, resource_iri, target, path, out);
+        for_each_ref(value, &mut |site, s, inner_path| {
+            if site == RefSite::Value && s == target.as_str() {
+                let mut full = path.clone();
+                full.extend_from_slice(inner_path);
+                out.push(CascadeItem::OrphanedReference {
+                    resource: resource_iri.clone(),
+                    dropped_target: target.clone(),
+                    location: PropertyPath(full),
+                });
+            }
+        });
         path.pop();
-    }
-}
-
-fn collect_orphaned_refs_in_value(
-    value: &crate::ontology::resource::Value,
-    resource_iri: &Iri,
-    target: &Iri,
-    path: &mut Vec<Iri>,
-    out: &mut Vec<CascadeItem>,
-) {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::String(r) if r.as_str() == target.as_str() => {
-            out.push(CascadeItem::OrphanedReference {
-                resource: resource_iri.clone(),
-                dropped_target: target.clone(),
-                location: PropertyPath(path.clone()),
-            });
-        }
-        Value::Array(items) => {
-            for v in items {
-                collect_orphaned_refs_in_value(v, resource_iri, target, path, out);
-            }
-        }
-        Value::Embedded(boxed) => {
-            for (prop, inner_value) in boxed.properties() {
-                path.push(prop.clone());
-                collect_orphaned_refs_in_value(inner_value, resource_iri, target, path, out);
-                path.pop();
-            }
-        }
-        _ => {}
     }
 }
 

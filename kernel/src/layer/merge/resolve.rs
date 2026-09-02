@@ -452,57 +452,25 @@ fn resource_mentions_iri(resource: &Resource, iri: &Iri) -> bool {
 }
 
 fn value_mentions_iri(value: &crate::ontology::resource::Value, iri: &Iri) -> bool {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::String(r) => r.as_str() == iri.as_str(),
-        Value::Array(items) => items.iter().any(|v| value_mentions_iri(v, iri)),
-        Value::Embedded(resource) => resource_mentions_iri(resource, iri),
-        // `Value::Json` gets no arm. It is `core:json` and only that — opaque data,
-        // where an IRI-shaped string is a string (D85 R5a). A term is a resource, so it
-        // arrives `Embedded` and the arm above descends it.
-        _ => false,
-    }
+    use crate::ontology::value_refs::{for_each_ref, RefSite};
+    // Value leaves only: a rename moves a RESOURCE, and the properties pointing at it keep
+    // their own names. `Value::Json` is not visited at all — it is `core:json` and only that,
+    // opaque data where an IRI-shaped string is a string (D85 R5a), and rewriting one would
+    // corrupt a solver payload.
+    let mut found = false;
+    for_each_ref(value, &mut |site, s, _path| {
+        found |= site == RefSite::Value && s == iri.as_str();
+    });
+    found
 }
 
 /// Produce a copy of `resource` with every reference to `old_iri`
 /// (in `@id`, IRI strings, nested `Embedded`, and `Array` items)
 /// rewritten to `new_iri`.
 fn substitute_iri_in_resource(resource: &Resource, old_iri: &Iri, new_iri: &Iri) -> Resource {
-    let mut out = match resource.id() {
-        Some(id) if id == old_iri => Resource::new(new_iri.clone()),
-        Some(id) => Resource::new(id.clone()),
-        None => Resource::new_embedded(),
-    };
-    for (prop, value) in resource.properties() {
-        out.set(
-            prop.clone(),
-            substitute_iri_in_value(value, old_iri, new_iri),
-        );
-    }
-    out
-}
-
-fn substitute_iri_in_value(
-    value: &crate::ontology::resource::Value,
-    old_iri: &Iri,
-    new_iri: &Iri,
-) -> crate::ontology::resource::Value {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::String(r) if r.as_str() == old_iri.as_str() => Value::iri(new_iri),
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|v| substitute_iri_in_value(v, old_iri, new_iri))
-                .collect(),
-        ),
-        Value::Embedded(resource) => Value::Embedded(Box::new(substitute_iri_in_resource(
-            resource, old_iri, new_iri,
-        ))),
-        // `Value::Json` is left alone — see `value_mentions_iri`, which is the read side of
-        // the same rule.
-        other => other.clone(),
-    }
+    crate::ontology::value_refs::map_resource_refs(resource, &mut |s| {
+        (s == old_iri.as_str()).then(|| new_iri.as_str().to_string())
+    })
 }
 
 // ─── Schema-quotient application (15d) ─────────────────────────────────────
