@@ -376,6 +376,24 @@ tagged half is deleted, not after: the other three (`term_mentions`, the α-cano
 reason recorded at that line, so porting means walking a value resource for
 `is_a = eigentt:Term-ConstRef` — the same predicate, one shape over.
 
+**The alignment emitter read `lexicon:cat` as `Value::Json` and silently emitted NOTHING —
+found `2026-09-02`, fixed.** `cat_n_num` opened with `let Value::Json(j) = cat else { return
+None }`, so after step 4 every category read as "not a `cat_n`" and every entry was counted a
+named individual. The emitter reported `skipped (named indiv.): 40405`, a plausible number
+against `merges: 38389`, and wrote a 0.0 MB layer; the kernel then panicked loading it —
+`commit/pipeline.rs:263`, `unreachable!()` on an empty batch. Reading either shape restores
+`entries redefined: 40357, skipped: 48`, matching the previous run exactly.
+
+Two things it demonstrates. A reader that opens the blob does not fail when the shape changes;
+it MISREADS, and the miss looks like data. And `cargo test --workspace` cannot see this: the
+alignment build is a script over a 4 GB snapshot, so the only signal was a downstream panic.
+
+A sweep of every `Value::Json`-only reader in the tree found no others of this kind. The rest
+read slots genuinely declared `core:json` — `runtime:library_content`,
+`runtime:numerical_metadata`, `schemaorg:coverage`, the Lean worker's source tree — where the
+variant is the right match. The exception is the Lean pair below, which reads and writes tagged
+consistently and moves together.
+
 **`lean:LeanExpr` values are still written tagged — found `2026-09-02`, step 5's work.**
 `lean:proposition` declares `data_type: core:inductive` with `class_types: [lean:LeanExpr]`,
 so a value there is a `LeanExpr` value resource. `chain_mirror::bytes_to_lean_expr` returns
@@ -388,8 +406,10 @@ step 4 closed had gone unnoticed — a shape is only checked where it lands.
 Fixing it is `encode_term`'s pattern applied to a second mirror: each arm names its constructor
 and its arguments, and `ctor_classes::value_resource` lays them out. `LeanName`, `LeanLevel`,
 `LeanLevelList` and `LeanExpr` are declared in `lean-expressions.eigon.json`, so the argument
-names are already there to read. It belongs with step 5 rather than step 4 because it is a
-producer nothing reads back through the D47 codec — the Lean worker consumes it directly.
+names are already there to read. `institution::check_proposition_structural_correspondence` reads it the same way, so the two
+sides agree with each other and disagree with the declaration. They move together, at step 5
+rather than step 4, because nothing reads this producer back through the D47 codec — the Lean
+worker consumes it directly.
 
 **The docs still teach the tagged shape — 107 occurrences across 21 files, counted
 `2026-09-01`.** Mostly `FormulaTerm` (`App` 27, `Var` 17, `OpRef` 14, `LitFloat` 10) in the
