@@ -21,7 +21,7 @@
 //! `Some(Value::String(s))` alone, took the fall-through arm, and returned an empty diagnostic
 //! vector: a malformed date committed with no diagnostic. The pass and the variant were retired
 //! on `2026-08-31` (D85 §6.2), so the slot is a `String` throughout — but the rule is still read
-//! through `as_iri_str`, and these tests still pin that a malformed value is caught at commit,
+//! through an accessor, and these tests still pin that a malformed value is caught at commit,
 //! which is the property #118 was actually about.
 //!
 //! The bug was shape-dependent, not universal. A definition rehydrated
@@ -208,7 +208,7 @@ fn well_formed_date_commits() {
 
 /// Rule 4 must still fire when the property definition arrives from a
 /// chain rehydrated out of storage rather than from the layer just built.
-/// Both backends hand the slot back as an IRI string, read through `as_iri_str`. They did
+/// Both backends hand the slot back as an IRI string, read through an accessor. They did
 /// not always agree — the in-memory one returned `Value::ResourceRef` where RocksDB's CBOR
 /// layer normalised it to `String` — and that disagreement is what this test was written to
 /// catch, and what retiring the variant removed.
@@ -230,9 +230,9 @@ fn format_rule_fires_against_a_reloaded_chain() {
     assert_eq!(
         prop_def
             .get(&iri("urn:eigenius:core:format"))
-            .and_then(Value::as_iri_str),
+            .and_then(Value::as_str),
         Some("urn:eigenius:core:formats:date"),
-        "format slot must survive the reload in one of the two IRI shapes"
+        "format slot must survive the reload"
     );
 
     let validator = Validator::new(Arc::clone(&reloaded));

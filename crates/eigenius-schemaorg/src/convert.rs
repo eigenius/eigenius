@@ -667,12 +667,9 @@ mod tests {
         match r.get(&iri(prop)) {
             Some(Value::Array(a)) => a
                 .iter()
-                .filter_map(|v| v.as_iri_str().map(String::from))
+                .filter_map(|v| v.as_str().map(String::from))
                 .collect(),
-            Some(v) => v
-                .as_iri_str()
-                .map(|s| vec![s.to_string()])
-                .unwrap_or_default(),
+            Some(v) => v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default(),
             None => Vec::new(),
         }
     }

@@ -394,7 +394,7 @@ fn enumerate_iri_typed_predicates(new_layer: &Arc<Layer>, is_a: &Iri) -> Vec<Iri
         let Some(prop_def) = new_layer.resolve(&prop_iri) else {
             continue;
         };
-        let Some(dt) = prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) else {
+        let Some(dt) = prop_def.get(&data_type_prop).and_then(|v| v.as_str()) else {
             continue;
         };
         if dt == wk::RESOURCE || dt == wk::RESOURCE_ARRAY {

@@ -625,12 +625,12 @@ impl EigeniusService {
                 let body_prop = Iri::parse("urn:eigenius:program:body").unwrap();
                 let input_type_prop = Iri::parse("urn:eigenius:program:input_type").unwrap();
                 // `program:input_type` is `data_type: resource`, so an IRI string. Read it
-                // via `as_iri_str` rather than matching a variant.
+                // through an accessor rather than by matching a variant.
                 if let (
                     Some(input_type_str),
                     Some(crate::ontology::resource::Value::Embedded(body)),
                 ) = (
-                    program.get(&input_type_prop).and_then(|v| v.as_iri_str()),
+                    program.get(&input_type_prop).and_then(|v| v.as_str()),
                     program.get(&body_prop),
                 ) {
                     if let Ok(input_type_iri) = Iri::parse(input_type_str) {

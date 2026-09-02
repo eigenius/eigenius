@@ -264,9 +264,9 @@ fn resource_attrs(
     }
     let data_type_iri = Iri::parse(wk::DATA_TYPE_PROP).expect("DATA_TYPE_PROP IRI");
     if let Some(v) = resource.get(&data_type_iri) {
-        // `data_type` is a resource-typed property. Read it through `as_iri_str` rather than
+        // `data_type` is a resource-typed property. Read it through an accessor rather than
         // matching a variant — see the test below for the bug that discipline exists to prevent.
-        if let Some(s) = v.as_iri_str() {
+        if let Some(s) = v.as_str() {
             attrs.insert("data_type".to_string(), s.to_string());
         }
     }
@@ -287,7 +287,7 @@ fn emit_resource_edges(
     let is_a_iri = Iri::parse(wk::IS_A).expect("IS_A IRI");
     if let Some(Value::Array(values)) = resource.get(&is_a_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_iri_str() {
+            if let Some(target_iri) = v.as_str() {
                 // Skip self-typing for taxonomy meta-resources.
                 if kind == proto::NodeKind::Class && target_iri == wk::CLASS {
                     continue;
@@ -309,7 +309,7 @@ fn emit_resource_edges(
     let subclass_iri = Iri::parse(wk::PARENT_CLASSES).expect("PARENT_CLASSES IRI");
     if let Some(Value::Array(values)) = resource.get(&subclass_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_iri_str() {
+            if let Some(target_iri) = v.as_str() {
                 edges.push(proto::TopologyEdge {
                     source: source.clone(),
                     target: target_iri.to_string(),
@@ -324,7 +324,7 @@ fn emit_resource_edges(
     let requires_iri = Iri::parse(wk::REQUIRES).expect("REQUIRES IRI");
     if let Some(Value::Array(values)) = resource.get(&requires_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_iri_str() {
+            if let Some(target_iri) = v.as_str() {
                 edges.push(proto::TopologyEdge {
                     source: source.clone(),
                     target: target_iri.to_string(),
@@ -339,7 +339,7 @@ fn emit_resource_edges(
     let recommends_iri = Iri::parse(wk::RECOMMENDS).expect("RECOMMENDS IRI");
     if let Some(Value::Array(values)) = resource.get(&recommends_iri) {
         for v in values {
-            if let Some(target_iri) = v.as_iri_str() {
+            if let Some(target_iri) = v.as_str() {
                 edges.push(proto::TopologyEdge {
                     source: source.clone(),
                     target: target_iri.to_string(),
@@ -355,7 +355,7 @@ fn emit_resource_edges(
         let class_types_iri = Iri::parse(wk::CLASS_TYPES).expect("CLASS_TYPES IRI");
         if let Some(Value::Array(values)) = resource.get(&class_types_iri) {
             for v in values {
-                if let Some(target_iri) = v.as_iri_str() {
+                if let Some(target_iri) = v.as_str() {
                     edges.push(proto::TopologyEdge {
                         source: source.clone(),
                         target: target_iri.to_string(),
@@ -700,7 +700,7 @@ mod tests {
     ///
     /// `Value::ResourceRef` was retired on `2026-08-31` (D85 §6.2) and this is the bug that
     /// argued for it: a variant not reliably produced is a place a reloaded chain reads nothing.
-    /// The reading discipline it forced — go through `as_iri_str`, never match a variant —
+    /// The reading discipline it forced — go through an accessor, never match a variant —
     /// survives the variant, which is why the test does.
     #[test]
     fn walker_emits_edges_for_resources_built_through_layer_builder() {
@@ -777,7 +777,7 @@ mod tests {
         assert_eq!(
             name_node.attrs.get("data_type").map(String::as_str),
             Some(wk::STRING),
-            "expected data_type attr read through as_iri_str; got: {:?}",
+            "expected data_type attr read through an accessor; got: {:?}",
             name_node.attrs,
         );
     }

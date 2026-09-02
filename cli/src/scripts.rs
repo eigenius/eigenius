@@ -273,8 +273,8 @@ pub async fn script_run(
     let input_type = input_resource
         .get(&Iri::parse("urn:eigenius:core:is_a").expect("static IRI"))
         .and_then(|v| match v {
-            Value::Array(items) => items.first().and_then(|i| i.as_iri_str()),
-            other => other.as_iri_str(),
+            Value::Array(items) => items.first().and_then(|i| i.as_str()),
+            other => other.as_str(),
         })
         .map(str::to_string)
         .unwrap_or_else(|| {

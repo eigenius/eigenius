@@ -413,7 +413,7 @@ fn expand_runtime_script_argument(comp_arg: &Resource, layer: &Layer) -> Result<
     let read = |r: &Resource, p: &str| -> Option<String> {
         r.get(&Iri::parse(p).unwrap()).and_then(|v| match v {
             Value::String(s) => Some(s.clone()),
-            other => other.as_iri_str().map(str::to_string),
+            other => other.as_str().map(str::to_string),
         })
     };
 
@@ -617,9 +617,9 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         let motive = crate::program::eigentt_type_mirror::decode_type(motive_value, layer)
             .map_err(|e| format!("invalid `result_motive` payload: {e:?}"))?;
         build_inductive_rec(parsed_arms, scrutinee_exp, motive, layer)
-    } else if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_iri_str()) {
-        // `program:result_type` is `data_type: resource`, so its value is an IRI string.
-        // `as_iri_str` reads it without matching a variant.
+    } else if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_str()) {
+        // `program:result_type` is `data_type: resource`, so its value is an IRI string,
+        // read through an accessor rather than by matching a variant.
         let result_type_iri = Iri::parse(rt_iri_str)
             .map_err(|e| format!("invalid `result_type` IRI '{rt_iri_str}': {e}"))?;
         let result_type_val = resolve_class_type(&result_type_iri, layer)?;
@@ -1146,7 +1146,7 @@ mod tests {
         let get = |p: &str| {
             expanded
                 .get(&Iri::parse(p).unwrap())
-                .and_then(|v| v.as_iri_str())
+                .and_then(|v| v.as_str())
                 .map(str::to_string)
         };
         assert_eq!(get(RUNTIME_LANGUAGE).as_deref(), Some("r"));

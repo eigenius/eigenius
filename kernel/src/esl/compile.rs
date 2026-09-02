@@ -4901,7 +4901,7 @@ mod tests {
     /// cannot pass or fail for the wrong reason.
     fn declared_by(r: &Resource) -> Option<String> {
         r.get(&iri(crate::ontology::well_known::DECLARED_BY))
-            .and_then(|v| v.as_iri_str().map(|s| s.to_string()))
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
     }
 
     #[test]
@@ -6021,7 +6021,7 @@ mod tests {
             .get(&iri("urn:eigenius:program:parameter_type"))
             .expect("typed lambda must emit parameter_type");
         assert_eq!(
-            pt.as_iri_str(),
+            pt.as_str(),
             Some("urn:ex:A"),
             "expected parameter_type IRI = urn:ex:A, got {pt:?}"
         );
@@ -6053,11 +6053,11 @@ mod tests {
         let target_class = r
             .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
             .expect("merge_target_class must be set");
-        assert_eq!(target_class.as_iri_str(), Some("urn:ex:Patient"));
+        assert_eq!(target_class.as_str(), Some("urn:ex:Patient"));
         let transformation = r
             .get(&iri(crate::ontology::well_known::MERGE_TRANSFORMATION))
             .expect("merge_transformation must be set");
-        assert_eq!(transformation.as_iri_str(), Some("urn:ex:take_b_term"));
+        assert_eq!(transformation.as_str(), Some("urn:ex:take_b_term"));
     }
 
     #[test]
@@ -6114,13 +6114,13 @@ mod tests {
         assert_eq!(
             comorphism_r
                 .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
-                .and_then(|v| v.as_iri_str()),
+                .and_then(|v| v.as_str()),
             Some("urn:ex:Patient")
         );
         assert_eq!(
             comorphism_r
                 .get(&iri(crate::ontology::well_known::MERGE_TRANSFORMATION))
-                .and_then(|v| v.as_iri_str()),
+                .and_then(|v| v.as_str()),
             Some(lambda_iri.as_str()),
             "comorphism's `merge_transformation` should point at the synthesised lambda's IRI"
         );
@@ -6220,7 +6220,7 @@ mod tests {
         assert_eq!(
             comorphism
                 .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
-                .and_then(|v| v.as_iri_str()),
+                .and_then(|v| v.as_str()),
             Some("urn:project:Patient")
         );
     }
@@ -6317,7 +6317,7 @@ mod tests {
         assert_eq!(
             comorphism
                 .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
-                .and_then(|v| v.as_iri_str()),
+                .and_then(|v| v.as_str()),
             Some("urn:project:Patient")
         );
     }

@@ -1,9 +1,10 @@
 # D85 — The shape of inductive types and their values
 
 **Status: implemented.** Written `2026-08-31`; §5's six retrofit steps landed `2026-09-01`
-through `2026-09-02`. §6 records what is still open — the six-visitor traversal consolidation
-(R5a), and `ResourceRef`'s 142 reconciliation call sites, both of which this note enabled rather
-than performed.
+through `2026-09-02`, and the two consequences this note enabled rather than performed — R5a's
+traversal consolidation and the accessor `ResourceRef` left behind — closed the same day. What
+§6 still declines to answer is deliberate and belongs elsewhere: whether Eigon-JSON and
+Eigon-CBOR should abbreviate property IRIs is a codec question about ALL resources (§6.3).
 
 **Replaces [D83](d83-inductive-value-wire-format.md) and
 [D84](d84-an-inductive-value-is-a-resource.md) entirely.** Both were written across one day while
@@ -161,15 +162,22 @@ exists to avoid. A reference is an IRI, and which variant holds it is not part o
 is what made retiring the variant (§6.2, done) a consequence of the rule rather than a separate
 decision.
 
-*The debt itself*, recorded and not fixed here. `ResourceRef` is
-`String` plus a schema lookup, produced only by
-[`canonicalise_resource_refs`](../../kernel/src/layer/mod.rs#L1305) at
-[build time](../../kernel/src/layer/mod.rs#L1073) and lost on the next serialisation. Hence 142 call
-sites of `as_iri_str` / `as_iri` / `as_iri_array` to reconcile it, and a special case in
-[`values_equal`](../../kernel/src/query/functions.rs#L149) so `ResourceRef("urn:x") == String("urn:x")`
-— which derived `PartialEq` does not share. The data model already states the principle, in
-[`as_iri_array`'s own doc](../../kernel/src/ontology/resource.rs#L179): *"the distinction between
-string literals and resource references is made by the property's data_type, not at parse time."*
+*The debt itself*, recorded here and **paid `2026-09-02`.** `ResourceRef` was
+`String` plus a schema lookup, produced only by `canonicalise_resource_refs` at build time and
+lost on the next serialisation. Hence 142 call sites of `as_iri_str` / `as_iri` / `as_iri_array`
+to reconcile it, and a special case in `values_equal` so `ResourceRef("urn:x") ==
+String("urn:x")` — which derived `PartialEq` does not share. The data model already states the
+principle, in `as_iri_array`'s own doc: *"the distinction between string literals and resource
+references is made by the property's data_type, not at parse time."*
+
+What retiring the variant left behind was **one accessor with nothing to do**. `as_iri_str`
+existed to read `ResourceRef` as well as `String`; once the variant went, its body was
+`as_str`'s body, and its doc still told readers to prefer it — a documented distinction that no
+longer existed. It is gone, and its 47 callers read `as_str`. The other two stay: `as_iri`
+parses and `as_iri_array` filters an array to its IRI-parseable elements, so each does work a
+caller would otherwise repeat. The surviving discipline is the one worth stating — **read
+through an accessor, never by matching a variant** — and the comments that used to name the
+retired method now say that instead.
 
 ### R5a — what a traversal does at each variant
 
@@ -202,16 +210,25 @@ that before the `Json`/`Embedded` split would have to pick one of the three curr
 would freeze it. `json_mentions` then disappears outright: an inductive value's interior is `Value`,
 so the traversal that already handles `Embedded` handles it.
 
-**Two of the three answers are gone as of `2026-09-02`** (§5 step 5). `json_mentions` is deleted,
-and `merge/resolve`'s conditional went with `is_term_valued` — the gate D77 §3.6 needed and the
-`schema` parameter that existed only to compute it. Every remaining traversal descends `Embedded`
-and stops at `Json`. The six-into-one consolidation is still open, but it now has one answer to
-consolidate on rather than three.
+**Two of the three answers went at §5 step 5** (`2026-09-02`). `json_mentions` is deleted, and
+`merge/resolve`'s conditional went with `is_term_valued` — the gate D77 §3.6 needed and the
+`schema` parameter that existed only to compute it.
 
-`dcg/chart/attribute::value_refs` is the other outlier — it does not descend into `Embedded` at all.
-Not reachable today, because its one caller passes `core:is_a`, a flat array of IRI strings. It is
-still wrong by the table above, and it is the kind of wrong that is invisible until someone reuses a
-function whose name promises the general traversal.
+**The consolidation followed, the same day.** `ontology::value_refs` is the one walk:
+`for_each_ref` / `for_each_resource_ref` visit, `map_refs` / `map_resource_refs` rebuild, and the
+seven callers keep only their leaf action. What varies between them turned out to be three
+things, each now a caller's choice rather than a fork in the walk: whether a property KEY counts
+as a reference (`declaration_order` and `supporting` count it; the merge walks do not), whether
+the property PATH is wanted (`cascade` alone), and what to do at a leaf. `dcg/chart/attribute`'s
+outlier is fixed by construction — it descends `Embedded` now because the one walk does, which
+changes nothing for its only caller (`core:is_a`, a flat array) and everything for the next one.
+A `Value` variant added tomorrow is one match arm, not seven.
+
+`dcg/chart/attribute::value_refs` was the other outlier — it did not descend into `Embedded` at
+all. Not reachable, because its one caller passes `core:is_a`, a flat array of IRI strings. It was
+still wrong by the table above, and it is the kind of wrong that stays invisible until someone
+reuses a function whose name promises the general traversal — which is the argument for one walk
+rather than for fixing this one.
 
 ---
 
@@ -227,16 +244,18 @@ are declared properties, so Rule 1 checks arity and Rules 5 and 6 check each arg
 ([`rules/inductive.rs:192`](../../kernel/src/validation/rules/inductive.rs#L192)) is subsumed, and
 replaced by nothing.
 
-**One traversal, one equality, one canonicalisation.** Today each has a `serde_json` twin, because
-`Embedded(Box<Resource>)` keeps the recursion inside the data model and an inductive value in
-`serde_json::Value` leaves it: `value_refs` / `collect_refs_from_value` against `json_mentions`,
-`values_equal` against `alpha_canonicalize_proposition_json`, `value_to_cbor` against
-`json_value_to_cbor`. Canonicalisation has no twin at all, which is why a term's interior is never
-canonicalised.
+**One traversal, one equality, one canonicalisation.** Each had a `serde_json` twin when this was
+written, because `Embedded(Box<Resource>)` keeps the recursion inside the data model and an
+inductive value in `serde_json::Value` leaves it: `value_refs` / `collect_refs_from_value` against
+`json_mentions`, `values_equal` against `alpha_canonicalize_proposition_json`, `value_to_cbor`
+against `json_value_to_cbor`. Canonicalisation had no twin at all, which is why a term's interior
+was never canonicalised. All three are settled as of `2026-09-02`: the twins are deleted (§5 step
+5), α-canonicalisation runs on `Value`, and the traversal is `ontology::value_refs` — one walk
+with seven callers instead of seven walks.
 
 **References for free.** A chain-resident value has an `@id`; naming it is that IRI. No sentinel,
-no second reference kind, and `core:mentions` follows it because
-[`value_refs`](../../kernel/src/layer/declaration_order.rs#L128) already descends `Embedded`. (This
+no second reference kind, and `core:mentions` follows it because the traversal
+(`ontology::value_refs`) descends `Embedded`. (This
 paragraph said "naming it is a `ResourceRef`" until that variant was retired on `2026-08-31` per
 §6.2 — R5 is what made the retirement available, and the paragraph reads the same without it, which
 was the point.)

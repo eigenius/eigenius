@@ -96,7 +96,7 @@ fn resolve_additional_inputs(argument: &Resource, layer: &Layer) -> Result<Vec<V
     let value_iri = |v: &Value| -> Option<String> {
         match v {
             Value::String(s) => Some(s.clone()),
-            other => other.as_iri_str().map(str::to_string),
+            other => other.as_str().map(str::to_string),
         }
     };
     let iris: Vec<String> = match argument.get(&prop) {

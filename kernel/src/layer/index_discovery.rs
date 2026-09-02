@@ -131,7 +131,7 @@ fn read_iri(layer: &Layer, resource_iri: &Iri, property_iri: &str) -> Option<Iri
     let resource = layer.resolve(resource_iri)?;
     let prop = Iri::parse(property_iri).ok()?;
     let value = resource.get(&prop)?;
-    let iri_str = value.as_iri_str()?;
+    let iri_str = value.as_str()?;
     Iri::parse(iri_str).ok()
 }
 

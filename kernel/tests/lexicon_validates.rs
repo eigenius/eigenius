@@ -748,8 +748,8 @@ fn form_value_index_is_declared_on_lexicon_form() {
         .get(&Iri::parse("urn:eigenius:core:is_a").unwrap())
         .expect("form_index has is_a");
     let classes: Vec<&str> = match is_a {
-        Value::Array(items) => items.iter().filter_map(|v| v.as_iri_str()).collect(),
-        v => v.as_iri_str().into_iter().collect(),
+        Value::Array(items) => items.iter().filter_map(|v| v.as_str()).collect(),
+        v => v.as_str().into_iter().collect(),
     };
     assert!(
         classes.contains(&"urn:eigenius:core:ValueIndex"),

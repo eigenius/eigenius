@@ -806,7 +806,7 @@ impl Validator {
         let Some(target_class_value) = resource.get(&iri(wk::MERGE_TARGET_CLASS)) else {
             return errors;
         };
-        let Some(target_class_iri_str) = target_class_value.as_iri_str() else {
+        let Some(target_class_iri_str) = target_class_value.as_str() else {
             return errors;
         };
         let Ok(target_class) = Iri::parse(target_class_iri_str) else {
@@ -818,7 +818,7 @@ impl Validator {
         let Some(transformation_value) = resource.get(&iri(wk::MERGE_TRANSFORMATION)) else {
             return errors;
         };
-        let Some(transformation_iri_str) = transformation_value.as_iri_str() else {
+        let Some(transformation_iri_str) = transformation_value.as_str() else {
             return errors;
         };
         let Ok(transformation_iri) = Iri::parse(transformation_iri_str) else {
@@ -938,7 +938,7 @@ impl Validator {
             let (label, ok) = match idx {
                 0 | 1 => (
                     "the class A (merge_target_class)",
-                    value.as_iri_str() == Some(class_iri_str),
+                    value.as_str() == Some(class_iri_str),
                 ),
                 2 => (
                     "Option<A> (Option of merge_target_class)",
@@ -1327,7 +1327,7 @@ fn is_option_of_class(value: &Value, class_iri: &str) -> bool {
     if args.len() != 1 {
         return false;
     }
-    args[0].as_iri_str() == Some(class_iri)
+    args[0].as_str() == Some(class_iri)
 }
 
 /// Format a resource's `is_a` list for inclusion in an error message.

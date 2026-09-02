@@ -669,7 +669,7 @@ fn resolve_component_schemas(
     let comp_def = layer.resolve(&comp_iri)?;
 
     let arg_type_prop = Iri::parse("urn:eigenius:program:component:argument_type").ok()?;
-    let arg_type_str = comp_def.get(&arg_type_prop)?.as_iri_str()?;
+    let arg_type_str = comp_def.get(&arg_type_prop)?.as_str()?;
     let arg_type_iri = Iri::parse(arg_type_str).ok()?;
     let arg_type_def = layer.resolve(&arg_type_iri)?;
 
@@ -701,11 +701,11 @@ fn resolve_component_schemas(
 
         let is_resource = prop_def
             .get(&data_type_iri)
-            .and_then(|v| v.as_iri_str())
+            .and_then(|v| v.as_str())
             .is_some_and(|s| s == "urn:eigenius:core:resource");
 
         if is_class_ref && is_resource {
-            if let Some(class_iri_str) = arg.get(prop_iri).and_then(|v| v.as_iri_str()) {
+            if let Some(class_iri_str) = arg.get(prop_iri).and_then(|v| v.as_str()) {
                 if let Ok(schema_class_iri) = Iri::parse(class_iri_str) {
                     match crate::program::schema::schema_for_class(&schema_class_iri, layer) {
                         Ok((json_schema, table)) => {

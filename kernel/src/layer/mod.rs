@@ -1088,13 +1088,14 @@ impl LayerBuilder {
         // no codec produces it — and canonical CBOR writes it as `Text`, which reads back as
         // `String`. The invariant held only between this call and the next serialisation, and
         // a reader that relied on it saw nothing at all on a chain loaded from storage. That
-        // is the bug `Value::as_iri_str` was added for: `as_str` "produced an entirely-empty
-        // topology graph for canonicalised chains".
+        // is the bug `Value::as_iri_str` was added for: matching `Value::String` "produced an
+        // entirely-empty topology graph for canonicalised chains". That accessor was itself
+        // retired once it became a synonym for `as_str`.
         //
         // A reference is an IRI. Which variant carries it is not something to depend on, so
-        // readers go through `Value::as_iri` / `as_iri_str` / `as_iri_array`, which accept
-        // either shape and parse. Removing the pass moves no bytes: `String` and `ResourceRef`
-        // encode identically in both CBOR (`Text`) and Eigon-JSON.
+        // readers go through `Value::as_str` / `as_iri` / `as_iri_array` rather than matching a
+        // variant. Removing the pass moves no bytes: `String` and `ResourceRef` encode
+        // identically in both CBOR (`Text`) and Eigon-JSON.
         let content_hash = compute_content_hash(&self.resources, &self.tombstoned_iris);
         let id = compute_position_hash(&content_hash, &self.parents);
         let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
@@ -1304,7 +1305,7 @@ pub fn compute_position_hash(content_hash: &ContentHash, parents: &[Arc<Layer>])
 // `canonicalise_resource_refs` pass. Both are retired (D85 §6.2) — `LayerBuilder::build` above
 // records why the invariant it promised could not be kept. The parser stays schema-agnostic:
 // every `"prop": "urn:..."` parses as `Value::String`, and readers go through
-// `Value::as_iri` / `as_iri_str` / `as_iri_array` rather than matching a variant.
+// `Value::as_str` / `as_iri` / `as_iri_array` rather than matching a variant.
 
 #[cfg(test)]
 mod tests {

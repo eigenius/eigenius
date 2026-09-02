@@ -30,8 +30,7 @@ impl Validator {
         prop_iri: &Iri,
         res_id: &Option<Iri>,
     ) -> Vec<ValidationError> {
-        // Read the `format` slot with `as_iri_str` — never `as_str`, and never a bare
-        // `Value::String` match.
+        // Read the `format` slot through an accessor — never a bare `Value::String` match.
         //
         // This is issue #118, and the shape that caused it is gone: `canonicalise_resource_refs`
         // rewrote `core:format` to `Value::ResourceRef` on every freshly built layer while the
@@ -41,10 +40,7 @@ impl Validator {
         // fired only for definitions rehydrated from a store. Both the pass and the variant
         // were retired on `2026-08-31` (D85 §6.2); the accessor discipline is what prevents
         // the next instance of that bug, so it stays.
-        let Some(format_str) = prop_def
-            .get(&iri(wk::FORMAT_PROP))
-            .and_then(|v| v.as_iri_str())
-        else {
+        let Some(format_str) = prop_def.get(&iri(wk::FORMAT_PROP)).and_then(|v| v.as_str()) else {
             return vec![];
         };
 

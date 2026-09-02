@@ -87,24 +87,16 @@ impl Value {
         }
     }
 
-    /// The IRI text of a value that names a resource.
-    ///
-    /// Use this — not `as_str` — from any reader that walks a resource-typed property
-    /// (`is_a`, `subclass_of`, `requires`, `class_types`, …). It read `ResourceRef` as well
-    /// as `String` until that variant was retired; `as_str` silently dropped `ResourceRef`
-    /// values, which produced an entirely-empty topology graph for canonicalised chains and
-    /// is why this method exists at all.
-    pub fn as_iri_str(&self) -> Option<&str> {
-        match self {
-            Value::String(iri) => Some(iri.as_str()),
-            _ => None,
-        }
-    }
-
     /// The value as a parsed IRI. `None` when it is not a string, or not a valid IRI.
     ///
     /// A reference is a string that parses; whether it is *meant* as a reference is the
     /// property's `data_type`, which this method does not consult and its callers do.
+    ///
+    /// There was an `as_iri_str` beside this one, whose doc said to prefer it over `as_str`
+    /// when walking a resource-typed property. It read `ResourceRef` as well as `String`, and
+    /// once that variant was retired (D85 §6.2) the two were the same match arm — a synonym
+    /// whose documentation claimed a distinction that no longer existed. Its 47 callers read
+    /// `as_str` now; a reader wanting the parsed form uses this.
     pub fn as_iri(&self) -> Option<Iri> {
         match self {
             Value::String(s) => Iri::parse(s).ok(),

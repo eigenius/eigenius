@@ -1207,7 +1207,7 @@ fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
     match resource.get(&data_type_prop) {
         Some(Value::String(v)) => v.as_str() == string_iri.as_str(),
         Some(v) => v
-            .as_iri_str()
+            .as_str()
             .and_then(|s| Iri::parse(s).ok())
             .map(|iri| iri == string_iri)
             .unwrap_or(false),

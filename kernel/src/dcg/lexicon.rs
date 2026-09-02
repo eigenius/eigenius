@@ -333,7 +333,7 @@ enum Source {
 /// for an untagged entry (always-available — e.g. the grammatical closed class).
 fn read_in_lexicon(r: &crate::ontology::resource::Resource) -> Option<Iri> {
     r.get(&iri("urn:eigenius:lexicon:in_lexicon"))
-        .and_then(|v| v.as_iri_str())
+        .and_then(|v| v.as_str())
         .and_then(|s| Iri::parse(s).ok())
 }
 
@@ -367,13 +367,10 @@ pub fn resolve_lexicon_profile(layer: &Layer, profile: &Iri) -> Option<Vec<Iri>>
         Value::Array(items) => Some(
             items
                 .iter()
-                .filter_map(|v| v.as_iri_str().and_then(|s| Iri::parse(s).ok()))
+                .filter_map(|v| v.as_str().and_then(|s| Iri::parse(s).ok()))
                 .collect(),
         ),
-        v => v
-            .as_iri_str()
-            .and_then(|s| Iri::parse(s).ok())
-            .map(|i| vec![i]),
+        v => v.as_str().and_then(|s| Iri::parse(s).ok()).map(|i| vec![i]),
     }
 }
 

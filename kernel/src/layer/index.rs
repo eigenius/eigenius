@@ -232,11 +232,11 @@ pub fn is_indexable_predicate(layer: &Layer, predicate: &Iri) -> bool {
         Some(def) => def,
         None => return false,
     };
-    // Read through `as_iri_str`, never by matching a variant. Using `as_str` here was a
-    // shipped bug: it returned `None` for the `Value::ResourceRef` that
+    // Read through an accessor, never by matching a variant. Matching `Value::String` here was
+    // a shipped bug: it returned `None` for the `Value::ResourceRef` that
     // `canonicalise_resource_refs` produced, breaking the index for every chain that had been
     // built — i.e. every production chain. Both are retired (D85 §6.2); the discipline is not.
-    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) {
+    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
         Some(t) => t,
         None => return false,
     };
@@ -306,9 +306,9 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 Some(def) => def,
                 None => continue,
             };
-            // Read through `as_iri_str`, never by matching a variant — see the matching
+            // Read through an accessor, never by matching a variant — see the matching
             // comment in `is_indexable_predicate`.
-            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) {
+            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
                 Some(t) => t,
                 None => continue,
             };
@@ -325,7 +325,7 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 // The slot is `data_type: resource`, so its string IS a reference — this
                 // reader has the schema and needs only to parse. It used to match
                 // `Value::ResourceRef` alongside, for a shape a stored chain never carried.
-                wk::RESOURCE => push_iri_value(&mut triples, value.as_iri_str().unwrap_or("")),
+                wk::RESOURCE => push_iri_value(&mut triples, value.as_str().unwrap_or("")),
                 // D79 §2.2 — a term-valued property. Its `Value::Json` names
                 // declarations, and before this arm those references produced no
                 // triples at all, so nothing could ask what depends on a term.

@@ -55,17 +55,15 @@ fn read_str(r: &Resource, prop: &str) -> Option<String> {
     r.get(&iri(prop)).and_then(|v| {
         v.as_str()
             .map(str::to_string)
-            .or_else(|| v.as_iri_str().map(str::to_string))
+            .or_else(|| v.as_str().map(str::to_string))
     })
 }
 
 /// Whether `r` is an `ingest:PinnedExternalFile` (by its `is_a`).
 pub fn is_pinned_external_file(r: &Resource) -> bool {
     match r.get(&iri(PROP_IS_A)) {
-        Some(Value::Array(items)) => items
-            .iter()
-            .any(|v| v.as_iri_str() == Some(PINNED_FILE_CLASS)),
-        Some(other) => other.as_iri_str() == Some(PINNED_FILE_CLASS),
+        Some(Value::Array(items)) => items.iter().any(|v| v.as_str() == Some(PINNED_FILE_CLASS)),
+        Some(other) => other.as_str() == Some(PINNED_FILE_CLASS),
         None => false,
     }
 }
