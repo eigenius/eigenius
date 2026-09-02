@@ -29,6 +29,13 @@ import {
   type BranchInfo,
   CancelTaskRequestSchema,
   type CancelTaskResponse,
+  type CascadeAckWire,
+  type CascadeItemWire,
+  type CommitPolicy,
+  CommitPolicy_CascadeTombstoneSchema,
+  CommitPolicy_RejectSchema,
+  CommitPolicySchema,
+  type CommittedLayer,
   type ComorphismDecl,
   ConsolidateChainRequestSchema,
   type ConsolidateChainResponse,
@@ -47,8 +54,13 @@ import {
   type EstimateConsolidationResponse,
   EstimateGcRequestSchema,
   type EstimateGcResponse,
+  FormalizationOptionsSchema,
+  FormalizeDocumentRequestSchema,
+  type FormalizeDocumentResponse,
   GetBranchRequestSchema,
   type GetBranchResponse,
+  GetFormalizationResultRequestSchema,
+  type GetFormalizationResultResponse,
   GetTaskStatusRequestSchema,
   type GetTaskStatusResponse,
   HealthRequestSchema,
@@ -56,6 +68,7 @@ import {
   InspectRequestSchema,
   type InspectResponse,
   type InstitutionInfo,
+  LayerRole,
   LayerTopologyRequestSchema,
   type LayerTopologyResponse,
   ListBranchesRequestSchema,
@@ -64,16 +77,8 @@ import {
   type ListTagsResponse,
   ListTasksRequestSchema,
   type ListTasksResponse,
-  type CommitPolicy,
-  CommitPolicy_CascadeTombstoneSchema,
-  CommitPolicy_RejectSchema,
-  CommitPolicySchema,
-  type CommittedLayer,
-  LayerRole,
   LoadRequestSchema,
   type LoadResponse,
-  type CascadeAckWire,
-  type CascadeItemWire,
   MergeBranchesRequestSchema,
   type MergeBranchesResponse,
   type MergeInfo,
@@ -91,10 +96,6 @@ import {
   type PreviewCascadeResponse,
   PreviewMergeRequestSchema,
   type PreviewMergeResponse,
-  SubmitResolutionErrorKind,
-  SubmitResolutionRequestSchema,
-  type SubmitResolutionResponse,
-  type TypedConflictWire,
   type QueryClassDecl,
   QueryRequestSchema,
   type QueryResponse,
@@ -102,17 +103,16 @@ import {
   type ReflectResponse,
   RunGcRequestSchema,
   type RunGcResponse,
-  FormalizationOptionsSchema,
-  FormalizeDocumentRequestSchema,
-  type FormalizeDocumentResponse,
-  GetFormalizationResultRequestSchema,
-  type GetFormalizationResultResponse,
   RunProgramByIriRequestSchema,
   RunProgramRequestSchema,
   type RunProgramResponse,
   RuntimeKind,
+  SubmitResolutionErrorKind,
+  SubmitResolutionRequestSchema,
+  type SubmitResolutionResponse,
   type TagInfo,
   type TaskInfo,
+  type TypedConflictWire,
   ValidateProgramRequestSchema,
   type ValidateProgramResponse,
   type ValidationError,
@@ -191,6 +191,84 @@ import {
   notebookJsonToResources,
   type PublishOutput,
 } from "./notebook.ts";
+
+/**
+ * The outcome of a kernel call that can fail without throwing.
+ *
+ * **The kernel reports refusal in the response, not by an error status.** 21 of its response
+ * messages carry `bool success`, and `Load` additionally answers
+ * `Ok(LoadResponse { success: false, errors, layer_id: "" })` — a perfectly successful RPC
+ * describing a refusal. A caller reading `resp.layerId` off that gets `""`, which renders as
+ * nothing and reads as success. That is not hypothetical: it shipped, and a notebook reported
+ * "landed as layer " for an artifact the validator had refused in full.
+ *
+ * The union makes the failure unreachable-around: `value` does not exist until `ok` is
+ * narrowed, so the compiler refuses the shape of that bug.
+ *
+ * **One shape for both flavours.** The kernel reports failure two ways — structured
+ * `repeated ValidationError errors` (`Load`, `RunProgram`) and a single `string error`
+ * (`Query`, the branch and tag operations, `RunGc`). Callers should not have to know which,
+ * so both land here: `message` is always human-readable and `errors` is empty for the
+ * string-error methods.
+ *
+ * Methods whose response carries NO failure signal — `layerTopology`, `formalizeDocument`,
+ * `listBranches`, `getTaskStatus` — deliberately do not return this. There is nothing to
+ * narrow, and wrapping them would teach callers a habit the type does not actually enforce.
+ */
+export type Outcome<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+    readonly ok: false;
+    /** Human-readable, always populated — joined from `errors` when the RPC returns those. */
+    readonly message: string;
+    /** Structured errors when the RPC carries them; empty otherwise. */
+    readonly errors: readonly ValidationError[];
+    /**
+     * The refused response itself, for the details `message` cannot carry —
+     * `CreateTagResponse.alreadyExists` distinguishes a name collision from every other
+     * failure, and a caller that wants to say so needs the field.
+     *
+     * Reaching in here is deliberate and visible; the property this type protects is that
+     * the SUCCESS payload lives only under `value`, so no one reads `layerId` off a refusal
+     * by accident.
+     *
+     * Optional because an outcome can be COMPOSED — `publishNotebook` maps a failed
+     * `Outcome<LoadResponse>` to `Outcome<{ publish, load }>`, and there is no response of
+     * the new type to carry. Present iff this outcome came straight from one RPC.
+     */
+    readonly response?: T;
+  };
+
+/** Format one `ValidationError` the way the notebook's cell output does. */
+function formatError(e: ValidationError): string {
+  const rule = e.rule ? `[${e.rule}] ` : "";
+  const at = e.resourceIri ? ` (${e.resourceIri})` : "";
+  return `${rule}${e.message}${at}`;
+}
+
+/**
+ * Narrow a kernel response to an [`Outcome`].
+ *
+ * `success` is the discriminant; `errors` and `error` are the two ways the kernel says why.
+ * A response that reports failure with neither still produces a message, because "it failed
+ * and said nothing" is a diagnosis too — and silently returning an empty string here would
+ * reintroduce exactly the class of bug this type exists to remove.
+ */
+function outcome<T extends { success: boolean }>(
+  response: T,
+  what: string,
+): Outcome<T> {
+  if (response.success) return { ok: true, value: response };
+  const errors: readonly ValidationError[] =
+    (response as { errors?: readonly ValidationError[] }).errors ?? [];
+  const single = (response as { error?: string }).error ?? "";
+  const message = errors.length > 0
+    ? errors.map(formatError).join("\n")
+    : single.length > 0
+    ? single
+    : `${what} failed without reporting a reason`;
+  return { ok: false, message, errors, response };
+}
 
 export interface EigenOptions {
   /** Orchestrator endpoint, e.g. `"http://localhost:8080"`. Required. */
@@ -326,7 +404,9 @@ export type LoadPolicy =
   | { kind: "reject"; maxViolations?: number }
   | { kind: "cascadeTombstone" };
 
-function policyToProto(policy: LoadPolicy | undefined): CommitPolicy | undefined {
+function policyToProto(
+  policy: LoadPolicy | undefined,
+): CommitPolicy | undefined {
   if (!policy) return undefined;
   if (policy.kind === "reject") {
     return create(CommitPolicySchema, {
@@ -563,14 +643,17 @@ export class Eigen {
   async query(
     eigenql: string,
     options: QueryOptions = {},
-  ): Promise<QueryResponse> {
+  ): Promise<Outcome<QueryResponse>> {
     const atLayer = options.atLayer ?? "";
-    return await this.kernel.query(
-      create(QueryRequestSchema, {
-        eigenql,
-        atLayer,
-        branch: this.resolveBranch(options.branch, atLayer),
-      }),
+    return outcome(
+      await this.kernel.query(
+        create(QueryRequestSchema, {
+          eigenql,
+          atLayer,
+          branch: this.resolveBranch(options.branch, atLayer),
+        }),
+      ),
+      "query",
     );
   }
 
@@ -599,20 +682,23 @@ export class Eigen {
   async load(
     source: string | Uint8Array,
     options: LoadOptions = {},
-  ): Promise<LoadResponse> {
+  ): Promise<Outcome<LoadResponse>> {
     const contentType = options.contentType ?? "application/x-esl";
     const bytes = typeof source === "string"
       ? TEXT_ENCODER.encode(source)
       : source;
-    return await this.kernel.load(
-      create(LoadRequestSchema, {
-        resources: bytes,
-        contentType,
-        autoCommit: options.autoCommit ?? true,
-        branch: this.resolveBranch(options.branch),
-        policy: policyToProto(options.policy),
-        explicitTombstones: options.explicitTombstones ?? [],
-      }),
+    return outcome(
+      await this.kernel.load(
+        create(LoadRequestSchema, {
+          resources: bytes,
+          contentType,
+          autoCommit: options.autoCommit ?? true,
+          branch: this.resolveBranch(options.branch),
+          policy: policyToProto(options.policy),
+          explicitTombstones: options.explicitTombstones ?? [],
+        }),
+      ),
+      "load",
     );
   }
 
@@ -660,7 +746,7 @@ export class Eigen {
     program: string | Uint8Array,
     input: string | Uint8Array,
     options: RunProgramOptions = {},
-  ): Promise<RunProgramResponse> {
+  ): Promise<Outcome<RunProgramResponse>> {
     const programBytes = typeof program === "string"
       ? TEXT_ENCODER.encode(program)
       : program;
@@ -672,13 +758,16 @@ export class Eigen {
     // RunProgramByIri) so callers can mix ESL programs with Eigon-JSON
     // inputs naturally.
     const contentType = options.contentType ?? "application/x-esl";
-    return await this.kernel.runProgram(
-      create(RunProgramRequestSchema, {
-        program: programBytes,
-        input: inputBytes,
-        contentType,
-        branch: this.resolveBranch(options.branch),
-      }),
+    return outcome(
+      await this.kernel.runProgram(
+        create(RunProgramRequestSchema, {
+          program: programBytes,
+          input: inputBytes,
+          contentType,
+          branch: this.resolveBranch(options.branch),
+        }),
+      ),
+      "runProgram",
     );
   }
 
@@ -780,17 +869,20 @@ export class Eigen {
   async reflect(
     trace: string | Uint8Array,
     options: { contentType?: SourceContentType; branch?: string } = {},
-  ): Promise<ReflectResponse> {
+  ): Promise<Outcome<ReflectResponse>> {
     const contentType = options.contentType ?? "application/eigon+json";
     const bytes = typeof trace === "string"
       ? TEXT_ENCODER.encode(trace)
       : trace;
-    return await this.kernel.reflect(
-      create(ReflectRequestSchema, {
-        trace: bytes,
-        contentType,
-        branch: this.resolveBranch(options.branch),
-      }),
+    return outcome(
+      await this.kernel.reflect(
+        create(ReflectRequestSchema, {
+          trace: bytes,
+          contentType,
+          branch: this.resolveBranch(options.branch),
+        }),
+      ),
+      "reflect",
     );
   }
 
@@ -840,12 +932,15 @@ export class Eigen {
   async createBranch(
     name: string,
     options: CreateBranchOptions,
-  ): Promise<CreateBranchResponse> {
-    return await this.kernel.createBranch(
-      create(CreateBranchRequestSchema, {
-        name,
-        fromLayer: options.fromLayer,
-      }),
+  ): Promise<Outcome<CreateBranchResponse>> {
+    return outcome(
+      await this.kernel.createBranch(
+        create(CreateBranchRequestSchema, {
+          name,
+          fromLayer: options.fromLayer,
+        }),
+      ),
+      "createBranch",
     );
   }
 
@@ -881,9 +976,12 @@ export class Eigen {
   async mergeBranches(
     source: string,
     target: string,
-  ): Promise<MergeBranchesResponse> {
-    return await this.kernel.mergeBranches(
-      create(MergeBranchesRequestSchema, { source, target }),
+  ): Promise<Outcome<MergeBranchesResponse>> {
+    return outcome(
+      await this.kernel.mergeBranches(
+        create(MergeBranchesRequestSchema, { source, target }),
+      ),
+      "mergeBranches",
     );
   }
 
@@ -913,12 +1011,15 @@ export class Eigen {
   async prepareMerge(
     branch: string,
     candidateHead: string,
-  ): Promise<PrepareMergeResponse> {
-    return await this.kernel.prepareMerge(
-      create(PrepareMergeRequestSchema, {
-        branch,
-        candidateHead,
-      }),
+  ): Promise<Outcome<PrepareMergeResponse>> {
+    return outcome(
+      await this.kernel.prepareMerge(
+        create(PrepareMergeRequestSchema, {
+          branch,
+          candidateHead,
+        }),
+      ),
+      "prepareMerge",
     );
   }
 
@@ -958,15 +1059,18 @@ export class Eigen {
     resolutions: MergeResolutionWire[],
     acknowledgments: CascadeAckWire[],
     witnessSearchBranches: string[] = [],
-  ): Promise<SubmitResolutionResponse> {
-    return await this.kernel.submitResolution(
-      create(SubmitResolutionRequestSchema, {
-        branch,
-        candidateHead,
-        resolutions,
-        acknowledgments,
-        witnessSearchBranches,
-      }),
+  ): Promise<Outcome<SubmitResolutionResponse>> {
+    return outcome(
+      await this.kernel.submitResolution(
+        create(SubmitResolutionRequestSchema, {
+          branch,
+          candidateHead,
+          resolutions,
+          acknowledgments,
+          witnessSearchBranches,
+        }),
+      ),
+      "submitResolution",
     );
   }
 
@@ -1000,16 +1104,19 @@ export class Eigen {
    */
   async consolidateChain(
     options: ConsolidateOptions,
-  ): Promise<ConsolidateChainResponse> {
-    return await this.kernel.consolidateChain(
-      create(ConsolidateChainRequestSchema, {
-        branch: options.branch ?? "",
-        fromLayer: options.fromLayer,
-        toLayer: options.toLayer,
-        maxWalkEntries: options.maxWalkEntries ?? 0n,
-        tracePinPolicy: options.tracePinPolicy ?? "",
-        preserveHistory: options.preserveHistory ?? false,
-      }),
+  ): Promise<Outcome<ConsolidateChainResponse>> {
+    return outcome(
+      await this.kernel.consolidateChain(
+        create(ConsolidateChainRequestSchema, {
+          branch: options.branch ?? "",
+          fromLayer: options.fromLayer,
+          toLayer: options.toLayer,
+          maxWalkEntries: options.maxWalkEntries ?? 0n,
+          tracePinPolicy: options.tracePinPolicy ?? "",
+          preserveHistory: options.preserveHistory ?? false,
+        }),
+      ),
+      "consolidateChain",
     );
   }
 
@@ -1070,9 +1177,12 @@ export class Eigen {
   async createTag(
     name: string,
     layerId: string,
-  ): Promise<CreateTagResponse> {
-    return await this.kernel.createTag(
-      create(CreateTagRequestSchema, { name, layerId }),
+  ): Promise<Outcome<CreateTagResponse>> {
+    return outcome(
+      await this.kernel.createTag(
+        create(CreateTagRequestSchema, { name, layerId }),
+      ),
+      "createTag",
     );
   }
 
@@ -1092,9 +1202,12 @@ export class Eigen {
    * `success: true, deleted: false`. The target layer becomes
    * GC-eligible if no other root still reaches it.
    */
-  async deleteTag(name: string): Promise<DeleteTagResponse> {
-    return await this.kernel.deleteTag(
-      create(DeleteTagRequestSchema, { name }),
+  async deleteTag(name: string): Promise<Outcome<DeleteTagResponse>> {
+    return outcome(
+      await this.kernel.deleteTag(
+        create(DeleteTagRequestSchema, { name }),
+      ),
+      "deleteTag",
     );
   }
 
@@ -1120,8 +1233,11 @@ export class Eigen {
    * `min_age` protection window. Destructive — surface a confirmation
    * dialog in the UX before calling.
    */
-  async runGc(): Promise<RunGcResponse> {
-    return await this.kernel.runGc(create(RunGcRequestSchema, {}));
+  async runGc(): Promise<Outcome<RunGcResponse>> {
+    return outcome(
+      await this.kernel.runGc(create(RunGcRequestSchema, {})),
+      "runGc",
+    );
   }
 
   // ------------------------------------------------------------------
@@ -1144,13 +1260,21 @@ export class Eigen {
   async publishNotebook(
     notebook: NotebookJson,
     options: { branch?: string } = {},
-  ): Promise<{ publish: PublishOutput; load: LoadResponse }> {
+  ): Promise<Outcome<{ publish: PublishOutput; load: LoadResponse }>> {
     const publish = await notebookJsonToResources(notebook);
     const load = await this.load(JSON.stringify(publish.resources), {
       contentType: "application/eigon+json",
       autoCommit: true,
       branch: options.branch,
     });
-    return { publish, load };
+    // A publish whose load was refused is not a publish. Returning the raw response here
+    // would hand the caller a `LoadResponse` with an empty `layerId` and let it read as
+    // success — the defect `Outcome` exists to make unrepresentable, one level up.
+    if (!load.ok) {
+      // `response` is dropped, not forwarded: it is a `LoadResponse`, and this outcome is
+      // typed at `{ publish, load }`. That is what makes the field optional.
+      return { ok: false, message: load.message, errors: load.errors };
+    }
+    return { ok: true, value: { publish, load: load.value } };
   }
 }

@@ -213,17 +213,12 @@ export function Notebook() {
   const onPublish = async () => {
     setPublish({ kind: "publishing" });
     try {
-      const { publish: result, load } = await eigen.publishNotebook(
-        exportNotebook(),
-      );
-      if (!load.success) {
-        setPublish({
-          kind: "error",
-          message: load.errors.map((e) => e.message).join("; ") ||
-            "publish failed (no error message)",
-        });
+      const published = await eigen.publishNotebook(exportNotebook());
+      if (!published.ok) {
+        setPublish({ kind: "error", message: published.message });
         return;
       }
+      const { publish: result } = published.value;
       setPublish({
         kind: "success",
         notebookIri: result.notebookIri,

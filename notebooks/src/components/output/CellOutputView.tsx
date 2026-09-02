@@ -29,7 +29,6 @@ import {
 import { useState } from "react";
 import { useEigen } from "../../runtime/EigenProvider";
 import type { CellOutput } from "../../runtime/notebookStore";
-import { formatValidationError } from "../../runtime/notebookStore";
 import { CommitStatusBadge } from "./CommitStatusBadge";
 import { LayerStackPanel } from "./LayerStackPanel";
 import { ProgramRunOutputView } from "./ProgramRunOutputView";
@@ -258,16 +257,11 @@ function FormalizeOutputView(
       // — the empty id vanishing into the sentence — hid the Load button, and dropped
       // the one thing that said what happened. The ESL cell runner has always checked
       // this; these two paths did not.
-      if (!resp.success) {
-        const messages = resp.errors.map((e) => formatValidationError(e));
-        setError(
-          messages.length === 0
-            ? "load failed (no errors reported)"
-            : messages.join("\n"),
-        );
+      if (!resp.ok) {
+        setError(resp.message);
         return;
       }
-      setLanded(`landed as layer ${resp.layerId.slice(0, 12)}`);
+      setLanded(`landed as layer ${resp.value.layerId.slice(0, 12)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -576,7 +576,10 @@ async function runPrepareMerge(
     return;
   }
 
-  if (!resp.success) {
+  if (!resp.ok) {
+    // `response` carries `errorKind`, which decides whether a retry is offered at all —
+    // `message` alone cannot say "no common ancestor".
+    const kind = resp.response?.errorKind ?? PrepareMergeErrorKind.INTERNAL;
     const errored: MergeResolutionState = {
       kind: "error",
       branch,
@@ -584,24 +587,26 @@ async function runPrepareMerge(
       cellId,
       // No retry path on no-common-ancestor; the user closes and
       // re-evaluates manually.
-      retryFrom: resp.errorKind === PrepareMergeErrorKind.NO_COMMON_ANCESTOR
+      retryFrom: kind === PrepareMergeErrorKind.NO_COMMON_ANCESTOR
         ? null
         : "loading",
-      message: resp.error,
+      message: resp.message,
       rpc: "prepare",
-      errorKind: resp.errorKind,
+      errorKind: kind,
     };
     set({ mergeResolution: errored });
     persistMergeResolution(errored);
     return;
   }
 
+  const prepared = resp.value;
+
   // Preserve prior resolution picks for surviving conflict ids when
   // recovering from a race — IDs are deterministic per D20 §8.
   const prior = get().mergeResolution;
   const priorResolutions: Record<string, MergeResolutionWire | undefined> =
     prior.kind === "picking" ? prior.resolutions : {};
-  const conflictIds = resp.conflicts.map((c) => c.id);
+  const conflictIds = prepared.conflicts.map((c) => c.id);
   const resolutions: Record<string, MergeResolutionWire | undefined> = {};
   for (const id of conflictIds) {
     if (priorResolutions[id] !== undefined) resolutions[id] = priorResolutions[id];
@@ -619,8 +624,8 @@ async function runPrepareMerge(
     branch,
     candidateHead,
     cellId,
-    branchTip: resp.branchTip,
-    conflicts: resp.conflicts,
+    branchTip: prepared.branchTip,
+    conflicts: prepared.conflicts,
     resolutions,
     witnessSearchBranches: priorWitnessSearchBranches,
     raceDiff: raceDiff && (raceDiff.added.length > 0 || raceDiff.removed.length > 0)
@@ -806,10 +811,11 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   },
 
   async createBranch(eigen, name, fromLayer, switchAfter) {
-    const resp = await eigen.createBranch(name, { fromLayer });
-    if (!resp.success) {
-      return { success: false, error: resp.error };
+    const outcome = await eigen.createBranch(name, { fromLayer });
+    if (!outcome.ok) {
+      return { success: false, error: outcome.message };
     }
+
     // Refresh the cache so the new branch appears in the menu
     // even if the user doesn't switch to it.
     await get().refreshBranches(eigen);
@@ -1123,13 +1129,14 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       return;
     }
 
-    if (resp.success) {
+    if (resp.ok) {
+      const submitted = resp.value;
       const done: MergeResolutionState = {
         kind: "done",
         branch: current.branch,
         cellId: current.cellId,
-        mergeLayerId: resp.mergeLayerId,
-        branchTip: resp.branchTip,
+        mergeLayerId: submitted.mergeLayerId,
+        branchTip: submitted.branchTip,
       };
       emitResolutionTelemetry("commit-success", done, {
         cellAutoCleared: current.cellId !== undefined,
@@ -1155,7 +1162,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
               commit: {
                 ...existing.commit,
                 mergeOutcome: MergeOutcome.TRIVIAL_MERGE,
-                mergeLayerId: resp.mergeLayerId,
+                mergeLayerId: submitted.mergeLayerId,
                 conflictingIris: [],
                 orphanLayerId: undefined,
                 currentHead: undefined,
@@ -1171,11 +1178,17 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       return;
     }
 
+    // `response` carries `errorKind` and `missingAcknowledgments` — the fields that decide
+    // WHERE the user is routed back to. `message` alone cannot distinguish a CAS race (retry
+    // automatically) from incomplete acknowledgments (send them back to acknowledging).
+    const refused = resp.response;
+    const errorKind = refused?.errorKind ?? SubmitResolutionErrorKind.INTERNAL;
+
     // Branch CAS race → drop back to loading and re-prepareMerge.
     // The race-diff banner gets populated by `runPrepareMerge`.
     if (
-      resp.errorKind === SubmitResolutionErrorKind.BRANCH_CAS_RACE ||
-      resp.errorKind === SubmitResolutionErrorKind.CONFLICT_NOT_FOUND
+      errorKind === SubmitResolutionErrorKind.BRANCH_CAS_RACE ||
+      errorKind === SubmitResolutionErrorKind.CONFLICT_NOT_FOUND
     ) {
       const priorConflictIds = current.conflicts.map((c) => c.id);
       const loading: MergeResolutionState = {
@@ -1198,7 +1211,7 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     // Other errors: route the user back to picking or acknowledging
     // based on the kind.
     const retryFrom: "picking" | "acknowledging" =
-      resp.errorKind === SubmitResolutionErrorKind.INCOMPLETE_ACKNOWLEDGMENTS
+      errorKind === SubmitResolutionErrorKind.INCOMPLETE_ACKNOWLEDGMENTS
         ? "acknowledging"
         : "picking";
     const errored: MergeResolutionState = {
@@ -1207,11 +1220,11 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
       candidateHead: current.candidateHead,
       cellId: current.cellId,
       retryFrom,
-      message: resp.error,
+      message: resp.message,
       rpc: "submit",
-      errorKind: resp.errorKind,
-      missingAcks: resp.missingAcknowledgments.length > 0
-        ? [...resp.missingAcknowledgments]
+      errorKind,
+      missingAcks: refused && refused.missingAcknowledgments.length > 0
+        ? [...refused.missingAcknowledgments]
         : undefined,
     };
     set({ mergeResolution: errored });
@@ -1531,25 +1544,25 @@ async function executeCell(
       // Loads are writes — they always commit to the branch tip, not
       // the read-pin. (D34 §5.2: "Writes still go to branch tip — the
       // read-pin is per-session, not a kernel concept.")
-      const resp = await eigen.load(cell.source, {
+      const outcome = await eigen.load(cell.source, {
         contentType: "application/x-esl",
         autoCommit: true,
       });
-      if (!resp.success) {
-        const messages = resp.errors.map((e) => formatValidationError(e));
+      if (!outcome.ok) {
+        const refused = outcome.response;
         return {
           kind: "error",
-          message: messages.length === 0
-            ? "load failed (no errors reported)"
-            : messages.join("\n"),
+          message: outcome.message,
           // D41 totalViolations is non-zero only when the kernel
           // surfaced more violations than `errors` carries (policy
           // truncation). The UI uses this to render "showing X of Y".
-          totalViolations: resp.totalViolations > resp.errors.length
-            ? resp.totalViolations
-            : undefined,
+          totalViolations:
+            refused && refused.totalViolations > outcome.errors.length
+              ? refused.totalViolations
+              : undefined,
         };
       }
+      const resp = outcome.value;
       // D41: find the user-layer's CommittedLayer entry to pull its
       // cascade outcome; surface any non-user layers (audit /
       // institution_classes) as side layers.
@@ -1590,15 +1603,13 @@ async function executeCell(
       // Read-pinned: query resolves against the pinned layer instead
       // of the branch tip. A FIBER INTO inside the query still
       // commits to the branch (the kernel's commit-vs-read split).
-      const resp = await eigen.query(cell.source, {
+      const outcome = await eigen.query(cell.source, {
         atLayer: readPinLayerId ?? undefined,
       });
-      if (!resp.success) {
-        return {
-          kind: "error",
-          message: resp.error || "query failed (no error message)",
-        };
+      if (!outcome.ok) {
+        return { kind: "error", message: outcome.message };
       }
+      const resp = outcome.value;
       // The query may have included a FIBER INTO clause that committed.
       // If `merge` is present and not UNSPECIFIED, surface the commit
       // info; otherwise leave it undefined (this was a pure read).
@@ -1697,7 +1708,7 @@ async function executeFormalizeCell(
   // content-addressed, so re-running unchanged prose does not advance the branch.
   let landed: { layerId: string; resourceCount: number } | undefined;
   if (cell.land) {
-    const resp = await eigen.load(artifact, {
+    const outcome = await eigen.load(artifact, {
       contentType: "application/x-esl",
       autoCommit: true,
     });
@@ -1705,15 +1716,13 @@ async function executeFormalizeCell(
     // `Ok(LoadResponse { success: false, errors, layer_id: "" })`. Reading `layerId`
     // without checking `success` reports "landed as layer " — the empty id rendering as
     // nothing — while the whole layer was refused and the artifact reached no chain.
-    if (!resp.success) {
-      const messages = resp.errors.map((e) => formatValidationError(e));
+    if (!outcome.ok) {
       return {
         kind: "error",
-        message: messages.length === 0
-          ? "the artifact failed to land (no errors reported)"
-          : `the artifact failed to land:\n${messages.join("\n")}`,
+        message: `the artifact failed to land:\n${outcome.message}`,
       };
     }
+    const resp = outcome.value;
     landed = {
       layerId: resp.layerId,
       resourceCount: Number(resp.resourceCount ?? 0),
@@ -1811,15 +1820,13 @@ async function executeChartCell(
       message: "chart x_column and y_column are required",
     };
   }
-  const resp = await eigen.query(trimmedQuery, {
+  const outcome = await eigen.query(trimmedQuery, {
     atLayer: readPinLayerId ?? undefined,
   });
-  if (!resp.success) {
-    return {
-      kind: "error",
-      message: resp.error || "chart query failed (no error message)",
-    };
+  if (!outcome.ok) {
+    return { kind: "error", message: outcome.message };
   }
+  const resp = outcome.value;
   const rows = sandboxHelpers.rows(resp.document);
   if (rows.length === 0) {
     return { kind: "error", message: "query returned no rows to chart" };
