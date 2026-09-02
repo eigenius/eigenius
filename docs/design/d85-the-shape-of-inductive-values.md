@@ -376,6 +376,21 @@ tagged half is deleted, not after: the other three (`term_mentions`, the α-cano
 reason recorded at that line, so porting means walking a value resource for
 `is_a = eigentt:Term-ConstRef` — the same predicate, one shape over.
 
+**`lean:LeanExpr` values are still written tagged — found `2026-09-02`, step 5's work.**
+`lean:proposition` declares `data_type: core:inductive` with `class_types: [lean:LeanExpr]`,
+so a value there is a `LeanExpr` value resource. `chain_mirror::bytes_to_lean_expr` returns
+`Value::Json` over the tagged form, twenty `json!({"ctor": …})` sites deep.
+
+Nothing catches it because nothing commits one: `chain_mirror_test` inspects the returned JSON
+and never puts it in a slot, so Rule 21 never sees it. That is the same reason the four drifts
+step 4 closed had gone unnoticed — a shape is only checked where it lands.
+
+Fixing it is `encode_term`'s pattern applied to a second mirror: each arm names its constructor
+and its arguments, and `ctor_classes::value_resource` lays them out. `LeanName`, `LeanLevel`,
+`LeanLevelList` and `LeanExpr` are declared in `lean-expressions.eigon.json`, so the argument
+names are already there to read. It belongs with step 5 rather than step 4 because it is a
+producer nothing reads back through the D47 codec — the Lean worker consumes it directly.
+
 **The docs still teach the tagged shape — 107 occurrences across 21 files, counted
 `2026-09-01`.** Mostly `FormulaTerm` (`App` 27, `Var` 17, `OpRef` 14, `LitFloat` 10) in the
 formula guides and the Julia institution tutorials, which walk a reader through authoring a
