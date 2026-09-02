@@ -160,10 +160,9 @@ resource probe:bridge_proposition : justification:Claim {
         // A term is a value resource (D85 §6.1); project it back for the positional
         // assertions below.
         Some(Value::Embedded(r)) => {
-            eigenius_kernel::program::eigentt_type_mirror::value_resource_to_tagged(r, &layer)
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, &layer)
                 .expect("a stored proposition is well formed")
         }
-        Some(Value::Json(j)) => j.clone(),
         other => panic!("canonical_proposition is not a term: {other:?}"),
     }
 }

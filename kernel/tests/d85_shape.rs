@@ -75,9 +75,9 @@ fn the_constructor_class_is_derived_into_the_inductives_layer() {
 
 /// A test-local inductive, so these exercise step 1's derivation without reaching into step 3.
 ///
-/// A resource-form value in an `eigentt:Term`-typed slot is still refused by the D47 codec
-/// ("expected Value::Json, got Embedded") — that codec is what step 3 changes. Step 1 delivers
-/// the STRUCTURE: the classes exist, arity is checked, argument types are checked.
+/// Step 1 delivers the STRUCTURE: the classes exist, arity is checked, argument types are
+/// checked. Steps 2 through 5 are what made the codec read and then write this shape, and
+/// stop accepting the tagged dict.
 fn colour_inductive() -> Resource {
     let mut ind = Resource::new(iri("urn:test:d85:Colour"));
     ind.set(
@@ -123,8 +123,8 @@ fn colour_inductive() -> Resource {
     );
     arg.set(
         iri("urn:eigenius:core:type_name"),
-        Value::Json(
-            serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]}),
+        eigenius_kernel::testing::term_value(
+            &serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]}),
         ),
     );
     named.set(
@@ -413,16 +413,9 @@ fn the_derived_constructor_classes_satisfy_rule_25() {
 ///
 /// This follows the ontology's own convention — `core:type_name` and `core:param_kind` both hold
 /// an `eigentt:Term` value and both declare `data_type: core:inductive` with the inductive in
-/// `class_types`. A `core:resource` slot with an inductive in `class_types` takes a different
-/// path: Rule 8 dispatches it to the JSON walker, which rejects the resource form outright.
-///
-/// **The value half of this waits for step 3.** A resource-form value in a `eigentt:Term`-ranged
-/// slot is still refused by Rule 21, which routes such slots through the D47 codec — and that
-/// codec reads `Value::Json` only. Rule 21 exempts exactly two properties by name
-/// (`is_declaration_internal`: `core:type_name` and `core:param_kind`), which is why 98 of the
-/// 123 authored values sit in slots that would accept the new shape today and the rest do not.
-/// Step 3 is what makes `decode_type` read a value resource; until then this test pins the
-/// DECLARATION the derivation produces, which is what step 1 owes.
+/// `class_types`. Since step 5 there is no second path: a `core:resource` slot naming an
+/// inductive in `class_types` admits the same value, because a constructor class lists the
+/// inductive in `parent_classes` and the ordinary `Embedded` check follows it.
 #[test]
 fn an_inductive_typed_argument_is_declared_core_inductive() {
     let core = core_layer();
@@ -449,9 +442,8 @@ fn an_inductive_typed_argument_is_declared_core_inductive() {
 ///
 /// Before step 2 this failed with "expected Value::Json, got Embedded": Rule 21 routes every
 /// `eigentt:Term`- or `Judgement`-ranged slot through the D47 codec, and the codec read the
-/// tagged dict only. `decode_type` now reads both, by translating the resource form to the
-/// tagged form and decoding that — so every constructor's decoding stays in one place and the
-/// two shapes cannot drift while both are accepted.
+/// tagged dict only. `decode_type` read both from step 2 until step 5, which deleted the
+/// tagged half — the value is now the only shape, and `ctor_and_args` the only read of it.
 ///
 /// `encode_type` still emits the dict. Expand before migrate: nothing is rewritten yet, so
 /// nothing can break.
@@ -483,13 +475,15 @@ fn a_value_resource_decodes_in_a_term_ranged_slot() {
     );
 }
 
-/// And the two shapes decode to the SAME `Exp` — which is what makes the migration safe.
+/// A value decodes to the `Exp` its constructor names.
+///
+/// This pinned "both shapes decode to the SAME `Exp`" from step 2 until step 5, which is what
+/// made the migration safe to land: while both were accepted, neither could drift from the
+/// other. Step 5 deleted the tagged half, so what remains to pin is that the surviving shape
+/// still decodes to what it denotes.
 #[test]
-fn both_shapes_decode_to_the_same_exp() {
+fn a_value_decodes_to_the_exp_its_constructor_names() {
     let core = core_layer();
-    let tagged = Value::Json(serde_json::json!({
-        "ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]
-    }));
     let mut res = Resource::new_embedded();
     res.set(
         iri("urn:eigenius:core:is_a"),
@@ -504,15 +498,16 @@ fn both_shapes_decode_to_the_same_exp() {
         Value::Array(Vec::new()),
     );
 
-    let from_json = eigenius_kernel::program::eigentt_type_mirror::decode_type(&tagged, &core)
-        .expect("the tagged dict decodes");
-    let from_resource = eigenius_kernel::program::eigentt_type_mirror::decode_type(
+    let decoded = eigenius_kernel::program::eigentt_type_mirror::decode_type(
         &Value::Embedded(Box::new(res)),
         &core,
     )
     .expect("the value resource decodes");
     assert_eq!(
-        from_json, from_resource,
-        "the two shapes must decode to the same Exp, or migrating a value changes its meaning"
+        decoded,
+        eigenius_kernel::nbe::term::Exp::EigonPrimitive(
+            eigenius_kernel::nbe::term::PrimitiveType::String
+        ),
+        "a `ConstRef` naming `core:string` decodes to the primitive it names"
     );
 }

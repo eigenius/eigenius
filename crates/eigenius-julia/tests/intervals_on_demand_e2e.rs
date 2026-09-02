@@ -174,7 +174,7 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
     );
     expr.set(
         iri("urn:eigenius:symbolics:term"),
-        Value::Json(serde_json::json!({
+        eigenius_kernel::testing::term_value(&serde_json::json!({
             "ctor": "App",
             "args": [
                 {
@@ -352,7 +352,7 @@ fn build_bounds_request_input() -> Resource {
     );
     expr.set(
         iri("urn:eigenius:symbolics:term"),
-        Value::Json(serde_json::json!({
+        eigenius_kernel::testing::term_value(&serde_json::json!({
             "ctor": "App",
             "args": [
                 {

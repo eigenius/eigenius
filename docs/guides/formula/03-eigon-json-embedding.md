@@ -1,37 +1,45 @@
 # 3. Eigon-JSON embedding
 
-A `FormulaTerm` value is encoded on the chain as a recursive
-**tagged-dict tree**. This chapter is the encoding reference: every shape
-your value can take, the validator's rule for each, and the worked
-examples for the most common patterns.
+A `FormulaTerm` value is a **resource**, and so is every subterm of it.
+This chapter is the encoding reference: every shape your value can take,
+the validator's rule for each, and the worked examples for the most
+common patterns.
 
 ## 3.1. The encoding rule
 
-Every `FormulaTerm` value is a JSON object of exactly two fields:
+A value's `is_a` names the **constructor's class**, and each argument is
+a **named property** on that class (D85 §6.1):
 
 ```json
 {
-  "ctor": "<CtorName>",
-  "args": [ <arg₀>, <arg₁>, ... ]
+  "urn:eigenius:core:is_a": ["urn:eigenius:formulas:FormulaTerm-<CtorName>"],
+  "urn:eigenius:formulas:FormulaTerm-<CtorName>-<argName>": <arg>,
+  ...
 }
 ```
 
 `<CtorName>` is one of the six constructor names declared in
 [`formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json):
-`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`. `args` is an ordered
-list whose contents and types match the ctor's declared `arg_types`.
+`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`. `<argName>` is the
+`arg_name` that constructor's declaration gives the argument. Both
+classes and properties are **derived from the inductive's declaration**
+when the layer is built — you never write them by hand in an ontology,
+and you cannot name one the declaration does not have.
 
-| Ctor | `args` shape |
+| Ctor | Properties |
 |---|---|
-| `Var(name)` | `["x"]` — one string |
-| `LitFloat(value)` | `[2.5]` — one float |
-| `OpRef(iri)` | `["urn:eigenius:formulas:ops:add"]` — one IRI string |
-| `App(head, arg)` | `[<head FormulaTerm>, <arg FormulaTerm>]` — two recursive nodes |
-| `Lam(name, ty, body)` | `["x", <FormulaTerm>, <FormulaTerm>]` — string + two recursive nodes |
-| `Pi(name, ty, body)` | `["x", <FormulaTerm>, <FormulaTerm>]` — string + two recursive nodes |
+| `Var(name)` | `FormulaTerm-Var-name`: a string |
+| `LitFloat(value)` | `FormulaTerm-LitFloat-value`: a float |
+| `OpRef(iri)` | `FormulaTerm-OpRef-iri`: an IRI string |
+| `App(head, arg)` | `FormulaTerm-App-head`, `FormulaTerm-App-arg`: two nested values |
+| `Lam(name, ty, body)` | `FormulaTerm-Lam-name`: a string; `-ty`, `-body`: nested values |
+| `Pi(name, ty, body)` | `FormulaTerm-Pi-name`: a string; `-ty`, `-body`: nested values |
 
-That's the whole rule. Recursive descent down `App` heads and arguments
-gives you the full tree.
+That's the whole rule. There is no `ctor` field and no `args` list:
+the class says which constructor it is, and the properties say what its
+arguments are. Argument ORDER lives in the declaration, so reading a
+value back positionally means reading the declaration too — which is why
+the kernel's one read of a value, `ctor_and_args`, takes the layer.
 
 ## 3.2. Multi-argument operators curry
 
@@ -54,26 +62,45 @@ right-to-left up the spine.
 Reading outermost-in: top-level is multiplication of two things. Left
 arg is `x + 0`; right arg is `1`.
 
+Property IRIs are abbreviated below with the `formulas:` prefix for
+`urn:eigenius:formulas:` and `core:` for `urn:eigenius:core:`.
+
 ```json
-{ "ctor": "App",
-  "args": [
-    { "ctor": "App",
-      "args": [
-        { "ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"] },
-        { "ctor": "App",
-          "args": [
-            { "ctor": "App",
-              "args": [
-                { "ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"] },
-                { "ctor": "Var", "args": ["x"] }
-              ] },
-            { "ctor": "LitFloat", "args": [0.0] }
-          ] }
-      ] },
-    { "ctor": "LitFloat", "args": [1.0] }
-  ]
+{ "core:is_a": ["formulas:FormulaTerm-App"],
+  "formulas:FormulaTerm-App-head": {
+    "core:is_a": ["formulas:FormulaTerm-App"],
+    "formulas:FormulaTerm-App-head": {
+      "core:is_a": ["formulas:FormulaTerm-OpRef"],
+      "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:mul"
+    },
+    "formulas:FormulaTerm-App-arg": {
+      "core:is_a": ["formulas:FormulaTerm-App"],
+      "formulas:FormulaTerm-App-head": {
+        "core:is_a": ["formulas:FormulaTerm-App"],
+        "formulas:FormulaTerm-App-head": {
+          "core:is_a": ["formulas:FormulaTerm-OpRef"],
+          "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:add"
+        },
+        "formulas:FormulaTerm-App-arg": {
+          "core:is_a": ["formulas:FormulaTerm-Var"],
+          "formulas:FormulaTerm-Var-name": "x"
+        }
+      },
+      "formulas:FormulaTerm-App-arg": {
+        "core:is_a": ["formulas:FormulaTerm-LitFloat"],
+        "formulas:FormulaTerm-LitFloat-value": 0.0
+      }
+    }
+  },
+  "formulas:FormulaTerm-App-arg": {
+    "core:is_a": ["formulas:FormulaTerm-LitFloat"],
+    "formulas:FormulaTerm-LitFloat-value": 1.0
+  }
 }
 ```
+
+Nobody writes that by hand. Author it in ESL (chapter 5) or build it
+with the encoder; this is what the chain holds.
 
 Reading bottom-up:
 
@@ -83,25 +110,26 @@ Reading bottom-up:
 3. `App(App(OpRef(mul), <that>), LitFloat(1.0))` is `mul(x+0, 1)`,
    i.e. `(x + 0) * 1`.
 
-## 3.4. The validator's inductive-value rule
+## 3.4. How the validator checks a value
 
-When a chain commit lands carrying a `core:inductive`-typed property
-referencing `formulas:FormulaTerm` (or any inductive type), the
-validator does the following per node (D32 §3.5):
+There is no separate inductive-value rule. A value is a resource, so the
+rules that check every resource check it (D85 §6.1):
 
-1. Read the `ctor` field. Look it up in the inductive's declared
-   constructor list. If the name isn't a declared ctor, reject with
-   `expected one of: Var, LitFloat, OpRef, App, Lam, Pi; got: <bad>`.
-2. Read the `args` field. Match its length against the ctor's declared
-   `arg_types`. If the count doesn't match, reject with arity mismatch.
-3. For each `args[i]`, type-check it against `arg_types[i]`:
-   - If the slot is a primitive (string, float, IRI), check the JSON
-     type matches.
-   - If the slot references another inductive, recurse into the value.
-   - If the slot references a class (e.g. an `OpRef`'s IRI must resolve
-     to a `formulas:Operator` resource), look the IRI up on the chain
-     and confirm it exists with the expected `is_a`.
-4. For `App`, *additionally* run the operator-arity rank check
+1. **The slot.** `data_type: core:inductive` admits an embedded resource
+   and nothing else, and `class_types: [formulas:FormulaTerm]` admits the
+   constructors of that inductive — each derived class lists the
+   inductive in its `parent_classes`. A constructor the declaration does
+   not have has no class, so `is_a` names something that does not
+   resolve.
+2. **The arity.** A constructor class `requires` one property per
+   declared argument. A missing argument is a missing required property.
+3. **Each argument.** The derived property carries the argument's
+   declared type: a primitive `data_type` for a string or float, an
+   inductive one for a subterm, `class_types` for an IRI that has to
+   resolve to a chain resource (an `OpRef`'s operator, say).
+4. **Nested values.** Each argument that is a value is a resource in its
+   own right, so the same three checks run on it.
+5. For `App`, *additionally* the operator-arity rank check
    (described in [chapter 4](04-operator-catalog.md#43-the-app-spine-arity-check)).
 
 If any step fails, the entire chain commit is rejected. The error
@@ -115,10 +143,10 @@ node. Errors are surfaced in the `eigenius load`'s response.
 - **Curry left-to-right.** `f(a, b, c)` is
   `App(App(App(OpRef(f), a), b), c)` — left-spined, not right-spined.
   Reverse spines fail arity checks.
-- **Float literals are JSON numbers.** `3.14`, `0.0`, `-1.5`. The
-  validator distinguishes int and float; `LitFloat` requires a floating
-  representation. (For integer-valued literals you commonly want
-  `LitFloat(2.0)`, not the JSON integer `2`.)
+- **Float literals are floats.** `3.14`, `0.0`, `-1.5`. The validator
+  distinguishes int and float; `LitFloat`'s argument is declared
+  `core:float`. (For integer-valued literals you commonly want
+  `LitFloat(2.0)`, not the integer `2`.)
 - **`OpRef` requires a chain-resolved operator.** A typo in the IRI
   fails commit with "unknown operator IRI". The set of valid operators
   is whatever's declared as `formulas:Operator` on the chain (chapter 4).

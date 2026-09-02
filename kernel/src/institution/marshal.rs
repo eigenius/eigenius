@@ -224,12 +224,11 @@ fn deref_iri_to_embedded(iri: &Iri, param_iri: &Iri, layer: &Layer) -> Result<Va
 ///
 /// Properties whose `data_type` is something else (`core:inductive`,
 /// `core:json`, `core:value_array`, primitives, …) pass through
-/// unchanged. Inductive payloads (`Value::Json` for FormulaTerm,
-/// `Verdict`, etc.) are *not* walked — chain-bound IRI strings
-/// inside an inductive payload don't denote chain references the
-/// way `class_types: [...]`-typed properties do, and walking them
-/// would corrupt FormulaTerm trees that legitimately carry IRI
-/// strings as `OpRef` payloads.
+/// unchanged. Inductive VALUES are *not* walked — chain-bound IRI
+/// strings inside one don't denote chain references the way
+/// `class_types: [...]`-typed properties do, and walking them would
+/// corrupt terms that legitimately carry IRI strings as `OpRef` or
+/// `ConstRef` payloads. `recurse_into_embedded` is where that stops.
 pub fn embed_typed_resource_refs_recursively(
     resource: Resource,
     layer: &Layer,
@@ -261,6 +260,16 @@ pub fn embed_typed_resource_refs_recursively(
 }
 
 fn recurse_into_embedded(value: Value, layer: &Layer) -> Result<Value, MarshalError> {
+    // An inductive value is a resource too, and its properties are the constructor's
+    // ARGUMENTS — not slots to dereference. `eigentt:Judgement`'s `logic` argument is declared
+    // at the class `eigentt:Logic`, so its derived property carries `data_type: core:resource`
+    // and walking in would replace the IRI with an embedded copy, leaving a judgement the
+    // codec can no longer read. The doc below has always said inductive payloads are not
+    // walked; it stopped being true when a term became a resource (D85 §6.1), and this is
+    // what makes it true again.
+    if crate::layer::ctor_classes::is_inductive_value(&value, layer) {
+        return Ok(value);
+    }
     match value {
         Value::Embedded(r) => {
             let recursed = embed_typed_resource_refs_recursively(*r, layer)?;
@@ -274,5 +283,60 @@ fn recurse_into_embedded(value: Value, layer: &Layer) -> Result<Value, MarshalEr
             Ok(Value::Array(out))
         }
         other => Ok(other),
+    }
+}
+
+#[cfg(test)]
+mod value_walk_tests {
+    //! **A term's interior is not a marshalling site.**
+    //!
+    //! Before D85 §5 step 4 a term was a `Value::Json`, which
+    //! [`embed_typed_resource_refs_recursively`] never descended. Making it a resource made it
+    //! look like every other embedded resource, and one constructor argument — the `logic` of
+    //! `eigentt:Judgement`'s `holds`, declared at the class `eigentt:Logic` — is exactly the
+    //! shape this walker dereferences.
+
+    use super::*;
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::Value;
+    use crate::ontology::well_known as wk;
+
+    #[test]
+    fn a_judgements_logic_argument_survives_the_marshalling_walk() {
+        let layer = crate::testing::term_chain();
+        let names = crate::testing::codec_names();
+        let term = crate::testing::term_value(&serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []],
+        }));
+        let judgement = crate::program::eigentt_type_mirror::encode_judgement(
+            "urn:eigenius:eigentt:logic_kernel",
+            &term,
+            &term,
+            names,
+        )
+        .expect("judgement encodes");
+
+        let mut holder = Resource::new(Iri::parse("urn:test:marshal:holder").expect("iri"));
+        holder.set(
+            Iri::parse(wk::IS_A).expect("iri"),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:justification:Conclusion".into(),
+            )]),
+        );
+        holder.set(
+            Iri::parse("urn:eigenius:justification:judgement").expect("iri"),
+            judgement.clone(),
+        );
+
+        let walked =
+            embed_typed_resource_refs_recursively(holder, layer).expect("the walk succeeds");
+        let after = walked
+            .get(&Iri::parse("urn:eigenius:justification:judgement").expect("iri"))
+            .expect("the judgement is still there");
+        assert_eq!(
+            after, &judgement,
+            "the walk must leave a term untouched — a dereferenced `logic` argument is a \
+             judgement the codec can no longer read"
+        );
     }
 }

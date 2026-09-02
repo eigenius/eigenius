@@ -282,7 +282,7 @@ resource nb:sse_expr : symbolics:SymbolicExpression {
 
 Inside the parens you can write `+ - * / ^`, function calls (`sin(x)`, `pow(a, b)`), parens, unary minus, `Var`-shaped identifiers, and float literals. Standard math precedence; `^` is right-associative. Function names lower to the chain operator catalog at `urn:eigenius:formulas:ops:<name>`; unknown operators are accepted by the parser but rejected by the chain validator at commit time.
 
-**Compile target.** A `Value::CtorApp` literal mirroring the FormulaTerm tree (`App`, `OpRef`, `Var`, `LitFloat`, …). The kernel emits the canonical Eigon-JSON tagged-dict shape `{"ctor": "App", "args": [head, arg]}` recursively, which the validator type-checks against `formulas:FormulaTerm`'s ctor schema and against each operator's declared `Pi`-spine arity (`OperatorArityMismatch` if the spine is wider than the signature).
+**Compile target.** A `Value::CtorApp` literal mirroring the FormulaTerm tree (`App`, `OpRef`, `Var`, `LitFloat`, …). The kernel emits the value resources those constructors denote — `is_a` names the constructor's class and each argument lands on that class's property — recursively, which the validator type-checks against `formulas:FormulaTerm`'s ctor schema and against each operator's declared `Pi`-spine arity (`OperatorArityMismatch` if the spine is wider than the signature).
 
 **Lexer note (Phase 19f.3).** A bare `-` no longer folds into a numeric literal at lex time, so `formula(x - 2)` lexes correctly as `Minus IntLit(2)` (binary subtraction) rather than `Minus IntLit(-2)`. Outside `formula(...)`, the legacy `ex:value = -1.5;` shape (unary minus on a numeric literal) is handled by `parse_value` and still works.
 
@@ -318,15 +318,20 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
 }
 ```
 
-The `type_expr(HasLowIC50(...))` expression compiles to a `Value::Json` carrying the tagged-dict tree:
+The `type_expr(HasLowIC50(...))` expression compiles to the value resources those constructors denote — `is_a` names the constructor's class, and each argument lands on that class's property (D85 §6.1):
 
 ```json
 {
-  "ctor": "App",
-  "args": [
-    {"ctor": "ConstRef", "args": ["urn:eigenius:demo:screen:HasLowIC50"]},
-    {"ctor": "LitString", "args": ["urn:eigenius:demo:screen:EIG_0291"]}
-  ]
+  "core:is_a": ["eigentt:Term-App"],
+  "eigentt:Term-App-head": {
+    "core:is_a": ["eigentt:Term-ConstRef"],
+    "eigentt:Term-ConstRef-iri": "urn:eigenius:demo:screen:HasLowIC50",
+    "eigentt:Term-ConstRef-levels": []
+  },
+  "eigentt:Term-App-arg": {
+    "core:is_a": ["eigentt:Term-LitString"],
+    "eigentt:Term-LitString-value": "urn:eigenius:demo:screen:EIG_0291"
+  }
 }
 ```
 
@@ -380,7 +385,7 @@ What forces the pair: the DCG parser renders every definite description as `the(
 
 ### Why this surface vs. the JSON form
 
-Authors *could* hand-write the tagged-dict JSON tree directly as a `Value::Json` literal, but in practice three-nested `App(ConstRef, LitString, …)` shapes get verbose quickly and the syntactic noise drowns out the proposition. `type_expr(...)` is to the D47 type fragment what `formula(...)` is to the D32 formula language: a Pratt-parsed inline sublanguage that compiles to the same wire shape the verifier consumes, with the syntactic shape an author actually reads.
+Authors *could* hand-write the value resources directly, but in practice three-nested `App(ConstRef, LitString, …)` shapes get verbose quickly and the syntactic noise drowns out the proposition. `type_expr(...)` is to the D47 type fragment what `formula(...)` is to the D32 formula language: a Pratt-parsed inline sublanguage that compiles to the same wire shape the verifier consumes, with the syntactic shape an author actually reads.
 
 The two sublanguages target different chain types — `formula(...)` produces `formulas:FormulaTerm`, `type_expr(...)` produces `eigentt:Term` — and they don't overlap: numerical institutions speak FormulaTerm, propositional / reasoning institutions speak `eigentt:Term`. An ESL expression position can host either, depending on what the property's `class_types` constraint demands.
 
@@ -389,7 +394,7 @@ The two sublanguages target different chain types — `formula(...)` produces `f
 `type_expr(...)` lowers in two steps:
 
 1. The parser produces a `Value::Term { typ, pos }` AST node carrying the inner `ast::Term` tree;
-2. The compiler's `encode_type_expr_to_json` walks that tree, calls `lower_type_expr_to_exp` to produce a kernel `Exp`, then `eigentt_type_mirror::encode_type` to produce the tagged-dict JSON shape, and rewraps as `Value::Json`.
+2. The compiler's `encode_type_expr_to_value` walks that tree, calls `lower_type_expr_to_exp` to produce a kernel `Exp`, then `eigentt_type_mirror::encode_type` to produce the value resource it denotes.
 
 The resulting value lands in the resource's property slot just like any other property literal — there's no special chain-storage treatment.
 
@@ -401,7 +406,7 @@ The resulting value lands in the resource's property slot just like any other pr
 - `justification:proposition` on `justification:Conclusion` — the proposition the certificate type-checks against.
 - `core:ctor_type` on the typed-ctor form of indexed inductives — emitted by the compiler from the `data` declaration, not authored as a literal.
 
-Source: [`parse_type_expr`](../../../kernel/src/esl/parser.rs), [`lower_type_expr_to_exp`](../../../kernel/src/esl/compile.rs), [`encode_type_expr_to_json`](../../../kernel/src/esl/compile.rs), [`eigentt_type_mirror::encode_type`](../../../kernel/src/program/eigentt_type_mirror.rs).
+Source: [`parse_type_expr`](../../../kernel/src/esl/parser.rs), [`lower_type_expr_to_exp`](../../../kernel/src/esl/compile.rs), [`encode_type_expr_to_value`](../../../kernel/src/esl/compile.rs), [`eigentt_type_mirror::encode_type`](../../../kernel/src/program/eigentt_type_mirror.rs).
 
 ## 5.15. Capability modes — quick reference
 

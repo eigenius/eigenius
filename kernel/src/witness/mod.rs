@@ -131,7 +131,7 @@ impl WitnessKey {
 /// `eigon_cbor::serialize_value` to produce a fixed-size content hash.
 ///
 /// The encoded JSON is alpha-canonicalized before CBOR encoding (see
-/// [`alpha_canonicalize_proposition_json`]) so that propositions equal
+/// [`alpha_canonicalize_proposition`]) so that propositions equal
 /// up to binder renaming hash to the same key. Required because the
 /// kernel's NbE readback freshens binder names (`Pi (c : T) => ...`
 /// reads back as `Pi (G#0 : T) => ...`); without canonicalization, a
@@ -154,7 +154,6 @@ pub fn hash_proposition_exp(
 /// [`hash_proposition_exp`] for why.
 pub fn hash_proposition_value(encoded: &Value) -> [u8; 32] {
     let canonical = match encoded {
-        Value::Json(j) => Value::Json(alpha_canonicalize_proposition_json(j)),
         // D85 §6.1 — the same normalisation over the value-resource shape. It has to be here
         // and not only on the JSON: the emit side hashes an author's binder names and the
         // check side hashes what NbE readback freshened them to, so a shape the canonicaliser
@@ -192,6 +191,11 @@ pub fn hash_proposition_value(encoded: &Value) -> [u8; 32] {
 /// Binders are renamed to `_b<depth>` and every `Var` that resolves to one is rewritten, so
 /// propositions equal up to binder renaming hash alike. Argument names are read structurally —
 /// a property on a value resource is `<class>-<arg>` — so this needs no chain.
+pub fn alpha_canonicalize_proposition(v: &Value) -> Value {
+    let mut env: Vec<(String, String)> = Vec::new();
+    canonicalize_value(v, &mut env)
+}
+
 fn canonicalize_value(v: &Value, env: &mut Vec<(String, String)>) -> Value {
     const TERM: &str = crate::ontology::well_known::EIGENTT_TERM;
     let Value::Embedded(r) = v else {
@@ -267,76 +271,6 @@ fn canonicalize_value(v: &Value, env: &mut Vec<(String, String)>) -> Value {
         out.set(k.clone(), canonicalize_value(val, env));
     }
     Value::Embedded(Box::new(out))
-}
-
-pub fn alpha_canonicalize_proposition_json(value: &serde_json::Value) -> serde_json::Value {
-    let mut env: Vec<(String, String)> = Vec::new();
-    canonicalize_inner(value, &mut env)
-}
-
-fn canonicalize_inner(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
-    use serde_json::json;
-    let obj = match v.as_object() {
-        Some(o) => o,
-        None => return v.clone(),
-    };
-    let ctor = obj.get("ctor").and_then(|c| c.as_str());
-    let args = obj.get("args").and_then(|a| a.as_array());
-    let (ctor, args) = match (ctor, args) {
-        (Some(c), Some(a)) => (c, a),
-        _ => return v.clone(),
-    };
-    match (ctor, args.len()) {
-        ("Pi", 3) | ("Sig", 3) | ("Lam", 3) => {
-            let binder = args[0].as_str().unwrap_or("").to_string();
-            // Dom is evaluated in the *outer* scope (before this binder
-            // is in scope), so canonicalize it first without pushing.
-            let dom_canon = canonicalize_inner(&args[1], env);
-            // Push the binder mapping for the body. Anonymous binders
-            // (empty string) push an empty mapping so the depth counter
-            // still advances — required so a later Var lookup sees the
-            // right scoping even when intermediate binders are
-            // anonymous.
-            let depth = env.len();
-            let canonical_binder = if binder.is_empty() {
-                String::new()
-            } else {
-                format!("_b{depth}")
-            };
-            env.push((binder, canonical_binder.clone()));
-            let body_canon = canonicalize_inner(&args[2], env);
-            env.pop();
-            json!({
-                "ctor": ctor,
-                "args": [canonical_binder, dom_canon, body_canon],
-            })
-        }
-        ("Var", 1) => {
-            let name = args[0].as_str().unwrap_or("");
-            // Search the stack top-down (most recent binder wins for
-            // shadowing). The level we read is the binder's depth from
-            // the outside, so it's stable across the whole tree.
-            let resolved = env
-                .iter()
-                .rev()
-                .find(|(orig, _)| orig == name && !orig.is_empty())
-                .map(|(_, canon)| canon.clone())
-                .unwrap_or_else(|| name.to_string());
-            json!({
-                "ctor": "Var",
-                "args": [resolved],
-            })
-        }
-        _ => {
-            // Other ctors: recurse on each arg without changing the env.
-            let canon_args: Vec<serde_json::Value> =
-                args.iter().map(|a| canonicalize_inner(a, env)).collect();
-            json!({
-                "ctor": ctor,
-                "args": canon_args,
-            })
-        }
-    }
 }
 
 #[cfg(test)]

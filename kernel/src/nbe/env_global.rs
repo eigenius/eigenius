@@ -360,7 +360,7 @@ mod tests {
         // Body: `Sort(1)` in D47 form — a term that decodes and evaluates.
         r.set(
             i("urn:eigenius:eigentt:definition_body"),
-            Value::Json(serde_json::json!({
+            crate::testing::term_value(&serde_json::json!({
                 "ctor": "Sort",
                 "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]
             })),

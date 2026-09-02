@@ -12,9 +12,9 @@ three purposes:
    (D32 §6.2). The cost of bridging two domains drops from "write a custom
    translator" to "declare a comorphism resource."
 2. **Validated chain commits.** A formula isn't a string. It's a typed
-   tagged-dict tree where every node carries a constructor name and the
-   validator type-checks each node against the ctor's declared argument
-   types at commit time. Mismatched arity, unknown operators, free
+   value tree where every node states its constructor's class and the
+   validator type-checks each node against the arguments that class
+   declares, at commit time. Mismatched arity, unknown operators, free
    variables in unexpected positions — all rejected before the runtime
    ever sees the value.
 3. **Authoring ergonomics.** Inside `formula(...)` blocks in ESL, you write
@@ -28,7 +28,7 @@ Three places the formula language shows up, and how they relate:
 | Surface | Where you see it | What it is |
 |---|---|---|
 | **EigenTT fragment** | Inside the kernel's type theory | A subset of EigenTT `Exp` lifted onto the chain as an inductive type. Six constructors mirror EigenTT one-for-one. |
-| **Eigon-JSON encoding** | Chain commits, the wire | A tagged-dict tree `{"ctor": "App", "args": [head, arg]}` recursively. The validator type-checks every node. |
+| **Eigon-JSON encoding** | Chain commits, the wire | A resource whose `is_a` names the constructor's class and whose arguments are that class's properties, recursively. The validator type-checks every node. |
 | **ESL `formula(...)` sublanguage** | ESL program source | A Pratt-parsed math surface compiling to the encoded tree. `formula(x + 0)` produces `App(App(OpRef(+), Var(x)), LitFloat(0.0))`. |
 
 The middle surface is the load-bearing one — it's the actual representation
@@ -106,20 +106,36 @@ written in Eigon-JSON:
   "@id": "urn:eigenius:demo:expr:x_plus_0_times_1",
   "core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
   "symbolics:term": {
-    "ctor": "App",
-    "args": [
-      {"ctor": "App", "args": [
-        {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
-        {"ctor": "App", "args": [
-          {"ctor": "App", "args": [
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
-            {"ctor": "Var", "args": ["x"]}
-          ]},
-          {"ctor": "LitFloat", "args": [0.0]}
-        ]}
-      ]},
-      {"ctor": "LitFloat", "args": [1.0]}
-    ]
+    "core:is_a": ["formulas:FormulaTerm-App"],
+    "formulas:FormulaTerm-App-head": {
+      "core:is_a": ["formulas:FormulaTerm-App"],
+      "formulas:FormulaTerm-App-head": {
+        "core:is_a": ["formulas:FormulaTerm-OpRef"],
+        "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:mul"
+      },
+      "formulas:FormulaTerm-App-arg": {
+        "core:is_a": ["formulas:FormulaTerm-App"],
+        "formulas:FormulaTerm-App-head": {
+          "core:is_a": ["formulas:FormulaTerm-App"],
+          "formulas:FormulaTerm-App-head": {
+            "core:is_a": ["formulas:FormulaTerm-OpRef"],
+            "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:add"
+          },
+          "formulas:FormulaTerm-App-arg": {
+            "core:is_a": ["formulas:FormulaTerm-Var"],
+            "formulas:FormulaTerm-Var-name": "x"
+          }
+        },
+        "formulas:FormulaTerm-App-arg": {
+          "core:is_a": ["formulas:FormulaTerm-LitFloat"],
+          "formulas:FormulaTerm-LitFloat-value": 0.0
+        }
+      }
+    },
+    "formulas:FormulaTerm-App-arg": {
+      "core:is_a": ["formulas:FormulaTerm-LitFloat"],
+      "formulas:FormulaTerm-LitFloat-value": 1.0
+    }
   }
 }
 ```

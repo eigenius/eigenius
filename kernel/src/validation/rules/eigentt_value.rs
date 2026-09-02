@@ -130,12 +130,13 @@ impl Validator {
         // is what happens here.
         //
         // Nothing did it until now. Rule 21 selected only on `eigentt:Term`, so a
-        // Judgement slot fell through to Rule 16's generic inductive walk — which
-        // reads the D32 tagged-dict form, while a Judgement is stored D47-encoded
-        // as an `App` spine. Every judgement on every chain therefore reported
-        // "ctor `App` not declared on InductiveType `eigentt:Judgement`", and no
-        // test saw it because the chains that carry judgements are built with
-        // `LayerBuilder::build`, which does not validate.
+        // Judgement slot fell through to the generic inductive walk Rule 16 used to
+        // run — which read the D32 tagged-dict form, while a Judgement was stored
+        // D47-encoded as an `App` spine. Every judgement on every chain therefore
+        // reported "ctor `App` not declared on InductiveType `eigentt:Judgement`",
+        // and no test saw it because the chains that carry judgements are built
+        // with `LayerBuilder::build`, which does not validate. That walk is gone
+        // (D85 §5 step 5); this arm is what replaced it.
         if ranged_on_judgement {
             let j = match crate::program::eigentt_type_mirror::decode_judgement(value, &self.layer)
             {
@@ -340,7 +341,7 @@ fn paired_slot(prop_iri: &Iri, owner: &Resource) -> Option<(&'static str, Value)
 /// reports `unbound variable in type context: iri` — which is what happened the moment D85 §5
 /// step 4 turned terms into resources and Rule 23 began recursing into them. The outermost
 /// term's check covers every subterm; the subterms are not separate obligations.
-fn is_constructor_argument(prop_iri: &Iri, owner: &Resource) -> bool {
+pub(in crate::validation) fn is_constructor_argument(prop_iri: &Iri, owner: &Resource) -> bool {
     owner
         .is_a()
         .iter()
@@ -467,11 +468,11 @@ mod tests {
 
     /// `measurements:lt(1.0, 2.0)` — an axiom application at `Prop`.
     fn a_real_proposition() -> Value {
-        Value::Json(serde_json::json!({
+        crate::testing::term_value(&serde_json::json!({
             "ctor": "App",
             "args": [
                 {"ctor": "App", "args": [
-                    {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt"]},
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt", []]},
                     {"ctor": "LitFloat", "args": [1.0]}
                 ]},
                 {"ctor": "LitFloat", "args": [2.0]}
@@ -527,9 +528,9 @@ mod tests {
     fn unapplied_predicate_in_a_proposition_slot_rejected() {
         // `measurements:lt` on its own is `float -> float -> Prop` — a
         // predicate, not the claim that some pair satisfies it.
-        let value = Value::Json(serde_json::json!({
+        let value = crate::testing::term_value(&serde_json::json!({
             "ctor": "ConstRef",
-            "args": ["urn:eigenius:measurements:lt"]
+            "args": ["urn:eigenius:measurements:lt", []]
         }));
         let errs = errors_for_claim(value);
         assert_eq!(
@@ -619,9 +620,9 @@ mod tests {
         // ConstRef to a non-existent IRI fails to decode.
         let chain = chain_with_eigentt_prop();
         let mut top = LayerBuilder::new("unresolved", Some(chain));
-        let value = Value::Json(serde_json::json!({
+        let value = crate::testing::term_value(&serde_json::json!({
             "ctor": "ConstRef",
-            "args": ["urn:eigenius:nonexistent:Foo"]
+            "args": ["urn:eigenius:nonexistent:Foo", []]
         }));
         top.add_resource(holder_with_tx("urn:eigenius:test:unresolved", value))
             .unwrap();
@@ -649,11 +650,11 @@ mod tests {
         // felicity check a decode-only gate would miss.
         let chain = chain_with_eigentt_prop();
         let mut top = LayerBuilder::new("illtyped", Some(chain));
-        let value = Value::Json(serde_json::json!({
+        let value = crate::testing::term_value(&serde_json::json!({
             "ctor": "App",
             "args": [
-                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt"]},
-                {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]}
+                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt", []]},
+                {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class", []]}
             ]
         }));
         top.add_resource(holder_with_tx("urn:eigenius:test:illtyped", value))

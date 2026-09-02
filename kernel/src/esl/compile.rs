@@ -115,14 +115,18 @@ fn sort_kind_params(k: &ast::SortKind, out: &mut Vec<String>) {
 }
 
 fn sort_kind_result_value(
-    arg_names: &BTreeMap<String, Vec<String>>,
+    names: &crate::program::eigentt_type_mirror::CodecNames,
     k: &ast::SortKind,
     declared: &std::collections::BTreeSet<String>,
     pos: &crate::esl::error::Position,
 ) -> Result<Value, EslError> {
-    let json =
-        crate::program::eigentt_type_mirror::encode_level_json(&sort_kind_level(k, declared, pos)?);
-    level_value(arg_names, &json, pos)
+    let level = sort_kind_level(k, declared, pos)?;
+    crate::program::eigentt_type_mirror::encode_level(&level, names).map_err(|e| {
+        EslError::compiler(
+            Some(pos.clone()),
+            format!("cannot encode the result sort: {e}"),
+        )
+    })
 }
 
 /// Build one inductive value in the D85 §6.1 resource form.
@@ -180,41 +184,6 @@ fn ctor_value(
     Ok(Value::Embedded(Box::new(r)))
 }
 
-/// A `core:Level` value, from the tagged-dict encoding `encode_level_json` produces.
-///
-/// Levels are their own inductive, so the class is `<Level>-<Ctor>`, exactly as for
-/// `eigentt:Term`. Only the argument SHAPES differ: a level's arguments are nested levels,
-/// strings (a universe parameter's name) or integers.
-fn level_value(
-    arg_names: &BTreeMap<String, Vec<String>>,
-    j: &serde_json::Value,
-    pos: &crate::esl::error::Position,
-) -> Result<Value, EslError> {
-    const LEVEL_IRI: &str = "urn:eigenius:core:Level";
-    let Some(ctor) = j.get("ctor").and_then(serde_json::Value::as_str) else {
-        return Ok(Value::Json(j.clone()));
-    };
-    let args: Result<Vec<Value>, EslError> = j
-        .get("args")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
-        .iter()
-        .map(|a| {
-            if a.is_object() {
-                level_value(arg_names, a, pos)
-            } else if let Some(s) = a.as_str() {
-                Ok(Value::String(s.to_string()))
-            } else if let Some(n) = a.as_i64() {
-                Ok(Value::Integer(n))
-            } else {
-                Ok(Value::Json(a.clone()))
-            }
-        })
-        .collect();
-    ctor_value(arg_names, LEVEL_IRI, ctor, &args?, pos)
-}
-
 /// The `eigentt:Term` IRI, which the declaration emitters build values of.
 const TERM_IRI: &str = "urn:eigenius:eigentt:Term";
 
@@ -245,7 +214,7 @@ fn const_ref_value(
 ) -> Result<Value, EslError> {
     // Two arguments: the IRI and the universe levels it is instantiated at. A reference
     // written in ESL is monomorphic, so the level list is empty — see the `Exp::Const` arm of
-    // `encode_type_json` for why the argument stopped being optional.
+    // `encode_type` for why the argument stopped being optional.
     term_value(
         arg_names,
         "ConstRef",
@@ -678,7 +647,7 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
 /// Expand all `Term::Alias` forms by substituting each binding's
 /// value into the body at the names it introduces. The result is an
 /// alias-free `Term` ready for the standard compile passes
-/// (`lower_type_expr_to_exp` / `encode_type_expr_to_json` /
+/// (`lower_type_expr_to_exp` / `encode_type_expr_to_value` /
 /// `compile_type_expr`).
 ///
 /// Substitution rules:
@@ -1207,15 +1176,16 @@ impl Compiler {
             // Both sides are D85 §1 value resources; `result_sort` differs in carrying the
             // bare level, with no `Sort` wrapper.
             ast::IndexKind::Sort(sk) => {
-                let level = crate::program::eigentt_type_mirror::encode_level_json(
-                    &sort_kind_level(sk, &self.declared_universes, pos)?,
-                );
-                term_value(
-                    &self.ctor_arg_names,
-                    "Sort",
-                    &[level_value(&self.ctor_arg_names, &level, pos)?],
-                    pos,
-                )?
+                let level = sort_kind_level(sk, &self.declared_universes, pos)?;
+                let level =
+                    crate::program::eigentt_type_mirror::encode_level(&level, &self.codec_names)
+                        .map_err(|e| {
+                            EslError::compiler(
+                                Some(pos.clone()),
+                                format!("cannot encode the level: {e}"),
+                            )
+                        })?;
+                term_value(&self.ctor_arg_names, "Sort", &[level], pos)?
             }
         })
     }
@@ -1531,7 +1501,7 @@ impl Compiler {
             // A term-level annotation `(e : T)` is a category error in a
             // type-declaration position (codata observation type / inductive ctor
             // arg type). Annotations belong in `type_expr(...)` term slots, which
-            // compile via `encode_type_expr_to_json`, not here.
+            // compile via `encode_type_expr_to_value`, not here.
             ast::Term::Ann { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
                 "a type annotation `(e : T)` is not valid in a type-declaration \
@@ -1849,7 +1819,7 @@ impl Compiler {
                 &self.declared_universes,
                 pos,
             )?)),
-            // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_json`. Both paths
+            // Sigma ELIMINATION — see the twin arm in `encode_type_expr_to_value`. Both paths
             // are live: `axiom X : T` lowers through here, `type_expr(...)` in a resource
             // property through the JSON encoder.
             ast::Term::Ref { name, args, .. }
@@ -2406,7 +2376,7 @@ impl Compiler {
             r.set(
                 iri(wk::RESULT_SORT),
                 sort_kind_result_value(
-                    &self.ctor_arg_names,
+                    &self.codec_names,
                     sort,
                     &self.declared_universes,
                     &decl.name.pos,
@@ -4131,10 +4101,7 @@ mod tests {
 
     /// The CONSTRUCTOR view of a compiled value, for assertions written as `j["ctor"]`.
     ///
-    /// Reads `is_a` and the argument properties in declaration order. Deliberately not
-    /// `value_resource_to_tagged`, which projects to the D47 TERM encoding — for an inductive
-    /// other than `eigentt:Term` that is an `App` spine over `CtorApp`, a fact about the term
-    /// language rather than about the value these tests compiled.
+    /// Reads `is_a` and the argument properties in declaration order.
     fn tagged_of(v: &Value) -> serde_json::Value {
         match v {
             Value::Embedded(r) => {
@@ -7026,13 +6993,12 @@ mod sigma_surface_tests {
             .get(&crate::ontology::iri::Iri::parse("urn:eigenius:eigentt:axiom_statement").unwrap())
             .expect("axiom_statement")
         {
-            // The tagged view of the value resource, so these structural assertions keep
-            // reading `j["ctor"]` rather than walking derived property names.
+            // The `{ctor, args}` view of the value resource, so these structural assertions
+            // keep reading `j["ctor"]` rather than walking derived property names.
             crate::ontology::resource::Value::Embedded(r) => {
-                crate::program::eigentt_type_mirror::value_resource_to_tagged(r, term_chain())
+                crate::program::eigentt_type_mirror::ctor_view(r, term_chain())
                     .expect("a compiled statement is a well-formed value resource")
             }
-            crate::ontology::resource::Value::Json(j) => j.clone(),
             other => panic!("expected a term, got {other:?}"),
         }
     }

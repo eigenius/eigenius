@@ -551,15 +551,9 @@ fn decode_result_sort(
     // through the same codec as every other level means one representation and one validator.
     let sort_iri = Iri::parse(wk::RESULT_SORT).unwrap();
     match resource.get(&sort_iri) {
-        // Either shape — step 3 migrates the authored ones from the tagged dict to the value
-        // resource, and both decode through the same codec.
-        Some(v @ (Value::Json(_) | Value::Embedded(_))) => {
-            crate::program::eigentt_type_mirror::decode_level(v, layer)
-                .map(Exp::Sort)
-                .map_err(|e| {
-                    format!("inductive type '{class_iri}' has malformed `result_sort`: {e}")
-                })
-        }
+        Some(v @ Value::Embedded(_)) => crate::program::eigentt_type_mirror::decode_level(v, layer)
+            .map(Exp::Sort)
+            .map_err(|e| format!("inductive type '{class_iri}' has malformed `result_sort`: {e}")),
         Some(other) => Err(format!(
             "inductive type '{class_iri}' has a `result_sort` that is not a core:Level value: \
              {other:?}"
@@ -826,22 +820,13 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
     let value = r
         .get(&Iri::parse(wk::TYPE_NAME).unwrap())
         .ok_or_else(|| "InductiveArgType missing `type_name`".to_string())?;
-    // Both shapes: `type_name` may be a tagged dict or the value resource D85 §1 specifies,
-    // and step 3 migrates the authored ones from the first to the second. In the resource form
-    // the constructor is the class `is_a` names — read off its `-<Ctor>` suffix — and the single
-    // argument is the one property besides `is_a`, so nothing here hard-codes an argument name.
+    // `type_name` is a value resource (D85 §6.1): the constructor is the class `is_a` names,
+    // read off its `-<Ctor>` suffix. The head this function reports is `Var` or `ConstRef`,
+    // and each takes exactly one string argument — `name` and `iri` — so that argument is
+    // the one string-valued property besides `is_a`. Picking it by shape rather than by
+    // position is what lets this run without the layer that fixes argument order: `ConstRef`
+    // also carries `levels`, and a list is not a string.
     let (ctor, arg0_owned): (String, Option<String>) = match value {
-        Value::Json(head) => (
-            head.get("ctor")
-                .and_then(|c| c.as_str())
-                .ok_or_else(|| "InductiveArgType `type_name` has no ctor".to_string())?
-                .to_string(),
-            head.get("args")
-                .and_then(|a| a.as_array())
-                .and_then(|a| a.first())
-                .and_then(|v| v.as_str())
-                .map(str::to_string),
-        ),
         Value::Embedded(r) => {
             let class = r
                 .is_a()
@@ -859,8 +844,8 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
             let arg = r
                 .properties()
                 .iter()
-                .find(|(k, _)| **k != is_a_iri)
-                .and_then(|(_, v)| v.as_str().map(str::to_string));
+                .filter(|(k, _)| **k != is_a_iri)
+                .find_map(|(_, v)| v.as_str().map(str::to_string));
             (ctor, arg)
         }
         other => {
@@ -1454,12 +1439,14 @@ mod tests {
     }
 
     /// Build a `core:param_kind` value the way the compiler now does (eigenius#188 / N4).
+    /// A kind fixture: the literal describes a term, the value it denotes is built through
+    /// the declaration (D85 §6.1).
     fn kind_val(j: serde_json::Value) -> Value {
-        Value::Json(j)
+        crate::testing::term_value(&j)
     }
 
     fn const_ref(iri: &str) -> Value {
-        kind_val(serde_json::json!({"ctor": "ConstRef", "args": [iri]}))
+        kind_val(serde_json::json!({"ctor": "ConstRef", "args": [iri, []]}))
     }
 
     fn sort_kind(n: usize) -> Value {
@@ -1878,8 +1865,8 @@ mod list_decoder_agreement {
 
         // Decoder 1: the D47 `ConstRef` path.
         let via_const_ref = crate::program::eigentt_type_mirror::decode_type(
-            &Value::Json(serde_json::json!({
-                "ctor": "ConstRef", "args": [wk::LIST],
+            &crate::testing::term_value(&serde_json::json!({
+                "ctor": "ConstRef", "args": [wk::LIST, []],
             })),
             &layer,
         )
@@ -1902,7 +1889,9 @@ mod list_decoder_agreement {
         );
         arg.set(
             Iri::parse(wk::TYPE_NAME).unwrap(),
-            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::LIST]})),
+            crate::testing::term_value(
+                &serde_json::json!({"ctor": "ConstRef", "args": [wk::LIST, []]}),
+            ),
         );
         let holder = Iri::parse("urn:eigenius:test:Holder").unwrap();
         let via_arg_type = decode_arg_type(&holder, &Value::Embedded(Box::new(arg)), &layer)

@@ -55,45 +55,23 @@ impl Validator {
                 // comment warned about: `LayerBuilder::build` produced it in memory, the CBOR
                 // codec serialised it as `Text`, and a reloaded layer carried `String`.
                 //
-                // When `class_types` declares an `InductiveType`, also
-                // accept `Value::Json` — the tagged-dict carrier for
-                // inductive values. The deeper structural check
-                // (ctor / arg_types) runs in `check_class_types`,
-                // mirroring the `core:inductive` split.
-                if self.class_types_inductive_target(prop_def).is_some() {
-                    matches!(
-                        value,
-                        Value::String(_) | Value::Embedded(_) | Value::Json(_)
-                    )
-                } else {
-                    matches!(value, Value::String(_) | Value::Embedded(_))
-                }
+                // A slot whose `class_types` names an `InductiveType` needs no separate arm:
+                // an inductive value is a resource (D85 §6.1), so it arrives `Embedded` like
+                // any other, and Rule 6 checks its constructor class against `class_types`.
+                matches!(value, Value::String(_) | Value::Embedded(_))
             }
             wk::RESOURCE_ARRAY => match value {
-                Value::Array(arr) => {
-                    if self.class_types_inductive_target(prop_def).is_some() {
-                        arr.iter().all(|v| {
-                            matches!(v, Value::String(_) | Value::Embedded(_) | Value::Json(_))
-                        })
-                    } else {
-                        arr.iter()
-                            .all(|v| matches!(v, Value::String(_) | Value::Embedded(_)))
-                    }
-                }
+                Value::Array(arr) => arr
+                    .iter()
+                    .all(|v| matches!(v, Value::String(_) | Value::Embedded(_))),
                 _ => false,
             },
             wk::VALUE_ARRAY => matches!(value, Value::Array(_)),
             wk::JSON => true, // Any value is valid for JSON
-            wk::INDUCTIVE => {
-                // Wire-level shape check: an inductive value lands as
-                // either a `Value::Json` carrying the tagged-dict tree
-                // or a `Value::Embedded` resource. The deeper
-                // structural type-check (ctor exists on declared
-                // InductiveType, arg shapes match `arg_types`) lives in
-                // `check_inductive_value` (rule 16) — same split as
-                // `check_class_types` for `core:resource`.
-                matches!(value, Value::Json(_) | Value::Embedded(_))
-            }
+            // An inductive value is a resource whose `is_a` names the constructor's class
+            // (D85 §6.1), so it lands `Embedded` and nothing else. Which constructor, and
+            // whether its arguments type-check, is Rule 6's and Rule 23's to say.
+            wk::INDUCTIVE => matches!(value, Value::Embedded(_)),
             _ => true, // Unknown data type, skip
         };
 

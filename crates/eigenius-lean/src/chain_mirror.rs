@@ -17,7 +17,7 @@
 //!
 //! Standalone authoring-side utility: takes verbatim `lean4export`
 //! bytes plus a target theorem name and emits the theorem's *type*
-//! (its proposition) as a `serde_json::Value` tagged-dict tree
+//! (its proposition) as the `lean:LeanExpr` value tree
 //! matching D40 §3's four chain inductives (`lean:LeanName` /
 //! `lean:LeanLevel` / `lean:LeanLevelList` / `lean:LeanExpr`).
 //!
@@ -74,7 +74,7 @@ pub enum ChainMirrorError {
 }
 
 /// Translate `bytes` (a verbatim `lean4export` JSON export) into a
-/// chain `lean:LeanExpr` tagged-dict value for the theorem named
+/// chain `lean:LeanExpr` value for the theorem named
 /// `target_name`. The value mirrors the theorem's *type* — its
 /// proposition — per D40 §4.1.
 ///
@@ -175,7 +175,7 @@ fn rendered_name<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, name: NamePtr<'t>) -> String {
     parts.join(".")
 }
 
-/// Encode a nanoda `Name` into the `lean:LeanName` tagged-dict shape
+/// Encode a nanoda `Name` into the `lean:LeanName` value shape
 /// per D40 §3.1: `Anon` / `Str(prefix, "suffix")` / `Num(prefix, 42)`.
 /// The four inductives this mirror writes, and the argument names each constructor declares.
 ///
@@ -229,7 +229,7 @@ fn encode_name<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, name: NamePtr<'t>, names: &LeanN
     }
 }
 
-/// Encode a nanoda `Level` into the `lean:LeanLevel` tagged-dict
+/// Encode a nanoda `Level` into the `lean:LeanLevel` value
 /// shape per D40 §3.2.
 fn encode_level<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, level: LevelPtr<'t>, names: &LeanNames) -> Value {
     match ctx.read_level(level) {
@@ -271,7 +271,7 @@ fn encode_levels<'t, 'p: 't>(
     out
 }
 
-/// Encode a nanoda `Expr` into the `lean:LeanExpr` tagged-dict shape
+/// Encode a nanoda `Expr` into the `lean:LeanExpr` value shape
 /// per D40 §3.4. `path` accumulates a structured trail for the
 /// `UnexpectedLocal` diagnostic.
 fn encode_expr<'t, 'p: 't>(

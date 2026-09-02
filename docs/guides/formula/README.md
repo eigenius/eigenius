@@ -30,10 +30,11 @@ other:
    constructors (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`), what they
    correspond to in EigenTT, and why two binders (`Lam` / `Pi`) sit
    alongside the four expression-shaped ones.
-3. **[Eigon-JSON embedding](03-eigon-json-embedding.md)** — the tagged-dict
-   shape `{"ctor", "args"}`, left-spined `App` currying for multi-arg
-   operators, the validator's inductive-value rule, and how every chain
-   commit gets type-checked.
+3. **[Eigon-JSON embedding](03-eigon-json-embedding.md)** — the value
+   resource: `is_a` names the constructor's class and each argument is one
+   of that class's properties. Left-spined `App` currying for multi-arg
+   operators, how the ordinary validation rules check a value, and how
+   every chain commit gets type-checked.
 4. **[The operator catalog](04-operator-catalog.md)** —
    `formulas:Operator` resources, the on-chain `operator_signature`
    (Pi-spine), the App-spine arity check, and how to author a new operator.

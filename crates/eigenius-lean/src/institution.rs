@@ -138,9 +138,9 @@ pub mod iris {
     pub const PROP_CLAIM_IRI: &str = "urn:eigenius:lean:claim_iri";
 
     /// Property: `LeanProofTerm.proposition` — chain-mirrored
-    /// `lean:LeanExpr` (D40 §3.4) tagged-dict tree carrying the
-    /// theorem's *type*. v1 of the correspondence check walks this
-    /// tree to confirm the proof actually reasons about the claim's
+    /// `lean:LeanExpr` (D40 §3.4) value carrying the theorem's
+    /// *type*. v1 of the correspondence check walks this
+    /// value to confirm the proof actually reasons about the claim's
     /// class via a mirror type (D28 §5.5 ¶2 final sentence). Absent
     /// proposition → structural check is skipped.
     pub const PROP_PROPOSITION: &str = "urn:eigenius:lean:proposition";
@@ -636,9 +636,20 @@ fn check_proposition_structural_correspondence(
     mirror: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<Option<String>, InstitutionError> {
+    // The proposition is a `lean:LeanExpr` value resource (D85 §6.1). `ctor_view` is the one
+    // read of an inductive value; projecting through it lets `walk_lean_expr` below stay
+    // written against `{ctor, args}` — the shape of the constructor, not of a wire format.
     let proposition = match proof_term.get(&Iri::parse(iris::PROP_PROPOSITION).expect("static IRI"))
     {
-        Some(Value::Json(j)) => j,
+        Some(Value::Embedded(r)) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, ctx.head()).map_err(
+                |e| {
+                    InstitutionError::ComputationFailed(format!(
+                        "LeanProofTerm `proposition` is not a well-formed value: {e}"
+                    ))
+                },
+            )?
+        }
         // Proposition is recommended-not-required (D28 §6.3). Absent
         // means the authoring side didn't run the chain-mirror
         // translator yet — the covering check alone has to suffice.
@@ -648,12 +659,12 @@ fn check_proposition_structural_correspondence(
         None => return Ok(None),
         Some(other) => {
             return Err(InstitutionError::ComputationFailed(format!(
-                "LeanProofTerm `proposition` must be JSON, got {other:?}"
+                "LeanProofTerm `proposition` must be a lean:LeanExpr value, got {other:?}"
             )));
         }
     };
 
-    let referenced_short_names = collect_mirror_short_names(proposition);
+    let referenced_short_names = collect_mirror_short_names(&proposition);
 
     // Resolve the claim's class IRI — same path as the covering
     // check; duplicated here so the structural check is
@@ -745,7 +756,7 @@ fn check_proposition_structural_correspondence(
     )))
 }
 
-/// Walk a chain-mirrored `lean:LeanExpr` tree (D40 §3.4 tagged-dict
+/// Walk a chain-mirrored `lean:LeanExpr` tree (D40 §3.4, projected
 /// shape) collecting every `Const` whose decoded `Name` lives
 /// under the `EigeniusFFI` namespace. Returns the suffix short
 /// names — e.g. a `Const "EigeniusFFI.Patient"` yields
@@ -801,7 +812,7 @@ fn walk_lean_expr(value: &serde_json::Value, out: &mut std::collections::BTreeSe
     }
 }
 
-/// Decode a `lean:LeanName` tagged dict (D40 §3.1) into the
+/// Decode a `lean:LeanName` constructor view (D40 §3.1) into the
 /// Lean-side short name **if** the name lives under the
 /// `EigeniusFFI` namespace. Returns `None` for any other shape.
 ///

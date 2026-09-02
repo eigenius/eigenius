@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rule 16 (inductive value type-check, D32 §3.5) and Rule 17 (FormulaTerm
-//! App-spine arity check, D32 §5.4 / Phase 19d.0.d). Both walk inductive
-//! tagged-dict trees; the latter is a FormulaTerm-specific arity check
-//! layered on top.
-
-use std::sync::Arc;
+//! Rule 16 (an inductive slot names one InductiveType, D32 §3.5) and Rule 17
+//! (FormulaTerm App-spine arity check, D32 §5.4 / Phase 19d.0.d).
+//!
+//! Rule 16 checks the DECLARATION only. An inductive value is a resource (D85 §6.1), so the
+//! ordinary rules check the value itself — see [`Validator::check_inductive_value`] for which
+//! rule owns which part. Rule 17 is the one thing they do not cover: whether an `App` spine
+//! supplies the number of arguments its head operator declares.
 
 use super::super::{iri, ValidationError, ValidationRule, Validator};
+use super::eigentt_value::is_constructor_argument;
+use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
+use crate::program::eigentt_type_mirror::ctor_and_args;
 
 /// FormulaTerm InductiveType IRI (D32 §4). Pinned here so the
 /// formula-specific arity rule can short-circuit before doing any
@@ -39,78 +43,47 @@ const OPERATOR_ARITY_IRI: &str = "urn:eigenius:formulas:operator_arity";
 /// `operator_arity` is read.
 const OPERATOR_IRI: &str = "urn:eigenius:formulas:Operator";
 
-/// EigenTTType InductiveType IRI (D47 §3). Pinned here so the
-/// `ConstRef` resolution check (D47 §5) can short-circuit when
-/// the inductive being walked isn't `eigentt:Term`.
-const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:Term";
-///  values are D47-encoded as an App spine, not D32 tagged
-/// dicts, so this walk cannot read them either. Rule 21 owns both.
-const EIGENTT_JUDGEMENT_IRI: &str = "urn:eigenius:eigentt:Judgement";
-
-/// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
-/// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
-/// **right-to-left** as the spine is traversed; the caller may want
-/// to reverse if argument order matters semantically. For the arity
-/// check, only the count matters so the order is irrelevant.
-fn collect_app_spine(node: &serde_json::Value) -> (serde_json::Value, Vec<serde_json::Value>) {
+/// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` value and return
+/// `(head, [a₁, a₂, a₃])`. Spine args are emitted **right-to-left** as the spine
+/// is traversed; the caller may want to reverse if argument order matters
+/// semantically. For the arity check, only the count matters so the order is
+/// irrelevant.
+///
+/// A node whose constructor cannot be read stops the walk and becomes the head:
+/// Rule 23 reports the malformed value itself, so this rule stays quiet about it.
+fn collect_app_spine<'a>(node: &'a Resource, layer: &Layer) -> (&'a Resource, Vec<&'a Value>) {
     let mut spine = Vec::new();
-    let mut cursor = node.clone();
+    let mut cursor = node;
     loop {
-        let Some(obj) = cursor.as_object() else {
+        let Ok((ctor, args)) = ctor_and_args(cursor, layer) else {
             return (cursor, spine);
         };
-        let ctor = obj.get("ctor").and_then(|v| v.as_str()).unwrap_or("");
-        if ctor != "App" {
+        if ctor != "App" || args.len() != 2 {
             return (cursor, spine);
         }
-        let args = obj
-            .get("args")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        if args.len() != 2 {
+        let Value::Embedded(head) = args[0] else {
             return (cursor, spine);
-        }
-        let mut iter = args.into_iter();
-        let head = iter.next().expect("len 2");
-        let arg = iter.next().expect("len 2");
-        spine.push(arg);
+        };
+        spine.push(args[1]);
         cursor = head;
     }
 }
 
 impl Validator {
-    /// Resolve `class_types` to an `InductiveType` resource when the
-    /// property declares exactly one entry pointing to one. Returns
-    /// `None` for the Class case (the original `class_types`
-    /// semantics) and for mixed/empty lists. Powers the Option A
-    /// unification across `core:resource`, `core:resource_array`,
-    /// and (implicitly, via the singleton constraint) `core:inductive`.
-    pub(in crate::validation) fn class_types_inductive_target(
-        &self,
-        prop_def: &Resource,
-    ) -> Option<Arc<Resource>> {
-        let class_iris = prop_def.get(&iri(wk::CLASS_TYPES))?.as_iri_array();
-        if class_iris.len() != 1 {
-            return None;
-        }
-        let target = self.layer.resolve(&class_iris[0])?;
-        if target.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
-            Some(target)
-        } else {
-            None
-        }
-    }
-
-    /// Rule 16: Inductive value type-checking (D32 §3.5).
+    /// Rule 16: an inductive slot names one InductiveType (D32 §3.5, D85 §5).
     ///
-    /// When a property has `data_type: core:inductive`, its `class_types`
-    /// must declare exactly one `core:InductiveType`, and the value must
-    /// be a tagged-dict tree (`{ "ctor": ..., "args": [...] }`) whose
-    /// every node corresponds to a ctor declared on the inductive and
-    /// whose every arg matches the ctor's declared `arg_types[i].type_name`.
-    /// Errors carry structured paths so users see
-    /// `term.args[0].args[1]: ctor 'foo' not declared on FormulaTerm`.
+    /// When a property has `data_type: core:inductive`, its `class_types` must
+    /// declare exactly one entry and that entry must resolve to a
+    /// `core:InductiveType`. That is the whole of this rule.
+    ///
+    /// The value itself is not walked here. An inductive value is a resource
+    /// whose `is_a` names the constructor's class (D85 §6.1), so the ordinary
+    /// rules already own every part of it: Rule 5 gates the wire shape, Rule 6
+    /// checks the constructor class against the slot's `class_types` (the
+    /// derived class lists the inductive in `parent_classes`), Rule 23 recurses
+    /// into the embedded resource, and there Rule 1 checks arity via `requires`
+    /// and Rules 5 and 6 check each argument against its declared property. A
+    /// second walk here would restate all of it against a shape nothing writes.
     pub(in crate::validation) fn check_inductive_value(
         &self,
         prop_def: &Resource,
@@ -167,277 +140,8 @@ impl Validator {
             }];
         }
 
-        // eigentt:Term values are validated end to end by Rule 21
-        // (`check_type_expr_well_typed`, eigentt_value.rs): decode + NbE
-        // type-check. Skip the generic inductive walk here so the two don't
-        // produce duplicate diagnostics — Rule 21 is the single eigentt owner.
-        if ind_iri.as_str() == EIGENTT_TYPE_EXPR_IRI || ind_iri.as_str() == EIGENTT_JUDGEMENT_IRI {
-            return vec![];
-        }
-
-        let mut errors = Vec::new();
-        self.walk_inductive_value(
-            value,
-            &ind_type,
-            prop_iri.as_str().to_string(),
-            res_id,
-            &mut errors,
-        );
-        errors
-    }
-
-    /// Recursively type-check an inductive value tree against an
-    /// `InductiveType` resource. `path` accumulates a structured trace
-    /// (`term.args[0].args[1]`) for diagnostic clarity.
-    pub(in crate::validation) fn walk_inductive_value(
-        &self,
-        value: &Value,
-        inductive_type: &Resource,
-        path: String,
-        res_id: &Option<Iri>,
-        out: &mut Vec<ValidationError>,
-    ) {
-        let json = match value {
-            Value::Json(j) => j,
-            // A value RESOURCE (D85 §1) is validated as a resource in its own right: Rule 23
-            // recurses into every embedded resource declaring `is_a` and applies the full rule
-            // set, so its constructor class is checked by Rule 8, its arity by Rule 1 and each
-            // argument by Rules 5 and 6. Walking it here as well would duplicate all of that
-            // against a shape this walker does not read. This walker is deleted outright at
-            // D85 §5 step 5; deferring is the smallest thing that lets step 3 land green.
-            Value::Embedded(_) => return,
-            other => {
-                out.push(ValidationError {
-                    resource_id: res_id.clone(),
-                    property: None,
-                    rule: ValidationRule::InductiveValueMismatch,
-                    message: format!(
-                        "{path}: expected JSON tagged-dict for inductive value, got {other:?}"
-                    ),
-                });
-                return;
-            }
-        };
-
-        let obj = match json.as_object() {
-            Some(o) => o,
-            None => {
-                out.push(ValidationError {
-                    resource_id: res_id.clone(),
-                    property: None,
-                    rule: ValidationRule::InductiveValueMismatch,
-                    message: format!("{path}: inductive value must be a JSON object"),
-                });
-                return;
-            }
-        };
-
-        let ctor_name = match obj.get("ctor").and_then(serde_json::Value::as_str) {
-            Some(s) => s,
-            None => {
-                out.push(ValidationError {
-                    resource_id: res_id.clone(),
-                    property: None,
-                    rule: ValidationRule::InductiveValueMismatch,
-                    message: format!("{path}: inductive value missing string `ctor` field"),
-                });
-                return;
-            }
-        };
-
-        let args_array = obj
-            .get("args")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-
-        // Find the ctor declaration on the inductive type.
-        let ctors_value = match inductive_type.get(&iri(wk::CTORS)) {
-            Some(v) => v,
-            None => {
-                out.push(ValidationError {
-                    resource_id: res_id.clone(),
-                    property: None,
-                    rule: ValidationRule::InductiveValueMismatch,
-                    message: format!(
-                        "{path}: InductiveType `{}` has no `ctors` declared",
-                        inductive_type.id().map(|i| i.as_str()).unwrap_or("?"),
-                    ),
-                });
-                return;
-            }
-        };
-        let ctor_arr = match ctors_value {
-            Value::Array(a) => a,
-            _ => return, // Earlier rules will have flagged this
-        };
-
-        let matching_ctor = ctor_arr.iter().find_map(|c| match c {
-            Value::Embedded(r) => {
-                let name = r
-                    .get(&iri(wk::CTOR_NAME))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if name == ctor_name {
-                    Some(r.as_ref())
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        });
-
-        let ctor = match matching_ctor {
-            Some(c) => c,
-            None => {
-                out.push(ValidationError {
-                    resource_id: res_id.clone(),
-                    property: None,
-                    rule: ValidationRule::InductiveValueMismatch,
-                    message: format!(
-                        "{path}: ctor `{ctor_name}` not declared on InductiveType `{}`",
-                        inductive_type.id().map(|i| i.as_str()).unwrap_or("?"),
-                    ),
-                });
-                return;
-            }
-        };
-
-        let arg_types: Vec<Resource> = match ctor.get(&iri(wk::ARG_TYPES)) {
-            Some(Value::Array(a)) => a
-                .iter()
-                .filter_map(|v| match v {
-                    Value::Embedded(r) => Some(r.as_ref().clone()),
-                    _ => None,
-                })
-                .collect(),
-            _ => Vec::new(),
-        };
-
-        if args_array.len() != arg_types.len() {
-            out.push(ValidationError {
-                resource_id: res_id.clone(),
-                property: None,
-                rule: ValidationRule::InductiveValueMismatch,
-                message: format!(
-                    "{path}: ctor `{ctor_name}` expects {} arg(s), got {}",
-                    arg_types.len(),
-                    args_array.len(),
-                ),
-            });
-            return;
-        }
-
-        for (i, (arg_value, arg_type_decl)) in args_array.iter().zip(arg_types.iter()).enumerate() {
-            // eigenius#188 / N4: `type_name` is an `eigentt:Term` value, so the type this
-            // dispatches on is the value's HEAD.
-            let child_path = format!("{path}.args[{i}]");
-            let type_name = match crate::program::ground::arg_type_head(arg_type_decl) {
-                Ok(n) => n,
-                Err(e) => {
-                    // An argument whose declared type cannot be read is not an argument this rule
-                    // can pass. It read `.unwrap_or_default()` here, which turned an unreadable
-                    // `type_name` into the empty string and then into a "typed by the parameter
-                    // ``" report naming a parameter that does not exist.
-                    out.push(ValidationError {
-                        resource_id: res_id.clone(),
-                        property: None,
-                        rule: ValidationRule::InductiveValueMismatch,
-                        message: format!("{child_path}: {e}"),
-                    });
-                    continue;
-                }
-            };
-            self.check_inductive_arg(arg_value, &type_name, child_path, res_id, out);
-        }
-    }
-
-    /// Validate one argument value against the `type_name` declared on
-    /// its `InductiveArgType`. Dispatches on whether `type_name` resolves
-    /// to a primitive `DataType`, a `Class`, an `InductiveType`, or a
-    /// bare type-parameter name (deferred — parameter-aware checking
-    /// lands when parametric inductives have their first chain
-    /// consumer; v1 callers use only monomorphic inductives).
-    fn check_inductive_arg(
-        &self,
-        arg_value: &serde_json::Value,
-        type_name: &str,
-        path: String,
-        res_id: &Option<Iri>,
-        out: &mut Vec<ValidationError>,
-    ) {
-        // A bare name is a type-PARAMETER reference. Parameter-aware checking — instantiating the
-        // parameter from the value's own type arguments — is genuinely not built, so this cannot
-        // check the value. It says so instead of returning `Ok`.
-        //
-        // Until eigenius#188 this arm was `Err(_) => return` with the comment "deferred per v1;
-        // v1 callers use only monomorphic inductives". That premise was half true: the
-        // DECLARATIONS are parametric — `core:Option.some(A)`, `logic:And.conj(P, Q)`,
-        // `logic:Or.inl/inr` — and `closed-class.esl` gives English "but" the semantics
-        // `λs₂. λs₁. logic:And(s₁, s₂)`, so any parsed sentence containing "but" produces an
-        // `And` value whose arguments are typed `P` and `Q`. Silent admission was one prose
-        // encoding from mattering.
-        let type_iri = match Iri::parse(type_name) {
-            Ok(i) => i,
-            Err(_) => {
-                out.push(ValidationError {
-                    resource_id: res_id.clone(),
-                    property: None,
-                    rule: ValidationRule::InductiveValueMismatch,
-                    message: format!(
-                        "{path}: argument is typed by the parameter `{type_name}`, which this \
-                         rule cannot check — parameter-aware validation is not built. The value \
-                         is NOT validated (eigenius#188 / N4)."
-                    ),
-                });
-                return;
-            }
-        };
-
-        // Primitive type IRIs are well-known; check inline.
-        let ok = match type_name {
-            wk::STRING => arg_value.is_string(),
-            wk::INTEGER => arg_value.is_i64(),
-            wk::FLOAT => arg_value.is_number(),
-            wk::BOOLEAN => arg_value.is_boolean(),
-            _ => {
-                // Resolve to a chain Resource.
-                let referent = match self.layer.resolve(&type_iri) {
-                    Some(r) => r,
-                    None => return, // Treat as unbound parameter; deferred.
-                };
-                // InductiveType: recurse.
-                if referent.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
-                    self.walk_inductive_value(
-                        &Value::Json(arg_value.clone()),
-                        &referent,
-                        path,
-                        res_id,
-                        out,
-                    );
-                    return;
-                }
-                // Class: arg is an embedded resource ref or IRI string —
-                // structural shape only; deeper class-type checking
-                // would duplicate `check_class_types` and is deferred.
-                // For v1, accept any string (IRI ref) or object (embedded).
-                if referent.is_instance_of(&iri(wk::CLASS)) {
-                    arg_value.is_string() || arg_value.is_object()
-                } else {
-                    // Unknown referent kind — skip silently.
-                    true
-                }
-            }
-        };
-
-        if !ok {
-            out.push(ValidationError {
-                resource_id: res_id.clone(),
-                property: None,
-                rule: ValidationRule::InductiveValueMismatch,
-                message: format!("{path}: value does not match declared `type_name` `{type_name}`"),
-            });
-        }
+        let _ = (value, ind_type);
+        vec![]
     }
 
     /// Rule 17: FormulaTerm App-spine arity check (D32 §5.4).
@@ -461,7 +165,17 @@ impl Validator {
         value: &Value,
         prop_iri: &Iri,
         res_id: &Option<Iri>,
+        owner: &Resource,
     ) -> Vec<ValidationError> {
+        // A subterm is checked as part of the term that contains it. `add(x, 2)` is
+        // `App(App(OpRef(add), x), 2)`, and its inner `App` is a partial application
+        // sitting in the outer one's `head` slot — arity-checking it standalone reports
+        // `add` under-applied. Rule 23 recurses into every embedded resource, so without
+        // this the outer walk's care to skip intermediate spine heads buys nothing.
+        if is_constructor_argument(prop_iri, owner) {
+            return vec![];
+        }
+
         // Only fire on properties whose value is a FormulaTerm.
         let dt = match self.get_data_type_str(prop_def) {
             Some(dt) => dt,
@@ -481,13 +195,12 @@ impl Validator {
             return vec![];
         }
 
-        let json = match value {
-            Value::Json(j) => j,
-            _ => return vec![],
+        let Value::Embedded(term) = value else {
+            return vec![];
         };
 
         let mut errors = Vec::new();
-        self.walk_formula_term_app_arity(json, prop_iri.as_str().to_string(), res_id, &mut errors);
+        self.walk_formula_term_app_arity(term, prop_iri.as_str().to_string(), res_id, &mut errors);
         errors
     }
 
@@ -504,40 +217,30 @@ impl Validator {
     /// checked.
     fn walk_formula_term_app_arity(
         &self,
-        node: &serde_json::Value,
+        node: &Resource,
         path: String,
         res_id: &Option<Iri>,
         out: &mut Vec<ValidationError>,
     ) {
-        let obj = match node.as_object() {
-            Some(o) => o,
-            None => return,
+        let Ok((ctor, args)) = ctor_and_args(node, &self.layer) else {
+            return;
         };
-        let ctor = obj
-            .get("ctor")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
 
         if ctor == "App" {
-            let (head, spine_args) = collect_app_spine(node);
-            if let Some(head_obj) = head.as_object() {
-                let head_ctor = head_obj
-                    .get("ctor")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                if head_ctor == "OpRef" {
-                    self.check_op_ref_head(head_obj, spine_args.len(), &path, res_id, out);
-                }
+            let (head, spine_args) = collect_app_spine(node, &self.layer);
+            if let Ok(("OpRef", head_args)) = ctor_and_args(head, &self.layer)
+                .as_ref()
+                .map(|(c, a)| (c.as_str(), a))
+            {
+                self.check_op_ref_head(head_args, spine_args.len(), &path, res_id, out);
             }
             // Recurse only into spine args (NOT into intermediate
             // App heads — those are partial applications counted by
             // the spine, not separate invocations to arity-check).
             // `collect_app_spine` returns args right-to-left from
             // the deepest App; reverse so paths read left-to-right.
-            let spine_left_to_right: Vec<&serde_json::Value> = spine_args.iter().rev().collect();
-            for (i, arg) in spine_left_to_right.iter().enumerate() {
-                let child_path = format!("{path}.args[{i}]");
-                self.walk_formula_term_app_arity(arg, child_path, res_id, out);
+            for (i, arg) in spine_args.iter().rev().enumerate() {
+                self.walk_arg_for_app_arity(arg, format!("{path}.args[{i}]"), res_id, out);
             }
             return;
         }
@@ -545,14 +248,29 @@ impl Validator {
         // Non-App node: recurse into every arg so nested applications
         // inside Lam/Pi bodies, OpRef IRIs (no recursion needed —
         // they're string args), etc. get checked too.
-        let args = obj
-            .get("args")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default();
         for (i, arg) in args.iter().enumerate() {
-            let child_path = format!("{path}.args[{i}]");
-            self.walk_formula_term_app_arity(arg, child_path, res_id, out);
+            self.walk_arg_for_app_arity(arg, format!("{path}.args[{i}]"), res_id, out);
+        }
+    }
+
+    /// Recurse into one constructor argument. A subterm is an embedded value; an
+    /// argument list (`core:value_array`) holds subterms element-wise. Everything
+    /// else is a leaf this rule has nothing to say about.
+    fn walk_arg_for_app_arity(
+        &self,
+        arg: &Value,
+        path: String,
+        res_id: &Option<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        match arg {
+            Value::Embedded(r) => self.walk_formula_term_app_arity(r, path, res_id, out),
+            Value::Array(elems) => {
+                for (i, e) in elems.iter().enumerate() {
+                    self.walk_arg_for_app_arity(e, format!("{path}[{i}]"), res_id, out);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -569,12 +287,10 @@ impl Validator {
     ///
     /// Two shapes deliberately produce nothing here:
     ///
-    /// - **A missing or non-string `OpRef` operand.** Rule 16
-    ///   (`walk_inductive_value`) already walks every `OpRef` node in
-    ///   the same value against the ctor's declared `arg_types`
-    ///   (`iri: core:string`) and raises `InductiveValueMismatch` for
-    ///   both the wrong arg count and the wrong arg type. Re-reporting
-    ///   it would double-diagnose one defect.
+    /// - **A missing or non-string `OpRef` operand.** The value is a resource
+    ///   whose class `requires` the operand property at its declared
+    ///   `core:string` (D85 §6.1), so Rule 1 reports the missing argument and
+    ///   Rule 5 the wrong type. Re-reporting it would double-diagnose one defect.
     /// - **An operator carrying no `operator_arity` at all.** The
     ///   property is only `recommends` on `formulas:Operator`, which
     ///   `requires` `operator_signature` instead, so an operator
@@ -585,7 +301,7 @@ impl Validator {
     ///   decision this rule does not pre-empt.
     fn check_op_ref_head(
         &self,
-        head_obj: &serde_json::Map<String, serde_json::Value>,
+        head_args: &[&Value],
         spine_len: usize,
         path: &str,
         res_id: &Option<Iri>,
@@ -598,13 +314,8 @@ impl Validator {
             message,
         };
 
-        // Arg shape is Rule 16's; see the doc comment.
-        let Some(op_iri_s) = head_obj
-            .get("args")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|a| a.first())
-            .and_then(serde_json::Value::as_str)
-        else {
+        // Arg shape is Rules 1 and 5's; see the doc comment.
+        let Some(Value::String(op_iri_s)) = head_args.first().copied() else {
             return;
         };
 
@@ -669,9 +380,11 @@ impl Validator {
 mod tests {
     use super::super::super::tests::{build_core_layer, iri, make_resource};
     use super::super::super::{ValidationRule, Validator};
+    use super::FORMULA_TERM_IRI;
     use crate::layer::{Layer, LayerBuilder};
     use crate::ontology::resource::Value;
     use crate::ontology::well_known as wk;
+    use crate::program::eigentt_type_mirror::CodecNames;
     use std::sync::Arc;
 
     // ──────────────────────────────────────────────────────────────────
@@ -714,8 +427,8 @@ mod tests {
                 // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
                 (
                     wk::TYPE_NAME,
-                    Value::Json(serde_json::json!({
-                        "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+                    crate::testing::term_value(&serde_json::json!({
+                        "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []],
                     })),
                 ),
             ],
@@ -778,6 +491,18 @@ mod tests {
         Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
+    /// Turn a tagged dict into the value resource it names, against the layer that declares
+    /// the inductive. Thin wrapper over [`CodecNames::value_of_tagged`] — the one
+    /// implementation — with the test-local inductive as the preference.
+    fn value_of(layer: &Layer, inductive: &str, tagged: &serde_json::Value) -> Value {
+        CodecNames::from_layer(layer)
+            .value_of_tagged(&[inductive], tagged)
+            .expect("fixture literal is a value")
+    }
+
+    const NAT: &str = "urn:eigenius:test:Nat";
+    const LEAN_EXPR: &str = "urn:eigenius:lean:LeanExpr";
+
     /// `succ(succ(zero))` as a JSON tagged-dict tree.
     fn nat_succ_succ_zero() -> serde_json::Value {
         serde_json::json!({
@@ -795,98 +520,93 @@ mod tests {
     #[test]
     fn inductive_value_validates_succ_succ_zero() {
         let nat_layer = build_nat_layer();
+        let value = value_of(&nat_layer, NAT, &nat_succ_succ_zero());
         let mut top = LayerBuilder::new("test_top", Some(nat_layer));
 
         let holder = make_resource(
             "urn:eigenius:test:n2",
-            vec![(
-                "urn:eigenius:test:nat_value",
-                Value::Json(nat_succ_succ_zero()),
-            )],
+            vec![("urn:eigenius:test:nat_value", value)],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-        let inductive_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
+        // The holder itself is a bare resource with no `is_a`, which is its own
+        // diagnostic; what this test asserts is that nothing is reported about the Nat
+        // value it carries.
+        let errors: Vec<_> = Validator::new(Arc::clone(&layer))
+            .validate()
+            .into_iter()
+            .filter(|e| e.message.contains("Nat") || e.message.contains("nat_value"))
             .collect();
         assert!(
-            inductive_errors.is_empty(),
-            "expected no InductiveValueMismatch on succ(succ(zero)); got {errors:?}"
+            errors.is_empty(),
+            "expected succ(succ(zero)) to validate; got {errors:?}"
         );
     }
 
+    /// **An undeclared constructor is rejected.** Rule 16 no longer walks the value,
+    /// so this is the ordinary class check doing the work: the value names
+    /// `Nat-infinity` in `is_a`, and no such class exists because the inductive
+    /// declares no `infinity` constructor for `LayerBuilder::build` to derive one from.
     #[test]
     fn inductive_value_rejects_unknown_ctor() {
         let nat_layer = build_nat_layer();
         let mut top = LayerBuilder::new("test_top", Some(nat_layer));
 
+        let mut infinity =
+            crate::ontology::resource::Resource::new(iri("urn:eigenius:test:Nat-infinity-value"));
+        infinity.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(format!("{NAT}-infinity"))]),
+        );
         let bad = make_resource(
             "urn:eigenius:test:bad",
             vec![(
                 "urn:eigenius:test:nat_value",
-                Value::Json(serde_json::json!({
-                    "ctor": "infinity",
-                    "args": []
-                })),
+                Value::Embedded(Box::new(infinity)),
             )],
         );
         top.add_resource(bad).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let errors = Validator::new(Arc::clone(&layer)).validate();
-        let mismatches: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .collect();
-        assert_eq!(
-            mismatches.len(),
-            1,
-            "expected exactly one InductiveValueMismatch for unknown ctor; got {errors:?}"
-        );
         assert!(
-            mismatches[0].message.contains("infinity"),
-            "error must mention the offending ctor name: {}",
-            mismatches[0].message
+            errors.iter().any(|e| e.message.contains("Nat-infinity")),
+            "expected the unknown constructor class to be reported; got {errors:?}"
         );
     }
 
+    /// **A missing constructor argument is rejected.** `succ` takes one argument, so
+    /// its derived class `requires` `Nat-succ-pred`; omitting it is Rule 1's
+    /// `MissingRequiredProperty`, not a separate inductive arity check.
     #[test]
     fn inductive_value_rejects_arity_mismatch() {
         let nat_layer = build_nat_layer();
         let mut top = LayerBuilder::new("test_top", Some(nat_layer));
 
-        // succ takes one arg; supply zero.
+        let mut succ =
+            crate::ontology::resource::Resource::new(iri("urn:eigenius:test:succ-of-nothing"));
+        succ.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(format!("{NAT}-succ"))]),
+        );
         let bad = make_resource(
             "urn:eigenius:test:bad_arity",
             vec![(
                 "urn:eigenius:test:nat_value",
-                Value::Json(serde_json::json!({
-                    "ctor": "succ",
-                    "args": []
-                })),
+                Value::Embedded(Box::new(succ)),
             )],
         );
         top.add_resource(bad).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let errors = Validator::new(Arc::clone(&layer)).validate();
-        let mismatches: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .collect();
-        assert_eq!(
-            mismatches.len(),
-            1,
-            "expected one InductiveValueMismatch for arity mismatch; got {errors:?}"
-        );
         assert!(
-            mismatches[0].message.contains("expects 1 arg"),
-            "error must describe the arity mismatch: {}",
-            mismatches[0].message
+            errors
+                .iter()
+                .any(|e| e.rule == ValidationRule::MissingRequired
+                    && e.message.contains("Nat-succ-pred")),
+            "expected the missing constructor argument to be reported; got {errors:?}"
         );
     }
 
@@ -945,10 +665,11 @@ mod tests {
     #[test]
     fn formula_term_well_formed_app_validates() {
         let layer = build_formula_layer();
+        let value = value_of(&layer, FORMULA_TERM_IRI, &add_x_2());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:f1",
-            vec![("urn:eigenius:test:formula_value", Value::Json(add_x_2()))],
+            vec![("urn:eigenius:test:formula_value", value)],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -976,10 +697,11 @@ mod tests {
         });
 
         let layer = build_formula_layer();
+        let value = value_of(&layer, FORMULA_TERM_IRI, &underapplied);
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:bad_arity",
-            vec![("urn:eigenius:test:formula_value", Value::Json(underapplied))],
+            vec![("urn:eigenius:test:formula_value", value)],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -1031,10 +753,11 @@ mod tests {
         });
 
         let layer = build_formula_layer();
+        let value = value_of(&layer, FORMULA_TERM_IRI, &overapplied);
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:bad_arity_long",
-            vec![("urn:eigenius:test:formula_value", Value::Json(overapplied))],
+            vec![("urn:eigenius:test:formula_value", value)],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -1061,10 +784,11 @@ mod tests {
     /// bootstrap formulas layer and return the whole error list.
     fn validate_formula_term(term: serde_json::Value) -> Vec<super::super::super::ValidationError> {
         let layer = build_formula_layer();
+        let value = value_of(&layer, FORMULA_TERM_IRI, &term);
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:op_ref_holder",
-            vec![("urn:eigenius:test:formula_value", Value::Json(term))],
+            vec![("urn:eigenius:test:formula_value", value)],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -1151,6 +875,11 @@ mod tests {
     /// malformed declarations can be exercised.
     fn validate_operator_with_arity(arity: Value) -> Vec<super::super::super::ValidationError> {
         let layer = build_formula_layer();
+        let value = value_of(
+            &layer,
+            FORMULA_TERM_IRI,
+            &app_of("urn:eigenius:test:ops:bad"),
+        );
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let op = make_resource(
             "urn:eigenius:test:ops:bad",
@@ -1168,10 +897,7 @@ mod tests {
         top.add_resource(op).unwrap();
         let holder = make_resource(
             "urn:eigenius:test:op_ref_holder",
-            vec![(
-                "urn:eigenius:test:formula_value",
-                Value::Json(app_of("urn:eigenius:test:ops:bad")),
-            )],
+            vec![("urn:eigenius:test:formula_value", value)],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -1265,23 +991,40 @@ mod tests {
         );
     }
 
+    /// **A non-string `OpRef` operand is diagnosed where the operand is declared.**
+    /// Rule 17 stays quiet on it; the derived property `FormulaTerm-OpRef-iri` carries
+    /// `data_type: core:string`, so Rule 5 reports it.
     #[test]
-    fn op_ref_with_non_string_operand_is_caught_by_rule_16() {
-        // Rule 17 stays quiet on a malformed `OpRef` operand because
-        // Rule 16 owns the ctor arg shape. Verify the defect is
-        // diagnosed there rather than falling through both rules.
-        let errors = validate_formula_term(serde_json::json!({
-            "ctor": "App",
-            "args": [
-                {"ctor": "OpRef", "args": [42]},
-                {"ctor": "Var", "args": ["x"]}
-            ]
-        }));
+    fn op_ref_with_non_string_operand_is_caught_elsewhere() {
+        let layer = build_formula_layer();
+        let mut op_ref =
+            crate::ontology::resource::Resource::new(iri("urn:eigenius:test:bad_op_ref"));
+        op_ref.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(format!("{FORMULA_TERM_IRI}-OpRef"))]),
+        );
+        op_ref.set(
+            iri(&format!("{FORMULA_TERM_IRI}-OpRef-iri")),
+            Value::Integer(42),
+        );
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:op_ref_holder",
+            vec![(
+                "urn:eigenius:test:formula_value",
+                Value::Embedded(Box::new(op_ref)),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(layer).validate();
         assert!(
-            errors
-                .iter()
-                .any(|e| e.rule == ValidationRule::InductiveValueMismatch),
-            "a non-string OpRef operand must be diagnosed by Rule 16; got {errors:?}"
+            errors.iter().any(|e| e.rule == ValidationRule::TypeMismatch
+                && e.property
+                    .as_ref()
+                    .is_some_and(|p| p.as_str().ends_with("OpRef-iri"))),
+            "a non-string OpRef operand must be diagnosed at its declared type; got {errors:?}"
         );
     }
 
@@ -1362,61 +1105,63 @@ mod tests {
     fn lean_expr_lambda_x_in_nat_validates() {
         // Phase 20a.2 acceptance test: a hand-encoded `λ x : Nat, x`
         // value commits cleanly against the chain-mirrored LeanExpr
-        // ontology — the chain-side type-check walks the tagged-dict
-        // shape, dispatches on each ctor name, and recurses into
-        // child arguments through LeanName / LeanLevelList / LeanExpr.
-        // No validator errors means the inductive-value walker
-        // successfully resolved every cross-reference and the
-        // ontology layer is structurally consistent.
+        // ontology. Each node is a resource stating its constructor's class, so
+        // Rule 23 recurses into it and Rules 1, 5 and 6 check its arguments —
+        // through LeanName / LeanLevelList / LeanExpr. No validator errors means
+        // every cross-reference resolved and the ontology layer is structurally
+        // consistent.
         let layer = build_lean_expr_layer();
+        let value = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p1",
+            vec![("urn:eigenius:test:proposition_value", value)],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors: Vec<_> = Validator::new(Arc::clone(&layer))
+            .validate()
+            .into_iter()
+            .filter(|e| e.message.contains("Lean"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "well-formed `λ x : Nat, x` must validate as a lean:LeanExpr; got {errors:?}"
+        );
+    }
+
+    /// **A constructor the inductive doesn't declare is rejected.** `LeanExpr` has no
+    /// `MetaVar`, so `LayerBuilder::build` derives no class for it and the value's
+    /// `is_a` names something that does not resolve.
+    #[test]
+    fn lean_expr_unknown_ctor_rejected() {
+        let layer = build_lean_expr_layer();
+        let mut meta_var =
+            crate::ontology::resource::Resource::new(iri("urn:eigenius:test:meta_var"));
+        meta_var.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:lean:LeanExpr-MetaVar".into(),
+            )]),
+        );
+        let mut top = LayerBuilder::new("test_top", Some(layer));
+        let holder = make_resource(
+            "urn:eigenius:test:bad_ctor",
             vec![(
                 "urn:eigenius:test:proposition_value",
-                Value::Json(lambda_x_in_nat()),
+                Value::Embedded(Box::new(meta_var)),
             )],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let errors = Validator::new(Arc::clone(&layer)).validate();
-        let inductive_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .collect();
         assert!(
-            inductive_errors.is_empty(),
-            "well-formed `λ x : Nat, x` must validate as a lean:LeanExpr; got {inductive_errors:?}"
-        );
-    }
-
-    #[test]
-    fn lean_expr_unknown_ctor_rejected() {
-        // A value with a ctor name the LeanExpr inductive doesn't
-        // declare must surface as `InductiveValueMismatch` — exercises
-        // the per-ctor lookup in `walk_inductive_value`.
-        let bogus = serde_json::json!({
-            "ctor": "MetaVar",
-            "args": [42]
-        });
-        let layer = build_lean_expr_layer();
-        let mut top = LayerBuilder::new("test_top", Some(layer));
-        let holder = make_resource(
-            "urn:eigenius:test:bad_ctor",
-            vec![("urn:eigenius:test:proposition_value", Value::Json(bogus))],
-        );
-        top.add_resource(holder).unwrap();
-        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
-
-        let errors = Validator::new(Arc::clone(&layer)).validate();
-        let inductive_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .collect();
-        assert!(
-            !inductive_errors.is_empty(),
-            "unknown ctor `MetaVar` must trigger an InductiveValueMismatch; got {errors:?}"
+            errors
+                .iter()
+                .any(|e| e.message.contains("LeanExpr-MetaVar")),
+            "unknown ctor `MetaVar` must be reported; got {errors:?}"
         );
     }
 
@@ -1500,8 +1245,9 @@ mod tests {
     /// inductive value, and the validator walks it the same way as
     /// `data_type: core:inductive`.
     #[test]
-    fn option_a_resource_with_inductive_class_types_accepts_json() {
+    fn option_a_resource_with_inductive_class_types_accepts_a_value() {
         let layer = build_lean_expr_property_layer(wk::RESOURCE);
+        let value = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p_single",
@@ -1514,10 +1260,7 @@ mod tests {
                             .to_string(),
                     )]),
                 ),
-                (
-                    "urn:eigenius:test:proposition_value",
-                    Value::Json(lambda_x_in_nat()),
-                ),
+                ("urn:eigenius:test:proposition_value", value),
             ],
         );
         top.add_resource(holder).unwrap();
@@ -1535,8 +1278,9 @@ mod tests {
     /// `Value::Json` elements; each element is walked against the
     /// declared inductive.
     #[test]
-    fn option_a_resource_array_with_inductive_class_types_accepts_json_array() {
+    fn option_a_resource_array_with_inductive_class_types_accepts_a_value_array() {
         let layer = build_lean_expr_property_layer(wk::RESOURCE_ARRAY);
+        let value = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p_array",
@@ -1551,10 +1295,7 @@ mod tests {
                 ),
                 (
                     "urn:eigenius:test:proposition_value",
-                    Value::Array(vec![
-                        Value::Json(lambda_x_in_nat()),
-                        Value::Json(lambda_x_in_nat()),
-                    ]),
+                    Value::Array(vec![value.clone(), value]),
                 ),
             ],
         );
@@ -1568,38 +1309,36 @@ mod tests {
         );
     }
 
-    /// Option A: malformed inductive value in a `resource_array`
-    /// element surfaces as `InductiveValueMismatch` with a structured
-    /// path indicating the bad index — the dispatch in
-    /// `check_class_types` walks each Json element.
+    /// **A bad constructor in a `resource_array` element is rejected.** Every element
+    /// is a value resource in its own right, so the element naming a class that does
+    /// not resolve is reported like any other.
     #[test]
     fn option_a_resource_array_with_bad_ctor_rejects() {
         let layer = build_lean_expr_property_layer(wk::RESOURCE_ARRAY);
+        let good = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
+        let mut bogus =
+            crate::ontology::resource::Resource::new(iri("urn:eigenius:test:does_not_exist"));
+        bogus.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(format!("{LEAN_EXPR}-DoesNotExist"))]),
+        );
         let mut top = LayerBuilder::new("test_top", Some(layer));
-        let bogus = serde_json::json!({"ctor": "DoesNotExist", "args": []});
         let holder = make_resource(
             "urn:eigenius:test:p_array_bad",
             vec![(
                 "urn:eigenius:test:proposition_value",
-                Value::Array(vec![Value::Json(lambda_x_in_nat()), Value::Json(bogus)]),
+                Value::Array(vec![good, Value::Embedded(Box::new(bogus))]),
             )],
         );
         top.add_resource(holder).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let errors = Validator::new(Arc::clone(&layer)).validate();
-        let inductive_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .collect();
         assert!(
-            !inductive_errors.is_empty(),
-            "bad ctor in array must surface as InductiveValueMismatch; got {errors:?}"
-        );
-        let saw_index_path = inductive_errors.iter().any(|e| e.message.contains("[1]"));
-        assert!(
-            saw_index_path,
-            "error message should reference the failing array index `[1]`; got {inductive_errors:?}"
+            errors
+                .iter()
+                .any(|e| e.message.contains("LeanExpr-DoesNotExist")),
+            "bad ctor in array must be reported; got {errors:?}"
         );
     }
 
@@ -1658,39 +1397,42 @@ mod tests {
         );
     }
 
+    /// **A constructor argument of the wrong type is rejected.** `succ`'s argument is
+    /// declared at `Nat`, so its derived property carries `data_type: core:inductive`
+    /// and a string in that slot fails the wire-shape gate — the argument is checked
+    /// where it is declared, not by a walk over the value.
     #[test]
     fn inductive_value_rejects_nested_arg_type_mismatch() {
         let nat_layer = build_nat_layer();
         let mut top = LayerBuilder::new("test_top", Some(nat_layer));
 
-        // succ's arg should be a Nat; supply a JSON string.
+        let mut succ =
+            crate::ontology::resource::Resource::new(iri("urn:eigenius:test:succ-of-str"));
+        succ.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(format!("{NAT}-succ"))]),
+        );
+        succ.set(
+            iri(&format!("{NAT}-succ-pred")),
+            Value::String("not_a_nat".into()),
+        );
         let bad = make_resource(
             "urn:eigenius:test:bad_nested",
             vec![(
                 "urn:eigenius:test:nat_value",
-                Value::Json(serde_json::json!({
-                    "ctor": "succ",
-                    "args": ["not_a_nat"]
-                })),
+                Value::Embedded(Box::new(succ)),
             )],
         );
         top.add_resource(bad).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
         let errors = Validator::new(Arc::clone(&layer)).validate();
-        let mismatches: Vec<_> = errors
-            .iter()
-            .filter(|e| e.rule == ValidationRule::InductiveValueMismatch)
-            .collect();
         assert!(
-            !mismatches.is_empty(),
-            "expected an InductiveValueMismatch for nested arg type mismatch; got {errors:?}"
-        );
-        // Path should mention args[0].
-        let path_match = mismatches.iter().any(|e| e.message.contains("args[0]"));
-        assert!(
-            path_match,
-            "error must include structured path `args[0]`: {mismatches:?}"
+            errors.iter().any(|e| e.rule == ValidationRule::TypeMismatch
+                && e.property
+                    .as_ref()
+                    .is_some_and(|p| p.as_str().ends_with("Nat-succ-pred"))),
+            "expected the mistyped constructor argument to be reported; got {errors:?}"
         );
     }
 
@@ -1765,9 +1507,9 @@ mod tests {
             "urn:eigenius:test:carve_bad",
             vec![(
                 "urn:eigenius:test:eigentt_value",
-                Value::Json(serde_json::json!({
+                crate::testing::term_value(&serde_json::json!({
                     "ctor": "ConstRef",
-                    "args": ["urn:eigenius:nonexistent:Foo"]
+                    "args": ["urn:eigenius:nonexistent:Foo", []]
                 })),
             )],
         );

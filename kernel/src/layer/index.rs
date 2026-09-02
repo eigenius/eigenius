@@ -1548,6 +1548,12 @@ mod mentions_tests {
         Arc::new(b.build(LayerStorage::in_memory()))
     }
 
+    /// The IRIs a term names, EXCLUDING the constructor classes it instantiates.
+    ///
+    /// A value states its class, and the index counts that as a mention because the class is a
+    /// real dependency (D85 §6.1). These tests are about the constants and premise IRIs a term
+    /// refers to, so the classes are filtered out here rather than repeated in every
+    /// expectation.
     fn mentions_of(term: serde_json::Value) -> Vec<String> {
         let mut b = LayerBuilder::new("mentions_top", Some(base()));
         let mut holder = Resource::new(iri("urn:eigenius:test:holder"));
@@ -1555,20 +1561,24 @@ mod mentions_tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
-        holder.set(iri("urn:eigenius:test:tx"), Value::Json(term));
+        holder.set(
+            iri("urn:eigenius:test:tx"),
+            crate::testing::term_value(&term),
+        );
         b.add_resource(holder).unwrap();
         let layer = b.build(LayerStorage::in_memory());
         extract_indexable_triples(&layer)
             .into_iter()
             .filter(|t| t.predicate.as_str() == wk::MENTIONS)
             .map(|t| t.object.as_str().to_string())
+            .filter(|o| !o.contains("-"))
             .collect()
     }
 
     /// **A justification term's premise citations are indexed.** The grounding
     /// leaves take the premise IRI as a `core:string` argument rather than a
-    /// `ConstRef`, so whether they reach the index is not obvious; `json_mentions`
-    /// matches any `urn:`-prefixed string at any depth, so they do. This is what
+    /// `ConstRef`, so whether they reach the index is not obvious; the walker matches any
+    /// `urn:`-prefixed string at any depth, so they do. This is what
     /// lets a commit-time check reach a justification term's premises through the
     /// triple index rather than by decoding the term.
     #[test]
@@ -1587,7 +1597,7 @@ mod mentions_tests {
     #[test]
     fn a_term_reference_becomes_a_mentions_triple() {
         let m = mentions_of(serde_json::json!({
-            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"],
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []],
         }));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
     }
@@ -1599,7 +1609,7 @@ mod mentions_tests {
     #[test]
     fn a_mention_of_a_sealed_inductive_is_dropped() {
         let m = mentions_of(serde_json::json!({
-            "ctor": "ConstRef", "args": ["urn:eigenius:test:Colour"],
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Colour", []],
         }));
         assert!(m.is_empty(), "sealed objects must not be indexed: {m:?}");
     }
@@ -1610,7 +1620,7 @@ mod mentions_tests {
     fn a_mixed_term_keeps_only_the_rebindable_edge() {
         let m = mentions_of(serde_json::json!({"ctor": "App", "args": [
             {"ctor": "CtorApp", "args": ["urn:eigenius:test:Colour", "red"]},
-            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]}]}));
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]}]}));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
     }
 
@@ -1619,8 +1629,8 @@ mod mentions_tests {
     #[test]
     fn repeated_mentions_of_one_iri_yield_one_triple() {
         let m = mentions_of(serde_json::json!({"ctor": "App", "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]},
-            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]}]}));
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]}]}));
         assert_eq!(m.len(), 1, "{m:?}");
     }
 }

@@ -42,6 +42,7 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
+use eigenius_kernel::testing::term_value;
 use serde_json::json;
 
 /// Commit `sentence` onto the chain and return every validation error naming it.
@@ -150,7 +151,7 @@ const PROBE_SENTENCE: &str = "urn:test:probe:sentence";
 
 fn synthetic_sentence(
     proposition: Option<Value>,
-    justification: Option<Value>,
+    justification: Option<serde_json::Value>,
     certificate: Option<Value>,
 ) -> Resource {
     let mut r = Resource::new(Iri::parse(PROBE_SENTENCE).unwrap());
@@ -179,7 +180,7 @@ fn synthetic_sentence(
 }
 /// Assemble the one judgement a conclusion now carries from the three parts
 /// that used to be separate slots: `holds(kernel, cert, Certificate(j, P))`.
-fn judgement(proposition: Value, justification: Value, cert: Value) -> Value {
+fn judgement(proposition: Value, justification: serde_json::Value, cert: Value) -> Value {
     use eigenius_kernel::program::eigentt_type_mirror::{certificate_type, encode_judgement};
     let typ = certificate_type(&d47(&justification), &proposition, codec())
         .expect("certificate type encodes");
@@ -187,18 +188,23 @@ fn judgement(proposition: Value, justification: Value, cert: Value) -> Value {
         .expect("judgement encodes")
 }
 
-/// Re-encode a plain D32 §3.7 tagged-dict `justification:Term` into the D47
-/// form a term embedded in a judgement must carry.
+/// Re-encode a plain `{ctor, args}` `justification:Term` literal into the value a term
+/// embedded in a judgement must carry.
 ///
 /// This conversion is the encoding boundary the collapse moved. A justification
 /// term used to sit in a slot of its own as a plain `{"ctor", "args"}` dict; it
 /// now rides inside the judgement, which is an `eigentt:Term`-ranged value, so
 /// the D47 codec reads it and a foreign inductive's constructor is named by
 /// `CtorApp` with arguments folded through `App`. Callers below still write the
-/// plain shape because it is what an author reads.
-fn d47(v: &Value) -> Value {
+/// plain literal because it is what an author reads.
+fn d47(j: &serde_json::Value) -> Value {
+    term_value(&d47_tagged(j))
+}
+
+/// The `App`/`CtorApp` spine, still as a literal, so the recursion composes before
+/// [`term_value`] builds the whole tree in one pass.
+fn d47_tagged(j: &serde_json::Value) -> serde_json::Value {
     const JT: &str = "urn:eigenius:justification:Term";
-    let Value::Json(j) = v else { return v.clone() };
     let (Some(name), args) = (
         j.get("ctor").and_then(serde_json::Value::as_str),
         j.get("args")
@@ -206,21 +212,18 @@ fn d47(v: &Value) -> Value {
             .cloned()
             .unwrap_or_default(),
     ) else {
-        return v.clone();
+        return j.clone();
     };
     let mut acc = json!({"ctor": "CtorApp", "args": [JT, name]});
     for a in args {
         let arg = match &a {
             serde_json::Value::String(s) => json!({"ctor": "LitString", "args": [s]}),
-            serde_json::Value::Object(_) => match d47(&Value::Json(a.clone())) {
-                Value::Json(x) => x,
-                _ => a.clone(),
-            },
+            serde_json::Value::Object(_) => d47_tagged(&a),
             other => other.clone(),
         };
         acc = json!({"ctor": "App", "args": [acc, arg]});
     }
-    Value::Json(acc)
+    acc
 }
 
 // ── Phase 10 — end-to-end Holds path ────────────────────────────────
@@ -322,7 +325,7 @@ fn justified_by_declared_certificate(
     iri_str: &str,
     proposition_subtree: serde_json::Value,
 ) -> Value {
-    Value::Json(json!({
+    term_value(&json!({
         "ctor": "App",
         "args": [
             {"ctor": "App", "args": [
@@ -508,11 +511,11 @@ fn an_explicit_canonical_proposition_admits_the_same_witness_as_the_default() {
             {"ctor": "LitString", "args": [target]},
         ],
     });
-    let proposition = Value::Json(asserts_subtree.clone());
-    let justification = Value::Json(json!({
+    let proposition = term_value(&asserts_subtree);
+    let justification = json!({
         "ctor": "Declared",
         "args": [target],
-    }));
+    });
     let certificate = justified_by_declared_certificate(target, asserts_subtree);
 
     let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
@@ -543,11 +546,11 @@ fn a_certificate_matching_an_admitted_witness_type_checks() {
         ],
     });
 
-    let proposition = Value::Json(asserts_subtree.clone());
-    let justification = Value::Json(json!({
+    let proposition = term_value(&asserts_subtree);
+    let justification = json!({
         "ctor": "Declared",
         "args": [target],
-    }));
+    });
     let certificate = justified_by_declared_certificate(target, asserts_subtree);
 
     let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
@@ -582,14 +585,14 @@ fn a_certificate_citing_the_wrong_proposition_is_rejected() {
         ],
     });
 
-    let proposition = Value::Json(mismatched_subtree.clone());
+    let proposition = term_value(&mismatched_subtree);
     // The justification still cites `target` (a valid Declared
     // grounding), but the proposition the certificate claims doesn't
     // match what the chain admits for that resource.
-    let justification = Value::Json(json!({
+    let justification = json!({
         "ctor": "Declared",
         "args": [target],
-    }));
+    });
     let certificate = justified_by_declared_certificate(target, mismatched_subtree);
 
     let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
@@ -622,11 +625,11 @@ fn a_certificate_citing_an_untraced_iri_is_rejected() {
         ],
     });
 
-    let proposition = Value::Json(asserts_subtree.clone());
-    let justification = Value::Json(json!({
+    let proposition = term_value(&asserts_subtree);
+    let justification = json!({
         "ctor": "Declared",
         "args": [target],
-    }));
+    });
     let certificate = justified_by_declared_certificate(target, asserts_subtree);
 
     let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
@@ -650,20 +653,20 @@ fn arity_mismatch_in_certificate_is_rejected() {
     // before the witness-synthesis hook runs.
     let ctx = build_full_chain();
 
-    let proposition = Value::Json(json!({
+    let proposition = term_value(&json!({
         "ctor": "App",
         "args": [
             {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": ["urn:foo"]},
         ],
     }));
-    let justification = Value::Json(json!({
+    let justification = json!({
         "ctor": "Declared",
         "args": ["urn:foo"],
-    }));
+    });
     // Certificate with only ONE App-arg — `justification:Certificate.declared`
     // expects three (iri, P, witness).
-    let certificate = Value::Json(json!({
+    let certificate = term_value(&json!({
         "ctor": "App",
         "args": [
             {"ctor": "CtorApp", "args": [
@@ -727,7 +730,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     );
     artifact.set(
         Iri::parse(wk::CANONICAL_PROPOSITION).unwrap(),
-        Value::Json(prop.clone()),
+        term_value(&prop),
     );
 
     let mut trace = Resource::new(Iri::parse("urn:test:v205:transcribed-trace").unwrap());
@@ -759,7 +762,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
 
     let exp =
-        eigenius_kernel::program::eigentt_type_mirror::decode_type(&Value::Json(prop), &layer)
+        eigenius_kernel::program::eigentt_type_mirror::decode_type(&term_value(&prop), &layer)
             .expect("proposition decodes");
     let key = |c| WitnessKey::from_exp(c, target_iri.clone(), &exp, codec()).expect("key builds");
 
@@ -800,20 +803,26 @@ fn a_conclusion_with_no_judgement_is_rejected() {
 
 #[test]
 fn a_judgement_the_codec_cannot_read_is_rejected() {
-    // The D47 codec has no `NotARealCtor`. Rule 21 reports it twice — once decoding the
-    // `eigentt:Judgement`, once reading the conclusion's justification — and both name the slot.
+    // `UnitVal` is a perfectly good `eigentt:Term`; it is not a judgement. The slot is
+    // `eigentt:Judgement`-ranged, so Rule 21 reports it twice — once decoding the
+    // judgement, once reading the conclusion's justification — and both name the slot.
+    //
+    // The fixture used to be `NotARealCtor`, a constructor no inductive declares. That is
+    // no longer expressible: a value states its constructor's CLASS (D85 §6.1), so a name
+    // the chain does not have has no class to name, and the fixture builder refuses it
+    // rather than the codec. The remaining unreadable case is the one here — a value the
+    // codec reads fine, in a slot that wanted something else.
     let ctx = build_full_chain();
     let mut sentence = synthetic_sentence(None, None, None);
     sentence.set(
         Iri::parse("urn:eigenius:justification:judgement").unwrap(),
-        Value::Json(json!({"ctor": "NotARealCtor", "args": []})),
+        term_value(&json!({"ctor": "UnitVal", "args": []})),
     );
     let errors = commit_and_validate(&ctx, sentence);
     let joined = errors.join("\n");
     assert!(
-        joined.contains("does not decode as an eigentt:Judgement")
-            && joined.contains("unknown eigentt:Term ctor: `NotARealCtor`"),
-        "the error must name the slot and the ctor, got: {joined}"
+        joined.contains("does not decode as an eigentt:Judgement"),
+        "the error must name the slot, got: {joined}"
     );
 }
 
@@ -825,11 +834,11 @@ fn a_proposition_that_is_a_sort_rather_than_a_term_is_rejected() {
     // `Certificate(j, P)`, where `P : Prop` is checked.
     let ctx = build_full_chain();
     let sentence = synthetic_sentence(
-        Some(Value::Json(
-            json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        Some(term_value(
+            &json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
         )),
-        Some(Value::Json(json!({"ctor": "Declared", "args": ["urn:a"]}))),
-        Some(Value::Json(json!({"ctor": "UnitVal", "args": []}))),
+        Some(json!({"ctor": "Declared", "args": ["urn:a"]})),
+        Some(term_value(&json!({"ctor": "UnitVal", "args": []}))),
     );
     let errors = commit_and_validate(&ctx, sentence);
     let joined = errors.join("\n");

@@ -60,22 +60,6 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use std::collections::BTreeSet;
 
-/// Every IRI a D47-encoded term names, at any depth.
-pub fn json_mentions(j: &serde_json::Value, out: &mut BTreeSet<Iri>) {
-    match j {
-        serde_json::Value::String(s) => {
-            if s.starts_with("urn:") {
-                if let Ok(iri) = Iri::parse(s) {
-                    out.insert(iri);
-                }
-            }
-        }
-        serde_json::Value::Array(items) => items.iter().for_each(|i| json_mentions(i, out)),
-        serde_json::Value::Object(map) => map.values().for_each(|v| json_mentions(v, out)),
-        _ => {}
-    }
-}
-
 /// Every IRI a term-valued property names, in either shape.
 ///
 /// `Value::Embedded` IS descended. It was not until `2026-09-01`, on the reasoning that "an
@@ -94,7 +78,6 @@ pub fn json_mentions(j: &serde_json::Value, out: &mut BTreeSet<Iri>) {
 /// is the correct answer, not an over-approximation to apologise for.
 pub fn json_mentions_of_value(v: &Value, out: &mut BTreeSet<Iri>) {
     match v {
-        Value::Json(j) => json_mentions(j, out),
         Value::Array(items) => items.iter().for_each(|i| json_mentions_of_value(i, out)),
         // Same rule as inside a term: any string that parses as a `urn:` IRI counts.
         Value::String(s) if s.starts_with("urn:") => {
@@ -117,12 +100,18 @@ mod tests {
     #[test]
     fn a_const_ref_inside_a_term_is_a_mention() {
         let mut out = BTreeSet::new();
-        json_mentions(
-            &serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"]}),
+        json_mentions_of_value(
+            &crate::testing::term_value(
+                &serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []]}),
+            ),
             &mut out,
         );
-        assert_eq!(out.len(), 1);
+        // The referenced constant AND `Term-ConstRef`, the class the value states. Both are
+        // real dependencies: the class must be declared for the value to be well formed.
         assert!(out.iter().any(|i| i.as_str() == "urn:eigenius:test:Nat"));
+        assert!(out
+            .iter()
+            .any(|i| i.as_str() == "urn:eigenius:eigentt:Term-ConstRef"));
     }
 
     /// `CtorApp` names the inductive, not the constructor — constructors have no
@@ -130,13 +119,14 @@ mod tests {
     #[test]
     fn a_ctor_app_mentions_the_inductive_not_the_constructor() {
         let mut out = BTreeSet::new();
-        json_mentions(
-            &serde_json::json!({"ctor": "CtorApp", "args": ["urn:eigenius:test:Nat", "succ"]}),
+        json_mentions_of_value(
+            &crate::testing::term_value(
+                &serde_json::json!({"ctor": "CtorApp", "args": ["urn:eigenius:test:Nat", "succ"]}),
+            ),
             &mut out,
         );
-        assert_eq!(
-            out.len(),
-            1,
+        assert!(
+            !out.iter().any(|i| i.as_str().ends_with(":succ")),
             "the ctor name `succ` is not an IRI and must not become one: {out:?}"
         );
         assert!(out.iter().any(|i| i.as_str() == "urn:eigenius:test:Nat"));
@@ -145,15 +135,24 @@ mod tests {
     #[test]
     fn nested_applications_are_reached() {
         let mut out = BTreeSet::new();
-        json_mentions(
-            &serde_json::json!({"ctor": "App", "args": [
+        json_mentions_of_value(
+            &crate::testing::term_value(&serde_json::json!({"ctor": "App", "args": [
                 {"ctor": "App", "args": [
-                    {"ctor": "ConstRef", "args": ["urn:eigenius:lexicon:cat_np"]},
-                    {"ctor": "ConstRef", "args": ["urn:eigenius:wn:n00001740"]}]},
-                {"ctor": "ConstRef", "args": ["urn:eigenius:lexicon:num_sg"]}]}),
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:lexicon:cat_np", []]},
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:wn:n00001740", []]}]},
+                {"ctor": "ConstRef", "args": ["urn:eigenius:lexicon:num_sg", []]}]})),
             &mut out,
         );
-        assert_eq!(out.len(), 3, "every ConstRef in the spine: {out:?}");
+        for expected in [
+            "urn:eigenius:lexicon:cat_np",
+            "urn:eigenius:wn:n00001740",
+            "urn:eigenius:lexicon:num_sg",
+        ] {
+            assert!(
+                out.iter().any(|i| i.as_str() == expected),
+                "every ConstRef in the spine is reached; missing {expected}: {out:?}"
+            );
+        }
     }
 
     /// D85 §6.1 — the shape the tagged dict became. The index reaches a value resource ONLY
@@ -186,12 +185,25 @@ mod tests {
     }
 
     #[test]
-    fn a_term_with_no_iris_mentions_nothing() {
+    /// A term with no IRIs of its own still mentions the CLASSES it instantiates, and nothing
+    /// else. `Sort(Zero)` names no constant, so the only mentions are `eigentt:Term-Sort` and
+    /// `core:Level-Zero` — both declared, both real dependencies of the value.
+    fn a_term_with_no_constants_mentions_only_its_classes() {
         let mut out = BTreeSet::new();
-        json_mentions(
-            &serde_json::json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+        json_mentions_of_value(
+            &crate::testing::term_value(
+                &serde_json::json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
+            ),
             &mut out,
         );
-        assert!(out.is_empty(), "{out:?}");
+        let got: Vec<&str> = out.iter().map(Iri::as_str).collect();
+        assert_eq!(
+            got,
+            vec![
+                "urn:eigenius:core:Level-Zero",
+                "urn:eigenius:eigentt:Term-Sort"
+            ],
+            "only the constructor classes: {out:?}"
+        );
     }
 }

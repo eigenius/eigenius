@@ -302,7 +302,7 @@ pub enum Value {
     /// matching what a programmatic `encode_type` caller produces.
     /// Surface counterpart of `formula(...)` for D32 §3.7
     /// inductive values — same purpose (write the expression
-    /// readably instead of the tagged-dict tree the codec emits),
+    /// readably instead of the value tree the codec emits),
     /// different codec.
     Term {
         typ: Term,

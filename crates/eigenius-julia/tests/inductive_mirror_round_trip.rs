@@ -94,7 +94,7 @@ impl NatChain {
         // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
-            Value::Json(serde_json::json!({
+            eigenius_kernel::testing::term_value(&serde_json::json!({
                 "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []],
             })),
         );

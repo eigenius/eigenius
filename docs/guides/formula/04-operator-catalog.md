@@ -82,17 +82,24 @@ as:
   "urn:eigenius:formulas:operator_associativity": "n_ary",
   "urn:eigenius:formulas:operator_commutativity": true,
   "urn:eigenius:formulas:operator_signature": {
-    "ctor": "Pi",
-    "args": [
-      "_",
-      {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-      {"ctor": "Pi",
-       "args": [
-         "_",
-         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]},
-         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:types:Real"]}
-       ]}
-    ]
+    "core:is_a": ["formulas:FormulaTerm-Pi"],
+    "formulas:FormulaTerm-Pi-name": "_",
+    "formulas:FormulaTerm-Pi-ty": {
+      "core:is_a": ["formulas:FormulaTerm-OpRef"],
+      "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+    },
+    "formulas:FormulaTerm-Pi-body": {
+      "core:is_a": ["formulas:FormulaTerm-Pi"],
+      "formulas:FormulaTerm-Pi-name": "_",
+      "formulas:FormulaTerm-Pi-ty": {
+        "core:is_a": ["formulas:FormulaTerm-OpRef"],
+        "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      },
+      "formulas:FormulaTerm-Pi-body": {
+        "core:is_a": ["formulas:FormulaTerm-OpRef"],
+        "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:types:Real"
+      }
+    }
   }
 }
 ```

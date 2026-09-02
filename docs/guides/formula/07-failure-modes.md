@@ -72,8 +72,8 @@ expected string at args[0]; got float
 
 A constructor's argument slot expected a string (e.g. `Var(name)` or
 `OpRef(iri)`) but got a different JSON type. Usually the result of
-hand-authoring with the wrong shape — e.g. `{"ctor": "Var", "args":
-[42]}` instead of `{"ctor": "Var", "args": ["x"]}`.
+hand-authoring with the wrong shape — e.g. `FormulaTerm-Var-name: 42`
+instead of `FormulaTerm-Var-name: "x"`.
 
 **Fix.** Match the leaf slot's expected primitive type. The constructor
 table in [chapter 2 §2.1](02-mini-tt-fragment.md#21-the-constructor-table)
@@ -81,11 +81,11 @@ lists each.
 
 ### Integer where a float is expected
 
-A subtler form of the previous failure: `{"ctor": "LitFloat", "args":
-[2]}` (integer `2`) gets rejected because `LitFloat` requires a float.
-JSON's `2` and `2.0` parse to different Eigon-Value types.
+A subtler form of the previous failure: `FormulaTerm-LitFloat-value: 2`
+(integer `2`) gets rejected because the argument is declared
+`core:float`. JSON's `2` and `2.0` parse to different Eigon-Value types.
 
-**Fix.** Use `2.0` instead of `2` in `LitFloat` args.
+**Fix.** Use `2.0` instead of `2`.
 
 ## 7.2. Parser-level failures (compile time)
 

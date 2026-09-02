@@ -213,6 +213,8 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
     // dispatch index sees their class definitions.
     let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
     let parent = Arc::clone(ctx.head());
+    let names =
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(parent.as_ref());
     let storage = LayerStorage::in_memory();
     let parent_layer_id = parent.id().to_string();
 
@@ -341,9 +343,14 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
         Value::String(claim_iri_str.to_string()),
     );
     if let Some(prop_json) = &s.proposition {
+        // `lean:proposition` holds a `lean:LeanExpr` VALUE (D85 §6.1). The scenarios below
+        // still describe it as a `{ctor, args}` literal because that is what reads; the
+        // fixture builder is what turns it into the resources it names.
         term.set(
             iri(lean_iris::PROP_PROPOSITION),
-            Value::Json(prop_json.clone()),
+            names
+                .value_of_tagged(&["urn:eigenius:lean:LeanExpr"], prop_json)
+                .expect("the scenario's proposition is a LeanExpr"),
         );
     }
     builder.add_resource(term).expect("add term");

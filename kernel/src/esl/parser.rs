@@ -770,7 +770,7 @@ impl<'a> Parser<'a> {
                 // encodes the lowered Exp. Surface counterpart of
                 // `formula(...)` for D47, used by D39 justification:Conclusion
                 // authors who'd otherwise hand-write the verbose
-                // `{"ctor":"App","args":[...]}` tagged-dict tree.
+                // value tree by hand.
                 if bare.as_deref() == Some("type_expr") && self.peek_at(1) == &TokenKind::LParen {
                     let pos = self.current_pos();
                     self.advance(); // consume `type_expr`
@@ -850,7 +850,7 @@ impl<'a> Parser<'a> {
     // Pratt parser for math-style infix expressions inside
     // `formula(...)`. Output is a `Value::CtorApp` tree mirroring the
     // chain-typed FormulaTerm; the existing `compile_value` lowers it
-    // to `Value::Json` carrying the `{ctor, args}` tagged-dict shape.
+    // to the value resources those constructors denote (D85 §6.1).
     //
     // Operator catalog (left-to-right precedence levels):
     //

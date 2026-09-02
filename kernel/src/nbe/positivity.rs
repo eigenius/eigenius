@@ -163,7 +163,7 @@ pub fn recursive_arg_shape<'a>(decl: &InductiveDecl, typ: &'a Exp) -> Option<Rec
             //
             // Peel the spine to its head. This is the same occurrence the fused
             // `InductiveType(d, args)` arm below classifies, written the way the
-            // wire has always written it (`encode_type_json` emits
+            // wire has always written it (`encode_type` emits
             // `ConstRef(iri)` + an `App` spine), so both forms must be
             // recognised while the migration is in flight.
             //

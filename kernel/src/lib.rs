@@ -44,7 +44,6 @@ pub mod runtime;
 pub mod server;
 pub mod storage;
 pub mod task;
-#[cfg(test)]
-pub(crate) mod testing;
+pub mod testing;
 pub mod validation;
 pub mod witness;

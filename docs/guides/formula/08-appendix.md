@@ -7,7 +7,7 @@
 | [`ontologies/formulas/formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json) | Chain declaration of the `FormulaTerm` inductive type, the `Operator` class, and the v1 catalog (`add`, `mul`, `pow`, etc.) |
 | [`kernel/src/esl/lexer.rs`](../../../kernel/src/esl/lexer.rs) | Lexer; tokenises `+ - * / ^` and the unary-minus rules described in [chapter 5 §5.3](05-esl-sublanguage.md#53-the-unary-minus-subtlety-lexer-note) |
 | [`kernel/src/esl/parser.rs`](../../../kernel/src/esl/parser.rs) | `formula(...)` Pratt parser; lowers the math sublanguage to `Value::CtorApp` literals |
-| [`kernel/src/esl/compile.rs`](../../../kernel/src/esl/compile.rs) | Lowers `Value::CtorApp` to chain-bound `Value::Json` carrying the canonical tagged-dict shape |
+| [`kernel/src/esl/compile.rs`](../../../kernel/src/esl/compile.rs) | Lowers `Value::CtorApp` to the chain-bound value resources the constructors denote |
 | [`kernel/src/validation/`](../../../kernel/src/validation/) | The validator's inductive-value rule (chapter 3 §3.4); the App-spine arity check (chapter 4 §4.3) |
 | [`crates/runtime-substrate/src/mirror_generator.rs`](../../../crates/runtime-substrate/src/mirror_generator.rs) | Closure walker; emits per-ctor decoder/encoder code for `FormulaTerm` and other inductives |
 | [`crates/eigenius-julia/src/mirror_gen.rs`](../../../crates/eigenius-julia/src/mirror_gen.rs) | Julia-specific mirror generator; emits `decode_FormulaTerm` and per-ctor structs |

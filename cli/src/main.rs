@@ -1848,9 +1848,89 @@ fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
     println!("{source}");
 }
 
-/// Compare the D47 terms of two documents by `@id` + property, alpha-canonically.
+/// Compare the terms of two documents by `@id` + property, alpha-canonically.
+///
+/// A term in a serialised document is a value RESOURCE (D85 §6.1): a nested object whose
+/// `core:is_a` names its constructor's class, with one property per argument. It was
+/// `{"ctor": …, "args": […]}` before step 4, and this looked for that shape — so after the
+/// migration it matched nothing and `--verify` compared an empty set.
 fn compare_terms(a: &serde_json::Value, b: &serde_json::Value) -> Vec<String> {
-    use eigenius_kernel::witness::alpha_canonicalize_proposition_json;
+    const IS_A: &str = "urn:eigenius:core:is_a";
+    const TERM: &str = "urn:eigenius:eigentt:Term";
+
+    /// The constructor class this object states, if it is a term.
+    fn term_class(v: &serde_json::Value) -> Option<String> {
+        let arr = v.as_object()?.get(IS_A)?.as_array()?;
+        let [one] = arr.as_slice() else { return None };
+        let c = one.as_str()?;
+        c.starts_with(&format!("{TERM}-")).then(|| c.to_string())
+    }
+
+    /// Rename binders to their depth so α-equivalent terms compare equal — the same
+    /// normalisation `witness::alpha_canonicalize_proposition` applies to values.
+    fn canon(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
+        let Some(class) = term_class(v) else {
+            return match v {
+                serde_json::Value::Array(items) => {
+                    serde_json::Value::Array(items.iter().map(|x| canon(x, env)).collect())
+                }
+                other => other.clone(),
+            };
+        };
+        let obj = v.as_object().expect("term_class checked this");
+        let arg = |n: &str| format!("{class}-{n}");
+        let mut out = serde_json::Map::new();
+        out.insert(IS_A.into(), obj[IS_A].clone());
+
+        let binder = ["Pi", "Sig", "Lam"]
+            .iter()
+            .any(|c| class == format!("{TERM}-{c}"));
+        if binder {
+            let name = obj
+                .get(&arg("name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let dom = obj.get(&arg("dom")).map(|d| canon(d, env));
+            let canonical = if name.is_empty() {
+                String::new()
+            } else {
+                format!("_b{}", env.len())
+            };
+            env.push((name, canonical.clone()));
+            let body = obj.get(&arg("body")).map(|b| canon(b, env));
+            env.pop();
+            out.insert(arg("name"), serde_json::Value::String(canonical));
+            if let Some(d) = dom {
+                out.insert(arg("dom"), d);
+            }
+            if let Some(b) = body {
+                out.insert(arg("body"), b);
+            }
+            return serde_json::Value::Object(out);
+        }
+        if class == format!("{TERM}-Var") {
+            let name = obj
+                .get(&arg("name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let resolved = env
+                .iter()
+                .rev()
+                .find(|(orig, _)| orig == name && !orig.is_empty())
+                .map(|(_, c)| c.clone())
+                .unwrap_or_else(|| name.to_string());
+            out.insert(arg("name"), serde_json::Value::String(resolved));
+            return serde_json::Value::Object(out);
+        }
+        for (k, val) in obj {
+            if k != IS_A {
+                out.insert(k.clone(), canon(val, env));
+            }
+        }
+        serde_json::Value::Object(out)
+    }
+
     fn terms(v: &serde_json::Value) -> std::collections::BTreeMap<String, serde_json::Value> {
         let mut out = std::collections::BTreeMap::new();
         let rs = match v {
@@ -1861,22 +1941,21 @@ fn compare_terms(a: &serde_json::Value, b: &serde_json::Value) -> Vec<String> {
             let Some(o) = r.as_object() else { continue };
             let id = o.get("@id").and_then(|x| x.as_str()).unwrap_or("<anon>");
             for (k, val) in o {
-                if val.get("ctor").is_some() {
+                if term_class(val).is_some() {
                     out.insert(format!("{id} :: {k}"), val.clone());
                 }
             }
         }
         out
     }
+
     let (ta, tb) = (terms(a), terms(b));
     let mut bad = Vec::new();
     for (k, va) in &ta {
         match tb.get(k) {
             None => bad.push(format!("{k}: absent after round trip")),
             Some(vb) => {
-                if alpha_canonicalize_proposition_json(va)
-                    != alpha_canonicalize_proposition_json(vb)
-                {
+                if canon(va, &mut Vec::new()) != canon(vb, &mut Vec::new()) {
                     bad.push(format!("{k}: not alpha-equal"));
                 }
             }

@@ -114,7 +114,7 @@ fn is_inductive(r: &Resource) -> bool {
 /// not.** That one documents JSON as never carrying typed-reference semantics,
 /// which is true for its purpose and false here: an inductive's constructor
 /// argument types are stored as D47-encoded JSON —
-/// `{"ctor": "ConstRef", "args": ["urn:…"]}` — so a walker that skips `Json`
+/// `{"ctor": "ConstRef", "args": ["urn:…", []]}` — so a walker that skips `Json`
 /// finds **no inductive-to-inductive edges at all**. Reusing it would produce an
 /// empty graph for precisely the case [`OrderError::MutualInductives`] exists to
 /// catch, and would look like it worked.
@@ -175,7 +175,7 @@ fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
         // This arm read `Value::ResourceRef` and ignored `Value::String`, which worked only
         // while a build-time pass upgraded one to the other — an upgrade that never survived
         // a storage round trip, so a reloaded chain contributed no edges here at all. The
-        // shape test is what `json_mentions` already uses one line below ("any `urn:`-prefixed
+        // shape test is what `json_mentions_of_value` already uses one line below ("any `urn:`-prefixed
         // string at any depth"), and having one answer is what lets `core:mentions` and
         // `MutualInductives` agree about what a value names.
         Value::String(s) => {
@@ -185,11 +185,11 @@ fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
         }
         Value::Array(items) => items.iter().for_each(|i| value_refs(i, out)),
         Value::Embedded(inner) => references(inner.as_ref(), out),
-        // D47-encoded terms. Shared with the indexer since D79 §2.2 — this
-        // descent used to live here, and having one copy is what lets
-        // `core:mentions` and `MutualInductives` agree about what a term names.
-        Value::Json(j) => crate::layer::term_mentions::json_mentions(j, out),
-        Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::Vector { .. } => {}
+        Value::Integer(_)
+        | Value::Float(_)
+        | Value::Boolean(_)
+        | Value::Json(_)
+        | Value::Vector { .. } => {}
     }
 }
 
@@ -330,8 +330,8 @@ mod tests {
                         a.set(iri("urn:eigenius:core:arg_name"), Value::String("x".into()));
                         a.set(
                             iri("urn:eigenius:core:type_name"),
-                            Value::Json(serde_json::json!({
-                                "ctor": "ConstRef", "args": [arg]
+                            crate::testing::term_value(&serde_json::json!({
+                                "ctor": "ConstRef", "args": [arg, []]
                             })),
                         );
                         a

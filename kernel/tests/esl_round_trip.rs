@@ -14,7 +14,7 @@
 
 //! `compile(print(t))` is α-equal to `t`, over every D47 term in the committed demo artifacts.
 //!
-//! The comparator is [`alpha_canonicalize_proposition_json`] — the SAME normalisation the witness
+//! The comparator is [`alpha_canonicalize_proposition`] — the SAME normalisation the witness
 //! index hashes to decide whether a chain-resident witness discharges a proposition. So a term that
 //! passes here does not merely "look similar": it is the identical witness as far as the commit
 //! gate is concerned.
@@ -29,7 +29,6 @@ use std::collections::BTreeMap;
 use eigenius_kernel::esl;
 use eigenius_kernel::esl::print::{is_d47_term, print_type_expr, print_value_term, Namespaces};
 use eigenius_kernel::layer::Layer;
-use eigenius_kernel::witness::alpha_canonicalize_proposition_json;
 use serde_json::Value;
 
 /// The demo's committed chain artifacts, relative to the kernel crate root (cargo's CWD for an
@@ -143,13 +142,9 @@ fn tagged_of(v: &eigenius_kernel::ontology::resource::Value) -> serde_json::Valu
     use eigenius_kernel::ontology::resource::Value;
     match v {
         Value::Embedded(r) => {
-            eigenius_kernel::program::eigentt_type_mirror::value_resource_to_tagged(
-                r,
-                bootstrap_chain(),
-            )
-            .expect("a compiled term is a well-formed value resource")
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, bootstrap_chain())
+                .expect("a compiled term is a well-formed value resource")
         }
-        Value::Json(j) => j.clone(),
         other => panic!("expected a term value, got {other:?}"),
     }
 }
@@ -165,6 +160,56 @@ fn bootstrap_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
                 .head(),
         )
     })
+}
+
+/// α-canonicalise a term in the tagged PROJECTION these round trips compare.
+///
+/// The kernel canonicalises VALUES — `witness::alpha_canonicalize_proposition`, the one the
+/// witness key hashes through. This file compares projections, because printing and
+/// recompiling is what it exercises, so the same renaming is spelled once here rather than
+/// kept as a second canonicaliser in the kernel.
+fn alpha_canon_tagged(v: &serde_json::Value) -> serde_json::Value {
+    fn go(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
+        let Some(obj) = v.as_object() else {
+            return v.clone();
+        };
+        let (Some(ctor), Some(args)) = (
+            obj.get("ctor").and_then(serde_json::Value::as_str),
+            obj.get("args").and_then(serde_json::Value::as_array),
+        ) else {
+            return v.clone();
+        };
+        match (ctor, args.len()) {
+            ("Pi", 3) | ("Sig", 3) | ("Lam", 3) => {
+                let binder = args[0].as_str().unwrap_or("").to_string();
+                let dom = go(&args[1], env);
+                let canonical = if binder.is_empty() {
+                    String::new()
+                } else {
+                    format!("_b{}", env.len())
+                };
+                env.push((binder, canonical.clone()));
+                let body = go(&args[2], env);
+                env.pop();
+                serde_json::json!({"ctor": ctor, "args": [canonical, dom, body]})
+            }
+            ("Var", 1) => {
+                let name = args[0].as_str().unwrap_or("");
+                let resolved = env
+                    .iter()
+                    .rev()
+                    .find(|(orig, _)| orig == name && !orig.is_empty())
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_else(|| name.to_string());
+                serde_json::json!({"ctor": "Var", "args": [resolved]})
+            }
+            _ => serde_json::json!({
+                "ctor": ctor,
+                "args": args.iter().map(|a| go(a, env)).collect::<Vec<_>>(),
+            }),
+        }
+    }
+    go(v, &mut Vec::new())
 }
 
 #[test]
@@ -192,8 +237,8 @@ fn every_demo_term_round_trips_through_esl() {
             match print_then_compile(&term, &prop_ns, layer) {
                 Err(e) => failures.push(format!("{path}\n  {label}\n  {e}")),
                 Ok(back) => {
-                    let a = alpha_canonicalize_proposition_json(&term);
-                    let b = alpha_canonicalize_proposition_json(&back);
+                    let a = alpha_canon_tagged(&term);
+                    let b = alpha_canon_tagged(&back);
                     if a != b {
                         failures.push(format!(
                             "{path}\n  {label}\n  NOT alpha-equal after round trip\n  \
@@ -253,8 +298,8 @@ fn boolean_literal_round_trips_through_esl() {
 
         let back = print_then_compile(&term, "rt", layer).expect("reparses");
         assert_eq!(
-            alpha_canonicalize_proposition_json(&term),
-            alpha_canonicalize_proposition_json(&back),
+            alpha_canon_tagged(&term),
+            alpha_canon_tagged(&back),
             "`{literal}` changed across the round trip"
         );
     }
@@ -320,8 +365,8 @@ fn pretty_layout_changes_only_whitespace() {
             let b = wrap_and_compile(&pretty, &pns, layer)
                 .unwrap_or_else(|e| panic!("{label}: pretty form does not compile: {e}"));
             assert_eq!(
-                alpha_canonicalize_proposition_json(&a),
-                alpha_canonicalize_proposition_json(&b),
+                alpha_canon_tagged(&a),
+                alpha_canon_tagged(&b),
                 "{label}: pretty and flat compile to different terms"
             );
             checked += 1;
@@ -401,8 +446,8 @@ fn sorts_round_trip_in_every_position() {
             let back = wrap_and_compile(&printed, &ns, layer)
                 .unwrap_or_else(|e| panic!("{label}: printed `{printed}` does not compile: {e}"));
             assert_eq!(
-                alpha_canonicalize_proposition_json(&term),
-                alpha_canonicalize_proposition_json(&back),
+                alpha_canon_tagged(&term),
+                alpha_canon_tagged(&back),
                 "{label}: printed `{printed}`, which compiles to a different term"
             );
             checked += 1;

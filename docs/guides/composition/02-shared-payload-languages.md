@@ -334,15 +334,22 @@ reflection:canonical_proposition = type_expr(
 );
 ```
 
-This lowers to a `Value::Json` carrying the tagged-dict tree:
+This lowers to the value resources those constructors denote — `is_a`
+names the constructor's class, and each argument lands on that class's
+property (D85 §6.1):
 
 ```json
 {
-  "ctor": "App",
-  "args": [
-    {"ctor": "ConstRef", "args": ["urn:eigenius:demo:screen:HasLowIC50"]},
-    {"ctor": "LitString", "args": ["urn:eigenius:demo:screen:EIG_0291"]}
-  ]
+  "core:is_a": ["eigentt:Term-App"],
+  "eigentt:Term-App-head": {
+    "core:is_a": ["eigentt:Term-ConstRef"],
+    "eigentt:Term-ConstRef-iri": "urn:eigenius:demo:screen:HasLowIC50",
+    "eigentt:Term-ConstRef-levels": []
+  },
+  "eigentt:Term-App-arg": {
+    "core:is_a": ["eigentt:Term-LitString"],
+    "eigentt:Term-LitString-value": "urn:eigenius:demo:screen:EIG_0291"
+  }
 }
 ```
 

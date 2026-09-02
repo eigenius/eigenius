@@ -190,7 +190,7 @@ fn iid_pooled_variance_dispatches_correctly() {
     // Override variance_assumption from WelchUnequal to Pooled.
     claim.set(
         Iri::parse(iris::PROP_VARIANCE_ASSUMPTION).unwrap(),
-        KV::Json(json!({"ctor": "Pooled", "args": []})),
+        eigenius_kernel::testing::term_value(&json!({"ctor": "Pooled", "args": []})),
     );
 
     let inst = StatisticsInstitution::new();

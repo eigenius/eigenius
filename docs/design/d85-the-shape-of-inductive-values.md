@@ -199,6 +199,12 @@ that before the `Json`/`Embedded` split would have to pick one of the three curr
 would freeze it. `json_mentions` then disappears outright: an inductive value's interior is `Value`,
 so the traversal that already handles `Embedded` handles it.
 
+**Two of the three answers are gone as of `2026-09-02`** (§5 step 5). `json_mentions` is deleted,
+and `merge/resolve`'s conditional went with `is_term_valued` — the gate D77 §3.6 needed and the
+`schema` parameter that existed only to compute it. Every remaining traversal descends `Embedded`
+and stops at `Json`. The six-into-one consolidation is still open, but it now has one answer to
+consolidate on rather than three.
+
 `dcg/chart/attribute::value_refs` is the other outlier — it does not descend into `Embedded` at all.
 Not reachable today, because its one caller passes `core:is_a`, a flat array of IRI strings. It is
 still wrong by the table above, and it is the kind of wrong that is invisible until someone reuses a
@@ -243,9 +249,9 @@ variables in JSON, only because the mirror is JSON.
 |---|---|---|
 | [`encode_type` / `decode_type`](../../kernel/src/program/eigentt_type_mirror.rs#L75) | `serde_json::Value` tagged dicts | `Exp` ↔ `Value` bridges |
 | `eigentt:Term.CtorApp` | 2 args + an `App` spine | `Embed(value)`, 1 arg |
-| [Rule 16 walker](../../kernel/src/validation/rules/inductive.rs#L192) | walks JSON against the SLOT's inductive | deleted, and replaced by NOTHING — Rule 23 recurses, Rule 1 checks arity, Rules 5 and 6 check argument types (§6.1) |
-| `json_mentions` | JSON twin of `value_refs` | deleted |
-| `alpha_canonicalize_proposition_json` | α-equivalence on JSON | on `Exp` |
+| Rule 16 walker | walks JSON against the SLOT's inductive | **deleted `2026-09-02`**, and replaced by NOTHING — Rule 23 recurses, Rule 1 checks arity, Rules 5 and 6 check argument types (§6.1) |
+| `json_mentions` | JSON twin of `value_refs` | **deleted `2026-09-02`** |
+| `alpha_canonicalize_proposition_json` | α-equivalence on JSON | **done** — on `Value`, α-canonicalising the resource tree |
 | authored values in shipped ontologies | 114 tagged dicts in 5 slots | resource form |
 | `Value::Vector` | in the persisted value type; [panics if serialised](../../kernel/src/ontology/eigon_cbor.rs#L217) | out of `Value` (§6) |
 
@@ -273,7 +279,7 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 | 2 | `decode_type` READS a value resource as well as a tagged dict; `encode_type` still emits the dict. Expand before migrate: nothing is rewritten, so nothing can break, and the codec stops being the reason the new shape is refused. | yes |
 | 3 | Migrate the 123 authored values AND switch the emitters in ONE change — each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it, while `encode_type` and the ESL compiler start emitting that form; then `CtorApp` → `Embed`. **The two halves are not separable** — see below. | yes |
 | 4 | **DONE `2026-09-02`.** The encode side emits value resources: `encode_term` (the D47 codec, formerly `encode_type_json`), `encode_type_expr_to_value` (ESL's `type_expr`) and `ctor_value_to_value` (ESL's `CtorApp` values). All write the same slots, so they flip together; readers took both shapes at step 2. Every witness key hash moves — `hash_proposition_exp` hashes this output — so it carries its own reseed, and Rule 24's guard is ported in the same commit. | yes |
-| 5 | Delete the twins. `json_mentions_const_ref` went at step 4, which had no use for a walker that read only the tagged dict. What remains: `term_mentions::json_mentions` (the `Value::Json` half), Rule 16's `walk_inductive_value`, `alpha_canonicalize_proposition_json` (the value form already exists beside it), and `decode_type_json` together with the spine fold in `value_resource_to_tagged` that feeds it. Plus the Lean mirror, which still writes `lean:LeanExpr` tagged. | yes |
+| 5 | **DONE `2026-09-02`.** Delete the twins. Gone: `term_mentions::json_mentions`, `alpha_canonicalize_proposition_json`, `decode_type_json`, `value_resource_to_tagged` and its spine fold, `encode_level_json`, `esl::compile::level_value`, Rule 16's `walk_inductive_value` and `check_inductive_arg`, `class_types_inductive_target`, and merge/resolve's `is_term_valued` / `json_mentions_iri` / `substitute_iri_in_json` (R5a's `if term_valued` conditional, and the `schema` parameter that existed only to compute it). `Value::Json` no longer passes the wire gate for `core:inductive`, so a term in that variant is a type error rather than a second shape. Rule 16 keeps its declaration check; Rule 17 was ported to values rather than left dark, and skips constructor-argument slots so an inner `App` is not arity-checked as a standalone application. `ValidationRule::InductiveValueMismatch` is retired — nothing produces it. One tagged→value builder remains, `CodecNames::value_of_tagged`, and it is what fixtures and the two JSON-building producers call. | yes |
 | 6 | `Vector` leaves `Value` — the query engine takes a domain extending the data model, and serialising a transient becomes a type error rather than a panic. | yes |
 
 Two reseeds: after step 3, folded into the one already owed for P4 and P5; and after step 4,

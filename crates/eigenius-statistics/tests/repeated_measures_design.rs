@@ -285,7 +285,7 @@ fn rm_ar1_returns_not_yet_wired_diagnostic() {
     let mut claim = (*claim_arc).clone();
     claim.set(
         Iri::parse(iris::PROP_AUTOCORRELATION_STRUCTURE).unwrap(),
-        KV::Json(json!({"ctor": "AR1", "args": []})),
+        eigenius_kernel::testing::term_value(&json!({"ctor": "AR1", "args": []})),
     );
 
     let inst = StatisticsInstitution::new();

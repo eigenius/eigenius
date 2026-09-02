@@ -112,7 +112,7 @@ fn claim(proposition: Value) -> Resource {
 
 /// `measurements:lt(1.0, 2.0)` — an axiom application, so a term at `Prop`.
 fn a_real_proposition() -> Value {
-    Value::Json(serde_json::json!({
+    eigenius_kernel::testing::term_value(&serde_json::json!({
         "ctor": "App",
         "args": [
             {"ctor": "App", "args": [
@@ -233,7 +233,7 @@ fn well_formed_claim_commits() {
 /// had to land together, and this test is the evidence.
 #[test]
 fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
-    let annotated = Value::Json(serde_json::json!({
+    let annotated = eigenius_kernel::testing::term_value(&serde_json::json!({
         "ctor": "Ann",
         "args": [
             {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class", []]},

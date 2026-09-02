@@ -178,7 +178,7 @@ fn check_side_hash(layer: &Layer, stored: &Value) -> [u8; 32] {
 /// The load-bearing test: on the shape every parsed sentence has, the two ends agree.
 ///
 /// They differ by `eval` + `readback`. Readback freshens binder names, which
-/// `alpha_canonicalize_proposition_json` absorbs (D66 D4). `eval` has nothing to do here: parses are
+/// `alpha_canonicalize_proposition` absorbs (D66 D4). `eval` has nothing to do here: parses are
 /// β-normal, and under D9 a definition's body is stored already normalized so decode yields a normal
 /// The D47 codec's constructor argument names, from the bootstrap chain, built once.
 ///

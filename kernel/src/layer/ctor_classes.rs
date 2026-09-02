@@ -125,20 +125,9 @@ fn arg_property_type(
     parents: &[Arc<Layer>],
 ) -> (String, Option<String>) {
     let fallback = || (wk::RESOURCE.to_string(), None);
-    // Both shapes, because step 3 migrates these very values: a `type_name` may still be a
-    // tagged dict or may already be the value resource. Only `ConstRef` is read either way —
-    // `Var` and everything else take the fallback.
+    // Only `ConstRef` names a type this can act on; `Var` and everything else take the
+    // fallback.
     let target = match type_name {
-        Some(Value::Json(j)) => {
-            if j.get("ctor").and_then(serde_json::Value::as_str) != Some("ConstRef") {
-                return fallback();
-            }
-            j.get("args")
-                .and_then(serde_json::Value::as_array)
-                .and_then(|a| a.first())
-                .and_then(serde_json::Value::as_str)
-                .and_then(|s| Iri::parse(s).ok())
-        }
         Some(Value::Embedded(r)) => const_ref_target(r),
         _ => return fallback(),
     };
@@ -150,6 +139,37 @@ fn arg_property_type(
         TargetKind::Inductive => (wk::INDUCTIVE.to_string(), Some(target.as_str().to_string())),
         TargetKind::Class => (wk::RESOURCE.to_string(), Some(target.as_str().to_string())),
     }
+}
+
+/// Is `value` an inductive VALUE — a resource whose `is_a` names a constructor class?
+///
+/// A constructor class is derived, never authored, and it names its inductive in
+/// `parent_classes` (see [`derive`]); that edge is what this reads. A caller needs it when the
+/// question is "may I walk into this resource?" rather than "what is in it": a term's interior
+/// belongs to the term, and a traversal that treats its arguments as ordinary properties will
+/// mistake a declared argument for a slot of its own. `institution::marshal` is the case that
+/// found this — it dereferences `core:resource` properties into embedded resources, and
+/// `eigentt:Judgement`'s `logic` argument is declared at the class `eigentt:Logic`.
+pub(crate) fn is_inductive_value(value: &Value, layer: &Layer) -> bool {
+    let Value::Embedded(r) = value else {
+        return false;
+    };
+    let is_a = r.is_a();
+    let Some(class) = is_a.first() else {
+        return false;
+    };
+    let Some(class) = layer.resolve(class) else {
+        return false;
+    };
+    let Some(parents) = class.get(&iri(wk::PARENT_CLASSES)) else {
+        return false;
+    };
+    let parents = parents.as_iri_array();
+    parents.iter().any(|p| {
+        layer
+            .resolve(p)
+            .is_some_and(|r| r.is_instance_of(&iri(wk::INDUCTIVE_TYPE)))
+    })
 }
 
 /// Derive every constructor class and argument property for the inductives in `resources`.
@@ -207,12 +227,6 @@ pub(crate) fn value_resource(
 pub(crate) fn declared_arg_type(arg: &Resource) -> Option<String> {
     match arg.get(&iri(wk::TYPE_NAME))? {
         Value::Embedded(r) => const_ref_target(r).map(|i| i.as_str().to_string()),
-        Value::Json(j) => j
-            .get("args")
-            .and_then(|a| a.as_array())
-            .and_then(|a| a.first())
-            .and_then(|s| s.as_str())
-            .map(str::to_string),
         _ => None,
     }
 }

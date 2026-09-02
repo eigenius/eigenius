@@ -1024,7 +1024,7 @@ are abbreviated; the numbered statement in the body is authoritative.
 | `ACP-A-12` | The position address of a layer — its identity within a chain — MUST be computed as: | binding |
 | `ACP-A-13` | Parent addresses MUST be sorted before concatenation, so that the position address does not… | binding |
 | `ACP-A-14` | Propositions MUST be terms of the EigenTT type theory — a fragment of the Calculus of… | binding |
-| `ACP-A-15` | A proposition MUST be encoded on the chain as a tree of tagged objects of the form {"ctor":… | binding |
+| `ACP-A-15` | A proposition MUST be encoded on the chain as a tree of resources, each stating its… | binding |
 | `ACP-A-16` | The connectives required by ACP-8-6 MUST be expressed with these constructors rather than… | binding |
 | `ACP-A-17` | The atomic proposition of ACP-8-7 MUST be the chain-declared inductive type core:Asserts,… | binding |
 | `ACP-A-18` | The encoding MUST round-trip (ACP-8-3). | binding |
@@ -1285,20 +1285,22 @@ not depend on the order in which parents were presented ([ACP-4-4](#41-requireme
 **ACP-A-14.** Propositions MUST be terms of the EigenTT type theory — a fragment of the Calculus of
 Inductive Constructions — inhabiting the impredicative universe `Prop`.
 
-**ACP-A-15.** A proposition MUST be encoded on the chain as a tree of tagged objects of the form
-`{"ctor": <name>, "args": [ ... ]}`, using exactly these nine constructors:
+**ACP-A-15.** A proposition MUST be encoded on the chain as a tree of resources. Each resource
+states its constructor's class in `core:is_a` and carries each argument under a property named for
+that class and the argument — `<inductive>-<Ctor>` and `<inductive>-<Ctor>-<arg>`. Argument ORDER
+is the constructor declaration's, not the value's. Exactly these nine constructors:
 
 | Constructor | Arguments | Denotes |
 |---|---|---|
 | `Sort` | `level` | A universe. Level 0 is `Prop`, level 1 is `Set`. |
 | `Var` | `name` | A bound-variable reference. |
-| `ConstRef` | `iri` | A reference to a chain-declared type former. Always nullary; multi-argument references are built by currying through `App`. |
+| `ConstRef` | `iri`, `levels` | A reference to a chain-declared type former. Always nullary; multi-argument references are built by currying through `App`. |
 | `App` | `head`, `arg` | Application. |
-| `Pi` | `name`, `domain`, `body` | Dependent function type. An empty `name` denotes an anonymous binder, giving ordinary implication. |
-| `Sig` | `name`, `domain`, `body` | Dependent pair type. An empty `name` denotes an anonymous binder. |
-| `Lam` | `name`, `domain`, `body` | Type-level abstraction, used for motives and parametric definitions. |
+| `Pi` | `name`, `dom`, `body` | Dependent function type. An empty `name` denotes an anonymous binder, giving ordinary implication. |
+| `Sig` | `name`, `dom`, `body` | Dependent pair type. An empty `name` denotes an anonymous binder. |
+| `Lam` | `name`, `dom`, `body` | Type-level abstraction, used for motives and parametric definitions. |
 | `One` | — | The unit type. |
-| `Id` | `type`, `lhs`, `rhs` | Propositional equality. |
+| `Id` | `ty`, `lhs`, `rhs` | Propositional equality. |
 
 **ACP-A-16.** The connectives required by [ACP-8-6](#81-what-a-binding-must-supply) MUST be expressed
 with these constructors rather than by adding primitives: conjunction as `Sig` with both components in

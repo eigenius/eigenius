@@ -342,7 +342,7 @@ mod ctor_type_tests {
         );
         c.set(iri(wk::CTOR_NAME), Value::String("mk".into()));
         c.set(iri(wk::ARG_TYPES), Value::Array(vec![]));
-        c.set(iri(wk::CTOR_TYPE), Value::Json(ctor_type));
+        c.set(iri(wk::CTOR_TYPE), crate::testing::term_value(&ctor_type));
 
         let mut b = Resource::new(iri("urn:eigenius:test:Box"));
         b.set(
@@ -376,7 +376,7 @@ mod ctor_type_tests {
     #[test]
     fn a_ctor_type_naming_an_unresolvable_iri_is_refused() {
         let errs = errors_for_ctor_type(serde_json::json!({
-            "ctor": "ConstRef", "args": ["urn:eigenius:test:no-such-type"],
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:no-such-type", []],
         }));
         assert!(
             !errs.is_empty(),
@@ -395,7 +395,7 @@ mod ctor_type_tests {
     #[test]
     fn a_well_formed_ctor_type_still_passes() {
         let errs = errors_for_ctor_type(serde_json::json!({
-            "ctor": "ConstRef", "args": ["urn:eigenius:test:Box"],
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Box", []],
         }));
         assert!(
             errs.is_empty(),

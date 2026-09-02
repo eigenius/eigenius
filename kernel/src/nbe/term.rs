@@ -57,7 +57,7 @@ pub enum Exp {
     /// D19 does not mention it and D48 records it only as a preserved artifact.
     ///
     /// **`levels` is empty until #188's residual.** The wire form already carries
-    /// the IRI — `encode_type_json` emits `ConstRef(iri)` for an
+    /// the IRI — `encode_type` emits `ConstRef(iri)` for an
     /// `InductiveType` — so a level-free `Const` round-trips through the
     /// existing codec unchanged. Levels are what makes this a chain-format
     /// change, and they are Phase E2.

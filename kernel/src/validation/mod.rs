@@ -84,11 +84,6 @@ pub enum ValidationRule {
     /// `core:DataType`, `subclass_of` referencing a missing
     /// `core:Class`. See eigenius#26.
     UnresolvedClassReference,
-    /// An inductive value carries a `ctor` not declared on its
-    /// referenced `InductiveType`, an arity mismatch against the
-    /// ctor's `arg_types`, or an arg whose value doesn't match its
-    /// declared `type_name`. D32 §3.5.
-    InductiveValueMismatch,
     /// A FormulaTerm `App` spine doesn't match the leftmost operator's
     /// declared arity. D32 §5.4 / Phase 19d.0.d.
     OperatorArityMismatch,
@@ -504,7 +499,9 @@ impl Validator {
                 // Rule 17: FormulaTerm App-spine rank check against
                 // the leftmost operator's declared arity (D32 §5.4 /
                 // Phase 19d.0.d). No-op for non-FormulaTerm values.
-                errors.extend(self.check_formula_term_arity(prop_def, value, prop_iri, &res_id));
+                errors.extend(
+                    self.check_formula_term_arity(prop_def, value, prop_iri, &res_id, resource),
+                );
 
                 // Rule 21: eigentt:Term fields must decode AND type-check
                 // against the chain — generalizes Rule 20's decode-only check
@@ -1131,10 +1128,10 @@ impl Validator {
         //    no decode, and is also where a self-reference is visible as itself rather than as
         //    whatever decode turned it into. There is no fuel and no termination argument for
         //    recursion here — see #66.
-        // Reads the value in EITHER shape. It was gated on `Value::Json`, which stopped
-        // matching the moment D85 §5 step 4 made a definition body a value resource — and a
-        // guard that never fires looks exactly like a guard with nothing to catch. The
-        // recursion was still refused, but by a decode failure with an unrelated message.
+        // This was gated on `Value::Json` and stopped matching the moment D85 §5 step 4 made
+        // a definition body a value resource — and a guard that never fires looks exactly
+        // like a guard with nothing to catch. The recursion was still refused, but by a
+        // decode failure with an unrelated message.
         if let Some(id) = res_id {
             if mentions_iri(body_value, id) {
                 fail(
@@ -2603,7 +2600,9 @@ mod tests {
         // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         r.set(
             iri(wk::TYPE_NAME),
-            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::OPTION]})),
+            crate::testing::term_value(&serde_json::json!({
+                "ctor": "ConstRef", "args": [wk::OPTION, []],
+            })),
         );
         r.set(
             iri(wk::TYPE_ARGS),

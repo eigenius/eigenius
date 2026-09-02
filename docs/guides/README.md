@@ -69,7 +69,7 @@ The read-only query language over the layered Eigon knowledge graph. Pattern mat
 
 The chain-mirrored EigenTT fragment shared by every numerical institution on the platform. A small typed expression-tree language at `urn:eigenius:formulas:` that Symbolics, IntervalArithmetic, Catalyst, DiffEq, and JuMP-HiGHS all consume directly.
 
-**Eight chapters covering**: the three-surface mental model (EigenTT fragment / Eigon-JSON encoding / ESL `formula(...)` sublanguage); the six constructors and why two are binders; the tagged-dict embedding and validator's inductive-value rule; the operator catalog and signature-driven arity check; the Pratt-parsed `formula(...)` ESL sublanguage; identity-comorphism collapse when both endpoints share FormulaTerm; common failure modes; appendix.
+**Eight chapters covering**: the three-surface mental model (EigenTT fragment / Eigon-JSON encoding / ESL `formula(...)` sublanguage); the six constructors and why two are binders; the value-resource embedding and how the ordinary rules check it; the operator catalog and signature-driven arity check; the Pratt-parsed `formula(...)` ESL sublanguage; identity-comorphism collapse when both endpoints share FormulaTerm; common failure modes; appendix.
 
 ### [Composing institutions →](composition/README.md)
 

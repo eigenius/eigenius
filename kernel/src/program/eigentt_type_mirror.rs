@@ -29,7 +29,6 @@ use crate::nbe::term::{Exp, Patt};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
-use serde_json::json;
 use std::collections::BTreeMap;
 
 /// `eigentt:Judgement` — a `holds(logic, term, type)` value, not a term.
@@ -73,10 +72,10 @@ impl std::error::Error for EncodeError {}
 /// Encode an EigenTT type expression as a chain-resident
 /// `eigentt:Term` value.
 ///
-/// The output is a [`Value::Json`] wrapping a `{"ctor": ..., "args": [...]}`
-/// tree shape (D32 §3.7). The validator at commit time walks the tree
-/// against the ctor schema declared in
-/// `ontologies/eigentt/eigentt-type-fragment.json`.
+/// The output is a [`Value::Embedded`] resource whose `is_a` names the constructor's class
+/// and which carries each argument under that class's property (D85 §6.1). The validator at
+/// commit time checks it as a resource: its class against the slot, its arity against the
+/// class's `requires`, and each argument against the property that declares it.
 ///
 /// Multi-arg type-former references (e.g., `InductiveType(List, [Nat])`)
 /// are encoded by App currying — `App(ConstRef(List), ConstRef(Nat))` —
@@ -153,6 +152,57 @@ impl CodecNames {
     /// The public face of the layout authority: a producer outside this module — the Lean
     /// chain mirror, say — says which constructor it means and hands over the arguments, and
     /// the names and arity come from the declaration this table read.
+    /// Build the value a `{ctor, args}` literal denotes, arguments and all.
+    ///
+    /// A tagged literal reads well in source, so several producers write one and hand it here
+    /// rather than assembling resources by hand. `prefer` is the inductives to resolve each
+    /// constructor against, in order — a term producer passes `eigentt:Term` and `core:Level`,
+    /// whose constructors are the term language and share names with other inductives
+    /// (`Zero` belongs to `core:Level` and to `lean:LeanLevel`). A constructor none of them
+    /// declares resolves against the whole chain, and a name more than one inductive declares
+    /// is an error rather than a guess.
+    ///
+    /// A node with no `ctor` is a leaf: a string, number, boolean, or a list of nodes.
+    pub fn value_of_tagged(
+        &self,
+        prefer: &[&str],
+        tagged: &serde_json::Value,
+    ) -> Result<Value, EncodeError> {
+        let Some(ctor) = tagged.get("ctor").and_then(serde_json::Value::as_str) else {
+            return Ok(match tagged {
+                serde_json::Value::String(s) => Value::String(s.clone()),
+                serde_json::Value::Bool(b) => Value::Boolean(*b),
+                serde_json::Value::Array(a) => Value::Array(
+                    a.iter()
+                        .map(|e| self.value_of_tagged(prefer, e))
+                        .collect::<Result<_, _>>()?,
+                ),
+                serde_json::Value::Number(n) => match n.as_i64() {
+                    Some(i) => Value::Integer(i),
+                    None => Value::Float(n.as_f64().unwrap_or_default()),
+                },
+                other => {
+                    return Err(EncodeError::Undeclared(format!(
+                        "a tagged literal has no leaf form for {other}"
+                    )))
+                }
+            });
+        };
+        let empty = Vec::new();
+        let args: Vec<Value> = tagged
+            .get("args")
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or(&empty)
+            .iter()
+            .map(|a| self.value_of_tagged(prefer, a))
+            .collect::<Result<_, _>>()?;
+        let inductive = match prefer.iter().find(|p| self.lookup_declares(p, ctor)) {
+            Some(p) => (*p).to_string(),
+            None => self.find(ctor)?.to_string(),
+        };
+        self.value(&inductive, ctor, args)
+    }
+
     pub fn value(
         &self,
         inductive: &str,
@@ -170,6 +220,40 @@ impl CodecNames {
         Ok(crate::layer::ctor_classes::value_resource(
             inductive, ctor, names, &args,
         ))
+    }
+
+    /// Find the one inductive declaring `ctor`, for a caller that has only the name.
+    ///
+    /// Ambiguity is an error, not a guess: `App` belongs to `eigentt:Term`,
+    /// `justification:Term` AND `formulas:FormulaTerm`, and picking one silently is how a
+    /// value ends up stating a class its slot does not admit.
+    /// Does `inductive` declare `ctor`?
+    pub fn lookup_declares(&self, inductive: &str, ctor: &str) -> bool {
+        self.by_class
+            .contains_key(&crate::layer::ctor_classes::class_iri(inductive, ctor))
+    }
+
+    pub fn find(&self, ctor: &str) -> Result<&str, EncodeError> {
+        let mut hits = self
+            .by_class
+            .iter()
+            .filter(|(class, _)| class.rsplit_once('-').is_some_and(|(_, c)| c == ctor))
+            .map(|(_, (ind, _))| ind.as_str());
+        let Some(first) = hits.next() else {
+            return Err(EncodeError::Undeclared(format!(
+                "no inductive in this chain declares a constructor `{ctor}`"
+            )));
+        };
+        let rest: Vec<&str> = hits.collect();
+        if rest.is_empty() {
+            Ok(first)
+        } else {
+            Err(EncodeError::Undeclared(format!(
+                "`{ctor}` is declared by more than one inductive ({first}, {}) — name the one \
+                 you mean",
+                rest.join(", ")
+            )))
+        }
     }
 
     fn lookup_in(&self, inductive: &str, ctor: &str) -> Result<(&str, &[String]), EncodeError> {
@@ -346,8 +430,17 @@ fn const_ref(
     )
 }
 
-/// A `core:Level` value.
-fn encode_level(l: &crate::nbe::level::Level, names: &CodecNames) -> Result<Value, EncodeError> {
+/// Encode a universe level as a `core:Level` value (eigenius#188).
+///
+/// The chain ctor took a bare integer until slice 4; it now takes a `Level`, so a `Max`,
+/// `IMax` or `Param` survives the round trip instead of being unrepresentable. Numerals
+/// encode as the `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than
+/// `1` and is the price of one ctor able to carry every level rather than one declaration
+/// per rung.
+pub(crate) fn encode_level(
+    l: &crate::nbe::level::Level,
+    names: &CodecNames,
+) -> Result<Value, EncodeError> {
     use crate::nbe::level::Level;
     let lvl = |ctor: &str, args: Vec<Value>| -> Result<Value, EncodeError> {
         let (inductive, arg_names) = names.lookup_in(wk::LEVEL, ctor)?;
@@ -370,23 +463,6 @@ fn encode_level(l: &crate::nbe::level::Level, names: &CodecNames) -> Result<Valu
     }
 }
 
-/// Encode a universe level as an `eigentt:Level` value tree (eigenius#188).
-///
-/// The chain ctor took a bare integer until slice 4; it now takes a `Level`, so a `Max`, `IMax`
-/// or `Param` survives the round trip instead of being unrepresentable. Numerals encode as the
-/// `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than `1` and is the
-/// price of one ctor able to carry every level rather than one declaration per rung.
-pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
-    use crate::nbe::level::Level;
-    match l {
-        Level::Zero => ctor("Zero", vec![]),
-        Level::Succ(a) => ctor("Succ", vec![encode_level_json(a)]),
-        Level::Max(a, b) => ctor("Max", vec![encode_level_json(a), encode_level_json(b)]),
-        Level::IMax(a, b) => ctor("IMax", vec![encode_level_json(a), encode_level_json(b)]),
-        Level::Param(n) => ctor("Param", vec![json!(n)]),
-    }
-}
-
 /// Decode an `eigentt:Level` value tree.
 ///
 /// **There is no legacy arm for the pre-eigenius#188 bare integer, deliberately.** One was written
@@ -400,85 +476,11 @@ pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Val
 /// (D85 §1) is translated to the tagged form first. Needs the layer for the same reason
 /// `decode_type` does — the constructor is a class the layer derived, and the ARGUMENT ORDER
 /// comes from that constructor's declaration rather than from the value.
-pub fn decode_level(value: &Value, layer: &Layer) -> Result<crate::nbe::level::Level, DecodeError> {
-    match value {
-        Value::Json(j) => decode_level_json(j),
-        Value::Embedded(r) => decode_level_json(&value_resource_to_tagged(r, layer)?),
-        other => Err(DecodeError::MalformedValue(format!(
-            "expected a core:Level value, got {other:?}"
-        ))),
-    }
-}
-
-pub(crate) fn decode_level_json(
-    v: &serde_json::Value,
+pub fn decode_level(
+    value: &Value,
+    _layer: &Layer,
 ) -> Result<crate::nbe::level::Level, DecodeError> {
-    use crate::nbe::level::Level;
-    let obj = v
-        .as_object()
-        .ok_or_else(|| wrong_shape("Sort", 0, "expected an eigentt:Level value"))?;
-    let name = obj
-        .get("ctor")
-        .and_then(|c| c.as_str())
-        .ok_or(DecodeError::MissingCtor)?;
-    let args = obj
-        .get("args")
-        .and_then(|a| a.as_array())
-        .ok_or(DecodeError::MissingArgs)?;
-    let arity = |n: usize| -> Result<(), DecodeError> {
-        if args.len() == n {
-            Ok(())
-        } else {
-            Err(wrong_shape(
-                "Sort",
-                0,
-                &format!("`{name}` takes {n} argument(s), got {}", args.len()),
-            ))
-        }
-    };
-    match name {
-        "Zero" => {
-            arity(0)?;
-            Ok(Level::Zero)
-        }
-        "Succ" => {
-            arity(1)?;
-            Ok(Level::Succ(Box::new(decode_level_json(&args[0])?)))
-        }
-        "Max" => {
-            arity(2)?;
-            Ok(Level::Max(
-                Box::new(decode_level_json(&args[0])?),
-                Box::new(decode_level_json(&args[1])?),
-            ))
-        }
-        "IMax" => {
-            arity(2)?;
-            Ok(Level::IMax(
-                Box::new(decode_level_json(&args[0])?),
-                Box::new(decode_level_json(&args[1])?),
-            ))
-        }
-        "Param" => {
-            arity(1)?;
-            let n = args[0]
-                .as_str()
-                .ok_or_else(|| wrong_shape("Sort", 0, "`Param` takes a string name"))?;
-            Ok(Level::Param(n.to_string()))
-        }
-        other => Err(wrong_shape(
-            "Sort",
-            0,
-            &format!("`{other}` is not an eigentt:Level constructor"),
-        )),
-    }
-}
-
-fn ctor(name: &str, args: Vec<serde_json::Value>) -> serde_json::Value {
-    json!({
-        "ctor": name,
-        "args": args,
-    })
+    decode_level_value(value)
 }
 
 /// A `Patt::Var(name)` becomes the binder name; `Patt::Unit` encodes
@@ -496,7 +498,7 @@ fn binder_name(p: &Patt) -> String {
 /// be decoded back to an `Exp`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
-    /// The value isn't a JSON-shaped chain inductive (`Value::Json`).
+    /// The value isn't a well-formed inductive value resource.
     MalformedValue(String),
     /// The `ctor` field is missing or not a string.
     MissingCtor,
@@ -605,18 +607,64 @@ struct DecodeCtx<'a> {
 pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
     let ctx = DecodeCtx { layer };
     match value {
-        Value::Json(j) => decode_type_json(j, &ctx),
-        // D85 §1 — a value RESOURCE: `is_a` names its constructor's class and its arguments are
-        // the properties that class requires. Read by translating to the tagged-dict form and
-        // decoding that, so every constructor's decoding stays in one place and the two shapes
-        // cannot drift apart while both are accepted. Step 3 migrates the authored values and
-        // makes `encode_type` emit this form; until then reading both is what lets the migration
-        // happen against a reader that already accepts its output.
-        Value::Embedded(r) => decode_type_json(&value_resource_to_tagged(r, layer)?, &ctx),
+        Value::Embedded(r) => decode_value(r, &ctx),
         other => Err(DecodeError::MalformedValue(format!(
-            "expected Value::Json or a value resource, got {other:?}"
+            "expected a value resource, got {other:?}"
         ))),
     }
+}
+
+/// One argument of a constructor, decoded as a term.
+fn decode_arg(v: &Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
+    match v {
+        Value::Embedded(r) => decode_value(r, ctx),
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a term argument, got {other:?}"
+        ))),
+    }
+}
+
+/// A `core:Level` value.
+fn decode_level_value(v: &Value) -> Result<crate::nbe::level::Level, DecodeError> {
+    use crate::nbe::level::Level;
+    let bad = |m: String| DecodeError::MalformedValue(m);
+    let Value::Embedded(r) = v else {
+        return Err(bad(format!("expected a level value, got {v:?}")));
+    };
+    let class = r
+        .is_a()
+        .first()
+        .map(|c| c.as_str().to_string())
+        .ok_or_else(|| bad("a level value must name its constructor's class".into()))?;
+    let ctor = class
+        .rsplit_once('-')
+        .map(|(_, c)| c.to_string())
+        .ok_or_else(|| bad(format!("`{class}` is not `<inductive>-<ctor>`")))?;
+    let arg = |name: &str| -> Result<Value, DecodeError> {
+        Iri::parse(&format!("{class}-{name}"))
+            .ok()
+            .and_then(|k| r.get(&k).cloned())
+            .ok_or_else(|| bad(format!("`{ctor}` is missing argument `{name}`")))
+    };
+    Ok(match ctor.as_str() {
+        "Zero" => Level::Zero,
+        "Succ" => Level::Succ(Box::new(decode_level_value(&arg("base")?)?)),
+        "Max" => Level::Max(
+            Box::new(decode_level_value(&arg("left")?)?),
+            Box::new(decode_level_value(&arg("right")?)?),
+        ),
+        "IMax" => Level::IMax(
+            Box::new(decode_level_value(&arg("left")?)?),
+            Box::new(decode_level_value(&arg("right")?)?),
+        ),
+        "Param" => Level::Param(
+            arg("name")?
+                .as_str()
+                .ok_or_else(|| bad("`Param`'s name must be a string".into()))?
+                .to_string(),
+        ),
+        other => return Err(bad(format!("`{other}` is not a `core:Level` constructor"))),
+    })
 }
 
 /// The constructor a value states, and its arguments in DECLARATION order.
@@ -708,67 +756,12 @@ pub fn ctor_view(r: &Resource, layer: &Layer) -> Result<serde_json::Value, Decod
     Ok(serde_json::json!({ "ctor": ctor_name, "args": args? }))
 }
 
-/// The TERM-LANGUAGE projection of a value resource, for [`decode_type_json`].
+/// One argument of a value resource, as the `{ctor, args}` view expects it.
 ///
-/// Identical to [`ctor_view`] for `eigentt:Term` and `core:Level` — those ARE the term
-/// language. For any other inductive it folds the constructor application into the `App`s over
-/// `CtorApp` that the legacy decoder knows, the shape tagged JSON was forced into because it
-/// could not write a constructor with named arguments.
-///
-/// **An adapter, not a representation.** Nothing produces the spine: `encode_term` writes a
-/// value directly. A consumer that wants the CONSTRUCTOR — which is what a value states —
-/// calls `ctor_view`; this exists for the decoder, and goes with it at D85 §5 step 5.
-pub fn value_resource_to_tagged(
-    r: &Resource,
-    layer: &Layer,
-) -> Result<serde_json::Value, DecodeError> {
-    let (ctor_name, args) = ctor_and_args(r, layer)?;
-    let args: Result<Vec<serde_json::Value>, DecodeError> = args
-        .iter()
-        .map(|a| match a {
-            Value::Embedded(inner) => value_resource_to_tagged(inner, layer),
-            other => arg_value_to_json(other, layer),
-        })
-        .collect();
-    let view = serde_json::json!({ "ctor": ctor_name, "args": args? });
-    Ok(fold_spine(r, view))
-}
-
-/// Fold a constructor view into the `App`s over `CtorApp` the legacy decoder knows, unless the
-/// value already IS the term language.
-fn fold_spine(r: &Resource, view: serde_json::Value) -> serde_json::Value {
-    let inductive = r
-        .is_a()
-        .first()
-        .and_then(|c| c.as_str().rsplit_once('-').map(|(i, _)| i.to_string()))
-        .unwrap_or_default();
-    if inductive == wk::EIGENTT_TERM || inductive == wk::LEVEL {
-        return view;
-    }
-    let (Some(ctor_name), Some(args)) = (
-        view.get("ctor").and_then(serde_json::Value::as_str),
-        view.get("args").and_then(serde_json::Value::as_array),
-    ) else {
-        return view;
-    };
-    let mut spine = serde_json::json!({
-        "ctor": "CtorApp",
-        "args": [inductive, ctor_name],
-    });
-    for a in args {
-        spine = serde_json::json!({ "ctor": "App", "args": [spine, a] });
-    }
-    spine
-}
-
-/// One argument of a value resource, as the tagged-dict form expects it.
-///
-/// A nested inductive value recurses; a primitive passes through; a `Value::Json` is a
-/// tagged dict already, which is how a partly-migrated tree reads.
+/// A nested inductive value recurses; a primitive passes through.
 fn arg_value_to_json(v: &Value, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
     Ok(match v {
         Value::Embedded(r) => ctor_view(r, layer)?,
-        Value::Json(j) => j.clone(),
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Integer(i) => serde_json::Value::from(*i),
         Value::Float(f) => serde_json::Value::from(*f),
@@ -787,33 +780,30 @@ fn arg_value_to_json(v: &Value, layer: &Layer) -> Result<serde_json::Value, Deco
     })
 }
 
-fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
-    let obj = v
-        .as_object()
-        .ok_or_else(|| DecodeError::MalformedValue(format!("expected object, got {v:?}")))?;
-    let ctor = obj
-        .get("ctor")
-        .and_then(|c| c.as_str())
-        .ok_or(DecodeError::MissingCtor)?;
-    let args = obj
-        .get("args")
-        .and_then(|a| a.as_array())
-        .ok_or(DecodeError::MissingArgs)?;
+/// Decode a value resource into an `Exp`.
+///
+/// Reads the constructor and its arguments through `ctor_and_args` — the one read of an
+/// inductive value — and dispatches. Arguments arrive as `Value`, not JSON: a resource is
+/// destructured directly, so nothing is serialised on the way in and no number loses its type.
+fn decode_value(r: &Resource, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
+    let (ctor, args) = ctor_and_args(r, ctx.layer)?;
+    let ctor = ctor.as_str();
+    let args: &[&Value] = &args;
     match ctor {
         "Sort" => {
             expect_arg_count("Sort", 1, args)?;
-            Ok(Exp::Sort(decode_level_json(&args[0])?))
+            Ok(Exp::Sort(decode_level_value(args[0])?))
         }
         "Var" => {
             expect_arg_count("Var", 1, args)?;
-            let name = arg_string("Var", 0, &args[0])?;
+            let name = arg_string("Var", 0, args[0])?;
             Ok(Exp::Var(name))
         }
         "Ann" => {
             // Type annotation `(e : T)` — the bidirectional mode switch.
             expect_arg_count("Ann", 2, args)?;
-            let e = decode_type_json(&args[0], ctx)?;
-            let t = decode_type_json(&args[1], ctx)?;
+            let e = decode_arg(args[0], ctx)?;
+            let t = decode_arg(args[1], ctx)?;
             Ok(Exp::Ann(Box::new(e), Box::new(t)))
         }
         "One" => {
@@ -822,9 +812,9 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Pi" => {
             expect_arg_count("Pi", 3, args)?;
-            let name = arg_string("Pi", 0, &args[0])?;
-            let dom = decode_type_json(&args[1], ctx)?;
-            let body = decode_type_json(&args[2], ctx)?;
+            let name = arg_string("Pi", 0, args[0])?;
+            let dom = decode_arg(args[1], ctx)?;
+            let body = decode_arg(args[2], ctx)?;
             let patt = if name.is_empty() {
                 Patt::Unit
             } else {
@@ -834,9 +824,9 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Sig" => {
             expect_arg_count("Sig", 3, args)?;
-            let name = arg_string("Sig", 0, &args[0])?;
-            let dom = decode_type_json(&args[1], ctx)?;
-            let body = decode_type_json(&args[2], ctx)?;
+            let name = arg_string("Sig", 0, args[0])?;
+            let dom = decode_arg(args[1], ctx)?;
+            let body = decode_arg(args[2], ctx)?;
             let patt = if name.is_empty() {
                 Patt::Unit
             } else {
@@ -888,7 +878,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                 } else {
                     Patt::Var(name.to_string())
                 };
-                fields.push((iri, patt, decode_type_json(&triple[2], ctx)?));
+                fields.push((iri, patt, decode_arg(&triple[2], ctx)?));
             }
             // Rebuild through the canonicalising constructor rather than
             // trusting the wire order (D78 §1).
@@ -902,7 +892,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Refine" => {
             expect_arg_count("Refine", 2, args)?;
-            let carrier = decode_type_json(&args[0], ctx)?;
+            let carrier = decode_arg(args[0], ctx)?;
             let names = args[1]
                 .as_array()
                 .ok_or_else(|| DecodeError::WrongArgShape {
@@ -934,11 +924,11 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Lam" => {
             expect_arg_count("Lam", 3, args)?;
-            let name = arg_string("Lam", 0, &args[0])?;
+            let name = arg_string("Lam", 0, args[0])?;
             // The dom annotation is decoded for round-trip-fidelity validation
             // but discarded — Exp::Lam doesn't carry a type slot.
-            let _dom = decode_type_json(&args[1], ctx)?;
-            let body = decode_type_json(&args[2], ctx)?;
+            let _dom = decode_arg(args[1], ctx)?;
+            let body = decode_arg(args[2], ctx)?;
             let patt = if name.is_empty() {
                 Patt::Unit
             } else {
@@ -948,19 +938,19 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Id" => {
             expect_arg_count("Id", 3, args)?;
-            let ty = decode_type_json(&args[0], ctx)?;
-            let lhs = decode_type_json(&args[1], ctx)?;
-            let rhs = decode_type_json(&args[2], ctx)?;
+            let ty = decode_arg(args[0], ctx)?;
+            let lhs = decode_arg(args[1], ctx)?;
+            let rhs = decode_arg(args[2], ctx)?;
             Ok(Exp::Id(Box::new(ty), Box::new(lhs), Box::new(rhs)))
         }
         "App" => {
             expect_arg_count("App", 2, args)?;
-            let head = decode_type_json(&args[0], ctx)?;
-            let arg = decode_type_json(&args[1], ctx)?;
+            let head = decode_arg(args[0], ctx)?;
+            let arg = decode_arg(args[1], ctx)?;
             // D66: the head resolved from a transparent `eigentt:Definition`, so it is that
             // definition's lambda chain. Peel and substitute instead of building an `App` — the
             // redex is never formed, so the result is normal (§2.4).
-            if is_definition_head(&args[0], ctx) {
+            if is_definition_head(args[0], ctx) {
                 return peel_and_substitute(head, arg);
             }
             // Spine folding: if head is an InductiveType / CodataType /
@@ -995,21 +985,21 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                     actual: args.len(),
                 });
             }
-            let iri_str = arg_string("ConstRef", 0, &args[0])?;
+            let iri_str = arg_string("ConstRef", 0, args[0])?;
             let iri = Iri::parse(&iri_str).map_err(|e| {
                 wrong_shape("ConstRef", 0, &format!("invalid IRI `{iri_str}`: {e}"))
             })?;
             let levels: Vec<crate::nbe::level::Level> = match args.get(1) {
                 None => Vec::new(),
-                Some(serde_json::Value::Array(ls)) => ls
+                Some(Value::Array(ls)) => ls
                     .iter()
-                    .map(decode_level_json)
+                    .map(decode_level_value)
                     .collect::<Result<Vec<_>, _>>()?,
                 Some(other) => {
                     return Err(wrong_shape(
                         "ConstRef",
                         1,
-                        &format!("level arguments must be an array, got {other}"),
+                        &format!("level arguments must be an array, got {other:?}"),
                     ))
                 }
             };
@@ -1032,22 +1022,22 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Pair" => {
             expect_arg_count("Pair", 2, args)?;
-            let fst = decode_type_json(&args[0], ctx)?;
-            let snd = decode_type_json(&args[1], ctx)?;
+            let fst = decode_arg(args[0], ctx)?;
+            let snd = decode_arg(args[1], ctx)?;
             Ok(Exp::Pair(Box::new(fst), Box::new(snd)))
         }
         "Fst" => {
             expect_arg_count("Fst", 1, args)?;
-            Ok(Exp::Fst(Box::new(decode_type_json(&args[0], ctx)?)))
+            Ok(Exp::Fst(Box::new(decode_arg(args[0], ctx)?)))
         }
         "Snd" => {
             expect_arg_count("Snd", 1, args)?;
-            Ok(Exp::Snd(Box::new(decode_type_json(&args[0], ctx)?)))
+            Ok(Exp::Snd(Box::new(decode_arg(args[0], ctx)?)))
         }
         "CtorApp" => {
             expect_arg_count("CtorApp", 2, args)?;
-            let decl_iri_str = arg_string("CtorApp", 0, &args[0])?;
-            let ctor_name = arg_string("CtorApp", 1, &args[1])?;
+            let decl_iri_str = arg_string("CtorApp", 0, args[0])?;
+            let ctor_name = arg_string("CtorApp", 1, args[1])?;
             let decl_iri = Iri::parse(&decl_iri_str).map_err(|e| {
                 wrong_shape(
                     "CtorApp",
@@ -1097,7 +1087,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "LitInt" => {
             expect_arg_count("LitInt", 1, args)?;
-            let n = args[0].as_i64().ok_or_else(|| {
+            let n = args[0].as_integer().ok_or_else(|| {
                 DecodeError::MalformedValue(format!(
                     "LitInt arg must be a JSON integer, got {:?}",
                     args[0]
@@ -1107,7 +1097,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "LitFloat" => {
             expect_arg_count("LitFloat", 1, args)?;
-            let f = args[0].as_f64().ok_or_else(|| {
+            let f = args[0].as_float().ok_or_else(|| {
                 DecodeError::MalformedValue(format!(
                     "LitFloat arg must be a JSON number, got {:?}",
                     args[0]
@@ -1117,7 +1107,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "LitBool" => {
             expect_arg_count("LitBool", 1, args)?;
-            let b = args[0].as_bool().ok_or_else(|| {
+            let b = args[0].as_boolean().ok_or_else(|| {
                 DecodeError::MalformedValue(format!(
                     "LitBool arg must be a JSON boolean, got {:?}",
                     args[0]
@@ -1156,30 +1146,24 @@ fn definition_is_opaque(resource: &crate::ontology::resource::Resource) -> bool 
 /// Reducing any `App(Lam, _)` at decode would change the hash of every stored proposition that
 /// happens to contain a redex, which is a separate decision from this feature (D66 §2.4 specifies
 /// the narrower rule).
-fn is_definition_head(head_json: &serde_json::Value, ctx: &DecodeCtx<'_>) -> bool {
-    let mut cursor = head_json;
-    // Walk down the App spine to its innermost head.
+fn is_definition_head(head: &Value, ctx: &DecodeCtx<'_>) -> bool {
+    let mut cursor = head;
     loop {
-        let Some(obj) = cursor.as_object() else {
+        let Value::Embedded(r) = cursor else {
             return false;
         };
-        match obj.get("ctor").and_then(|c| c.as_str()) {
-            Some("App") => {
-                let Some(args) = obj.get("args").and_then(|a| a.as_array()) else {
-                    return false;
-                };
+        let Ok((ctor, args)) = ctor_and_args(r, ctx.layer) else {
+            return false;
+        };
+        match ctor.as_str() {
+            "App" => {
                 let Some(next) = args.first() else {
                     return false;
                 };
                 cursor = next;
             }
-            Some("ConstRef") => {
-                let Some(iri_str) = obj
-                    .get("args")
-                    .and_then(|a| a.as_array())
-                    .and_then(|a| a.first())
-                    .and_then(|v| v.as_str())
-                else {
+            "ConstRef" => {
+                let Some(iri_str) = args.first().and_then(|v| v.as_str()) else {
                     return false;
                 };
                 let Ok(iri) = Iri::parse(iri_str) else {
@@ -1298,7 +1282,7 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
 fn expect_arg_count(
     ctor: &'static str,
     expected: usize,
-    args: &[serde_json::Value],
+    args: &[&Value],
 ) -> Result<(), DecodeError> {
     if args.len() != expected {
         Err(DecodeError::WrongArgCount {
@@ -1311,11 +1295,7 @@ fn expect_arg_count(
     }
 }
 
-fn arg_string(
-    ctor: &'static str,
-    slot: usize,
-    v: &serde_json::Value,
-) -> Result<String, DecodeError> {
+fn arg_string(ctor: &'static str, slot: usize, v: &Value) -> Result<String, DecodeError> {
     v.as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| wrong_shape(ctor, slot, "expected string"))
@@ -1489,14 +1469,53 @@ pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
 
 #[cfg(test)]
 mod tests {
-    /// Encode, then project to the tagged view — for assertions written as `j["ctor"]`.
+    use serde_json::json;
+    /// Materialise a tagged literal as the value resources it denotes — a FIXTURE builder.
     ///
-    /// The encoder produces value resources; this reads one back through the same projection
-    /// the legacy decoder uses. It is a test convenience, not a second encoding.
+    /// These tests describe terms as `{"ctor": …, "args": […]}` because that reads well in a
+    /// literal. The values themselves are resources (D85 §6.1), so the literal is built out
+    /// through the declaration, which means a fixture cannot name a constructor or an arity
+    /// the chain does not have.
+    pub(super) fn value_of(tagged: &serde_json::Value) -> Value {
+        let names = crate::testing::codec_names();
+        let Some(ctor) = tagged.get("ctor").and_then(serde_json::Value::as_str) else {
+            return match tagged {
+                serde_json::Value::String(s) => Value::String(s.clone()),
+                serde_json::Value::Bool(b) => Value::Boolean(*b),
+                serde_json::Value::Array(a) => Value::Array(a.iter().map(value_of).collect()),
+                serde_json::Value::Number(n) => match n.as_i64() {
+                    Some(i) => Value::Integer(i),
+                    None => Value::Float(n.as_f64().unwrap_or_default()),
+                },
+                other => Value::Json(other.clone()),
+            };
+        };
+        let empty = Vec::new();
+        let args: Vec<Value> = tagged
+            .get("args")
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or(&empty)
+            .iter()
+            .map(value_of)
+            .collect();
+        let inductive = if ["Zero", "Succ", "Max", "IMax", "Param"].contains(&ctor) {
+            wk::LEVEL
+        } else {
+            wk::EIGENTT_TERM
+        };
+        names
+            .value(inductive, ctor, args)
+            .unwrap_or_else(|e| panic!("fixture names a constructor the chain lacks: {e}"))
+    }
+
+    /// Encode, then project to `{ctor, args}` — for assertions written as `j["ctor"]`.
+    ///
+    /// The encoder produces value resources; [`ctor_view`] reads one back. It is a test
+    /// convenience, not a second encoding.
     fn tagged(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         let v = encode_type(exp, crate::testing::codec_names())?;
         match &v {
-            Value::Embedded(r) => Ok(value_resource_to_tagged(r, crate::testing::term_chain())
+            Value::Embedded(r) => Ok(ctor_view(r, crate::testing::term_chain())
                 .expect("a freshly encoded value projects")),
             other => Ok(serde_json::json!(format!("{other:?}"))),
         }
@@ -1639,11 +1658,11 @@ mod tests {
             ),
             ctor_obj("UnitVal", vec![]),
         ] {
-            decode_type(&Value::Json(pre_existing.clone()), &layer)
+            decode_type(&value_of(&pre_existing.clone()), &layer)
                 .unwrap_or_else(|e| panic!("{pre_existing} no longer decodes: {e}"));
         }
-        let malformed = Value::Json(ctor_obj("LitBool", vec![json!("true")]));
-        match decode_type(&malformed, &layer) {
+        let malformed = ctor_obj("LitBool", vec![json!("true")]);
+        match decode_type(&value_of(&malformed), &layer) {
             Err(DecodeError::MalformedValue(msg)) => assert!(msg.contains("LitBool"), "{msg}"),
             other => panic!("expected MalformedValue, got {other:?}"),
         }
@@ -1653,8 +1672,8 @@ mod tests {
     fn lit_string_decode_rejects_non_string_arg() {
         let layer = empty_layer();
         // Authored-by-hand malformed payload: LitString with an int arg.
-        let malformed = Value::Json(ctor_obj("LitString", vec![json!(42)]));
-        let result = decode_type(&malformed, &layer);
+        let malformed = ctor_obj("LitString", vec![json!(42)]);
+        let result = decode_type(&value_of(&malformed), &layer);
         assert!(result.is_err(), "LitString with int arg must reject");
         match result.unwrap_err() {
             DecodeError::MalformedValue(msg) => {
@@ -1837,33 +1856,37 @@ mod tests {
     }
 
     #[test]
-    fn decoder_rejects_unknown_ctor() {
-        let bad = json!({"ctor": "Nonsense", "args": []});
-        let err = decode_type(&Value::Json(bad.clone()), &empty_layer()).unwrap_err();
-        assert!(matches!(err, DecodeError::UnknownCtor(c) if c == "Nonsense"));
+    /// **The rejection moved from decode to construction.** A term used to be a tagged dict,
+    /// which could name any constructor at all, so the decoder had to refuse the ones
+    /// `eigentt:Term` does not declare. A value states its constructor's CLASS (D85 §6.1), and
+    /// there is no class for `Nonsense` — the term cannot be built in the first place.
+    fn an_undeclared_ctor_cannot_be_built() {
+        let err = crate::testing::codec_names()
+            .value(wk::EIGENTT_TERM, "Nonsense", vec![])
+            .expect_err("`eigentt:Term` declares no `Nonsense`");
+        assert!(format!("{err}").contains("Nonsense"), "{err}");
     }
 
     #[test]
-    fn decoder_rejects_wrong_arg_count() {
-        let bad = json!({"ctor": "Sort", "args": []});
-        let err = decode_type(&Value::Json(bad.clone()), &empty_layer()).unwrap_err();
-        assert!(matches!(
-            err,
-            DecodeError::WrongArgCount {
-                ctor: "Sort",
-                expected: 1,
-                actual: 0,
-            }
-        ));
+    /// Arity likewise: a value carries its arguments as NAMED properties, so a `Sort` with no
+    /// level is not a term the builder will make.
+    fn a_wrong_arity_cannot_be_built() {
+        let err = crate::testing::codec_names()
+            .value(wk::EIGENTT_TERM, "Sort", vec![])
+            .expect_err("`Sort` takes one argument");
+        assert!(
+            format!("{err}").contains("takes 1 argument"),
+            "expected an arity diagnostic, got {err}"
+        );
     }
 
     #[test]
     fn decoder_rejects_unresolved_constref() {
         let bad = json!({
             "ctor": "ConstRef",
-            "args": ["urn:eigenius:nonexistent:Foo"]
+            "args": ["urn:eigenius:nonexistent:Foo", []]
         });
-        let err = decode_type(&Value::Json(bad.clone()), &empty_layer()).unwrap_err();
+        let err = decode_type(&value_of(&bad.clone()), &empty_layer()).unwrap_err();
         assert!(matches!(err, DecodeError::UnresolvedConstRef(_)));
     }
 
@@ -1874,9 +1897,9 @@ mod tests {
         let head = bootstrap_head();
         let v = json!({
             "ctor": "ConstRef",
-            "args": ["urn:eigenius:core:Class"]
+            "args": ["urn:eigenius:core:Class", []]
         });
-        let decoded = decode_type(&Value::Json(v), &head).unwrap();
+        let decoded = decode_type(&value_of(&v), &head).unwrap();
         match decoded {
             Exp::EigonClass(iri) => {
                 assert_eq!(iri.as_str(), "urn:eigenius:core:Class");
@@ -2179,9 +2202,12 @@ mod record_codec {
         decode_type(&encoded, &layer).expect("decode")
     }
 
+    /// Decode a hand-written term. The literal is a readable description; the value it
+    /// denotes is built through the declaration (see `tests::value_of`), so a fixture cannot
+    /// name a constructor or an arity the chain does not have.
     fn decode_raw(j: serde_json::Value) -> Result<Exp, DecodeError> {
         let layer = super::tests::empty_layer();
-        decode_type(&crate::ontology::resource::Value::Json(j), &layer)
+        decode_type(&super::tests::value_of(&j), &layer)
     }
 
     #[test]
