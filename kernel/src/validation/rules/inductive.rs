@@ -204,7 +204,7 @@ impl Validator {
             // set, so its constructor class is checked by Rule 8, its arity by Rule 1 and each
             // argument by Rules 5 and 6. Walking it here as well would duplicate all of that
             // against a shape this walker does not read. This walker is deleted outright at
-            // D85 §5 step 4; deferring is the smallest thing that lets step 3 land green.
+            // D85 §5 step 5; deferring is the smallest thing that lets step 3 land green.
             Value::Embedded(_) => return,
             other => {
                 out.push(ValidationError {

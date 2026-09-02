@@ -272,10 +272,18 @@ never-green tree for its whole length, so every fact arrived as a failure that c
 | 1 | `core:subclass_of` admits `core:InductiveType`, so a constructor class can name its inductive; derive the constructor classes and argument properties (§6.1), **with Rule 25**, the two-sided closedness check (§6.1) — a class `subclass_of` an inductive must be declared in that inductive's own layer AND correspond to an entry in its `core:ctors`. Without it §6.1 silently converts a closed type into an open one. **No `core:ctor`, no `core:args`, and no new value rule** otherwise — arity is Rule 1, argument types are Rules 5 and 6. Nothing produces the shape yet, so this is additive. | yes |
 | 2 | `decode_type` READS a value resource as well as a tagged dict; `encode_type` still emits the dict. Expand before migrate: nothing is rewritten, so nothing can break, and the codec stops being the reason the new shape is refused. | yes |
 | 3 | Migrate the 123 authored values AND switch the emitters in ONE change — each `{"ctor": C, "args": [a…]}` becomes a resource whose `is_a` names the constructor class step 1 derived and whose arguments are the named properties on it, while `encode_type` and the ESL compiler start emitting that form; then `CtorApp` → `Embed`. **The two halves are not separable** — see below. | yes |
-| 4 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
-| 5 | `Vector` leaves `Value` — the query engine takes a domain extending the data model, and serialising a transient becomes a type error rather than a panic. | yes |
+| 4 | The encode side emits value resources: `encode_type` / `encode_lam_chain` (the D47 codec), `encode_type_expr_to_json` (ESL's `type_expr`) and `ctor_value_to_json` (ESL's `CtorApp` values). All three write the same slots, so they flip together; readers took both shapes at step 2, so it lands green. **Every witness key hash moves** — `hash_proposition_exp` hashes this output — so it carries its own reseed, and Rule 24's guard must be ported in the same commit. | yes |
+| 5 | Delete the twins: `json_mentions`, the Rule 16 walker, α-canonicalisation on JSON. | yes |
+| 6 | `Vector` leaves `Value` — the query engine takes a domain extending the data model, and serialising a transient becomes a type error rather than a panic. | yes |
 
-One reseed, after step 3, folded into the one already owed for P4 and P5.
+Two reseeds: after step 3, folded into the one already owed for P4 and P5; and after step 4,
+which no folding can avoid because it moves every witness key hash.
+
+**Step 4 was missing from this table until `2026-09-01`.** Step 2 said `encode_type` still emits
+the dict and step 5 says to delete α-canonicalisation on JSON, with nothing in between making the
+producer stop. The gap surfaced while step 3 was landing, as a step that had been discussed as
+"3b" — a label for a row that did not exist. Numbering it 4 renumbers the twins to 5 and `Vector`
+to 6.
 
 **Step 3's two halves are one change, measured `2026-09-01`.** Migrating the values while the
 compiler still emits tagged dicts leaves the two shapes side by side, and
@@ -322,7 +330,7 @@ against the layer each was already building on. Two consequences the empty layer
 `cons`, `some` and `none` are ambiguous unqualified — and the qualifier that resolves it does not
 reach program bodies (eigenius#231).
 
-**Step 3b turns OFF Rule 24's recursion guard unless it is ported in the same commit — found
+**Step 4 turns OFF Rule 24's recursion guard unless it is ported in the same commit — found
 `2026-09-01`.** `validation/mod.rs:1133` reads
 
 ```rust
@@ -330,7 +338,7 @@ if let (Some(id), Value::Json(json)) = (res_id, body_value) {
     if json_mentions_const_ref(json, id.as_str()) { … }
 ```
 
-`definition_body` is `Value::Json` today (`encode_lam_chain`), so the guard runs. When 3b flips
+`definition_body` is `Value::Json` today (`encode_lam_chain`), so the guard runs. When step 4 flips
 the encoder, the body becomes `Value::Embedded`, the `if let` stops matching, and the guard
 stops running — no error, no failing test, because a guard that never fires looks exactly like a
 guard with nothing to catch. It is the one reader here whose twin must be WRITTEN before its
@@ -342,8 +350,8 @@ reason recorded at that line, so porting means walking a value resource for
 **The docs still teach the tagged shape — 107 occurrences across 21 files, counted
 `2026-09-01`.** Mostly `FormulaTerm` (`App` 27, `Var` 17, `OpRef` 14, `LitFloat` 10) in the
 formula guides and the Julia institution tutorials, which walk a reader through authoring a
-value by hand. They are stale, not broken: readers accept both shapes until step 4. Rewriting
-them belongs WITH step 4, when the tagged shape stops being read — doing it now would rewrite
+value by hand. They are stale, not broken: readers accept both shapes until step 5. Rewriting
+them belongs WITH step 5, when the tagged shape stops being read — doing it now would rewrite
 the same examples twice, and would claim a retirement that has not happened.
 
 **Steps 2 and 3 were the other way round until `2026-09-01`, and that order cannot land green.**
