@@ -24,6 +24,13 @@ import { decode as cborDecode } from "cbor-x";
 
 const IS_A = "urn:eigenius:core:is_a";
 const NS = "urn:eigenius:reflection";
+// The ProgramTrace RESOURCE's metadata moved to `prov:` (P5 — "move the provenance axis onto
+// prov"); the trace TREE's nodes did not. `kernel/src/program/trace.rs` writes every node
+// property under `reflection:` and `kernel/src/server/programs.rs` writes the surrounding
+// metadata under `prov:`, so this file needs both. Reading `reflection:trace_tree` found
+// nothing and the panel rendered an empty tree beside a perfectly good trace — the run's
+// component steps, their token counts and latencies were all on the chain, unread.
+const PROV = "urn:eigenius:prov";
 
 const ID = "@id";
 
@@ -40,13 +47,13 @@ const PROP = {
   completionTokens: `${NS}:completion_tokens`,
   latencyMs: `${NS}:latency_ms`,
   branchTaken: `${NS}:branch_taken`,
-  // ProgramTrace metadata + root-trace embedding
-  program: `${NS}:program`,
-  startedAt: `${NS}:started_at`,
-  completedAt: `${NS}:completed_at`,
-  totalTokens: `${NS}:total_tokens`,
-  executedSteps: `${NS}:executed_steps`,
-  traceTree: `${NS}:trace_tree`,
+  // ProgramTrace metadata + root-trace embedding — `prov:`, not `reflection:`.
+  program: `${PROV}:program`,
+  startedAt: `${PROV}:started_at`,
+  completedAt: `${PROV}:completed_at`,
+  totalTokens: `${PROV}:total_tokens`,
+  executedSteps: `${PROV}:executed_steps`,
+  traceTree: `${PROV}:trace_tree`,
   // child-trace edges
   valueTrace: `${NS}:value_trace`,
   bodyTrace: `${NS}:body_trace`,
