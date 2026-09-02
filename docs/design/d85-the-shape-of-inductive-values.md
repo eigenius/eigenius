@@ -678,9 +678,23 @@ the migration then rewrites values a reader already accepts.
    What remains underneath is a **different and much broader question**: an inductive value now
    carries full property IRIs (`urn:eigenius:eigentt:Term-App-fn`), and so does every other resource in
    the system. Whether Eigon-JSON and Eigon-CBOR should abbreviate property IRIs is a codec question
-   about ALL resources, not about inductive values, and it does not belong in this note. The size
-   argument that made an earlier draft treat it as a design fork does not survive the storage layer
-   setting `DBCompressionType::Lz4` either way.
+   about ALL resources, not about inductive values, and it does not belong in this note.
+
+   **Measured `2026-09-02`, because the paragraph above asserted a size argument without one.**
+   It said the argument "does not survive the storage layer setting `DBCompressionType::Lz4`
+   either way". Comparing the `2026-09-01` and `2026-09-02` lexicon snapshots — copies, each
+   fully compacted — the `layer` keyspace holds the same 9,435,51x records and **+94% bytes**.
+   That is this question's effect, and it is real: raw growth across the store is +16.9 GiB,
+   which LZ4 takes to +1.5 GiB on disk. So the compression claim is directionally right — it
+   absorbs about 91% — and the residue is +72% on a 2.03 GiB store, which is not nothing. The
+   fork is still not this note's to resolve; the number is recorded so whoever resolves it does
+   not have to re-measure.
+
+   *The rest of that growth was a bug, not this question.* The triple index went from 35.5M to
+   76.2M entries in each direction, because D79 §2.3's seal tests `is_a: [core:InductiveType]`
+   and §6.1 moved what a value names to the constructor's CLASS. Fixed the same day by having
+   the seal follow `parent_classes`; the two effects were about equal in raw bytes, which is why
+   attributing them mattered.
 
 ---
 
